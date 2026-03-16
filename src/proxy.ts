@@ -28,12 +28,17 @@ const PREFIXOS_PROTEGIDOS = new Set(Object.values(MODULO_TO_PREFIX));
 const rolePermCache = new Map<string, { modulos: string[]; exp: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-async function getModulosForUser(userId: string, origin: string, cookieHeader: string): Promise<string[] | null> {
+async function getModulosForUser(userId: string, _origin: string, cookieHeader: string): Promise<string[] | null> {
   const cached = rolePermCache.get(userId);
   if (cached && cached.exp > Date.now()) return cached.modulos;
 
+  // Usa 127.0.0.1 em vez do origin público para funcionar dentro do container Docker.
+  // O origin público (ex: https://erp.alisson.api.br) não é roteável de dentro do container.
+  const port = process.env.PORT ?? "3000";
+  const internalBase = `http://127.0.0.1:${port}`;
+
   try {
-    const res = await fetch(`${origin}/api/user/permissoes?user_id=${userId}`, {
+    const res = await fetch(`${internalBase}/api/user/permissoes?user_id=${userId}`, {
       headers: { cookie: cookieHeader },
     });
     if (!res.ok) return null;
