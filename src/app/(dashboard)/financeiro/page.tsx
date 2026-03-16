@@ -1,6 +1,8 @@
 import sql from "@/lib/db";
 import FinanceiroClient from "./FinanceiroClient";
 
+export const dynamic = 'force-dynamic';
+
 export default async function FinanceiroPage() {
   const [pagar, receber, extratos, lancamentos] = await Promise.all([
     sql`

@@ -1,6 +1,8 @@
 import sql from "@/lib/db";
 import EntregaClient from "./EntregaClient";
 
+export const dynamic = 'force-dynamic';
+
 export default async function EntregaPage() {
   const entregas = await sql`
     SELECT

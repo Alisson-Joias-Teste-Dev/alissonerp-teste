@@ -3,6 +3,8 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import ProtocoloClient from "./ProtocoloClient";
 import ProtocoloMotoboy from "@/components/motoboy/ProtocoloMotoboy";
 
+export const dynamic = 'force-dynamic';
+
 export default async function ProtocoloPage() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();

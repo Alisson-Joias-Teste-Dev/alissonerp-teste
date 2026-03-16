@@ -2,6 +2,8 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import OrdensClient from "@/components/OrdensClient";
 
+export const dynamic = 'force-dynamic';
+
 export default async function OrdensPage() {
   // Auth — consultora vê só as ordens do seu vendedor_id
   const supabase = await createServerSupabase();

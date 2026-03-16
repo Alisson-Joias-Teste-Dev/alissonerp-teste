@@ -1,6 +1,8 @@
 import sql from "@/lib/db";
 import DistribuicaoClient from "@/components/DistribuicaoClient";
 
+export const dynamic = 'force-dynamic';
+
 export default async function DistribuicaoPage() {
   const dists = await sql`
     SELECT

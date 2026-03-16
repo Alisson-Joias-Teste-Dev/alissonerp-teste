@@ -1,6 +1,8 @@
 import sql from "@/lib/db";
 import AuditoriaClient from "./AuditoriaClient";
 
+export const dynamic = 'force-dynamic';
+
 export default async function AuditoriaPage() {
   const [dashboards, auditorias] = await Promise.all([
     // Array com uma linha por tipo_auditoria (loja | fabrica)

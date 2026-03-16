@@ -1,6 +1,8 @@
 import sql from "@/lib/db";
 import QuebraClient from "@/components/QuebraClient";
 
+export const dynamic = 'force-dynamic';
+
 export default async function QuebraPage() {
   const [quebraOurives, quebraMensal, quebraDeposito, parametros] =
     await Promise.all([

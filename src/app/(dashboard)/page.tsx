@@ -2,6 +2,8 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
 import { redirect } from "next/navigation";
 
+export const dynamic = 'force-dynamic';
+
 function formatarMoeda(valor: number): string {
   return valor.toLocaleString("pt-BR", {
     minimumFractionDigits: 2,

@@ -1,6 +1,8 @@
 import sql from "@/lib/db";
 import ComprasClient from "@/components/ComprasClient";
 
+export const dynamic = 'force-dynamic';
+
 export default async function ComprasPage() {
   const compras = await sql`
     SELECT
