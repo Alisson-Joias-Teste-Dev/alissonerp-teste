@@ -1,27 +1,28 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { canAccess, type Role } from "@/lib/auth/permissions";
 
-// Rotas que requerem checagem de role (mapeadas em permissions.ts)
-const ROTAS_PROTEGIDAS = new Set([
-  "/dashboard-fabrica",
-  "/ordens",
-  "/pcp",
-  "/distribuicao",
-  "/estoque",
-  "/quebra",
-  "/insumos",
-  "/compras",
-  "/protocolo",
-  "/conferencia",
-  "/entrega",
-  "/auditoria",
-  "/vendas",
-  "/financeiro",
-  "/produtos",
-  "/precificacao",
-  "/configuracoes",
-]);
+// Espelho de ROLE_MENUS de permissions.ts — mantido em sync manualmente
+const ROLE_ALLOWED: Record<string, string[]> = {
+  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro", "/produtos", "/precificacao", "/configuracoes"],
+  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro", "/produtos", "/precificacao", "/configuracoes"],
+  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro"],
+  gerente_loja:       ["/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/produtos", "/precificacao"],
+  ourives:            ["/ordens", "/pcp"],
+  motoboy:            ["/protocolo"],
+  consultora:         ["/ordens", "/estoque", "/conferencia"],
+  estoquista_fabrica: ["/estoque", "/quebra", "/compras", "/insumos"],
+  estoquista_loja:    ["/estoque"],
+  pcp:                ["/ordens", "/pcp", "/distribuicao", "/quebra"],
+};
+
+function canAccess(role: string | undefined, pathname: string): boolean {
+  if (!role) return false;
+  const allowed = ROLE_ALLOWED[role] ?? [];
+  return allowed.some((p) => pathname === p || pathname.startsWith(p + "/"));
+}
+
+// Conjunto de prefixos protegidos (derivado de ROLE_ALLOWED acima)
+const ROTAS_PROTEGIDAS = new Set(Object.values(ROLE_ALLOWED).flat());
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -76,7 +77,7 @@ export async function proxy(request: NextRequest) {
   // 4. Checar role apenas para rotas protegidas
   const primeiroSegmento = "/" + pathname.split("/").filter(Boolean)[0];
   if (ROTAS_PROTEGIDAS.has(primeiroSegmento)) {
-    const role = user.user_metadata?.role as Role | undefined;
+    const role = user.user_metadata?.role as string | undefined;
     if (!canAccess(role, pathname)) {
       return NextResponse.redirect(new URL("/", request.url));
     }
