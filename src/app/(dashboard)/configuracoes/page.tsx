@@ -10,7 +10,7 @@ export default async function ConfiguracoesPage() {
   if (!isFullAccess(user?.user_metadata?.role)) redirect("/");
 
   const [parametros, webhooks, logs, usuarios, depositos] = await Promise.all([
-    sql`SELECT * FROM alissonerp.parametros WHERE id = 1`,
+    sql`SELECT * FROM public.parametros LIMIT 1`,
     sql`
       SELECT id, nome, url, ativo, descricao, ultimo_disparo, total_disparos
       FROM alissonerp.webhook_config

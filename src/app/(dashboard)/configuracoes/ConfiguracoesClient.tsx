@@ -48,12 +48,12 @@ const P = {
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 interface Parametros {
-  id: number;
-  cotacao_ouro: number;
-  cotacao_dolar: number;
-  cotacao_euro: number;
-  cotacao_prata: number;
-  updated_at: string;
+  id?: number;
+  ouro: number;
+  dollar: number;
+  euro: number;
+  prata: number;
+  updated_at?: string;
 }
 
 interface Webhook {
@@ -104,42 +104,39 @@ function TabParametros({ parametros }: { parametros: Parametros }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [form, setForm] = useState({
-    cotacao_ouro:  String(parametros.cotacao_ouro  ?? ""),
-    cotacao_dolar: String(parametros.cotacao_dolar ?? ""),
-    cotacao_euro:  String(parametros.cotacao_euro  ?? ""),
-    cotacao_prata: String(parametros.cotacao_prata ?? ""),
+    ouro:   String(parametros.ouro   ?? ""),
+    dollar: String(parametros.dollar ?? ""),
+    euro:   String(parametros.euro   ?? ""),
+    prata:  String(parametros.prata  ?? ""),
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [erro, setErro] = useState("");
 
-  const supabase = createClient();
-
   async function handleSave() {
     setSaving(true); setErro(""); setSaved(false);
-    const { error } = await supabase
-      .from("parametros")
-      .update({
-        cotacao_ouro:  Number(form.cotacao_ouro),
-        cotacao_dolar: Number(form.cotacao_dolar),
-        cotacao_euro:  Number(form.cotacao_euro),
-        cotacao_prata: Number(form.cotacao_prata),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
-
+    const res = await fetch("/api/configuracoes/parametros", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ouro:   Number(form.ouro),
+        dollar: Number(form.dollar),
+        euro:   Number(form.euro),
+        prata:  Number(form.prata),
+      }),
+    });
     setSaving(false);
-    if (error) { setErro(error.message); return; }
+    if (!res.ok) { const d = await res.json(); setErro(d.error ?? "Erro ao salvar"); return; }
     setSaved(true);
     startTransition(() => router.refresh());
     setTimeout(() => setSaved(false), 3000);
   }
 
   const campos = [
-    { key: "cotacao_ouro",  label: "Cotação Ouro",  prefix: "R$/g" },
-    { key: "cotacao_dolar", label: "Dólar",          prefix: "R$" },
-    { key: "cotacao_euro",  label: "Euro",            prefix: "R$" },
-    { key: "cotacao_prata", label: "Prata",           prefix: "R$/g" },
+    { key: "ouro",   label: "Cotação Ouro", prefix: "R$/g" },
+    { key: "dollar", label: "Dólar",        prefix: "R$"   },
+    { key: "euro",   label: "Euro",         prefix: "R$"   },
+    { key: "prata",  label: "Prata",        prefix: "R$/g" },
   ] as const;
 
   return (
