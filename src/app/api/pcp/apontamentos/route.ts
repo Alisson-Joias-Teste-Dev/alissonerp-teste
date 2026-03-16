@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { recalcularTotaisPCP } from "@/lib/recalcular-totais-pcp";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 // POST /api/pcp/apontamentos
 export async function POST(req: NextRequest) {
@@ -20,6 +21,22 @@ export async function POST(req: NextRequest) {
       { error: "tipo_apontamento_id, deposito_id, pcp_id e qtd são obrigatórios" },
       { status: 400 }
     );
+  }
+
+  // Guard ourives: só pode apontar em PCPs do seu depósito
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    const [caller] = await sql`
+      SELECT role, deposito_id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+    `;
+    const ROLES_VE_TUDO = ["admin", "desenvolvedor", "gerente_fabrica", "pcp", "gerente_loja"];
+    if (caller && !ROLES_VE_TUDO.includes(caller.role as string) && caller.deposito_id != null) {
+      const [pcpRow] = await sql`SELECT deposito_id FROM alissonerp.pcp WHERE id = ${pcp_id} LIMIT 1`;
+      if (pcpRow && pcpRow.deposito_id !== caller.deposito_id) {
+        return NextResponse.json({ error: "Ordem não pertence ao seu depósito" }, { status: 403 });
+      }
+    }
   }
 
   // Validação de estoque para tipos 1, 2, 3 e 8 (todos saem do Almoxarifado Central)

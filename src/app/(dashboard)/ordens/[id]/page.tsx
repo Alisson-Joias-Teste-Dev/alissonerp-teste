@@ -1,5 +1,6 @@
 import sql from "@/lib/db";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { createServerSupabase } from "@/lib/supabase/server";
 import OrdemDetalheClient from "./OrdemDetalheClient";
 
 export default async function OrdemDetalhePage({
@@ -52,6 +53,21 @@ export default async function OrdemDetalhePage({
   ]);
 
   if (!ordens[0]) return notFound();
+
+  // Consultora só pode ver ordens do seu vendedor_id
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    const [usuario] = await sql`
+      SELECT role, vendedor_id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+    `;
+    if (usuario?.role === "consultora" && usuario.vendedor_id != null) {
+      const ordemVendedorId = (ordens[0] as any).vendedor_id;
+      if (ordemVendedorId !== usuario.vendedor_id) {
+        redirect("/ordens");
+      }
+    }
+  }
 
   return (
     <OrdemDetalheClient

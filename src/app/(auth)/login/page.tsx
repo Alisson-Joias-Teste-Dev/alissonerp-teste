@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -12,7 +12,7 @@ const C = {
   dourado: "#DB9864",
 };
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
@@ -121,5 +121,13 @@ export default function LoginPage() {
         Fábrica AJ · v3.1
       </p>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="w-full max-w-sm" />}>
+      <LoginForm />
+    </Suspense>
   );
 }

@@ -227,7 +227,7 @@ export default function QuebraClient({ quebraOurives, quebraMensal, quebraDeposi
                         <Cell key={i} fill={entry.fill} />
                       ))}
                     </Pie>
-                    <Tooltip {...tooltipStyle} formatter={(v: number) => `${v}g`} />
+                    <Tooltip {...tooltipStyle} formatter={(v) => `${Number(v ?? 0)}g`} />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="flex justify-center gap-4 mt-1">
@@ -267,7 +267,7 @@ export default function QuebraClient({ quebraOurives, quebraMensal, quebraDeposi
                   />
                   <Tooltip
                     {...tooltipStyle}
-                    formatter={(v: number) => [`${v}%`, "Quebra"]}
+                    formatter={(v) => [`${Number(v ?? 0)}%`, "Quebra"]}
                   />
                   <ReferenceLine
                     y={5}

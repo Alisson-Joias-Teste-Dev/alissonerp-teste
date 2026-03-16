@@ -143,7 +143,7 @@ function TabParametros({ parametros }: { parametros: Parametros }) {
     <div className="space-y-5 max-w-md">
       <div>
         <p className="text-xs" style={{ color: P.muted }}>
-          Atualizado em: {fmtDate(parametros.updated_at)}
+          Atualizado em: {fmtDate(parametros.updated_at ?? null)}
         </p>
       </div>
 
@@ -459,6 +459,7 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
         ativo:       u.ativo,
         avatar_url:  u.avatar_url ?? null,
         deposito_id: null,
+        vendedor_id: null,
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -472,7 +473,8 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
       role:        u.role,
       ativo:       u.ativo,
       avatar_url:  u.avatar_url ?? null,
-      deposito_id: null, // alissonerp.usuarios não tem deposito_id ainda no SELECT — ok
+      deposito_id: null,
+      vendedor_id: null,
     });
   }
 

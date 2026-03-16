@@ -1,0 +1,8 @@
+node_modules
+.next
+.git
+*.dump
+*.sql.gz
+backups/
+.env*
+.env.local
