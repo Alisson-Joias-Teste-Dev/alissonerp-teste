@@ -8,13 +8,13 @@ import {
   Loader2, AlertCircle, ArrowLeft, X, RotateCcw, Plus,
 } from "lucide-react";
 
-// ── Cores dark theme ──────────────────────────────────────────────────────
+// ── Cores tema claro (alinhadas com layout padrão do sistema) ─────────────
 const T = {
-  creme:   "#F3EADA",
-  sage:    "#80A795",
-  dourado: "#DB9864",
-  card:    "rgba(255,255,255,0.08)",
-  border:  "rgba(255,255,255,0.08)",
+  creme:   "#111827",   // texto principal (gray-900)
+  sage:    "#6b7280",   // texto muted (gray-500)
+  dourado: "#DB9864",   // acento dourado (mantido)
+  card:    "#ffffff",   // card branco
+  border:  "#e5e7eb",   // border gray-200
 };
 
 // ── Tipos ─────────────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ function EtapaBadge({ etapa, direcao }: { etapa: string; direcao: string }) {
       className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold"
       style={{
         backgroundColor: concluido ? "rgba(16,185,129,0.2)" : "rgba(219,152,100,0.2)",
-        color: concluido ? "#6EE7B7" : T.dourado,
+        color: concluido ? "#059669" : T.dourado,
       }}
     >
       {concluido ? <CheckCircle2 size={9} /> : <Clock size={9} />}
@@ -340,7 +340,7 @@ export default function ProtocoloMotoboy() {
                       className="w-4 h-4 rounded flex items-center justify-center shrink-0 border"
                       style={{
                         backgroundColor: sel ? T.dourado : "transparent",
-                        borderColor: sel ? T.dourado : "rgba(255,255,255,0.25)",
+                        borderColor: sel ? T.dourado : "#d1d5db",
                       }}
                     >
                       {sel && <svg width="9" height="7" viewBox="0 0 9 7" fill="none"><path d="M1 3L3.5 5.5L8 1" stroke="#184036" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
@@ -378,7 +378,7 @@ export default function ProtocoloMotoboy() {
             <button
               onClick={() => setView("camera")}
               className="w-full rounded-2xl py-10 flex flex-col items-center gap-2.5"
-              style={{ backgroundColor: T.card, border: "2px dashed rgba(255,255,255,0.15)" }}
+              style={{ backgroundColor: T.card, border: "2px dashed #d1d5db" }}
             >
               <Camera size={32} style={{ color: T.sage }} />
               <span className="text-sm" style={{ color: T.sage }}>Tirar foto das joias</span>
@@ -578,7 +578,7 @@ function ProtocoloCard({
       onClick={onClick}
       className="w-full flex items-center gap-4 rounded-2xl px-4 py-4 text-left active:scale-[0.98] transition-all"
       style={{
-        backgroundColor: dim ? "rgba(255,255,255,0.04)" : T.card,
+        backgroundColor: dim ? "#f9fafb" : T.card,
         border: `1px solid ${T.border}`,
         opacity: dim ? 0.65 : 1,
       }}

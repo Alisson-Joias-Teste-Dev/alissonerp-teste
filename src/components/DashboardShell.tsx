@@ -2,10 +2,9 @@
 
 import { useAuth } from "@/hooks/useAuth";
 import Sidebar from "@/components/Sidebar";
-import MotoboyLayout from "@/components/layout/MotoboyLayout";
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
-  const { role, loading } = useAuth();
+  const { loading } = useAuth();
 
   // Enquanto carrega, renderiza shell mínimo (evita flash de sidebar)
   if (loading) {
@@ -16,12 +15,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
     );
   }
 
-  // Motoboy → experiência mobile dark, sem sidebar desktop
-  if (role === "motoboy") {
-    return <MotoboyLayout>{children}</MotoboyLayout>;
-  }
-
-  // Todos os outros roles → layout desktop com sidebar
+  // Todas as roles → layout padrão com sidebar (motoboy vê só "Protocolo")
   return (
     <div className="flex">
       <Sidebar />
