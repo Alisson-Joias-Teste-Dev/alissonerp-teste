@@ -1442,16 +1442,8 @@ const MODULO_GRUPOS = [
   { label: "⚙️ Sistema",    modulos: ["configuracoes"] },
 ];
 
-const ALL_ROLES = [
-  { key: "gerente_fabrica",   label: "G. Fábrica" },
-  { key: "gerente_loja",      label: "G. Loja"    },
-  { key: "ourives",           label: "Ourives"    },
-  { key: "motoboy",           label: "Motoboy"    },
-  { key: "consultora",        label: "Consultora" },
-  { key: "estoquista_fabrica",label: "Est. Fáb."  },
-  { key: "estoquista_loja",   label: "Est. Loja"  },
-  { key: "pcp",               label: "PCP"        },
-];
+// ALL_ROLES agora é carregado dinamicamente da API /api/configuracoes/roles
+// (removido o array hardcoded — ver estado rolesAtivas dentro de TabPermissoes)
 
 type PermMap = Record<string, Record<string, { pode_ler: boolean; pode_escrever: boolean }>>;
 
@@ -1466,30 +1458,72 @@ function fromLevel(level: 0 | 1 | 2) {
   return { pode_ler: level >= 1, pode_escrever: level === 2 };
 }
 
+type RoleItem = { key: string; label: string; ativo: boolean };
+
+const SUPER_ADMINS = ["desenvolvedor", "admin"];
+
+function labelFromNome(nome: string): string {
+  const map: Record<string, string> = {
+    gerente_fabrica:    "G. Fábrica",
+    gerente_loja:       "G. Loja",
+    ourives:            "Ourives",
+    motoboy:            "Motoboy",
+    consultora:         "Consultora",
+    estoquista_fabrica: "Est. Fáb.",
+    estoquista_loja:    "Est. Loja",
+    pcp:                "PCP",
+  };
+  return map[nome] ?? nome.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function TabPermissoes() {
-  const [perms, setPerms]       = useState<PermMap>({});
-  const [original, setOriginal] = useState<PermMap>({});
-  const [loading, setLoading]   = useState(true);
-  const [saving, setSaving]     = useState(false);
-  const [saved, setSaved]       = useState(false);
-  const [erro, setErro]         = useState("");
+  const [perms, setPerms]           = useState<PermMap>({});
+  const [original, setOriginal]     = useState<PermMap>({});
+  const [loading, setLoading]       = useState(true);
+  const [saving, setSaving]         = useState(false);
+  const [saved, setSaved]           = useState(false);
+  const [erro, setErro]             = useState("");
+
+  // Roles dinâmicas (excluindo super-admins)
+  const [rolesAtivas, setRolesAtivas] = useState<RoleItem[]>([]);
+
+  // Modal Nova Role
+  const [novaRoleOpen,  setNovaRoleOpen]  = useState(false);
+  const [novaRoleNome,  setNovaRoleNome]  = useState("");
+  const [novaRoleDesc,  setNovaRoleDesc]  = useState("");
+  const [criandoRole,   setCriandoRole]   = useState(false);
+  const [erroNovaRole,  setErroNovaRole]  = useState("");
+
+  async function carregarRoles() {
+    const res = await fetch("/api/configuracoes/roles").catch(() => null);
+    if (!res?.ok) return;
+    const data = await res.json() as { roles: { nome: string; descricao: string; ativo: boolean }[] };
+    setRolesAtivas(
+      (data.roles ?? [])
+        .filter(r => !SUPER_ADMINS.includes(r.nome) && r.ativo)
+        .map(r => ({ key: r.nome, label: labelFromNome(r.nome), ativo: r.ativo }))
+    );
+  }
+
+  async function carregarPermissoes() {
+    const res = await fetch("/api/configuracoes/permissoes").catch(() => null);
+    if (!res?.ok) { setErro("Erro ao carregar permissões"); setLoading(false); return; }
+    const data = await res.json();
+    const map: PermMap = {};
+    for (const { role, modulos } of (data.permissoes ?? [])) {
+      map[role] = {};
+      for (const m of modulos) {
+        map[role][m.modulo] = { pode_ler: m.pode_ler, pode_escrever: m.pode_escrever };
+      }
+    }
+    setPerms(map);
+    setOriginal(JSON.parse(JSON.stringify(map)));
+    setLoading(false);
+  }
 
   useEffect(() => {
-    fetch("/api/configuracoes/permissoes")
-      .then(r => r.json())
-      .then(data => {
-        const map: PermMap = {};
-        for (const { role, modulos } of (data.permissoes ?? [])) {
-          map[role] = {};
-          for (const m of modulos) {
-            map[role][m.modulo] = { pode_ler: m.pode_ler, pode_escrever: m.pode_escrever };
-          }
-        }
-        setPerms(map);
-        setOriginal(JSON.parse(JSON.stringify(map)));
-        setLoading(false);
-      })
-      .catch(() => { setErro("Erro ao carregar permissões"); setLoading(false); });
+    Promise.all([carregarRoles(), carregarPermissoes()]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function toggleLevel(role: string, modulo: string) {
@@ -1510,13 +1544,41 @@ function TabPermissoes() {
     return cur.pode_ler !== ori.pode_ler || cur.pode_escrever !== ori.pode_escrever;
   }
 
-  const totalPending = ALL_ROLES.flatMap(r =>
+  const totalPending = rolesAtivas.flatMap(r =>
     Object.keys(MODULO_LABEL).filter(m => isDirty(r.key, m))
   ).length;
 
+  async function handleCriarRole() {
+    const nome = novaRoleNome.trim().toLowerCase();
+    if (!nome) { setErroNovaRole("Nome obrigatório"); return; }
+    setCriandoRole(true); setErroNovaRole("");
+    const res = await fetch("/api/configuracoes/roles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome, descricao: novaRoleDesc.trim() || undefined }),
+    });
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    setCriandoRole(false);
+    if (!res.ok) { setErroNovaRole(data.error ?? `Erro ${res.status}`); return; }
+    setNovaRoleOpen(false);
+    setNovaRoleNome("");
+    setNovaRoleDesc("");
+    await Promise.all([carregarRoles(), carregarPermissoes()]);
+  }
+
+  async function handleDesativarRole(nome: string) {
+    if (!confirm(`Desativar a role "${nome}"? Ela sumirá do grid e do dropdown de usuários.`)) return;
+    await fetch(`/api/configuracoes/roles/${encodeURIComponent(nome)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ativo: false }),
+    });
+    await carregarRoles();
+  }
+
   async function handleSave() {
     setSaving(true); setErro(""); setSaved(false);
-    const changes = ALL_ROLES.flatMap(({ key: role }) =>
+    const changes = rolesAtivas.flatMap(({ key: role }) =>
       Object.keys(MODULO_LABEL)
         .filter(modulo => isDirty(role, modulo))
         .map(modulo => ({
@@ -1569,6 +1631,13 @@ function TabPermissoes() {
               {totalPending} alteração{totalPending > 1 ? "ões" : ""} pendente{totalPending > 1 ? "s" : ""}
             </span>
           )}
+          <button
+            onClick={() => { setNovaRoleOpen(true); setErroNovaRole(""); setNovaRoleNome(""); setNovaRoleDesc(""); }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors hover:bg-gray-50"
+            style={{ borderColor: P.border, color: P.creme }}
+          >
+            <Plus size={13} /> Nova Role
+          </button>
           <button
             onClick={handleSave}
             disabled={saving || totalPending === 0}
@@ -1640,14 +1709,23 @@ function TabPermissoes() {
                   {r === "desenvolvedor" ? "Dev" : "Admin"}
                 </th>
               ))}
-              {/* Roles editáveis */}
-              {ALL_ROLES.map(({ key, label }) => (
+              {/* Roles editáveis (dinâmicas) */}
+              {rolesAtivas.map(({ key, label }) => (
                 <th
                   key={key}
                   className="px-3 py-3 text-center font-semibold min-w-[80px]"
                   style={{ color: P.creme }}
                 >
-                  {label}
+                  <div className="flex flex-col items-center gap-1">
+                    <span>{label}</span>
+                    <button
+                      onClick={() => handleDesativarRole(key)}
+                      title={`Desativar role "${key}"`}
+                      className="opacity-30 hover:opacity-100 transition-opacity"
+                    >
+                      <Trash2 size={10} style={{ color: P.vermelho }} />
+                    </button>
+                  </div>
                 </th>
               ))}
             </tr>
@@ -1697,8 +1775,8 @@ function TabPermissoes() {
                         </div>
                       </td>
                     ))}
-                    {/* Roles editáveis */}
-                    {ALL_ROLES.map(({ key: role }) => {
+                    {/* Roles editáveis (dinâmicas) */}
+                    {rolesAtivas.map(({ key: role }) => {
                       const cur   = perms[role]?.[modulo] ?? { pode_ler: false, pode_escrever: false };
                       const level = getLevel(cur.pode_ler, cur.pode_escrever);
                       const dirty = isDirty(role, modulo);
@@ -1742,6 +1820,77 @@ function TabPermissoes() {
         Clique em uma célula para alternar: Sem acesso → Leitura → Leitura+Escrita → Sem acesso
         · Alterações pendentes ficam com borda dourada · Clique em Salvar para aplicar
       </p>
+
+      {/* ── Modal Nova Role ──────────────────────────────────────────────── */}
+      {novaRoleOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => setNovaRoleOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold" style={{ color: P.creme }}>Nova Role</p>
+                <p className="text-xs mt-0.5" style={{ color: P.muted }}>Uma nova coluna aparecerá no grid com tudo zerado</p>
+              </div>
+              <button onClick={() => setNovaRoleOpen(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100">
+                <X size={15} style={{ color: P.muted }} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: P.muted }}>
+                  Nome (slug) *
+                </label>
+                <input
+                  type="text"
+                  value={novaRoleNome}
+                  onChange={e => setNovaRoleNome(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                  placeholder="ex: supervisor"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#184036]"
+                />
+                <p className="text-[10px] mt-0.5" style={{ color: P.muted }}>Apenas letras minúsculas, números e underscore</p>
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: P.muted }}>
+                  Descrição (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={novaRoleDesc}
+                  onChange={e => setNovaRoleDesc(e.target.value)}
+                  placeholder="ex: Supervisor de produção"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#184036]"
+                />
+              </div>
+            </div>
+
+            {erroNovaRole && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: P.vermelho + "15", color: P.vermelho }}>
+                <AlertTriangle size={12} /> {erroNovaRole}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-1">
+              <button onClick={() => setNovaRoleOpen(false)} className="px-4 py-2 text-sm" style={{ color: P.muted }}>
+                Cancelar
+              </button>
+              <button
+                onClick={handleCriarRole}
+                disabled={criandoRole || !novaRoleNome.trim()}
+                className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+                style={{ backgroundColor: "#184036", color: "#F3EADA" }}
+              >
+                {criandoRole ? <><Loader2 size={13} className="animate-spin" /> Criando...</> : <><Plus size={13} /> Criar Role</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

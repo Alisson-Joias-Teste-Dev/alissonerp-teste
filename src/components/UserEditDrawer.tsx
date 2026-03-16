@@ -4,18 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { X, Save, Loader2, Camera, Eye, EyeOff, AlertTriangle, CheckCircle } from "lucide-react";
 import UserAvatar from "@/components/UserAvatar";
 
-const ROLES = [
-  { value: "desenvolvedor",      label: "Desenvolvedor" },
-  { value: "admin",              label: "Admin" },
-  { value: "gerente_fabrica",    label: "Gerente Fábrica" },
-  { value: "gerente_loja",       label: "Gerente Loja" },
-  { value: "ourives",            label: "Ourives" },
-  { value: "motoboy",            label: "Motoboy / Logística" },
-  { value: "consultora",         label: "Consultora" },
-  { value: "estoquista_fabrica", label: "Estoquista Fábrica" },
-  { value: "estoquista_loja",    label: "Estoquista Loja" },
-  { value: "pcp",                label: "PCP" },
-] as const;
+// Roles são carregadas da API (veja estado rolesDisponiveis no componente)
 
 export interface UsuarioEdit {
   id: string;
@@ -61,12 +50,32 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
 
   const [vendedorId, setVendedorId] = useState<number | null>(null);
   const [vendedores, setVendedores] = useState<{ id_vendedor: number; nome: string }[]>([]);
+  const [rolesDisponiveis, setRolesDisponiveis] = useState<{ value: string; label: string }[]>([]);
 
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [uploadando, setUploadando] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Carregar roles do banco
+  useEffect(() => {
+    fetch("/api/configuracoes/roles")
+      .then(r => r.json())
+      .then((data: { roles?: { nome: string; descricao: string; ativo: boolean }[] }) => {
+        setRolesDisponiveis(
+          (data.roles ?? [])
+            .filter(r => r.ativo)
+            .map(r => ({
+              value: r.nome,
+              label: r.descricao
+                ? `${r.nome.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())} — ${r.descricao.split("—")[0].trim()}`
+                : r.nome.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+            }))
+        );
+      })
+      .catch(() => {});
+  }, []);
 
   // Sincronizar campos ao abrir/trocar usuário
   useEffect(() => {
@@ -294,7 +303,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
               disabled={isProprioUsuario}
               className={isProprioUsuario ? inputDisabledCls : inputCls}
             >
-              {ROLES.map((r) => (
+              {rolesDisponiveis.map((r) => (
                 <option key={r.value} value={r.value}>{r.label}</option>
               ))}
             </select>

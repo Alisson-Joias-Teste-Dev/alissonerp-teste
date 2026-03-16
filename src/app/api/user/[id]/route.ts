@@ -3,11 +3,11 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 
-// Roles válidas (enum_role em alissonerp)
-const ROLES_VALIDAS = [
-  "desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "ourives",
-  "motoboy", "consultora", "estoquista_fabrica", "estoquista_loja", "pcp",
-] as const;
+// Validação de role: verificar contra alissonerp.roles (dinâmico)
+async function isRoleValida(role: string): Promise<boolean> {
+  const rows = await sql`SELECT 1 FROM alissonerp.roles WHERE nome = ${role} AND ativo = true`;
+  return rows.length > 0;
+}
 
 // PATCH /api/user/[id] — atualizar dados do usuário
 // Body: { nome?, role?, ativo?, deposito_id?, email?, nova_senha? }
@@ -49,8 +49,8 @@ export async function PATCH(
   // Usuário NUNCA pode alterar sua própria role (proteção dupla: frontend + backend)
   const role = (user.id === id) ? undefined : body.role;
 
-  // Validar role
-  if (role !== undefined && !ROLES_VALIDAS.includes(role as typeof ROLES_VALIDAS[number])) {
+  // Validar role contra tabela alissonerp.roles (dinâmica)
+  if (role !== undefined && !(await isRoleValida(role))) {
     return NextResponse.json({ error: "Role inválida" }, { status: 400 });
   }
 
@@ -76,7 +76,7 @@ export async function PATCH(
       SET
         nome        = COALESCE(${nome ?? null}, nome),
         email       = COALESCE(${email ?? null}, email),
-        role        = COALESCE(${role}::alissonerp.enum_role, role),
+        role        = COALESCE(${role}, role),
         ativo       = COALESCE(${ativo ?? null}, ativo),
         deposito_id = ${deposito_id ?? null},
         vendedor_id = ${vendedor_id ?? null},
