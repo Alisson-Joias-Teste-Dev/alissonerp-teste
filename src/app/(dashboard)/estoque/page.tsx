@@ -1,6 +1,8 @@
 import sql from "@/lib/db";
 import EstoqueClient from "@/components/EstoqueClient";
 
+export const dynamic = 'force-dynamic';
+
 export default async function EstoquePage() {
   const [saldos, insumos, movimentacoes, parametros, saldoDepositos] =
     await Promise.all([

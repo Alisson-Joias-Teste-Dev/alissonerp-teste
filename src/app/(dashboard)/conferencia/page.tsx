@@ -2,6 +2,8 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import ConferenciaClient from "./ConferenciaClient";
 
+export const dynamic = 'force-dynamic';
+
 export default async function ConferenciaPage() {
   // Auth — consultora vê só as conferências vinculadas ao seu vendedor_id (= consultora_id)
   const supabase = await createServerSupabase();

@@ -4,6 +4,8 @@ import { isPrecificacaoAccess } from "@/lib/roles";
 import PrecificacaoClient from "./PrecificacaoClient";
 import sql from "@/lib/db";
 
+export const dynamic = 'force-dynamic';
+
 export default async function PrecificacaoPage() {
   const supabase = await createServerSupabase();
   const {

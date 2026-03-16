@@ -2,6 +2,8 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import KanbanClient from "@/components/KanbanClient";
 
+export const dynamic = 'force-dynamic';
+
 // Roles que vêem TODOS os PCPs (sem filtro por depósito)
 const ROLES_VE_TUDO = ["admin", "desenvolvedor", "gerente_fabrica", "pcp", "gerente_loja"];
 
