@@ -25,6 +25,22 @@ function canAccess(role: string | undefined, pathname: string): boolean {
 const ROTAS_PROTEGIDAS = new Set(Object.values(ROLE_ALLOWED).flat());
 
 export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // 0. Whitelist — passa direto, sem auth nem role check
+  if (
+    pathname === "/" ||
+    pathname.startsWith("/api/") ||
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/_next/") ||
+    pathname.startsWith("/favicon") ||
+    pathname.startsWith("/logo") ||
+    pathname.includes(".")
+  ) {
+    return NextResponse.next();
+  }
+
+  // Para rotas de página: inicializar Supabase e checar auth
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -52,29 +68,14 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
-
-  // 1. APIs — protegidas individualmente, nunca bloqueadas aqui
-  if (pathname.startsWith("/api/")) {
-    return supabaseResponse;
-  }
-
-  // 2. Login — redirecionar para / se já logado
-  if (pathname.startsWith("/login")) {
-    if (user) {
-      return NextResponse.redirect(new URL("/", request.url));
-    }
-    return supabaseResponse;
-  }
-
-  // 3. Não autenticado → redirecionar para login
+  // 1. Não autenticado → redirecionar para login
   if (!user) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  // 4. Checar role apenas para rotas protegidas
+  // 2. Checar role apenas para rotas protegidas
   const primeiroSegmento = "/" + pathname.split("/").filter(Boolean)[0];
   if (ROTAS_PROTEGIDAS.has(primeiroSegmento)) {
     const role = user.user_metadata?.role as string | undefined;
