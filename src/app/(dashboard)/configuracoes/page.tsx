@@ -1,0 +1,46 @@
+import sql from "@/lib/db";
+import { createServerSupabase } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import ConfiguracoesClient from "./ConfiguracoesClient";
+import { isFullAccess } from "@/lib/roles";
+
+export default async function ConfiguracoesPage() {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!isFullAccess(user?.user_metadata?.role)) redirect("/");
+
+  const [parametros, webhooks, logs, usuarios, depositos] = await Promise.all([
+    sql`SELECT * FROM alissonerp.parametros WHERE id = 1`,
+    sql`
+      SELECT id, nome, url, ativo, descricao, ultimo_disparo, total_disparos
+      FROM alissonerp.webhook_config
+      ORDER BY nome
+    `,
+    sql`
+      SELECT id, webhook_nome, response_status, erro, created_at
+      FROM alissonerp.webhook_log
+      ORDER BY created_at DESC
+      LIMIT 30
+    `,
+    sql`
+      SELECT
+        u.id, u.email, u.nome, u.role, u.ativo, u.created_at,
+        up.avatar_url
+      FROM alissonerp.usuarios u
+      LEFT JOIN public.user_profiles up ON up.id_user = u.id
+      ORDER BY u.created_at DESC
+      LIMIT 50
+    `,
+    sql`SELECT id, nome FROM alissonerp.depositos WHERE ativo = true ORDER BY id`,
+  ]);
+
+  return (
+    <ConfiguracoesClient
+      parametros={(parametros as any[])[0] ?? {}}
+      webhooks={webhooks as any[]}
+      logs={logs as any[]}
+      usuarios={usuarios as any[]}
+      depositos={depositos as any[]}
+    />
+  );
+}
