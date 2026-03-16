@@ -1,28 +1,57 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Espelho de ROLE_MENUS de permissions.ts — mantido em sync manualmente
-const ROLE_ALLOWED: Record<string, string[]> = {
-  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro", "/produtos", "/precificacao", "/configuracoes"],
-  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro", "/produtos", "/precificacao", "/configuracoes"],
-  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro"],
-  gerente_loja:       ["/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/produtos", "/precificacao"],
-  ourives:            ["/ordens", "/pcp"],
-  motoboy:            ["/protocolo"],
-  consultora:         ["/ordens", "/estoque", "/conferencia"],
-  estoquista_fabrica: ["/estoque", "/quebra", "/compras", "/insumos"],
-  estoquista_loja:    ["/estoque"],
-  pcp:                ["/ordens", "/pcp", "/distribuicao", "/quebra"],
+// Mapa modulo → prefixo de rota (espelho de HREF_TO_MODULO em permissions.ts)
+const MODULO_TO_PREFIX: Record<string, string> = {
+  dashboard_fabrica: "/dashboard-fabrica",
+  ordens:            "/ordens",
+  pcp:               "/pcp",
+  distribuicao:      "/distribuicao",
+  estoque:           "/estoque",
+  quebra:            "/quebra",
+  insumos:           "/insumos",
+  compras:           "/compras",
+  protocolo:         "/protocolo",
+  conferencia:       "/conferencia",
+  entrega:           "/entrega",
+  auditoria:         "/auditoria",
+  vendas:            "/vendas",
+  financeiro:        "/financeiro",
+  produtos:          "/produtos",
+  precificacao:      "/precificacao",
+  configuracoes:     "/configuracoes",
 };
 
-function canAccess(role: string | undefined, pathname: string): boolean {
-  if (!role) return false;
-  const allowed = ROLE_ALLOWED[role] ?? [];
-  return allowed.some((p) => pathname === p || pathname.startsWith(p + "/"));
+const PREFIXOS_PROTEGIDOS = new Set(Object.values(MODULO_TO_PREFIX));
+
+// Cache de permissões por role (TTL 5 min) — evita query ao banco a cada request
+const rolePermCache = new Map<string, { modulos: string[]; exp: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function getModulosForUser(userId: string, origin: string, cookieHeader: string): Promise<string[] | null> {
+  const cached = rolePermCache.get(userId);
+  if (cached && cached.exp > Date.now()) return cached.modulos;
+
+  try {
+    const res = await fetch(`${origin}/api/user/permissoes?user_id=${userId}`, {
+      headers: { cookie: cookieHeader },
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { modulos_leitura: string[] };
+    const modulos = data.modulos_leitura ?? [];
+    rolePermCache.set(userId, { modulos, exp: Date.now() + CACHE_TTL_MS });
+    return modulos;
+  } catch {
+    return null;
+  }
 }
 
-// Conjunto de prefixos protegidos (derivado de ROLE_ALLOWED acima)
-const ROTAS_PROTEGIDAS = new Set(Object.values(ROLE_ALLOWED).flat());
+function canAccessModulos(modulos: string[], pathname: string): boolean {
+  return modulos.some(m => {
+    const prefix = MODULO_TO_PREFIX[m];
+    return prefix && (pathname === prefix || pathname.startsWith(prefix + "/"));
+  });
+}
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -75,11 +104,16 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // 2. Checar role apenas para rotas protegidas
+  // 2. Checar acesso apenas para rotas protegidas
   const primeiroSegmento = "/" + pathname.split("/").filter(Boolean)[0];
-  if (ROTAS_PROTEGIDAS.has(primeiroSegmento)) {
-    const role = user.user_metadata?.role as string | undefined;
-    if (!canAccess(role, pathname)) {
+  if (PREFIXOS_PROTEGIDOS.has(primeiroSegmento)) {
+    const origin = request.nextUrl.origin;
+    const cookieHeader = request.headers.get("cookie") ?? "";
+
+    // Buscar módulos do banco (com cache por userId, TTL 5 min)
+    const modulos = await getModulosForUser(user.id, origin, cookieHeader);
+
+    if (!modulos || !canAccessModulos(modulos, pathname)) {
       return NextResponse.redirect(new URL("/", request.url));
     }
   }

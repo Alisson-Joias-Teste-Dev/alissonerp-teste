@@ -92,6 +92,49 @@ export function getMenuGroupsForRole(role: Role | null | undefined): MenuEntry[]
   return result;
 }
 
+// Mapa href → nome do módulo em role_permissoes
+const HREF_TO_MODULO: Record<string, string> = {
+  "/dashboard-fabrica": "dashboard_fabrica",
+  "/ordens":            "ordens",
+  "/pcp":               "pcp",
+  "/distribuicao":      "distribuicao",
+  "/estoque":           "estoque",
+  "/quebra":            "quebra",
+  "/insumos":           "insumos",
+  "/compras":           "compras",
+  "/protocolo":         "protocolo",
+  "/conferencia":       "conferencia",
+  "/entrega":           "entrega",
+  "/auditoria":         "auditoria",
+  "/vendas":            "vendas",
+  "/financeiro":        "financeiro",
+  "/produtos":          "produtos",
+  "/precificacao":      "precificacao",
+  "/configuracoes":     "configuracoes",
+};
+
+// Constrói o menu lateral a partir da lista de módulos do banco (role_permissoes)
+export function getMenuGroupsForModulos(modulos: string[]): MenuEntry[] {
+  const allowed = new Set(modulos);
+  const result: MenuEntry[] = [];
+
+  for (const group of MENU_GROUPS) {
+    const visibleItems = group.items.filter(item => {
+      if (!item) return false;
+      const modulo = HREF_TO_MODULO[item.href];
+      return modulo ? allowed.has(modulo) : false;
+    });
+    if (visibleItems.length === 0) continue;
+    result.push({ ...group, items: visibleItems });
+  }
+
+  if (allowed.has("configuracoes")) {
+    result.push(ALL_MENUS.find(m => m.href === "/configuracoes")!);
+  }
+
+  return result;
+}
+
 export function canAccess(role: Role | null | undefined, pathname: string): boolean {
   if (!role) return false;
   if (role === "admin" || role === "desenvolvedor") return true;

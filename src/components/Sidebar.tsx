@@ -28,7 +28,7 @@ import {
   BarChart2,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { getMenuGroupsForRole, type MenuGroup, type MenuEntry } from "@/lib/auth/permissions";
+import { getMenuGroupsForRole, getMenuGroupsForModulos, type MenuGroup, type MenuEntry } from "@/lib/auth/permissions";
 import { isFullAccess } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/client";
 import UserAvatar from "@/components/UserAvatar";
@@ -69,9 +69,12 @@ function isActiveInGroup(group: MenuGroup, pathname: string) {
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { role, nome, fotoUrl, loading, user } = useAuth();
+  const { role, nome, fotoUrl, loading, user, modulos_leitura } = useAuth();
 
-  const allEntries  = getMenuGroupsForRole(role);
+  // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)
+  const allEntries = modulos_leitura.length > 0
+    ? getMenuGroupsForModulos(modulos_leitura)
+    : getMenuGroupsForRole(role);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const configEntry = allEntries.find(e => !isGroup(e) && (e as any).href === "/configuracoes") as (MenuEntry & { href: string; icon: string }) | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

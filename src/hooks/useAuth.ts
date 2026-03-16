@@ -11,6 +11,8 @@ interface AuthState {
   nome: string | null;
   fotoUrl: string | null;
   loading: boolean;
+  modulos_leitura: string[];
+  modulos_escrita: string[];
 }
 
 export function useAuth(): AuthState {
@@ -20,6 +22,8 @@ export function useAuth(): AuthState {
     nome: null,
     fotoUrl: null,
     loading: true,
+    modulos_leitura: [],
+    modulos_escrita: [],
   });
 
   useEffect(() => {
@@ -28,20 +32,26 @@ export function useAuth(): AuthState {
     async function loadUser() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const role = user.user_metadata?.role as Role ?? null;
+        const roleFromToken = user.user_metadata?.role as Role ?? null;
         const nome = user.user_metadata?.nome as string ?? null;
-        // Buscar avatar_url e name do DB
-        const profileRes = await fetch(`/api/user/role?user_id=${user.id}`).catch(() => null);
+        // Buscar perfil (nome/avatar) e permissões em paralelo
+        const [profileRes, permRes] = await Promise.all([
+          fetch(`/api/user/role?user_id=${user.id}`).catch(() => null),
+          fetch(`/api/user/permissoes?user_id=${user.id}`).catch(() => null),
+        ]);
         const profile = profileRes?.ok ? await profileRes.json() : null;
+        const perm    = permRes?.ok    ? await permRes.json()    : null;
         setState({
           user,
-          role,
-          nome: profile?.name ?? nome,
-          fotoUrl: profile?.avatar_url ?? null,
-          loading: false,
+          role:            (perm?.role ?? roleFromToken) as Role | null,
+          nome:            profile?.name ?? nome,
+          fotoUrl:         profile?.avatar_url ?? null,
+          loading:         false,
+          modulos_leitura: perm?.modulos_leitura ?? [],
+          modulos_escrita: perm?.modulos_escrita ?? [],
         });
       } else {
-        setState({ user: null, role: null, nome: null, fotoUrl: null, loading: false });
+        setState({ user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [] });
       }
     }
 
@@ -49,23 +59,25 @@ export function useAuth(): AuthState {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const user = session?.user ?? null;
-      const role = user?.user_metadata?.role as Role ?? null;
+      const roleFromToken = user?.user_metadata?.role as Role ?? null;
       const nome = user?.user_metadata?.nome as string ?? null;
       if (user) {
-        fetch(`/api/user/role?user_id=${user.id}`)
-          .then((r) => r.ok ? r.json() : null)
-          .then((profile) => {
-            setState({
-              user,
-              role,
-              nome: profile?.name ?? nome,
-              fotoUrl: profile?.avatar_url ?? null,
-              loading: false,
-            });
-          })
-          .catch(() => setState({ user, role, nome, fotoUrl: null, loading: false }));
+        Promise.all([
+          fetch(`/api/user/role?user_id=${user.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/user/permissoes?user_id=${user.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        ]).then(([profile, perm]) => {
+          setState({
+            user,
+            role:            (perm?.role ?? roleFromToken) as Role | null,
+            nome:            profile?.name ?? nome,
+            fotoUrl:         profile?.avatar_url ?? null,
+            loading:         false,
+            modulos_leitura: perm?.modulos_leitura ?? [],
+            modulos_escrita: perm?.modulos_escrita ?? [],
+          });
+        }).catch(() => setState({ user, role: roleFromToken, nome, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [] }));
       } else {
-        setState({ user: null, role: null, nome: null, fotoUrl: null, loading: false });
+        setState({ user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [] });
       }
     });
 
