@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import ComentariosOrdem from "@/components/ComentariosOrdem";
 
 const C = {
   esmeralda: "#184036",
@@ -65,7 +66,7 @@ function MarcadorBadge({ marcador }: { marcador: string }) {
   );
 }
 
-type Tab = "producao" | "apontamentos" | "estoque" | "transferencias" | "ficha";
+type Tab = "producao" | "apontamentos" | "estoque" | "transferencias" | "ficha" | "comentarios";
 
 interface Props {
   ordem: any;
@@ -79,6 +80,7 @@ interface Props {
 export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("producao");
+  const [comentariosCount, setComentariosCount] = useState(0);
 
   const temPcp = !!ordem.pcp_id;
   const pcpConcluido = ordem.pcp_etapas_cod === "5";
@@ -93,6 +95,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
     { key: "estoque",        label: "Mov. Estoque",   count: movEstoque.length },
     { key: "transferencias", label: "Transferências", count: transferencias.length },
     { key: "ficha",          label: "Ficha Técnica",  count: fichaTecnica ? 1 : 0 },
+    { key: "comentarios",    label: "Comentários",    count: comentariosCount },
   ];
 
   return (
@@ -347,6 +350,16 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Tab: Comentários */}
+          {tab === "comentarios" && (
+            <div className="bg-white rounded-xl border p-5" style={{ borderColor: "#E8DCC8" }}>
+              <ComentariosOrdem
+                ordemId={ordem.id}
+                onCountChange={setComentariosCount}
+              />
             </div>
           )}
 
