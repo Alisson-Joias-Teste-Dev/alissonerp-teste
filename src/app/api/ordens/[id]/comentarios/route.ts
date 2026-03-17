@@ -21,7 +21,7 @@ export async function GET(
            u.nome AS autor_nome, u.role AS autor_role
     FROM alissonerp.comentarios_ordem c
     JOIN alissonerp.usuarios u ON u.id = c.autor_id
-    WHERE c.ordem_id = ${ordemId}::uuid
+    WHERE c.ordem_id = ${parseInt(ordemId)}
     ORDER BY c.created_at ASC
   `;
 
@@ -58,12 +58,12 @@ export async function POST(
 
   const [comentario] = await sql`
     INSERT INTO alissonerp.comentarios_ordem (ordem_id, autor_id, texto, mencoes)
-    VALUES (${ordemId}::uuid, ${user.id}::uuid, ${texto}, ${mencoes}::uuid[])
+    VALUES (${parseInt(ordemId)}, ${user.id}::uuid, ${texto}, ${mencoes}::uuid[])
     RETURNING id, created_at
   `;
 
   const [ordem] = await sql`
-    SELECT numero_ordem FROM alissonerp.ordens WHERE id = ${ordemId}::uuid
+    SELECT numero_ordem FROM alissonerp.ordens WHERE id = ${parseInt(ordemId)}
   `;
 
   for (const mencionadoId of mencoes) {
@@ -76,8 +76,8 @@ export async function POST(
         ${`@${autor.nome} mencionou você na ${ordem?.numero_ordem ?? ordemId}`},
         ${texto.substring(0, 100)},
         ${`/ordens/${ordemId}`},
-        ${ordemId}::uuid,
-        ${comentario.id}::uuid,
+        ${parseInt(ordemId)},
+        ${comentario.id},
         ${user.id}::uuid
       )
     `;

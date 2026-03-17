@@ -21,7 +21,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Texto obrigatório" }, { status: 400 });
 
   const [c] = await sql`
-    SELECT autor_id FROM alissonerp.comentarios_ordem WHERE id = ${comentarioId}::uuid
+    SELECT autor_id FROM alissonerp.comentarios_ordem WHERE id = ${parseInt(comentarioId)}
   `;
   if (!c)
     return NextResponse.json(
@@ -34,7 +34,7 @@ export async function PATCH(
   await sql`
     UPDATE alissonerp.comentarios_ordem
     SET texto = ${texto}, editado = true, editado_em = now()
-    WHERE id = ${comentarioId}::uuid
+    WHERE id = ${parseInt(comentarioId)}
   `;
 
   return NextResponse.json({ success: true });
@@ -55,7 +55,7 @@ export async function DELETE(
   const { comentarioId } = await params;
 
   const [c] = await sql`
-    SELECT autor_id FROM alissonerp.comentarios_ordem WHERE id = ${comentarioId}::uuid
+    SELECT autor_id FROM alissonerp.comentarios_ordem WHERE id = ${parseInt(comentarioId)}
   `;
   if (!c)
     return NextResponse.json(
@@ -72,6 +72,6 @@ export async function DELETE(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  await sql`DELETE FROM alissonerp.comentarios_ordem WHERE id = ${comentarioId}::uuid`;
+  await sql`DELETE FROM alissonerp.comentarios_ordem WHERE id = ${parseInt(comentarioId)}`;
   return NextResponse.json({ success: true });
 }
