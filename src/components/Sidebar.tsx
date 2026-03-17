@@ -29,6 +29,7 @@ import {
   Bell,
 } from "lucide-react";
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
+import PerfilDrawer from "./PerfilDrawer";
 import { useAuth } from "@/hooks/useAuth";
 import { getMenuGroupsForRole, getMenuGroupsForModulos, type MenuGroup, type MenuEntry } from "@/lib/auth/permissions";
 import { isFullAccess } from "@/lib/roles";
@@ -87,6 +88,9 @@ export default function Sidebar() {
     const initial = new Set<string>();
     return initial;
   });
+
+  // Perfil
+  const [perfilAberto, setPerfilAberto] = useState(false);
 
   // Notificações
   const [naoLidas, setNaoLidas] = useState(0);
@@ -354,13 +358,17 @@ export default function Sidebar() {
         })()}
       </div>
       <div className="px-4 py-4 border-t" style={{ borderColor: "#0F2922" }}>
-        <div className="flex items-center gap-2.5 mb-3">
+        <button
+          onClick={() => setPerfilAberto(true)}
+          className="flex items-center gap-2.5 mb-3 w-full rounded-lg px-1 py-1 transition-colors hover:bg-white/5 text-left"
+          title="Editar perfil"
+        >
           <UserAvatar
             nome={nome}
             fotoUrl={fotoUrl}
             size={30}
             userId={user?.id}
-            clickable={isFullAccess(role)}
+            clickable={false}
           />
           <div className="flex-1 min-w-0">
             {nome && (
@@ -374,7 +382,7 @@ export default function Sidebar() {
               </p>
             )}
           </div>
-        </div>
+        </button>
         <button
           onClick={handleLogout}
           className="flex items-center gap-2 text-[11px] transition-colors hover:opacity-80"
@@ -394,6 +402,7 @@ export default function Sidebar() {
       onMarcarTodas={marcarTodas}
       carregando={carregandoNotifs}
     />
+    {perfilAberto && <PerfilDrawer onClose={() => setPerfilAberto(false)} />}
     </>
   );
 }

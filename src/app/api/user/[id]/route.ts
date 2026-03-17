@@ -24,13 +24,21 @@ export async function PATCH(
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
 
-  // Verificar que é admin/desenvolvedor (join por UUID — emails podem diferir entre tabelas)
+  // Verificar role do usuário autenticado
   const [meuPerfil] = await sql`
     SELECT role::text AS role
     FROM alissonerp.usuarios
     WHERE id = ${user.id}::uuid
   `;
-  if (!meuPerfil || !isFullAccess(meuPerfil.role)) {
+  if (!meuPerfil) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
+  const isSelfUpdate = user.id === id;
+  const isAdmin = isFullAccess(meuPerfil.role);
+
+  // Não-admin só pode atualizar o próprio perfil
+  if (!isAdmin && !isSelfUpdate) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -44,10 +52,15 @@ export async function PATCH(
     nova_senha?: string;
   };
 
-  const { nome, ativo, deposito_id, vendedor_id, email, nova_senha } = body;
+  // Não-admin: só pode alterar nome (proteção backend)
+  const { nome, nova_senha } = body;
+  const ativo       = isAdmin ? body.ativo       : undefined;
+  const deposito_id = isAdmin ? body.deposito_id : undefined;
+  const vendedor_id = isAdmin ? body.vendedor_id : undefined;
+  const email       = isAdmin ? body.email       : undefined;
 
   // Usuário NUNCA pode alterar sua própria role (proteção dupla: frontend + backend)
-  const role = (user.id === id) ? undefined : body.role;
+  const role = isSelfUpdate ? undefined : body.role;
 
   // Validar role contra tabela alissonerp.roles (dinâmica)
   if (role !== undefined && !(await isRoleValida(role))) {
