@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -26,7 +26,9 @@ import {
   ChevronDown,
   Tag,
   BarChart2,
+  Bell,
 } from "lucide-react";
+import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import { useAuth } from "@/hooks/useAuth";
 import { getMenuGroupsForRole, getMenuGroupsForModulos, type MenuGroup, type MenuEntry } from "@/lib/auth/permissions";
 import { isFullAccess } from "@/lib/roles";
@@ -86,6 +88,34 @@ export default function Sidebar() {
     return initial;
   });
 
+  // Notificações
+  const [naoLidas, setNaoLidas] = useState(0);
+  const [drawerAberto, setDrawerAberto] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [notificacoes, setNotificacoes] = useState<any[]>([]);
+  const [carregandoNotifs, setCarregandoNotifs] = useState(false);
+
+  // Busca contagem de notificações não lidas
+  const fetchContagem = useCallback(async () => {
+    try {
+      const res = await fetch("/api/notificacoes/contagem");
+      if (!res.ok) return;
+      const data = await res.json();
+      setNaoLidas(data.nao_lidas || 0);
+    } catch {
+      // silencioso
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchContagem();
+  }, [fetchContagem]);
+
+  useEffect(() => {
+    const interval = setInterval(fetchContagem, 60000);
+    return () => clearInterval(interval);
+  }, [fetchContagem]);
+
   // Abre automaticamente o grupo da rota ativa ao carregar
   useEffect(() => {
     if (!entries.length) return;
@@ -110,6 +140,52 @@ export default function Sidebar() {
     });
   }
 
+  async function abrirDrawer() {
+    setDrawerAberto(true);
+    setCarregandoNotifs(true);
+    try {
+      const res = await fetch("/api/notificacoes");
+      if (res.ok) {
+        const data = await res.json();
+        setNotificacoes(Array.isArray(data) ? data : []);
+      } else {
+        setNotificacoes([]);
+      }
+    } catch {
+      setNotificacoes([]);
+    } finally {
+      setCarregandoNotifs(false);
+    }
+  }
+
+  async function marcarLida(id: string, link: string | null) {
+    try {
+      await fetch(`/api/notificacoes/${id}/ler`, { method: "PATCH" });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setNotificacoes((prev: any[]) =>
+        prev.map((n) => (n.id === id ? { ...n, lida: true } : n))
+      );
+      setNaoLidas((prev) => Math.max(0, prev - 1));
+      if (link) {
+        router.push(link);
+        setDrawerAberto(false);
+      }
+    } catch {
+      // silencioso
+    }
+  }
+
+  async function marcarTodas() {
+    try {
+      await fetch("/api/notificacoes/ler-todas", { method: "PATCH" });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setNotificacoes((prev: any[]) => prev.map((n) => ({ ...n, lida: true })));
+      setNaoLidas(0);
+    } catch {
+      // silencioso
+    }
+  }
+
   async function handleLogout() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -118,6 +194,7 @@ export default function Sidebar() {
   }
 
   return (
+    <>
     <aside
       className="fixed top-0 left-0 h-screen w-56 flex flex-col z-40"
       style={{ backgroundColor: "#184036", borderRight: "1px solid #0F2922" }}
@@ -224,6 +301,36 @@ export default function Sidebar() {
         )}
       </nav>
 
+      {/* Sino de notificações */}
+      <div className="px-3 pb-2">
+        <button
+          onClick={abrirDrawer}
+          className="flex items-center justify-between w-full px-3 py-2 rounded-lg transition-colors"
+          style={{ color: "#80A795" }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.backgroundColor = "rgba(15,41,34,0.4)";
+            (e.currentTarget as HTMLButtonElement).style.color = "#F3EADA";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
+            (e.currentTarget as HTMLButtonElement).style.color = "#80A795";
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <Bell size={15} strokeWidth={1.75} />
+            <span className="text-sm tracking-wide">Notificações</span>
+          </div>
+          {naoLidas > 0 && (
+            <span
+              className="text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1"
+              style={{ backgroundColor: "#ef4444", color: "#fff" }}
+            >
+              {naoLidas > 99 ? "99+" : naoLidas}
+            </span>
+          )}
+        </button>
+      </div>
+
       {/* Footer — configurações + usuário + logout */}
       <div className="border-t" style={{ borderColor: "#0F2922" }}>
         {configEntry && (() => {
@@ -278,5 +385,15 @@ export default function Sidebar() {
         </button>
       </div>
     </aside>
+
+    <NotificacoesDrawer
+      aberto={drawerAberto}
+      onFechar={() => setDrawerAberto(false)}
+      notificacoes={notificacoes}
+      onMarcarLida={marcarLida}
+      onMarcarTodas={marcarTodas}
+      carregando={carregandoNotifs}
+    />
+    </>
   );
 }
