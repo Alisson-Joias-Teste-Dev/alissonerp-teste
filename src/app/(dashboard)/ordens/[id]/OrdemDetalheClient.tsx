@@ -66,7 +66,7 @@ function MarcadorBadge({ marcador }: { marcador: string }) {
   );
 }
 
-type Tab = "producao" | "apontamentos" | "estoque" | "transferencias" | "ficha" | "comentarios";
+type Tab = "producao" | "apontamentos" | "estoque" | "transferencias" | "ficha";
 
 interface Props {
   ordem: any;
@@ -80,7 +80,7 @@ interface Props {
 export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("producao");
-  const [comentariosCount, setComentariosCount] = useState(0);
+  const [comentariosCount, setComentariosCount] = useState(0); // usado no header da seção
 
   const temPcp = !!ordem.pcp_id;
   const pcpConcluido = ordem.pcp_etapas_cod === "5";
@@ -95,7 +95,6 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
     { key: "estoque",        label: "Mov. Estoque",   count: movEstoque.length },
     { key: "transferencias", label: "Transferências", count: transferencias.length },
     { key: "ficha",          label: "Ficha Técnica",  count: fichaTecnica ? 1 : 0 },
-    { key: "comentarios",    label: "Comentários",    count: comentariosCount },
   ];
 
   return (
@@ -353,16 +352,6 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
             </div>
           )}
 
-          {/* Tab: Comentários */}
-          {tab === "comentarios" && (
-            <div className="bg-white rounded-xl border p-5" style={{ borderColor: "#E8DCC8" }}>
-              <ComentariosOrdem
-                ordemId={ordem.id}
-                onCountChange={setComentariosCount}
-              />
-            </div>
-          )}
-
           {/* Tab: Ficha Técnica */}
           {tab === "ficha" && (
             <div className="bg-white rounded-xl border p-5" style={{ borderColor: C.cremeBorder }}>
@@ -561,6 +550,29 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
               )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Comentários — sempre visível, abaixo de tudo */}
+      <div className="mt-6">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-base font-semibold" style={{ color: "#1A1A1A" }}>
+            💬 Comentários
+          </span>
+          {comentariosCount > 0 && (
+            <span
+              className="px-2 py-0.5 rounded-full text-[11px] font-semibold"
+              style={{ backgroundColor: "#E8F0ED", color: "#184036" }}
+            >
+              {comentariosCount}
+            </span>
+          )}
+        </div>
+        <div className="bg-white rounded-xl border p-5" style={{ borderColor: "#E8DCC8" }}>
+          <ComentariosOrdem
+            ordemId={ordem.id}
+            onCountChange={setComentariosCount}
+          />
         </div>
       </div>
     </div>

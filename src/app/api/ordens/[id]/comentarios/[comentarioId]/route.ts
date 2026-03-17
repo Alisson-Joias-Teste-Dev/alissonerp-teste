@@ -33,7 +33,8 @@ export async function PATCH(
 
   await sql`
     UPDATE alissonerp.comentarios_ordem
-    SET texto = ${texto}, editado = true, editado_em = now()
+    SET texto_original = CASE WHEN texto_original IS NULL THEN texto ELSE texto_original END,
+        texto = ${texto}, editado = true, editado_em = now()
     WHERE id = ${parseInt(comentarioId)}
   `;
 
@@ -72,6 +73,10 @@ export async function DELETE(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  await sql`DELETE FROM alissonerp.comentarios_ordem WHERE id = ${parseInt(comentarioId)}`;
+  await sql`
+    UPDATE alissonerp.comentarios_ordem
+    SET excluido = true, excluido_em = now(), excluido_por = ${user.id}::uuid
+    WHERE id = ${parseInt(comentarioId)}
+  `;
   return NextResponse.json({ success: true });
 }

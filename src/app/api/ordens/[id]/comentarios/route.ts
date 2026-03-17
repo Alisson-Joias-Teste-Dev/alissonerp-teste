@@ -21,7 +21,7 @@ export async function GET(
            u.nome AS autor_nome, u.role AS autor_role
     FROM alissonerp.comentarios_ordem c
     JOIN alissonerp.usuarios u ON u.id = c.autor_id
-    WHERE c.ordem_id = ${parseInt(ordemId)}
+    WHERE c.ordem_id = ${parseInt(ordemId)} AND (c.excluido = false OR c.excluido IS NULL)
     ORDER BY c.created_at ASC
   `;
 

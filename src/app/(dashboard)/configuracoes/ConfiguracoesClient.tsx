@@ -416,8 +416,8 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
     pcp:                "PCP",
   };
 
-  // Roles disponíveis no dropdown (desenvolvedor excluído — proteção intencional)
-  const ROLES_DISPONIVEIS = [
+  // Roles disponíveis no dropdown — carregadas da API (desenvolvedor excluído — proteção intencional)
+  const [rolesDisponiveis, setRolesDisponiveis] = useState([
     { value: "admin",              label: "Admin" },
     { value: "gerente_fabrica",    label: "Gerente Fábrica" },
     { value: "gerente_loja",       label: "Gerente Loja" },
@@ -427,7 +427,7 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
     { value: "estoquista_fabrica", label: "Estoquista Fábrica" },
     { value: "estoquista_loja",    label: "Estoquista Loja" },
     { value: "pcp",                label: "PCP" },
-  ];
+  ]);
 
   const router = useRouter();
   const { user: userLogado, role: roleLogado } = useAuth();
@@ -445,6 +445,22 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
   const novaFotoRef = useRef<HTMLInputElement>(null);
 
   const podecriarUsuario = roleLogado === "admin" || roleLogado === "desenvolvedor";
+
+  // Carrega roles ativas da API para o dropdown "Novo Usuário"
+  useEffect(() => {
+    fetch("/api/configuracoes/roles")
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { roles: { nome: string; descricao: string; ativo: boolean }[] } | null) => {
+        if (!data?.roles) return;
+        setRolesDisponiveis(
+          data.roles
+            .filter(r => r.ativo && r.nome !== "desenvolvedor")
+            .map(r => ({ value: r.nome, label: ROLE_LABEL[r.nome] ?? r.nome }))
+        );
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-abre drawer quando há ?user=UUID na URL
   useEffect(() => {
@@ -844,7 +860,7 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
                   style={{ border: "1px solid #E8DCC8", backgroundColor: "#fff", color: novoUsuario.role ? "#374151" : "#9CA3AF" }}
                 >
                   <option value="" disabled>Selecione um perfil…</option>
-                  {ROLES_DISPONIVEIS.map((r) => (
+                  {rolesDisponiveis.map((r) => (
                     <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
                 </select>

@@ -270,9 +270,10 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
       body: JSON.stringify({ texto: editTexto.trim() }),
     });
     if (res.ok) {
+      const agora = new Date().toISOString();
       setComentarios((prev) =>
         prev.map((c) =>
-          c.id === id ? { ...c, texto: editTexto.trim(), editado: true } : c
+          c.id === id ? { ...c, texto: editTexto.trim(), editado: true, editado_em: agora } : c
         )
       );
       setEditandoId(null);
@@ -370,12 +371,12 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
                       <span className="text-[11px]" style={{ color: "#9CA3AF" }}>
                         · {dataRelativa(c.created_at)}
                       </span>
-                      {c.editado && (
+                      {c.editado && c.editado_em && (
                         <span
-                          className="text-[10px]"
+                          className="text-[10px] italic"
                           style={{ color: "#C4B5A0" }}
                         >
-                          · editado
+                          · (editado {new Date(c.editado_em).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} {new Date(c.editado_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })})
                         </span>
                       )}
                     </div>

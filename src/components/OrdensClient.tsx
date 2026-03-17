@@ -139,6 +139,10 @@ export default function OrdensClient({ ordens }: { ordens: any[] }) {
   // ── Table filter ─────────────────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
+    const agora = new Date(); agora.setHours(0, 0, 0, 0);
+    const tresDias = new Date(agora); tresDias.setDate(tresDias.getDate() + 3);
+    const isConcluido = (s: string) => s === "Concluído" || s === "Concluido";
+
     return ordens.filter((o) => {
       const q = search.toLowerCase();
       const matchSearch =
@@ -147,8 +151,22 @@ export default function OrdensClient({ ordens }: { ordens: any[] }) {
         o.numero_pedido?.includes(q) ||
         o.cliente_nome?.toLowerCase().includes(q) ||
         o.vendedor_nome?.toLowerCase().includes(q);
-      const matchStatus =
-        filterStatus === "todos" || o.status === filterStatus;
+
+      let matchStatus: boolean;
+      if (filterStatus === "todos") {
+        matchStatus = true;
+      } else if (filterStatus === "a_vencer") {
+        if (!o.data_entrega || isConcluido(o.status)) return false;
+        const e = new Date(o.data_entrega); e.setHours(0, 0, 0, 0);
+        matchStatus = e >= agora && e <= tresDias;
+      } else if (filterStatus === "vencidas") {
+        if (!o.data_entrega || isConcluido(o.status)) return false;
+        const e = new Date(o.data_entrega); e.setHours(0, 0, 0, 0);
+        matchStatus = e < agora;
+      } else {
+        matchStatus = o.status === filterStatus;
+      }
+
       return matchSearch && matchStatus;
     });
   }, [ordens, search, filterStatus]);
@@ -158,6 +176,19 @@ export default function OrdensClient({ ordens }: { ordens: any[] }) {
     for (const o of ordens) {
       c[o.status] = (c[o.status] ?? 0) + 1;
     }
+    const agora = new Date(); agora.setHours(0, 0, 0, 0);
+    const tresDias = new Date(agora); tresDias.setDate(tresDias.getDate() + 3);
+    const isConcluido = (s: string) => s === "Concluído" || s === "Concluido";
+    c.a_vencer = ordens.filter(o => {
+      if (!o.data_entrega || isConcluido(o.status)) return false;
+      const e = new Date(o.data_entrega); e.setHours(0, 0, 0, 0);
+      return e >= agora && e <= tresDias;
+    }).length;
+    c.vencidas = ordens.filter(o => {
+      if (!o.data_entrega || isConcluido(o.status)) return false;
+      const e = new Date(o.data_entrega); e.setHours(0, 0, 0, 0);
+      return e < agora;
+    }).length;
     return c;
   }, [ordens]);
 
@@ -167,6 +198,12 @@ export default function OrdensClient({ ordens }: { ordens: any[] }) {
 
   return (
     <div className="px-6 py-8 max-w-7xl mx-auto">
+      <style>{`
+        @keyframes pulse-soft {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.55; }
+        }
+      `}</style>
       {/* Header */}
       <div className="mb-6">
         <h2
@@ -396,6 +433,38 @@ export default function OrdensClient({ ordens }: { ordens: any[] }) {
             <span className="opacity-70">({counts[s] ?? 0})</span>
           </button>
         ))}
+        <button
+          onClick={() => setFilterStatus("a_vencer")}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border"
+          style={{
+            ...(filterStatus === "a_vencer"
+              ? { backgroundColor: "#92400E", color: "#FEF3C7", borderColor: "#92400E" }
+              : counts.a_vencer > 0
+              ? { backgroundColor: "#FEF3C7", color: "#92400E", borderColor: "#FCD34D" }
+              : { backgroundColor: "#F3EADA", color: "#9CA3AF", borderColor: "transparent" }),
+            ...(counts.a_vencer > 0 && filterStatus !== "a_vencer"
+              ? { animation: "pulse-soft 2s ease-in-out infinite" }
+              : undefined),
+          }}
+        >
+          A Vencer <span className="opacity-70">({counts.a_vencer ?? 0})</span>
+        </button>
+        <button
+          onClick={() => setFilterStatus("vencidas")}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border"
+          style={{
+            ...(filterStatus === "vencidas"
+              ? { backgroundColor: "#991B1B", color: "#FEE2E2", borderColor: "#991B1B" }
+              : counts.vencidas > 0
+              ? { backgroundColor: "#FEE2E2", color: "#991B1B", borderColor: "#FCA5A5" }
+              : { backgroundColor: "#F3EADA", color: "#9CA3AF", borderColor: "transparent" }),
+            ...(counts.vencidas > 0 && filterStatus !== "vencidas"
+              ? { animation: "pulse-soft 2s ease-in-out infinite" }
+              : undefined),
+          }}
+        >
+          Vencidas <span className="opacity-70">({counts.vencidas ?? 0})</span>
+        </button>
       </div>
 
       {/* Tabela */}

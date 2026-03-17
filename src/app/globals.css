@@ -36,6 +36,15 @@
   --font-mono:    var(--font-jetbrains), ui-monospace, monospace;
 }
 
+/* Pulse suave para alertas (A Vencer / Vencidas) */
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.65; }
+}
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
+}
+
 /* Base */
 body {
   background-color: #FAFAF7;
