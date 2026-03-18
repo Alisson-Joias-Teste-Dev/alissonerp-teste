@@ -2,8 +2,9 @@
 
 import { useState, useMemo, useCallback, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
+import { Plus, SlidersHorizontal } from "lucide-react";
 import LancamentoAvulsoModal from "@/components/forms/LancamentoAvulsoModal";
+import { MobileCard } from "@/components/ui/MobileCard";
 
 const C = {
   esmeralda: "#184036",
@@ -67,6 +68,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
   const [searchMov, setSearchMov] = useState("");
   const [filterCat, setFilterCat] = useState("Todos");
   const [modalAvulso, setModalAvulso] = useState(false);
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
   const [, startTransition] = useTransition();
   const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
 
@@ -120,12 +122,12 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
   ];
 
   return (
-    <div className="px-6 py-8 max-w-7xl mx-auto">
+    <div className="px-3 md:px-6 py-4 md:py-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
+      <div className="mb-4 md:mb-6 flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2
-            className="text-2xl font-semibold"
+            className="text-xl md:text-2xl font-semibold"
             style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}
           >
             Estoque
@@ -208,7 +210,50 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
       {/* TAB: Saldos */}
       {tab === "saldos" && (
         <>
-          <div className="flex flex-wrap items-center gap-3 mb-4">
+          {/* Filtros mobile */}
+          <div className="flex gap-2 mb-2 md:hidden">
+            <input
+              type="text"
+              placeholder="Buscar insumo ou depósito..."
+              value={searchSaldo}
+              onChange={(e) => setSearchSaldo(e.target.value)}
+              className="border rounded-lg px-3 py-2 text-sm flex-1 outline-none"
+              style={{ borderColor: C.cremeBorder }}
+            />
+            <button
+              onClick={() => setFiltrosAbertos((v) => !v)}
+              className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium border"
+              style={{
+                borderColor: C.cremeBorder,
+                backgroundColor: filtrosAbertos ? C.esmeralda : C.creme,
+                color: filtrosAbertos ? "#F3EADA" : C.esmeralda,
+              }}
+            >
+              <SlidersHorizontal size={14} />
+              Cat.
+            </button>
+          </div>
+          {filtrosAbertos && (
+            <div className="flex flex-wrap gap-1 mb-3 md:hidden">
+              {categorias.slice(0, 6).map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setFilterCat(c)}
+                  className="px-3 py-1 rounded-md text-[11px] font-medium transition-colors border"
+                  style={{
+                    backgroundColor: filterCat === c ? C.esmeralda : "transparent",
+                    borderColor: filterCat === c ? C.esmeralda : C.cremeBorder,
+                    color: filterCat === c ? "#F3EADA" : "#6B7280",
+                  }}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Filtros desktop */}
+          <div className="hidden md:flex flex-wrap items-center gap-3 mb-4">
             <input
               type="text"
               placeholder="Buscar insumo ou depósito..."
@@ -234,7 +279,28 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+          {/* Lista mobile */}
+          <div className="block md:hidden space-y-3 mb-3">
+            {filteredSaldos.map((s) => (
+              <MobileCard
+                key={`${s.deposito_id}-${s.insumo_id}`}
+                titulo={s.insumo_nome || "—"}
+                subtitulo={s.categoria_nome || "—"}
+                campos={[
+                  { label: "Depósito", valor: s.deposito_nome || "—" },
+                  { label: "Saldo", valor: <span style={{ color: Number(s.saldo) < 0 ? C.danger : C.dourado }} className="font-mono font-semibold">{Number(s.saldo).toFixed(2)}</span> },
+                  { label: "Entradas", valor: <span style={{ color: C.success }} className="font-mono">{Number(s.total_entrada).toFixed(2)}</span> },
+                  { label: "Saídas", valor: <span style={{ color: C.danger }} className="font-mono">{Number(s.total_saida).toFixed(2)}</span> },
+                ]}
+              />
+            ))}
+            {filteredSaldos.length === 0 && (
+              <p className="text-center py-8 text-sm" style={{ color: "#6B7280" }}>Nenhum resultado</p>
+            )}
+          </div>
+
+          {/* Tabela desktop */}
+          <div className="hidden md:block bg-white rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -316,10 +382,29 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
             placeholder="Buscar por insumo, marcador ou ordem..."
             value={searchMov}
             onChange={(e) => setSearchMov(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm mb-4 outline-none"
-            style={{ borderColor: C.cremeBorder, width: 320 }}
+            className="border rounded-lg px-3 py-2 text-sm mb-4 outline-none w-full md:w-80"
+            style={{ borderColor: C.cremeBorder }}
           />
-          <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+
+          {/* Lista mobile */}
+          <div className="block md:hidden space-y-3 mb-3">
+            {filteredMov.slice(0, 50).map((m) => (
+              <MobileCard
+                key={m.id}
+                titulo={m.insumo_nome || "—"}
+                subtitulo={m.marcador || "—"}
+                campos={[
+                  { label: "Data", valor: m.date_created ? new Date(m.date_created).toLocaleDateString("pt-BR") : "—" },
+                  { label: "Depósito", valor: m.deposito_nome || "—" },
+                  { label: "Entrada", valor: Number(m.entrada) > 0 ? <span style={{ color: C.success }} className="font-mono">{Number(m.entrada).toFixed(2)}</span> : "—" },
+                  { label: "Saída", valor: Number(m.saida) > 0 ? <span style={{ color: C.danger }} className="font-mono">{Number(m.saida).toFixed(2)}</span> : "—" },
+                ]}
+              />
+            ))}
+          </div>
+
+          {/* Tabela desktop */}
+          <div className="hidden md:block bg-white rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -375,7 +460,27 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
 
       {/* TAB: Insumos */}
       {tab === "insumos" && (
-        <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+        <>
+          {/* Lista mobile */}
+          <div className="block md:hidden space-y-3 mb-3">
+            {insumos.map((ins) => (
+              <MobileCard
+                key={ins.id}
+                titulo={ins.nome || "—"}
+                subtitulo={ins.categoria || "—"}
+                badges={ins.status_estoque ? [{ label: ins.status_estoque === "ok" ? "OK" : ins.status_estoque === "atencao" ? "Atenção" : "Crítico", cor: ins.status_estoque === "ok" ? "bg-green-100 text-green-700" : ins.status_estoque === "atencao" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700" }] : []}
+                campos={[
+                  { label: "SKU", valor: ins.sku || "—" },
+                  { label: "Saldo", valor: ins.saldo != null ? <span style={{ color: C.dourado }} className="font-mono font-semibold">{Number(ins.saldo).toFixed(2)}</span> : "—" },
+                  { label: "Mínimo", valor: ins.estoque_minimo || "—" },
+                  { label: "Máximo", valor: ins.estoque_maximo || "—" },
+                ]}
+              />
+            ))}
+          </div>
+
+          {/* Tabela desktop */}
+        <div className="hidden md:block bg-white rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -423,6 +528,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
             </table>
           </div>
         </div>
+        </>
       )}
       <LancamentoAvulsoModal
         isOpen={modalAvulso}

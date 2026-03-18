@@ -194,7 +194,7 @@ export default function PerfilDrawer({ onClose }: Props) {
       <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
 
       {/* Panel */}
-      <div className="fixed top-0 right-0 h-full w-96 bg-white z-50 shadow-2xl flex flex-col overflow-y-auto">
+      <div className="fixed top-0 right-0 h-full w-full md:w-96 bg-white z-50 shadow-2xl flex flex-col overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: "#E8DCC8" }}>
           <h2 className="font-semibold text-[15px]" style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}>

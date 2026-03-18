@@ -206,12 +206,12 @@ export default function KanbanClient({
   const handleSuccess = useCallback(() => { router.refresh(); }, [router]);
 
   return (
-    <div className="px-6 py-8">
+    <div className="px-3 md:px-6 py-4 md:py-8">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
+      <div className="mb-4 md:mb-6 flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2
-            className="text-2xl font-semibold"
+            className="text-xl md:text-2xl font-semibold"
             style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}
           >
             PCP — Kanban
@@ -246,20 +246,20 @@ export default function KanbanClient({
             placeholder="Buscar ordem ou cliente..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm outline-none"
-            style={{ borderColor: "#E8DCC8", width: 240 }}
+            className="border rounded-lg px-3 py-2 text-sm outline-none w-full md:w-60"
+            style={{ borderColor: "#E8DCC8" }}
           />
         </div>
       </div>
 
       {/* Kanban board */}
-      <div className="flex gap-4 overflow-x-auto pb-4">
+      <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-4 md:snap-none">
         {ETAPAS.map((etapa) => {
           const cards = byEtapa[etapa.key] ?? [];
           return (
             <div
               key={etapa.key}
-              className="flex-shrink-0 w-56 rounded-xl flex flex-col"
+              className="flex-shrink-0 w-[calc(100vw-3rem)] md:w-56 snap-start rounded-xl flex flex-col"
               style={{ backgroundColor: etapa.bg, minHeight: 200 }}
             >
               {/* Column header */}

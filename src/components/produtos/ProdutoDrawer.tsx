@@ -644,7 +644,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
 
       {/* Drawer */}
       <div
-        className={`fixed inset-y-0 right-0 w-[480px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-300 ${
+        className={`fixed inset-y-0 right-0 w-full md:w-[480px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-300 ${
           aberto ? "translate-x-0" : "translate-x-full"
         }`}
       >

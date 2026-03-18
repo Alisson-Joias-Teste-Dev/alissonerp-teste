@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
 const ALL_TIPOS = [
-  "servico_venda", "servico_loja", "fabricacao", "reposicao_venda",
+  "servico_venda", "fabricacao", "reposicao_venda",
   "reposicao_loja", "compra_fornecedor", "garantia", "servico_interno",
 ];
 

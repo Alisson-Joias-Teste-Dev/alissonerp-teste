@@ -2,6 +2,8 @@
 
 import { useAuth } from "@/hooks/useAuth";
 import Sidebar from "@/components/Sidebar";
+import MobileHeader from "@/components/MobileHeader";
+import { SidebarProvider } from "@/contexts/SidebarContext";
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const { loading } = useAuth();
@@ -17,11 +19,14 @@ export default function DashboardShell({ children }: { children: React.ReactNode
 
   // Todas as roles → layout padrão com sidebar (motoboy vê só "Protocolo")
   return (
-    <div className="flex">
-      <Sidebar />
-      <main className="flex-1 ml-56 min-h-screen" style={{ backgroundColor: "#FAFAF7" }}>
-        {children}
-      </main>
-    </div>
+    <SidebarProvider>
+      <MobileHeader />
+      <div className="flex">
+        <Sidebar />
+        <main className="flex-1 md:ml-56 mt-14 md:mt-0 min-h-screen" style={{ backgroundColor: "#FAFAF7" }}>
+          {children}
+        </main>
+      </div>
+    </SidebarProvider>
   );
 }

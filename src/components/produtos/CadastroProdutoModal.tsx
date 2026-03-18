@@ -595,7 +595,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
@@ -604,12 +604,11 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
 
       {/* Modal */}
       <div
-        className="relative bg-white rounded-2xl shadow-2xl flex flex-col"
-        style={{ width: "680px", maxHeight: "90vh" }}
+        className="relative bg-white w-full max-h-[92vh] rounded-t-2xl md:rounded-2xl shadow-2xl flex flex-col md:w-[680px] md:max-h-[90vh]"
       >
         {/* Header */}
         <div
-          className="flex items-center justify-between px-6 py-4 border-b"
+          className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10"
           style={{ borderColor: C.cremeBorder }}
         >
           <h2 className="text-base font-semibold text-gray-800">Novo Produto</h2>
@@ -990,7 +989,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                               )}
 
                               {tipoRegra === "tabela" && (
-                                <div className="grid grid-cols-4 gap-2">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                   {numeracoesSel.map((n) => (
                                     <div key={n}>
                                       <label className={labelCls}>Nº {n} (g)</label>

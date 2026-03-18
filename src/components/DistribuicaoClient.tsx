@@ -205,8 +205,8 @@ export default function DistribuicaoClient({ dists }: { dists: DistRow[] }) {
     // Ordem concluída = data_baixa preenchida (saída registrada) ou peso_fechamento > 0 (legado)
     const ordensConcluidas = ordens.filter((o) => o.data_baixa || (o.peso_fechamento && o.peso_fechamento > 0));
     return (
-      <div className="px-6 py-8">
-        <div className="mb-6">
+      <div className="px-3 md:px-6 py-4 md:py-8">
+        <div className="mb-4 md:mb-6">
           <button
             onClick={() => { setSelected(null); setOrdens([]); setOrdemParaSaida(null); refresh(); }}
             className="flex items-center gap-1.5 text-sm mb-4 transition-opacity hover:opacity-70"
@@ -216,7 +216,7 @@ export default function DistribuicaoClient({ dists }: { dists: DistRow[] }) {
           </button>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
-              <h2 className="text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}>
+              <h2 className="text-xl md:text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}>
                 Distribuição #{selected.id}
               </h2>
               <p className="text-sm mt-1 flex items-center gap-2" style={{ color: "#6B7280" }}>
@@ -503,11 +503,11 @@ export default function DistribuicaoClient({ dists }: { dists: DistRow[] }) {
   const concluidos  = dists.filter((d) => d.etapas === "concluido");
 
   return (
-    <div className="px-6 py-8">
+    <div className="px-3 md:px-6 py-4 md:py-8">
       {/* Header */}
-      <div className="mb-8 flex items-center justify-between flex-wrap gap-3">
+      <div className="mb-4 md:mb-8 flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}>
+          <h2 className="text-xl md:text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}>
             Distribuição
           </h2>
           <p className="text-sm mt-1" style={{ color: "#6B7280" }}>

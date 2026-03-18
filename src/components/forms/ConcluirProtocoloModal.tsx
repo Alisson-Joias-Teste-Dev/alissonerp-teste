@@ -9,7 +9,6 @@ const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8" };
 
 const TIPO_LABEL: Record<string, string> = {
   servico_venda: "Serv. Venda",
-  servico_loja: "Serv. Loja",
   fabricacao: "Fabricação",
   reposicao_venda: "Rep. Venda",
   reposicao_loja: "Rep. Loja",
@@ -121,9 +120,9 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
   const bloqueado = userRole !== "" && !ROLES_CONCLUIR_PROTOCOLO.includes(userRole as typeof ROLES_CONCLUIR_PROTOCOLO[number]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={handleClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: C.cremeBorder }}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={handleClose}>
+      <div className="bg-white w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4 md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
           <div>
             <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>Concluir Protocolo</h3>
             <p className="text-[12px] mt-0.5" style={{ color: "#9CA3AF" }}>Protocolo #{protocoloId} · {direcao === "ida" ? "Loja → Fábrica" : "Fábrica → Loja"}</p>

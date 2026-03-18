@@ -108,9 +108,9 @@ function NovoInsumoModal({ categorias, onSuccess, onClose }: ModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: C.cremeBorder }}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4 md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
           <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>Novo Insumo</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100">
             <X size={17} style={{ color: "#9CA3AF" }} />
@@ -185,7 +185,7 @@ function NovoInsumoModal({ categorias, onSuccess, onClose }: ModalProps) {
             </div>
 
             {/* Estoque Min/Max + Custo */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#9CA3AF" }}>Est. Mín</label>
                 <input
@@ -297,11 +297,11 @@ export default function InsumosClient() {
   });
 
   return (
-    <div className="px-6 py-8">
+    <div className="px-3 md:px-6 py-4 md:py-8">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
+      <div className="mb-4 md:mb-6 flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
+          <h2 className="text-xl md:text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
             Insumos
           </h2>
           <p className="text-sm mt-1" style={{ color: "#6B7280" }}>Saldo do Pote · Matérias-primas</p>

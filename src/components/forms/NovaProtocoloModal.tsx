@@ -111,10 +111,10 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, onSuccess
   const titulo = direcao === "ida" ? "Novo Protocolo — Ida (Loja → Fábrica)" : "Novo Protocolo — Volta (Fábrica → Loja)";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white w-full max-h-[92vh] overflow-y-auto flex flex-col rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-lg md:mx-4 md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b shrink-0" style={{ borderColor: C.cremeBorder }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b shrink-0 sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
           <div>
             <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>{titulo}</h3>
             <p className="text-[12px] mt-0.5" style={{ color: "#9CA3AF" }}>

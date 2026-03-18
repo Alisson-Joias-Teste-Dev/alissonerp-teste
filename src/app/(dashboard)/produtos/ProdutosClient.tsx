@@ -268,7 +268,7 @@ export default function ProdutosClient() {
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: C.bg }}>
       {/* Header */}
-      <div className="px-6 py-4 border-b bg-white shrink-0" style={{ borderColor: C.cremeBorder }}>
+      <div className="px-3 md:px-6 py-3 md:py-4 border-b bg-white shrink-0" style={{ borderColor: C.cremeBorder }}>
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-lg font-semibold text-gray-800">Produtos</h1>

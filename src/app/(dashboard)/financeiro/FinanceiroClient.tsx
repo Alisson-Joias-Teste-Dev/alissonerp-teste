@@ -399,7 +399,7 @@ function TabConciliacao({ extratos, lancamentos }: { extratos: Extrato[]; lancam
 
       {/* Mini stats extrato selecionado */}
       {extratoSel && lançamentosFiltrados.length > 0 && (
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { label: "Lançamentos", value: lançamentosFiltrados.length },
             { label: "Entradas (C)", value: fmt(totalC), color: "#4A9F73" },
@@ -489,7 +489,7 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
   ];
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-3 md:p-6 space-y-4 md:space-y-5">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>

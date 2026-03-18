@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ChevronDown, Loader2, RefreshCw, Plus } from "lucide-react";
+import { ChevronDown, Loader2, RefreshCw, Plus, Wrench, Hammer, RotateCcw, Store, Package, Shield, Settings, SlidersHorizontal } from "lucide-react";
 import NovaOrdemModal from "@/components/ordens/NovaOrdemModal";
+import { MobileCard } from "@/components/ui/MobileCard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,18 @@ function Badge({ label, map }: { label: string; map: Record<string, { bg: string
   );
 }
 
+// ─── Tipos de ordem dropdown ──────────────────────────────────────────────────
+
+const TIPOS_ORDEM_DROPDOWN = [
+  { tipo: "servico_venda",     label: "Serviço Venda",     Icon: Wrench,     color: "#1E40AF" },
+  { tipo: "fabricacao",        label: "Fabricação",         Icon: Hammer,     color: "#92400E" },
+  { tipo: "reposicao_venda",   label: "Reposição Venda",   Icon: RotateCcw,  color: "#6B21A8" },
+  { tipo: "reposicao_loja",    label: "Reposição Loja",    Icon: Store,      color: "#0369A1" },
+  { tipo: "compra_fornecedor", label: "Compra Fornecedor", Icon: Package,    color: "#065F46" },
+  { tipo: "garantia",          label: "Garantia",           Icon: Shield,     color: "#991B1B" },
+  { tipo: "servico_interno",   label: "Serviço Interno",   Icon: Settings,   color: "#166534" },
+];
+
 // ─── Funil card config ────────────────────────────────────────────────────────
 
 const FUNIL_CARDS: {
@@ -77,6 +90,7 @@ export default function OrdensClient({ ordens, tiposPermitidos = [] }: { ordens:
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("todos");
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
 
   // ── Funil state ─────────────────────────────────────────────────────────────
   type Preset = "today" | "7d" | "30d" | "custom";
@@ -88,13 +102,25 @@ export default function OrdensClient({ ordens, tiposPermitidos = [] }: { ordens:
   const [funilError, setFunilError] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<CardKey | null>(null);
 
-  // ── Nova Ordem modal ──────────────────────────────────────────────────────────
-  const [modalAberto, setModalAberto] = useState(false);
-  const [toastMsg, setToastMsg]       = useState<string | null>(null);
+  // ── Nova Ordem dropdown ───────────────────────────────────────────────────────
+  const [dropdownAberto, setDropdownAberto] = useState(false);
+  const [tipoSelecionado, setTipoSelecionado] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const podeNovOrdem = tiposPermitidos.length > 0;
 
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownAberto(false);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   function handleOrdemCriada(numeroOrdem: string) {
-    setModalAberto(false);
+    setTipoSelecionado(null);
     setToastMsg(`Ordem ${numeroOrdem} criada com sucesso`);
     setTimeout(() => setToastMsg(null), 4000);
     router.refresh();
@@ -211,7 +237,7 @@ export default function OrdensClient({ ordens, tiposPermitidos = [] }: { ordens:
     expandedCard && funilData ? funilData[expandedCard].ordens : [];
 
   return (
-    <div className="px-6 py-8 max-w-7xl mx-auto">
+    <div className="px-3 md:px-6 py-4 md:py-8 max-w-7xl mx-auto">
       <style>{`
         @keyframes pulse-soft {
           0%, 100% { opacity: 1; }
@@ -219,10 +245,10 @@ export default function OrdensClient({ ordens, tiposPermitidos = [] }: { ordens:
         }
       `}</style>
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex items-start justify-between mb-4 md:mb-6">
         <div>
           <h2
-            className="text-2xl font-semibold"
+            className="text-xl md:text-2xl font-semibold"
             style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}
           >
             Ordens
@@ -232,22 +258,43 @@ export default function OrdensClient({ ordens, tiposPermitidos = [] }: { ordens:
           </p>
         </div>
         {podeNovOrdem && (
-          <button
-            onClick={() => setModalAberto(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90"
-            style={{ backgroundColor: "#184036" }}
-          >
-            <Plus size={15} />
-            Nova Ordem
-          </button>
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setDropdownAberto((v) => !v)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90"
+              style={{ backgroundColor: "#184036" }}
+            >
+              <Plus size={15} />
+              Nova Ordem
+              <ChevronDown size={13} className={`transition-transform ${dropdownAberto ? "rotate-180" : ""}`} />
+            </button>
+            {dropdownAberto && (
+              <div
+                className="absolute right-0 top-full mt-1.5 z-30 bg-white rounded-xl shadow-lg border overflow-hidden min-w-[190px]"
+                style={{ borderColor: "#E8DCC8" }}
+              >
+                {TIPOS_ORDEM_DROPDOWN.filter((t) => tiposPermitidos.includes(t.tipo)).map((t) => (
+                  <button
+                    key={t.tipo}
+                    onClick={() => { setTipoSelecionado(t.tipo); setDropdownAberto(false); }}
+                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors text-left border-b last:border-0"
+                    style={{ borderColor: "#F3EADA", color: "#1A1A1A" }}
+                  >
+                    <t.Icon size={14} style={{ color: t.color, flexShrink: 0 }} />
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
       {/* Modal */}
-      {modalAberto && (
+      {tipoSelecionado && (
         <NovaOrdemModal
-          tiposPermitidos={tiposPermitidos}
-          onClose={() => setModalAberto(false)}
+          tipoOrdem={tipoSelecionado}
+          onClose={() => setTipoSelecionado(null)}
           onSuccess={handleOrdemCriada}
         />
       )}
@@ -451,7 +498,78 @@ export default function OrdensClient({ ordens, tiposPermitidos = [] }: { ordens:
       ══════════════════════════════════════════════════════════════════════ */}
 
       {/* Filtros */}
-      <div className="flex flex-wrap items-center gap-3 mb-5">
+      {/* Mobile: linha com busca + toggle */}
+      <div className="flex gap-2 mb-2 md:hidden">
+        <input
+          type="text"
+          placeholder="Buscar ordem, cliente..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="border rounded-lg px-3 py-2 text-sm flex-1 outline-none focus:ring-2"
+          style={{ borderColor: "#E8DCC8", color: "#1A1A1A", backgroundColor: "#fff" }}
+        />
+        <button
+          onClick={() => setFiltrosAbertos((v) => !v)}
+          className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium border"
+          style={{
+            borderColor: "#E8DCC8",
+            backgroundColor: filtrosAbertos ? "#184036" : "#F3EADA",
+            color: filtrosAbertos ? "#F3EADA" : "#184036",
+          }}
+        >
+          <SlidersHorizontal size={14} />
+          Filtros
+        </button>
+      </div>
+
+      {/* Mobile: filtros colapsáveis */}
+      {filtrosAbertos && (
+        <div className="flex flex-wrap gap-2 mb-3 md:hidden">
+          {["todos", "Aguardando", "Em Andamento", "Concluído"].map((s) => (
+            <button
+              key={s}
+              onClick={() => setFilterStatus(s)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+              style={{
+                backgroundColor: filterStatus === s ? "#184036" : "#F3EADA",
+                color: filterStatus === s ? "#F3EADA" : "#184036",
+              }}
+            >
+              {s === "todos" ? "Todos" : s}{" "}
+              <span className="opacity-70">({counts[s] ?? 0})</span>
+            </button>
+          ))}
+          <button
+            onClick={() => setFilterStatus("a_vencer")}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border"
+            style={{
+              ...(filterStatus === "a_vencer"
+                ? { backgroundColor: "#92400E", color: "#FEF3C7", borderColor: "#92400E" }
+                : counts.a_vencer > 0
+                ? { backgroundColor: "#FEF3C7", color: "#92400E", borderColor: "#FCD34D" }
+                : { backgroundColor: "#F3EADA", color: "#9CA3AF", borderColor: "transparent" }),
+            }}
+          >
+            A Vencer <span className="opacity-70">({counts.a_vencer ?? 0})</span>
+          </button>
+          <button
+            onClick={() => setFilterStatus("vencidas")}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border"
+            style={{
+              ...(filterStatus === "vencidas"
+                ? { backgroundColor: "#991B1B", color: "#FEE2E2", borderColor: "#991B1B" }
+                : counts.vencidas > 0
+                ? { backgroundColor: "#FEE2E2", color: "#991B1B", borderColor: "#FCA5A5" }
+                : { backgroundColor: "#F3EADA", color: "#9CA3AF", borderColor: "transparent" }),
+            }}
+          >
+            Vencidas <span className="opacity-70">({counts.vencidas ?? 0})</span>
+          </button>
+        </div>
+      )}
+
+      {/* Desktop: filtros sempre visíveis */}
+      <div className="hidden md:flex flex-wrap items-center gap-3 mb-5">
         <input
           type="text"
           placeholder="Buscar por ordem, cliente ou vendedor..."
@@ -512,9 +630,35 @@ export default function OrdensClient({ ordens, tiposPermitidos = [] }: { ordens:
         </button>
       </div>
 
-      {/* Tabela */}
+      {/* Lista mobile — só aparece em telas pequenas */}
+      <div className="block md:hidden space-y-3 mb-3">
+        {filtered.map((o) => (
+          <MobileCard
+            key={o.id}
+            titulo={o.numero_ordem ?? `#${o.id}`}
+            subtitulo={o.cliente_nome ?? ''}
+            badges={[
+              { label: o.status ?? '—', cor: o.status === 'Concluído' || o.status === 'Concluido' ? 'bg-green-100 text-green-700' : o.status === 'Em Andamento' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700' }
+            ]}
+            campos={[
+              { label: 'Tipo', valor: o.tipo_ordem ?? '—' },
+              { label: 'Entrega', valor: o.data_entrega ? new Date(o.data_entrega).toLocaleDateString('pt-BR') : '—' },
+              { label: 'Vendedor', valor: o.vendedor_nome ?? '—' },
+              { label: 'Pedido', valor: o.numero_pedido ? `#${o.numero_pedido}` : '—' },
+            ]}
+            onClick={() => router.push(`/ordens/${o.id}`)}
+          />
+        ))}
+        {filtered.length === 0 && (
+          <p className="text-center py-8 text-sm" style={{ color: "#6B7280" }}>
+            Nenhuma ordem encontrada
+          </p>
+        )}
+      </div>
+
+      {/* Tabela — só aparece em desktop */}
       <div
-        className="bg-white rounded-xl border overflow-hidden"
+        className="hidden md:block bg-white rounded-xl border overflow-hidden"
         style={{ borderColor: "#E8DCC8" }}
       >
         <div className="overflow-x-auto">

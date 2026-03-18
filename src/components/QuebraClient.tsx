@@ -65,11 +65,11 @@ export default function QuebraClient({ quebraOurives, quebraMensal, quebraDeposi
     (nome ?? "??").split(" ").slice(0, 2).map((n: string) => n[0] ?? "").join("").toUpperCase();
 
   return (
-    <div className="px-6 py-8 max-w-7xl mx-auto">
+    <div className="px-3 md:px-6 py-4 md:py-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="mb-6">
+      <div className="mb-4 md:mb-6">
         <h2
-          className="text-2xl font-semibold"
+          className="text-xl md:text-2xl font-semibold"
           style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}
         >
           Quebra de Ouro
@@ -142,10 +142,10 @@ export default function QuebraClient({ quebraOurives, quebraMensal, quebraDeposi
         </div>
       )}
 
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 md:gap-4">
         {/* Ranking ourives — 3 colunas */}
         <div
-          className="col-span-5 lg:col-span-3 bg-white rounded-xl border p-5"
+          className="lg:col-span-3 bg-white rounded-xl border p-5"
           style={{ borderColor: C.cremeBorder }}
         >
           <h3 className="text-sm font-semibold mb-4" style={{ color: "#1A1A1A" }}>
@@ -202,7 +202,7 @@ export default function QuebraClient({ quebraOurives, quebraMensal, quebraDeposi
         </div>
 
         {/* Coluna direita — 2 colunas */}
-        <div className="col-span-5 lg:col-span-2 flex flex-col gap-4">
+        <div className="lg:col-span-2 flex flex-col gap-4">
           {/* Pizza distribuição */}
           <div className="bg-white rounded-xl border p-5" style={{ borderColor: C.cremeBorder }}>
             <h3 className="text-sm font-semibold mb-2" style={{ color: "#1A1A1A" }}>

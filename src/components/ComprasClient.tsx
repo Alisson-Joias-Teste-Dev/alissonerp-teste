@@ -89,9 +89,9 @@ function NovaCompraModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onCl
 
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: C.cremeBorder }}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4 md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
           <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>Nova Compra</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100"><X size={17} style={{ color: "#9CA3AF" }} /></button>
         </div>
@@ -203,14 +203,14 @@ function CompraDetalhe({ compra, onBack, onRefresh }: { compra: CompraRow; onBac
   const bloqueada = compra.bloqueado || compra.situacao === "concluido";
 
   return (
-    <div className="px-6 py-8">
+    <div className="px-3 md:px-6 py-4 md:py-8">
       <button onClick={onBack} className="flex items-center gap-1.5 text-sm mb-4 transition-opacity hover:opacity-70" style={{ color: "#6B7280" }}>
         <ArrowLeft size={15} /> Voltar à lista
       </button>
 
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-4 md:mb-6">
         <div>
-          <h2 className="text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
+          <h2 className="text-xl md:text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
             Compra #{compra.id}
           </h2>
           <p className="text-sm mt-1" style={{ color: "#6B7280" }}>
@@ -231,7 +231,7 @@ function CompraDetalhe({ compra, onBack, onRefresh }: { compra: CompraRow; onBac
       </div>
 
       {/* Stat card */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-4 md:mb-6">
         {[
           { label: "Itens", value: String(itens.length), color: C.esmeralda },
           { label: "Total Calculado", value: `R$ ${totalItens.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`, color: "#059669" },
@@ -357,11 +357,11 @@ export default function ComprasClient({ compras }: { compras: CompraRow[] }) {
   }
 
   return (
-    <div className="px-6 py-8">
+    <div className="px-3 md:px-6 py-4 md:py-8">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
+      <div className="mb-4 md:mb-6 flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
+          <h2 className="text-xl md:text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
             Compras
           </h2>
           <p className="text-sm mt-1" style={{ color: "#6B7280" }}>
