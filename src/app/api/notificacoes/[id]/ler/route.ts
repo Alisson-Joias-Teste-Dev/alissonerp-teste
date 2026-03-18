@@ -17,7 +17,7 @@ export async function PATCH(
   const { id } = await params;
 
   const [notif] = await sql`
-    SELECT usuario_id FROM alissonerp.notificacoes WHERE id = ${id}::uuid
+    SELECT usuario_id FROM alissonerp.notificacoes WHERE id = ${parseInt(id)}
   `;
   if (!notif)
     return NextResponse.json(
@@ -28,7 +28,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   await sql`
-    UPDATE alissonerp.notificacoes SET lida = true, lida_em = now() WHERE id = ${id}::uuid
+    UPDATE alissonerp.notificacoes SET lida = true, lida_em = now() WHERE id = ${parseInt(id)}
   `;
   return NextResponse.json({ success: true });
 }

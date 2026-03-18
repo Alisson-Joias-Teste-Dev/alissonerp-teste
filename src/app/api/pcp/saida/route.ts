@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
   //    (trigger guard: IF NEW.peso IS NULL OR NEW.peso <= 0 → RETURN NEW)
   const [saida] = await sql`
     INSERT INTO alissonerp.saidas_ordem (ordem_id, deposito_id, peso, obs, created_by)
-    VALUES (${ordemId}, ${depositoId}, 0, 'Saída via PCP — gerenciado pelo ERP', ${user_id ?? null})
+    VALUES (${ordemId}, ${depositoId}, 0, 'Saída via PCP — gerenciado pelo ERP', ${user_id ?? null}::uuid)
     RETURNING id
   `;
   const saidaId = saida.id as number;

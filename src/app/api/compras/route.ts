@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
 
   const [row] = await sql`
     INSERT INTO alissonerp.compras (situacao, fornecedor_id, obs, created_by)
-    VALUES ('pendente', ${fornecedor_id ?? null}, ${obs ?? null}, ${created_by ?? null})
+    VALUES ('pendente', ${fornecedor_id ?? null}, ${obs ?? null}, ${created_by ?? null}::uuid)
     RETURNING id, situacao, total, obs, bloqueado, created_at
   `;
 

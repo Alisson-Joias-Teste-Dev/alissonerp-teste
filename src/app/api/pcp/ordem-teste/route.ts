@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
        ${ordemLocalAtual},
        ${pesoFinal},
        ${true},
-       ${user.id})
+       ${user.id}::uuid)
     RETURNING id
   `;
 
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
       (${ordem.id as number},
        ${etapa}::alissonerp.enum_etapas_pcp,
        ${pcpDepositoId},
-       ${user.id})
+       ${user.id}::uuid)
     RETURNING id
   `;
 

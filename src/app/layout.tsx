@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { DM_Sans, JetBrains_Mono, Playfair_Display } from "next/font/google";
 import "./globals.css";
+import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -21,18 +22,25 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: "ALISSON | Gestão de Fábrica",
+  title: "ALISSON ERP",
   description: "Sistema de gestão de produção — Joalheria ALISSON",
   manifest: "/manifest.json",
-  icons: {
-    icon: "/logo.leaoverde.webp",
-    apple: "/logo.leaoverde.webp",
-  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "ALISSON",
+    title: "ALISSON ERP",
   },
+  icons: {
+    icon: "/icons/icon-192x192.png",
+    apple: "/icons/apple-touch-icon.png",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: "#184036",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -42,17 +50,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${dmSans.variable} ${jetbrains.variable} ${playfair.variable}`}
     >
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-        <meta name="theme-color" content="#184036" />
         <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
       </head>
       <body className="antialiased">
         {children}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}`,
-          }}
-        />
+        <ServiceWorkerRegister />
       </body>
     </html>
   );

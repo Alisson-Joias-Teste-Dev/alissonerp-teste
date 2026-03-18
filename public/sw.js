@@ -1,28 +1,72 @@
-const CACHE = "alisson-motoboy-v1";
-const OFFLINE_URLS = ["/protocolo", "/login"];
+const CACHE_NAME = 'alisson-erp-v2.4.0';
 
-self.addEventListener("install", (e) => {
-  e.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(OFFLINE_URLS).catch(() => {}))
+const STATIC_ASSETS = [
+  '/offline.html',
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png',
+  '/logo.leaoverde.webp',
+];
+
+// ── Install — pré-cachear assets estáticos ──────────────────────────────────
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(STATIC_ASSETS).catch(() => {});
+    })
   );
   self.skipWaiting();
 });
 
-self.addEventListener("activate", (e) => {
-  e.waitUntil(
+// ── Activate — limpar caches antigos ───────────────────────────────────────
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter((key) => key !== CACHE_NAME)
+          .map((key) => caches.delete(key))
+      )
     )
   );
   self.clients.claim();
 });
 
-self.addEventListener("fetch", (e) => {
-  // Cache-first para assets estáticos, network-first para API
-  if (e.request.url.includes("/api/") || e.request.url.includes("supabase")) {
-    return; // deixa passar para a rede
+// ── Fetch — network-first (ERP: dados frescos têm prioridade) ──────────────
+self.addEventListener('fetch', (event) => {
+  // Ignorar requisições não-GET
+  if (event.request.method !== 'GET') return;
+
+  // Ignorar chamadas de API e Supabase — deixar ir direto pra rede
+  const url = event.request.url;
+  if (
+    url.includes('/api/') ||
+    url.includes('supabase') ||
+    url.includes('_next/webpack-hmr')
+  ) {
+    return;
   }
-  e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request))
+
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        // Cachear a resposta fresca para uso offline futuro
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, clone);
+          });
+        }
+        return response;
+      })
+      .catch(() => {
+        // Offline: tentar servir do cache
+        return caches.match(event.request).then((cached) => {
+          if (cached) return cached;
+          // Navegação sem cache → página offline
+          if (event.request.mode === 'navigate') {
+            return caches.match('/offline.html');
+          }
+        });
+      })
   );
 });

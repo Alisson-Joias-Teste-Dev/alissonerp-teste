@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       ${deposito_id ?? null},
       ${peso},
       ${obs ?? null},
-      ${created_by ?? null}
+      ${created_by ?? null}::uuid
     )
     RETURNING id
   `;
