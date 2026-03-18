@@ -1,8 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import ComentariosOrdem from "@/components/ComentariosOrdem";
+import GaleriaFotosOrdem from "@/components/ordem/GaleriaFotosOrdem";
+import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
 
 const C = {
   esmeralda: "#184036",
@@ -63,6 +66,73 @@ function MarcadorBadge({ marcador }: { marcador: string }) {
     >
       {marcador || "—"}
     </span>
+  );
+}
+
+function PecaClienteCard({ fotoPeca, pesoPeca, videoObs }: {
+  fotoPeca: string | null;
+  pesoPeca: number | null;
+  videoObs: string | null;
+}) {
+  const [fotoUrl, setFotoUrl]   = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const sb = createClient();
+    async function getUrls() {
+      if (fotoPeca) {
+        const { data } = await sb.storage.from("ordem-fotos").createSignedUrl(fotoPeca, 3600);
+        if (data) setFotoUrl(data.signedUrl);
+      }
+      if (videoObs) {
+        const { data } = await sb.storage.from("ordem-videos").createSignedUrl(videoObs, 3600);
+        if (data) setVideoUrl(data.signedUrl);
+      }
+    }
+    getUrls();
+  }, [fotoPeca, videoObs]);
+
+  return (
+    <div className="bg-white rounded-xl border p-5" style={{ borderColor: "#E8DCC8" }}>
+      <p className="text-[10px] font-semibold uppercase tracking-wider mb-3" style={{ color: "#9CA3AF" }}>
+        Peça do Cliente
+      </p>
+      <div className="flex gap-5 flex-wrap">
+        {fotoUrl && (
+          <a href={fotoUrl} target="_blank" rel="noreferrer" className="shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={fotoUrl}
+              alt="Foto da peça"
+              className="w-32 h-32 object-cover rounded-lg border"
+              style={{ borderColor: "#E8DCC8" }}
+            />
+          </a>
+        )}
+        <div className="flex flex-col justify-center gap-2">
+          {pesoPeca != null && (
+            <div>
+              <span className="text-[11px] uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Peso</span>
+              <p className="font-mono text-[15px] mt-0.5" style={{ color: "#1A1A1A" }}>{Number(pesoPeca).toFixed(2)}g</p>
+            </div>
+          )}
+          {videoUrl && (
+            <a
+              href={videoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border"
+              style={{ color: "#184036", borderColor: "#E8DCC8" }}
+            >
+              ▶ Ver vídeo de observação
+            </a>
+          )}
+          {!fotoUrl && pesoPeca == null && !videoUrl && (
+            <p className="text-[13px]" style={{ color: "#9CA3AF" }}>Sem dados registrados.</p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -157,6 +227,19 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
               <InfoRow label="Metal Externo"  value={Number(ordem.pcp_metal_externo || 0) > 0 ? `${Number(ordem.pcp_metal_externo).toFixed(2)}g` : "—"} mono />
             </div>
           </div>
+
+          {/* Itens da Ordem (produtos da venda) */}
+          <ItensOrdemSection ordemId={ordem.id} />
+
+          {/* Peça do Cliente — só para servico_venda / servico_loja quando há dados */}
+          {["servico_venda", "servico_loja"].includes(ordem.tipo_ordem_cod) &&
+            (ordem.foto_peca_servico || ordem.peso_peca_servico != null || ordem.video_observacao) && (
+            <PecaClienteCard
+              fotoPeca={ordem.foto_peca_servico}
+              pesoPeca={ordem.peso_peca_servico}
+              videoObs={ordem.video_observacao}
+            />
+          )}
 
           {/* Card PMC — só quando PCP concluído */}
           {pcpConcluido && (
@@ -553,11 +636,16 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
         </div>
       </div>
 
+      {/* Galeria de fotos — antes dos comentários */}
+      <div className="mt-6">
+        <GaleriaFotosOrdem ordemId={ordem.id} />
+      </div>
+
       {/* Comentários — sempre visível, abaixo de tudo */}
       <div className="mt-6">
         <div className="flex items-center gap-2 mb-3">
           <span className="text-base font-semibold" style={{ color: "#1A1A1A" }}>
-            💬 Comentários
+            Comentários
           </span>
           {comentariosCount > 0 && (
             <span

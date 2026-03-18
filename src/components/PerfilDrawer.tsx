@@ -79,6 +79,21 @@ export default function PerfilDrawer({ onClose }: Props) {
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
+  function comprimirImagem(file: File, maxSize = 200): Promise<Blob> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const ratio = Math.min(maxSize / img.width, maxSize / img.height, 1);
+        const canvas = document.createElement("canvas");
+        canvas.width  = Math.round(img.width  * ratio);
+        canvas.height = Math.round(img.height * ratio);
+        canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => resolve(blob!), "image/jpeg", 0.85);
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
   function handleFotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -118,13 +133,20 @@ export default function PerfilDrawer({ onClose }: Props) {
     try {
       // 1. Upload foto if changed
       if (fotoFile) {
+        const blob = await comprimirImagem(fotoFile);
         const fd = new FormData();
-        fd.append("file", fotoFile);
+        fd.append("file", blob, "avatar.jpg");
         const r = await fetch("/api/user/avatar", { method: "POST", body: fd });
         if (!r.ok) {
           const d = await r.json().catch(() => ({}));
           setErro((d as { error?: string }).error ?? "Erro ao enviar foto");
           return;
+        }
+        const d = await r.json() as { avatar_url?: string };
+        if (d.avatar_url) {
+          setFotoPreview(d.avatar_url);
+          setFotoFile(null);
+          window.dispatchEvent(new CustomEvent("perfil:foto-atualizada", { detail: d.avatar_url }));
         }
       }
 

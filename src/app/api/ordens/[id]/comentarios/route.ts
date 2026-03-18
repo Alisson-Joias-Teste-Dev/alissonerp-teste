@@ -18,6 +18,7 @@ export async function GET(
 
   const comentarios = await sql`
     SELECT c.id, c.texto, c.mencoes, c.autor_id, c.editado, c.editado_em, c.created_at,
+           c.foto_path,
            u.nome AS autor_nome, u.role AS autor_role
     FROM alissonerp.comentarios_ordem c
     JOIN alissonerp.usuarios u ON u.id = c.autor_id
@@ -42,7 +43,7 @@ export async function POST(
 
   const { id: ordemId } = await params;
   const body = await req.json();
-  const { texto, mencoes = [] } = body;
+  const { texto, mencoes = [], foto_path = null } = body;
 
   if (!texto?.trim())
     return NextResponse.json({ error: "Texto obrigatório" }, { status: 400 });
@@ -57,8 +58,8 @@ export async function POST(
     );
 
   const [comentario] = await sql`
-    INSERT INTO alissonerp.comentarios_ordem (ordem_id, autor_id, texto, mencoes)
-    VALUES (${parseInt(ordemId)}, ${user.id}::uuid, ${texto}, ${mencoes}::uuid[])
+    INSERT INTO alissonerp.comentarios_ordem (ordem_id, autor_id, texto, mencoes, foto_path)
+    VALUES (${parseInt(ordemId)}, ${user.id}::uuid, ${texto}, ${mencoes}::uuid[], ${foto_path ?? null})
     RETURNING id, created_at
   `;
 

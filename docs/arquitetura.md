@@ -113,6 +113,12 @@ O cliente Supabase (`src/lib/supabase/client.ts` e `server.ts`) esta configurado
 | `064_seq_produto_id.sql` | CREATE sequência para IDs de produtos criados internamente (public.produtos.id_produto não tem default — vem do Tiny ERP). |
 | `065_ordens_eh_teste.sql` | ADD `eh_teste BOOLEAN` em `alissonerp.ordens`. Badge "🧪 TESTE" no Kanban. |
 | `066_quebra_operador.sql` | CREATE `alissonerp.quebra_operador` + views `vw_quebra_operadores`, `vw_saldo_pote_ouro`, `vw_ouro_em_producao`. Dashboard ouro fábrica. |
+| `067_role_permissoes.sql` | CREATE `alissonerp.role_permissoes` (módulo, leitura, escrita). APIs: /api/configuracoes/roles, /api/configuracoes/permissoes, /api/user/permissoes. |
+| `068_role_varchar.sql` | MIGRAR `usuarios.role` de `enum_role` → `VARCHAR(50)`. DROP TYPE enum_role CASCADE (removeu fn_user_role + 26 RLS policies). RECRIAR fn_user_role, fn_handle_new_user, 26 policies. ADD `role_permissoes.ativo`. CREATE `alissonerp.roles` (seed 10 roles). |
+| `069_comentarios_notificacoes.sql` | CREATE `alissonerp.comentarios_ordem` (tabela nova para comentários). RENAME `notificacoes.user_id` → `usuario_id`. ADD colunas em notificacoes (link, ordem_id, comentario_id, remetente_id, lida_em). ADD realtime. |
+| `070_rls_comentarios_notificacoes.sql` | RLS para comentarios_ordem + notificacoes. |
+| `071_comentarios_foto_excluido.sql` | ADD em `comentarios_ordem`: texto_original, excluido, excluido_em, excluido_por, `foto_path`. ADD `alissonerp.ordens.fotos_paths TEXT[]`. CREATE bucket `ordem-fotos` (privado, 10MB, inclui heic). RLS para storage.objects bucket='ordem-fotos'. |
+| `072_user_profiles_unique_avatar.sql` | ADD `public.user_profiles.avatar_url IF NOT EXISTS`. ENSURE UNIQUE constraint em `id_user` (necessária para ON CONFLICT no upsert do avatar). |
 
 ---
 
@@ -385,6 +391,92 @@ Estrutura com Route Groups (Next.js 16):
 | `ProdutosClient.tsx`                                 | `app/(dashboard)/produtos/ProdutosClient.tsx`             | Catalogo de produtos ERP (pai/variacao, SKU, medidas) |
 | `VendasClient.tsx`                                   | `app/(dashboard)/vendas/VendasClient.tsx`                 | Vendas |
 | `login/page.tsx`                                     | `app/(auth)/login/page.tsx`                               | Formulario de login: supabase.auth.signInWithPassword, redireciona para `next` param |
+| `GaleriaFotosOrdem.tsx`                              | `src/components/ordem/GaleriaFotosOrdem.tsx`              | Galeria de fotos da ordem: duas fontes (PDV público + ERP signed 1h), lightbox teclado, upload, delete admin-only |
+| `ComentariosOrdem.tsx`                               | `src/components/ComentariosOrdem.tsx`                     | Comentários com realtime Supabase, @mentions autocomplete, edição, soft delete, foto anexo |
+| `PerfilDrawer.tsx`                                   | `src/components/PerfilDrawer.tsx`                         | Drawer perfil: avatar (comprime 200x200 JPEG 0.85 via canvas), nome, senha, dispara evento perfil:foto-atualizada |
+| `UserAvatar.tsx`                                     | `src/components/UserAvatar.tsx`                           | Exibe avatar com fallback para iniciais |
+| `UserEditDrawer.tsx`                                 | `src/components/UserEditDrawer.tsx`                       | Edicao de usuario pelo admin |
+| `NotificacoesDrawer.tsx`                             | `src/components/NotificacoesDrawer.tsx`                   | Drawer de notificacoes (mencoes, sistema) |
+| `ProtocoloMotoboy.tsx`                               | `src/components/motoboy/ProtocoloMotoboy.tsx`             | PWA dark theme para motoboy (protocolo simplificado) |
+
+---
+
+## Comentarios e Fotos de Ordens (Migrations 069-072)
+
+### Tabela alissonerp.comentarios_ordem
+```
+id             SERIAL PK
+ordem_id       INTEGER FK → alissonerp.ordens.id
+autor_id       UUID FK → alissonerp.usuarios.id
+texto          TEXT
+mencoes        TEXT[]          — array de UUIDs dos usuarios mencionados
+editado        BOOLEAN
+editado_em     TIMESTAMPTZ
+texto_original TEXT            — preserva texto antes da edicao (migration 071)
+excluido       BOOLEAN         — soft delete (migration 071)
+excluido_em    TIMESTAMPTZ
+excluido_por   UUID
+foto_path      TEXT            — path no bucket 'ordem-fotos' (migration 071)
+created_at     TIMESTAMPTZ
+```
+
+### Coluna alissonerp.ordens.fotos_paths (migration 071)
+```
+fotos_paths   TEXT[]   — array de paths no bucket 'ordem-fotos'
+  Adicionado junto com bucket 'ordem-fotos' (privado, 10MB, HEIC incluso)
+  Path padrao: ordens/{ordemId}/{timestamp}-{userId[0:8]}.{ext}
+```
+
+### Tabela alissonerp.notificacoes (migration 069)
+```
+Colunas adicionadas: link, ordem_id, comentario_id, remetente_id, lida_em
+Renomeado: user_id → usuario_id
+Realtime habilitado em migration 069
+```
+
+### Fluxo fotos da ordem — duas fontes
+```
+GET /api/ordens/[id]/fotos retorna array com origem marcada:
+  PDV: directus.ordens.arquivos_path → bucket 'imagens' (publico) → URL direta, origin="pdv"
+  ERP: alissonerp.ordens.fotos_paths → bucket 'ordem-fotos' (privado) → signed URL 1h, origin="erp"
+
+POST /api/ordens/[id]/fotos → body: { path } → array_append em fotos_paths
+DELETE /api/ordens/[id]/fotos → body: { path } → array_remove + Storage delete (admin/dev only)
+```
+
+### Fluxo comentarios com @mention
+```
+1. Usuario digita "@" → busca /api/usuarios/busca?q= (debounce 150ms)
+2. Seleciona usuario → substitui "@query " por "@firstname ", add UUID em mencoes[]
+3. POST /api/ordens/[id]/comentarios → body: { texto, mencoes?, foto_path? }
+4. API cria comentario + notificacoes tipo='mencao' para cada UUID em mencoes
+5. Realtime: canal "comentarios-ordem-{ordemId}" → INSERT → recarrega lista
+
+Fotos em comentarios: path = comentarios/{ordemId}/{timestamp}-{userId[0:8]}.{ext}
+  bucket: 'ordem-fotos' (privado), signed URL 1h gerado ao carregar lista
+```
+
+### Perfil do Usuario — PerfilDrawer.tsx + /api/user/avatar
+```
+PerfilDrawer comprime imagem ANTES de enviar:
+  canvas.toBlob(JPEG, 0.85) com max 200×200px preservando aspect ratio
+
+/api/user/avatar (POST):
+  Recebe File (sem compressao server-side — feita no client)
+  Upload para bucket 'avatars' como {userId}.{ext}
+  Upsert em public.user_profiles com mapeamento de role:
+    desenvolvedor/admin → 'admin'
+    gerente_fabrica/gerente_loja → 'gerente'
+    pcp/ourives/estoquista_fabrica → 'producao'
+    motoboy/logistica → 'logistica'
+    consultora → 'consultora' | financeiro → 'financeiro'
+    estoquista_loja + outros → 'user'
+  (Constraint user_profiles_role_check nao aceita roles ERP diretas)
+
+Atualizacao em tempo real:
+  API retorna { avatar_url } → PerfilDrawer dispara CustomEvent "perfil:foto-atualizada"
+  useAuth() escuta evento → setState({ fotoUrl: url }) sem reload de pagina
+```
 
 ---
 
@@ -1651,3 +1743,100 @@ Deposito ID=1 excluído da seleção (é Almoxarifado, não operador).
 Backward compat: cards antigos sem deposito_id usam SETOR_LABEL fallback.
 
 Próximas: C2=Apontamentos, C3=Saída por ordem, C4/C5=Conclusão.
+
+---
+
+## Auditoria Completa do Projeto (17/03/2026)
+
+### Totais reais (verificados via queries ao banco)
+
+| Item | Valor |
+|------|-------|
+| Arquivos .ts/.tsx | 167 |
+| API routes (route.ts) | 88 |
+| Componentes .tsx | 32 |
+| Hooks .ts | 1 (useAuth) |
+| Libs .ts | 11 |
+| Páginas (page.tsx) | 20 |
+| Tabelas alissonerp | 60 (inclui backups) |
+| Views alissonerp | 43 |
+| Triggers alissonerp | 33 (22 trigger names, multi-event) |
+| Funções alissonerp | 27 |
+| Migrations | 072 (sem 042 em disco) |
+| Buckets Storage | 5 |
+
+### Módulo de Comentários de Ordem (migrations 069-071)
+
+**Tabela principal:** `alissonerp.comentarios_ordem` (NÃO `ordem_comentarios`)
+
+Colunas: id, ordem_id, autor_id UUID, texto, mencoes UUID[], editado, editado_em,
+excluido (soft delete), excluido_em, excluido_por UUID, texto_original, foto_path TEXT, created_at
+
+**Tabela legada (NÃO usar):** `alissonerp.ordem_comentarios` — sem foto_path/excluido, era a tabela antiga
+
+**API routes:**
+- `GET /api/ordens/[id]/comentarios` — lista comentários não excluídos, inclui foto_path
+- `POST /api/ordens/[id]/comentarios` — body: {texto, mencoes?, foto_path?} + cria notificações
+- `PATCH /api/ordens/[id]/comentarios/[id]` — editar texto (somente autor)
+- `DELETE /api/ordens/[id]/comentarios/[id]` — soft delete (autor ou admin/desenvolvedor)
+
+**Upload de fotos em comentários:**
+1. Client faz upload direto: `supabase.storage.from("ordem-fotos").upload("comentarios/{ordemId}/...", file)`
+2. Client envia `foto_path` junto com o texto via `POST /api/ordens/[id]/comentarios`
+3. Signed URLs geradas no carregamento: `supabase.storage.from("ordem-fotos").createSignedUrl(path, 3600)`
+
+**Notificações:** INSERT em `alissonerp.notificacoes` para cada mencao UUID que não seja o próprio autor
+
+### Galeria de Fotos de Ordem (migration 071)
+
+**Campo:** `alissonerp.ordens.fotos_paths TEXT[]`
+
+**Duas fontes de fotos:**
+1. PDV: `directus.ordens.arquivos_path` → bucket `imagens` (público, URL direta)
+2. ERP: `alissonerp.ordens.fotos_paths` → bucket `ordem-fotos` (privado, signed URLs 1h)
+
+**Componente:** `src/components/ordem/GaleriaFotosOrdem.tsx`
+- Grid de thumbnails com badge "PDV" ou "ERP"
+- Lightbox com navegação por teclado
+- Upload client-side → register via API
+- Remoção: somente admin/desenvolvedor, remove do storage também
+
+### Storage Buckets (todos os 5)
+
+Ver tabela completa em `project_storage_buckets.md`.
+
+```
+avatars         → PÚBLICO, 10MB — foto usuários
+imagens         → PÚBLICO, sem limite — legado PDV (NÃO usar para ERP)
+protocolo-fotos → privado, 10MB — fotos de protocolo
+apontamento-fotos → privado, 10MB — fotos balança
+ordem-fotos     → privado, 10MB, +heic — fotos ordens e comentários
+```
+
+### public.user_profiles — Estrutura real
+
+Ver detalhes completos em `project_user_profiles.md`.
+
+Colunas principais: id_user (PK+UNIQUE), email, password_hash, name, role, avatar_url, phone, created_at, updated_at, last_login, is_active, vendedor_id, mx_desconto_permitido
+
+**BUG POTENCIAL:** `user_profiles_role_check` aceita apenas: admin, consultora, user, gerente, producao, logistica, financeiro — NÃO inclui roles ERP como desenvolvedor/ourives/gerente_fabrica. A API `/api/user/avatar` faz upsert com `COALESCE(u.role::text, 'user')` o que pode violar a constraint para roles como 'desenvolvedor'.
+
+### Roles — após migration 068
+
+- `alissonerp.usuarios.role` = VARCHAR(50) (era ENUM antes)
+- `alissonerp.roles` = tabela de metadados (10 roles + 'administrativo' extra no banco)
+- 10 roles válidas: desenvolvedor, admin, gerente_fabrica, gerente_loja, ourives, motoboy, consultora, estoquista_fabrica, estoquista_loja, pcp
+
+### API de Rastreio de Ordens
+
+`GET /api/ordens/rastreio?inicio=YYYY-MM-DD&fim=YYYY-MM-DD`
+
+Retorna ordens do período agrupadas em 6 categorias:
+- `pcp`: PCP ativo (não concluído/cancelado)
+- `protocolo_ida`: protocolo direcao='ida', etapas='pendente'
+- `protocolo_volta`: protocolo direcao='volta', etapas='pendente'
+- `auditoria`: auditorias situacao IN ('pendente','em_analise','pendenciado')
+- `conferencia`: aprovacoes_consultora etapas IN ('pendente','aguardando')
+- `entregues`: preparacoes_entrega etapas='concluido'
+
+Consultoras: filtradas por vendedor_id automaticamente.

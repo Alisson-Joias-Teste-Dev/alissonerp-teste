@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { X, Save, Loader2, Camera, Eye, EyeOff, AlertTriangle, CheckCircle } from "lucide-react";
+import { X, Save, Loader2, Camera, Eye, EyeOff, AlertTriangle, CheckCircle, Shield } from "lucide-react";
 import UserAvatar from "@/components/UserAvatar";
 
 // Roles são carregadas da API (veja estado rolesDisponiveis no componente)
@@ -15,7 +15,19 @@ export interface UsuarioEdit {
   avatar_url: string | null;
   deposito_id: number | null;
   vendedor_id: number | null;
+  tipos_ordem_permitidos?: string[];
 }
+
+const TODOS_TIPOS_ORDEM: Record<string, string> = {
+  servico_venda:     "Serviço Venda",
+  servico_loja:      "Serviço Loja",
+  servico_interno:   "Serviço Interno",
+  fabricacao:        "Fabricação",
+  reposicao_venda:   "Reposição Venda",
+  reposicao_loja:    "Reposição Loja",
+  garantia:          "Garantia",
+  compra_fornecedor: "Compra Fornecedor",
+};
 
 export interface Deposito {
   id: number;
@@ -51,6 +63,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
   const [vendedorId, setVendedorId] = useState<number | null>(null);
   const [vendedores, setVendedores] = useState<{ id_vendedor: number; nome: string }[]>([]);
   const [rolesDisponiveis, setRolesDisponiveis] = useState<{ value: string; label: string }[]>([]);
+  const [tiposPermitidos, setTiposPermitidos] = useState<string[]>([]);
 
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
@@ -90,6 +103,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
       setNovaSenha("");
       setConfirmar("");
       setMsg(null);
+      setTiposPermitidos(usuario.tipos_ordem_permitidos ?? []);
 
       // Buscar lista de vendedores se for consultora ou gerente_loja
       if (usuario.role === "consultora" || usuario.role === "gerente_loja") {
@@ -173,11 +187,12 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
     setMsg(null);
 
     const body: Record<string, unknown> = {
-      nome:        nome.trim(),
+      nome:                  nome.trim(),
       role,
       ativo,
-      deposito_id: depositoId ? parseInt(depositoId) : null,
-      vendedor_id: (role === "consultora" || role === "gerente_loja") ? vendedorId : null,
+      deposito_id:           depositoId ? parseInt(depositoId) : null,
+      vendedor_id:           (role === "consultora" || role === "gerente_loja") ? vendedorId : null,
+      tipos_ordem_permitidos: tiposPermitidos,
     };
     // Só envia email se mudou
     if (email.trim() !== usuario.email) body.email = email.trim();
@@ -379,6 +394,44 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
                 Inativo
               </button>
             </div>
+          </div>
+
+          {/* Permissões de Criação de Ordens */}
+          <div className="border-t border-gray-100 pt-5">
+            <label className={labelCls}>Permissões de Criação de Ordens</label>
+            {["admin", "desenvolvedor"].includes(role) ? (
+              <div className="flex items-start gap-2 mt-2 px-3 py-2.5 rounded-lg text-xs bg-blue-50 border border-blue-200 text-blue-700">
+                <Shield size={12} className="mt-0.5 shrink-0" />
+                <span>Este usuário tem acesso total — estas permissões não se aplicam.</span>
+              </div>
+            ) : (
+              <div className="mt-2 space-y-1.5">
+                <p className="text-[10px] text-gray-400 mb-2">
+                  Tipos de ordem que este usuário pode criar:
+                </p>
+                {Object.entries(TODOS_TIPOS_ORDEM).map(([value, label]) => {
+                  const checked = tiposPermitidos.includes(value);
+                  return (
+                    <label key={value} className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setTiposPermitidos((prev) =>
+                            checked ? prev.filter((t) => t !== value) : [...prev, value]
+                          )
+                        }
+                        className="w-4 h-4 rounded border-gray-300 accent-[#184036]"
+                      />
+                      <span className="text-sm text-gray-700">{label}</span>
+                    </label>
+                  );
+                })}
+                <p className="text-[10px] text-gray-400 mt-2">
+                  Vazio = não pode criar nenhuma ordem (botão oculto).
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Alterar senha */}

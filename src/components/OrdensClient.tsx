@@ -3,7 +3,8 @@
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ChevronDown, Loader2, RefreshCw } from "lucide-react";
+import { ChevronDown, Loader2, RefreshCw, Plus } from "lucide-react";
+import NovaOrdemModal from "@/components/ordens/NovaOrdemModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,7 +73,7 @@ const FUNIL_CARDS: {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function OrdensClient({ ordens }: { ordens: any[] }) {
+export default function OrdensClient({ ordens, tiposPermitidos = [] }: { ordens: any[]; tiposPermitidos?: string[] }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("todos");
@@ -86,6 +87,19 @@ export default function OrdensClient({ ordens }: { ordens: any[] }) {
   const [funilLoading, setFunilLoading] = useState(false);
   const [funilError, setFunilError] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<CardKey | null>(null);
+
+  // ── Nova Ordem modal ──────────────────────────────────────────────────────────
+  const [modalAberto, setModalAberto] = useState(false);
+  const [toastMsg, setToastMsg]       = useState<string | null>(null);
+  const podeNovOrdem = tiposPermitidos.length > 0;
+
+  function handleOrdemCriada(numeroOrdem: string) {
+    setModalAberto(false);
+    setToastMsg(`Ordem ${numeroOrdem} criada com sucesso`);
+    setTimeout(() => setToastMsg(null), 4000);
+    router.refresh();
+  }
+
 
   async function fetchFunil(ini: string, f: string) {
     setFunilLoading(true);
@@ -205,17 +219,48 @@ export default function OrdensClient({ ordens }: { ordens: any[] }) {
         }
       `}</style>
       {/* Header */}
-      <div className="mb-6">
-        <h2
-          className="text-2xl font-semibold"
-          style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}
-        >
-          Ordens
-        </h2>
-        <p className="text-sm mt-1" style={{ color: "#6B7280" }}>
-          {ordens.length} ordens — alissonerp.vw_ordens_completa
-        </p>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h2
+            className="text-2xl font-semibold"
+            style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}
+          >
+            Ordens
+          </h2>
+          <p className="text-sm mt-1" style={{ color: "#6B7280" }}>
+            {ordens.length} ordens — alissonerp.vw_ordens_completa
+          </p>
+        </div>
+        {podeNovOrdem && (
+          <button
+            onClick={() => setModalAberto(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90"
+            style={{ backgroundColor: "#184036" }}
+          >
+            <Plus size={15} />
+            Nova Ordem
+          </button>
+        )}
       </div>
+
+      {/* Modal */}
+      {modalAberto && (
+        <NovaOrdemModal
+          tiposPermitidos={tiposPermitidos}
+          onClose={() => setModalAberto(false)}
+          onSuccess={handleOrdemCriada}
+        />
+      )}
+
+      {/* Toast */}
+      {toastMsg && (
+        <div
+          className="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
+          style={{ backgroundColor: "#184036" }}
+        >
+          ✓ {toastMsg}
+        </div>
+      )}
 
       {/* ══════════════════════════════════════════════════════════════════════
           FUNIL DE PRODUÇÃO

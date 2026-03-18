@@ -4,18 +4,33 @@ import OrdensClient from "@/components/OrdensClient";
 
 export const dynamic = 'force-dynamic';
 
+const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
+const ALL_TIPOS = [
+  "servico_venda", "servico_loja", "fabricacao", "reposicao_venda",
+  "reposicao_loja", "compra_fornecedor", "garantia", "servico_interno",
+];
+
 export default async function OrdensPage() {
   // Auth — consultora vê só as ordens do seu vendedor_id
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
 
   let vendedorIdFiltro: number | null = null;
+  let tiposPermitidos: string[] = [];
+
   if (user) {
     const [usuario] = await sql`
-      SELECT role, vendedor_id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+      SELECT role, vendedor_id, tipos_ordem_permitidos
+      FROM alissonerp.usuarios
+      WHERE id = ${user.id}::uuid LIMIT 1
     `;
     if (usuario?.role === "consultora" && usuario.vendedor_id != null) {
       vendedorIdFiltro = usuario.vendedor_id as number;
+    }
+    if (usuario) {
+      tiposPermitidos = FULL_ACCESS_ROLES.includes(usuario.role)
+        ? ALL_TIPOS
+        : (usuario.tipos_ordem_permitidos ?? []);
     }
   }
 
@@ -42,5 +57,5 @@ export default async function OrdensPage() {
         LIMIT 200
       `;
 
-  return <OrdensClient ordens={ordens} />;
+  return <OrdensClient ordens={ordens} tiposPermitidos={tiposPermitidos} />;
 }

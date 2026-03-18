@@ -8,7 +8,8 @@ import { ROLES_CONCLUIR_PROTOCOLO } from "@/lib/roles";
 const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8" };
 
 const TIPO_LABEL: Record<string, string> = {
-  servico: "Serviço",
+  servico_venda: "Serv. Venda",
+  servico_loja: "Serv. Loja",
   fabricacao: "Fabricação",
   reposicao_venda: "Rep. Venda",
   reposicao_loja: "Rep. Loja",

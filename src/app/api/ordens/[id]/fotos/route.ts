@@ -1,0 +1,144 @@
+import { NextRequest, NextResponse } from "next/server";
+import sql from "@/lib/db";
+import { createServerSupabase } from "@/lib/supabase/server";
+
+const STORAGE_PUBLIC_URL = "https://api.alisson.api.br/storage/v1/object/public";
+
+type FotoItem = { path: string; url: string; origem: "pdv" | "erp" };
+
+// GET /api/ordens/[id]/fotos
+// Retorna fotos das duas fontes:
+//   PDV  — directus.ordens.arquivos_path  (bucket imagens, público, URL direta)
+//   ERP  — alissonerp.ordens.fotos_paths  (bucket ordem-fotos, privado, signed URL)
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user)
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  const { id: ordemId } = await params;
+
+  // Buscar as duas fontes em paralelo
+  const [ordemErp, ordemDirectus] = await Promise.all([
+    sql`
+      SELECT fotos_paths, directus_ordem_id
+      FROM alissonerp.ordens
+      WHERE id = ${parseInt(ordemId)}
+    `.then((rows) => rows[0] ?? null),
+
+    sql`
+      SELECT a.arquivos_path
+      FROM alissonerp.ordens o
+      JOIN directus.ordens a ON a.id = o.directus_ordem_id
+      WHERE o.id = ${parseInt(ordemId)}
+        AND a.arquivos_path IS NOT NULL
+    `.then((rows) => rows[0] ?? null),
+  ]);
+
+  if (!ordemErp) {
+    return NextResponse.json({ error: "Ordem não encontrada" }, { status: 404 });
+  }
+
+  const fotos: FotoItem[] = [];
+
+  // 1. Fotos do PDV — URL pública direta (path já inclui "imagens/ordens/...")
+  const pdvPaths: string[] = ordemDirectus?.arquivos_path ?? [];
+  for (const path of pdvPaths) {
+    fotos.push({ path, url: `${STORAGE_PUBLIC_URL}/${path}`, origem: "pdv" });
+  }
+
+  // 2. Fotos do ERP — signed URLs (bucket privado)
+  const erpPaths: string[] = ordemErp.fotos_paths ?? [];
+  if (erpPaths.length > 0) {
+    await Promise.all(
+      erpPaths.map(async (path) => {
+        const { data: signed } = await supabase.storage
+          .from("ordem-fotos")
+          .createSignedUrl(path, 3600);
+        if (signed?.signedUrl) {
+          fotos.push({ path, url: signed.signedUrl, origem: "erp" });
+        }
+      })
+    );
+    // Manter ordem original das fotos ERP
+    const erpFotos = fotos.filter((f) => f.origem === "erp");
+    erpFotos.sort((a, b) => erpPaths.indexOf(a.path) - erpPaths.indexOf(b.path));
+  }
+
+  return NextResponse.json({ fotos });
+}
+
+// POST /api/ordens/[id]/fotos
+// Adiciona um novo path ao array fotos_paths
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user)
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  const { id: ordemId } = await params;
+  const { path } = await req.json();
+
+  if (!path?.trim()) {
+    return NextResponse.json({ error: "Path obrigatório" }, { status: 400 });
+  }
+
+  await sql`
+    UPDATE alissonerp.ordens
+    SET fotos_paths = array_append(COALESCE(fotos_paths, '{}'), ${path})
+    WHERE id = ${parseInt(ordemId)}
+  `;
+
+  return NextResponse.json({ success: true });
+}
+
+// DELETE /api/ordens/[id]/fotos
+// Remove um path do array fotos_paths
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user)
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  const { id: ordemId } = await params;
+  const { path } = await req.json();
+
+  if (!path?.trim()) {
+    return NextResponse.json({ error: "Path obrigatório" }, { status: 400 });
+  }
+
+  // Verificar permissão — apenas admin/desenvolvedor pode remover fotos
+  const [usuario] = await sql`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid
+  `;
+  const isAdmin = ["admin", "desenvolvedor"].includes(usuario?.role);
+  if (!isAdmin) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
+  await sql`
+    UPDATE alissonerp.ordens
+    SET fotos_paths = array_remove(COALESCE(fotos_paths, '{}'), ${path})
+    WHERE id = ${parseInt(ordemId)}
+  `;
+
+  // Remover do storage também
+  await supabase.storage.from("ordem-fotos").remove([path]);
+
+  return NextResponse.json({ success: true });
+}
