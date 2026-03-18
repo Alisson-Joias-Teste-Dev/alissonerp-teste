@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
     VALUES
       (${deposito_id}, ${setor_id ?? null}, 'em_andamento',
        0, 0, 0, 0, 0, 0,
-       ${user_id ?? null})
+       ${user_id ?? null}::uuid)
     RETURNING id
   `;
 

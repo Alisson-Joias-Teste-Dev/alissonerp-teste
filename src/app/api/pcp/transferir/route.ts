@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
       VALUES
         (${insumo.insumo_id}, ${origemDepositoId}, ${null}, ${ordemId ?? null},
          ${insumo.quantidade}, ${0},
-         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user_id ?? null})
+         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user_id ?? null}::uuid)
     `;
 
     // ENTRADA no destino
@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
       VALUES
         (${insumo.insumo_id}, ${destino_deposito_id}, ${setor_id ?? null}, ${ordemId ?? null},
          ${0}, ${insumo.quantidade},
-         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user_id ?? null})
+         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user_id ?? null}::uuid)
     `;
   }
 
@@ -168,7 +168,7 @@ export async function POST(req: NextRequest) {
       (pcp_id, ordem_id, deposito_id, setor_id, obs, created_by)
     VALUES
       (${pcp_id}, ${ordemId ?? null}, ${destino_deposito_id}, ${null},
-       ${obsComFoto}, ${user_id ?? null})
+       ${obsComFoto}, ${user_id ?? null}::uuid)
   `;
 
   // 5. Atualizar depósito do PCP

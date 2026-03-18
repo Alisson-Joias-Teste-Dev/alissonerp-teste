@@ -135,7 +135,7 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, onSuccess
               placeholder="Buscar ordem..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-2 rounded-lg border text-sm focus:outline-none"
+              className="w-full pl-8 pr-3 py-3 md:py-2 rounded-lg border text-base md:text-sm focus:outline-none"
               style={{ borderColor: C.cremeBorder }}
             />
           </div>
@@ -157,7 +157,7 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, onSuccess
                   <button
                     key={o.id}
                     onClick={() => toggleOrdem(o.id)}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors"
+                    className="w-full flex items-center gap-3 px-3 py-3.5 md:py-2.5 rounded-lg text-left transition-colors active:scale-[0.98]"
                     style={{
                       backgroundColor: isSelected ? "#18403612" : "transparent",
                       border: `1px solid ${isSelected ? C.esmeralda + "40" : C.cremeBorder}`,
@@ -235,13 +235,19 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, onSuccess
               <CheckCircle size={14} className="shrink-0" />Protocolo criado!
             </div>
           )}
-          <div className="flex items-center justify-end gap-3">
-            <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px]" style={{ color: "#6B7280" }}>Cancelar</button>
+          <div className="flex flex-col-reverse md:flex-row md:items-center md:justify-end gap-2 md:gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2.5 md:py-2 rounded-lg text-[13px] text-center"
+              style={{ color: "#6B7280" }}
+            >
+              Cancelar
+            </button>
             <button
               onClick={handleSubmit}
               disabled={loading || success || selected.size === 0 || !fotoFile}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
-              style={{ backgroundColor: C.esmeralda, color: C.creme }}
+              className="flex items-center justify-center gap-2 px-5 py-3 md:py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50 w-full md:w-auto"
+              style={{ backgroundColor: C.esmeralda, color: C.creme, minHeight: 44 }}
             >
               {loading ? <><Loader2 size={14} className="animate-spin" />Criando...</> : `Criar Protocolo (${selected.size})`}
             </button>
