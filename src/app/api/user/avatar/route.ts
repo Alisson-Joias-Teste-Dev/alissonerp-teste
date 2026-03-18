@@ -43,9 +43,6 @@ export async function POST(req: NextRequest) {
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
-  // Upload via Storage REST API (usando anon key — bucket público com RLS para authenticated)
-  const uploadUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/${path}`;
-
   // Obter session token para auth
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -73,14 +70,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // URL pública
-  const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/avatars/${path}`;
+  // URL pública com cache-bust (garante que o browser não usa versão em cache)
+  const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/avatars/${path}?t=${Date.now()}`;
 
-  // Atualizar user_profiles.avatar_url
+  // Atualizar avatar_url buscando por email — funciona mesmo se id_user estiver desincronizado
   await sql`
     UPDATE public.user_profiles
-    SET avatar_url = ${publicUrl}
-    WHERE id_user = ${targetUserId}::uuid
+    SET avatar_url = ${publicUrl}, updated_at = now()
+    WHERE email = (SELECT email FROM alissonerp.usuarios WHERE id = ${targetUserId}::uuid)
   `;
 
   return NextResponse.json({ avatar_url: publicUrl });

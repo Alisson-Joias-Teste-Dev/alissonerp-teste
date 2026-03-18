@@ -1,7 +1,7 @@
 # MEMORY.md — Alisson ERP (Joalheria de Alto Padrão)
 
 > **LEITURA OBRIGATÓRIA antes de qualquer sessão.**
-> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 15/03/2026 — Auditoria D1-D11 aplicada**
+> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 17/03/2026 — Auditoria completa (foto ordens, comentários, user_profiles, buckets)**
 
 ---
 
@@ -32,7 +32,7 @@ são INACEITÁVEIS — significam que não consultou o banco.
 |--------|--------|----------|
 | `public` | READONLY | contatos (=CLIENTES), vendedores, produtos, vendas, pedidos, user_profiles |
 | `directus` | READONLY | ordens, pcp, apontamento, controle_estoque, protocolo, ficha_tecnica_ordem, insumos |
-| `alissonerp` | LEITURA+ESCRITA | ~45 tabelas, ~32 views, ~22 triggers |
+| `alissonerp` | LEITURA+ESCRITA | 60 tabelas reais, 43 views reais, 33 triggers reais |
 
 ### Erros que NUNCA devem acontecer
 ```
@@ -78,6 +78,18 @@ auditorias (loja + fábrica)
 ── SISTEMA ──
 configuracoes_sistema (config IA: provedor, modelos, ativa)
 configuracoes_secrets (API keys IA)
+
+── COMENTÁRIOS E NOTIFICAÇÕES ──
+comentarios_ordem (id, ordem_id, autor_id UUID, texto, mencoes UUID[], editado, editado_em,
+  excluido, excluido_em, excluido_por UUID, texto_original, foto_path TEXT NULLABLE,
+  created_at) — SOFT DELETE; foto no bucket 'ordem-fotos'
+notificacoes (id, usuario_id, tipo, titulo, mensagem, lida, created_at, link, ordem_id,
+  comentario_id, remetente_id, lida_em)
+ordem_comentario_mencoes (legado — substituído por mencoes UUID[] inline em comentarios_ordem)
+ordem_comentarios (legado — tabela antiga sem foto/excluido, não usada pelo código novo)
+
+── COMUNICAÇÃO ──
+ordens.fotos_paths TEXT[] — array de paths no bucket 'ordem-fotos' (migration 071)
 ```
 
 ---
@@ -295,10 +307,18 @@ Pitfall: auth.users.email ≠ alissonerp.usuarios.email para alguns usuários
   → Correto: WHERE alissonerp.usuarios.id = ${user.id}::uuid
   → Errado:  JOIN auth.users ON au.email = u.email WHERE au.id = ...
 
-Constraint user_profiles_role_check só aceita: admin, consultora, user, gerente,
-producao, logistica, financeiro + roles novas (sem 'desenvolvedor' por ora)
-→ user_profiles.role ficou como 'admin' para o admin; não mudar
-→ Fonte de verdade de role = alissonerp.usuarios.role
+⚠️ ROLES MIGRADAS de enum para VARCHAR(50) em migration 068
+   alissonerp.usuarios.role = VARCHAR(50), default 'ourives'
+   alissonerp.roles tabela = fonte de verdade das roles válidas (10 roles ativas)
+   Roles válidas: desenvolvedor, admin, gerente_fabrica, gerente_loja, ourives,
+                  motoboy, consultora, estoquista_fabrica, estoquista_loja, pcp
+   EXTRA no banco: 'administrativo' (inserido manualmente, ativo=true)
+
+⚠️ public.user_profiles.role usa constraint CHECK diferente:
+   Aceita: 'admin', 'consultora', 'user', 'gerente', 'producao', 'logistica', 'financeiro'
+   → NÃO inclui 'desenvolvedor', 'ourives', etc.
+   → Fonte de verdade = alissonerp.usuarios.role (NÃO user_profiles.role)
+   → API /api/user/role busca de alissonerp.usuarios JOIN user_profiles para avatar_url
 ```
 
 ---
@@ -326,6 +346,18 @@ POST  /api/protocolo                         → body inclui foto_criacao (base6
 GET   /api/protocolo/concluidos
 GET   /api/protocolo/[protocoloId]           → ordens do protocolo
 PATCH /api/protocolo/[protocoloId]           → etapas + recebedor_id + foto_conclusao (base64)
+
+── ORDENS ──
+GET  /api/ordens/rastreio?inicio=YYYY-MM-DD&fim=YYYY-MM-DD
+     → 6 categorias: pcp, protocolo_ida, protocolo_volta, auditoria, conferencia, entregues
+     → consultora: filtra por vendedor_id automaticamente
+GET  /api/ordens/[id]/fotos          → fotos PDV (bucket imagens, público) + ERP (bucket ordem-fotos, signed URLs)
+POST /api/ordens/[id]/fotos          → body: { path } — adiciona ao array fotos_paths
+DEL  /api/ordens/[id]/fotos          → body: { path } — remove de fotos_paths + remove do storage (admin only)
+GET  /api/ordens/[id]/comentarios    → lista comentarios_ordem WHERE excluido=false, inclui foto_path
+POST /api/ordens/[id]/comentarios    → body: { texto, mencoes?, foto_path? } — cria comentário + notificações
+PATCH /api/ordens/[id]/comentarios/[comentarioId] → body: { texto } — edita (somente autor)
+DEL  /api/ordens/[id]/comentarios/[comentarioId] → soft delete (autor ou admin/desenvolvedor)
 
 ── AUDITORIA ──
 GET   /api/ficha/[ordemId]           → SELECT vw_fichas_tecnicas WHERE ordem_id=$1 (retorna 1 row ou null)
@@ -574,10 +606,33 @@ Posição: após Financeiro, antes de Precificação
 ## 16. STORAGE BUCKETS
 
 ```
-protocolo-fotos      → fotos criação/conclusão protocolo (privado)
-apontamento-fotos    → fotos balança dos apontamentos (privado)
-avatars              → fotos de perfil dos usuários (PÚBLICO, 2MB, jpeg/png/webp)
-                       RLS: SELECT público, INSERT/UPDATE/DELETE autenticados
+Bucket               Público  Tamanho  Tipos aceitos
+─────────────────────────────────────────────────────────────────────────────────
+avatars              SIM      10MB     image/jpeg, image/jpg, image/png, image/webp
+imagens              SIM      sem lim  sem restrição (legado PDV — NÃO usar para ERP)
+protocolo-fotos      NÃO      10MB     image/jpeg, image/png, image/webp
+apontamento-fotos    NÃO      10MB     image/jpeg, image/png, image/webp
+ordem-fotos          NÃO      10MB     image/jpeg, image/png, image/webp, image/heic
+
+avatars:
+  Caminho: {user_id}.{ext}
+  URL pública: {SUPABASE_URL}/storage/v1/object/public/avatars/{path}?t={timestamp}
+  Salvo em: public.user_profiles.avatar_url
+  API: POST /api/user/avatar
+
+ordem-fotos (migration 071):
+  Caminho ordens: ordens/{ordemId}/{timestamp}-{userId8}.{ext}
+  Caminho comentários: comentarios/{ordemId}/{timestamp}-{userId8}.{ext}
+  Acesso: signed URLs (1h TTL) geradas via supabase.storage.createSignedUrl()
+  Paths salvos em: alissonerp.ordens.fotos_paths TEXT[]
+                   alissonerp.comentarios_ordem.foto_path TEXT
+  APIs: GET/POST/DELETE /api/ordens/[id]/fotos
+
+protocolo-fotos: → campos protocolos.foto_criacao + protocolos.foto_conclusao
+apontamento-fotos: → campo apontamentos_pcp.foto_balanca
+
+⚠️ storage.policies NÃO existe (é storage.objects com RLS, não tabela policies)
+⚠️ Para listar buckets: SELECT id, name FROM storage.buckets
 ```
 
 ---
@@ -891,6 +946,26 @@ NUNCA   → escrever INSERT/UPDATE sem confirmar colunas existem
      CREATE vw_saldo_pote_ouro (saldo ouro cat=1 no depósito=1)
      CREATE vw_ouro_em_producao (saldo ouro por operador, dep!=1)
      CREATE vw_quebra_operadores (quebra agrupada por operador)
+067: CREATE alissonerp.role_permissoes (granular por módulo: modulo, leitura, escrita)
+     CREATE GET /api/configuracoes/roles, /api/configuracoes/permissoes, /api/user/permissoes
+068: MIGRAR usuarios.role de ENUM → VARCHAR(50)
+     DROP TYPE enum_role CASCADE (removeu fn_user_role + 26 policies)
+     RECRIAR fn_user_role RETURNS VARCHAR(50)
+     RECRIAR fn_handle_new_user (trigger auth.users INSERT)
+     RECRIAR 26 RLS policies (sem ::enum_role)
+     ADD role_permissoes.ativo BOOLEAN
+     CREATE alissonerp.roles (metadados das roles válidas, seed 10 roles)
+069: CREATE alissonerp.comentarios_ordem (tabela nova, substitui ordem_comentarios legada)
+     RENAME notificacoes.user_id → usuario_id
+     ADD notificacoes: link, ordem_id, comentario_id, remetente_id, lida_em
+     ADD realtime para comentarios_ordem + notificacoes
+070: RLS para comentarios_ordem + notificacoes
+071: ADD comentarios_ordem.foto_path, excluido, excluido_em, excluido_por, texto_original
+     ADD alissonerp.ordens.fotos_paths TEXT[]
+     CREATE bucket 'ordem-fotos' (privado, 10MB, heic incluído)
+     RLS storage.objects para ordem-fotos (upload/select/delete autenticados)
+072: ADD public.user_profiles.avatar_url IF NOT EXISTS
+     ENSURE UNIQUE constraint em user_profiles.id_user (necessária para ON CONFLICT)
 ```
 
 ---

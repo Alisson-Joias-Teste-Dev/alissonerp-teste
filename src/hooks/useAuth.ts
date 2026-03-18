@@ -27,6 +27,15 @@ export function useAuth(): AuthState {
   });
 
   useEffect(() => {
+    function handleFotoAtualizada(e: Event) {
+      const url = (e as CustomEvent<string>).detail;
+      setState(prev => prev.user ? { ...prev, fotoUrl: url } : prev);
+    }
+    window.addEventListener("perfil:foto-atualizada", handleFotoAtualizada);
+    return () => window.removeEventListener("perfil:foto-atualizada", handleFotoAtualizada);
+  }, []);
+
+  useEffect(() => {
     const supabase = createClient();
 
     async function loadUser() {

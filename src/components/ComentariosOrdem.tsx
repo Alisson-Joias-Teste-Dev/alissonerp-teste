@@ -76,6 +76,8 @@ interface Comentario {
   editado: boolean;
   editado_em: string | null;
   created_at: string;
+  foto_path: string | null;
+  foto_url?: string; // signed URL, gerado no cliente
 }
 
 interface UsuarioBusca {
@@ -101,6 +103,11 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   const [mencoes, setMencoes] = useState<string[]>([]);
   const [enviando, setEnviando] = useState(false);
 
+  // Foto no comentário
+  const [fotoFile, setFotoFile] = useState<File | null>(null);
+  const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+  const fotoInputRef = useRef<HTMLInputElement>(null);
+
   // @mention
   const [showMention, setShowMention] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
@@ -117,13 +124,37 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  async function carregarSignedUrls(lista: Comentario[]): Promise<Comentario[]> {
+    const comFoto = lista.filter((c) => c.foto_path);
+    if (comFoto.length === 0) return lista;
+
+    const supabase = createClient();
+    const urlMap: Record<string, string> = {};
+
+    await Promise.all(
+      comFoto.map(async (c) => {
+        const { data: signed } = await supabase.storage
+          .from("ordem-fotos")
+          .createSignedUrl(c.foto_path!, 3600);
+        if (signed?.signedUrl) urlMap[c.foto_path!] = signed.signedUrl;
+      })
+    );
+
+    return lista.map((c) =>
+      c.foto_path && urlMap[c.foto_path]
+        ? { ...c, foto_url: urlMap[c.foto_path] }
+        : c
+    );
+  }
+
   // Load initial comments
   useEffect(() => {
     fetch(`/api/ordens/${ordemId}/comentarios`)
       .then((r) => r.json())
-      .then((data: Comentario[]) => {
-        setComentarios(data);
-        onCountChange?.(data.length);
+      .then(async (data: Comentario[]) => {
+        const comUrls = await carregarSignedUrls(data);
+        setComentarios(comUrls);
+        onCountChange?.(comUrls.length);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -153,9 +184,10 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
         () => {
           fetch(`/api/ordens/${ordemId}/comentarios`)
             .then((r) => r.json())
-            .then((data: Comentario[]) => {
-              setComentarios(data);
-              onCountChange?.(data.length);
+            .then(async (data: Comentario[]) => {
+              const comUrls = await carregarSignedUrls(data);
+              setComentarios(comUrls);
+              onCountChange?.(comUrls.length);
             })
             .catch(() => {});
         }
@@ -239,23 +271,65 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
     setTimeout(() => textareaRef.current?.focus(), 0);
   }
 
+  function selecionarFoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (fotoPreview) URL.revokeObjectURL(fotoPreview);
+    setFotoFile(file);
+    setFotoPreview(URL.createObjectURL(file));
+    e.target.value = "";
+  }
+
+  function removerFotoSelecionada() {
+    if (fotoPreview) URL.revokeObjectURL(fotoPreview);
+    setFotoFile(null);
+    setFotoPreview(null);
+  }
+
   async function enviar() {
     if (!texto.trim() || enviando) return;
     setEnviando(true);
     try {
+      let fotoPath: string | null = null;
+
+      // Upload da foto se selecionada
+      if (fotoFile) {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const ext = fotoFile.name.split(".").pop()?.toLowerCase() ?? "jpg";
+          const timestamp = Date.now();
+          fotoPath = `comentarios/${ordemId}/${timestamp}-${user.id.substring(0, 8)}.${ext}`;
+
+          const { error: uploadErr } = await supabase.storage
+            .from("ordem-fotos")
+            .upload(fotoPath, fotoFile, {
+              contentType: fotoFile.type || "image/jpeg",
+              upsert: false,
+            });
+
+          if (uploadErr) {
+            console.error("Erro upload foto comentário:", uploadErr.message);
+            fotoPath = null; // envia comentário sem foto se upload falhar
+          }
+        }
+      }
+
       const res = await fetch(`/api/ordens/${ordemId}/comentarios`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto: texto.trim(), mencoes }),
+        body: JSON.stringify({ texto: texto.trim(), mencoes, foto_path: fotoPath }),
       });
       if (res.ok) {
         setTexto("");
         setMencoes([]);
+        removerFotoSelecionada();
         const novos: Comentario[] = await fetch(
           `/api/ordens/${ordemId}/comentarios`
         ).then((r) => r.json());
-        setComentarios(novos);
-        onCountChange?.(novos.length);
+        const comUrls = await carregarSignedUrls(novos);
+        setComentarios(comUrls);
+        onCountChange?.(comUrls.length);
       }
     } finally {
       setEnviando(false);
@@ -464,9 +538,30 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-[13px] leading-relaxed" style={{ color: "#374151" }}>
-                    {renderTexto(c.texto)}
-                  </p>
+                  <div>
+                    <p className="text-[13px] leading-relaxed" style={{ color: "#374151" }}>
+                      {renderTexto(c.texto)}
+                    </p>
+                    {/* Foto do comentário */}
+                    {c.foto_url && (
+                      <div className="mt-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={c.foto_url}
+                          alt="Foto do comentário"
+                          className="max-w-[240px] max-h-[200px] rounded-lg border object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                          style={{ borderColor: C.cremeBorder }}
+                          onClick={() => window.open(c.foto_url, "_blank")}
+                        />
+                      </div>
+                    )}
+                    {/* Foto path sem URL (signed URL expirado) */}
+                    {c.foto_path && !c.foto_url && (
+                      <p className="text-[11px] mt-1 italic" style={{ color: "#9CA3AF" }}>
+                        [foto anexada — recarregue para visualizar]
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             );
@@ -518,27 +613,85 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
         )}
 
         <div
-          className="flex gap-2 rounded-xl border p-3"
+          className="rounded-xl border overflow-hidden"
           style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}
         >
-          <textarea
-            ref={textareaRef}
-            value={texto}
-            onChange={handleTextoChange}
-            onKeyDown={handleTextoKeyDown}
-            placeholder="💬 Escreva um comentário... (@ para mencionar)"
-            rows={2}
-            className="flex-1 resize-none outline-none text-sm"
-            style={{ color: "#374151" }}
-          />
-          <button
-            onClick={enviar}
-            disabled={!texto.trim() || enviando}
-            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white self-end disabled:opacity-40 transition-opacity"
-            style={{ backgroundColor: C.esmeralda }}
-          >
-            {enviando ? "…" : "Enviar"}
-          </button>
+          {/* Preview de foto selecionada */}
+          {fotoPreview && fotoFile && (
+            <div
+              className="flex items-center gap-2 px-3 pt-3 pb-0"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={fotoPreview}
+                alt="Preview"
+                className="w-12 h-12 object-cover rounded-lg border shrink-0"
+                style={{ borderColor: C.cremeBorder }}
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-medium truncate" style={{ color: "#1A1A1A" }}>
+                  {fotoFile.name}
+                </p>
+                <p className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                  {(fotoFile.size / 1024).toFixed(0)} KB — será enviada com o comentário
+                </p>
+              </div>
+              <button
+                onClick={removerFotoSelecionada}
+                className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-white"
+                style={{ backgroundColor: "#DC2626" }}
+                title="Remover foto"
+              >
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+          )}
+
+          <div className="flex gap-2 p-3">
+            <textarea
+              ref={textareaRef}
+              value={texto}
+              onChange={handleTextoChange}
+              onKeyDown={handleTextoKeyDown}
+              placeholder="Escreva um comentário... (@ para mencionar)"
+              rows={2}
+              className="flex-1 resize-none outline-none text-sm"
+              style={{ color: "#374151" }}
+            />
+            <div className="flex flex-col gap-1.5 self-end shrink-0">
+              {/* Botão câmera */}
+              <button
+                onClick={() => fotoInputRef.current?.click()}
+                className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-stone-100"
+                title="Adicionar foto"
+                style={{ color: fotoFile ? C.esmeralda : "#9CA3AF" }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
+                </svg>
+              </button>
+              <input
+                ref={fotoInputRef}
+                type="file"
+                accept="image/jpeg,image/jpg,image/png,image/webp,image/heic"
+                className="hidden"
+                onChange={selecionarFoto}
+              />
+
+              {/* Botão enviar */}
+              <button
+                onClick={enviar}
+                disabled={!texto.trim() || enviando}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-40 transition-opacity"
+                style={{ backgroundColor: C.esmeralda }}
+              >
+                {enviando ? "…" : "Enviar"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

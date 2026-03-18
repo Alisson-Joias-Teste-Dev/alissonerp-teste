@@ -50,14 +50,16 @@ export async function PATCH(
     vendedor_id?: number | null;
     email?: string;
     nova_senha?: string;
+    tipos_ordem_permitidos?: string[];
   };
 
   // Não-admin: só pode alterar nome (proteção backend)
   const { nome, nova_senha } = body;
-  const ativo       = isAdmin ? body.ativo       : undefined;
-  const deposito_id = isAdmin ? body.deposito_id : undefined;
-  const vendedor_id = isAdmin ? body.vendedor_id : undefined;
-  const email       = isAdmin ? body.email       : undefined;
+  const ativo                 = isAdmin ? body.ativo                 : undefined;
+  const deposito_id           = isAdmin ? body.deposito_id           : undefined;
+  const vendedor_id           = isAdmin ? body.vendedor_id           : undefined;
+  const email                 = isAdmin ? body.email                 : undefined;
+  const tipos_ordem_permitidos = isAdmin ? body.tipos_ordem_permitidos : undefined;
 
   // Usuário NUNCA pode alterar sua própria role (proteção dupla: frontend + backend)
   const role = isSelfUpdate ? undefined : body.role;
@@ -110,8 +112,25 @@ export async function PATCH(
     `;
   }
 
+  // 1b. Atualizar tipos_ordem_permitidos (separado, apenas admin)
+  if (tipos_ordem_permitidos !== undefined) {
+    if (!Array.isArray(tipos_ordem_permitidos)) {
+      return NextResponse.json({ error: "tipos_ordem_permitidos deve ser um array" }, { status: 400 });
+    }
+    await sql`
+      UPDATE alissonerp.usuarios
+      SET tipos_ordem_permitidos = ${JSON.stringify(tipos_ordem_permitidos)}::jsonb,
+          updated_at = now()
+      WHERE id = ${id}::uuid
+    `;
+  }
+
   // 2. Atualizar user_profiles (se existir)
-  const [upExists] = await sql`SELECT 1 FROM public.user_profiles WHERE id_user = ${id}::uuid`;
+  // WHERE por email — funciona mesmo se id_user estiver desincronizado (ex: linha órfã com UUID antigo)
+  const [upExists] = await sql`
+    SELECT 1 FROM public.user_profiles
+    WHERE email = (SELECT email FROM alissonerp.usuarios WHERE id = ${id}::uuid)
+  `;
   if (upExists) {
     if (role !== undefined) {
       await sql`
@@ -119,10 +138,25 @@ export async function PATCH(
         SET
           name      = COALESCE(${nome ?? null}, name),
           email     = COALESCE(${email ?? null}, email),
-          role      = COALESCE(${role ?? null}, role),
+          role      = CASE ${role}
+            WHEN 'desenvolvedor'      THEN 'admin'
+            WHEN 'admin'              THEN 'admin'
+            WHEN 'administrativo'     THEN 'admin'
+            WHEN 'gerente_fabrica'    THEN 'gerente'
+            WHEN 'gerente_loja'       THEN 'gerente'
+            WHEN 'consultora'         THEN 'consultora'
+            WHEN 'financeiro'         THEN 'financeiro'
+            WHEN 'motoboy'            THEN 'logistica'
+            WHEN 'logistica'          THEN 'logistica'
+            WHEN 'pcp'                THEN 'producao'
+            WHEN 'ourives'            THEN 'producao'
+            WHEN 'estoquista_fabrica' THEN 'producao'
+            WHEN 'estoquista_loja'    THEN 'user'
+            ELSE 'user'
+          END,
           is_active = COALESCE(${ativo ?? null}, is_active),
           updated_at = now()
-        WHERE id_user = ${id}::uuid
+        WHERE email = (SELECT email FROM alissonerp.usuarios WHERE id = ${id}::uuid)
       `;
     } else {
       await sql`
@@ -132,7 +166,7 @@ export async function PATCH(
           email     = COALESCE(${email ?? null}, email),
           is_active = COALESCE(${ativo ?? null}, is_active),
           updated_at = now()
-        WHERE id_user = ${id}::uuid
+        WHERE email = (SELECT email FROM alissonerp.usuarios WHERE id = ${id}::uuid)
       `;
     }
   }

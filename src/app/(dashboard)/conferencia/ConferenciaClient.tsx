@@ -58,7 +58,8 @@ function fmtTipoOrdem(t: string | null) {
   if (!t) return "—";
   const map: Record<string, string> = {
     fabricacao: "Fabricação",
-    servico: "Serviço",
+    servico_venda: "Serv. Venda",
+    servico_loja: "Serv. Loja",
     servico_interno: "Serv. Interno",
     reposicao_loja: "Rep. Loja",
     reposicao_venda: "Rep. Venda",
