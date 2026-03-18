@@ -168,9 +168,9 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
   ];
 
   return (
-    <div className="px-6 py-8 max-w-7xl mx-auto">
+    <div className="px-3 md:px-6 py-4 md:py-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-4 md:mb-6">
         <button
           onClick={() => router.push("/ordens")}
           className="w-8 h-8 rounded-lg border flex items-center justify-center transition-colors"
@@ -181,7 +181,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
         <div className="flex-1">
           <div className="flex items-center gap-3 flex-wrap">
             <h2
-              className="text-2xl font-semibold"
+              className="text-xl md:text-2xl font-semibold"
               style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}
             >
               {ordem.numero_ordem || `Ordem #${ordem.id}`}
@@ -202,12 +202,12 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         {/* Coluna principal */}
-        <div className="col-span-2 space-y-5">
+        <div className="lg:col-span-2 space-y-4 md:space-y-5">
 
           {/* Info Cards */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
             <div className="bg-white rounded-xl border p-5" style={{ borderColor: C.cremeBorder }}>
               <p className="text-[10px] font-semibold uppercase tracking-wider mb-3" style={{ color: "#9CA3AF" }}>
                 Comercial
@@ -231,8 +231,8 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
           {/* Itens da Ordem (produtos da venda) */}
           <ItensOrdemSection ordemId={ordem.id} />
 
-          {/* Peça do Cliente — só para servico_venda / servico_loja quando há dados */}
-          {["servico_venda", "servico_loja"].includes(ordem.tipo_ordem_cod) &&
+          {/* Peça do Cliente — só para servico_venda quando há dados */}
+          {ordem.tipo_ordem_cod === "servico_venda" &&
             (ordem.foto_peca_servico || ordem.peso_peca_servico != null || ordem.video_observacao) && (
             <PecaClienteCard
               fotoPeca={ordem.foto_peca_servico}
@@ -250,7 +250,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
               <p className="text-[10px] uppercase tracking-wider mb-3" style={{ color: C.sage }}>
                 Resultado de Produção (PCP Concluído)
               </p>
-              <div className="grid grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 md:gap-4">
                 {[
                   { label: "Entrada Metal", value: `${Number(ordem.pcp_total_metal || 0).toFixed(2)}g` },
                   { label: "Retorno",       value: `${Number(ordem.pcp_retorno_metal || 0).toFixed(2)}g` },
@@ -305,7 +305,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                   Nenhum PCP vinculado a esta ordem.
                 </p>
               ) : (
-                <div className="grid grid-cols-3 gap-x-8 gap-y-1">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 md:gap-x-8 gap-y-1">
                   {[
                     { label: "Total Metal",    value: `${Number(ordem.pcp_total_metal || 0).toFixed(2)}g` },
                     { label: "Retorno Metal",  value: `${Number(ordem.pcp_retorno_metal || 0).toFixed(2)}g` },

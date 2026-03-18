@@ -77,16 +77,16 @@ export default function NovaPCPModal({ isOpen, onClose, onSuccess }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[80vh]"
+        className="bg-white w-full max-h-[92vh] overflow-y-auto flex flex-col rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4 md:max-h-[80vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div
-          className="flex items-center justify-between px-6 py-4 border-b shrink-0"
+          className="flex items-center justify-between px-6 py-4 border-b shrink-0 sticky top-0 bg-white z-10"
           style={{ borderColor: C.cremeBorder }}
         >
           <div>

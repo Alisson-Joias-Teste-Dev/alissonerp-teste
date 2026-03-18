@@ -55,7 +55,7 @@ export function NotificacoesDrawer({
 
       {/* Drawer */}
       <div
-        className="fixed left-56 top-0 h-full w-[360px] z-50 flex flex-col shadow-2xl"
+        className="fixed left-0 md:left-56 top-0 h-full w-full md:w-[360px] z-50 flex flex-col shadow-2xl"
         style={{ backgroundColor: "#fff", borderLeft: "1px solid #e5e7eb" }}
       >
         {/* Header */}

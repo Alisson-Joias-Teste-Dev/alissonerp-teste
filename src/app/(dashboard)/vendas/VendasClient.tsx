@@ -132,11 +132,11 @@ export default function VendasClient() {
   }, [vendas, busca, statusFiltro]);
 
   return (
-    <div className="px-6 py-8">
+    <div className="px-3 md:px-6 py-4 md:py-8">
       {/* Header */}
-      <div className="mb-6">
+      <div className="mb-4 md:mb-6">
         <h2
-          className="text-2xl font-semibold"
+          className="text-xl md:text-2xl font-semibold"
           style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}
         >
           Vendas

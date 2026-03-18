@@ -180,7 +180,7 @@ export default function DashboardClient({
   const saldoLiq = Number(kpis.total_a_receber ?? 0) - Number(kpis.total_a_pagar ?? 0);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-3 md:p-6 space-y-4 md:space-y-6">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>

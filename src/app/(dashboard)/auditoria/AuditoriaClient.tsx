@@ -14,7 +14,9 @@ import {
   ChevronDown,
   Store,
   Factory,
+  SlidersHorizontal,
 } from "lucide-react";
+import { MobileCard } from "@/components/ui/MobileCard";
 
 const C = {
   esmeralda: "#184036",
@@ -237,16 +239,16 @@ function AuditoriaModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 flex flex-col max-h-[90vh] overflow-y-auto"
+        className="bg-white w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-xl md:mx-4 md:max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div
-          className="flex items-center justify-between px-6 py-4 border-b shrink-0"
+          className="flex items-center justify-between px-6 py-4 border-b shrink-0 sticky top-0 bg-white z-10"
           style={{ borderColor: C.cremeBorder }}
         >
           <div>
@@ -325,7 +327,7 @@ function AuditoriaModal({
               <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#9CA3AF" }}>
                 Dados de Produção
               </p>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {[
                   { label: "Peso Negociado", value: `${fmtNum(aud.peso_negociado)} g` },
                   { label: "Peso Final",     value: `${fmtNum(aud.peso_final)} g` },
@@ -619,6 +621,7 @@ export default function AuditoriaClient({ dashboards, auditorias }: Props) {
   const [search, setSearch] = useState("");
   const [filterSituacao, setFilterSituacao] = useState<string>("todos");
   const [selected, setSelected] = useState<AuditoriaRow | null>(null);
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
 
   const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
 
@@ -649,11 +652,11 @@ export default function AuditoriaClient({ dashboards, auditorias }: Props) {
   };
 
   return (
-    <div className="px-6 py-8">
+    <div className="px-3 md:px-6 py-4 md:py-8">
       {/* Header */}
-      <div className="mb-6">
+      <div className="mb-4 md:mb-6">
         <h2
-          className="text-2xl font-semibold"
+          className="text-xl md:text-2xl font-semibold"
           style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}
         >
           Auditoria
@@ -732,8 +735,56 @@ export default function AuditoriaClient({ dashboards, auditorias }: Props) {
         )}
       </div>
 
-      {/* Filtros */}
-      <div className="flex flex-wrap gap-3 mb-4">
+      {/* Filtros mobile */}
+      <div className="flex gap-2 mb-2 md:hidden">
+        <div className="relative flex-1">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#9CA3AF" }} />
+          <input
+            type="text"
+            placeholder="Buscar ordem, cliente..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-8 pr-3 py-2 rounded-lg border text-sm focus:outline-none"
+            style={{ borderColor: C.cremeBorder }}
+          />
+        </div>
+        <button
+          onClick={() => setFiltrosAbertos((v) => !v)}
+          className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium border"
+          style={{
+            borderColor: C.cremeBorder,
+            backgroundColor: filtrosAbertos ? C.esmeralda : C.creme,
+            color: filtrosAbertos ? C.creme : C.esmeralda,
+          }}
+        >
+          <SlidersHorizontal size={14} />
+          Filtros
+        </button>
+      </div>
+
+      {filtrosAbertos && (
+        <div className="mb-3 md:hidden">
+          <div className="relative">
+            <select
+              value={filterSituacao}
+              onChange={(e) => setFilterSituacao(e.target.value)}
+              className="w-full appearance-none pl-3 pr-8 py-2 rounded-lg border text-sm focus:outline-none"
+              style={{ borderColor: C.cremeBorder, color: "#374151" }}
+            >
+              <option value="todos">Todas as situações</option>
+              <option value="pendente">Pendentes</option>
+              <option value="em_analise">Em Análise</option>
+              <option value="aprovado">Aprovadas</option>
+              <option value="reprovado">Reprovadas</option>
+              <option value="pendenciado">Pendenciadas</option>
+            </select>
+            <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "#9CA3AF" }} />
+          </div>
+        </div>
+      )}
+
+      {/* Filtros desktop */}
+      <div className="hidden md:flex flex-wrap gap-3 mb-4">
         <div className="relative flex-1 min-w-[200px]">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#9CA3AF" }} />
           <input
@@ -767,8 +818,57 @@ export default function AuditoriaClient({ dashboards, auditorias }: Props) {
         </div>
       </div>
 
-      {/* Tabela */}
-      <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+      {/* Lista mobile */}
+      <div className="block md:hidden space-y-3 mb-3">
+        {filtered.map((a) => {
+          const situacaoCor =
+            a.situacao === "aprovado" ? "bg-green-100 text-green-700"
+            : a.situacao === "reprovado" ? "bg-red-100 text-red-700"
+            : a.situacao === "pendenciado" ? "bg-purple-100 text-purple-700"
+            : "bg-yellow-100 text-yellow-700";
+          const situacaoLabel =
+            a.situacao === "aprovado" ? "Aprovada"
+            : a.situacao === "reprovado" ? "Reprovada"
+            : a.situacao === "em_analise" ? "Em Análise"
+            : a.situacao === "pendenciado" ? "Pendenciada"
+            : "Pendente";
+          return (
+            <MobileCard
+              key={a.id}
+              titulo={a.numero_ordem ?? `#${a.ordem_id}`}
+              subtitulo={tab === "loja" ? (a.cliente_nome ?? '') : (a.ourives_nome ?? '')}
+              badges={[
+                { label: situacaoLabel, cor: situacaoCor },
+                { label: tab === "loja" ? "Loja" : "Fábrica", cor: tab === "loja" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700" },
+              ]}
+              campos={
+                tab === "loja"
+                  ? [
+                      { label: "Pedido PDV", valor: a.numero_pedido ? `#${a.numero_pedido}` : "—" },
+                      { label: "Vendedor", valor: a.vendedor_nome ?? "—" },
+                      { label: "Peso Neg.", valor: `${fmtNum(a.peso_negociado)} g` },
+                      { label: "Criado em", valor: fmt(a.created_at) },
+                    ]
+                  : [
+                      { label: "Pedido PDV", valor: a.numero_pedido ? `#${a.numero_pedido}` : "—" },
+                      { label: "Peso Neg.", valor: `${fmtNum(a.peso_negociado)} g` },
+                      { label: "Peso Final", valor: `${fmtNum(a.peso_final)} g` },
+                      { label: "% Quebra", valor: `${fmtNum(a.quebra_percentual, 1)}%` },
+                    ]
+              }
+              onClick={() => setSelected(a)}
+            />
+          );
+        })}
+        {filtered.length === 0 && (
+          <p className="text-center py-8 text-sm" style={{ color: "#9CA3AF" }}>
+            Nenhuma auditoria encontrada
+          </p>
+        )}
+      </div>
+
+      {/* Tabela desktop */}
+      <div className="hidden md:block rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
         <table className="w-full text-sm">
           <thead>
             <tr style={{ backgroundColor: C.cremeBg, borderBottom: "1px solid #E8DCC8" }}>

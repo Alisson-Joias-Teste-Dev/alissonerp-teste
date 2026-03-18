@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Plus, CheckCircle2, Clock, Package } from "lucide-react";
 import NovaProtocoloModal from "@/components/forms/NovaProtocoloModal";
 import ConcluirProtocoloModal from "@/components/forms/ConcluirProtocoloModal";
+import { MobileCard } from "@/components/ui/MobileCard";
 
 const C = {
   esmeralda: "#184036",
@@ -70,7 +71,6 @@ interface Props {
 
 const TIPO_LABEL: Record<string, string> = {
   servico_venda: "Serv. Venda",
-  servico_loja: "Serv. Loja",
   fabricacao: "Fabricação",
   reposicao_venda: "Rep. Venda",
   reposicao_loja: "Rep. Loja",
@@ -129,11 +129,11 @@ export default function ProtocoloClient({ ida, volta }: Props) {
   ];
 
   return (
-    <div className="px-6 py-8">
+    <div className="px-3 md:px-6 py-4 md:py-8">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
+      <div className="mb-4 md:mb-6 flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
+          <h2 className="text-xl md:text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
             Protocolo
           </h2>
           <p className="text-sm mt-1" style={{ color: "#6B7280" }}>
@@ -311,43 +311,77 @@ function ProtocoloTable({
   onConcluir: (row: ProtocoloRow) => void;
 }) {
   return (
-    <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-      <table className="w-full text-sm">
-        <thead>
-          <tr style={{ backgroundColor: C.cremeBg, borderBottom: "1px solid #E8DCC8" }}>
-            {["ID", "Status", "Ordens", "Criado em", "Concluído em", ""].map((h) => (
-              <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr><td colSpan={6} className="text-center py-12 text-sm" style={{ color: "#9CA3AF" }}>Nenhum protocolo encontrado</td></tr>
-          )}
-          {rows.map((r, i) => (
-            <tr key={r.id} style={{ borderTop: i > 0 ? "1px solid #F3EADA" : undefined }}>
-              <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>#{r.id}</td>
-              <td className="px-4 py-3"><EtapaBadge etapa={r.etapas} /></td>
-              <td className="px-4 py-3 font-mono text-center" style={{ color: "#374151" }}>{r.total_ordens}</td>
-              <td className="px-4 py-3 font-mono text-[11px]" style={{ color: "#9CA3AF" }}>{fmt(r.created_at)}</td>
-              <td className="px-4 py-3 font-mono text-[11px]" style={{ color: r.data_conclusao ? "#059669" : "#9CA3AF" }}>
-                {fmt(r.data_conclusao)}
-              </td>
-              <td className="px-4 py-3 text-right">
-                {r.etapas === "pendente" && (
-                  <button
-                    onClick={() => onConcluir(r)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold ml-auto"
-                    style={{ backgroundColor: "#18403612", color: C.esmeralda }}
-                  >
-                    <CheckCircle2 size={12} /> Concluir
-                  </button>
-                )}
-              </td>
+    <>
+      {/* Lista mobile */}
+      <div className="block md:hidden space-y-3 mb-3">
+        {rows.length === 0 && (
+          <p className="text-center py-8 text-sm" style={{ color: "#9CA3AF" }}>Nenhum protocolo encontrado</p>
+        )}
+        {rows.map((r) => (
+          <MobileCard
+            key={r.id}
+            titulo={`Protocolo #${r.id}`}
+            subtitulo={direcao === "ida" ? "Loja → Fábrica" : "Fábrica → Loja"}
+            badges={[
+              { label: r.etapas === "concluido" ? "Concluído" : r.etapas === "em_andamento" ? "Em Andamento" : "Pendente", cor: r.etapas === "concluido" ? "bg-green-100 text-green-700" : r.etapas === "em_andamento" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-700" }
+            ]}
+            campos={[
+              { label: "Ordens", valor: String(r.total_ordens) },
+              { label: "Criado em", valor: fmt(r.created_at) },
+              { label: "Concluído em", valor: fmt(r.data_conclusao) },
+              { label: "Ação", valor: r.etapas === "pendente" ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onConcluir(r); }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold"
+                  style={{ backgroundColor: "#18403612", color: C.esmeralda }}
+                >
+                  <CheckCircle2 size={11} /> Concluir
+                </button>
+              ) : "—" },
+            ]}
+          />
+        ))}
+      </div>
+
+      {/* Tabela desktop */}
+      <div className="hidden md:block rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ backgroundColor: C.cremeBg, borderBottom: "1px solid #E8DCC8" }}>
+              {["ID", "Status", "Ordens", "Criado em", "Concluído em", ""].map((h) => (
+                <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{h}</th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={6} className="text-center py-12 text-sm" style={{ color: "#9CA3AF" }}>Nenhum protocolo encontrado</td></tr>
+            )}
+            {rows.map((r, i) => (
+              <tr key={r.id} style={{ borderTop: i > 0 ? "1px solid #F3EADA" : undefined }}>
+                <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>#{r.id}</td>
+                <td className="px-4 py-3"><EtapaBadge etapa={r.etapas} /></td>
+                <td className="px-4 py-3 font-mono text-center" style={{ color: "#374151" }}>{r.total_ordens}</td>
+                <td className="px-4 py-3 font-mono text-[11px]" style={{ color: "#9CA3AF" }}>{fmt(r.created_at)}</td>
+                <td className="px-4 py-3 font-mono text-[11px]" style={{ color: r.data_conclusao ? "#059669" : "#9CA3AF" }}>
+                  {fmt(r.data_conclusao)}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {r.etapas === "pendente" && (
+                    <button
+                      onClick={() => onConcluir(r)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold ml-auto"
+                      style={{ backgroundColor: "#18403612", color: C.esmeralda }}
+                    >
+                      <CheckCircle2 size={12} /> Concluir
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }

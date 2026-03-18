@@ -35,6 +35,7 @@ import { getMenuGroupsForRole, getMenuGroupsForModulos, type MenuGroup, type Men
 import { isFullAccess } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/client";
 import UserAvatar from "@/components/UserAvatar";
+import { useSidebar } from "@/contexts/SidebarContext";
 
 const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
   LayoutDashboard,
@@ -73,6 +74,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { role, nome, fotoUrl, loading, user, modulos_leitura } = useAuth();
+  const { aberta, setAberta } = useSidebar();
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)
   const allEntries = modulos_leitura.length > 0
@@ -200,7 +202,7 @@ export default function Sidebar() {
   return (
     <>
     <aside
-      className="fixed top-0 left-0 h-screen w-56 flex flex-col z-40"
+      className={`fixed top-0 left-0 h-full flex flex-col z-50 transition-transform duration-300 ease-in-out md:translate-x-0 md:w-56 w-64 ${aberta ? 'translate-x-0' : '-translate-x-full'}`}
       style={{ backgroundColor: "#184036", borderRight: "1px solid #0F2922" }}
     >
       {/* Logo */}
@@ -235,6 +237,7 @@ export default function Sidebar() {
                   <Link
                     key={entry.href}
                     href={entry.href}
+                    onClick={() => setAberta(false)}
                     className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
                     style={{
                       backgroundColor: active ? "#0F2922" : "transparent",
@@ -285,6 +288,7 @@ export default function Sidebar() {
                           <Link
                             key={item.href}
                             href={item.href}
+                            onClick={() => setAberta(false)}
                             className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors"
                             style={{
                               backgroundColor: active ? "#0F2922" : "transparent",
@@ -344,6 +348,7 @@ export default function Sidebar() {
             <div className="px-3 py-2">
               <Link
                 href="/configuracoes"
+                onClick={() => setAberta(false)}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
                 style={{
                   backgroundColor: active ? "#0F2922" : "transparent",
@@ -393,6 +398,14 @@ export default function Sidebar() {
         </button>
       </div>
     </aside>
+
+    {/* Overlay mobile — fecha a sidebar ao clicar fora */}
+    {aberta && (
+      <div
+        className="fixed inset-0 bg-black/50 z-40 md:hidden"
+        onClick={() => setAberta(false)}
+      />
+    )}
 
     <NotificacoesDrawer
       aberto={drawerAberto}

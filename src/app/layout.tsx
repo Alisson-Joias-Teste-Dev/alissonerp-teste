@@ -42,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${dmSans.variable} ${jetbrains.variable} ${playfair.variable}`}
     >
       <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
         <meta name="theme-color" content="#184036" />
         <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
       </head>

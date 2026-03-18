@@ -59,7 +59,6 @@ function fmtTipoOrdem(t: string | null) {
   const map: Record<string, string> = {
     fabricacao: "Fabricação",
     servico_venda: "Serv. Venda",
-    servico_loja: "Serv. Loja",
     servico_interno: "Serv. Interno",
     reposicao_loja: "Rep. Loja",
     reposicao_venda: "Rep. Venda",
@@ -179,11 +178,11 @@ export default function ConferenciaClient({ aprovacoes }: Props) {
   ];
 
   return (
-    <div className="px-6 py-8">
+    <div className="px-3 md:px-6 py-4 md:py-8">
       {/* Header */}
-      <div className="mb-6">
+      <div className="mb-4 md:mb-6">
         <h2
-          className="text-2xl font-semibold"
+          className="text-xl md:text-2xl font-semibold"
           style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}
         >
           Conferência
@@ -194,7 +193,7 @@ export default function ConferenciaClient({ aprovacoes }: Props) {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 md:mb-6">
         <StatCard label="Pendentes" value={pendentes} color={pendentes > 0 ? "#92400E" : C.esmeralda} />
         <StatCard label="Aprovadas" value={aprovadas} color="#059669" />
         <StatCard label="Reprovadas" value={reprovadas} color="#DC2626" />

@@ -333,14 +333,14 @@ function ModalSimulacao({
   const inputCls = "px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-gray-300 font-mono";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 md:p-4">
       {toast && <Toast msg={toast.msg} tipo={toast.tipo} />}
       <div
-        className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
+        className="w-full max-h-[92vh] flex flex-col rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden md:max-w-3xl md:max-h-[90vh]"
         style={{ backgroundColor: P.card, border: `1px solid ${P.border}` }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: P.border }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 z-10" style={{ borderColor: P.border, backgroundColor: P.card }}>
           <div>
             <h3 className="font-semibold text-base" style={{ color: P.text }}>
               Simular Alteração de Markup
@@ -411,7 +411,7 @@ function ModalSimulacao({
           {resultado && (
             <>
               {/* Cards stats */}
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
                   { label: "Produtos afetados", value: (stats?.produtos_afetados ?? 0).toLocaleString("pt-BR"), highlight: true },
                   { label: "Variação média", value: fmtVariacao(stats?.variacao_media ?? 0) },
@@ -886,12 +886,12 @@ function TabPendentes({
 
       {/* ── Modal visualizar simulação ─────────── */}
       {visualizando && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 md:p-4">
           <div
-            className="w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
+            className="w-full max-h-[92vh] flex flex-col rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden md:max-w-2xl md:max-h-[80vh]"
             style={{ backgroundColor: P.card, border: `1px solid ${P.border}` }}
           >
-            <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: P.border }}>
+            <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 z-10" style={{ borderColor: P.border, backgroundColor: P.card }}>
               <div>
                 <h3 className="font-semibold text-base" style={{ color: P.text }}>
                   Simulação #{visualizando.id}
@@ -906,7 +906,7 @@ function TabPendentes({
             </div>
 
             <div className="flex-1 overflow-y-auto p-6">
-              <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
                 {[
                   { label: "Afetados", value: visualizando.produtos_afetados.toLocaleString("pt-BR") },
                   { label: "Variação média", value: fmtVariacao(Number(visualizando.variacao_media)) },
@@ -963,12 +963,12 @@ function TabPendentes({
 
       {/* ── Modal rejeitar ─────────────────────── */}
       {modalRejeitar && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 md:p-4">
           <div
-            className="w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"
+            className="w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden md:max-w-md md:max-h-[90vh]"
             style={{ backgroundColor: P.card, border: `1px solid ${P.border}` }}
           >
-            <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: P.border }}>
+            <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 z-10" style={{ borderColor: P.border, backgroundColor: P.card }}>
               <h3 className="font-semibold text-base" style={{ color: P.text }}>Rejeitar Alteração</h3>
               <button onClick={() => setModalRejeitar(null)} style={{ color: P.muted }}>
                 <X size={18} />
@@ -1371,9 +1371,9 @@ function TabMarkupPedras({
 
       {/* Modal adicionar */}
       {adicionando && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40">
           <div
-            className="w-full max-w-md rounded-2xl p-6 shadow-xl"
+            className="w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl md:max-w-md p-6 shadow-xl"
             style={{ backgroundColor: P.card, border: `1px solid ${P.border}` }}
           >
             <div className="flex items-center justify-between mb-5">
@@ -1611,11 +1611,11 @@ export default function PrecificacaoClient({ faixasPedrasInicial, configInicial,
   ];
 
   return (
-    <div className="min-h-screen p-6" style={{ backgroundColor: P.bg }}>
+    <div className="min-h-screen p-3 md:p-6" style={{ backgroundColor: P.bg }}>
       {globalToast && <Toast msg={globalToast.msg} tipo={globalToast.tipo} />}
 
       {/* Header */}
-      <div className="mb-6">
+      <div className="mb-4 md:mb-6">
         <h1 className="text-xl font-semibold" style={{ color: P.text }}>Precificação</h1>
         <p className="text-sm mt-0.5" style={{ color: P.sage }}>Configuração de regras de markup e atualização de preços</p>
       </div>

@@ -20,7 +20,6 @@ export interface UsuarioEdit {
 
 const TODOS_TIPOS_ORDEM: Record<string, string> = {
   servico_venda:     "Serviço Venda",
-  servico_loja:      "Serviço Loja",
   servico_interno:   "Serviço Interno",
   fabricacao:        "Fabricação",
   reposicao_venda:   "Reposição Venda",
@@ -237,7 +236,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
 
       {/* Drawer */}
       <div
-        className={`fixed inset-y-0 right-0 w-[400px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-300 ${
+        className={`fixed inset-y-0 right-0 w-full md:w-[400px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-300 ${
           aberto ? "translate-x-0" : "translate-x-full"
         }`}
       >

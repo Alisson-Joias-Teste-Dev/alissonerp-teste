@@ -721,12 +721,12 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
       {/* ── Modal: Novo Usuário ──────────────────────────────────────────────── */}
       {showNovoUsuarioModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-end md:items-center justify-center md:p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
           onClick={fecharModalNovo}
         >
           <div
-            className="w-full max-w-md rounded-2xl shadow-2xl p-6"
+            className="w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl p-6 md:max-w-md md:max-h-[90vh]"
             style={{ backgroundColor: "#FAFAF7", border: "1px solid #E8DCC8" }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -2166,11 +2166,11 @@ function TabPermissoes() {
       {/* ── Modal Nova Role ──────────────────────────────────────────────── */}
       {novaRoleOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-sm"
           onClick={() => setNovaRoleOpen(false)}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-4"
+            className="bg-white w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-sm md:mx-4 p-6 space-y-4"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -2267,7 +2267,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     : baseTabs;
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-3 md:p-6 space-y-4 md:space-y-5">
       {/* Header */}
       <div>
         <h1

@@ -65,11 +65,11 @@ function SituacaoBadge({ situacao }: { situacao: string }) {
 export default function Dashboard({ stats, depositos, ultimasOrdens, vendedores }: DashboardProps) {
   return (
     <div>
-      <main className="max-w-5xl mx-auto px-6 py-8">
+      <main className="max-w-5xl mx-auto px-3 md:px-6 py-4 md:py-8">
 
         {/* Título */}
-        <div className="mb-8">
-          <h2 className="text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}>
+        <div className="mb-6 md:mb-8">
+          <h2 className="text-xl md:text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}>
             Dashboard
           </h2>
           <p className="text-sm mt-1" style={{ color: "#6B7280" }}>

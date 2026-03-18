@@ -151,16 +151,16 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm"
       onClick={handleClose}
     >
-      {/* Modal — max-h 90vh com scroll no corpo */}
+      {/* Modal — max-h 92vh mobile / 90vh desktop com scroll no corpo */}
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[90vh]"
+        className="bg-white w-full max-h-[92vh] flex flex-col rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4 md:max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header fixo */}
-        <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0" style={{ borderColor: C.cremeBorder }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0 sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
           <div>
             <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>Lançamento Avulso</h3>
             <p className="text-[12px] mt-0.5" style={{ color: "#9CA3AF" }}>Movimentação manual de estoque</p>

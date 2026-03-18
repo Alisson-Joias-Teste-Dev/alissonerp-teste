@@ -74,7 +74,7 @@ export default async function Home() {
 
       {/* Saudação */}
       <div className="text-center mb-6">
-        <h1 className="text-3xl font-light text-gray-800">
+        <h1 className="text-2xl md:text-3xl font-light text-gray-800">
           {saudacao},{" "}
           <span className="font-semibold">{nomeUsuario}</span>{" "}
           👋
@@ -93,10 +93,10 @@ export default async function Home() {
       </div>
 
       {/* Cotações */}
-      <div className="flex flex-wrap gap-6 justify-center mb-4 mt-8">
+      <div className="flex flex-wrap gap-3 md:gap-6 justify-center mb-4 mt-8">
 
         {/* Card Ouro 24K */}
-        <div className="bg-white rounded-xl border border-[var(--color-creme-200)] shadow-sm p-6 w-56 text-center">
+        <div className="bg-white rounded-xl border border-[var(--color-creme-200)] shadow-sm p-4 md:p-6 w-44 md:w-56 text-center">
           <p className="text-xs text-gray-400 uppercase tracking-wide">
             🏅 Ouro 24K
           </p>
@@ -108,7 +108,7 @@ export default async function Home() {
         </div>
 
         {/* Card Dólar */}
-        <div className="bg-white rounded-xl border border-[var(--color-creme-200)] shadow-sm p-6 w-56 text-center">
+        <div className="bg-white rounded-xl border border-[var(--color-creme-200)] shadow-sm p-4 md:p-6 w-44 md:w-56 text-center">
           <p className="text-xs text-gray-400 uppercase tracking-wide">
             💵 Dólar
           </p>

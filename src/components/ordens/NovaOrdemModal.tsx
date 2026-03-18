@@ -16,7 +16,6 @@ const C = {
 
 const TIPO_LABELS: Record<string, string> = {
   servico_venda:     "Serviço Venda",
-  servico_loja:      "Serviço Loja",
   fabricacao:        "Fabricação",
   reposicao_venda:   "Reposição Venda",
   reposicao_loja:    "Reposição Loja",
@@ -25,7 +24,17 @@ const TIPO_LABELS: Record<string, string> = {
   servico_interno:   "Serviço Interno",
 };
 
-const SERVICO_TIPOS = ["servico_venda", "servico_loja"];
+const TIPO_COLORS: Record<string, { bg: string; color: string }> = {
+  servico_venda:     { bg: "#DBEAFE", color: "#1E40AF" },
+  fabricacao:        { bg: "#FEF3C7", color: "#92400E" },
+  reposicao_venda:   { bg: "#F3E8FF", color: "#6B21A8" },
+  reposicao_loja:    { bg: "#E0F2FE", color: "#0369A1" },
+  compra_fornecedor: { bg: "#ECFDF5", color: "#065F46" },
+  garantia:          { bg: "#FEE2E2", color: "#991B1B" },
+  servico_interno:   { bg: "#F0FDF4", color: "#166534" },
+};
+
+const SERVICO_TIPOS = ["servico_venda"];
 const CLIENTE_OBRIGATORIO = ["servico_venda", "fabricacao", "reposicao_venda", "garantia"];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -90,16 +99,15 @@ interface Vendedor { id_vendedor: number; nome: string }
 interface Produto  { id_produto: number; nome: string; sku: string; peso_precificado: number | null }
 
 interface Props {
-  tiposPermitidos: string[];
+  tipoOrdem: string;
   onClose: () => void;
   onSuccess: (numeroOrdem: string) => void;
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export default function NovaOrdemModal({ tiposPermitidos, onClose, onSuccess }: Props) {
+export default function NovaOrdemModal({ tipoOrdem, onClose, onSuccess }: Props) {
   // ── Form state ──────────────────────────────────────────────────────────────
-  const [tipoOrdem, setTipoOrdem] = useState(tiposPermitidos[0] ?? "");
   const [clienteId, setClienteId]   = useState<number | null>(null);
   const [clienteNome, setClienteNome] = useState("");
   const [vendedorId, setVendedorId] = useState<number | null>(null);
@@ -243,7 +251,6 @@ export default function NovaOrdemModal({ tiposPermitidos, onClose, onSuccess }: 
     setError("");
 
     // Validações
-    if (!tipoOrdem) { setError("Selecione o tipo de ordem."); return; }
     if (clienteObrigatorio && !clienteId) {
       setError("Cliente é obrigatório para este tipo de ordem."); return;
     }
@@ -322,18 +329,29 @@ export default function NovaOrdemModal({ tiposPermitidos, onClose, onSuccess }: 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-end md:items-start md:justify-center md:overflow-y-auto"
       style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
     >
       <div
-        className="relative w-full max-w-2xl my-8 mx-4 bg-white rounded-2xl shadow-2xl"
+        className="relative w-full bg-white rounded-t-2xl md:rounded-2xl shadow-2xl overflow-y-auto md:w-auto md:max-w-2xl md:my-8 md:mx-4 max-h-[92vh]"
         style={{ borderTop: `4px solid ${C.esmeralda}` }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: C.cremeBorder }}>
-          <h2 className="text-lg font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
-            Nova Ordem
-          </h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
+              Nova Ordem
+            </h2>
+            <span
+              className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
+              style={{
+                backgroundColor: TIPO_COLORS[tipoOrdem]?.bg ?? "#F3F4F6",
+                color: TIPO_COLORS[tipoOrdem]?.color ?? "#6B7280",
+              }}
+            >
+              {TIPO_LABELS[tipoOrdem] ?? tipoOrdem}
+            </span>
+          </div>
           <button
             onClick={onClose}
             className="w-8 h-8 rounded-lg border flex items-center justify-center transition-colors hover:bg-gray-50"
@@ -345,24 +363,6 @@ export default function NovaOrdemModal({ tiposPermitidos, onClose, onSuccess }: 
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
-
-          {/* Tipo de Ordem */}
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
-              Tipo de Ordem *
-            </label>
-            <select
-              value={tipoOrdem}
-              onChange={e => setTipoOrdem(e.target.value)}
-              required
-              className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none"
-              style={{ borderColor: C.cremeBorder, color: "#1A1A1A", backgroundColor: "#fff" }}
-            >
-              {tiposPermitidos.map(tipo => (
-                <option key={tipo} value={tipo}>{TIPO_LABELS[tipo] ?? tipo}</option>
-              ))}
-            </select>
-          </div>
 
           {/* Cliente */}
           <div ref={clienteRef}>
