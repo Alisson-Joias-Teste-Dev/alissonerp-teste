@@ -1,7 +1,7 @@
 # MEMORY.md — Alisson ERP (Joalheria de Alto Padrão)
 
 > **LEITURA OBRIGATÓRIA antes de qualquer sessão.**
-> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 17/03/2026 — Auditoria completa (foto ordens, comentários, user_profiles, buckets)**
+> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 18/03/2026 — Go-Live + reset banco + migração 443 ordens + módulo criação ordens + PWA + mobile responsivo (v2.5.1)**
 
 ---
 
@@ -53,6 +53,12 @@ são INACEITÁVEIS — significam que não consultou o banco.
 ❌ SELECT descricao FROM alissonerp.insumos → ✅ SELECT nome AS descricao (coluna real é 'nome')
    ⚠️ insumos.unidade: coluna existe (adicionada em produção, migration 042 só no DB)
    ⚠️ /api/produtos/insumos e /api/pcp/insumos usam 'nome'; BOM component usa campo 'descricao' (alias)
+❌ auditorias.tipo              → ✅ auditorias.tipo_auditoria (coluna real é tipo_auditoria)
+❌ WHERE integer_col = ${uuidVar} → ✅ usar parseInt(id) ou cast explícito (nunca ::uuid em coluna INT)
+❌ directus.itens_ordem_1 para ordens ERP → ✅ alissonerp.itens_ordem (fonte separada por origem)
+   REGRA: ordens legadas (origem='legado') → itens em directus.itens_ordem_1
+          ordens ERP (origem='erp')       → itens em alissonerp.itens_ordem
+❌ tipo_ordem='servico'         → ✅ tipo_ordem='servico_venda' (migration 071 renomeou o enum)
 ```
 
 ### Tabelas alissonerp (referência)
