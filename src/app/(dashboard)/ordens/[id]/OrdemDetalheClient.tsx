@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import ComentariosOrdem from "@/components/ComentariosOrdem";
 import GaleriaFotosOrdem from "@/components/ordem/GaleriaFotosOrdem";
 import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
@@ -74,23 +73,11 @@ function PecaClienteCard({ fotoPeca, pesoPeca, videoObs }: {
   pesoPeca: number | null;
   videoObs: string | null;
 }) {
-  const [fotoUrl, setFotoUrl]   = useState<string | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
-  useEffect(() => {
-    const sb = createClient();
-    async function getUrls() {
-      if (fotoPeca) {
-        const { data } = await sb.storage.from("ordem-fotos").createSignedUrl(fotoPeca, 3600);
-        if (data) setFotoUrl(data.signedUrl);
-      }
-      if (videoObs) {
-        const { data } = await sb.storage.from("ordem-videos").createSignedUrl(videoObs, 3600);
-        if (data) setVideoUrl(data.signedUrl);
-      }
-    }
-    getUrls();
-  }, [fotoPeca, videoObs]);
+  // URLs públicas diretas (buckets públicos após migração)
+  const fotoUrl  = fotoPeca  ? `${SUPABASE_URL}/storage/v1/object/public/ordem-fotos/${fotoPeca}`   : null;
+  const videoUrl = videoObs  ? `${SUPABASE_URL}/storage/v1/object/public/ordem-videos/${videoObs}`  : null;
 
   return (
     <div className="bg-white rounded-xl border p-5" style={{ borderColor: "#E8DCC8" }}>

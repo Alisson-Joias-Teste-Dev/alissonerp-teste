@@ -150,6 +150,25 @@ export async function POST(req: NextRequest) {
         ouro_entregue: ouroInsumo.quantidade,
         created_by:    user_id ?? null,
       });
+
+      // 3c. CE de baixa da quebra no saldo contábil do operador de ORIGEM
+      //     Sem essa movimentação o saldo residual (ouro_recebido − ouro_entregue)
+      //     permanece no depósito do operador indefinidamente.
+      //     Marcador QUEBRA_PCP é o padrão do sistema para baixa de residual de ouro
+      //     (mesmo enum usado pela saída PCP — não existe QUEBRA_TED no enum).
+      const quebraTransf = parseFloat((ouroRecebido - ouroInsumo.quantidade).toFixed(4));
+      if (quebraTransf > 0) {
+        await sql`
+          INSERT INTO alissonerp.movimentacoes_estoque
+            (insumo_id, deposito_id, saida, marcador, ordem_id, obs, created_at)
+          VALUES
+            (1, ${origemDepositoId}, ${quebraTransf}::real,
+             'QUEBRA_PCP'::alissonerp.enum_marcador_estoque,
+             ${ordemId ?? null},
+             ${'Quebra transferência PCP #' + pcp_id},
+             NOW())
+        `;
+      }
     }
   }
 

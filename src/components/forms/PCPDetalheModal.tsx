@@ -7,7 +7,6 @@ import {
   Package, ArrowLeftRight, CheckSquare, RefreshCw,
 } from "lucide-react";
 import UserAvatar from "@/components/UserAvatar";
-import { createClient } from "@/lib/supabase/client";
 import { formatPeso } from "@/lib/formatters";
 import ApontamentoPCPModal from "@/components/forms/ApontamentoPCPModal";
 import TransferenciaPCPModal from "@/components/forms/TransferenciaPCPModal";
@@ -123,20 +122,15 @@ export default function PCPDetalheModal({ pcp, onClose, onSuccess }: Props) {
         setTotais(resumoData.totais);
       }
 
-      // Signed URLs para eventos com foto_balanca (bucket apontamento-fotos)
+      // URLs públicas para eventos com foto_balanca (bucket apontamento-fotos público)
+      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
       const comFoto = lista.filter((e) => e.foto_balanca);
       if (comFoto.length > 0) {
-        const supabase = createClient();
         const urls: Record<string, string> = {};
-        await Promise.all(
-          comFoto.map(async (e) => {
-            const path = e.foto_balanca!;
-            const { data: signed } = await supabase.storage
-              .from("apontamento-fotos")
-              .createSignedUrl(path, 3600);
-            if (signed?.signedUrl) urls[path] = signed.signedUrl;
-          }),
-        );
+        comFoto.forEach((e) => {
+          const path = e.foto_balanca!;
+          urls[path] = `${SUPABASE_URL}/storage/v1/object/public/apontamento-fotos/${path}`;
+        });
         setFotoUrls(urls);
       }
     } finally {

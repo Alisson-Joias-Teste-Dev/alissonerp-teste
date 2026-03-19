@@ -49,13 +49,14 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // Cachear a resposta fresca para uso offline futuro
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, clone);
-          });
+        // Guard: só cachear responses válidas (basic = mesma origem, status 200)
+        if (!response || response.status !== 200 || response.type !== 'basic') {
+          return response;
         }
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(event.request, clone);
+        });
         return response;
       })
       .catch(() => {
@@ -66,6 +67,8 @@ self.addEventListener('fetch', (event) => {
           if (event.request.mode === 'navigate') {
             return caches.match('/offline.html');
           }
+          // Outros recursos sem cache → response vazia válida (evita "Failed to convert value to Response")
+          return new Response('', { status: 503, statusText: 'Offline' });
         });
       })
   );

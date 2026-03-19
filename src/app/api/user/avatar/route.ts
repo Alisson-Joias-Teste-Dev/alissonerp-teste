@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { uploadFile } from "@/lib/storage";
 
 // POST /api/user/avatar
 // Body: FormData { file: File, user_id?: string }
@@ -39,39 +40,21 @@ export async function POST(req: NextRequest) {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "jpg";
   const path = `${targetUserId}.${ext}`;
 
-  // Converter File → ArrayBuffer → Buffer
+  // Converter File → ArrayBuffer → base64 para o helper uploadFile
   const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
+  const base64Data = Buffer.from(arrayBuffer).toString("base64");
 
-  // Obter session token para auth
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const uploadResult = await uploadFile("avatars", path, base64Data, file.type || "image/jpeg");
 
-  // Tentar UPSERT (PUT) primeiro, se falhar tenta POST
-  let uploadRes = await fetch(
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/avatars/${path}`,
-    {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        "Content-Type": file.type || "image/jpeg",
-        "x-upsert": "true",
-      },
-      body: buffer,
-    }
-  );
-
-  if (!uploadRes.ok) {
-    const errText = await uploadRes.text();
+  if ("error" in uploadResult) {
     return NextResponse.json(
-      { error: `Upload falhou: ${uploadRes.status} — ${errText}` },
+      { error: `Upload falhou: ${uploadResult.error}` },
       { status: 500 }
     );
   }
 
   // URL pública com cache-bust (garante que o browser não usa versão em cache)
-  const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/avatars/${path}?t=${Date.now()}`;
+  const publicUrl = `${uploadResult.url}?t=${Date.now()}`;
 
   // Atualizar avatar_url buscando por email — funciona mesmo se id_user estiver desincronizado
   await sql`
