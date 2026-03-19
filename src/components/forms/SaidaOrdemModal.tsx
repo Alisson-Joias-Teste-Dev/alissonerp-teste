@@ -523,19 +523,31 @@ export default function SaidaOrdemModal({
                             {p.peso_pedra.toFixed(4)}g/un · {p.qtd_disponivel} UN disponíveis
                           </p>
                         </div>
-                        <input
-                          type="number"
-                          step="1"
-                          min="0"
-                          max={p.qtd_disponivel}
-                          value={qtdPedras[p.insumo_id] ?? "0"}
-                          onChange={(e) => {
-                            setQtdPedras((prev) => ({ ...prev, [p.insumo_id]: e.target.value }));
-                            setError("");
-                          }}
-                          className="w-20 px-2 py-1.5 rounded-md border text-sm font-mono text-center focus:outline-none"
-                          style={{ borderColor: C.cremeBorder }}
-                        />
+                        <div className="flex flex-col items-end gap-0.5">
+                          <input
+                            type="number"
+                            step="1"
+                            min="0"
+                            max={p.qtd_disponivel}
+                            value={qtdPedras[p.insumo_id] ?? "0"}
+                            onChange={(e) => {
+                              setQtdPedras((prev) => ({ ...prev, [p.insumo_id]: e.target.value }));
+                              setError("");
+                            }}
+                            className="w-20 px-2 py-1.5 rounded-md border text-sm font-mono text-center focus:outline-none"
+                            style={{ borderColor: C.cremeBorder }}
+                          />
+                          {(() => {
+                            const qtd = parseInt(qtdPedras[p.insumo_id] ?? "0") || 0;
+                            const quebra = p.qtd_disponivel - qtd;
+                            if (quebra <= 0) return null;
+                            return (
+                              <span className="text-[10px] font-semibold" style={{ color: "#DC2626" }}>
+                                Quebra: {quebra} UN
+                              </span>
+                            );
+                          })()}
+                        </div>
                         <span className="text-[11px] w-16 text-right" style={{ color: "#6B7280" }}>
                           {formatPeso((parseInt(qtdPedras[p.insumo_id] ?? "0") || 0) * p.peso_pedra)}g
                         </span>
