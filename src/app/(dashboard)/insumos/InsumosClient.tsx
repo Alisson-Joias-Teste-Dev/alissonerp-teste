@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, FlaskConical, Search, X, Loader2, AlertCircle, ChevronDown } from "lucide-react";
+import { Plus, FlaskConical, Search, X, Loader2, AlertCircle, ChevronDown, Package } from "lucide-react";
+import InsumoEditDrawer from "@/components/insumos/InsumoEditDrawer";
 
 const C = {
   esmeralda: "#184036",
@@ -32,6 +33,12 @@ interface InsumoRow {
   categoria_id: number;
   categoria_nome: string;
   saldo_real: number;
+  // novos campos opcionais que podem vir da view
+  foto?: string | null;
+  fornecedor_id?: number | null;
+  peso_pedra?: number | null;
+  observacao?: string | null;
+  created_at?: string | null;
 }
 
 interface CategoriaRow {
@@ -55,6 +62,27 @@ function saldoColor(saldo: number, min: number) {
   if (saldo <= 0) return "#DC2626";
   if (min > 0 && saldo < min) return "#D97706";
   return "#059669";
+}
+
+// Converte InsumoRow para o formato esperado pelo InsumoEditDrawer
+function insumoRowToDrawer(i: InsumoRow) {
+  return {
+    id: i.insumo_id,
+    nome: i.insumo_nome,
+    sku: i.sku,
+    categoria_id: i.categoria_id,
+    unidade: i.unidade,
+    estoque_minimo: i.estoque_minimo,
+    estoque_maximo: i.estoque_maximo,
+    custo_compra: i.custo_compra,
+    ativo: i.ativo,
+    saldo_real: i.saldo_real,
+    foto: i.foto,
+    fornecedor_id: i.fornecedor_id,
+    peso_pedra: i.peso_pedra,
+    observacao: i.observacao,
+    created_at: i.created_at,
+  };
 }
 
 // ─── NovoInsumoModal ──────────────────────────────────────────────────────────
@@ -259,6 +287,9 @@ export default function InsumosClient() {
   const [loadingData, setLoadingData] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
 
+  // drawerInsumo: undefined = fechado | null = novo | InsumoRow = editar
+  const [drawerInsumo, setDrawerInsumo] = useState<InsumoRow | null | undefined>(undefined);
+
   const fetchAll = useCallback(async () => {
     setLoadingData(true);
     try {
@@ -296,6 +327,12 @@ export default function InsumosClient() {
     return true;
   });
 
+  // Converter categorias para formato do drawer
+  const categoriasDrawer = categorias.map((c) => ({
+    id: c.categoria_id,
+    nome: c.categoria_nome,
+  }));
+
   return (
     <div className="px-3 md:px-6 py-4 md:py-8">
       {/* Header */}
@@ -307,7 +344,7 @@ export default function InsumosClient() {
           <p className="text-sm mt-1" style={{ color: "#6B7280" }}>Saldo do Pote · Matérias-primas</p>
         </div>
         <button
-          onClick={() => setModalOpen(true)}
+          onClick={() => setDrawerInsumo(null)}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
           style={{ backgroundColor: C.esmeralda, color: C.creme }}
         >
@@ -373,22 +410,22 @@ export default function InsumosClient() {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
-              {["Insumo", "SKU", "Categoria", "Und.", "Saldo Real", "Est. Mín", "Custo", ""].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{h}</th>
+              {["", "Insumo", "SKU", "Categoria", "Und.", "Saldo Real", "Est. Mín", "Custo", "Status", ""].map((h, idx) => (
+                <th key={idx} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loadingData && (
               <tr>
-                <td colSpan={8} className="text-center py-12">
+                <td colSpan={10} className="text-center py-12">
                   <Loader2 size={18} className="animate-spin inline" style={{ color: "#9CA3AF" }} />
                 </td>
               </tr>
             )}
             {!loadingData && insumosFiltrados.length === 0 && (
               <tr>
-                <td colSpan={8} className="text-center py-12 text-sm" style={{ color: "#9CA3AF" }}>
+                <td colSpan={10} className="text-center py-12 text-sm" style={{ color: "#9CA3AF" }}>
                   {busca || catFiltro !== null ? "Nenhum resultado" : "Nenhum insumo cadastrado"}
                 </td>
               </tr>
@@ -396,7 +433,29 @@ export default function InsumosClient() {
             {!loadingData && insumosFiltrados.map((insumo, i) => {
               const color = saldoColor(insumo.saldo_real, insumo.estoque_minimo);
               return (
-                <tr key={insumo.insumo_id} style={{ borderTop: i > 0 ? `1px solid ${C.cremeBorder}` : undefined }}>
+                <tr
+                  key={insumo.insumo_id}
+                  className="hover:bg-gray-50 cursor-pointer transition-colors"
+                  style={{ borderTop: i > 0 ? `1px solid ${C.cremeBorder}` : undefined }}
+                  onClick={() => setDrawerInsumo(insumo)}
+                >
+                  {/* Thumbnail foto */}
+                  <td className="px-3 py-2.5 w-10">
+                    <div
+                      className="w-8 h-8 rounded-lg border overflow-hidden flex items-center justify-center shrink-0"
+                      style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}
+                    >
+                      {insumo.foto ? (
+                        <img
+                          src={insumo.foto}
+                          alt={insumo.insumo_nome}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Package size={14} style={{ color: "#D1D5DB" }} />
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 font-medium" style={{ color: "#111827" }}>{insumo.insumo_nome}</td>
                   <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#9CA3AF" }}>{insumo.sku ?? "—"}</td>
                   <td className="px-4 py-3 text-[12px]" style={{ color: "#6B7280" }}>{insumo.categoria_nome}</td>
@@ -408,7 +467,19 @@ export default function InsumosClient() {
                     {insumo.estoque_minimo > 0 ? `${fmtNum(insumo.estoque_minimo, 0)} ${insumo.unidade}` : "—"}
                   </td>
                   <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>{fmtCusto(insumo.custo_compra)}</td>
-                  <td className="px-4 py-3 text-right">
+                  {/* Badge ativo */}
+                  <td className="px-4 py-3">
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                      style={{
+                        backgroundColor: insumo.ativo ? "#DCFCE7" : "#FEE2E2",
+                        color: insumo.ativo ? "#15803D" : "#DC2626",
+                      }}
+                    >
+                      {insumo.ativo ? "Ativo" : "Inativo"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => handleDesativar(insumo.insumo_id, insumo.insumo_nome)}
                       className="text-[11px] px-2.5 py-1 rounded hover:opacity-80"
@@ -424,12 +495,25 @@ export default function InsumosClient() {
         </table>
       </div>
 
-      {/* Modal */}
+      {/* Modal legado (mantido para compatibilidade) */}
       {modalOpen && (
         <NovoInsumoModal
           categorias={categorias}
           onClose={() => setModalOpen(false)}
           onSuccess={() => { setModalOpen(false); fetchAll(); }}
+        />
+      )}
+
+      {/* Drawer de edição/criação */}
+      {drawerInsumo !== undefined && (
+        <InsumoEditDrawer
+          insumo={drawerInsumo !== null ? insumoRowToDrawer(drawerInsumo) : null}
+          categorias={categoriasDrawer}
+          onClose={() => setDrawerInsumo(undefined)}
+          onSaved={() => {
+            setDrawerInsumo(undefined);
+            fetchAll();
+          }}
         />
       )}
     </div>

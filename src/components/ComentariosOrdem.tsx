@@ -124,25 +124,16 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  async function carregarSignedUrls(lista: Comentario[]): Promise<Comentario[]> {
-    const comFoto = lista.filter((c) => c.foto_path);
-    if (comFoto.length === 0) return lista;
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
-    const supabase = createClient();
-    const urlMap: Record<string, string> = {};
+  function getPublicUrl(bucket: string, path: string): string {
+    return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
+  }
 
-    await Promise.all(
-      comFoto.map(async (c) => {
-        const { data: signed } = await supabase.storage
-          .from("ordem-fotos")
-          .createSignedUrl(c.foto_path!, 3600);
-        if (signed?.signedUrl) urlMap[c.foto_path!] = signed.signedUrl;
-      })
-    );
-
+  function carregarSignedUrls(lista: Comentario[]): Comentario[] {
     return lista.map((c) =>
-      c.foto_path && urlMap[c.foto_path]
-        ? { ...c, foto_url: urlMap[c.foto_path] }
+      c.foto_path
+        ? { ...c, foto_url: getPublicUrl("ordem-fotos", c.foto_path) }
         : c
     );
   }
@@ -152,7 +143,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
     fetch(`/api/ordens/${ordemId}/comentarios`)
       .then((r) => r.json())
       .then(async (data: Comentario[]) => {
-        const comUrls = await carregarSignedUrls(data);
+        const comUrls = carregarSignedUrls(data);
         setComentarios(comUrls);
         onCountChange?.(comUrls.length);
       })
@@ -185,7 +176,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
           fetch(`/api/ordens/${ordemId}/comentarios`)
             .then((r) => r.json())
             .then(async (data: Comentario[]) => {
-              const comUrls = await carregarSignedUrls(data);
+              const comUrls = carregarSignedUrls(data);
               setComentarios(comUrls);
               onCountChange?.(comUrls.length);
             })
@@ -327,7 +318,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
         const novos: Comentario[] = await fetch(
           `/api/ordens/${ordemId}/comentarios`
         ).then((r) => r.json());
-        const comUrls = await carregarSignedUrls(novos);
+        const comUrls = carregarSignedUrls(novos);
         setComentarios(comUrls);
         onCountChange?.(comUrls.length);
       }

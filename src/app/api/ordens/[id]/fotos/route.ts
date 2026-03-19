@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { getPublicUrl, deleteFile } from "@/lib/storage";
 
-const STORAGE_PUBLIC_URL = "https://api.alisson.api.br/storage/v1/object/public";
+const STORAGE_PUBLIC_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public`;
 
 type FotoItem = { path: string; url: string; origem: "pdv" | "erp" };
 
 // GET /api/ordens/[id]/fotos
 // Retorna fotos das duas fontes:
 //   PDV  — directus.ordens.arquivos_path  (bucket imagens, público, URL direta)
-//   ERP  — alissonerp.ordens.fotos_paths  (bucket ordem-fotos, privado, signed URL)
+//   ERP  — alissonerp.ordens.fotos_paths  (bucket ordem-fotos, público, URL direta)
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -52,22 +53,10 @@ export async function GET(
     fotos.push({ path, url: `${STORAGE_PUBLIC_URL}/${path}`, origem: "pdv" });
   }
 
-  // 2. Fotos do ERP — signed URLs (bucket privado)
+  // 2. Fotos do ERP — URL pública direta (bucket público após migração)
   const erpPaths: string[] = ordemErp.fotos_paths ?? [];
-  if (erpPaths.length > 0) {
-    await Promise.all(
-      erpPaths.map(async (path) => {
-        const { data: signed } = await supabase.storage
-          .from("ordem-fotos")
-          .createSignedUrl(path, 3600);
-        if (signed?.signedUrl) {
-          fotos.push({ path, url: signed.signedUrl, origem: "erp" });
-        }
-      })
-    );
-    // Manter ordem original das fotos ERP
-    const erpFotos = fotos.filter((f) => f.origem === "erp");
-    erpFotos.sort((a, b) => erpPaths.indexOf(a.path) - erpPaths.indexOf(b.path));
+  for (const path of erpPaths) {
+    fotos.push({ path, url: getPublicUrl("ordem-fotos", path), origem: "erp" });
   }
 
   return NextResponse.json({ fotos });
@@ -138,7 +127,7 @@ export async function DELETE(
   `;
 
   // Remover do storage também
-  await supabase.storage.from("ordem-fotos").remove([path]);
+  await deleteFile("ordem-fotos", path);
 
   return NextResponse.json({ success: true });
 }
