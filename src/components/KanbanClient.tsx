@@ -1,15 +1,155 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, ArrowRight, LogOut, FlaskConical } from "lucide-react";
+import { Plus, ArrowRight, LogOut, FlaskConical, UserCheck, X, Loader2 } from "lucide-react";
 import ApontamentoPCPModal   from "@/components/forms/ApontamentoPCPModal";
 import TransferenciaPCPModal from "@/components/forms/TransferenciaPCPModal";
 import SaidaOrdemModal       from "@/components/forms/SaidaOrdemModal";
 import NovaPCPModal          from "@/components/forms/NovaPCPModal";
 import PCPDetalheModal       from "@/components/forms/PCPDetalheModal";
 import OrdemTesteModal       from "@/components/forms/OrdemTesteModal";
+
+// ─── Modal de Atribuir Operador ───────────────────────────────────────────────
+interface AtribuirOperadorModalProps {
+  pcpId: number;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function AtribuirOperadorModal({ pcpId, onClose, onSuccess }: AtribuirOperadorModalProps) {
+  const [depositos, setDepositos] = useState<{ id: number; nome: string }[]>([]);
+  const [depositoSelecionado, setDepositoSelecionado] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/pcp/depositos")
+      .then((r) => r.json())
+      .then((data: { id: number; nome: string }[]) => {
+        // Excluir Almoxarifado Central (id=1)
+        setDepositos(Array.isArray(data) ? data.filter((d) => d.id !== 1) : []);
+      })
+      .catch(() => setError("Erro ao carregar depósitos."));
+  }, []);
+
+  async function handleConfirmar() {
+    if (!depositoSelecionado) {
+      setError("Selecione um operador.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/pcp/${pcpId}/atribuir-operador`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deposito_id: depositoSelecionado }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError((body as { error?: string }).error ?? "Erro ao atribuir operador.");
+        setLoading(false);
+        return;
+      }
+      onSuccess();
+      onClose();
+    } catch {
+      setError("Erro de rede.");
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-5 py-4 border-b"
+          style={{ borderColor: "#E8DCC8" }}
+        >
+          <h3 className="text-base font-semibold" style={{ color: "#111827" }}>
+            Atribuir Operador
+          </h3>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            <X size={15} style={{ color: "#9CA3AF" }} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4 space-y-3">
+          <p className="text-[12px]" style={{ color: "#6B7280" }}>
+            PCP #{pcpId} — Selecione o operador responsável:
+          </p>
+
+          {depositos.length === 0 && !error && (
+            <div className="flex items-center gap-2 text-[13px]" style={{ color: "#9CA3AF" }}>
+              <Loader2 size={13} className="animate-spin" /> Carregando...
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {depositos.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                onClick={() => { setDepositoSelecionado(d.id); setError(""); }}
+                className="w-full text-left px-3 py-2.5 rounded-lg border text-sm transition-all"
+                style={{
+                  borderColor: depositoSelecionado === d.id ? "#184036" : "#E8DCC8",
+                  backgroundColor: depositoSelecionado === d.id ? "#18403610" : "#fff",
+                  color: "#111827",
+                  fontWeight: depositoSelecionado === d.id ? 600 : 400,
+                }}
+              >
+                {d.nome}
+              </button>
+            ))}
+          </div>
+
+          {error && (
+            <p className="text-[12px] font-semibold" style={{ color: "#DC2626" }}>
+              {error}
+            </p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          className="flex items-center justify-end gap-3 px-5 py-4 border-t"
+          style={{ borderColor: "#E8DCC8" }}
+        >
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-[13px] transition-colors"
+            style={{ color: "#6B7280" }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleConfirmar}
+            disabled={loading || !depositoSelecionado}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ backgroundColor: "#184036", color: "#F3EADA" }}
+          >
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <UserCheck size={13} />}
+            Confirmar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const ETAPAS = [
   { key: "Novas Ordens", color: "#6366F1", bg: "#EEF2FF" },
@@ -27,19 +167,22 @@ const ETAPAS_SAIDA         = new Set(["Em Andamento"]);
 type PCPItem = any;
 
 interface ModalState {
-  pcpId:     number;
-  ordemId:   number;
-  depositoId: number;
-  setorId:   number | null;
+  pcpId:              number;
+  ordemId:            number;
+  depositoId:         number;
+  setorId:            number | null;
+  depositoAtribuido:  boolean;
+  pesoMetalExterno?:  number;
 }
 
 type ActiveModal =
-  | { type: "detalhe";       data: PCPItem }
-  | { type: "apontamento";   data: ModalState }
-  | { type: "transferencia"; data: ModalState }
-  | { type: "saida";         data: ModalState }
-  | { type: "nova_pcp";      data: null }
-  | { type: "ordem_teste";   data: null }
+  | { type: "detalhe";           data: PCPItem }
+  | { type: "apontamento";       data: ModalState }
+  | { type: "transferencia";     data: ModalState }
+  | { type: "saida";             data: ModalState }
+  | { type: "atribuir_operador"; data: { pcpId: number } }
+  | { type: "nova_pcp";          data: null }
+  | { type: "ordem_teste";       data: null }
   | null;
 
 function KanbanCard({
@@ -48,17 +191,21 @@ function KanbanCard({
   onApontar,
   onTransferir,
   onSaida,
+  onAtribuir,
 }: {
   pcp:          PCPItem;
   onDetalhe:    (pcp: PCPItem) => void;
   onApontar:    (pcp: PCPItem) => void;
   onTransferir: (pcp: PCPItem) => void;
   onSaida:      (pcp: PCPItem) => void;
+  onAtribuir:   (pcp: PCPItem) => void;
 }) {
   const etapa        = pcp.etapas ?? "";
   const podeApontar    = ETAPAS_APONTAMENTO.has(etapa);
   const podeTransferir = ETAPAS_TRANSFERENCIA.has(etapa);
   const podeSaida      = ETAPAS_SAIDA.has(etapa);
+  // Botão atribuir operador: visível quando sem deposito_id e na coluna Novas Ordens
+  const podeAtribuir = pcp.deposito_id == null && etapa === "Novas Ordens";
 
   return (
     <div
@@ -117,9 +264,26 @@ function KanbanCard({
         )}
       </div>
 
+      {/* Nome do operador atual (se atribuído) */}
+      {pcp.deposito_nome && (
+        <div className="mt-1.5 text-[10px] font-medium truncate" style={{ color: "#6B7280" }}>
+          👤 {pcp.deposito_nome}
+        </div>
+      )}
+
       {/* Botões contextuais — stopPropagation para não abrir detalhe */}
-      {(podeApontar || podeTransferir || podeSaida) && (
+      {(podeApontar || podeTransferir || podeSaida || podeAtribuir) && (
         <div className="mt-2 flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+          {podeAtribuir && (
+            <button
+              onClick={() => onAtribuir(pcp)}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[11px] font-semibold transition-colors"
+              style={{ backgroundColor: "#7C3AED12", color: "#7C3AED" }}
+            >
+              <UserCheck size={11} strokeWidth={2.5} />
+              Atribuir Operador
+            </button>
+          )}
           {podeApontar && (
             <button
               onClick={() => onApontar(pcp)}
@@ -191,16 +355,19 @@ export default function KanbanClient({
   }, [filtered]);
 
   const makeModalData = useCallback((pcp: PCPItem): ModalState => ({
-    pcpId:      pcp.id,
-    ordemId:    pcp.ordem_id,
-    depositoId: pcp.deposito_id ?? 2,
-    setorId:    pcp.setor_id ?? null,
+    pcpId:             pcp.id,
+    ordemId:           pcp.ordem_id,
+    depositoId:        pcp.deposito_id ?? 2,
+    setorId:           pcp.setor_id ?? null,
+    depositoAtribuido: pcp.deposito_id != null,
+    pesoMetalExterno:  pcp.peso_metal_externo != null ? Number(pcp.peso_metal_externo) : undefined,
   }), []);
 
-  const handleDetalhe    = useCallback((pcp: PCPItem) => setActiveModal({ type: "detalhe",       data: pcp }), []);
-  const handleApontar    = useCallback((pcp: PCPItem) => setActiveModal({ type: "apontamento",   data: makeModalData(pcp) }), [makeModalData]);
-  const handleTransferir = useCallback((pcp: PCPItem) => setActiveModal({ type: "transferencia", data: makeModalData(pcp) }), [makeModalData]);
-  const handleSaida      = useCallback((pcp: PCPItem) => setActiveModal({ type: "saida",         data: makeModalData(pcp) }), [makeModalData]);
+  const handleDetalhe    = useCallback((pcp: PCPItem) => setActiveModal({ type: "detalhe",           data: pcp }), []);
+  const handleApontar    = useCallback((pcp: PCPItem) => setActiveModal({ type: "apontamento",       data: makeModalData(pcp) }), [makeModalData]);
+  const handleTransferir = useCallback((pcp: PCPItem) => setActiveModal({ type: "transferencia",     data: makeModalData(pcp) }), [makeModalData]);
+  const handleSaida      = useCallback((pcp: PCPItem) => setActiveModal({ type: "saida",             data: makeModalData(pcp) }), [makeModalData]);
+  const handleAtribuir   = useCallback((pcp: PCPItem) => setActiveModal({ type: "atribuir_operador", data: { pcpId: pcp.id } }), []);
 
   const handleClose   = useCallback(() => setActiveModal(null), []);
   const handleSuccess = useCallback(() => { router.refresh(); }, [router]);
@@ -297,6 +464,7 @@ export default function KanbanClient({
                     onApontar={handleApontar}
                     onTransferir={handleTransferir}
                     onSaida={handleSaida}
+                    onAtribuir={handleAtribuir}
                   />
                 ))}
                 {cards.length === 0 && (
@@ -312,6 +480,15 @@ export default function KanbanClient({
           );
         })}
       </div>
+
+      {/* Modal de atribuir operador */}
+      {activeModal?.type === "atribuir_operador" && (
+        <AtribuirOperadorModal
+          pcpId={activeModal.data.pcpId}
+          onClose={handleClose}
+          onSuccess={handleSuccess}
+        />
+      )}
 
       {/* Modais */}
       {activeModal?.type === "detalhe" && (
@@ -343,6 +520,7 @@ export default function KanbanClient({
           ordemId={activeModal.data.ordemId}
           depositoId={activeModal.data.depositoId}
           setorId={activeModal.data.setorId}
+          depositoAtribuido={activeModal.data.depositoAtribuido}
           onSuccess={handleSuccess}
         />
       )}
@@ -364,6 +542,7 @@ export default function KanbanClient({
           pcpId={activeModal.data.pcpId}
           ordemId={activeModal.data.ordemId}
           depositoId={activeModal.data.depositoId}
+          pesoMetalExterno={activeModal.data.pesoMetalExterno}
           onSuccess={handleSuccess}
         />
       )}

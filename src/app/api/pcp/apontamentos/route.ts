@@ -39,6 +39,24 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Para tipo 2 (Entrada de Metal): se pcp.deposito_id está definido, body.deposito_id deve ser igual
+  if (tipo_apontamento_id === 2) {
+    const [pcpCheck] = await sql`
+      SELECT p.deposito_id AS pcp_deposito_id, o.local_atual AS ordem_deposito_id
+      FROM alissonerp.pcp p
+      LEFT JOIN alissonerp.ordens o ON o.id = p.ordem_id
+      WHERE p.id = ${pcp_id}
+      LIMIT 1
+    `;
+    const depositoAtribuido = pcpCheck?.pcp_deposito_id ?? pcpCheck?.ordem_deposito_id;
+    if (depositoAtribuido != null && depositoAtribuido !== deposito_id) {
+      return NextResponse.json(
+        { error: "Operador já atribuído. Use transferência para mudar." },
+        { status: 400 }
+      );
+    }
+  }
+
   // Validação de estoque para tipos 1, 2, 3 e 8 (todos saem do Almoxarifado Central)
   if ((tipo_apontamento_id === 1 || tipo_apontamento_id === 2 || tipo_apontamento_id === 3 || tipo_apontamento_id === 8) && insumo_id) {
     const saldo = await sql`

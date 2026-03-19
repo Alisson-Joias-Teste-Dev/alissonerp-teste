@@ -31,7 +31,8 @@ export default async function PcpPage() {
           v.cliente_nome, v.vendedor_nome, v.setor_nome,
           v.peso_final, v.total_metal, v.data_conclusao,
           v.created_at, v.deposito_id, v.setor_id,
-          COALESCE(o.eh_teste, false) AS eh_teste
+          COALESCE(o.eh_teste, false) AS eh_teste,
+          o.peso_metal_externo
         FROM alissonerp.vw_pcp_erp v
         LEFT JOIN alissonerp.ordens o ON o.id = v.ordem_id
         WHERE v.deposito_id = ${depositoIdFiltro}
@@ -44,7 +45,8 @@ export default async function PcpPage() {
           v.cliente_nome, v.vendedor_nome, v.setor_nome,
           v.peso_final, v.total_metal, v.data_conclusao,
           v.created_at, v.deposito_id, v.setor_id,
-          COALESCE(o.eh_teste, false) AS eh_teste
+          COALESCE(o.eh_teste, false) AS eh_teste,
+          o.peso_metal_externo
         FROM alissonerp.vw_pcp_erp v
         LEFT JOIN alissonerp.ordens o ON o.id = v.ordem_id
         ORDER BY v.id DESC

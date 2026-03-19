@@ -8,23 +8,24 @@ import { registrarQuebra, buscarOuroRecebido } from "@/lib/registrar-quebra";
 // e gerencia tudo manualmente com dados reais dos apontamentos_pcp.
 //
 // Lógica:
-//   ouro_entregue = Σ tipos 2+1 (entrada+aditivo) − tipo 5 (retorno) + dist_ouro_real
-//   peso_pedras   = Σ(qtd_utilizada × peso_pedra)
-//   peso_ouro_real = peso_bruto − peso_pedras
-//   pmc           = peso_ouro_real − metal_externo − total_outros (= peso_ouro_real, pois sem dist)
-//   consumo       = ouro_entregue − retorno_metal
-//   quebra        = consumo − pmc
-//   %             = quebra / consumo × 100
+//   ouro_entregue  = Σ tipos 2+1 (entrada+aditivo) − tipo 5 (retorno) + dist_ouro_real
+//   peso_pedras    = Σ(qtd_utilizada × peso_pedra)
+//   peso_ouro_real = peso_bruto − peso_pedras           (ouro físico na peça, inclui metal_externo)
+//   pmc            = peso_ouro_real − outros − metal_externo  (conforme MEMORY.md §2)
+//   quebra         = total_metal − peso_ouro_real
+//   %              = quebra / total_metal × 100
 //
-// CE SM: saida dep_operador — peso_ouro_real — SEM entrada no pote (ouro virou peça)
+// CE SM: saida dep_operador — peso_ouro_real COMPLETO (inclui metal_externo fisicamente)
 // CE QUEBRA_PCP: saida dep_operador — quebra — SEM entrada no pote (só se quebra > 0)
 // Pedras: NÃO geram movimentação (consumidas na peça)
+// metal_externo: descontado SÓ do PMC, NÃO da movimentação de estoque
 export async function POST(req: NextRequest) {
   const {
     pcp_id,
     peso_bruto,
     pedras_utilizadas,
     peso_outros,
+    metal_externo: metal_externo_body,
     foto_balanca,
     user_id,
   } = await req.json() as {
@@ -32,6 +33,7 @@ export async function POST(req: NextRequest) {
     peso_bruto: number;
     pedras_utilizadas?: { insumo_id: number; qtd_utilizada: number }[];
     peso_outros?: number | null;
+    metal_externo?: number | null;
     foto_balanca?: string | null;
     user_id?: string | null;
   };
@@ -66,8 +68,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const ordemId   = pcp.ordem_id as number;
-  const depositoId = (pcp.deposito_id as number | null) ?? 2; // depósito do operador
+  const ordemId    = pcp.ordem_id as number;
+  const depositoId = pcp.deposito_id as number | null;
+  if (!depositoId) {
+    return NextResponse.json(
+      { error: "Operador não atribuído. Atribua um operador antes da saída." },
+      { status: 400 },
+    );
+  }
 
   // 2. Calcular peso das pedras utilizadas
   let peso_pedras_total = 0;
@@ -86,14 +94,18 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. Calcular valores finais
-  const peso_outros_num    = Number(peso_outros ?? 0);
-  // ouro_real = bruto − pedras − outros (formula simplificada)
-  const peso_ouro_real     = peso_bruto - peso_pedras_total - peso_outros_num;
-  const metal_externo      = Number(pcp.metal_externo ?? 0);
-  const dist_ouro_real     = Number(pcp.dist_ouro_real ?? 0);
+  const peso_outros_num = Number(peso_outros ?? 0);
 
-  // PMC = peso_ouro_real − metal_externo (outros já descontado em peso_ouro_real)
-  const pmc = peso_ouro_real - metal_externo;
+  // metal_externo: valor do BODY tem prioridade (operador pode corrigir).
+  // Fallback: valor armazenado no PCP (herdado da ordem na criação).
+  const metal_externo   = Number(metal_externo_body ?? pcp.metal_externo ?? 0);
+  const dist_ouro_real  = Number(pcp.dist_ouro_real ?? 0);
+
+  // Fórmula PMC PCP (MEMORY.md §2):
+  //   peso_ouro_real = peso_bruto − pedras              (ouro físico na peça)
+  //   pmc            = peso_ouro_real − outros − metal_externo
+  const peso_ouro_real = peso_bruto - peso_pedras_total;
+  const pmc            = peso_ouro_real - peso_outros_num - metal_externo;
 
   // Total Metal = mesma fórmula do resumo do card:
   //   Σ qtd tipos 1+2 (entrada+aditivo) − Σ qtd tipo 5 (retorno) + dist_ouro_real
@@ -110,25 +122,27 @@ export async function POST(req: NextRequest) {
   const metal_liquido = Number(metalCalc.entrada) - Number(metalCalc.retorno);
   const total_metal   = metal_liquido + dist_ouro_real;
 
-  // quebra = total_metal − ouro_real
-  const quebra             = total_metal - peso_ouro_real;
-  const porcentagem_quebra = total_metal !== 0 ? (quebra / total_metal) * 100 : 0;
+  // quebra = total_metal − ouro_real (zero se não houve ouro apontado no PCP)
+  const temOuro            = total_metal > 0;
+  const quebra             = temOuro ? total_metal - peso_ouro_real : 0;
+  const porcentagem_quebra = temOuro ? (quebra / total_metal) * 100 : 0;
 
   // 4. Inserir saida_ordem com peso=0 para SUPRIMIR o trigger
   //    (trigger guard: IF NEW.peso IS NULL OR NEW.peso <= 0 → RETURN NEW)
   const [saida] = await sql`
-    INSERT INTO alissonerp.saidas_ordem (ordem_id, deposito_id, peso, obs, created_by)
-    VALUES (${ordemId}, ${depositoId}, 0, 'Saída via PCP — gerenciado pelo ERP', ${user_id ?? null}::uuid)
+    INSERT INTO alissonerp.saidas_ordem (ordem_id, deposito_id, peso, metal_externo, obs, created_by)
+    VALUES (${ordemId}, ${depositoId}, 0, ${metal_externo}, 'Saída via PCP — gerenciado pelo ERP', ${user_id ?? null}::uuid)
     RETURNING id
   `;
   const saidaId = saida.id as number;
 
-  // 5. Atualizar PCP: peso_final, pmc, quebra, etapas=concluido
+  // 5. Atualizar PCP: peso_final, pmc, quebra, metal_externo (valor confirmado), etapas=concluido
   await sql`
     UPDATE alissonerp.pcp SET
       peso_final               = ${peso_ouro_real},
       pmc                      = ${Math.round(pmc * 1000) / 1000},
       total_geral_outros_pesos = ${peso_outros_num},
+      metal_externo            = ${metal_externo},
       quebra                   = ${Math.round(quebra * 1000) / 1000},
       porcentagem_de_quebra    = ${Math.round(porcentagem_quebra * 100) / 100},
       saida_ordem_id           = ${saidaId},
@@ -149,8 +163,8 @@ export async function POST(req: NextRequest) {
   `;
 
   // 7. CE: SM — saída do depósito do operador (ouro virou peça — sem entrada no pote)
-  //    Só cria se houver ouro real (peso_ouro_real > 0)
-  if (peso_ouro_real > 0) {
+  //    Só cria se houver ouro real E ouro foi apontado (temOuro evita CE fantasma)
+  if (temOuro && peso_ouro_real > 0) {
     await sql`
       INSERT INTO alissonerp.movimentacoes_estoque
         (insumo_id, deposito_id, saida, marcador, ordem_id, obs, created_at)
@@ -177,8 +191,8 @@ export async function POST(req: NextRequest) {
     `;
   }
 
-  // 7d. Registrar quebra do operador que realizou a saída (se não for o pote)
-  if (depositoId !== 1 && peso_ouro_real > 0) {
+  // 7d. Registrar quebra do operador que realizou a saída (se não for o pote e houve ouro)
+  if (temOuro && depositoId !== 1 && peso_ouro_real > 0) {
     const [depRow] = await sql`
       SELECT nome FROM alissonerp.depositos WHERE id = ${depositoId} LIMIT 1
     `;
@@ -256,14 +270,15 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    saida_id:          saidaId,
+    saida_id:           saidaId,
     peso_bruto,
-    peso_pedras:       peso_pedras_total,
-    peso_outros:       peso_outros_num,
+    peso_pedras:        peso_pedras_total,
+    peso_outros:        peso_outros_num,
+    metal_externo,
     peso_ouro_real,
-    total_metal:       Math.round(total_metal * 1000) / 1000,
-    pmc:               Math.round(pmc * 1000) / 1000,
-    quebra:            Math.round(quebra * 1000) / 1000,
+    total_metal:        Math.round(total_metal * 1000) / 1000,
+    pmc:                Math.round(pmc * 1000) / 1000,
+    quebra:             Math.round(quebra * 1000) / 1000,
     porcentagem_quebra: Math.round(porcentagem_quebra * 100) / 100,
   });
 }

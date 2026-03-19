@@ -163,7 +163,7 @@ function DistCard({ d, onClick }: { d: DistRow; onClick: () => void }) {
 
 type ActiveModal = "nova" | "apontamento" | "concluir" | null;
 
-export default function DistribuicaoClient({ dists }: { dists: DistRow[] }) {
+export default function DistribuicaoClient({ dists, semDeposito }: { dists: DistRow[]; semDeposito?: boolean }) {
   const router = useRouter();
   const [selected, setSelected] = useState<DistRow | null>(null);
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
@@ -521,6 +521,30 @@ export default function DistribuicaoClient({ dists }: { dists: DistRow[] }) {
           ordens={ordens}
           onSuccess={() => { refresh(); setSelected(null); setOrdens([]); }}
         />
+      </div>
+    );
+  }
+
+  // ─── SEM DEPÓSITO (ourives sem depósito configurado) ───────────────────────
+  if (semDeposito) {
+    return (
+      <div className="px-3 md:px-6 py-4 md:py-8">
+        <div className="mb-4 md:mb-8">
+          <h2 className="text-xl md:text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: "#184036" }}>
+            Distribuição
+          </h2>
+        </div>
+        <div
+          className="rounded-xl border p-8 text-center"
+          style={{ borderColor: "#E8DCC8", backgroundColor: "#FFFBEB" }}
+        >
+          <p className="text-sm font-semibold mb-1" style={{ color: "#92400E" }}>
+            Depósito não configurado
+          </p>
+          <p className="text-sm" style={{ color: "#B45309" }}>
+            Seu usuário não tem depósito configurado. Contate o administrador.
+          </p>
+        </div>
       </div>
     );
   }
