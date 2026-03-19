@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, ArrowLeft, CheckCircle2, Clock, Layers, RefreshCw } from "lucide-react";
+import { Plus, ArrowLeft, CheckCircle2, Clock, Layers, RefreshCw, X, Search, Loader2, AlertCircle } from "lucide-react";
 import NovaDistribuicaoModal from "@/components/forms/NovaDistribuicaoModal";
 import ApontamentoDistModal from "@/components/forms/ApontamentoDistModal";
 import FecharOrdemDistModal from "@/components/forms/FecharOrdemDistModal";
@@ -161,7 +161,256 @@ function DistCard({ d, onClick }: { d: DistRow; onClick: () => void }) {
   );
 }
 
-type ActiveModal = "nova" | "apontamento" | "concluir" | null;
+type ActiveModal = "nova" | "apontamento" | "concluir" | "adicionar-ordens" | null;
+
+// ─── MODAL: ADICIONAR ORDENS ──────────────────────────────────────────────────
+interface OrdemDisponivel {
+  id: number;
+  numero_ordem: string | null;
+  tipo_ordem: string | null;
+  peso_metal_negociado: number;
+  cliente_nome: string | null;
+  pcp_etapa: string;
+}
+
+function AdicionarOrdensModal({
+  isOpen,
+  onClose,
+  distribuicaoId,
+  onSuccess,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  distribuicaoId: number;
+  onSuccess: () => void;
+}) {
+  const [ordens, setOrdens] = useState<OrdemDisponivel[]>([]);
+  const [loadingOrdens, setLoadingOrdens] = useState(false);
+  const [selectedOrdens, setSelectedOrdens] = useState<Set<number>>(new Set());
+  const [busca, setBusca] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  // Carregar ordens disponíveis ao abrir
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedOrdens(new Set());
+    setBusca("");
+    setError("");
+    setSuccess(false);
+    setLoadingOrdens(true);
+    fetch(`/api/distribuicao/ordens-disponiveis?excluir_dist_id=${distribuicaoId}`)
+      .then((r) => r.json())
+      .then((rows) => setOrdens(rows as OrdemDisponivel[]))
+      .catch(() => setOrdens([]))
+      .finally(() => setLoadingOrdens(false));
+  }, [isOpen]);
+
+  const ordensFiltradas = useMemo(() => {
+    if (!busca.trim()) return ordens;
+    const q = busca.toLowerCase();
+    return ordens.filter(
+      (o) =>
+        (o.numero_ordem ?? "").toLowerCase().includes(q) ||
+        (o.cliente_nome ?? "").toLowerCase().includes(q),
+    );
+  }, [ordens, busca]);
+
+  function toggleOrdem(id: number) {
+    setSelectedOrdens((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+    setError("");
+  }
+
+  async function handleSubmit() {
+    if (selectedOrdens.size === 0) {
+      setError("Selecione ao menos uma ordem.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/distribuicao/${distribuicaoId}/adicionar-ordens`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ordem_ids: Array.from(selectedOrdens) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((data as { error?: string }).error ?? "Erro ao adicionar ordens.");
+        return;
+      }
+      setSuccess(true);
+      setTimeout(() => {
+        onSuccess();
+        onClose();
+      }, 900);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full max-h-[92vh] flex flex-col rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-lg md:mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-6 py-4 border-b shrink-0 sticky top-0 bg-white z-10"
+          style={{ borderColor: "#E8DCC8" }}
+        >
+          <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>
+            Adicionar Ordens ao Lote
+          </h3>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100"
+          >
+            <X size={17} style={{ color: "#9CA3AF" }} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+          {/* Busca */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label
+                className="text-[11px] font-semibold uppercase tracking-wider"
+                style={{ color: "#6B7280" }}
+              >
+                Ordens Disponíveis
+              </label>
+              <span className="text-[11px]" style={{ color: "#9CA3AF" }}>
+                {ordens.length} disponíveis · {selectedOrdens.size} selecionadas
+              </span>
+            </div>
+            <div className="relative mb-2">
+              <Search
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2"
+                style={{ color: "#9CA3AF" }}
+              />
+              <input
+                type="text"
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar por ordem ou cliente…"
+                className="w-full pl-8 pr-3 py-2 rounded-lg border text-sm focus:outline-none"
+                style={{ borderColor: "#E8DCC8" }}
+              />
+            </div>
+
+            <div
+              className="rounded-lg border divide-y overflow-y-auto"
+              style={{ borderColor: "#E8DCC8", maxHeight: 280 }}
+            >
+              {loadingOrdens && (
+                <p className="text-center text-sm py-6" style={{ color: "#9CA3AF" }}>
+                  <Loader2 size={14} className="inline animate-spin mr-1" />
+                  Carregando…
+                </p>
+              )}
+              {!loadingOrdens && ordensFiltradas.length === 0 && (
+                <p className="text-center text-sm py-6" style={{ color: "#9CA3AF" }}>
+                  {busca ? "Nenhuma ordem encontrada" : "Nenhuma ordem disponível"}
+                </p>
+              )}
+              {ordensFiltradas.map((o) => (
+                <label
+                  key={o.id}
+                  className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-gray-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedOrdens.has(o.id)}
+                    onChange={() => toggleOrdem(o.id)}
+                    className="rounded shrink-0"
+                    style={{ accentColor: "#184036" }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold" style={{ color: "#184036" }}>
+                      {o.numero_ordem ?? `#${o.id}`}
+                    </p>
+                    {o.cliente_nome && (
+                      <p className="text-[11px] truncate" style={{ color: "#6B7280" }}>
+                        {o.cliente_nome}
+                      </p>
+                    )}
+                  </div>
+                  {Number(o.peso_metal_negociado) > 0 && (
+                    <span className="text-[11px] font-mono shrink-0" style={{ color: "#9CA3AF" }}>
+                      {Number(o.peso_metal_negociado).toFixed(2)}g
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {error && (
+            <div
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]"
+              style={{ backgroundColor: "#FEF2F2", color: "#DC2626" }}
+            >
+              <AlertCircle size={14} className="shrink-0" />
+              {error}
+            </div>
+          )}
+          {success && (
+            <div
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]"
+              style={{ backgroundColor: "#ECFDF5", color: "#059669" }}
+            >
+              <CheckCircle2 size={14} className="shrink-0" />
+              Ordens adicionadas com sucesso!
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          className="flex items-center justify-end gap-3 px-6 py-4 border-t shrink-0"
+          style={{ borderColor: "#E8DCC8" }}
+        >
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-[13px]"
+            style={{ color: "#6B7280" }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading || success || selectedOrdens.size === 0}
+            className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
+            style={{ backgroundColor: "#184036", color: "#F3EADA" }}
+          >
+            {loading ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Adicionando…
+              </>
+            ) : (
+              `Adicionar${selectedOrdens.size > 0 ? ` ${selectedOrdens.size} Ordem${selectedOrdens.size > 1 ? "ns" : ""}` : ""}`
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function DistribuicaoClient({ dists, semDeposito }: { dists: DistRow[]; semDeposito?: boolean }) {
   const router = useRouter();
@@ -469,6 +718,13 @@ export default function DistribuicaoClient({ dists, semDeposito }: { dists: Dist
               <Plus size={14} /> Apontar
             </button>
             <button
+              onClick={() => setActiveModal("adicionar-ordens")}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+              style={{ backgroundColor: "#0EA5E912", color: "#0284C7" }}
+            >
+              <Plus size={14} /> Adicionar Ordens
+            </button>
+            <button
               onClick={() => setActiveModal("concluir")}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
               style={{ backgroundColor: "#F59E0B12", color: "#B45309" }}
@@ -520,6 +776,22 @@ export default function DistribuicaoClient({ dists, semDeposito }: { dists: Dist
           ouroEntregue={Math.max(0, (selected.total_metal ?? 0) - (selected.retorno_metal ?? 0))}
           ordens={ordens}
           onSuccess={() => { refresh(); setSelected(null); setOrdens([]); }}
+        />
+        <AdicionarOrdensModal
+          isOpen={activeModal === "adicionar-ordens"}
+          onClose={() => setActiveModal(null)}
+          distribuicaoId={selected.id}
+          onSuccess={() => {
+            setActiveModal(null);
+            // Recarregar ordens e atualizar contadores via router.refresh()
+            setLoadingOrdens(true);
+            fetch(`/api/distribuicao/${selected.id}`)
+              .then((r) => r.json())
+              .then((data) => setOrdens(data.ordens ?? []))
+              .catch(() => {})
+              .finally(() => setLoadingOrdens(false));
+            refresh();
+          }}
         />
       </div>
     );

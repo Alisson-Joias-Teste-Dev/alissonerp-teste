@@ -17,7 +17,8 @@ import { registrarQuebra, buscarOuroRecebido } from "@/lib/registrar-quebra";
 //
 // CE SM: saida dep_operador — peso_ouro_real COMPLETO (inclui metal_externo fisicamente)
 // CE QUEBRA_PCP: saida dep_operador — quebra — SEM entrada no pote (só se quebra > 0)
-// Pedras: NÃO geram movimentação (consumidas na peça)
+// CE SP: saida dep_operador — qtd_utilizada por pedra (pedras consumidas na peça)
+// CE QBP: saida dep_operador — quebra/perda de pedra (disponivel − utilizada, se > 0)
 // metal_externo: descontado SÓ do PMC, NÃO da movimentação de estoque
 export async function POST(req: NextRequest) {
   const {
@@ -77,9 +78,46 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 2. Calcular peso das pedras utilizadas
+  // 2. Calcular peso das pedras utilizadas + validar qtd contra disponível
   let peso_pedras_total = 0;
   const pedrasInfo: { insumo_id: number; qtd: number; peso_unitario: number; peso_total: number }[] = [];
+
+  // PRÉ-VALIDAÇÃO: calcular disponível de cada pedra apontada neste PCP
+  // (tipo 3 = entrada pedra, tipo 6 = retorno pedra)
+  // Feita ANTES de qualquer INSERT para poder retornar 400 sem efeito colateral.
+  if ((pedras_utilizadas ?? []).length > 0) {
+    const dispRows = await sql`
+      SELECT
+        a.insumo_id,
+        (SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -
+         SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END))::integer AS disponivel
+      FROM alissonerp.apontamentos_pcp a
+      JOIN alissonerp.insumos i ON i.id = a.insumo_id
+      WHERE a.pcp_id = ${pcp_id}
+        AND i.categoria_id = 2
+      GROUP BY a.insumo_id
+      HAVING (
+        SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -
+        SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END)
+      ) > 0
+    `;
+    const dispMap = new Map<number, number>(
+      dispRows.map((r) => [r.insumo_id as number, Number(r.disponivel)])
+    );
+
+    for (const p of pedras_utilizadas ?? []) {
+      if (!p.qtd_utilizada || p.qtd_utilizada < 0) continue;
+      const disponivel = dispMap.get(p.insumo_id) ?? 0;
+      if (p.qtd_utilizada > disponivel) {
+        return NextResponse.json(
+          {
+            error: `Pedra insumo_id=${p.insumo_id}: quantidade utilizada (${p.qtd_utilizada}) excede disponível (${disponivel}) no PCP.`,
+          },
+          { status: 400 },
+        );
+      }
+    }
+  }
 
   for (const p of pedras_utilizadas ?? []) {
     if (!p.qtd_utilizada || p.qtd_utilizada <= 0) continue;
@@ -217,6 +255,84 @@ export async function POST(req: NextRequest) {
       ouro_entregue: peso_ouro_real,
       created_by:    user_id ?? null,
     });
+  }
+
+  // 7e. CE: SP — baixa definitiva de pedras consumidas na peça
+  //      CE: QBP — baixa de quebra de pedra (perdida no processo)
+  //
+  // Padrão: 1 row de saída (sem dupla-entrada), depósito do operador.
+  // Pedras que "viraram peça" saem do operador e não entram em lugar algum
+  // (análogo ao SM do ouro: saída de peça acabada).
+  //
+  // Executa para TODA pedra com disponível > 0 neste PCP, independente do array enviado.
+  //
+  // Regra de qtdUtilizada:
+  //   - pedras_utilizadas === undefined (não enviado): default = disponível total (tudo consumido)
+  //   - pedras_utilizadas é array (mesmo vazio): pedras ausentes do array = qtd_utilizada 0
+  //     (tudo vira QBP — operador não declarou consumo)
+  const pedrasBodyDefinido = pedras_utilizadas !== undefined && pedras_utilizadas !== null;
+
+  // Re-buscar disponível para todas as pedras deste PCP (já validado, agora para CEs)
+  const dispRows2 = await sql`
+    SELECT
+      a.insumo_id,
+      (SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -
+       SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END))::integer AS disponivel
+    FROM alissonerp.apontamentos_pcp a
+    JOIN alissonerp.insumos i ON i.id = a.insumo_id
+    WHERE a.pcp_id = ${pcp_id}
+      AND i.categoria_id = 2
+    GROUP BY a.insumo_id
+    HAVING (
+      SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -
+      SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END)
+    ) > 0
+  `;
+
+  for (const row of dispRows2) {
+    const insumoId   = row.insumo_id as number;
+    const disponivel = Number(row.disponivel);
+
+    // Determinar qtdUtilizada
+    const info = (pedras_utilizadas ?? []).find((p) => p.insumo_id === insumoId);
+    let qtdUtilizada: number;
+    if (!pedrasBodyDefinido) {
+      // Body não enviou campo pedras_utilizadas → tudo consumido (default legado)
+      qtdUtilizada = disponivel;
+    } else if (info !== undefined) {
+      // Pedra presente no array → usar valor informado
+      qtdUtilizada = Number(info.qtd_utilizada);
+    } else {
+      // Pedra disponível mas ausente do array → operador não declarou consumo → tudo QBP
+      qtdUtilizada = 0;
+    }
+    const quebraPedra = disponivel - qtdUtilizada;
+
+    // SP: saída do depósito do operador — pedras consumidas na peça
+    if (qtdUtilizada > 0) {
+      await sql`
+        INSERT INTO alissonerp.movimentacoes_estoque
+          (insumo_id, deposito_id, saida, entrada, marcador, ordem_id, obs)
+        VALUES
+          (${insumoId}, ${depositoId}, ${qtdUtilizada}::real, 0,
+           'SP'::alissonerp.enum_marcador_estoque,
+           ${ordemId},
+           ${'Pedra consumida PCP #' + pcp_id + ' → saida_id #' + saidaId})
+      `;
+    }
+
+    // QBP: saída do depósito do operador — pedras quebradas/perdidas no processo
+    if (quebraPedra > 0) {
+      await sql`
+        INSERT INTO alissonerp.movimentacoes_estoque
+          (insumo_id, deposito_id, saida, entrada, marcador, ordem_id, obs)
+        VALUES
+          (${insumoId}, ${depositoId}, ${quebraPedra}::real, 0,
+           'QBP'::alissonerp.enum_marcador_estoque,
+           ${ordemId},
+           ${'Quebra pedra PCP #' + pcp_id + ' → saida_id #' + saidaId})
+      `;
+    }
   }
 
   // 8. Buscar dados complementares para a auditoria
