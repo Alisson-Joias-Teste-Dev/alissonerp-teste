@@ -76,5 +76,6 @@ export async function deleteFile(
  * (não precisa de signed URL — bucket é público)
  */
 export function getPublicUrl(bucket: string, path: string): string {
+  if (path.startsWith('http')) return path;
   return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
 }

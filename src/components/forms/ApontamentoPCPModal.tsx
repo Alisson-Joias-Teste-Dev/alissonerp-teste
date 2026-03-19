@@ -35,6 +35,8 @@ interface ApontamentoPCPModalProps {
   ordemId: number;
   depositoId: number;
   setorId: number | null;
+  /** true quando pcp.deposito_id já foi atribuído — trava o depósito no tipo 2 (Entrada de Metal) */
+  depositoAtribuido?: boolean;
   onSuccess?: () => void;
 }
 
@@ -79,6 +81,7 @@ export default function ApontamentoPCPModal({
   ordemId,
   depositoId,
   setorId,
+  depositoAtribuido = false,
   onSuccess,
 }: ApontamentoPCPModalProps) {
   const [tipos, setTipos] = useState<TipoApontamento[]>([]);
@@ -404,7 +407,10 @@ export default function ApontamentoPCPModal({
   const fotoOk = !precisaFotoIA || validacaoIA?.match === true;
   // Setor obrigatório apenas quando o depósito tem setores cadastrados
   const setorOk = setores.length === 0 || !!setorSelecionado;
-  const usaDepositoDoCard = tipoId === TIPO_ADITIVO || tipoId === TIPO_RETORNO || tipoId === TIPO_ENTRADA_PEDRA || tipoId === TIPO_RETORNO_PEDRA || tipoId === TIPO_OUTROS;
+  // usaDepositoDoCard: tipos que usam o depósito do card (read-only)
+  // + tipo 2 quando depositoAtribuido=true (operador já definido no PCP)
+  const usaDepositoDoCard = tipoId === TIPO_ADITIVO || tipoId === TIPO_RETORNO || tipoId === TIPO_ENTRADA_PEDRA || tipoId === TIPO_RETORNO_PEDRA || tipoId === TIPO_OUTROS
+    || (tipoId === TIPO_FOTO_IA && depositoAtribuido);
   const camposEntradaOk = precisaFotoIA
     ? (usaDepositoDoCard || (!!depositoSelecionado && setorOk))
     : true;

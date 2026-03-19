@@ -51,6 +51,7 @@ interface PCPDetalhe {
   cliente_nome: string | null;
   vendedor_nome: string | null;
   peso_metal_negociado: number | null;
+  peso_metal_externo: number | null;  // ouro do cliente (referência da ordem)
   peso_final: number | null;
   metal_externo: number | null;
   pmc: number | null;
@@ -571,6 +572,7 @@ export default function PCPDetalheModal({ pcp, onClose, onSuccess }: Props) {
           ordemId={pcp.ordem_id}
           depositoId={depositoId}
           setorId={setorId}
+          depositoAtribuido={(detalhe?.deposito_id ?? pcp.deposito_id ?? null) != null}
           onSuccess={handleApontamentoSuccess}
         />
       )}
@@ -592,6 +594,7 @@ export default function PCPDetalheModal({ pcp, onClose, onSuccess }: Props) {
           pcpId={pcp.id}
           ordemId={pcp.ordem_id}
           depositoId={depositoId}
+          pesoMetalExterno={Number(detalhe?.peso_metal_externo ?? 0)}
           onSuccess={() => { setSubModal(null); onSuccess(); onClose(); }}
         />
       )}

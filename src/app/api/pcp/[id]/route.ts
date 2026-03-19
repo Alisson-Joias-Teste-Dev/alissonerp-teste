@@ -10,7 +10,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       p.total_metal, p.retorno_metal, p.metal_externo, p.pmc, p.quebra,
       p.peso_final, p.bloqueado, p.data_conclusao, p.created_at,
       p.dist_ouro_real, p.dist_pedras_qtd, p.dist_pedras_g, p.dist_quebra,
-      o.numero_ordem, o.peso_metal_negociado, o.data_entrega,
+      o.numero_ordem, o.peso_metal_negociado, o.peso_metal_externo, o.data_entrega,
       o.local_atual AS deposito_id, o.setor_atual AS setor_id,
       c.nome AS cliente_nome,
       v.nome AS vendedor_nome,

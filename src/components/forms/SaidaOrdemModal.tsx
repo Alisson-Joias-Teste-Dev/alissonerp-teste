@@ -22,6 +22,7 @@ interface SaidaOrdemModalProps {
   pcpId: number;
   ordemId: number;
   depositoId: number;
+  pesoMetalExterno?: number; // peso_metal_externo da ordem (referência)
   onSuccess?: () => void;
 }
 
@@ -68,6 +69,7 @@ export default function SaidaOrdemModal({
   pcpId,
   ordemId,
   depositoId,
+  pesoMetalExterno,
   onSuccess,
 }: SaidaOrdemModalProps) {
   // ── Dados do PCP ──
@@ -81,6 +83,8 @@ export default function SaidaOrdemModal({
   const [outros, setOutros]               = useState<OutroInsumo[]>([]);
   const [pesoOutros, setPesoOutros]       = useState<Record<number, string>>({}); // insumo_id → g
   const [qtdPedras, setQtdPedras]         = useState<Record<number, string>>({}); // insumo_id → qtd
+  // Metal externo: pré-preenchido com o peso da ordem, editável pelo operador
+  const [metalExterno, setMetalExterno]   = useState(String(pesoMetalExterno ?? 0));
 
   // ── Foto + IA ──
   const [fotoFile, setFotoFile] = useState<File | null>(null);
@@ -157,10 +161,19 @@ export default function SaidaOrdemModal({
     }, 0);
   }, [pedras, qtdPedras]);
 
+  const metalExternoNum = Number(metalExterno.replace(",", ".")) || 0;
+
+  // peso_ouro_real = peso_bruto − pedras (ouro físico na peça, inclui metal_externo)
   const pesoOuroReal = useMemo(() => {
     if (isNaN(pesoBrutoNum) || pesoBrutoNum <= 0) return null;
-    return pesoBrutoNum - pesoPedrasTotal - outrosPesosNum;
-  }, [pesoBrutoNum, pesoPedrasTotal, outrosPesosNum]);
+    return pesoBrutoNum - pesoPedrasTotal;
+  }, [pesoBrutoNum, pesoPedrasTotal]);
+
+  // pmc = peso_ouro_real − outros − metal_externo
+  const pmcPreview = useMemo(() => {
+    if (pesoOuroReal === null) return null;
+    return pesoOuroReal - outrosPesosNum - metalExternoNum;
+  }, [pesoOuroReal, outrosPesosNum, metalExternoNum]);
 
   // Total Metal = mesma fórmula do card: metal_liquido (resumo ao vivo) + dist_ouro_real
   const totalMetal = dados
@@ -169,9 +182,11 @@ export default function SaidaOrdemModal({
 
   const preview = useMemo(() => {
     if (!dados || pesoOuroReal === null) return null;
-    const resultado = totalMetal - pesoOuroReal;
-    const pct       = totalMetal !== 0 ? (resultado / totalMetal) * 100 : 0;
+    const semOuro   = totalMetal === 0;
+    const resultado = semOuro ? 0 : totalMetal - pesoOuroReal;
+    const pct       = semOuro ? 0 : (resultado / totalMetal) * 100;
     return {
+      semOuro,
       resultado: Math.round(resultado * 1000) / 1000,
       pct:       Math.round(pct * 100) / 100,
     };
@@ -214,6 +229,7 @@ export default function SaidaOrdemModal({
     setOutros([]);
     setPesoOutros({});
     setQtdPedras({});
+    setMetalExterno(String(pesoMetalExterno ?? 0));
     setFotoFile(null);
     setFotoPreview(null);
     setValidacaoIA(null);
@@ -280,6 +296,7 @@ export default function SaidaOrdemModal({
         peso_bruto:       pesoBrutoNum,
         pedras_utilizadas,
         peso_outros:      outrosPesosNum,
+        metal_externo:    metalExternoNum,
         foto_balanca:     fotoPath,
         user_id:          null,
       }),
@@ -304,7 +321,7 @@ export default function SaidaOrdemModal({
   if (!isOpen) return null;
 
   const pctColor   = preview
-    ? (preview.resultado < 0 ? "#059669" : quebraColor(Math.abs(preview.pct)))
+    ? (preview.semOuro ? "#059669" : preview.resultado < 0 ? "#059669" : quebraColor(Math.abs(preview.pct)))
     : "#9CA3AF";
   const fotoOk     = validacaoIA?.match === true;
   const podeSalvar = !loading && !success && !isNaN(pesoBrutoNum) && pesoBrutoNum > 0 && fotoOk;
@@ -604,6 +621,50 @@ export default function SaidaOrdemModal({
                 )}
               </div>
 
+              {/* ── Metal Externo (só exibe se a ordem tem metal do cliente) ── */}
+              {(pesoMetalExterno ?? 0) > 0 && (
+                <div
+                  className="rounded-lg p-4 space-y-3"
+                  style={{ backgroundColor: "#FFFBEB", border: "1px solid #FDE68A" }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#92400E" }}>
+                      ⚠️ Metal do Cliente
+                    </span>
+                  </div>
+                  <p className="text-[12px]" style={{ color: "#78350F" }}>
+                    Esta ordem possui metal externo (ouro do cliente). Confirme o peso abaixo — será descontado do PMC mas NÃO da movimentação de estoque.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <p className="text-[10px] font-semibold mb-1" style={{ color: "#92400E" }}>
+                        Peso registrado na ordem
+                      </p>
+                      <p className="font-mono text-[13px]" style={{ color: "#92400E" }}>
+                        {Number(pesoMetalExterno).toFixed(3)}g
+                      </p>
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-[10px] font-semibold mb-1" style={{ color: "#92400E" }}>
+                        Peso confirmado <span style={{ color: "#EF4444" }}>*</span>
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          step="0.001"
+                          min="0"
+                          value={metalExterno}
+                          onChange={(e) => { setMetalExterno(e.target.value); setError(""); }}
+                          className="w-full px-2 py-1.5 rounded-md border text-sm font-mono text-right focus:outline-none"
+                          style={{ borderColor: "#FDE68A", backgroundColor: "#FFFEF5" }}
+                        />
+                        <span className="text-[11px]" style={{ color: "#92400E" }}>g</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* ── Preview Resultado ── */}
               <div
                 className="rounded-lg border overflow-hidden"
@@ -626,7 +687,7 @@ export default function SaidaOrdemModal({
                 </div>
                 {preview ? (
                   <div className="px-4 py-3 space-y-1.5 text-[13px]">
-                    {/* Bruto − pedras − outros = ouro real */}
+                    {/* Bloco 1: peso_ouro_real = bruto − pedras */}
                     <div className="flex justify-between">
                       <span style={{ color: "#374151" }}>Peso bruto</span>
                       <span className="font-mono" style={{ color: C.esmeralda }}>{formatPeso(pesoBrutoNum)}g</span>
@@ -637,12 +698,6 @@ export default function SaidaOrdemModal({
                         <span className="font-mono" style={{ color: "#6B7280" }}>−{formatPeso(pesoPedrasTotal)}g</span>
                       </div>
                     )}
-                    {outrosPesosNum > 0 && (
-                      <div className="flex justify-between">
-                        <span style={{ color: "#374151" }}>− Outros</span>
-                        <span className="font-mono" style={{ color: "#6B7280" }}>−{formatPeso(outrosPesosNum)}g</span>
-                      </div>
-                    )}
                     <div
                       className="flex justify-between font-semibold pt-1.5"
                       style={{ borderTop: `1px solid ${C.cremeBorder}` }}
@@ -650,29 +705,65 @@ export default function SaidaOrdemModal({
                       <span style={{ color: "#374151" }}>Ouro real na peça</span>
                       <span className="font-mono" style={{ color: C.esmeralda }}>{formatPeso(pesoOuroReal!)}g</span>
                     </div>
-                    {/* totalMetal − ouroReal = resultado */}
-                    <div className="flex justify-between mt-1">
-                      <span style={{ color: "#374151" }}>Ouro c/ operador</span>
-                      <span className="font-mono" style={{ color: C.esmeralda }}>{formatPeso(totalMetal)}g</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span style={{ color: "#374151" }}>− Ouro real</span>
-                      <span className="font-mono" style={{ color: "#6B7280" }}>−{formatPeso(pesoOuroReal!)}g</span>
-                    </div>
-                    <div
-                      className="flex justify-between font-bold text-[14px] pt-1.5"
-                      style={{ borderTop: `1px solid ${C.cremeBorder}` }}
-                    >
-                      <span style={{ color: pctColor }}>
-                        {preview.resultado > 0 ? "QUEBRA" : preview.resultado < 0 ? "SALDO" : "ZERADO"}
-                      </span>
-                      <span className="font-mono" style={{ color: pctColor }}>
-                        {preview.resultado > 0 ? "+" : ""}{formatPeso(preview.resultado)}g
-                        <span className="text-[11px] font-normal ml-1.5">
-                          ({Math.abs(preview.pct).toFixed(2)}%)
-                        </span>
-                      </span>
-                    </div>
+                    {/* Bloco 2: pmc = ouro_real − outros − metal_externo */}
+                    {(outrosPesosNum > 0 || metalExternoNum > 0) && (
+                      <>
+                        {outrosPesosNum > 0 && (
+                          <div className="flex justify-between">
+                            <span style={{ color: "#374151" }}>− Outros</span>
+                            <span className="font-mono" style={{ color: "#6B7280" }}>−{formatPeso(outrosPesosNum)}g</span>
+                          </div>
+                        )}
+                        {metalExternoNum > 0 && (
+                          <div className="flex justify-between">
+                            <span style={{ color: "#374151" }}>− Metal externo</span>
+                            <span className="font-mono" style={{ color: "#92400E" }}>−{formatPeso(metalExternoNum)}g</span>
+                          </div>
+                        )}
+                        <div
+                          className="flex justify-between font-semibold pt-1.5"
+                          style={{ borderTop: `1px solid ${C.cremeBorder}` }}
+                        >
+                          <span style={{ color: "#374151" }}>PMC</span>
+                          <span className="font-mono" style={{ color: C.esmeralda }}>{formatPeso(pmcPreview!)}g</span>
+                        </div>
+                      </>
+                    )}
+                    {/* Bloco 3: totalMetal − ouroReal = quebra (ou aviso sem ouro) */}
+                    {preview.semOuro ? (
+                      <div
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] mt-1"
+                        style={{ backgroundColor: "#F0FDF4", color: "#166534", border: "1px solid #BBF7D0" }}
+                      >
+                        <CheckCircle size={13} className="shrink-0" />
+                        Sem ouro apontado — sem quebra
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex justify-between mt-1">
+                          <span style={{ color: "#374151" }}>Ouro c/ operador</span>
+                          <span className="font-mono" style={{ color: C.esmeralda }}>{formatPeso(totalMetal)}g</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span style={{ color: "#374151" }}>− Ouro real</span>
+                          <span className="font-mono" style={{ color: "#6B7280" }}>−{formatPeso(pesoOuroReal!)}g</span>
+                        </div>
+                        <div
+                          className="flex justify-between font-bold text-[14px] pt-1.5"
+                          style={{ borderTop: `1px solid ${C.cremeBorder}` }}
+                        >
+                          <span style={{ color: pctColor }}>
+                            {preview.resultado > 0 ? "QUEBRA" : preview.resultado < 0 ? "SALDO" : "ZERADO"}
+                          </span>
+                          <span className="font-mono" style={{ color: pctColor }}>
+                            {preview.resultado > 0 ? "+" : ""}{formatPeso(preview.resultado)}g
+                            <span className="text-[11px] font-normal ml-1.5">
+                              ({Math.abs(preview.pct).toFixed(2)}%)
+                            </span>
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <p className="text-center text-[12px] py-4" style={{ color: "#9CA3AF" }}>
