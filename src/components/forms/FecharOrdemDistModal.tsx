@@ -1,8 +1,18 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { X, Loader2, CheckCircle, AlertCircle, Camera, RefreshCw } from "lucide-react";
+import { X, Loader2, CheckCircle, AlertCircle, Camera, RefreshCw, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+
+const MOTIVOS_SEM_PESO = [
+  { value: "servico_cliente", label: "Serviço — peça do cliente" },
+  { value: "sem_ouro", label: "Sem ouro — só pedras/acabamento" },
+  { value: "fundicao_falha", label: "Problema de fundição — metal retornado" },
+  { value: "cancelada", label: "Ordem cancelada" },
+  { value: "outro", label: "Outro motivo" },
+] as const;
+
+type MotivoSemPeso = (typeof MOTIVOS_SEM_PESO)[number]["value"];
 
 const C = {
   esmeralda: "#184036",
@@ -61,9 +71,15 @@ export default function FecharOrdemDistModal({
   const [validando, setValidando] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ─── Saída sem peso ───────────────────────────────────────────────────────
+  const [semPeso, setSemPeso] = useState(false);
+  const [motivo, setMotivo] = useState<MotivoSemPeso | "">("");
+  const [obsMotivo, setObsMotivo] = useState("");
+
   function resetForm() {
     setPeso(""); setPedrasQtd({}); setError(""); setSuccess(false);
     setFotoFile(null); setFotoPreview(null); setValidacaoIA(null); setValidando(false);
+    setSemPeso(false); setMotivo(""); setObsMotivo("");
   }
 
   useEffect(() => {
@@ -123,6 +139,49 @@ export default function FecharOrdemDistModal({
   async function handleSubmit() {
     setError("");
     if (!ordem) return;
+
+    // ── Validação sem peso ──────────────────────────────────────────────────
+    if (semPeso) {
+      if (!motivo) { setError("Selecione o motivo da saída sem peso."); return; }
+      if (motivo === "outro" && !obsMotivo.trim()) {
+        setError("Descreva o motivo da saída sem peso.");
+        return;
+      }
+
+      const labelMotivo = MOTIVOS_SEM_PESO.find((m) => m.value === motivo)?.label ?? motivo;
+      const justificativa = motivo === "outro"
+        ? `Outro: ${obsMotivo.trim()}`
+        : `${labelMotivo}${obsMotivo.trim() ? ` — ${obsMotivo.trim()}` : ""}`;
+
+      setLoading(true);
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      const res = await fetch(`/api/distribuicao/${distribuicaoId}/saida`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ordem_id: ordem.id,
+          sem_peso: true,
+          justificativa_sem_peso: justificativa,
+          user_id: user?.id ?? null,
+        }),
+      });
+
+      setLoading(false);
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error ?? "Erro ao registrar saída sem peso.");
+        return;
+      }
+
+      setSuccess(true);
+      setTimeout(() => { resetForm(); onSuccess?.(); onClose(); }, 1500);
+      return;
+    }
+
+    // ── Validação normal ────────────────────────────────────────────────────
     if (pesoBrutoNum <= 0) { setError("Peso bruto deve ser maior que zero."); return; }
     if (ouroReal < 0) {
       setError("Peso das pedras maior que o peso bruto. Verifique as quantidades.");
@@ -188,7 +247,9 @@ export default function FecharOrdemDistModal({
   if (!isOpen || !ordem) return null;
 
   const fotoOk = validacaoIA?.match === true;
-  const podeSalvar = !loading && !success && pesoBrutoNum > 0 && fotoOk;
+  const podeSalvarNormal = !loading && !success && pesoBrutoNum > 0 && fotoOk;
+  const podeSalvarSemPeso = !loading && !success && !!motivo && (motivo !== "outro" || !!obsMotivo.trim());
+  const podeSalvar = semPeso ? podeSalvarSemPeso : podeSalvarNormal;
   const iaColor = validacaoIA?.match ? "#059669" : "#DC2626";
 
   return (
@@ -220,7 +281,78 @@ export default function FecharOrdemDistModal({
         </div>
 
         <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
-          {/* Peso bruto */}
+          {/* Checkbox: Saída sem peso */}
+          <label
+            className="flex items-start gap-3 cursor-pointer rounded-xl border p-3 transition-colors"
+            style={{
+              borderColor: semPeso ? "#FCD34D" : "#E8DCC8",
+              backgroundColor: semPeso ? "#FFFBEB" : "#FAFAF7",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={semPeso}
+              onChange={(e) => {
+                setSemPeso(e.target.checked);
+                setMotivo("");
+                setObsMotivo("");
+                setError("");
+              }}
+              className="mt-0.5 h-4 w-4 rounded accent-amber-500 cursor-pointer"
+            />
+            <div>
+              <p className="text-[13px] font-semibold" style={{ color: semPeso ? "#92400E" : "#374151" }}>
+                Saída sem peso
+              </p>
+              <p className="text-[11px] mt-0.5" style={{ color: semPeso ? "#B45309" : "#9CA3AF" }}>
+                Serviço do cliente, sem ouro, cancelada ou fundição falhou
+              </p>
+            </div>
+          </label>
+
+          {/* Campos quando sem_peso = true */}
+          {semPeso && (
+            <div className="space-y-3 rounded-xl border p-4" style={{ borderColor: "#FCD34D", backgroundColor: "#FFFBEB" }}>
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle size={14} style={{ color: "#B45309" }} />
+                <p className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "#B45309" }}>
+                  Motivo obrigatório
+                </p>
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
+                  Motivo *
+                </label>
+                <select
+                  value={motivo}
+                  onChange={(e) => { setMotivo(e.target.value as MotivoSemPeso | ""); setError(""); }}
+                  className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none bg-white"
+                  style={{ borderColor: "#FCD34D" }}
+                >
+                  <option value="">Selecione…</option>
+                  {MOTIVOS_SEM_PESO.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
+                  Observação {motivo === "outro" ? "*" : "(opcional)"}
+                </label>
+                <textarea
+                  value={obsMotivo}
+                  onChange={(e) => { setObsMotivo(e.target.value); setError(""); }}
+                  placeholder={motivo === "outro" ? "Descreva o motivo…" : "Detalhes adicionais (opcional)"}
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none resize-none"
+                  style={{ borderColor: "#FCD34D" }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Campos normais — ocultos quando sem_peso */}
+          {!semPeso && (<>
           <div>
             <label
               className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
@@ -449,6 +581,7 @@ export default function FecharOrdemDistModal({
               )}
             </div>
           )}
+          </>)}
 
           {error && (
             <div

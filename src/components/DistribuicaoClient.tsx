@@ -67,6 +67,9 @@ interface OrdemDetalhe {
   quebra: number | null;
   ouro_entregue: number | null;
   data_baixa: string | null;
+  // Saída sem peso (migration 077)
+  sem_peso: boolean | null;
+  justificativa_sem_peso: string | null;
   // Fechamento (trigger result)
   peso_fechamento: number | null;
   pmc_fechamento: number | null;
@@ -261,8 +264,16 @@ export default function DistribuicaoClient({ dists }: { dists: DistRow[] }) {
             <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "#6B7280" }}>
               Ordens ({ordens.length})
             </h3>
-            <div className="text-sm" style={{ color: "#9CA3AF" }}>
+            <div className="text-sm flex items-center gap-2" style={{ color: "#9CA3AF" }}>
               {ordensConcluidas.length}/{ordens.length} concluídas
+              {ordens.filter((o) => o.sem_peso).length > 0 && (
+                <span
+                  className="px-1.5 py-0.5 rounded text-[10px] font-semibold border"
+                  style={{ backgroundColor: "#FFFBEB", color: "#92400E", borderColor: "#FDE68A" }}
+                >
+                  {ordens.filter((o) => o.sem_peso).length} sem peso
+                </span>
+              )}
             </div>
           </div>
 
@@ -286,14 +297,24 @@ export default function DistribuicaoClient({ dists }: { dists: DistRow[] }) {
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <Link
-                          href={`/ordens/${o.ordem_id}`}
-                          className="text-sm font-semibold hover:underline"
-                          style={{ color: "#184036" }}
-                          title="Ver detalhes da ordem"
-                        >
-                          {o.numero_ordem ?? `#${o.ordem_id}`}
-                        </Link>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Link
+                            href={`/ordens/${o.ordem_id}`}
+                            className="text-sm font-semibold hover:underline"
+                            style={{ color: "#184036" }}
+                            title="Ver detalhes da ordem"
+                          >
+                            {o.numero_ordem ?? `#${o.ordem_id}`}
+                          </Link>
+                          {o.sem_peso && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border"
+                              style={{ backgroundColor: "#FFFBEB", color: "#92400E", borderColor: "#FDE68A" }}
+                            >
+                              Sem Peso
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[11px] truncate" style={{ color: "#9CA3AF" }}>
                           {o.cliente_nome ?? "—"}
                           {Number(o.peso_metal_negociado) > 0 && ` · neg. ${Number(o.peso_metal_negociado).toFixed(2)}g`}
@@ -313,8 +334,14 @@ export default function DistribuicaoClient({ dists }: { dists: DistRow[] }) {
                         <span className="text-[11px] shrink-0" style={{ color: "#9CA3AF" }}>Em andamento</span>
                       )}
                     </div>
-                    {/* Resumo da saída */}
-                    {concluida && temDetalheSaida && (
+                    {/* Resumo da saída sem peso */}
+                    {concluida && o.sem_peso && (
+                      <div className="mt-1.5 text-[11px]" style={{ color: "#B45309" }}>
+                        {o.justificativa_sem_peso ?? "Saída sem peso"}
+                      </div>
+                    )}
+                    {/* Resumo da saída normal */}
+                    {concluida && !o.sem_peso && temDetalheSaida && (
                       <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-mono">
                         <span style={{ color: "#184036" }}>
                           bruto {Number(o.peso_bruto).toFixed(2)}g
@@ -331,7 +358,7 @@ export default function DistribuicaoClient({ dists }: { dists: DistRow[] }) {
                       </div>
                     )}
                     {/* Legado: só peso_fechamento sem detalhes */}
-                    {concluida && !temDetalheSaida && o.peso_fechamento != null && (
+                    {concluida && !o.sem_peso && !temDetalheSaida && o.peso_fechamento != null && (
                       <div className="mt-1 text-[11px] font-mono" style={{ color: "#059669" }}>
                         {Number(o.peso_fechamento).toFixed(2)}g
                         {o.pedras_fechamento != null && Number(o.pedras_fechamento) > 0 && ` · ${Math.round(Number(o.pedras_fechamento))} UN`}

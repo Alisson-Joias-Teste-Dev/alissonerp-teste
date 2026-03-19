@@ -56,6 +56,9 @@ export async function GET(
       doo.quebra,
       doo.ouro_entregue,
       doo.data_baixa,
+      -- Saída sem peso (migration 077)
+      doo.sem_peso,
+      doo.justificativa_sem_peso,
       -- Fechamento (trigger result, para compatibilidade)
       fd.peso             AS peso_fechamento,
       fd.pmc              AS pmc_fechamento,

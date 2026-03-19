@@ -4,10 +4,16 @@ import { recalcularTotaisPCP } from "@/lib/recalcular-totais-pcp";
 
 // POST /api/distribuicao/[id]/saida — registra saída por ordem
 //
-// Lógica:
+// Fluxo normal (sem_peso = false ou não enviado):
 //   peso_bruto     = peso da peça na balança (ouro + pedras)
 //   peso_pedras    = Σ(qtd_utilizada × peso_pedra_unitario)
 //   peso_ouro_real = peso_bruto − peso_pedras
+//   foto da balança obrigatória + validação IA
+//
+// Fluxo sem peso (sem_peso = true):
+//   justificativa_sem_peso OBRIGATÓRIA
+//   peso_bruto = peso_pedras = peso_ouro_real = 0
+//   NÃO exige foto, NÃO cria movimentação, NÃO calcula quebra
 //
 // Quebra/saldo NÃO é calculada por ordem — só na conclusão do lote.
 //
@@ -31,22 +37,39 @@ export async function POST(
     pedras_utilizadas,
     foto_balanca,
     user_id,
+    sem_peso,
+    justificativa_sem_peso,
   } = await req.json() as {
     ordem_id: number;
-    peso_bruto: number;
+    peso_bruto?: number;
     pedras_utilizadas?: { insumo_id: number; qtd_utilizada: number }[];
     foto_balanca?: string | null;
     user_id?: string | null;
+    sem_peso?: boolean;
+    justificativa_sem_peso?: string | null;
   };
 
   if (!ordem_id) {
     return NextResponse.json({ error: "ordem_id obrigatório" }, { status: 400 });
   }
-  if (!peso_bruto || peso_bruto <= 0) {
-    return NextResponse.json({ error: "Peso bruto deve ser maior que zero" }, { status: 400 });
-  }
-  if (!foto_balanca) {
-    return NextResponse.json({ error: "Foto da balança obrigatória" }, { status: 400 });
+
+  // ── Validações divergem por modo ──────────────────────────────────────────
+  if (sem_peso === true) {
+    // Modo sem peso: justificativa obrigatória, sem foto, sem peso_bruto
+    if (!justificativa_sem_peso || justificativa_sem_peso.trim() === "") {
+      return NextResponse.json(
+        { error: "Justificativa obrigatória quando sem_peso = true" },
+        { status: 400 },
+      );
+    }
+  } else {
+    // Modo normal: peso_bruto > 0 e foto obrigatórios
+    if (!peso_bruto || peso_bruto <= 0) {
+      return NextResponse.json({ error: "Peso bruto deve ser maior que zero" }, { status: 400 });
+    }
+    if (!foto_balanca) {
+      return NextResponse.json({ error: "Foto da balança obrigatória" }, { status: 400 });
+    }
   }
 
   // 1. Verificar que a ordem pertence a esta distribuição e não teve saída
@@ -62,6 +85,32 @@ export async function POST(
   if (doo.data_baixa) {
     return NextResponse.json({ error: "Esta ordem já teve saída registrada" }, { status: 400 });
   }
+
+  // ── MODO SEM PESO ─────────────────────────────────────────────────────────
+  if (sem_peso === true) {
+    await sql`
+      UPDATE alissonerp.distribuicao_ordens
+      SET
+        sem_peso               = true,
+        justificativa_sem_peso = ${justificativa_sem_peso!.trim()},
+        peso_bruto             = 0,
+        peso_pedras            = 0,
+        peso_ouro_real         = 0,
+        data_baixa             = now(),
+        saida_por              = ${user_id ?? null}
+      WHERE id = ${doo.id}
+    `;
+
+    return NextResponse.json({
+      ok: true,
+      sem_peso: true,
+      peso_bruto: 0,
+      peso_pedras: 0,
+      peso_ouro_real: 0,
+    });
+  }
+
+  // ── MODO NORMAL (fluxo 100% igual ao anterior) ───────────────────────────
 
   // 2. Calcular peso das pedras + buscar insumo unitário
   let peso_pedras_total = 0;
@@ -79,7 +128,7 @@ export async function POST(
     pedrasComPeso.push({ insumo_id: p.insumo_id, qtd: p.qtd_utilizada, peso_unitario: pu, peso_total: pt });
   }
 
-  const peso_ouro_real = peso_bruto - peso_pedras_total;
+  const peso_ouro_real = peso_bruto! - peso_pedras_total;
 
   // 3. INSERT detalhe de pedras usadas
   for (const p of pedrasComPeso) {
@@ -96,12 +145,12 @@ export async function POST(
   await sql`
     UPDATE alissonerp.distribuicao_ordens
     SET
-      peso_bruto     = ${peso_bruto},
+      peso_bruto     = ${peso_bruto!},
       peso_pedras    = ${peso_pedras_total},
       peso_ouro_real = ${peso_ouro_real},
       data_baixa     = now(),
       saida_por      = ${user_id ?? null},
-      foto_balanca   = ${foto_balanca}
+      foto_balanca   = ${foto_balanca!}
     WHERE id = ${doo.id}
   `;
 
@@ -124,7 +173,7 @@ export async function POST(
         peso            = ${peso_ouro_real},
         pmc             = ${peso_ouro_real},
         total_pedras_un = ${totalPedrasUn},
-        foto_balanca    = ${foto_balanca},
+        foto_balanca    = ${foto_balanca!},
         created_by      = ${user_id ?? null},
         updated_at      = now()
       WHERE id = ${fech.id}
@@ -140,7 +189,7 @@ export async function POST(
 
   return NextResponse.json({
     ok: true,
-    peso_bruto,
+    peso_bruto: peso_bruto!,
     peso_pedras: peso_pedras_total,
     peso_ouro_real,
   });
