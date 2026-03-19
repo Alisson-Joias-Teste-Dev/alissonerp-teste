@@ -78,6 +78,7 @@ interface AuditoriaRow {
   dias_analise: number;
   data_entrega: string | null;
   peso_metal_externo: number;
+  detalhes_ordem: string | null;
 }
 
 interface Props {
@@ -348,6 +349,26 @@ function AuditoriaModal({
                     <div className="text-sm font-semibold mt-0.5" style={{ color: C.esmeralda }}>{item.value}</div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Detalhes da Ordem — só exibe quando preenchido */}
+          {aud.detalhes_ordem && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#9CA3AF" }}>
+                Detalhes da Ordem
+              </p>
+              <div
+                className="rounded-lg p-3"
+                style={{ backgroundColor: "#FFFBEB", border: "1px solid #FDE68A" }}
+              >
+                <p
+                  className="text-sm whitespace-pre-wrap leading-relaxed"
+                  style={{ color: "#78350F" }}
+                >
+                  {aud.detalhes_ordem}
+                </p>
               </div>
             </div>
           )}

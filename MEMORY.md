@@ -64,8 +64,18 @@ são INACEITÁVEIS — significam que não consultou o banco.
 ### Tabelas alissonerp (referência)
 ```
 ── PRODUÇÃO ──
-ordens, pcp, saidas_ordem, apontamentos_pcp, distribuicoes
+ordens           — colunas novas (migration 073):
+  origem VARCHAR(20) DEFAULT 'erp' NOT NULL  — 'erp' | 'legado'
+  foto_peca_servico TEXT                     — path bucket ordem-fotos (servico_venda)
+  peso_peca_servico NUMERIC(10,2)            — peso peça cliente (servico_venda)
+  video_observacao TEXT                      — path bucket ordem-videos (servico_venda)
+pcp, saidas_ordem, apontamentos_pcp, distribuicoes
 tipos_apontamento (IDs 1-9 fixos)
+itens_ordem      — ordens criadas no ERP (NÃO do PDV)
+  id SERIAL, ordem_id INT FK, produto_id BIGINT FK public.produtos.id_produto,
+  nome_produto TEXT, sku TEXT, quantidade INT, peso_estimado NUMERIC(10,2),
+  observacao TEXT, created_at
+  (desnormalizada: nome_produto e sku para performance)
 
 ── SUPRIMENTOS ──
 insumos (251 registros, com unidade/descricao)
@@ -80,10 +90,16 @@ protocolo_ordens, protocolo_fotos
 
 ── QUALIDADE ──
 auditorias (loja + fábrica)
+  ATENÇÃO: coluna tipo_auditoria (NÃO 'tipo') — varchar(10), valor 'saida_pcp'
 
 ── SISTEMA ──
 configuracoes_sistema (config IA: provedor, modelos, ativa)
 configuracoes_secrets (API keys IA)
+
+── USUÁRIOS ──
+usuarios — coluna nova (migration 073):
+  tipos_ordem_permitidos JSONB DEFAULT '[]'
+  — array de tipos permitidos por usuário; admin/dev ignoram (fullAccess)
 
 ── COMENTÁRIOS E NOTIFICAÇÕES ──
 comentarios_ordem (id, ordem_id, autor_id UUID, texto, mencoes UUID[], editado, editado_em,
@@ -134,7 +150,10 @@ PEDRAS — REGRA DE MOVIMENTAÇÃO (igual ao ouro):
 situacao: "1"=Cancelado "2"=Criado "3"=Rascunho
 status:   "1"=Aguardando "2"=Em Andamento "3"=Concluído
 rota:     "1"=PCP "2"=Protocolo
-tipo_ordem: "1"=Serviço "2"=Fabricação "3"=Rep.Venda "4"=Rep.Loja "5"=Compra "6"=Garantia "7"=Serv.Interno
+tipo_ordem: "1"=servico_venda "2"=Fabricação "3"=Rep.Venda "4"=Rep.Loja "5"=Compra "6"=Garantia "7"=Serv.Interno
+  ⚠️ migration 071: 'servico' renomeado para 'servico_venda' no enum alissonerp
+  ⚠️ 'servico_loja' adicionado (migration 072) mas ESCONDIDO do frontend
+  ⚠️ trigger ponte: "1" → 'servico_venda' (não mais 'servico')
 etapas_pcp: "1"=Novas "2"=Pendência "3"=Aguardando "4"=Em Andamento "5"=Concluído "6"=Cancelado
 ```
 
@@ -170,10 +189,21 @@ SEMPRE usar directus_ordem_id para cruzar
 ## 6. FLUXO DA ORDEM
 
 ```
+── FLUXO A: PDV (origem='legado') ──
 PDV → [TRIGGER PONTE] → alissonerp.ordens + AUDITORIA LOJA
-  tipo_ordem='servico' → força rota='protocolo'
+  tipo_ordem='servico_venda' → força rota='protocolo'
   lookup numero_pedido em public.vendas (NÃO pedidos)
+  itens → directus.itens_ordem_1 (ponte: directus_ordem_id)
 
+── FLUXO B: ERP (origem='erp') — Módulo Criação (18/03/2026) ──
+Usuário clica "Nova Ordem" → dropdown 7 tipos → NovaOrdemModal
+  Número = MAX(ambos schemas) + 1 (evitar colisão)
+  Rota: servico_venda → protocolo; demais → pcp
+  POST /api/ordens: cria ordem + itens (alissonerp.itens_ordem) + auditoria loja (transação)
+  servico_venda: foto_peca_servico + peso_peca_servico OBRIGATÓRIOS
+  itens → alissonerp.itens_ordem (NÃO directus.itens_ordem_1)
+
+── CONTINUAÇÃO (ambos fluxos) ──
 AUDITORIA LOJA (administrativo, obrigatória)
   Aprovada + rota=pcp → cria saida_ordem + PCP direto
   Aprovada + rota=protocolo → disponível pra protocolo ida
@@ -354,9 +384,22 @@ GET   /api/protocolo/[protocoloId]           → ordens do protocolo
 PATCH /api/protocolo/[protocoloId]           → etapas + recebedor_id + foto_conclusao (base64)
 
 ── ORDENS ──
+POST /api/ordens                     → cria ordem ERP + itens (alissonerp.itens_ordem) + auditoria loja
+                                       body: { tipo_ordem, cliente_id, vendedor_id, numero_pedido?,
+                                              data_entrega?, peso_metal_negociado?, peso_metal_externo?,
+                                              observacao?, itens[], foto_peca_servico?, peso_peca_servico?,
+                                              video_observacao? }
+                                       Número = MAX(alissonerp + directus) + 1
+                                       Rota automática: servico_venda → protocolo; demais → pcp
+GET  /api/ordens/contatos?busca=     → autocomplete clientes (public.contatos) — debounce 300ms
+GET  /api/ordens/vendedores          → lista vendedores ativos (public.vendedores)
+GET  /api/ordens/produtos-busca?busca= → busca produtos ativos (public.produtos + erp_produtos)
 GET  /api/ordens/rastreio?inicio=YYYY-MM-DD&fim=YYYY-MM-DD
      → 6 categorias: pcp, protocolo_ida, protocolo_volta, auditoria, conferencia, entregues
      → consultora: filtra por vendedor_id automaticamente
+GET  /api/ordens/[id]/itens          → itens da ordem (DUAS FONTES):
+     origem='legado': directus.itens_ordem_1 WHERE ordem_id = directus_ordem_id
+     origem='erp':    alissonerp.itens_ordem WHERE ordem_id = $1
 GET  /api/ordens/[id]/fotos          → fotos PDV (bucket imagens, público) + ERP (bucket ordem-fotos, signed URLs)
 POST /api/ordens/[id]/fotos          → body: { path } — adiciona ao array fotos_paths
 DEL  /api/ordens/[id]/fotos          → body: { path } — remove de fotos_paths + remove do storage (admin only)
@@ -464,8 +507,9 @@ GET/PATCH /api/configuracoes/ia
 POST      /api/configuracoes/ia/key
 GET       /api/user/role?user_id=UUID → retorna role, name, avatar_url
 POST      /api/user/avatar (FormData: file, user_id?) → upload bucket avatars
-PATCH     /api/user/[id] → body: {nome?,role?,ativo?,deposito_id?,email?,nova_senha?}
+PATCH     /api/user/[id] → body: {nome?,role?,ativo?,deposito_id?,email?,nova_senha?,tipos_ordem_permitidos?}
               email → sync auth.users+usuarios+user_profiles | senha → crypt direto no auth.users
+              tipos_ordem_permitidos → JSONB array de tipos ex: ['fabricacao','garantia']
 
 ── PRODUTOS ──
 GET    /api/produtos
@@ -619,6 +663,7 @@ imagens              SIM      sem lim  sem restrição (legado PDV — NÃO usar
 protocolo-fotos      NÃO      10MB     image/jpeg, image/png, image/webp
 apontamento-fotos    NÃO      10MB     image/jpeg, image/png, image/webp
 ordem-fotos          NÃO      10MB     image/jpeg, image/png, image/webp, image/heic
+ordem-videos         NÃO      100MB    video/mp4, video/webm, video/quicktime, video/avi
 
 avatars:
   Caminho: {user_id}.{ext}
@@ -636,6 +681,12 @@ ordem-fotos (migration 071):
 
 protocolo-fotos: → campos protocolos.foto_criacao + protocolos.foto_conclusao
 apontamento-fotos: → campo apontamentos_pcp.foto_balanca
+
+ordem-videos (migration 073):
+  Caminho: ordens/{ordemId}/video-{timestamp}-{userId8}.{ext}
+  Acesso: signed URLs geradas via supabase.storage.createSignedUrl()
+  Paths salvos em: alissonerp.ordens.video_observacao TEXT
+  Usado em ordens tipo servico_venda
 
 ⚠️ storage.policies NÃO existe (é storage.objects com RLS, não tabela policies)
 ⚠️ Para listar buckets: SELECT id, name FROM storage.buckets
@@ -902,6 +953,21 @@ REGRA: trigger só atualiza produto_composicao — NÃO toca public.produtos (s�
    NUNCA dividir por PMC (distorce pra cima)
 ⚠️ Saída PCP: NÃO faz entrada no Almoxarifado. Ouro virou peça = consumido.
    Movimentação: só baixa (saída) do depósito do operador.
+⚠️ auditorias.tipo_auditoria: coluna REAL é tipo_auditoria, NÃO 'tipo'
+   varchar(10), valor correto: 'saida_pcp' (9 chars), NÃO 'saida_producao' (14 chars)
+⚠️ WHERE id = ${uuidVar}::uuid em coluna INTEGER: causa erro de cast no PostgreSQL
+   SEMPRE verificar o tipo real da coluna antes de usar casts
+   FIX: parseInt(id) para colunas INT, sem ::uuid
+⚠️ itens_ordem tem DUAS fontes:
+   ordens legadas (origem='legado'): itens em directus.itens_ordem_1 (bridge: directus_ordem_id)
+   ordens ERP (origem='erp'):       itens em alissonerp.itens_ordem (FK: ordem_id)
+   API /api/ordens/[id]/itens detecta automaticamente via campo origem
+⚠️ servico_loja: enum value existe (migration 073) mas está ESCONDIDO do frontend
+   Dropdown "Nova Ordem" não exibe servico_loja — 0 ocorrências de servico_loja no frontend
+⚠️ tipos_ordem_permitidos: JSONB array em alissonerp.usuarios
+   [] vazio → usuário NÃO pode criar ordens
+   admin/desenvolvedor ignoram (fullAccess)
+   Verificar SEMPRE ao implementar qualquer criação de ordem
 ```
 
 ---
@@ -972,6 +1038,15 @@ NUNCA   → escrever INSERT/UPDATE sem confirmar colunas existem
      RLS storage.objects para ordem-fotos (upload/select/delete autenticados)
 072: ADD public.user_profiles.avatar_url IF NOT EXISTS
      ENSURE UNIQUE constraint em user_profiles.id_user (necessária para ON CONFLICT)
+073: RENAME enum value 'servico' → 'servico_venda' em enum_tipo_ordem (105 ordens migradas)
+     ADD enum value 'servico_loja' em enum_tipo_ordem (oculto no frontend)
+     ADD alissonerp.ordens: foto_peca_servico TEXT, peso_peca_servico NUMERIC(10,2), video_observacao TEXT
+     ADD alissonerp.ordens.origem VARCHAR(20) DEFAULT 'erp' NOT NULL
+     CREATE alissonerp.itens_ordem (id SERIAL, ordem_id, produto_id, nome_produto, sku, quantidade, peso_estimado, observacao)
+     ADD alissonerp.usuarios.tipos_ordem_permitidos JSONB DEFAULT '[]'
+     CREATE bucket 'ordem-videos' (privado, 100MB, mp4/webm/quicktime/avi)
+     UPDATE trigger ponte: "1" → 'servico_venda' (não mais 'servico')
+     RECREATE views: vw_ordens_completa, vw_ordens_por_tipo, vw_ordem_detalhe
 ```
 
 ---
@@ -1059,4 +1134,208 @@ API: GET /api/dashboard/fabrica?inicio=YYYY-MM-DD&fim=YYYY-MM-DD
   Retorna: ordens (contagens), saldo_pote, ouro_producao,
            quebra_operadores (no período), financeiro (entradas/saídas/saldo)
   saldo_pote e ouro_producao são TEMPO REAL (sem filtro período)
+```
+
+---
+
+## 25. GO-LIVE E RESET DO BANCO (18/03/2026)
+
+```
+── RESET TOTAL ──
+TRUNCATE com RESTART IDENTITY CASCADE em 18 tabelas transacionais:
+  ordens, pcp, saidas_ordem, apontamentos_pcp, distribuicoes, distribuicao_ordens,
+  distribuicao_saida_pedras, transferencias_ordem, protocolos, protocolo_ordens,
+  protocolo_fotos, auditorias, quebra_operador, movimentacoes_estoque,
+  controle_estoque, comentarios_ordem, notificacoes, markup_alteracoes
+
+Storage limpo: apontamento-fotos, protocolo-fotos, ordem-fotos (0 arquivos)
+Tabela backup_mov_pedras_20260310 dropada
+Cadastros intactos: insumos(251), depositos(8), setores(10), tipos_apontamento(9),
+  usuarios, roles, produto_composicao, markup_pedras, configuracoes
+
+── MIGRAÇÃO DE ORDENS DO DIRECTUS ──
+443 ordens migradas: directus.ordens (situacao='2') → alissonerp.ordens
+  origem='legado' para todas (campo adicionado na migration 073)
+  Mapeamento: tipo_ordem (CASE diretamente no SQL), rota (servico→protocolo),
+              numero_pedido (lookup public.vendas), id_ordem_relacionada (45 links)
+  Sequence ajustada: próximo ID = 1330
+
+23 ordens receberam auditoria loja pendente (para produção imediata):
+  C-1082, C-1066, C-1065, C-1062, C-1098, C-1100, C-1029, C-1129, C-1173,
+  C-1175, C-1183, C-1185, C-1187, C-0374, C-0931, C-0966, C-0965, C-0978,
+  C-1021, C-1080, C-1033, C-0583, C-1189
+
+── ITENS DAS ORDENS LEGADAS ──
+Source: directus.itens_ordem_1 (541 itens)
+Colunas: id, ordem_id (FK → directus.ordens), produto_id (FK → public.produtos.id_produto), qtd
+Bridge: alissonerp.ordens.directus_ordem_id → directus.itens_ordem_1.ordem_id
+API: GET /api/ordens/[id]/itens (detecta automaticamente a origem da ordem)
+Componente: src/components/ordens/ItensOrdemSection.tsx
+Posição na UI: acima das tabs, abaixo dos cards Comercial/Produção
+```
+
+---
+
+## 26. MÓDULO CRIAÇÃO DE ORDENS (18/03/2026)
+
+```
+── TABELA ──
+alissonerp.itens_ordem (desnormalizada para performance):
+  id SERIAL PK
+  ordem_id INTEGER FK → alissonerp.ordens.id
+  produto_id BIGINT FK → public.produtos.id_produto
+  nome_produto TEXT     ← desnormalizado
+  sku TEXT              ← desnormalizado
+  quantidade INT
+  peso_estimado NUMERIC(10,2)
+  observacao TEXT
+  created_at TIMESTAMPTZ
+
+── PERMISSÕES DE CRIAÇÃO ──
+alissonerp.usuarios.tipos_ordem_permitidos JSONB DEFAULT '[]'
+  [] vazio = sem acesso a criar ordens
+  ['fabricacao', 'garantia'] = só esses tipos
+  admin/desenvolvedor ignoram a coluna (fullAccess sempre)
+  Gerenciado em: UserEditDrawer → seção "Permissões de Criação"
+  PATCH /api/user/[id] com campo tipos_ordem_permitidos
+
+── APIS ──
+POST /api/ordens              → cria ordem + itens (alissonerp.itens_ordem) + auditoria loja
+GET  /api/ordens/contatos     → ?busca= autocomplete clientes (public.contatos)
+GET  /api/ordens/vendedores   → lista vendedores ativos (public.vendedores)
+GET  /api/ordens/produtos-busca → ?busca= busca produtos (public.produtos + erp_produtos)
+
+── FLUXO DE CRIAÇÃO ──
+1. Botão "Nova Ordem" → dropdown com 7 tipos (ícones Lucide por tipo)
+   Visibilidade: filtra pelos tipos_ordem_permitidos do usuário (admin/dev = tudo)
+2. Clicar tipo → abre NovaOrdemModal com badge tipo fixo (não editável)
+3. Modal: autocomplete cliente (debounce 300ms), autocomplete produto, peso estimado
+4. Para servico_venda: campos obrigatórios adicionais:
+   foto_peca_servico: upload com compressão canvas (obrigatório)
+   peso_peca_servico: peso da peça em gramas (obrigatório)
+   video_observacao: upload vídeo direto para bucket ordem-videos (opcional)
+5. Salvar: transação atômica — INSERT ordens + itens_ordem + auditorias
+6. Número da ordem = MAX(alissonerp.ordens.id, directus.ordens.id) + 1 (evita colisão)
+
+── COMPONENTES ──
+src/components/ordens/NovaOrdemModal.tsx      → modal criação (autocomplete, upload, validação)
+src/components/ordens/ItensOrdemSection.tsx   → exibe itens na página /ordens/[id]
+src/components/ordens/NovaOrdemButton.tsx     → botão dropdown com 7 tipos
+
+── CARD PEÇA DO CLIENTE ──
+Visível somente para tipo=servico_venda na página /ordens/[id]
+Exibe: foto da peça na balança + peso + player de vídeo (se houver)
+Componente: integrado em OrdemDetalheClient.tsx
+```
+
+---
+
+## 27. MOBILE RESPONSIVO (18/03/2026)
+
+```
+── BREAKPOINT ──
+md: 768px (padrão Tailwind)
+Abaixo de md = mobile | Igual ou acima = desktop
+
+── HEADER MOBILE ──
+MobileHeader.tsx (src/components/MobileHeader.tsx)
+  Header fixo h-14 com: ☰ (toggle sidebar) + logo ALISSON + avatar (só < 768px)
+  DashboardShell.tsx: SidebarProvider + MobileHeader + mt-14 md:mt-0
+
+── SIDEBAR MOBILE ──
+SidebarContext.tsx (src/contexts/SidebarContext.tsx)
+  Context com isOpen/setIsOpen — controla abertura no mobile
+Sidebar.tsx: desliza da esquerda (translate-x) com overlay escuro (z-50 mobile, fixo desktop)
+
+── TABELAS ──
+Dual render: hidden md:block (tabela) + block md:hidden (cards)
+MobileCard.tsx (src/components/ui/MobileCard.tsx): componente reutilizável para cards de tabela
+
+── MODAIS ──
+15 modais: bottom-sheet no mobile (rounded-t-2xl, w-full, bottom-0) | normal no desktop
+4 drawers: w-full mobile | largura original desktop
+
+── KANBAN ──
+PCP e Distribuição: overflow-x-auto snap-x snap-mandatory no mobile
+Colunas Kanban: min-w-[280px] snap-start
+
+── FILTROS ──
+Colapsáveis no mobile: toggle button + flex-col md:flex-row
+
+── NOTIFICAÇÕES ──
+NotificacoesDrawer: left-0 md:left-56 (para não sobrepor sidebar desktop)
+
+── PROTOCOLO MOBILE ──
+Cards resumo compactos (h-12), ordens como cards clicáveis
+Botão "Criar Protocolo" fixo no bottom (mobile)
+Modal criar: full screen no mobile
+
+── ESCOPO ──
+39 arquivos com grids/padding/gaps responsivos
+```
+
+---
+
+## 28. PWA (18/03/2026)
+
+```
+── ARQUIVOS ──
+public/manifest.json
+  name: "ALISSON ERP" | short_name: "ALISSON"
+  display: standalone | theme_color: #184036
+  9 ícones (72px → 512px + apple-touch + maskable)
+  start_url: /
+
+public/sw.js
+  Estratégia: network-first para tudo exceto assets estáticos
+  Cache: alisson-erp-v2.4.0
+  Ignora: /api/ e qualquer URL supabase (dados nunca ficam no cache)
+  Fallback offline: /offline.html (página verde com logo + botão retry)
+
+public/offline.html
+  Página verde (#184036) com logo leão branco + botão "Tentar Novamente"
+
+public/icons/
+  Leão branco sobre fundo #184036, 10 tamanhos:
+  icon-72.png, icon-96.png, icon-128.png, icon-144.png, icon-152.png,
+  icon-192.png, icon-384.png, icon-512.png, apple-touch-icon.png, icon-512-maskable.png
+
+── REGISTRO ──
+ServiceWorkerRegister.tsx (src/components/ServiceWorkerRegister.tsx)
+  Registra SW via componente React (lado client)
+  Incluído em src/app/layout.tsx
+
+── FAVICON ──
+Leão branco em fundo escuro (removida referência leaoverde.webp)
+
+── VERSÕES ──
+v2.3.0 → módulo criação ordens + enum servico→servico_venda + permissões
+v2.4.0 → mobile responsivo + dropdown nova ordem
+v2.5.0 → PWA + protocolo mobile + fix uuid
+v2.5.1 → ícones PWA leão branco (VERSÃO ATUAL em 18/03/2026)
+```
+
+---
+
+## 29. FIX INTEGER = UUID (18/03/2026)
+
+```
+CAUSA RAIZ: notificacoes/[id]/ler/route.ts usava WHERE id = ${id}::uuid
+  mas notificacoes.id é INTEGER, não UUID — PostgreSQL rejeita o cast
+
+FIX RAIZ: WHERE id = ${parseInt(id)}
+
+9 CORREÇÕES PREVENTIVAS (::uuid em colunas INT detectadas):
+  Arquivos corrigidos (created_by INTEGER → sem cast ::uuid):
+  - src/app/api/pcp/ordem-teste/route.ts
+  - src/app/api/distribuicao/route.ts
+  - src/app/api/pcp/transferir/route.ts
+  - src/app/api/pcp/saida/route.ts
+  - src/app/api/lancamentos-avulso/route.ts
+  - src/app/api/compras/route.ts
+  + 3 outros arquivos de API
+
+REGRA: NUNCA usar ::uuid em colunas que são INTEGER
+        Verificar SEMPRE o tipo real: SELECT data_type FROM information_schema.columns
+        WHERE table_name='tabela' AND column_name='coluna'
 ```

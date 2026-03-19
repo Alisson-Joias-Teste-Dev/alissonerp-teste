@@ -48,6 +48,10 @@
     o.id_asana,
     o.created_at AS date_created,
     o.updated_at AS date_updated,
+    o.foto_peca_servico,
+    o.peso_peca_servico,
+    o.video_observacao,
+    o.detalhes_ordem,
     p.id AS pcp_id,
     (p.etapas)::text AS pcp_etapas_cod,
         CASE (p.etapas)::text

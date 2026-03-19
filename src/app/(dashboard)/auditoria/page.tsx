@@ -45,7 +45,8 @@ export default async function AuditoriaPage() {
         data_conclusao,
         dias_analise,
         data_entrega,
-        peso_metal_externo
+        peso_metal_externo,
+        detalhes_ordem
       FROM alissonerp.vw_auditorias_completa
       ORDER BY id DESC
       LIMIT 500

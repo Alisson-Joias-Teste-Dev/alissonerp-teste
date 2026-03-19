@@ -1,6 +1,7 @@
 # Arquitetura — fabricaAJ ERP
 
 Sistema ERP para a Joalheria ALISSON. Stack: Next.js 16.1.6 + PostgreSQL 15 (Supabase self-hosted).
+**Versão atual: v2.5.1 | Atualizado: 18/03/2026 — Go-Live + criação ordens + PWA + mobile responsivo**
 
 ---
 
@@ -119,6 +120,7 @@ O cliente Supabase (`src/lib/supabase/client.ts` e `server.ts`) esta configurado
 | `070_rls_comentarios_notificacoes.sql` | RLS para comentarios_ordem + notificacoes. |
 | `071_comentarios_foto_excluido.sql` | ADD em `comentarios_ordem`: texto_original, excluido, excluido_em, excluido_por, `foto_path`. ADD `alissonerp.ordens.fotos_paths TEXT[]`. CREATE bucket `ordem-fotos` (privado, 10MB, inclui heic). RLS para storage.objects bucket='ordem-fotos'. |
 | `072_user_profiles_unique_avatar.sql` | ADD `public.user_profiles.avatar_url IF NOT EXISTS`. ENSURE UNIQUE constraint em `id_user` (necessária para ON CONFLICT no upsert do avatar). |
+| `073_criacao_ordens_enum_servico.sql` | RENAME enum value `servico` → `servico_venda` em `enum_tipo_ordem` (105 ordens atualizadas). ADD `servico_loja` ao enum (oculto no frontend). ADD em `alissonerp.ordens`: `origem VARCHAR(20) DEFAULT 'erp' NOT NULL`, `foto_peca_servico TEXT`, `peso_peca_servico NUMERIC(10,2)`, `video_observacao TEXT`. ADD em `alissonerp.usuarios`: `tipos_ordem_permitidos JSONB DEFAULT '[]'`. CREATE `alissonerp.itens_ordem` (id, ordem_id FK, produto_id BIGINT FK, nome_produto, sku, quantidade, peso_estimado, observacao, created_at). CREATE bucket `ordem-videos` (privado, 100MB, mp4/webm/quicktime/avi). RECREATE views: vw_ordens_completa, vw_ordens_por_tipo, vw_ordem_detalhe. UPDATE trigger ponte: "1" → 'servico_venda'. |
 
 ---
 
@@ -396,8 +398,14 @@ Estrutura com Route Groups (Next.js 16):
 | `PerfilDrawer.tsx`                                   | `src/components/PerfilDrawer.tsx`                         | Drawer perfil: avatar (comprime 200x200 JPEG 0.85 via canvas), nome, senha, dispara evento perfil:foto-atualizada |
 | `UserAvatar.tsx`                                     | `src/components/UserAvatar.tsx`                           | Exibe avatar com fallback para iniciais |
 | `UserEditDrawer.tsx`                                 | `src/components/UserEditDrawer.tsx`                       | Edicao de usuario pelo admin |
-| `NotificacoesDrawer.tsx`                             | `src/components/NotificacoesDrawer.tsx`                   | Drawer de notificacoes (mencoes, sistema) |
+| `NotificacoesDrawer.tsx`                             | `src/components/NotificacoesDrawer.tsx`                   | Drawer de notificacoes (mencoes, sistema) — left-0 md:left-56 |
 | `ProtocoloMotoboy.tsx`                               | `src/components/motoboy/ProtocoloMotoboy.tsx`             | PWA dark theme para motoboy (protocolo simplificado) |
+| `NovaOrdemModal.tsx`                                 | `src/components/ordens/NovaOrdemModal.tsx`                | Modal criação de ordens: autocomplete cliente/produto (debounce 300ms), upload foto+video, campos servico_venda condicionais |
+| `ItensOrdemSection.tsx`                              | `src/components/ordens/ItensOrdemSection.tsx`             | Exibe itens da ordem em /ordens/[id]: duas fontes (directus.itens_ordem_1 legado, alissonerp.itens_ordem ERP) |
+| `MobileHeader.tsx`                                   | `src/components/MobileHeader.tsx`                         | Header fixo h-14 mobile: ☰ toggle sidebar + logo + avatar (visível apenas < 768px) |
+| `MobileCard.tsx`                                     | `src/components/ui/MobileCard.tsx`                        | Componente reutilizável para cards de tabela no mobile (dual-render pattern) |
+| `SidebarContext.tsx`                                 | `src/contexts/SidebarContext.tsx`                         | Context React para controle abrir/fechar sidebar no mobile |
+| `ServiceWorkerRegister.tsx`                          | `src/components/ServiceWorkerRegister.tsx`                | Registro do Service Worker via componente React (incluído em layout.tsx) |
 
 ---
 
@@ -885,6 +893,10 @@ Helper: `alissonerp.fn_user_role()` — retorna NULL se usuario nao cadastrado (
 |----------|-------|---------|
 | `auditorias.tipo_auditoria` truncado | Coluna e varchar(10); 'saida_producao' tem 14 chars | Usar 'saida_pcp' (9 chars) |
 | Trigger em cadeia (INSERT vazia dispara trigger de novo) | INSERT da transferencia vazia tambem aciona o trigger | Guard `IF setor_id IS NULL RETURN NEW` — safe, sem loop infinito |
+| `WHERE id = ${uuidVar}::uuid` em coluna INTEGER | notificacoes.id e INTEGER, nao UUID — PostgreSQL rejeita o cast | Usar `parseInt(id)` para colunas INT; NUNCA ::uuid em colunas nao-UUID |
+| `auditorias.tipo` nao existe | Coluna real e `tipo_auditoria`, nao `tipo` | Sempre verificar: SELECT column_name FROM information_schema.columns WHERE table_name='auditorias' |
+| itens_ordem duas fontes | Ordens legadas: directus.itens_ordem_1; Ordens ERP: alissonerp.itens_ordem | Detectar via ordens.origem ('legado' vs 'erp') — API /api/ordens/[id]/itens faz isso automaticamente |
+| servico_loja escondido no frontend | enum value existe no banco mas nao deve aparecer no dropdown | grep de servico_loja no frontend deve retornar 0 ocorrencias — nao exibir nunca |
 
 ### Proximos passos (Sessao 4.x)
 - Migracao de PCPs legados do Directus para alissonerp.pcp (Sessao 5.1)
@@ -1840,3 +1852,233 @@ Retorna ordens do período agrupadas em 6 categorias:
 - `entregues`: preparacoes_entrega etapas='concluido'
 
 Consultoras: filtradas por vendedor_id automaticamente.
+
+---
+
+## Go-Live e Reset do Banco (18/03/2026)
+
+### TRUNCATE das Tabelas Transacionais
+
+18 tabelas zeradas com RESTART IDENTITY CASCADE:
+```
+ordens, pcp, saidas_ordem, apontamentos_pcp, distribuicoes, distribuicao_ordens,
+distribuicao_saida_pedras, transferencias_ordem, protocolos, protocolo_ordens,
+protocolo_fotos, auditorias, quebra_operador, movimentacoes_estoque,
+controle_estoque, comentarios_ordem, notificacoes, markup_alteracoes
+```
+
+Storage limpo: apontamento-fotos, protocolo-fotos, ordem-fotos.
+Tabela `backup_mov_pedras_20260310` dropada.
+Cadastros mantidos intactos: insumos, depositos, setores, tipos_apontamento, usuarios, roles,
+produto_composicao, markup_pedras, configuracoes_sistema, configuracoes_secrets.
+
+### Migração de Ordens do Directus (443 ordens)
+
+```sql
+-- Fonte: directus.ordens WHERE situacao = '2'
+-- Destino: alissonerp.ordens com origem = 'legado'
+```
+
+- Coluna `origem VARCHAR(20) DEFAULT 'erp' NOT NULL` adicionada em alissonerp.ordens
+- Mapeamento tipo_ordem: CASE '1'→'servico_venda', '2'→'fabricacao', etc.
+- Rota: servico → protocolo forçado pelo mapeamento
+- numero_pedido: lookup em public.vendas (NÃO public.pedidos)
+- id_ordem_relacionada: 45 links mapeados
+- Sequence ajustada: próximo ID = 1330
+
+23 ordens receberam auditoria loja pendente para produção imediata.
+
+---
+
+## Módulo Criação de Ordens (18/03/2026)
+
+### Tabela alissonerp.itens_ordem
+
+```sql
+CREATE TABLE alissonerp.itens_ordem (
+  id            SERIAL PRIMARY KEY,
+  ordem_id      INTEGER NOT NULL REFERENCES alissonerp.ordens(id),
+  produto_id    BIGINT REFERENCES public.produtos(id_produto),
+  nome_produto  TEXT,   -- desnormalizado para performance
+  sku           TEXT,   -- desnormalizado para performance
+  quantidade    INTEGER NOT NULL DEFAULT 1,
+  peso_estimado NUMERIC(10,2),
+  observacao    TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+Ordens do PDV → `directus.itens_ordem_1` | Ordens do ERP → `alissonerp.itens_ordem`
+
+### Coluna alissonerp.usuarios.tipos_ordem_permitidos
+
+```sql
+ALTER TABLE alissonerp.usuarios
+  ADD COLUMN tipos_ordem_permitidos JSONB DEFAULT '[]'::jsonb NOT NULL;
+```
+
+- Array de tipos: ex. `['fabricacao', 'garantia']`
+- `[]` vazio = sem permissão de criar ordens
+- admin/desenvolvedor ignoram (fullAccess = sem filtro)
+- Gerenciado via PATCH /api/user/[id]
+
+### Novos campos em alissonerp.ordens (servico_venda)
+
+```sql
+ALTER TABLE alissonerp.ordens
+  ADD COLUMN foto_peca_servico   TEXT,             -- path no bucket ordem-fotos
+  ADD COLUMN peso_peca_servico   NUMERIC(10,2),    -- gramas
+  ADD COLUMN video_observacao    TEXT,             -- path no bucket ordem-videos
+  ADD COLUMN origem              VARCHAR(20) NOT NULL DEFAULT 'erp';
+```
+
+### Enum tipo_ordem — mudanças (migrations 073)
+
+- `servico` → renomeado para `servico_venda` (105 ordens migradas)
+- `servico_loja` → adicionado ao enum (OCULTO no frontend)
+- Trigger ponte atualizado: `"1"` → `'servico_venda'`
+- Views recriadas: vw_ordens_completa, vw_ordens_por_tipo, vw_ordem_detalhe
+
+### API Routes novas
+
+| Rota | Método | Função |
+|------|--------|--------|
+| `/api/ordens` | POST | Cria ordem + itens + auditoria loja (transação atômica) |
+| `/api/ordens/contatos` | GET | Autocomplete clientes (`?busca=`) |
+| `/api/ordens/vendedores` | GET | Lista vendedores ativos |
+| `/api/ordens/produtos-busca` | GET | Busca produtos ativos (`?busca=`) |
+| `/api/ordens/[id]/itens` | GET | Itens da ordem — detecta origem automaticamente |
+
+### Fluxo POST /api/ordens
+
+```
+1. Valida tipos_ordem_permitidos do usuário (admin/dev ignoram)
+2. numero_ordem = MAX(alissonerp.ordens.id, directus.ordens.id) + 1
+3. rota = servico_venda → 'protocolo'; demais → 'pcp'
+4. INSERT alissonerp.ordens (origem='erp')
+5. INSERT alissonerp.itens_ordem (bulk, todos os itens)
+6. INSERT alissonerp.auditorias (tipo='loja', situacao='pendente')
+7. COMMIT — tudo ou nada
+```
+
+---
+
+## Mobile Responsivo (18/03/2026)
+
+### Breakpoint Principal
+
+- `md: 768px` (padrão Tailwind v4)
+- Abaixo de md = mobile | Igual ou acima = desktop
+
+### Estrutura Layout Mobile
+
+```
+DashboardShell.tsx
+  ├── SidebarProvider (SidebarContext.tsx)
+  ├── MobileHeader.tsx  (fixo h-14, só < 768px)
+  │     ├── Botão ☰ → toggle sidebar
+  │     ├── Logo "ALISSON"
+  │     └── Avatar usuário
+  ├── Sidebar.tsx  (desliza da esquerda no mobile)
+  │     └── Overlay escuro (z-50, clique fecha)
+  └── main content (mt-14 mobile, mt-0 desktop)
+```
+
+### Padrões de Responsividade
+
+| Elemento | Mobile | Desktop |
+|----------|--------|---------|
+| Tabelas | Oculta (`hidden md:block`) | Visível |
+| Cards (MobileCard) | Visível (`block md:hidden`) | Oculto |
+| Modais | Bottom-sheet (`rounded-t-2xl, bottom-0, w-full`) | Centralizado |
+| Drawers | `w-full` | Largura original |
+| Kanban | `overflow-x-auto snap-x snap-mandatory` | Grid normal |
+| Filtros | Colapsáveis (toggle button, `flex-col`) | `flex-row` |
+| NotificacoesDrawer | `left-0` | `left-56` |
+
+### Protocolo Mobile
+
+- Cards resumo compactos, tabs Ida/Volta `h-12`
+- Protocolos como cards clicáveis (em vez de tabela)
+- Botão "Criar Protocolo" fixo no `bottom-4` (mobile)
+- Modal criar: full screen no mobile
+
+### Arquivos Envolvidos
+
+- 39 arquivos com grids/padding/gaps responsivos atualizados
+- 15 modais convertidos para bottom-sheet no mobile
+- 4 drawers convertidos para `w-full` no mobile
+- Kanban PCP + Distribuição: snap horizontal
+
+---
+
+## PWA (18/03/2026)
+
+### Arquivos
+
+| Arquivo | Descrição |
+|---------|-----------|
+| `public/manifest.json` | Nome, ícones, display=standalone, theme=#184036, 9 ícones |
+| `public/sw.js` | Network-first, cache `alisson-erp-v2.4.0`, ignora /api/ e supabase, fallback offline.html |
+| `public/offline.html` | Página offline: verde #184036 + logo leão + botão retry |
+| `public/icons/*.png` | 10 tamanhos: 72, 96, 128, 144, 152, 192, 384, 512px + apple-touch + maskable |
+| `src/components/ServiceWorkerRegister.tsx` | Registra SW via componente React em layout.tsx |
+
+### Ícones
+
+Leão branco sobre fundo `#184036` (tema ERP). Gerados em 10 variações de tamanho.
+Removida referência anterior a `leaoverde.webp`.
+
+### Estratégia do Service Worker
+
+```javascript
+// Network-first para tudo, exceto:
+// - Assets estáticos: cache-first
+// - /api/*: NUNCA cachear (dados ao vivo)
+// - *.supabase.*: NUNCA cachear (auth/storage)
+// Fallback: /offline.html
+```
+
+### Versionamento
+
+| Versão | Data | Conteúdo |
+|--------|------|----------|
+| v2.3.0 | 18/03/2026 | Módulo criação ordens + enum servico_venda + permissões |
+| v2.4.0 | 18/03/2026 | Mobile responsivo + dropdown nova ordem |
+| v2.5.0 | 18/03/2026 | PWA + protocolo mobile + fix uuid |
+| v2.5.1 | 18/03/2026 | Ícones PWA leão branco (VERSÃO ATUAL) |
+
+---
+
+## Fix: INTEGER = UUID (18/03/2026)
+
+### Problema
+
+```typescript
+// ERRADO — notificacoes.id é INTEGER, não UUID
+WHERE id = ${id}::uuid
+// Causa: invalid input syntax for type uuid: "42"
+```
+
+### Correção
+
+```typescript
+// CORRETO
+WHERE id = ${parseInt(id)}
+```
+
+### Arquivos corrigidos (9 correções preventivas)
+
+- `src/app/api/notificacoes/[id]/ler/route.ts` — fix raiz
+- `src/app/api/pcp/ordem-teste/route.ts`
+- `src/app/api/distribuicao/route.ts`
+- `src/app/api/pcp/transferir/route.ts`
+- `src/app/api/pcp/saida/route.ts`
+- `src/app/api/lancamentos-avulso/route.ts`
+- `src/app/api/compras/route.ts`
+- + 2 outros arquivos de API
+
+### Regra
+
+NUNCA usar `::uuid` em colunas que são INTEGER.
+Verificar tipo real: `SELECT data_type FROM information_schema.columns WHERE table_name='X' AND column_name='id'`.
