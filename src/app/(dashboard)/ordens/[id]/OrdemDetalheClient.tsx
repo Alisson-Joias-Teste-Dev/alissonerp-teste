@@ -231,6 +231,21 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
           {/* Itens da Ordem (produtos da venda) */}
           <ItensOrdemSection ordemId={ordem.id} />
 
+          {/* Detalhes da Ordem — só exibe quando preenchido */}
+          {ordem.detalhes_ordem && (
+            <div className="bg-white rounded-xl border p-5" style={{ borderColor: C.cremeBorder }}>
+              <p className="text-[10px] font-semibold uppercase tracking-wider mb-3" style={{ color: "#9CA3AF" }}>
+                Detalhes da Ordem
+              </p>
+              <p
+                className="text-[13px] leading-relaxed whitespace-pre-wrap"
+                style={{ color: "#374151" }}
+              >
+                {ordem.detalhes_ordem}
+              </p>
+            </div>
+          )}
+
           {/* Peça do Cliente — só para servico_venda quando há dados */}
           {ordem.tipo_ordem_cod === "servico_venda" &&
             (ordem.foto_peca_servico || ordem.peso_peca_servico != null || ordem.video_observacao) && (
