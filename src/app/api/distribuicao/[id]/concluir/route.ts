@@ -41,7 +41,7 @@ export async function POST(
 
   // 2. Verificar que TODAS as ordens têm saída registrada
   const ordens = await sql`
-    SELECT id, ordens_id, data_baixa, peso_bruto, peso_ouro_real
+    SELECT id, ordens_id, data_baixa, peso_bruto, peso_ouro_real, sem_peso
     FROM alissonerp.distribuicao_ordens
     WHERE distribuicao_id = ${distId}
   `;
@@ -69,8 +69,12 @@ export async function POST(
   const ouroEntregue = Number(metalLote.entrada) - Number(metalLote.retorno);
 
   // 4. Somar ouro nas peças e totais físicos
-  const ouroNasPecas  = ordens.reduce((s, o) => s + Number(o.peso_ouro_real ?? 0), 0);
-  const pesoFinalTotal = ordens.reduce((s, o) => s + Number(o.peso_bruto ?? 0), 0);
+  //    Ordens sem_peso=true saíram sem ouro — excluir do somatório de ouro_pecas
+  //    mas incluir no peso_final (peso_bruto=0, não afeta o total)
+  const ordensComPeso = ordens.filter((o) => o.sem_peso !== true);
+  const ouroNasPecas   = ordensComPeso.reduce((s, o) => s + Number(o.peso_ouro_real ?? 0), 0);
+  const pesoFinalTotal  = ordens.reduce((s, o) => s + Number(o.peso_bruto ?? 0), 0);
+  const qtdSemPeso      = ordens.filter((o) => o.sem_peso === true).length;
   const quebraLote    = ouroEntregue - ouroNasPecas;
   const pctQuebra     = ouroEntregue > 0 ? (quebraLote / ouroEntregue) * 100 : 0;
 
@@ -122,10 +126,13 @@ export async function POST(
 
   return NextResponse.json({
     ok: true,
-    ouro_entregue: ouroEntregue,
-    ouro_pecas:    ouroNasPecas,
-    quebra_lote:   quebraLote,
-    porcentagem:   pctQuebra,
-    peso_final:    pesoFinalTotal,
+    ouro_entregue:  ouroEntregue,
+    ouro_pecas:     ouroNasPecas,
+    quebra_lote:    quebraLote,
+    porcentagem:    pctQuebra,
+    peso_final:     pesoFinalTotal,
+    ordens_total:   ordens.length,
+    ordens_sem_peso: qtdSemPeso,
+    ordens_com_peso: ordens.length - qtdSemPeso,
   });
 }
