@@ -28,7 +28,7 @@ export default async function DistribuicaoPage() {
 
   // Se ourives sem depósito, retornar lista vazia
   if (semDeposito) {
-    return <DistribuicaoClient dists={[]} semDeposito={true} />;
+    return <DistribuicaoClient dists={[]} semDeposito={true} userRole={userRole} />;
   }
 
   const dists = depositoIdFiltro != null
@@ -94,5 +94,5 @@ export default async function DistribuicaoPage() {
         LIMIT 100
       `;
 
-  return <DistribuicaoClient dists={dists as any[]} semDeposito={false} />;
+  return <DistribuicaoClient dists={dists as any[]} semDeposito={false} userRole={userRole} />;
 }

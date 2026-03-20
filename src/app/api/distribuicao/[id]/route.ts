@@ -63,12 +63,27 @@ export async function GET(
       fd.peso             AS peso_fechamento,
       fd.pmc              AS pmc_fechamento,
       fd.total_pedras_un  AS pedras_fechamento,
-      fd.foto_balanca     AS foto_fechamento
+      fd.foto_balanca     AS foto_fechamento,
+      -- Estorno (migration 081)
+      ed.id               AS estorno_id,
+      ed.motivo           AS estorno_motivo,
+      ed.justificativa    AS estorno_justificativa,
+      ed.created_at       AS estorno_em,
+      up.name             AS estorno_por_nome
     FROM alissonerp.distribuicao_ordens doo
     JOIN alissonerp.ordens o ON o.id = doo.ordens_id
     LEFT JOIN public.contatos c ON c.id_contato = o.cliente_id
     LEFT JOIN alissonerp.fechamentos_distribuicao fd
       ON fd.distribuicao_id = doo.distribuicao_id AND fd.ordem_id = doo.ordens_id
+    -- Último estorno da ordem neste lote (data_baixa=NULL após estorno)
+    LEFT JOIN LATERAL (
+      SELECT id, motivo, justificativa, estornado_por, created_at
+      FROM alissonerp.estornos_distribuicao
+      WHERE distribuicao_id = ${distId} AND ordem_id = doo.ordens_id
+      ORDER BY created_at DESC
+      LIMIT 1
+    ) ed ON true
+    LEFT JOIN public.user_profiles up ON up.id_user = ed.estornado_por
     WHERE doo.distribuicao_id = ${distId}
     ORDER BY o.numero_ordem
   `;

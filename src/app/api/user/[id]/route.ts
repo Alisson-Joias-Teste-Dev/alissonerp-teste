@@ -169,18 +169,19 @@ export async function PATCH(
   // 3. Atualizar email atomicamente nas 3 tabelas (transação)
   // auth.users.id = alissonerp.usuarios.id (mesmo UUID — join direto)
   if (email) {
-    await sql.begin(async (sql) => {
-      await sql`
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await sql.begin(async (tx: any) => {
+      await tx`
         UPDATE auth.users
         SET email = ${email}, email_confirmed_at = now(), updated_at = now()
         WHERE id = ${id}::uuid
       `;
-      await sql`
+      await tx`
         UPDATE alissonerp.usuarios
         SET email = ${email}, updated_at = now()
         WHERE id = ${id}::uuid
       `;
-      await sql`
+      await tx`
         UPDATE public.user_profiles
         SET email = ${email}, updated_at = now()
         WHERE id_user = ${id}::uuid
