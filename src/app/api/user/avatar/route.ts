@@ -56,40 +56,46 @@ export async function POST(req: NextRequest) {
   // URL pública com cache-bust (garante que o browser não usa versão em cache)
   const publicUrl = `${uploadResult.url}?t=${Date.now()}`;
 
-  // UPSERT: cria o registro se não existir, atualiza avatar_url se existir.
+  // Passo 1: tentar UPDATE por id_user (caso mais comum — registro já existe)
+  const updateResult = await sql`
+    UPDATE public.user_profiles
+    SET avatar_url = ${publicUrl}, updated_at = now()
+    WHERE id_user = ${targetUserId}::uuid
+    RETURNING id_user
+  `;
+
+  // Passo 2: se não existia registro → INSERT novo.
   // user_profiles.role tem check constraint limitada — mapear role ERP → role legado.
   // password_hash é legado (auth real é GoTrue) → placeholder ''.
-  await sql`
-    INSERT INTO public.user_profiles (id_user, email, password_hash, name, role, is_active, avatar_url, updated_at)
-    SELECT
-      u.id,
-      u.email,
-      '',
-      u.nome,
-      CASE u.role::text
-        WHEN 'admin'              THEN 'admin'
-        WHEN 'desenvolvedor'      THEN 'admin'
-        WHEN 'gerente_fabrica'    THEN 'gerente'
-        WHEN 'gerente_loja'       THEN 'gerente'
-        WHEN 'consultora'         THEN 'consultora'
-        WHEN 'financeiro'         THEN 'financeiro'
-        WHEN 'logistica'          THEN 'logistica'
-        WHEN 'motoboy'            THEN 'logistica'
-        WHEN 'pcp'                THEN 'producao'
-        WHEN 'ourives'            THEN 'producao'
-        WHEN 'estoquista_fabrica' THEN 'producao'
-        ELSE 'user'
-      END,
-      COALESCE(u.ativo, true),
-      ${publicUrl},
-      now()
-    FROM alissonerp.usuarios u
-    WHERE u.id = ${targetUserId}::uuid
-    ON CONFLICT (email) DO UPDATE
-      SET id_user    = EXCLUDED.id_user,
-          avatar_url = EXCLUDED.avatar_url,
-          updated_at = now()
-  `;
+  if (updateResult.length === 0) {
+    await sql`
+      INSERT INTO public.user_profiles (id_user, email, password_hash, name, role, is_active, avatar_url, updated_at)
+      SELECT
+        u.id,
+        u.email,
+        '',
+        u.nome,
+        CASE u.role::text
+          WHEN 'admin'              THEN 'admin'
+          WHEN 'desenvolvedor'      THEN 'admin'
+          WHEN 'gerente_fabrica'    THEN 'gerente'
+          WHEN 'gerente_loja'       THEN 'gerente'
+          WHEN 'consultora'         THEN 'consultora'
+          WHEN 'financeiro'         THEN 'financeiro'
+          WHEN 'logistica'          THEN 'logistica'
+          WHEN 'motoboy'            THEN 'logistica'
+          WHEN 'pcp'                THEN 'producao'
+          WHEN 'ourives'            THEN 'producao'
+          WHEN 'estoquista_fabrica' THEN 'producao'
+          ELSE 'user'
+        END,
+        COALESCE(u.ativo, true),
+        ${publicUrl},
+        now()
+      FROM alissonerp.usuarios u
+      WHERE u.id = ${targetUserId}::uuid
+    `;
+  }
 
   return NextResponse.json({ avatar_url: publicUrl });
 }

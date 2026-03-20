@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const rows = await sql`
     SELECT u.role::text AS role, u.nome AS name, up.avatar_url
     FROM alissonerp.usuarios u
-    LEFT JOIN public.user_profiles up ON LOWER(up.email) = LOWER(u.email)
+    LEFT JOIN public.user_profiles up ON up.id_user = u.id
     WHERE u.id = ${userId}::uuid
   `;
 

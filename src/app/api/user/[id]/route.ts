@@ -84,13 +84,12 @@ export async function PATCH(
     }
   }
 
-  // 1. Atualizar alissonerp.usuarios (tabela principal)
+  // 1. Atualizar alissonerp.usuarios (tabela principal — email excluído, tratado atomicamente abaixo)
   if (role !== undefined) {
     await sql`
       UPDATE alissonerp.usuarios
       SET
         nome        = COALESCE(${nome ?? null}, nome),
-        email       = COALESCE(${email ?? null}, email),
         role        = COALESCE(${role}, role),
         ativo       = COALESCE(${ativo ?? null}, ativo),
         deposito_id = ${deposito_id ?? null},
@@ -103,7 +102,6 @@ export async function PATCH(
       UPDATE alissonerp.usuarios
       SET
         nome        = COALESCE(${nome ?? null}, nome),
-        email       = COALESCE(${email ?? null}, email),
         ativo       = COALESCE(${ativo ?? null}, ativo),
         deposito_id = ${deposito_id ?? null},
         vendedor_id = ${vendedor_id ?? null},
@@ -125,11 +123,10 @@ export async function PATCH(
     `;
   }
 
-  // 2. Atualizar user_profiles (se existir)
-  // WHERE por email — funciona mesmo se id_user estiver desincronizado (ex: linha órfã com UUID antigo)
+  // 2. Atualizar user_profiles (se existir) — nome/role/ativo; email tratado abaixo
+  // WHERE por id_user (UUID estável) — evita falha quando emails diferem entre tabelas
   const [upExists] = await sql`
-    SELECT 1 FROM public.user_profiles
-    WHERE email = (SELECT email FROM alissonerp.usuarios WHERE id = ${id}::uuid)
+    SELECT 1 FROM public.user_profiles WHERE id_user = ${id}::uuid
   `;
   if (upExists) {
     if (role !== undefined) {
@@ -137,7 +134,6 @@ export async function PATCH(
         UPDATE public.user_profiles
         SET
           name      = COALESCE(${nome ?? null}, name),
-          email     = COALESCE(${email ?? null}, email),
           role      = CASE ${role}
             WHEN 'desenvolvedor'      THEN 'admin'
             WHEN 'admin'              THEN 'admin'
@@ -154,34 +150,46 @@ export async function PATCH(
             WHEN 'estoquista_loja'    THEN 'user'
             ELSE 'user'
           END,
-          is_active = COALESCE(${ativo ?? null}, is_active),
+          is_active  = COALESCE(${ativo ?? null}, is_active),
           updated_at = now()
-        WHERE email = (SELECT email FROM alissonerp.usuarios WHERE id = ${id}::uuid)
+        WHERE id_user = ${id}::uuid
       `;
     } else {
       await sql`
         UPDATE public.user_profiles
         SET
-          name      = COALESCE(${nome ?? null}, name),
-          email     = COALESCE(${email ?? null}, email),
-          is_active = COALESCE(${ativo ?? null}, is_active),
+          name       = COALESCE(${nome ?? null}, name),
+          is_active  = COALESCE(${ativo ?? null}, is_active),
           updated_at = now()
-        WHERE email = (SELECT email FROM alissonerp.usuarios WHERE id = ${id}::uuid)
+        WHERE id_user = ${id}::uuid
       `;
     }
   }
 
-  // 3. Atualizar auth.users (email e/ou senha)
-  // auth.users.id = alissonerp.usuarios.id (mesmo UUID — join direto, sem email)
+  // 3. Atualizar email atomicamente nas 3 tabelas (transação)
+  // auth.users.id = alissonerp.usuarios.id (mesmo UUID — join direto)
   if (email) {
-    await sql`
-      UPDATE auth.users
-      SET
-        email                = ${email},
-        email_confirmed_at   = now(),
-        updated_at           = now()
-      WHERE id = ${id}::uuid
-    `;
+    await sql.begin(async (sql) => {
+      await sql`
+        UPDATE auth.users
+        SET email = ${email}, email_confirmed_at = now(), updated_at = now()
+        WHERE id = ${id}::uuid
+      `;
+      await sql`
+        UPDATE alissonerp.usuarios
+        SET email = ${email}, updated_at = now()
+        WHERE id = ${id}::uuid
+      `;
+      await sql`
+        UPDATE public.user_profiles
+        SET email = ${email}, updated_at = now()
+        WHERE id_user = ${id}::uuid
+      `;
+    });
+  }
+
+  if (isSelfUpdate && nova_senha) {
+    return NextResponse.json({ error: 'Para trocar sua própria senha, use a opção no seu perfil.' }, { status: 400 });
   }
 
   if (nova_senha && nova_senha.length >= 6) {
