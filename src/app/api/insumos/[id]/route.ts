@@ -34,11 +34,6 @@ export async function PATCH(
     foto, foto_remover, fornecedor_id, peso_pedra, observacao, ativo,
   } = body;
 
-  console.log('[insumos PATCH] id:', id);
-  console.log('[insumos PATCH] foto recebida:', !!foto);
-  console.log('[insumos PATCH] foto tamanho base64:', foto?.length);
-  console.log('[insumos PATCH] foto_remover:', foto_remover);
-
   // ── Upload / remoção de foto ────────────────────────────────────────────────
   // fotoUrl = undefined → não alterar | null → remover | string → URL pública nova
   let fotoUrl: string | null | undefined = undefined;
@@ -50,7 +45,6 @@ export async function PATCH(
       const oldPath = (current.foto as string).includes("/storage/v1/object/public/insumo-fotos/")
         ? (current.foto as string).split("/storage/v1/object/public/insumo-fotos/")[1]
         : (current.foto as string);
-      console.log('[insumos PATCH] deletando foto antiga:', oldPath);
       await deleteFile("insumo-fotos", oldPath);
     }
   }
@@ -68,9 +62,7 @@ export async function PATCH(
 
     await deleteOldFoto();
 
-    console.log('[insumos PATCH] iniciando upload:', fileName, mimeType);
     const result = await uploadFile("insumo-fotos", fileName, foto, mimeType);
-    console.log('[insumos PATCH] resultado upload:', JSON.stringify(result));
 
     if ("error" in result) {
       return NextResponse.json({ error: `Upload falhou: ${result.error}` }, { status: 500 });
@@ -78,7 +70,6 @@ export async function PATCH(
 
     // Salvar URL pública completa (não apenas o filename)
     fotoUrl = result.url;
-    console.log('[insumos PATCH] fotoUrl salva no banco:', fotoUrl);
   }
 
   // ── UPDATE — usa COALESCE para campos escalares, UPDATE explícito para novos ─

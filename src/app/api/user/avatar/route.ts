@@ -56,11 +56,13 @@ export async function POST(req: NextRequest) {
   // URL pública com cache-bust (garante que o browser não usa versão em cache)
   const publicUrl = `${uploadResult.url}?t=${Date.now()}`;
 
-  // Atualizar avatar_url buscando por email — funciona mesmo se id_user estiver desincronizado
-  await sql`
+  // UPDATE por email — robusto mesmo se id_user estiver dessincronizado (ver migration 080)
+  // Após migration 080 os id_user ficam corretos, mas o email continua como fallback seguro
+  const updateResult = await sql`
     UPDATE public.user_profiles
     SET avatar_url = ${publicUrl}, updated_at = now()
-    WHERE email = (SELECT email FROM alissonerp.usuarios WHERE id = ${targetUserId}::uuid)
+    WHERE LOWER(email) = LOWER((SELECT email FROM alissonerp.usuarios WHERE id = ${targetUserId}::uuid))
+    RETURNING id_user, avatar_url
   `;
 
   return NextResponse.json({ avatar_url: publicUrl });
