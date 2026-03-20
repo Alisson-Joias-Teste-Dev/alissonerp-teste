@@ -85,8 +85,9 @@ export async function POST(req: NextRequest) {
       now()
     FROM alissonerp.usuarios u
     WHERE u.id = ${targetUserId}::uuid
-    ON CONFLICT (id_user) DO UPDATE
-      SET avatar_url = EXCLUDED.avatar_url,
+    ON CONFLICT (email) DO UPDATE
+      SET id_user    = EXCLUDED.id_user,
+          avatar_url = EXCLUDED.avatar_url,
           updated_at = now()
   `;
 
