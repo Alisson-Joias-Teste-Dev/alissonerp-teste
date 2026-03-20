@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, ArrowLeft, CheckCircle2, Clock, Layers, RefreshCw, X, Search, Loader2, AlertCircle } from "lucide-react";
+import { Plus, ArrowLeft, CheckCircle2, Clock, Layers, RefreshCw, X, Search, Loader2, AlertCircle, RotateCcw } from "lucide-react";
 import NovaDistribuicaoModal from "@/components/forms/NovaDistribuicaoModal";
 import ApontamentoDistModal from "@/components/forms/ApontamentoDistModal";
 import FecharOrdemDistModal from "@/components/forms/FecharOrdemDistModal";
@@ -75,6 +75,213 @@ interface OrdemDetalhe {
   pmc_fechamento: number | null;
   pedras_fechamento: number | null;
   foto_fechamento: string | null;
+  // Estorno (migration 081)
+  estorno_id: number | null;
+  estorno_motivo: string | null;
+  estorno_justificativa: string | null;
+  estorno_em: string | null;
+  estorno_por_nome: string | null;
+}
+
+const MOTIVOS_ESTORNO = [
+  { value: "peso_errado",    label: "Peso registrado incorreto" },
+  { value: "pedra_errada",   label: "Pedra apontada incorretamente" },
+  { value: "ordem_errada",   label: "Ordem no lote errado" },
+  { value: "operador_errou", label: "Erro do operador no processo" },
+  { value: "retrabalho",     label: "Peça precisa de retrabalho" },
+  { value: "outro",          label: "Outro motivo" },
+];
+
+const ROLES_ESTORNO = ["admin", "desenvolvedor", "gerente_fabrica"];
+
+// ─── MODAL: ESTORNAR ORDEM ────────────────────────────────────────────────────
+function EstornarOrdemModal({
+  isOpen,
+  onClose,
+  distribuicaoId,
+  ordem,
+  onSuccess,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  distribuicaoId: number;
+  ordem: OrdemDetalhe | null;
+  onSuccess: () => void;
+}) {
+  const [motivo, setMotivo]             = useState("");
+  const [justificativa, setJustificativa] = useState("");
+  const [confirmacao, setConfirmacao]   = useState("");
+  const [loading, setLoading]           = useState(false);
+  const [error, setError]               = useState("");
+  const [success, setSuccess]           = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setMotivo(""); setJustificativa(""); setConfirmacao("");
+      setError(""); setSuccess(false);
+    }
+  }, [isOpen]);
+
+  if (!isOpen || !ordem) return null;
+
+  const minJust = motivo === "outro" ? 20 : 10;
+  const confirmOk = confirmacao === "ESTORNAR";
+  const formOk = motivo && justificativa.trim().length >= minJust && confirmOk;
+
+  async function handleSubmit() {
+    if (!formOk) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/distribuicao/${distribuicaoId}/estorno`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ordem_id: ordem!.ordem_id, motivo, justificativa }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((data as { error?: string }).error ?? "Erro ao estornar.");
+        return;
+      }
+      setSuccess(true);
+      setTimeout(() => { onSuccess(); onClose(); }, 1200);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full max-h-[95vh] flex flex-col rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header vermelho */}
+        <div className="flex items-center justify-between px-6 py-4 border-b shrink-0"
+          style={{ borderColor: "#FCA5A5", backgroundColor: "#FEF2F2" }}>
+          <div className="flex items-center gap-2">
+            <RotateCcw size={16} style={{ color: "#DC2626" }} />
+            <h3 className="text-base font-semibold" style={{ color: "#991B1B" }}>
+              Estornar Ordem {ordem.numero_ordem ?? `#${ordem.ordem_id}`}
+            </h3>
+          </div>
+          <button onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-red-100">
+            <X size={16} style={{ color: "#9CA3AF" }} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+          {/* Aviso */}
+          <div className="rounded-lg p-3 text-[12px] space-y-1"
+            style={{ backgroundColor: "#FEF2F2", color: "#991B1B", border: "1px solid #FCA5A5" }}>
+            <p className="font-semibold">⚠️ Esta ação irá:</p>
+            <ul className="list-disc list-inside space-y-0.5 pl-1">
+              <li>Reverter TODOS os apontamentos desta ordem</li>
+              <li>Devolver ouro e pedras ao Almoxarifado</li>
+              <li>O operador terá que reapontar TUDO do zero</li>
+              {/* aviso lote será adicionado dinamicamente se necessário */}
+            </ul>
+          </div>
+
+          {/* Motivo */}
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
+              style={{ color: "#6B7280" }}>
+              Motivo *
+            </label>
+            <select
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none"
+              style={{ borderColor: motivo ? "#E8DCC8" : "#FCA5A5" }}
+            >
+              <option value="">Selecione o motivo…</option>
+              {MOTIVOS_ESTORNO.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Justificativa */}
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
+              style={{ color: "#6B7280" }}>
+              Justificativa * <span style={{ color: "#9CA3AF", fontWeight: 400 }}>
+                (mín. {minJust} caracteres)
+              </span>
+            </label>
+            <textarea
+              value={justificativa}
+              onChange={(e) => setJustificativa(e.target.value)}
+              rows={3}
+              placeholder="Descreva o motivo do estorno…"
+              className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none resize-none"
+              style={{ borderColor: justificativa.length >= minJust ? "#E8DCC8" : "#FCA5A5" }}
+            />
+            <p className="text-[10px] mt-0.5 text-right"
+              style={{ color: justificativa.length >= minJust ? "#9CA3AF" : "#DC2626" }}>
+              {justificativa.length}/{minJust}
+            </p>
+          </div>
+
+          {/* Confirmação */}
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
+              style={{ color: "#6B7280" }}>
+              Digite <span className="font-mono" style={{ color: "#DC2626" }}>ESTORNAR</span> para confirmar
+            </label>
+            <input
+              type="text"
+              value={confirmacao}
+              onChange={(e) => setConfirmacao(e.target.value)}
+              placeholder="ESTORNAR"
+              className="w-full px-3 py-2 rounded-lg border text-sm font-mono focus:outline-none"
+              style={{ borderColor: confirmOk ? "#86EFAC" : "#E8DCC8" }}
+            />
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]"
+              style={{ backgroundColor: "#FEF2F2", color: "#DC2626" }}>
+              <AlertCircle size={14} className="shrink-0" />{error}
+            </div>
+          )}
+          {success && (
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]"
+              style={{ backgroundColor: "#ECFDF5", color: "#059669" }}>
+              <CheckCircle2 size={14} className="shrink-0" />Estorno registrado com sucesso!
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t shrink-0"
+          style={{ borderColor: "#E8DCC8" }}>
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px]"
+            style={{ color: "#6B7280" }}>
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={!formOk || loading || success}
+            className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-40"
+            style={{ backgroundColor: "#DC2626", color: "white" }}
+          >
+            {loading ? (
+              <><Loader2 size={14} className="animate-spin" />Estornando…</>
+            ) : (
+              <><RotateCcw size={14} />Confirmar Estorno</>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // Exibe o operador/setor de uma distribuição
@@ -162,6 +369,7 @@ function DistCard({ d, onClick }: { d: DistRow; onClick: () => void }) {
 }
 
 type ActiveModal = "nova" | "apontamento" | "concluir" | "adicionar-ordens" | null;
+
 
 // ─── MODAL: ADICIONAR ORDENS ──────────────────────────────────────────────────
 interface OrdemDisponivel {
@@ -412,7 +620,15 @@ function AdicionarOrdensModal({
   );
 }
 
-export default function DistribuicaoClient({ dists, semDeposito }: { dists: DistRow[]; semDeposito?: boolean }) {
+export default function DistribuicaoClient({
+  dists,
+  semDeposito,
+  userRole,
+}: {
+  dists: DistRow[];
+  semDeposito?: boolean;
+  userRole?: string | null;
+}) {
   const router = useRouter();
   const [selected, setSelected] = useState<DistRow | null>(null);
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
@@ -421,6 +637,9 @@ export default function DistribuicaoClient({ dists, semDeposito }: { dists: Dist
   const [apontamentos, setApontamentos] = useState<ApontamentoRow[]>([]);
   const [loadingApontamentos, setLoadingApontamentos] = useState(false);
   const [ordemParaSaida, setOrdemParaSaida] = useState<OrdemDetalhe | null>(null);
+  const [ordemParaEstorno, setOrdemParaEstorno] = useState<OrdemDetalhe | null>(null);
+
+  const podeEstornar = ROLES_ESTORNO.includes(userRole ?? "");
 
   const refresh = useCallback(() => router.refresh(), [router]);
 
@@ -563,25 +782,49 @@ export default function DistribuicaoClient({ dists, semDeposito }: { dists: Dist
                               Sem Peso
                             </span>
                           )}
+                          {/* Badge estornada: mostra quando há estorno e saída ainda não re-registrada */}
+                          {!concluida && o.estorno_id && (
+                            <span
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border"
+                              style={{ backgroundColor: "#FEF2F2", color: "#DC2626", borderColor: "#FCA5A5" }}
+                            >
+                              <RotateCcw size={9} /> Estornada
+                            </span>
+                          )}
                         </div>
                         <p className="text-[11px] truncate" style={{ color: "#9CA3AF" }}>
                           {o.cliente_nome ?? "—"}
                           {Number(o.peso_metal_negociado) > 0 && ` · neg. ${Number(o.peso_metal_negociado).toFixed(2)}g`}
                         </p>
                       </div>
-                      {concluida ? (
-                        <CheckCircle2 size={16} className="shrink-0" style={{ color: "#059669" }} />
-                      ) : ativa ? (
-                        <button
-                          onClick={() => setOrdemParaSaida(o)}
-                          className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all hover:opacity-80"
-                          style={{ backgroundColor: "#0EA5E912", color: "#0284C7" }}
-                        >
-                          📤 Registrar Saída
-                        </button>
-                      ) : (
-                        <span className="text-[11px] shrink-0" style={{ color: "#9CA3AF" }}>Em andamento</span>
-                      )}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {concluida ? (
+                          <>
+                            <CheckCircle2 size={16} style={{ color: "#059669" }} />
+                            {/* Botão estornar: só para roles permitidas, ordem concluída */}
+                            {podeEstornar && (
+                              <button
+                                onClick={() => setOrdemParaEstorno(o)}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all hover:opacity-80"
+                                style={{ backgroundColor: "#FEF2F2", color: "#DC2626", border: "1px solid #FCA5A5" }}
+                                title="Estornar saída desta ordem"
+                              >
+                                <RotateCcw size={10} /> Estornar
+                              </button>
+                            )}
+                          </>
+                        ) : ativa ? (
+                          <button
+                            onClick={() => setOrdemParaSaida(o)}
+                            className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all hover:opacity-80"
+                            style={{ backgroundColor: "#0EA5E912", color: "#0284C7" }}
+                          >
+                            📤 Registrar Saída
+                          </button>
+                        ) : (
+                          <span className="text-[11px]" style={{ color: "#9CA3AF" }}>Em andamento</span>
+                        )}
+                      </div>
                     </div>
                     {/* Resumo da saída sem peso */}
                     {concluida && o.sem_peso && (
@@ -611,6 +854,15 @@ export default function DistribuicaoClient({ dists, semDeposito }: { dists: Dist
                       <div className="mt-1 text-[11px] font-mono" style={{ color: "#059669" }}>
                         {Number(o.peso_fechamento).toFixed(2)}g
                         {o.pedras_fechamento != null && Number(o.pedras_fechamento) > 0 && ` · ${Math.round(Number(o.pedras_fechamento))} UN`}
+                      </div>
+                    )}
+                    {/* Info do estorno (quando ordem foi estornada e aguarda re-registro) */}
+                    {!concluida && o.estorno_id && o.estorno_em && (
+                      <div className="mt-1.5 text-[10px] rounded px-2 py-1"
+                        style={{ backgroundColor: "#FEF2F2", color: "#991B1B" }}>
+                        Estornada por {o.estorno_por_nome ?? "—"} em{" "}
+                        {new Date(o.estorno_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                        {" · "}{MOTIVOS_ESTORNO.find((m) => m.value === o.estorno_motivo)?.label ?? o.estorno_motivo}
                       </div>
                     )}
                   </div>
@@ -707,6 +959,53 @@ export default function DistribuicaoClient({ dists, semDeposito }: { dists: Dist
           )}
         </div>
 
+        {/* Histórico de estornos */}
+        {(() => {
+          const estornadas = ordens.filter((o) => o.estorno_id && o.estorno_em);
+          if (estornadas.length === 0) return null;
+          return (
+            <div className="mb-6">
+              <h3 className="text-sm font-semibold uppercase tracking-wider mb-3"
+                style={{ color: "#DC2626" }}>
+                Histórico de Estornos ({estornadas.length})
+              </h3>
+              <div className="rounded-xl border overflow-hidden" style={{ borderColor: "#FCA5A5" }}>
+                {estornadas.map((o, i) => (
+                  <div key={o.doo_id}
+                    className="px-4 py-3"
+                    style={{ borderTop: i > 0 ? "1px solid #FEE2E2" : undefined, backgroundColor: "#FEF2F2" }}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold" style={{ color: "#991B1B" }}>
+                          {o.numero_ordem ?? `#${o.ordem_id}`}
+                        </p>
+                        <p className="text-[11px] mt-0.5" style={{ color: "#DC2626" }}>
+                          {MOTIVOS_ESTORNO.find((m) => m.value === o.estorno_motivo)?.label ?? o.estorno_motivo}
+                        </p>
+                        {o.estorno_justificativa && (
+                          <p className="text-[11px] mt-0.5 italic" style={{ color: "#9CA3AF" }}>
+                            &ldquo;{o.estorno_justificativa}&rdquo;
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                          {o.estorno_por_nome ?? "—"}
+                        </p>
+                        {o.estorno_em && (
+                          <p className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                            {new Date(o.estorno_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Ações */}
         {ativa && (
           <div className="flex gap-3 flex-wrap">
@@ -784,6 +1083,22 @@ export default function DistribuicaoClient({ dists, semDeposito }: { dists: Dist
           onSuccess={() => {
             setActiveModal(null);
             // Recarregar ordens e atualizar contadores via router.refresh()
+            setLoadingOrdens(true);
+            fetch(`/api/distribuicao/${selected.id}`)
+              .then((r) => r.json())
+              .then((data) => setOrdens(data.ordens ?? []))
+              .catch(() => {})
+              .finally(() => setLoadingOrdens(false));
+            refresh();
+          }}
+        />
+        <EstornarOrdemModal
+          isOpen={!!ordemParaEstorno}
+          onClose={() => setOrdemParaEstorno(null)}
+          distribuicaoId={selected.id}
+          ordem={ordemParaEstorno}
+          onSuccess={() => {
+            setOrdemParaEstorno(null);
             setLoadingOrdens(true);
             fetch(`/api/distribuicao/${selected.id}`)
               .then((r) => r.json())
