@@ -531,7 +531,8 @@ export default function SaidaOrdemModal({
                             max={p.qtd_disponivel}
                             value={qtdPedras[p.insumo_id] ?? "0"}
                             onChange={(e) => {
-                              setQtdPedras((prev) => ({ ...prev, [p.insumo_id]: e.target.value }));
+                              const v = Math.min(parseInt(e.target.value) || 0, p.qtd_disponivel);
+                              setQtdPedras((prev) => ({ ...prev, [p.insumo_id]: String(v) }));
                               setError("");
                             }}
                             className="w-20 px-2 py-1.5 rounded-md border text-sm font-mono text-center focus:outline-none"
