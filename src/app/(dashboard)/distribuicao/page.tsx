@@ -17,17 +17,12 @@ export default async function DistribuicaoPage() {
       SELECT role, deposito_id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
     `;
     userRole = (usuario?.role as string | null) ?? null;
-    console.log('[distribuicao] user:', user.id, 'role:', userRole, 'deposito_id:', usuario?.deposito_id ?? null);
     if (userRole === 'ourives') {
       if (usuario?.deposito_id != null) {
         depositoIdFiltro = usuario.deposito_id as number;
-        console.log('[distribuicao] filtro ativo: deposito_id =', depositoIdFiltro);
       } else {
         semDeposito = true;
-        console.log('[distribuicao] ourives sem deposito_id — lista vazia');
       }
-    } else {
-      console.log('[distribuicao] sem filtro — role não é ourives');
     }
   }
 
@@ -99,6 +94,5 @@ export default async function DistribuicaoPage() {
         LIMIT 100
       `;
 
-  console.log('[distribuicao] lotes retornados:', dists.length, dists.map((d: any) => `id=${d.id} dep=${d.deposito_id}`));
   return <DistribuicaoClient dists={dists as any[]} semDeposito={false} />;
 }
