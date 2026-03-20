@@ -88,5 +88,16 @@ export async function GET(
     ORDER BY o.numero_ordem
   `;
 
-  return NextResponse.json({ dist, ordens });
+  // Último estorno de lote inteiro (ordem_id IS NULL)
+  const [loteEstorno] = await sql`
+    SELECT e.motivo, e.justificativa, e.created_at,
+           up.name AS estornado_por_nome
+    FROM alissonerp.estornos_distribuicao e
+    LEFT JOIN public.user_profiles up ON up.id_user = e.estornado_por
+    WHERE e.distribuicao_id = ${distId} AND e.ordem_id IS NULL
+    ORDER BY e.created_at DESC
+    LIMIT 1
+  `;
+
+  return NextResponse.json({ dist, ordens, lote_estorno: loteEstorno ?? null });
 }

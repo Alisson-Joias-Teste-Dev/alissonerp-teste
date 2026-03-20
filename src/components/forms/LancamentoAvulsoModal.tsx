@@ -14,18 +14,19 @@ interface Categoria { categoria_id: number; categoria_nome: string; }
 const TIPO_OPTIONS: { value: TipoLancamento; label: string; desc: string }[] = [
   { value: "entrada",       label: "Entrada Avulsa",       desc: "Entrada de material no depósito selecionado" },
   { value: "saida",         label: "Saída Avulsa",         desc: "Saída de material do depósito selecionado" },
-  { value: "transferencia", label: "Transferência Avulsa", desc: "Move material do depósito para o Almoxarifado" },
+  { value: "transferencia", label: "Transferência Avulsa", desc: "Move material entre depósitos" },
   { value: "sangria",       label: "Sangria",              desc: "Recolhimento de material para o Almoxarifado" },
 ];
 
-function getInfoBox(tipo: TipoLancamento, deposito: Deposito | null) {
+function getInfoBox(tipo: TipoLancamento, deposito: Deposito | null, depositoDestino: Deposito | null) {
   const almox = "Almoxarifado Central";
-  const dep = deposito?.nome ?? "Depósito";
+  const dep   = deposito?.nome ?? "Depósito";
+  const dest  = depositoDestino?.nome ?? almox;
   switch (tipo) {
-    case "entrada":       return { from: "Externo",   to: dep,       color: "#059669" };
-    case "saida":         return { from: dep,         to: "Externo", color: "#DC2626" };
-    case "transferencia": return { from: dep,         to: almox,     color: "#2563EB" };
-    case "sangria":       return { from: "Produção",  to: almox,     color: "#D97706" };
+    case "entrada":       return { from: "Externo",  to: dep,   color: "#059669" };
+    case "saida":         return { from: dep,        to: "Externo", color: "#DC2626" };
+    case "transferencia": return { from: dep,        to: dest,  color: "#2563EB" };
+    case "sangria":       return { from: "Produção", to: almox, color: "#D97706" };
   }
 }
 
@@ -36,9 +37,10 @@ interface Props {
 }
 
 export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Props) {
-  const [tipo, setTipo]         = useState<TipoLancamento>("entrada");
+  const [tipo, setTipo]             = useState<TipoLancamento>("entrada");
   const [depositoId, setDepositoId] = useState("");
-  const [peso, setPeso]         = useState("");
+  const [depositoDestinoId, setDepositoDestinoId] = useState("");
+  const [peso, setPeso]             = useState("");
   const [obs, setObs]           = useState("");
 
   // Categoria + insumo com autocomplete
@@ -66,6 +68,7 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
     setBuscaInsumo("");
     setMostrarDropdown(false);
     setDepositoId("");
+    setDepositoDestinoId("");
     setPeso("");
     setObs("");
     setError("");
@@ -77,7 +80,12 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
     ]).then(([cats, deps]) => {
       setCategorias((cats as Categoria[]) ?? []);
       setDepositos((deps as Deposito[]) ?? []);
-      if (deps?.length) setDepositoId(String(deps[0].id));
+      if (deps?.length) {
+        setDepositoId(String(deps[0].id));
+        // Destino padrão = Almoxarifado (id=1), fallback = primeiro dep
+        const almox = (deps as Deposito[]).find((d) => d.id === 1);
+        setDepositoDestinoId(String(almox?.id ?? deps[0].id));
+      }
     });
   }, [isOpen]);
 
@@ -89,10 +97,12 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
       .then((data: Insumo[]) => setInsumos(data ?? []));
   }, [categoriaId]);
 
-  const selectedDeposito  = depositos.find((d) => d.id === Number(depositoId)) ?? null;
-  const isSangria         = tipo === "sangria";
-  const info              = getInfoBox(tipo, selectedDeposito);
-  const showDeposito      = !isSangria;
+  const selectedDeposito        = depositos.find((d) => d.id === Number(depositoId)) ?? null;
+  const selectedDepositoDestino = depositos.find((d) => d.id === Number(depositoDestinoId)) ?? null;
+  const isSangria               = tipo === "sangria";
+  const isTransferencia         = tipo === "transferencia";
+  const info                    = getInfoBox(tipo, selectedDeposito, selectedDepositoDestino);
+  const showDeposito            = !isSangria;
 
   const insumosFiltrados = insumos.filter((i) => {
     const q = buscaInsumo.toLowerCase();
@@ -119,6 +129,11 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
     if (!insumoId)                           { setError("Selecione o insumo.");         return; }
     if (isNaN(pesoNum) || pesoNum <= 0)      { setError("Informe o peso/quantidade.");  return; }
     if (!isSangria && !depositoId)           { setError("Selecione o depósito.");       return; }
+    if (isTransferencia && !depositoDestinoId) { setError("Selecione o depósito de destino."); return; }
+    if (isTransferencia && depositoId === depositoDestinoId) {
+      setError("Origem e destino não podem ser iguais.");
+      return;
+    }
 
     setLoading(true);
     const body: Record<string, unknown> = {
@@ -128,6 +143,7 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
       obs:             obs || null,
     };
     if (!isSangria) body.deposito_id = Number(depositoId);
+    if (isTransferencia) body.deposito_destino_id = Number(depositoDestinoId);
 
     const res = await fetch("/api/lancamentos-avulso", {
       method: "POST",
@@ -279,11 +295,30 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
           {showDeposito && (
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
-                {tipo === "transferencia" ? "Depósito de Origem" : "Depósito"}
+                {isTransferencia ? "Depósito de Origem" : "Depósito"}
               </label>
               <select
                 value={depositoId}
                 onChange={(e) => setDepositoId(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none"
+                style={{ borderColor: C.cremeBorder }}
+              >
+                {depositos.map((d) => (
+                  <option key={d.id} value={d.id}>{d.nome}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Depósito Destino — apenas para transferência */}
+          {isTransferencia && (
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
+                Depósito de Destino
+              </label>
+              <select
+                value={depositoDestinoId}
+                onChange={(e) => setDepositoDestinoId(e.target.value)}
                 className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none"
                 style={{ borderColor: C.cremeBorder }}
               >

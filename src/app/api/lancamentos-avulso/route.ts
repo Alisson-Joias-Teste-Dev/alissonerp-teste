@@ -2,14 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 
 // POST /api/lancamentos-avulso
-// Body: { tipo_lancamento, insumo_id, peso, deposito_id?, obs?, created_by? }
+// Body: { tipo_lancamento, insumo_id, peso, deposito_id?, deposito_destino_id?, obs?, created_by? }
 // Trigger trg_lancamento_avulso executa automaticamente ao INSERT.
 export async function POST(req: NextRequest) {
-  const { tipo_lancamento, insumo_id, deposito_id, peso, obs, created_by } =
+  const { tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, obs, created_by } =
     await req.json() as {
       tipo_lancamento: string;
       insumo_id: number;
       deposito_id?: number | null;
+      deposito_destino_id?: number | null;
       peso: number;
       obs?: string | null;
       created_by?: string | null;
@@ -22,13 +23,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  if (tipo_lancamento === "transferencia" && deposito_id && deposito_destino_id &&
+      Number(deposito_id) === Number(deposito_destino_id)) {
+    return NextResponse.json({ error: "Origem e destino não podem ser iguais" }, { status: 400 });
+  }
+
   const [row] = await sql`
     INSERT INTO alissonerp.lancamentos_avulso
-      (tipo_lancamento, insumo_id, deposito_id, peso, obs, created_by)
+      (tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, obs, created_by)
     VALUES (
       ${tipo_lancamento}::alissonerp.enum_tipo_lancamento,
       ${insumo_id},
       ${deposito_id ?? null},
+      ${deposito_destino_id ?? null},
       ${peso},
       ${obs ?? null},
       ${created_by ?? null}::uuid

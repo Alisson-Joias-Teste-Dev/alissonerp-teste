@@ -92,20 +92,29 @@ const MOTIVOS_ESTORNO = [
   { value: "outro",          label: "Outro motivo" },
 ];
 
+const MOTIVOS_ESTORNO_LOTE = [
+  { value: "apontamento_errado", label: "Apontamento incorreto (peso/pedra)" },
+  { value: "entrada_esquecida",  label: "Esqueceu de dar entrada de metal" },
+  { value: "retorno_indevido",   label: "Retorno de metal indevido" },
+  { value: "lote_errado",        label: "Ordens no lote errado" },
+  { value: "retrabalho",         label: "Peças precisam de retrabalho" },
+  { value: "outro",              label: "Outro motivo" },
+];
+
 const ROLES_ESTORNO = ["admin", "desenvolvedor", "gerente_fabrica"];
 
-// ─── MODAL: ESTORNAR ORDEM ────────────────────────────────────────────────────
-function EstornarOrdemModal({
+// ─── MODAL: ESTORNAR LOTE INTEIRO ────────────────────────────────────────────
+function EstornarLoteModal({
   isOpen,
   onClose,
   distribuicaoId,
-  ordem,
+  ordens,
   onSuccess,
 }: {
   isOpen: boolean;
   onClose: () => void;
   distribuicaoId: number;
-  ordem: OrdemDetalhe | null;
+  ordens: OrdemDetalhe[];
   onSuccess: () => void;
 }) {
   const [motivo, setMotivo]             = useState("");
@@ -118,90 +127,83 @@ function EstornarOrdemModal({
   useEffect(() => {
     if (!isOpen) {
       setMotivo(""); setJustificativa(""); setConfirmacao("");
-      setError(""); setSuccess(false);
+      setError(""); setSuccess(false); setLoading(false);
     }
   }, [isOpen]);
 
-  if (!isOpen || !ordem) return null;
-
-  const minJust = motivo === "outro" ? 20 : 10;
   const confirmOk = confirmacao === "ESTORNAR";
-  const formOk = motivo && justificativa.trim().length >= minJust && confirmOk;
+  const formOk    = motivo && justificativa.trim().length >= 10 && confirmOk;
 
   async function handleSubmit() {
     if (!formOk) return;
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     try {
-      const res = await fetch(`/api/distribuicao/${distribuicaoId}/estorno`, {
+      const res = await fetch(`/api/distribuicao/${distribuicaoId}/estorno-lote`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ordem_id: ordem!.ordem_id, motivo, justificativa }),
+        body: JSON.stringify({ motivo, justificativa }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError((data as { error?: string }).error ?? "Erro ao estornar.");
-        return;
-      }
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? "Erro ao estornar"); return; }
       setSuccess(true);
-      setTimeout(() => { onSuccess(); onClose(); }, 1200);
-    } finally {
-      setLoading(false);
-    }
+      setTimeout(() => { onSuccess(); }, 800);
+    } catch { setError("Erro de conexão"); }
+    finally  { setLoading(false); }
   }
 
+  if (!isOpen) return null;
+
+  const numOrdens = ordens.map((o) => o.numero_ordem ?? `#${o.ordem_id}`).join(", ");
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white w-full max-h-[95vh] flex flex-col rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header vermelho */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+      <div className="rounded-2xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ backgroundColor: "white", maxHeight: "90vh" }}>
+        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b shrink-0"
-          style={{ borderColor: "#FCA5A5", backgroundColor: "#FEF2F2" }}>
+          style={{ backgroundColor: "#FEF2F2", borderColor: "#FECACA" }}>
           <div className="flex items-center gap-2">
-            <RotateCcw size={16} style={{ color: "#DC2626" }} />
-            <h3 className="text-base font-semibold" style={{ color: "#991B1B" }}>
-              Estornar Ordem {ordem.numero_ordem ?? `#${ordem.ordem_id}`}
-            </h3>
+            <AlertCircle size={18} style={{ color: "#DC2626" }} />
+            <h2 className="text-base font-semibold" style={{ color: "#991B1B" }}>
+              Estornar Lote #{distribuicaoId}
+            </h2>
           </div>
-          <button onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-red-100">
-            <X size={16} style={{ color: "#9CA3AF" }} />
-          </button>
+          <button onClick={onClose} style={{ color: "#9CA3AF" }}><X size={18} /></button>
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
           {/* Aviso */}
-          <div className="rounded-lg p-3 text-[12px] space-y-1"
-            style={{ backgroundColor: "#FEF2F2", color: "#991B1B", border: "1px solid #FCA5A5" }}>
+          <div className="rounded-lg p-3 text-[13px] space-y-1" style={{ backgroundColor: "#FEF2F2", color: "#991B1B", border: "1px solid #FECACA" }}>
             <p className="font-semibold">⚠️ Esta ação irá:</p>
-            <ul className="list-disc list-inside space-y-0.5 pl-1">
-              <li>Reverter TODOS os apontamentos desta ordem</li>
-              <li>Devolver ouro e pedras ao Almoxarifado</li>
+            <ul className="list-disc list-inside space-y-0.5 text-[12px]">
+              <li>Reverter TODAS as movimentações de estoque do lote</li>
+              <li>Reverter TODAS as saídas das ordens</li>
+              <li>Devolver ouro e pedras aos saldos originais</li>
+              {ordens.some((o) => o.data_baixa) && <li>Zerar registros de saída de todas as ordens</li>}
+              <li>Se o lote estava concluído, será <strong>REABERTO</strong></li>
               <li>O operador terá que reapontar TUDO do zero</li>
-              {/* aviso lote será adicionado dinamicamente se necessário */}
             </ul>
           </div>
 
+          {numOrdens && (
+            <p className="text-[12px]" style={{ color: "#6B7280" }}>
+              <span className="font-semibold">Ordens afetadas:</span> {numOrdens}
+            </p>
+          )}
+
           {/* Motivo */}
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
-              style={{ color: "#6B7280" }}>
-              Motivo *
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "#374151" }}>
+              Motivo <span style={{ color: "#DC2626" }}>*</span>
             </label>
             <select
               value={motivo}
               onChange={(e) => setMotivo(e.target.value)}
               className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none"
-              style={{ borderColor: motivo ? "#E8DCC8" : "#FCA5A5" }}
+              style={{ borderColor: "#E8DCC8" }}
             >
-              <option value="">Selecione o motivo…</option>
-              {MOTIVOS_ESTORNO.map((m) => (
+              <option value="">Selecionar motivo…</option>
+              {MOTIVOS_ESTORNO_LOTE.map((m) => (
                 <option key={m.value} value={m.value}>{m.label}</option>
               ))}
             </select>
@@ -209,31 +211,24 @@ function EstornarOrdemModal({
 
           {/* Justificativa */}
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
-              style={{ color: "#6B7280" }}>
-              Justificativa * <span style={{ color: "#9CA3AF", fontWeight: 400 }}>
-                (mín. {minJust} caracteres)
-              </span>
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "#374151" }}>
+              Justificativa <span style={{ color: "#DC2626" }}>*</span>{" "}
+              <span style={{ color: "#9CA3AF" }}>(mín. {motivo === "outro" ? 20 : 10} caracteres)</span>
             </label>
             <textarea
               value={justificativa}
               onChange={(e) => setJustificativa(e.target.value)}
+              placeholder="Descreva em detalhes o motivo do estorno…"
               rows={3}
-              placeholder="Descreva o motivo do estorno…"
               className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none resize-none"
-              style={{ borderColor: justificativa.length >= minJust ? "#E8DCC8" : "#FCA5A5" }}
+              style={{ borderColor: "#E8DCC8" }}
             />
-            <p className="text-[10px] mt-0.5 text-right"
-              style={{ color: justificativa.length >= minJust ? "#9CA3AF" : "#DC2626" }}>
-              {justificativa.length}/{minJust}
-            </p>
           </div>
 
           {/* Confirmação */}
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
-              style={{ color: "#6B7280" }}>
-              Digite <span className="font-mono" style={{ color: "#DC2626" }}>ESTORNAR</span> para confirmar
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "#374151" }}>
+              Digite <span className="font-mono font-bold">ESTORNAR</span> para confirmar:
             </label>
             <input
               type="text"
@@ -254,7 +249,7 @@ function EstornarOrdemModal({
           {success && (
             <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]"
               style={{ backgroundColor: "#ECFDF5", color: "#059669" }}>
-              <CheckCircle2 size={14} className="shrink-0" />Estorno registrado com sucesso!
+              <CheckCircle2 size={14} className="shrink-0" />Estorno do lote registrado com sucesso!
             </div>
           )}
         </div>
@@ -275,7 +270,7 @@ function EstornarOrdemModal({
             {loading ? (
               <><Loader2 size={14} className="animate-spin" />Estornando…</>
             ) : (
-              <><RotateCcw size={14} />Confirmar Estorno</>
+              <><RotateCcw size={14} />Confirmar Estorno do Lote</>
             )}
           </button>
         </div>
@@ -637,7 +632,10 @@ export default function DistribuicaoClient({
   const [apontamentos, setApontamentos] = useState<ApontamentoRow[]>([]);
   const [loadingApontamentos, setLoadingApontamentos] = useState(false);
   const [ordemParaSaida, setOrdemParaSaida] = useState<OrdemDetalhe | null>(null);
-  const [ordemParaEstorno, setOrdemParaEstorno] = useState<OrdemDetalhe | null>(null);
+  const [loteEstornoAberto, setLoteEstornoAberto] = useState(false);
+  const [loteEstorno, setLoteEstorno]             = useState<{
+    motivo: string; justificativa: string; created_at: string; estornado_por_nome: string | null;
+  } | null>(null);
 
   const podeEstornar = ROLES_ESTORNO.includes(userRole ?? "");
 
@@ -645,11 +643,14 @@ export default function DistribuicaoClient({
 
   // Carregar ordens do detalhe ao selecionar uma distribuição
   useEffect(() => {
-    if (!selected) { setOrdens([]); return; }
+    if (!selected) { setOrdens([]); setLoteEstorno(null); return; }
     setLoadingOrdens(true);
     fetch(`/api/distribuicao/${selected.id}`)
       .then((r) => r.json())
-      .then((data) => setOrdens(data.ordens ?? []))
+      .then((data) => {
+        setOrdens(data.ordens ?? []);
+        setLoteEstorno(data.lote_estorno ?? null);
+      })
       .catch(() => setOrdens([]))
       .finally(() => setLoadingOrdens(false));
   }, [selected]);
@@ -697,8 +698,29 @@ export default function DistribuicaoClient({
                   <span>· por {selected.criado_por_nome}</span>
                 )}
               </p>
+              {loteEstorno && (
+                <p className="text-[11px] mt-1 flex items-center gap-1" style={{ color: "#DC2626" }}>
+                  <RotateCcw size={10} />
+                  Estornado por {loteEstorno.estornado_por_nome ?? "—"} em{" "}
+                  {new Date(loteEstorno.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  {" · "}
+                  {MOTIVOS_ESTORNO_LOTE.find((m) => m.value === loteEstorno.motivo)?.label ?? loteEstorno.motivo}
+                </p>
+              )}
             </div>
-            <EtapaBadge etapa={selected.etapas} />
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <EtapaBadge etapa={selected.etapas} />
+              {podeEstornar && (
+                <button
+                  onClick={() => setLoteEstornoAberto(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all"
+                  style={{ backgroundColor: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA" }}
+                  title="Reverter TODAS as movimentações deste lote"
+                >
+                  <AlertCircle size={12} /> Estornar Lote
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -801,17 +823,6 @@ export default function DistribuicaoClient({
                         {concluida ? (
                           <>
                             <CheckCircle2 size={16} style={{ color: "#059669" }} />
-                            {/* Botão estornar: só para roles permitidas, ordem concluída */}
-                            {podeEstornar && (
-                              <button
-                                onClick={() => setOrdemParaEstorno(o)}
-                                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all hover:opacity-80"
-                                style={{ backgroundColor: "#FEF2F2", color: "#DC2626", border: "1px solid #FCA5A5" }}
-                                title="Estornar saída desta ordem"
-                              >
-                                <RotateCcw size={10} /> Estornar
-                              </button>
-                            )}
                           </>
                         ) : ativa ? (
                           <button
@@ -1092,17 +1103,23 @@ export default function DistribuicaoClient({
             refresh();
           }}
         />
-        <EstornarOrdemModal
-          isOpen={!!ordemParaEstorno}
-          onClose={() => setOrdemParaEstorno(null)}
+        <EstornarLoteModal
+          isOpen={loteEstornoAberto}
+          onClose={() => setLoteEstornoAberto(false)}
           distribuicaoId={selected.id}
-          ordem={ordemParaEstorno}
+          ordens={ordens}
           onSuccess={() => {
-            setOrdemParaEstorno(null);
+            setLoteEstornoAberto(false);
             setLoadingOrdens(true);
             fetch(`/api/distribuicao/${selected.id}`)
               .then((r) => r.json())
-              .then((data) => setOrdens(data.ordens ?? []))
+              .then((data) => {
+                setOrdens(data.ordens ?? []);
+                setLoteEstorno(data.lote_estorno ?? null);
+                if (data.dist?.etapas) {
+                  setSelected((prev) => prev ? { ...prev, etapas: data.dist.etapas as Etapa } : null);
+                }
+              })
               .catch(() => {})
               .finally(() => setLoadingOrdens(false));
             refresh();
