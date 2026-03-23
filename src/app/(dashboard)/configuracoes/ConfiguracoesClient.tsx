@@ -27,6 +27,7 @@ import {
   Shield,
   Lock,
   PenLine,
+  Flame,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
@@ -85,15 +86,26 @@ interface Usuario {
   tipos_ordem_permitidos?: string[];
 }
 
+interface TeorOuro {
+  id: number;
+  insumo_id: number;
+  nome: string;
+  teor: number;
+  ativo: boolean;
+  sku: string;
+  updated_at: string;
+}
+
 interface Props {
   parametros: Parametros;
   webhooks: Webhook[];
   logs: WebhookLog[];
   usuarios: Usuario[];
   depositos: DepositoEdit[];
+  teores: TeorOuro[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -1759,6 +1771,7 @@ const MODULO_LABEL: Record<string, string> = {
   ordens:           "Ordens",
   pcp:              "PCP",
   distribuicao:     "Distribuição",
+  purificacao:      "Purificação",
   estoque:          "Estoque",
   quebra:           "Quebra",
   insumos:          "Insumos",
@@ -1776,7 +1789,7 @@ const MODULO_LABEL: Record<string, string> = {
 
 const MODULO_GRUPOS = [
   { label: "📊 Geral",       modulos: ["dashboard", "dashboard_fabrica"] },
-  { label: "🔧 Produção",    modulos: ["ordens", "pcp", "distribuicao"] },
+  { label: "🔧 Produção",    modulos: ["ordens", "pcp", "distribuicao", "purificacao"] },
   { label: "📦 Suprimentos", modulos: ["estoque", "quebra", "insumos", "compras"] },
   { label: "🚚 Logística",   modulos: ["protocolo", "conferencia", "entrega"] },
   { label: "✅ Qualidade",   modulos: ["auditoria"] },
@@ -2237,8 +2250,132 @@ function TabPermissoes() {
   );
 }
 
+// ─── Tab Teores de Ouro ───────────────────────────────────────────────────────
+function TabTeores({ teores: initial }: { teores: TeorOuro[] }) {
+  const router = useRouter();
+  const [, startTransition] = useTransition();
+  const [teores, setTeores] = useState<TeorOuro[]>(initial);
+  const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [editTeor, setEditTeor] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [savedId, setSavedId] = useState<number | null>(null);
+  const [erros, setErros] = useState<Record<number, string>>({});
+
+  async function handleSave(t: TeorOuro) {
+    const novoTeor = parseFloat(editTeor) / 100;
+    if (isNaN(novoTeor) || novoTeor <= 0 || novoTeor > 1) {
+      setErros(prev => ({ ...prev, [t.id]: "Teor deve ser entre 0.01 e 100%" }));
+      return;
+    }
+    setSaving(true);
+    setErros(prev => { const n = { ...prev }; delete n[t.id]; return n; });
+    const res = await fetch(`/api/purificacao/teores/${t.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teor: novoTeor, user_role: "admin" }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const d = await res.json();
+      setErros(prev => ({ ...prev, [t.id]: d.error ?? "Erro ao salvar" }));
+      return;
+    }
+    setTeores(prev => prev.map(x => x.id === t.id ? { ...x, teor: novoTeor } : x));
+    setEditandoId(null);
+    setSavedId(t.id);
+    setTimeout(() => setSavedId(null), 2000);
+    startTransition(() => router.refresh());
+  }
+
+  return (
+    <div className="space-y-4 max-w-lg">
+      <div>
+        <p className="text-xs" style={{ color: P.muted }}>
+          Teor de ouro puro por liga. Usado no cálculo da purificação (24k esperado).
+        </p>
+      </div>
+      <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ backgroundColor: P.bg, borderBottom: `1px solid ${P.border}` }}>
+              {["Tipo de Ouro", "SKU", "Teor (%)", "Status", ""].map(h => (
+                <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium" style={{ color: P.muted }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {teores.map(t => (
+              <tr key={t.id} style={{ borderBottom: `1px solid ${P.bg}` }}>
+                <td className="px-4 py-3 font-medium text-sm" style={{ color: P.creme }}>{t.nome}</td>
+                <td className="px-4 py-3 text-xs font-mono" style={{ color: P.muted }}>{t.sku}</td>
+                <td className="px-4 py-3">
+                  {editandoId === t.id ? (
+                    <div>
+                      <input
+                        type="number"
+                        value={editTeor}
+                        min={1}
+                        max={100}
+                        step={0.01}
+                        onChange={e => setEditTeor(e.target.value)}
+                        className="w-24 rounded-lg px-2 py-1 text-sm outline-none"
+                        style={{ border: `1px solid ${P.border}`, color: P.creme }}
+                        autoFocus
+                      />
+                      {erros[t.id] && <div className="text-[11px] mt-1" style={{ color: P.vermelho }}>{erros[t.id]}</div>}
+                    </div>
+                  ) : (
+                    <span className="font-semibold" style={{ color: P.dourado }}>
+                      {savedId === t.id ? "✓ " : ""}{(t.teor * 100).toFixed(2)}%
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <span style={{ color: t.ativo ? P.verde : P.muted, fontSize: 12 }}>
+                    {t.ativo ? "Ativo" : "Inativo"}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {editandoId === t.id ? (
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => handleSave(t)}
+                        disabled={saving}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50"
+                        style={{ backgroundColor: P.verde, color: "#fff" }}
+                      >
+                        {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                        Salvar
+                      </button>
+                      <button
+                        onClick={() => setEditandoId(null)}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                        style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+                      >
+                        <X size={12} /> Cancelar
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setEditandoId(t.id); setEditTeor(String((t.teor * 100).toFixed(2))); }}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                      style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+                    >
+                      <Pencil size={12} /> Editar
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export default function ConfiguracoesClient({ parametros, webhooks, logs, usuarios, depositos }: Props) {
+export default function ConfiguracoesClient({ parametros, webhooks, logs, usuarios, depositos, teores }: Props) {
   const [tab, setTab] = useState<Tab>("parametros");
   const [initialUserId, setInitialUserId] = useState<string | null>(null);
   const { role: currentRole } = useAuth();
@@ -2249,7 +2386,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
     const u = params.get("user");
-    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes"].includes(t)) {
+    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores"].includes(t)) {
       setTab(t as Tab);
     }
     if (u) setInitialUserId(u);
@@ -2261,6 +2398,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "usuarios",   label: "Usuários",    icon: Users },
     { key: "ia",         label: "IA",          icon: Bot },
     { key: "depositos",  label: "Depósitos",   icon: Warehouse },
+    { key: "teores",     label: "Teores Ouro", icon: Flame },
   ];
   const tabs = isSuperAdmin
     ? [...baseTabs, { key: "permissoes" as Tab, label: "Permissões", icon: Shield }]
@@ -2309,6 +2447,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "usuarios"    && <TabUsuarios usuarios={usuarios} depositos={depositos} initialUserId={initialUserId} />}
       {tab === "ia"          && <TabIA />}
       {tab === "depositos"   && <TabDepositos />}
+      {tab === "teores"      && <TabTeores teores={teores} />}
       {tab === "permissoes"  && isSuperAdmin && <TabPermissoes />}
     </div>
   );

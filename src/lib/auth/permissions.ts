@@ -31,6 +31,7 @@ const ALL_MENUS: MenuItem[] = [
   { label: "Ordens",             href: "/ordens",             icon: "ClipboardList"   },
   { label: "PCP",                href: "/pcp",                icon: "Kanban"          },
   { label: "Distribuição",       href: "/distribuicao",       icon: "Layers"          },
+  { label: "Purificação",        href: "/purificacao",        icon: "Flame"           },
   { label: "Estoque",            href: "/estoque",            icon: "Package"         },
   { label: "Quebra",             href: "/quebra",             icon: "Scale"           },
   { label: "Compras",            href: "/compras",            icon: "ShoppingCart"    },
@@ -47,21 +48,21 @@ const ALL_MENUS: MenuItem[] = [
 ];
 
 const ROLE_MENUS: Record<Role, string[]> = {
-  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro", "/produtos", "/precificacao", "/configuracoes"],
-  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro", "/produtos", "/precificacao", "/configuracoes"],
-  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro"],
+  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro", "/produtos", "/precificacao", "/configuracoes"],
+  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro", "/produtos", "/precificacao", "/configuracoes"],
+  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro"],
   gerente_loja:       ["/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/produtos", "/precificacao"],
   ourives:            ["/ordens", "/pcp"],
   motoboy:            ["/protocolo"],
   consultora:         ["/ordens", "/estoque", "/conferencia"],
   estoquista_fabrica: ["/estoque", "/quebra", "/compras", "/insumos"],
   estoquista_loja:    ["/estoque"],
-  pcp:                ["/ordens", "/pcp", "/distribuicao", "/quebra"],
+  pcp:                ["/ordens", "/pcp", "/distribuicao", "/purificacao", "/quebra"],
 };
 
 // Agrupamento do menu lateral
 const MENU_GROUPS: MenuGroup[] = [
-  { type: "group", label: "Produção",    icon: "Factory",     items: ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao"].map(h => ALL_MENUS.find(m => m.href === h)!) },
+  { type: "group", label: "Produção",    icon: "Factory",     items: ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Suprimentos", icon: "Package",     items: ["/estoque", "/quebra", "/insumos", "/compras"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Logística",   icon: "Truck",       items: ["/protocolo", "/conferencia", "/entrega"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Qualidade",   icon: "ShieldCheck", items: ["/auditoria"].map(h => ALL_MENUS.find(m => m.href === h)!) },
@@ -98,6 +99,7 @@ const HREF_TO_MODULO: Record<string, string> = {
   "/ordens":            "ordens",
   "/pcp":               "pcp",
   "/distribuicao":      "distribuicao",
+  "/purificacao":       "purificacao",
   "/estoque":           "estoque",
   "/quebra":            "quebra",
   "/insumos":           "insumos",
