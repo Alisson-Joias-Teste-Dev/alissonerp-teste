@@ -1,7 +1,7 @@
 # MEMORY.md — Alisson ERP (Joalheria de Alto Padrão)
 
 > **LEITURA OBRIGATÓRIA antes de qualquer sessão.**
-> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 18/03/2026 — Go-Live + reset banco + migração 443 ordens + módulo criação ordens + PWA + mobile responsivo (v2.5.1)**
+> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 20/03/2026 — v2.9.1 — Estorno lote distribuição + storage público + baixa pedras PCP + metal externo + insumos completo**
 
 ---
 
@@ -64,13 +64,26 @@ são INACEITÁVEIS — significam que não consultou o banco.
 ### Tabelas alissonerp (referência)
 ```
 ── PRODUÇÃO ──
-ordens           — colunas novas (migration 073):
-  origem VARCHAR(20) DEFAULT 'erp' NOT NULL  — 'erp' | 'legado'
-  foto_peca_servico TEXT                     — path bucket ordem-fotos (servico_venda)
-  peso_peca_servico NUMERIC(10,2)            — peso peça cliente (servico_venda)
-  video_observacao TEXT                      — path bucket ordem-videos (servico_venda)
-pcp, saidas_ordem, apontamentos_pcp, distribuicoes
+ordens           — colunas novas:
+  origem VARCHAR(20) DEFAULT 'erp' NOT NULL  — 'erp' | 'legado' (migration 073)
+  foto_peca_servico TEXT                     — path bucket ordem-fotos (servico_venda) (073)
+  peso_peca_servico NUMERIC(10,2)            — peso peça cliente (servico_venda) (073)
+  video_observacao TEXT                      — path bucket ordem-videos (servico_venda) (073)
+  detalhes_ordem TEXT                        — campo texto livre (migration 075)
+saidas_ordem     — colunas novas:
+  metal_externo NUMERIC DEFAULT 0            — ouro do cliente (migration 078)
+  pmc = peso_ouro_real - total_outros - metal_externo
+  total_metal=0 → sem quebra, sem CE (peça do cliente)
+distribuicao_ordens — colunas novas:
+  sem_peso BOOLEAN                           — saída sem peso físico (migration 077)
+  justificativa_sem_peso TEXT                — motivo obrigatório se sem_peso=true
+  ATENÇÃO: coluna é ordens_id (NÃO ordem_id)
+pcp, apontamentos_pcp, distribuicoes
 tipos_apontamento (IDs 1-9 fixos)
+estornos_distribuicao (migration 081/082):
+  distribuicao_id INT FK, ordem_id INT NULLABLE FK,
+  motivo TEXT, justificativa TEXT, estornado_por UUID,
+  dados_revertidos JSONB (snapshot)
 itens_ordem      — ordens criadas no ERP (NÃO do PDV)
   id SERIAL, ordem_id INT FK, produto_id BIGINT FK public.produtos.id_produto,
   nome_produto TEXT, sku TEXT, quantidade INT, peso_estimado NUMERIC(10,2),
@@ -78,11 +91,15 @@ itens_ordem      — ordens criadas no ERP (NÃO do PDV)
   (desnormalizada: nome_produto e sku para performance)
 
 ── SUPRIMENTOS ──
-insumos (251 registros, com unidade/descricao)
+insumos (251 registros) — colunas novas (migration 076):
+  foto TEXT        — URL completa no bucket insumo-fotos
+  observacao TEXT  — observação livre
+  (+ colunas existentes: nome, unidade, ativo, peso_pedra, ultimo_preco_compra_usd, etc.)
 categorias_insumo (8 categorias: Metal/Ouro=1, Pedras=2, Liga, Solda, Banho, Acabamento, Embalagem, Outros)
 depositos (= operadores: Almoxarifado=1, Ourives, Laser, Banca)
 setores (vinculados ao depósito)
 controle_estoque / movimentacoes_estoque
+  Marcadores SP (Saída Pedra consumida), QBP (Quebra Pedra) — adicionados migration 079
 
 ── LOGÍSTICA ──
 protocolos (foto_criacao, foto_conclusao, motoboy_id, recebedor_id)
@@ -470,8 +487,20 @@ GET  /api/distribuicao/[id] (dist + ordens: peso_fechamento, pedras_fechamento, 
 POST /api/distribuicao/[id]/saida (body: ordem_id, peso_bruto, pedras_utilizadas[], foto_balanca, user_id)
 GET  /api/distribuicao/[id]/pedras-apontadas (pedras com saldo disponível no lote)
 POST /api/distribuicao/[id]/concluir (sem body — valida data_baixa em todas ordens, calcula totais, SET etapas='concluido')
+POST /api/distribuicao/[id]/estorno-lote (5 fases atômicas — só admin/dev/gerente_fabrica)
+POST /api/distribuicao/[id]/adicionar-ordens (body: ordem_ids[] — valida não concluída/duplicada/outro lote)
 POST /api/distribuicao/apontamentos
 GET  /api/distribuicao/[id]/apontamentos
+
+── PCP (novos) ──
+PATCH /api/pcp/[id]/atribuir-operador → body: { deposito_id } — trava apontamento tipo 2 pro operador atribuído
+
+── INSUMOS (novos) ──
+GET   /api/insumos/fornecedores?q=   → autocomplete fornecedores
+
+── USUÁRIOS (novos) ──
+POST  /api/user/avatar               → FormData: file, user_id?
+POST  /api/user/alterar-senha        → body: { nova_senha } — isSelfUpdate protegido
 
 ── DEPÓSITOS/SETORES ──
 GET/POST   /api/depositos
@@ -655,41 +684,57 @@ Posição: após Financeiro, antes de Precificação
 
 ## 16. STORAGE BUCKETS
 
+### Padrão Atual (v2.8+) — TODOS OS BUCKETS SÃO PÚBLICOS
+
+```
+✅ TODOS os buckets são PÚBLICOS (public = true) desde v2.8.0
+✅ Helper: src/lib/storage.ts (uploadFile, deleteFile, getPublicUrl)
+   - Upload server-side com ANON_KEY (fallback; service_role não disponível)
+   - upsert: true (sobrescreve se existe)
+   - getPublicUrl: guard se já começa com http → retorna direto (evita URL duplicada)
+✅ Salvar URL COMPLETA no banco (não path/filename)
+✅ Frontend: <img src={campo}> direto (sem signed URLs, sem fetch extra)
+✅ Views que listam dados com foto DEVEM incluir coluna foto no SELECT
+❌ NUNCA usar createSignedUrl()
+❌ NUNCA upload client-side
+
+Policies: SELECT público, INSERT/UPDATE/DELETE autenticado
+⚠️ storage.policies NÃO existe (é storage.objects com RLS, não tabela policies)
+⚠️ Para listar buckets: SELECT id, name FROM storage.buckets
+Referência completa: docs/referencia-storage-imagens.md
+```
+
 ```
 Bucket               Público  Tamanho  Tipos aceitos
 ─────────────────────────────────────────────────────────────────────────────────
 avatars              SIM      10MB     image/jpeg, image/jpg, image/png, image/webp
 imagens              SIM      sem lim  sem restrição (legado PDV — NÃO usar para ERP)
-protocolo-fotos      NÃO      10MB     image/jpeg, image/png, image/webp
-apontamento-fotos    NÃO      10MB     image/jpeg, image/png, image/webp
-ordem-fotos          NÃO      10MB     image/jpeg, image/png, image/webp, image/heic
-ordem-videos         NÃO      100MB    video/mp4, video/webm, video/quicktime, video/avi
+protocolo-fotos      SIM      10MB     image/jpeg, image/png, image/webp
+apontamento-fotos    SIM      10MB     image/jpeg, image/png, image/webp
+ordem-fotos          SIM      10MB     image/jpeg, image/png, image/webp, image/heic
+ordem-videos         SIM      100MB    video/mp4, video/webm, video/quicktime, video/avi
+insumo-fotos         SIM      10MB     image/jpeg, image/png, image/webp (migration 076)
 
 avatars:
   Caminho: {user_id}.{ext}
-  URL pública: {SUPABASE_URL}/storage/v1/object/public/avatars/{path}?t={timestamp}
-  Salvo em: public.user_profiles.avatar_url
+  URL completa salva em: public.user_profiles.avatar_url
   API: POST /api/user/avatar
 
 ordem-fotos (migration 071):
   Caminho ordens: ordens/{ordemId}/{timestamp}-{userId8}.{ext}
   Caminho comentários: comentarios/{ordemId}/{timestamp}-{userId8}.{ext}
-  Acesso: signed URLs (1h TTL) geradas via supabase.storage.createSignedUrl()
-  Paths salvos em: alissonerp.ordens.fotos_paths TEXT[]
-                   alissonerp.comentarios_ordem.foto_path TEXT
+  URL completa salva em: alissonerp.ordens.fotos_paths TEXT[]
+                         alissonerp.comentarios_ordem.foto_path TEXT
   APIs: GET/POST/DELETE /api/ordens/[id]/fotos
 
-protocolo-fotos: → campos protocolos.foto_criacao + protocolos.foto_conclusao
-apontamento-fotos: → campo apontamentos_pcp.foto_balanca
+protocolo-fotos: → campos protocolos.foto_criacao + protocolos.foto_conclusao (URL completa)
+apontamento-fotos: → campo apontamentos_pcp.foto_balanca (URL completa)
+insumo-fotos: → campo insumos.foto (URL completa, migration 076)
 
 ordem-videos (migration 073):
   Caminho: ordens/{ordemId}/video-{timestamp}-{userId8}.{ext}
-  Acesso: signed URLs geradas via supabase.storage.createSignedUrl()
-  Paths salvos em: alissonerp.ordens.video_observacao TEXT
+  URL completa salva em: alissonerp.ordens.video_observacao TEXT
   Usado em ordens tipo servico_venda
-
-⚠️ storage.policies NÃO existe (é storage.objects com RLS, não tabela policies)
-⚠️ Para listar buckets: SELECT id, name FROM storage.buckets
 ```
 
 ---
@@ -929,6 +974,16 @@ REGRA: trigger só atualiza produto_composicao — NÃO toca public.produtos (s�
 ⚠️ Peso ouro: sempre exibir com 2 casas decimais via .toFixed(2) ou formatPeso() de src/lib/formatters.ts
 ⚠️ Pedras: NUNCA exibir qtd como gramas. Mostrar "X UN (Y.YYg)" onde Y = qtd × peso_pedra
    Resumo Pedras: saldo = entrada_qtd - retorno_qtd (não soma; igual ao metal)
+⚠️ sql.begin(): parâmetro do callback usar 'tx' NÃO 'sql' (conflito de tipo TypeScript)
+⚠️ getPublicUrl: guard se já começa com http → retorna direto (evita URL duplicada)
+⚠️ depositoId: NUNCA fallback silencioso — erro 400 se sem operador
+⚠️ user_profiles: PK em id_user + UNIQUE em email — JOINs SEMPRE por id_user (nunca por email)
+⚠️ Estorno lote: filtrar CEs por obs ILIKE '%distribuicao #ID%' (não pegar CEs de outros lotes)
+⚠️ Pedras: quantidade em UN, nunca exibir como gramas (mostrar "X UN (Y.YYg)")
+⚠️ metal_externo: subtrair do PMC (ouro do cliente ≠ ouro da joalheria)
+   total_metal=0 → sem quebra, sem CE (peça inteira do cliente)
+⚠️ saidas_ordem.metal_externo: DEFAULT 0 (não nullable)
+⚠️ distribuicao_ordens.sem_peso: flag para saída sem peso físico (justificativa obrigatória)
 ⚠️ fn_concluir_protocolo / fn_processar_auditoria: NÃO MEXER
 ⚠️ fn_processar_transferencia (migration 019): trigger de transferência LEGADO
    Guard: só processa se setor_id IS NOT NULL AND deposito_id IS NOT NULL
@@ -1044,9 +1099,26 @@ NUNCA   → escrever INSERT/UPDATE sem confirmar colunas existem
      ADD alissonerp.ordens.origem VARCHAR(20) DEFAULT 'erp' NOT NULL
      CREATE alissonerp.itens_ordem (id SERIAL, ordem_id, produto_id, nome_produto, sku, quantidade, peso_estimado, observacao)
      ADD alissonerp.usuarios.tipos_ordem_permitidos JSONB DEFAULT '[]'
-     CREATE bucket 'ordem-videos' (privado, 100MB, mp4/webm/quicktime/avi)
+     CREATE bucket 'ordem-videos' (100MB, mp4/webm/quicktime/avi)
      UPDATE trigger ponte: "1" → 'servico_venda' (não mais 'servico')
      RECREATE views: vw_ordens_completa, vw_ordens_por_tipo, vw_ordem_detalhe
+074: CREATE alissonerp.itens_ordem_erp + permissões associadas
+075: ADD alissonerp.ordens.detalhes_ordem TEXT — campo texto livre por ordem
+076: ADD alissonerp.insumos.foto TEXT + observacao TEXT
+     CREATE bucket 'insumo-fotos' (público)
+     InsumoEditDrawer: foto, fornecedor, peso_pedra, ativo
+077: ADD distribuicao_ordens.sem_peso BOOLEAN + justificativa_sem_peso TEXT
+     Dropdown motivos de saída sem peso
+078: ADD alissonerp.saidas_ordem.metal_externo NUMERIC DEFAULT 0
+     Fórmula PMC: pmc = peso_ouro_real - total_outros - metal_externo
+     total_metal=0 → sem quebra, sem CE
+079: ADD marcadores SP (Saída Pedra) + QBP (Quebra Pedra) ao enum controle_estoque
+     Baixa definitiva de pedras na saída PCP (operador informa pedras usadas)
+080: CREATE alissonerp.estornos_distribuicao (distribuicao_id, ordem_id NULLABLE, motivo,
+     justificativa, estornado_por UUID, dados_revertidos JSONB)
+     (renumerada como 081 no arquivo)
+082: ADD estornos_distribuicao.ordem_id NULLABLE (era NOT NULL originalmente)
+083: ADD lancamentos.deposito_destino_id + trigger atualizado (transferência avulsa com destino)
 ```
 
 ---
@@ -1338,4 +1410,154 @@ FIX RAIZ: WHERE id = ${parseInt(id)}
 REGRA: NUNCA usar ::uuid em colunas que são INTEGER
         Verificar SEMPRE o tipo real: SELECT data_type FROM information_schema.columns
         WHERE table_name='tabela' AND column_name='coluna'
+```
+
+---
+
+## 30. ESTORNO DE LOTE (v2.9.0 — 20/03/2026)
+
+```
+POST /api/distribuicao/[id]/estorno-lote
+Roles: admin, desenvolvedor, gerente_fabrica
+Modal: dropdown motivos + justificativa + digitar "ESTORNAR" para confirmar
+Tabela: alissonerp.estornos_distribuicao (snapshot JSONB dos dados revertidos)
+
+5 FASES ATÔMICAS em sql.begin() (usar 'tx' não 'sql'):
+  FASE 1: reabrir lote (etapas='em_andamento') + zerar balanço
+          (ouro_entregue, ouro_pecas, quebra_lote, retorno_metal, total_metal,
+           dist_ouro_real, dist_pedras_qtd, dist_pedras_g, dist_quebra)
+          + DELETE quebra_operador WHERE distribuicao_id=$id
+  FASE 2: reverter CEs TEDD + QUEBRA_LOTE
+          FILTRO CRÍTICO: obs ILIKE '%distribuicao #ID%' (não pegar de outros lotes)
+          Cria CE reversa: inverte entrada↔saída de cada CE original
+  FASE 2.5: reverter apontamentos_distribuicao
+          SELECT + INSERT reverso + DELETE dos apontamentos originais
+  FASE 3: resetar ordens (data_baixa=NULL, peso_bruto=NULL, peso_pedras=NULL,
+          peso_ouro_real=NULL) + DELETE distribuicao_saida_pedras
+          + DELETE distribuicao_ordens_insumos (se existir)
+  FASE 4: reverter PCP (total_metal=0, dist_ouro_real=0, dist_pedras_qtd=0, dist_pedras_g=0)
+          para cada pcp vinculado às ordens do lote
+  FASE 5: INSERT estornos_distribuicao com snapshot JSONB completo
+
+REGRA CRÍTICA: filtrar CEs por obs ILIKE '%distribuicao #ID%'
+  Motivo: múltiplos lotes podem ter CE para o mesmo operador/insumo
+  Erro: pegar CEs de outros lotes causa reversão incorreta
+```
+
+---
+
+## 31. FEATURES v2.9.0 (20/03/2026)
+
+```
+── DISTRIBUIÇÃO ──
+- Estorno lote inteiro (seção 30 acima)
+- Adicionar ordens a lote em andamento (POST /api/distribuicao/[id]/adicionar-ordens)
+  Validações: lote não concluído, ordem não duplicada, ordem não em outro lote
+- Filtro ourives: só vê lotes do seu depósito
+- Saída sem peso: sem_peso=true + justificativa obrigatória (migration 077)
+
+── PCP ──
+- Atribuir operador: PATCH /api/pcp/[id]/atribuir-operador
+  Trava apontamento tipo 2 (aditivo) pro operador atribuído
+- Metal externo na saída: pmc = peso_ouro_real - outros - metal_externo (migration 078)
+- Baixa pedras na saída: marcadores SP + QBP (migration 079)
+
+── USUÁRIOS / SEGURANÇA ──
+- Avatar fix: JOIN por id_user (não email) + UPDATE-first INSERT-if-needed
+- Email atômico: 3 tabelas em sql.begin (auth.users + usuarios + user_profiles)
+- Brecha senha: isSelfUpdate + nova_senha → 400 (usuário não pode alterar sua própria senha via admin)
+
+── INSUMOS ──
+- InsumoEditDrawer completo: foto, fornecedor, peso_pedra, ativo
+- Bucket insumo-fotos (público, migration 076)
+- GET /api/insumos/fornecedores?q= (autocomplete)
+
+── STORAGE (v2.8.0) ──
+- TODOS buckets tornados públicos
+- src/lib/storage.ts: uploadFile/deleteFile/getPublicUrl
+- URL completa salva no banco (não path relativo)
+- Sem signed URLs em nenhum bucket
+```
+
+---
+
+## Módulo WhatsApp Assistant (Sprint 8 — 23/03/2026)
+
+### Tabelas (migration 086)
+```
+alissonerp.wa_conversas      — histórico completo de mensagens (entrada + saída)
+alissonerp.wa_escalacoes     — escalações para Jonathan com status
+alissonerp.wa_usuarios       — cache telefone → user_profile_id + role
+alissonerp.wa_knowledge_base — base de conhecimento editável por categoria
+```
+
+### API Routes
+```
+POST /api/whatsapp/webhook — recebe mensagens do Evolution API (sem auth Supabase — webhook externo)
+```
+
+### Libs
+```
+src/lib/whatsapp/evolution.js  — enviarMensagem, enviarMensagemComBotoes, parsearWebhook
+src/lib/whatsapp/assistente.js — processarMensagem (integração Gemini)
+```
+
+### LLM Provider — ATENÇÃO
+```
+API: Google Gemini (generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent)
+Model padrão: gemini-2.5-flash (WA_MODEL)
+Auth: header x-goog-api-key (NÃO x-api-key)
+System prompt: campo systemInstruction.parts[{text}] (NÃO dentro de contents)
+Role do assistente: "model" (NÃO "assistant")
+Resposta: data.candidates[0].content.parts[].text
+Tokens: data.usageMetadata.promptTokenCount / candidatesTokenCount
+Safety block: candidate.finishReason === 'SAFETY'
+```
+
+### Variáveis de Ambiente (.env.local)
+```
+EVOLUTION_API_URL           (default: http://localhost:8080)
+EVOLUTION_API_KEY           (obrigatória)
+EVOLUTION_INSTANCE          (default: suporte_alisson)
+EVOLUTION_WEBHOOK_SECRET    (opcional — validação do webhook)
+GEMINI_API_KEY              (obrigatória)
+WA_MODEL                    (default: gemini-2.5-flash)
+WA_MAX_HISTORY              (default: 20 mensagens de contexto)
+JONATHAN_WHATSAPP           (número do Jonathan sem formatação: 5511999...)
+```
+
+### Fluxo de Escalação
+```
+Usuário → webhook → Gemini → (se não sabe/bug/sugestão) → wa_escalacoes
+→ notifica Jonathan via WhatsApp com contexto + comandos
+Jonathan → /resolver {id} <resposta> → salva + envia ao usuário
+Jonathan → /descartar {id} → fecha sem resposta
+```
+
+### Knowledge Base
+```
+wa_knowledge_base: seed em migration 087
+Categorias: tela, fluxo, erro, faq, role
+roles_aplicaveis TEXT[]: filtro por cargo ('{}'=todos)
+Editável sem redeploy — adicionar INSERTs direto no banco
+```
+
+### Coluna phone em public.user_profiles (migration 088)
+```
+EXCEÇÃO AUTORIZADA por Jonathan (23/03/2026).
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS phone VARCHAR(20);
+Índice: idx_user_profiles_phone WHERE phone IS NOT NULL
+
+Lookup automático: webhook busca user_profiles.phone = telefone → pega nome + role do ERP.
+Usuários não cadastrados entram como nome=pushName, role=NULL, user_profile_id=NULL.
+Popular telefones: UPDATE public.user_profiles SET phone = '551199...' WHERE id_user = '...';
+```
+
+### Configuração Evolution API (TASK 6)
+```
+1. Painel Evolution API → instância "suporte_alisson"
+2. Webhook URL: https://{DOMINIO}/api/whatsapp/webhook
+3. Events: MESSAGES_UPSERT
+4. Webhook secret: valor de EVOLUTION_WEBHOOK_SECRET (header x-webhook-secret)
+5. Testar: enviar "oi" para o número de suporte
 ```

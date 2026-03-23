@@ -1,7 +1,7 @@
 # Arquitetura — fabricaAJ ERP
 
 Sistema ERP para a Joalheria ALISSON. Stack: Next.js 16.1.6 + PostgreSQL 15 (Supabase self-hosted).
-**Versão atual: v2.5.1 | Atualizado: 18/03/2026 — Go-Live + criação ordens + PWA + mobile responsivo**
+**Versão atual: v2.9.1 | Atualizado: 20/03/2026 — Estorno lote + storage público + baixa pedras PCP + metal externo + insumos completo**
 
 ---
 
@@ -120,7 +120,17 @@ O cliente Supabase (`src/lib/supabase/client.ts` e `server.ts`) esta configurado
 | `070_rls_comentarios_notificacoes.sql` | RLS para comentarios_ordem + notificacoes. |
 | `071_comentarios_foto_excluido.sql` | ADD em `comentarios_ordem`: texto_original, excluido, excluido_em, excluido_por, `foto_path`. ADD `alissonerp.ordens.fotos_paths TEXT[]`. CREATE bucket `ordem-fotos` (privado, 10MB, inclui heic). RLS para storage.objects bucket='ordem-fotos'. |
 | `072_user_profiles_unique_avatar.sql` | ADD `public.user_profiles.avatar_url IF NOT EXISTS`. ENSURE UNIQUE constraint em `id_user` (necessária para ON CONFLICT no upsert do avatar). |
-| `073_criacao_ordens_enum_servico.sql` | RENAME enum value `servico` → `servico_venda` em `enum_tipo_ordem` (105 ordens atualizadas). ADD `servico_loja` ao enum (oculto no frontend). ADD em `alissonerp.ordens`: `origem VARCHAR(20) DEFAULT 'erp' NOT NULL`, `foto_peca_servico TEXT`, `peso_peca_servico NUMERIC(10,2)`, `video_observacao TEXT`. ADD em `alissonerp.usuarios`: `tipos_ordem_permitidos JSONB DEFAULT '[]'`. CREATE `alissonerp.itens_ordem` (id, ordem_id FK, produto_id BIGINT FK, nome_produto, sku, quantidade, peso_estimado, observacao, created_at). CREATE bucket `ordem-videos` (privado, 100MB, mp4/webm/quicktime/avi). RECREATE views: vw_ordens_completa, vw_ordens_por_tipo, vw_ordem_detalhe. UPDATE trigger ponte: "1" → 'servico_venda'. |
+| `073_criacao_ordens_enum_servico.sql` | RENAME enum value `servico` → `servico_venda` em `enum_tipo_ordem` (105 ordens atualizadas). ADD `servico_loja` ao enum (oculto no frontend). ADD em `alissonerp.ordens`: `origem VARCHAR(20) DEFAULT 'erp' NOT NULL`, `foto_peca_servico TEXT`, `peso_peca_servico NUMERIC(10,2)`, `video_observacao TEXT`. ADD em `alissonerp.usuarios`: `tipos_ordem_permitidos JSONB DEFAULT '[]'`. CREATE `alissonerp.itens_ordem` (id, ordem_id FK, produto_id BIGINT FK, nome_produto, sku, quantidade, peso_estimado, observacao, created_at). CREATE bucket `ordem-videos` (100MB, mp4/webm/quicktime/avi). RECREATE views: vw_ordens_completa, vw_ordens_por_tipo, vw_ordem_detalhe. UPDATE trigger ponte: "1" → 'servico_venda'. |
+| `074_itens_ordem_erp_e_permissoes.sql` | CREATE `alissonerp.itens_ordem_erp` + permissões associadas. |
+| `075_detalhes_ordem.sql` | ADD `alissonerp.ordens.detalhes_ordem TEXT` — campo texto livre por ordem. UPDATE 443 ordens Directus com dados legados. |
+| `076_insumos_edicao_completa.sql` | ADD `alissonerp.insumos.foto TEXT` + `observacao TEXT`. CREATE bucket `insumo-fotos` (público, 10MB). InsumoEditDrawer: foto, fornecedor_id, peso_pedra, ativo. Recria `vw_detalhe_pote` com colunas novas. |
+| `077_saida_sem_peso.sql` | ADD `distribuicao_ordens.sem_peso BOOLEAN` + `justificativa_sem_peso TEXT`. Dropdown de motivos no frontend. |
+| `078_saida_metal_externo.sql` | ADD `alissonerp.saidas_ordem.metal_externo NUMERIC DEFAULT 0`. Fórmula PMC atualizada: `pmc = peso_ouro_real - total_outros - metal_externo`. `total_metal=0` → sem quebra, sem CE (peça do cliente). |
+| `079_marcadores_pedras.sql` | ADD marcadores `SP` (Saída Pedra consumida) + `QBP` (Quebra Pedra) ao enum `controle_estoque`. Baixa definitiva de pedras na saída PCP. |
+| `080_sync_user_profiles_id_user.sql` | Sync `public.user_profiles.id_user` — garante UNIQUE constraint necessária para ON CONFLICT. |
+| `081_estorno_distribuicao.sql` | CREATE `alissonerp.estornos_distribuicao` (distribuicao_id INT FK, ordem_id INT NULLABLE FK, motivo TEXT, justificativa TEXT, estornado_por UUID, dados_revertidos JSONB). |
+| `082_estorno_lote_distribuicao.sql` | ADD `estornos_distribuicao.ordem_id` como NULLABLE (era NOT NULL). Endpoint `POST /api/distribuicao/[id]/estorno-lote` com 5 fases atômicas. |
+| `083_transferencia_avulsa_destino.sql` | ADD `lancamentos.deposito_destino_id INT FK` + trigger atualizado. Transferência avulsa agora registra depósito de destino. |
 
 ---
 
@@ -2082,3 +2092,194 @@ WHERE id = ${parseInt(id)}
 
 NUNCA usar `::uuid` em colunas que são INTEGER.
 Verificar tipo real: `SELECT data_type FROM information_schema.columns WHERE table_name='X' AND column_name='id'`.
+
+---
+
+## Storage — Padrão v2.8+ (Buckets Públicos)
+
+### Regra Geral
+
+A partir de v2.8.0, **TODOS os buckets são públicos** (`public = true`). Não usar signed URLs.
+
+### Helper: `src/lib/storage.ts`
+
+```typescript
+uploadFile(bucket, path, file, contentType?)  → URL completa
+deleteFile(bucket, path)                       → void
+getPublicUrl(bucket, path)                     → URL completa
+  // Guard: se path já começa com "http" → retorna direto (evita duplicata)
+```
+
+- Upload server-side com ANON_KEY
+- `upsert: true` (sobrescreve se existe)
+- Salva URL completa no banco (não path relativo)
+- Frontend: `<img src={campo}>` direto — SEM fetch extra, SEM signed URLs
+
+### Buckets
+
+| Bucket | Público | Campo no banco |
+|--------|---------|----------------|
+| `avatars` | SIM | `public.user_profiles.avatar_url` |
+| `imagens` | SIM | legado PDV — não usar para ERP |
+| `protocolo-fotos` | SIM | `protocolos.foto_criacao`, `protocolos.foto_conclusao` |
+| `apontamento-fotos` | SIM | `apontamentos_pcp.foto_balanca` |
+| `ordem-fotos` | SIM | `ordens.fotos_paths TEXT[]`, `comentarios_ordem.foto_path` |
+| `ordem-videos` | SIM | `ordens.video_observacao` |
+| `insumo-fotos` | SIM | `insumos.foto` (migration 076) |
+
+### Pitfalls Storage
+
+```
+❌ NUNCA createSignedUrl() — todos são públicos
+❌ NUNCA upload client-side (supabase.storage.from().upload() no browser)
+✅ SEMPRE server-side via src/lib/storage.ts
+✅ Views que listam dados com foto DEVEM incluir coluna foto no SELECT
+✅ getPublicUrl: verificar se path já é URL absoluta antes de montar
+```
+
+---
+
+## Distribuição — Estorno de Lote (v2.9.0)
+
+### Endpoint
+
+`POST /api/distribuicao/[id]/estorno-lote`
+
+Roles: `admin`, `desenvolvedor`, `gerente_fabrica`
+
+Modal de confirmação: dropdown motivos + justificativa + digitar "ESTORNAR"
+
+### 5 Fases Atômicas (`sql.begin()` — callback DEVE ser `tx`)
+
+```
+FASE 1: Reabrir lote
+  UPDATE distribuicoes SET etapas='em_andamento',
+    ouro_entregue=0, ouro_pecas=0, quebra_lote=0,
+    retorno_metal=0, total_metal=0, dist_ouro_real=0,
+    dist_pedras_qtd=0, dist_pedras_g=0, dist_quebra=0
+  DELETE quebra_operador WHERE distribuicao_id=$id
+
+FASE 2: Reverter CEs
+  SELECT CEs WHERE obs ILIKE '%distribuicao #ID%'  ← FILTRO CRÍTICO
+  INSERT movimentacoes_estoque reversa (inverte entrada↔saida)
+
+FASE 2.5: Reverter apontamentos_distribuicao
+  SELECT apontamentos do lote
+  INSERT CEs reversas
+  DELETE apontamentos originais
+
+FASE 3: Resetar ordens
+  UPDATE distribuicao_ordens SET data_baixa=NULL, peso_bruto=NULL,
+    peso_pedras=NULL, peso_ouro_real=NULL
+  DELETE distribuicao_saida_pedras WHERE distribuicao_ordem_id IN (...)
+
+FASE 4: Reverter PCP
+  UPDATE pcp SET total_metal=0, dist_ouro_real=0,
+    dist_pedras_qtd=0, dist_pedras_g=0
+  (para cada pcp vinculado às ordens do lote)
+
+FASE 5: Snapshot
+  INSERT estornos_distribuicao (motivo, justificativa, estornado_por, dados_revertidos JSONB)
+```
+
+### Tabela `alissonerp.estornos_distribuicao`
+
+```sql
+id              SERIAL PK
+distribuicao_id INT FK
+ordem_id        INT FK NULLABLE  -- NULL = estorno do lote inteiro
+motivo          TEXT
+justificativa   TEXT
+estornado_por   UUID FK auth.users
+dados_revertidos JSONB           -- snapshot: ordens, CEs, apontamentos revertidos
+created_at      TIMESTAMPTZ
+```
+
+### Pitfall CRÍTICO
+
+```
+Filtrar CEs por: obs ILIKE '%distribuicao #ID%'
+Motivo: múltiplos lotes podem ter CEs para o mesmo operador/insumo.
+Pegar CEs de outros lotes causa reversão incorreta do estoque.
+```
+
+---
+
+## PCP — Novas Features (v2.8/v2.9)
+
+### Metal Externo na Saída (migration 078)
+
+```
+saidas_ordem.metal_externo NUMERIC DEFAULT 0
+Fórmula PMC: pmc = peso_ouro_real - total_outros - metal_externo
+Caso especial: total_metal = 0 → sem quebra, sem CE (peça 100% do cliente)
+```
+
+### Baixa de Pedras na Saída (migration 079)
+
+```
+Marcadores novos: SP (Saída Pedra consumida), QBP (Quebra Pedra)
+Operador informa pedras utilizadas por insumo (insumo_id + qtd)
+Saldo do operador é zerado para as pedras informadas
+6 testes de validação: não negativo, não excede saldo, etc.
+```
+
+### Atribuir Operador (v2.9.0)
+
+```
+PATCH /api/pcp/[id]/atribuir-operador
+Body: { deposito_id }
+Efeito: trava apontamento tipo 2 (aditivo de metal) para o operador atribuído
+Botão visível no Kanban para roles gerente_fabrica/admin/desenvolvedor
+```
+
+---
+
+## Usuários — Melhorias (v2.9.0)
+
+### Avatar Fix
+
+```
+JOIN por id_user (NÃO por email — pode ser divergente)
+Estratégia: UPDATE primeiro → se 0 rows → INSERT
+```
+
+### Email Atômico
+
+```typescript
+// sql.begin(async (tx) => {  ← SEMPRE 'tx', nunca 'sql'
+  UPDATE auth.users SET email=$1, email_confirmed_at=now()
+  UPDATE alissonerp.usuarios SET email=$1
+  UPDATE public.user_profiles SET email=$1  -- apenas se existir
+// })
+// As 3 tabelas SEMPRE sincronizadas atomicamente
+```
+
+### Segurança Senha
+
+```
+isSelfUpdate (user.id === id do usuário sendo editado)
+  + nova_senha no body → 400 Bad Request
+Usuário não pode alterar sua própria senha pela rota admin
+Alterar senha: UPDATE auth.users SET encrypted_password=crypt($1,gen_salt('bf'))
+```
+
+---
+
+## Insumos — Edição Completa (v2.8.0)
+
+### InsumoEditDrawer
+
+Campos editáveis:
+- `foto` — upload para bucket `insumo-fotos` (URL completa salva em `insumos.foto`)
+- `fornecedor_id` — FK para fornecedor
+- `peso_pedra` — peso unitário em gramas (para calcular peso total por qtd)
+- `ativo` — toggle ativo/inativo
+
+API:
+```
+GET  /api/insumos/fornecedores?q=   → autocomplete fornecedores
+PATCH /api/insumos/[id]             → campos editáveis incluindo foto
+```
+
+View `vw_detalhe_pote` recriada com colunas: `foto`, `fornecedor_id`, `peso_pedra`, `observacao`.

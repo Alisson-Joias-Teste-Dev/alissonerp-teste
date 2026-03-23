@@ -57,6 +57,15 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
   const [fotoUrl, setFotoUrl]       = useState<string | null>(null);
   const [novaSenha, setNovaSenha]   = useState("");
   const [confirmar, setConfirmar]   = useState("");
+
+  // Permissões granulares de purificação/ligação
+  const [permPurif, setPermPurif] = useState({
+    abrir_purificacao:    false,
+    concluir_purificacao: false,
+    abrir_ligacao:        false,
+    concluir_ligacao:     false,
+  });
+  const [permLoading, setPermLoading] = useState(false);
   const [mostrarSenha, setMostrarSenha] = useState(false);
 
   const [vendedorId, setVendedorId] = useState<number | null>(null);
@@ -103,6 +112,23 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
       setConfirmar("");
       setMsg(null);
       setTiposPermitidos(usuario.tipos_ordem_permitidos ?? []);
+
+      // Buscar permissões granulares do usuário
+      setPermLoading(true);
+      fetch(`/api/configuracoes/permissoes-usuario?user_id=${usuario.id}`)
+        .then(r => r.ok ? r.json() : null)
+        .then((data: { permissoes: Record<string, boolean> } | null) => {
+          if (data?.permissoes) {
+            setPermPurif({
+              abrir_purificacao:    !!data.permissoes.abrir_purificacao,
+              concluir_purificacao: !!data.permissoes.concluir_purificacao,
+              abrir_ligacao:        !!data.permissoes.abrir_ligacao,
+              concluir_ligacao:     !!data.permissoes.concluir_ligacao,
+            });
+          }
+        })
+        .catch(() => {})
+        .finally(() => setPermLoading(false));
 
       // Buscar lista de vendedores se for consultora ou gerente_loja
       if (usuario.role === "consultora" || usuario.role === "gerente_loja") {
@@ -211,6 +237,14 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
         ...data.usuario,
         avatar_url: fotoUrl,
       };
+
+      // Salvar permissões granulares em paralelo (não bloqueia se falhar)
+      fetch("/api/configuracoes/permissoes-usuario", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: usuario.id, permissoes: permPurif }),
+      }).catch(() => {});
+
       setMsg({ ok: true, texto: "Alterações salvas!" });
       onSaved(saved);
       setTimeout(() => setMsg(null), 2500);
@@ -429,6 +463,44 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
                 <p className="text-[10px] text-gray-400 mt-2">
                   Vazio = não pode criar nenhuma ordem (botão oculto).
                 </p>
+              </div>
+            )}
+          </div>
+
+          {/* Permissões: Purificação / Ligação */}
+          <div className="border-t border-gray-100 pt-5">
+            <label className={labelCls}>Purificação / Ligação</label>
+            {["admin", "desenvolvedor"].includes(role) ? (
+              <div className="flex items-start gap-2 mt-2 px-3 py-2.5 rounded-lg text-xs bg-blue-50 border border-blue-200 text-blue-700">
+                <Shield size={12} className="mt-0.5 shrink-0" />
+                <span>Este usuário tem acesso total — permissões ignoradas.</span>
+              </div>
+            ) : permLoading ? (
+              <div className="flex items-center gap-2 mt-2 text-xs text-gray-400">
+                <Loader2 size={12} className="animate-spin" /> Carregando...
+              </div>
+            ) : (
+              <div className="mt-2 space-y-1.5">
+                {(
+                  [
+                    ["abrir_purificacao",    "Abrir purificação"],
+                    ["concluir_purificacao", "Concluir purificação"],
+                    ["abrir_ligacao",        "Abrir ligação"],
+                    ["concluir_ligacao",     "Concluir ligação"],
+                  ] as [keyof typeof permPurif, string][]
+                ).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={permPurif[key]}
+                      onChange={() =>
+                        setPermPurif(prev => ({ ...prev, [key]: !prev[key] }))
+                      }
+                      className="w-4 h-4 rounded border-gray-300 accent-[#184036]"
+                    />
+                    <span className="text-sm text-gray-700">{label}</span>
+                  </label>
+                ))}
               </div>
             )}
           </div>

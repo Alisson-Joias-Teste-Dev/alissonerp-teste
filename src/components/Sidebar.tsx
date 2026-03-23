@@ -27,6 +27,7 @@ import {
   Tag,
   BarChart2,
   Bell,
+  Flame,
 } from "lucide-react";
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
@@ -58,6 +59,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?
   Briefcase,
   Tag,
   BarChart2,
+  Flame,
 };
 
 function isGroup(entry: MenuEntry): entry is MenuGroup {

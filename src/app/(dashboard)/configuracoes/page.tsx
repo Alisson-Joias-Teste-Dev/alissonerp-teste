@@ -11,7 +11,7 @@ export default async function ConfiguracoesPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!isFullAccess(user?.user_metadata?.role)) redirect("/");
 
-  const [parametros, webhooks, logs, usuarios, depositos] = await Promise.all([
+  const [parametros, webhooks, logs, usuarios, depositos, teores] = await Promise.all([
     sql`SELECT * FROM public.parametros LIMIT 1`,
     sql`
       SELECT id, nome, url, ativo, descricao, ultimo_disparo, total_disparos
@@ -35,6 +35,12 @@ export default async function ConfiguracoesPage() {
       LIMIT 50
     `,
     sql`SELECT id, nome FROM alissonerp.depositos WHERE ativo = true ORDER BY id`,
+    sql`
+      SELECT t.id, t.insumo_id, t.nome, t.teor, t.ativo, t.updated_at, i.sku
+      FROM alissonerp.teores_ouro t
+      JOIN alissonerp.insumos i ON i.id = t.insumo_id
+      ORDER BY t.nome
+    `,
   ]);
 
   return (
@@ -44,6 +50,7 @@ export default async function ConfiguracoesPage() {
       logs={logs as any[]}
       usuarios={usuarios as any[]}
       depositos={depositos as any[]}
+      teores={teores as any[]}
     />
   );
 }
