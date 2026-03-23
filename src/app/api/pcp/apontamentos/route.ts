@@ -112,6 +112,17 @@ export async function POST(req: NextRequest) {
     WHERE id = ${pcp_id} AND etapas = 'novas_ordens'
   `;
 
+  // Atribuir operador automaticamente no primeiro apontamento fora do Almoxarifado
+  // Garante que pcp.deposito_id seja preenchido mesmo sem transferência formal
+  if (deposito_id !== 1) {
+    await sql`
+      UPDATE alissonerp.pcp
+      SET deposito_id = ${deposito_id}
+      WHERE id = ${pcp_id}
+        AND deposito_id IS NULL
+    `;
+  }
+
   // Recalcular totais dist_* (fire-and-forget, não bloqueia resposta)
   recalcularTotaisPCP(pcp_id).catch(() => {});
 
