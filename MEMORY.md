@@ -1478,3 +1478,86 @@ REGRA CRÍTICA: filtrar CEs por obs ILIKE '%distribuicao #ID%'
 - URL completa salva no banco (não path relativo)
 - Sem signed URLs em nenhum bucket
 ```
+
+---
+
+## Módulo WhatsApp Assistant (Sprint 8 — 23/03/2026)
+
+### Tabelas (migration 086)
+```
+alissonerp.wa_conversas      — histórico completo de mensagens (entrada + saída)
+alissonerp.wa_escalacoes     — escalações para Jonathan com status
+alissonerp.wa_usuarios       — cache telefone → user_profile_id + role
+alissonerp.wa_knowledge_base — base de conhecimento editável por categoria
+```
+
+### API Routes
+```
+POST /api/whatsapp/webhook — recebe mensagens do Evolution API (sem auth Supabase — webhook externo)
+```
+
+### Libs
+```
+src/lib/whatsapp/evolution.js  — enviarMensagem, enviarMensagemComBotoes, parsearWebhook
+src/lib/whatsapp/assistente.js — processarMensagem (integração Gemini)
+```
+
+### LLM Provider — ATENÇÃO
+```
+API: Google Gemini (generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent)
+Model padrão: gemini-2.5-flash (WA_MODEL)
+Auth: header x-goog-api-key (NÃO x-api-key)
+System prompt: campo systemInstruction.parts[{text}] (NÃO dentro de contents)
+Role do assistente: "model" (NÃO "assistant")
+Resposta: data.candidates[0].content.parts[].text
+Tokens: data.usageMetadata.promptTokenCount / candidatesTokenCount
+Safety block: candidate.finishReason === 'SAFETY'
+```
+
+### Variáveis de Ambiente (.env.local)
+```
+EVOLUTION_API_URL           (default: http://localhost:8080)
+EVOLUTION_API_KEY           (obrigatória)
+EVOLUTION_INSTANCE          (default: suporte_alisson)
+EVOLUTION_WEBHOOK_SECRET    (opcional — validação do webhook)
+GEMINI_API_KEY              (obrigatória)
+WA_MODEL                    (default: gemini-2.5-flash)
+WA_MAX_HISTORY              (default: 20 mensagens de contexto)
+JONATHAN_WHATSAPP           (número do Jonathan sem formatação: 5511999...)
+```
+
+### Fluxo de Escalação
+```
+Usuário → webhook → Gemini → (se não sabe/bug/sugestão) → wa_escalacoes
+→ notifica Jonathan via WhatsApp com contexto + comandos
+Jonathan → /resolver {id} <resposta> → salva + envia ao usuário
+Jonathan → /descartar {id} → fecha sem resposta
+```
+
+### Knowledge Base
+```
+wa_knowledge_base: seed em migration 087
+Categorias: tela, fluxo, erro, faq, role
+roles_aplicaveis TEXT[]: filtro por cargo ('{}'=todos)
+Editável sem redeploy — adicionar INSERTs direto no banco
+```
+
+### Coluna phone em public.user_profiles (migration 088)
+```
+EXCEÇÃO AUTORIZADA por Jonathan (23/03/2026).
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS phone VARCHAR(20);
+Índice: idx_user_profiles_phone WHERE phone IS NOT NULL
+
+Lookup automático: webhook busca user_profiles.phone = telefone → pega nome + role do ERP.
+Usuários não cadastrados entram como nome=pushName, role=NULL, user_profile_id=NULL.
+Popular telefones: UPDATE public.user_profiles SET phone = '551199...' WHERE id_user = '...';
+```
+
+### Configuração Evolution API (TASK 6)
+```
+1. Painel Evolution API → instância "suporte_alisson"
+2. Webhook URL: https://{DOMINIO}/api/whatsapp/webhook
+3. Events: MESSAGES_UPSERT
+4. Webhook secret: valor de EVOLUTION_WEBHOOK_SECRET (header x-webhook-secret)
+5. Testar: enviar "oi" para o número de suporte
+```
