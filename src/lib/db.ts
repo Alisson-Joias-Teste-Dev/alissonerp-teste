@@ -19,23 +19,23 @@ export function normalizeRow<T extends Record<string, unknown>>(
   numericFields: string[],
   jsonFields: string[] = [],
 ): T {
-  const result = { ...row };
+  const result = { ...row } as Record<string, unknown>;
   for (const field of numericFields) {
     if (field in result && result[field] !== null && result[field] !== undefined) {
       const val = result[field];
-      result[field] = (typeof val === "string" ? parseFloat(val) : val) as T[keyof T];
+      result[field] = typeof val === "string" ? parseFloat(val) : val;
     }
   }
   for (const field of jsonFields) {
     if (field in result && result[field] !== null && result[field] !== undefined) {
       const val = result[field];
       if (typeof val === "string") {
-        try { result[field] = JSON.parse(val) as T[keyof T]; } catch { result[field] = [] as T[keyof T]; }
+        try { result[field] = JSON.parse(val); } catch { result[field] = []; }
       }
       if (!Array.isArray(result[field])) {
-        result[field] = [] as T[keyof T];
+        result[field] = [];
       }
     }
   }
-  return result;
+  return result as T;
 }
