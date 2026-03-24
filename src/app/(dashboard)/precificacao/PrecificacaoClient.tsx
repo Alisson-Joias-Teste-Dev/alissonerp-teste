@@ -67,6 +67,7 @@ interface SimulacaoItem {
   preco_atual: number;
   preco_novo: number;
   variacao: number;
+  markup?: number | null;
 }
 
 interface SimulacaoStats {
@@ -223,14 +224,19 @@ function ModalSimulacao({
   const [salvandoDireto, setSalvandoDireto] = useState(false);
   const [resultado, setResultado] = useState<SimulacaoResultado | null>(null);
   const [toast, setToast] = useState<{ msg: string; tipo: "ok" | "erro" } | null>(null);
+  const [buscaPreview, setBuscaPreview] = useState('');
 
   function showToast(msg: string, tipo: "ok" | "erro") {
     setToast({ msg, tipo });
     setTimeout(() => setToast(null), 3500);
   }
 
+  function parseMarkup(v: string): number {
+    return parseFloat(v.toString().replace(",", ".").trim()) || 0;
+  }
+
   async function simular() {
-    const mv = Number(markupNovo);
+    const mv = parseMarkup(markupNovo);
     if (!mv || mv <= 0) {
       showToast("Informe um markup novo válido", "erro");
       return;
@@ -273,7 +279,7 @@ function ModalSimulacao({
           faixa_id: target.faixa_id,
           faixa_nome: resultado.faixa_nome || target.faixa_nome,
           markup_anterior: target.markup_anterior,
-          markup_novo: Number(markupNovo),
+          markup_novo: parseMarkup(markupNovo),
           stats: resultado.stats,
           simulacao: resultado.simulacao_total ?? resultado.simulacao,
         }),
@@ -294,7 +300,7 @@ function ModalSimulacao({
 
   async function salvarDireto() {
     if (!target.onSalvarDireto) return;
-    const mv = Number(markupNovo);
+    const mv = parseMarkup(markupNovo);
     if (!mv || mv <= 0) {
       showToast("Markup inválido", "erro");
       return;
@@ -313,9 +319,9 @@ function ModalSimulacao({
   function exportarCSV() {
     if (!resultado) return;
     const items = resultado.simulacao_total ?? resultado.simulacao;
-    const header = "SKU,Nome,Peso (g),Preco Atual,Preco Novo,Variacao %\n";
+    const header = "SKU,Nome,Peso (g),Markup Atual,Preco Atual,Preco Novo,Variacao %\n";
     const linhas = items
-      .map((s) => `${s.sku},"${s.nome.replace(/"/g, '""')}",${s.peso},${s.preco_atual},${s.preco_novo},${s.variacao}`)
+      .map((s) => `${s.sku},"${s.nome.replace(/"/g, '""')}",${s.peso},${s.markup != null ? Number(s.markup).toFixed(2) : ""},${s.preco_atual},${s.preco_novo},${s.variacao}`)
       .join("\n");
     const blob = new Blob([header + linhas], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -330,6 +336,14 @@ function ModalSimulacao({
 
   const stats = resultado?.stats;
   const preview = resultado?.simulacao ?? [];
+  const produtosFiltrados = preview.filter((p) => {
+    if (!buscaPreview.trim()) return true;
+    const termo = buscaPreview.toLowerCase();
+    return (
+      p.nome?.toLowerCase().includes(termo) ||
+      p.sku?.toLowerCase().includes(termo)
+    );
+  });
   const inputCls = "px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-gray-300 font-mono";
 
   return (
@@ -376,9 +390,8 @@ function ModalSimulacao({
               <input
                 className={inputCls}
                 style={{ borderColor: P.border, width: "100%" }}
-                type="number"
-                step="0.1"
-                min="0.1"
+                type="text"
+                inputMode="decimal"
                 value={markupNovo}
                 onChange={(e) => {
                   setMarkupNovo(e.target.value);
@@ -391,7 +404,7 @@ function ModalSimulacao({
 
           <button
             onClick={simular}
-            disabled={simulando || Number(markupNovo) <= 0}
+            disabled={simulando || parseMarkup(markupNovo) <= 0}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
             style={{
               backgroundColor: "#f3f4f6",
@@ -445,18 +458,35 @@ function ModalSimulacao({
               {/* Preview tabela */}
               {preview.length > 0 ? (
                 <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: P.sage }}>
-                      Preview — Top {preview.length} produtos por impacto
-                    </p>
-                    <button
-                      onClick={exportarCSV}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs border hover:bg-gray-50"
-                      style={{ borderColor: P.border, color: P.sage }}
-                    >
-                      <Download size={12} />
-                      Exportar CSV
-                    </button>
+                  <div className="flex items-center justify-between mb-2 gap-2">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: P.sage }}>
+                        Preview — Top {preview.length} produtos por impacto
+                      </p>
+                      {buscaPreview.trim() && (
+                        <span className="text-xs text-gray-400 ml-2">
+                          {produtosFiltrados.length} de {preview.length} produtos
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <input
+                        type="text"
+                        value={buscaPreview}
+                        onChange={(e) => setBuscaPreview(e.target.value)}
+                        placeholder="Buscar produto..."
+                        className="px-2.5 py-1 rounded-lg border text-xs focus:outline-none focus:ring-2 focus:ring-gray-300"
+                        style={{ borderColor: P.border, width: 140 }}
+                      />
+                      <button
+                        onClick={exportarCSV}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs border hover:bg-gray-50"
+                        style={{ borderColor: P.border, color: P.sage }}
+                      >
+                        <Download size={12} />
+                        Exportar CSV
+                      </button>
+                    </div>
                   </div>
                   <div
                     className="rounded-xl overflow-hidden"
@@ -467,6 +497,12 @@ function ModalSimulacao({
                         <tr style={{ backgroundColor: "#f3f4f6" }}>
                           <th className="text-left px-3 py-2.5 font-semibold uppercase tracking-wider" style={{ color: P.muted }}>
                             Produto
+                          </th>
+                          <th className="text-right px-3 py-2.5 font-semibold uppercase tracking-wider" style={{ color: P.muted }}>
+                            Peso
+                          </th>
+                          <th className="text-right px-3 py-2.5 font-semibold uppercase tracking-wider" style={{ color: P.muted }}>
+                            Markup Atual
                           </th>
                           <th className="text-right px-3 py-2.5 font-semibold uppercase tracking-wider" style={{ color: P.muted }}>
                             Preço Atual
@@ -480,7 +516,7 @@ function ModalSimulacao({
                         </tr>
                       </thead>
                       <tbody>
-                        {preview.slice(0, 20).map((item, i) => (
+                        {produtosFiltrados.slice(0, 20).map((item, i) => (
                           <tr
                             key={item.produto_id}
                             style={{
@@ -489,12 +525,18 @@ function ModalSimulacao({
                             }}
                           >
                             <td className="px-3 py-2.5" style={{ color: P.text }}>
-                              <p className="font-medium truncate max-w-[220px]">{item.nome}</p>
+                              <p className="font-medium truncate max-w-[200px]">{item.nome}</p>
                               {item.sku && (
                                 <p className="font-mono text-[10px]" style={{ color: P.muted }}>
                                   {item.sku}
                                 </p>
                               )}
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-mono" style={{ color: P.muted }}>
+                              {item.peso != null ? `${Number(item.peso).toFixed(2)}g` : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-mono" style={{ color: P.muted }}>
+                              {item.markup != null ? `${Number(item.markup).toFixed(2)}×` : '—'}
                             </td>
                             <td className="px-3 py-2.5 text-right font-mono" style={{ color: P.sage }}>
                               {fmtBrl(item.preco_atual)}
@@ -510,10 +552,17 @@ function ModalSimulacao({
                             </td>
                           </tr>
                         ))}
-                        {preview.length > 20 && (
+                        {produtosFiltrados.length > 20 && (
                           <tr style={{ borderTop: `1px solid ${P.border}` }}>
-                            <td colSpan={4} className="px-3 py-2 text-center text-xs" style={{ color: P.muted }}>
-                              + {preview.length - 20} produtos adicionais (use Exportar CSV para ver todos)
+                            <td colSpan={6} className="px-3 py-2 text-center text-xs" style={{ color: P.muted }}>
+                              + {produtosFiltrados.length - 20} produtos adicionais (use Exportar CSV para ver todos)
+                            </td>
+                          </tr>
+                        )}
+                        {produtosFiltrados.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="px-3 py-4 text-center text-xs" style={{ color: P.muted }}>
+                              Nenhum produto encontrado para &quot;{buscaPreview}&quot;
                             </td>
                           </tr>
                         )}
@@ -563,7 +612,7 @@ function ModalSimulacao({
             {target.allowDirectSave && target.onSalvarDireto && (
               <button
                 onClick={salvarDireto}
-                disabled={salvandoDireto || Number(markupNovo) <= 0}
+                disabled={salvandoDireto || parseMarkup(markupNovo) <= 0}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm border font-medium"
                 style={{ borderColor: P.border, color: P.text }}
               >
@@ -1581,11 +1630,24 @@ export default function PrecificacaoClient({ faixasPedrasInicial, configInicial,
   }
 
   function abrirSimulacaoOuro(cat: CategoriaOuro) {
-    const markupAtual = cat.markup != null ? Number(cat.markup) : 0;
+    // getMarkup é definido em TabMarkupOuro — replicar a mesma lógica aqui
+    // para extrair o markup de curvePoints quando cat.markup não existe
+    let markupAtual = 0;
+    if (cat.markup != null) {
+      markupAtual = Number(cat.markup);
+    } else if (cat.curvePoints) {
+      const cp = cat.curvePoints;
+      if (Array.isArray(cp) && cp.length > 0 && (cp[0] as Record<string, unknown>).markup != null) {
+        markupAtual = Number((cp[0] as Record<string, unknown>).markup);
+      } else if (typeof cp === "object" && cp !== null && "markup" in (cp as object)) {
+        markupAtual = Number((cp as Record<string, unknown>).markup);
+      }
+    }
+    const faixaNome = (cat.categoryName ?? cat.nome ?? cat.label ?? String(cat.id)) as string;
     setModal({
       tipo: "ouro",
       faixa_id: Number(cat.id),
-      faixa_nome: (cat.nome ?? cat.label ?? String(cat.id)) as string,
+      faixa_nome: faixaNome,
       markup_anterior: markupAtual,
       allowDirectSave: false,
     });

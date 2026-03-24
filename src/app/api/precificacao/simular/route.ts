@@ -34,11 +34,10 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { tipo, faixa_id, markup_novo } = body as {
-    tipo: "ouro" | "pedra";
-    faixa_id: number;
-    markup_novo: number;
-  };
+  const rawMarkupNovo = (body as { tipo: "ouro" | "pedra"; faixa_id: number; markup_novo: number | string }).markup_novo;
+  const { tipo, faixa_id } = body as { tipo: "ouro" | "pedra"; faixa_id: number };
+  // Normaliza vírgula → ponto para aceitar "2,5" e "2.5"
+  const markup_novo = parseFloat(String(rawMarkupNovo ?? "").replace(",", "."));
 
   if (!tipo || !faixa_id || !markup_novo || markup_novo <= 0) {
     return NextResponse.json({ error: "tipo, faixa_id e markup_novo (> 0) são obrigatórios" }, { status: 400 });
@@ -78,29 +77,42 @@ async function simularOuro(faixa_id: number, markup_novo: number, tipoArredondam
   // Coluna real da tabela legada: "categoryName"
   const faixaNome = (categoria.categoryName ?? categoria.nome ?? categoria.label ?? String(faixa_id)) as string;
 
-  // Buscar produtos desta categoria (usa custo_na_cotacao já calculado pelo trigger)
+  // Derivar pesoMin e pesoMax a partir do campo "range" (ex: "0.1g - 0.5g")
+  // categoria_precificacao está vazia em todos os produtos — o link correto é pelo peso_precificado
+  const rangeStr = (categoria.range ?? "") as string;
+  const rangeMatch = rangeStr.match(/([\d.]+)g\s*-\s*([\d.]+)g/);
+  const pesoMin = rangeMatch ? Number(rangeMatch[1]) : 0;
+  const pesoMax = rangeMatch ? Number(rangeMatch[2]) : 999999;
+
+  // Buscar produtos desta categoria por faixa de peso.
+  // custo_na_cotacao é populado pelo trigger legado do Tiny ERP — pode ser NULL em produtos
+  // criados pelo ERP. Quando NULL, calculamos inline: peso_precificado × cotacao_ouro × fator.
   const produtos = await sql<{
     id_produto: string;
     nome: string;
     sku: string | null;
     peso_precificado: string | null;
+    fator: string | null;
     custo_na_cotacao: string | null;
     preco_sync: string | null;
     preco_na_cotacao: string | null;
+    markup: string | null;
   }[]>`
     SELECT
       id_produto::text,
       nome,
       sku,
       peso_precificado,
+      fator,
       custo_na_cotacao,
       preco_sync,
-      preco_na_cotacao
+      preco_na_cotacao,
+      markup
     FROM public.produtos
-    WHERE categoria_precificacao = ${faixaNome}
+    WHERE COALESCE(peso_precificado, 0) >= ${pesoMin}
+      AND COALESCE(peso_precificado, 0) <= ${pesoMax}
       AND situacao = 'A'
       AND COALESCE(peso_precificado, 0) > 0
-      AND COALESCE(custo_na_cotacao, 0) > 0
     ORDER BY COALESCE(preco_sync, preco_na_cotacao) DESC NULLS LAST
   `;
 
@@ -111,7 +123,11 @@ async function simularOuro(faixa_id: number, markup_novo: number, tipoArredondam
   const cotacaoOuro = Number(params?.ouro ?? 857.019);
 
   const simulacao = produtos.map((p) => {
-    const custo = Number(p.custo_na_cotacao ?? 0);
+    // custo_na_cotacao pode ser NULL (produtos criados pelo ERP sem sync do Tiny).
+    // Fallback: peso_precificado × cotacao_ouro × fator (mesma fórmula do trigger legado).
+    const custoBanco = Number(p.custo_na_cotacao ?? 0);
+    const custoInline = Number(p.peso_precificado ?? 0) * cotacaoOuro * Number(p.fator ?? 1);
+    const custo = custoBanco > 0 ? custoBanco : custoInline;
     const preco_atual = Number(p.preco_sync ?? p.preco_na_cotacao ?? 0);
     const preco_novo_raw = custo * markup_novo;
     const preco_novo = arredondarPorTipo(preco_novo_raw, tipoArredondamento);
@@ -127,6 +143,7 @@ async function simularOuro(faixa_id: number, markup_novo: number, tipoArredondam
       preco_atual,
       preco_novo,
       variacao,
+      markup: p.markup != null ? Number(p.markup) : null,
     };
   });
 
@@ -225,8 +242,9 @@ async function simularPedra(faixa_id: number, markup_novo: number, tipoArredonda
     preco_sync: string | null;
     preco_pedras: string | null;
     preco_total_sync: string | null;
+    markup: string | null;
   }[]>`
-    SELECT id_produto::text, nome, sku, peso_precificado, preco_sync, preco_pedras, preco_total_sync
+    SELECT id_produto::text, nome, sku, peso_precificado, preco_sync, preco_pedras, preco_total_sync, markup
     FROM public.produtos
     WHERE id_produto = ANY(${produtoIds})
       AND situacao = 'A'
@@ -250,6 +268,7 @@ async function simularPedra(faixa_id: number, markup_novo: number, tipoArredonda
       preco_atual,
       preco_novo,
       variacao,
+      markup: p.markup != null ? Number(p.markup) : null,
     };
   });
 
@@ -283,11 +302,19 @@ function calcStats(simulacao: { variacao: number }[]) {
 }
 
 function extrairMarkupCategoria(cat: Record<string, unknown>): number {
-  if (cat.markup != null) return Number(cat.markup);
+  if (cat.markup != null && Number(cat.markup) > 0) return Number(cat.markup);
   if (cat.curvePoints) {
     const cp = cat.curvePoints;
-    if (Array.isArray(cp) && cp.length > 0 && (cp[0] as Record<string, unknown>).markup != null) {
-      return Number((cp[0] as Record<string, unknown>).markup);
+    // curvePoints é array de strings JSON: ['{"markup":3.5,"weight":0.5,...}', ...]
+    if (Array.isArray(cp) && cp.length > 0) {
+      // Pegar o ponto do meio como referência de markup da faixa
+      const midIdx = Math.floor(cp.length / 2);
+      const item = cp[midIdx];
+      const parsed = typeof item === "string" ? JSON.parse(item) : item;
+      if (parsed?.markup != null) return Number(parsed.markup);
+      // fallback: primeiro ponto
+      const first = typeof cp[0] === "string" ? JSON.parse(cp[0] as string) : cp[0];
+      if ((first as Record<string, unknown>)?.markup != null) return Number((first as Record<string, unknown>).markup);
     }
     if (typeof cp === "object" && cp !== null && "markup" in (cp as object)) {
       return Number((cp as Record<string, unknown>).markup);
