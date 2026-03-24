@@ -62,6 +62,14 @@ const labelCls =
 const TIPO_METAL_OPTS = ["Ouro Amarelo 18k", "Ouro Branco 18k", "Ouro Rosé 18k", "Prata"];
 const COR_METAL_OPTS = ["Amarelo", "Branco", "Rosé"];
 
+// ─── Helper de normalização de entrada numérica ───────────────────────────────
+
+function parseNumericInput(value: string | number): number {
+  if (typeof value === "number") return value;
+  const normalized = value.toString().replace(",", ".").trim();
+  return parseFloat(normalized) || 0;
+}
+
 // ─── Helpers de precificação automática ───────────────────────────────────────
 
 function parseFaixaPeso(faixa: string): { min: number; max: number } | null {
@@ -476,7 +484,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   }, [peso, categorias]);
 
   // ── Preview de precificação automática ────────────────────────────────────
-  const pesoNum = parseFloat(peso);
+  const pesoNum = parseNumericInput(peso);
   const catAuto = pesoNum > 0 && categorias.length > 0 ? buscarCategoriaPorPeso(pesoNum, categorias) : null;
   const markupAuto = catAuto ? extrairMarkupDaCategoria(catAuto) : null;
   const precoEstimadoAuto = catAuto && markupAuto && pesoNum > 0
@@ -513,7 +521,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   function validateStep1(): string | null {
     if (!nome.trim()) return "Nome obrigatório";
     if (!sku.trim()) return "SKU obrigatório";
-    if (!peso || parseFloat(peso) <= 0) return "Peso deve ser maior que 0";
+    if (!peso || parseNumericInput(peso) <= 0) return "Peso deve ser maior que 0";
     if (!catAuto) return "Peso fora das faixas de precificação cadastradas";
     return null;
   }
@@ -546,7 +554,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
         sku: sku.trim(),
         tipo_metal: tipoMetal || null,
         cor_metal: corMetal || null,
-        peso_precificado: parseFloat(peso),
+        peso_precificado: parseNumericInput(peso),
         markup: parseFloat(markup),
         fator: 1,
         categoria_precificacao: categoria || null,
@@ -706,9 +714,8 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                   <div>
                     <label className={labelCls}>Peso Base (g) *</label>
                     <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={peso}
                       onChange={(e) => setPeso(e.target.value)}
                       className={inputCls}

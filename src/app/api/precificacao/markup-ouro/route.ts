@@ -33,19 +33,29 @@ export async function GET() {
       ORDER BY id
     `;
 
-    // Contagem de produtos por categoria (keyed por nome, que é como produtos referencia a categoria)
-    const contagens = await sql<{ categoria_precificacao: string; total: string }[]>`
-      SELECT categoria_precificacao::text, COUNT(*) AS total
-      FROM public.produtos
-      WHERE categoria_precificacao IS NOT NULL
-      GROUP BY categoria_precificacao
-    `;
-
-    // totalMap keyed por categoryName (ex: "Leves 1") para bater com produtos.categoria_precificacao
+    // Contagem de produtos por faixa de peso — mesma lógica do simular/route.ts.
+    // categoria_precificacao está vazia em todos os produtos; o vínculo real é pelo peso_precificado
+    // comparado com o campo "range" de cada faixa (ex: "0.1g - 0.5g").
+    type CatRow = { id: number; categoryName: string; range: string };
     const totalMap: Record<string, number> = {};
-    for (const c of contagens) {
-      totalMap[c.categoria_precificacao] = Number(c.total);
-    }
+
+    await Promise.all(
+      (categorias as unknown as CatRow[]).map(async (cat) => {
+        const rangeMatch = String(cat.range ?? "").match(/([\d.]+)g\s*-\s*([\d.]+)g/);
+        if (!rangeMatch) return;
+        const pesoMin = Number(rangeMatch[1]);
+        const pesoMax = Number(rangeMatch[2]);
+        const [row] = await sql<{ total: string }[]>`
+          SELECT COUNT(*) AS total
+          FROM public.produtos
+          WHERE COALESCE(peso_precificado, 0) >= ${pesoMin}
+            AND COALESCE(peso_precificado, 0) <= ${pesoMax}
+            AND situacao = 'A'
+            AND COALESCE(peso_precificado, 0) > 0
+        `;
+        totalMap[cat.categoryName] = Number(row?.total ?? 0);
+      }),
+    );
 
     return NextResponse.json({ categorias, totalMap });
   } catch (err) {

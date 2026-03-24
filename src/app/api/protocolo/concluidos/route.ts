@@ -11,10 +11,12 @@ export async function GET(req: NextRequest) {
       p.direcao::text,
       p.created_at                      AS protocolo_criado,
       p.data_conclusao,
-      -- nome de quem criou (bridge via auth.users.email)
-      upm.name                          AS criado_por_nome,
+      p.foto_criacao,
+      p.foto_conclusao,
+      -- nome de quem criou
+      m.nome                            AS criado_por_nome,
       -- nome de quem concluiu
-      upr.name                          AS concluido_por_nome,
+      r.nome                            AS concluido_por_nome,
       -- ordens como array JSON
       COALESCE(
         json_agg(
@@ -32,13 +34,11 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.protocolo_ordens po ON po.protocolo_id = p.id
     LEFT JOIN alissonerp.ordens o           ON o.id = po.ordem_id
     LEFT JOIN public.contatos c             ON c.id_contato = o.cliente_id
-    LEFT JOIN auth.users aum               ON aum.id = p.motoboy_id
-    LEFT JOIN public.user_profiles upm     ON upm.email = aum.email
-    LEFT JOIN auth.users aur               ON aur.id = p.recebedor_id
-    LEFT JOIN public.user_profiles upr     ON upr.email = aur.email
+    LEFT JOIN alissonerp.usuarios m        ON m.id = p.motoboy_id
+    LEFT JOIN alissonerp.usuarios r        ON r.id = p.recebedor_id
     WHERE p.etapas = 'concluido'
       ${direcao ? sql`AND p.direcao::text = ${direcao}` : sql``}
-    GROUP BY p.id, upm.name, upr.name
+    GROUP BY p.id, m.nome, r.nome
     ORDER BY p.data_conclusao DESC NULLS LAST
     LIMIT 100
   `;

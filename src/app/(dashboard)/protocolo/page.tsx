@@ -19,11 +19,17 @@ export default async function ProtocoloPage() {
         p.etapas::text,
         p.data_conclusao,
         p.created_at,
-        COUNT(DISTINCT po.ordem_id)::integer AS total_ordens
+        p.foto_criacao,
+        p.foto_conclusao,
+        COUNT(DISTINCT po.ordem_id)::integer AS total_ordens,
+        m.nome AS criado_por_nome,
+        r.nome AS concluido_por_nome
       FROM alissonerp.protocolos p
       LEFT JOIN alissonerp.protocolo_ordens po ON po.protocolo_id = p.id
+      LEFT JOIN alissonerp.usuarios m        ON m.id = p.motoboy_id
+      LEFT JOIN alissonerp.usuarios r        ON r.id = p.recebedor_id
       WHERE p.direcao = 'ida'
-      GROUP BY p.id
+      GROUP BY p.id, m.nome, r.nome
       ORDER BY p.id DESC
       LIMIT 100
     `,
@@ -33,11 +39,17 @@ export default async function ProtocoloPage() {
         p.etapas::text,
         p.data_conclusao,
         p.created_at,
-        COUNT(DISTINCT po.ordem_id)::integer AS total_ordens
+        p.foto_criacao,
+        p.foto_conclusao,
+        COUNT(DISTINCT po.ordem_id)::integer AS total_ordens,
+        m.nome AS criado_por_nome,
+        r.nome AS concluido_por_nome
       FROM alissonerp.protocolos p
       LEFT JOIN alissonerp.protocolo_ordens po ON po.protocolo_id = p.id
+      LEFT JOIN alissonerp.usuarios m        ON m.id = p.motoboy_id
+      LEFT JOIN alissonerp.usuarios r        ON r.id = p.recebedor_id
       WHERE p.direcao = 'volta'
-      GROUP BY p.id
+      GROUP BY p.id, m.nome, r.nome
       ORDER BY p.id DESC
       LIMIT 100
     `,

@@ -30,10 +30,11 @@ export async function PATCH(
     );
   }
 
-  // Buscar PCP existente
+  // Buscar PCP existente (inclui peso_metal_externo para checar se precisa mover etapa)
   const [pcpRow] = await sql`
     SELECT p.id, p.ordem_id, p.deposito_id AS pcp_deposito_id,
-           o.local_atual AS ordem_deposito_id
+           o.local_atual AS ordem_deposito_id,
+           o.peso_metal_externo
     FROM alissonerp.pcp p
     LEFT JOIN alissonerp.ordens o ON o.id = p.ordem_id
     WHERE p.id = ${pcpId}
@@ -67,12 +68,28 @@ export async function PATCH(
     );
   }
 
-  // Atualizar pcp.deposito_id e ordens.local_atual
-  await sql`
-    UPDATE alissonerp.pcp
-    SET deposito_id = ${deposito_id}, updated_at = NOW()
-    WHERE id = ${pcpId}
-  `;
+  // Metal externo > 0 → ordem de serviço com ouro do cliente → não precisa de apontamento de entrada
+  // → mover direto pra em_andamento ao atribuir operador
+  const metalExterno = Number(pcpRow.peso_metal_externo || 0);
+  const moverParaAndamento = metalExterno > 0;
+
+  // Atualizar pcp.deposito_id (+ etapas se metal externo)
+  if (moverParaAndamento) {
+    await sql`
+      UPDATE alissonerp.pcp
+      SET deposito_id = ${deposito_id},
+          etapas = 'em_andamento',
+          updated_at = NOW()
+      WHERE id = ${pcpId}
+    `;
+  } else {
+    await sql`
+      UPDATE alissonerp.pcp
+      SET deposito_id = ${deposito_id},
+          updated_at = NOW()
+      WHERE id = ${pcpId}
+    `;
+  }
 
   if (pcpRow.ordem_id != null) {
     await sql`
@@ -87,5 +104,6 @@ export async function PATCH(
     pcp_id: pcpId,
     deposito_id,
     deposito_nome: deposito.nome,
+    movido_para_andamento: moverParaAndamento,
   });
 }
