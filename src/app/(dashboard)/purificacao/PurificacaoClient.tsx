@@ -16,7 +16,6 @@ import {
   Trash2,
   X,
   FlaskConical,
-  Settings,
 } from "lucide-react";
 import LigacaoTab, { type LigaTipo, type Ligacao, type LigacaoStats } from "./LigacaoTab";
 
@@ -92,6 +91,7 @@ interface Props {
     concluir_purificacao: boolean;
     abrir_ligacao: boolean;
     concluir_ligacao: boolean;
+    editar_teor_ligacao: boolean;
   };
 }
 
@@ -130,7 +130,7 @@ export default function PurificacaoClient({ purificacoes: initial, teores, stats
   const [purificacoes, setPurificacoes] = useState<Purificacao[]>(initial);
   const [filtroStatus, setFiltroStatus] = useState<string>("todos");
   const [canceladasAberto, setCanceladasAberto] = useState(false);
-  const [activeTab, setActiveTab] = useState<"purificacao" | "ligacao" | "teores">("purificacao");
+  const [activeTab, setActiveTab] = useState<"purificacao" | "ligacao">("purificacao");
 
   // Modais
   const [modalNova, setModalNova] = useState(false);
@@ -184,7 +184,6 @@ export default function PurificacaoClient({ purificacoes: initial, teores, stats
         {([
           { key: "purificacao", label: "Purificação", icon: <Flame size={15} /> },
           { key: "ligacao",     label: "Ligação",     icon: <FlaskConical size={15} /> },
-          { key: "teores",      label: "Teores",      icon: <Settings size={15} /> },
         ] as const).map(tab => (
           <button
             key={tab.key}
@@ -218,11 +217,6 @@ export default function PurificacaoClient({ purificacoes: initial, teores, stats
           userId={userId}
           permissoes={permissoesPurif}
         />
-      )}
-
-      {/* ── ABA TEORES ─────────────────────────────────────────────────────────── */}
-      {activeTab === "teores" && (
-        <TeoresTab teores={teores} ligaTipos={ligaTipos} userRole={userRole} userId={userId} />
       )}
 
       {/* ── ABA PURIFICAÇÃO ────────────────────────────────────────────────────── */}
@@ -359,171 +353,6 @@ export default function PurificacaoClient({ purificacoes: initial, teores, stats
       )}
       </>
       )}
-    </div>
-  );
-}
-
-// ─── TeoresTab ────────────────────────────────────────────────────────────────
-function TeoresTab({ teores: initial, ligaTipos, userRole, userId }: {
-  teores: Teor[];
-  ligaTipos: LigaTipo[];
-  userRole: string | null;
-  userId: string | null;
-}) {
-  const [teores, setTeores] = useState<Teor[]>(initial);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editValue, setEditValue] = useState("");
-  const [savingId, setSavingId] = useState<number | null>(null);
-  const [erroId, setErroId] = useState<number | null>(null);
-
-  const canEdit = userRole === "admin" || userRole === "desenvolvedor";
-
-  function startEdit(t: Teor) {
-    setEditingId(t.id);
-    setEditValue((Number(t.teor) * 100).toFixed(2));
-    setErroId(null);
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-    setEditValue("");
-  }
-
-  async function saveEdit(teor_id: number) {
-    const pct = parseFloat(editValue);
-    if (!pct || pct <= 0 || pct > 100) return;
-    setSavingId(teor_id);
-    setErroId(null);
-    try {
-      const res = await fetch(`/api/purificacao/teores/${teor_id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ teor: pct / 100, user_role: userRole }),
-      });
-      if (!res.ok) {
-        setErroId(teor_id);
-        return;
-      }
-      const updated = await res.json() as { teor: number };
-      setTeores(prev => prev.map(t => t.id === teor_id ? { ...t, teor: updated.teor } : t));
-      setEditingId(null);
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
-      {/* Teores de Purificação */}
-      <div>
-        <h2 style={{ fontSize: 16, fontWeight: 700, color: P.text, marginBottom: 12 }}>Teores de Purificação</h2>
-        <div style={{ background: P.card, border: `1px solid ${P.border}`, borderRadius: 12, overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: P.bg }}>
-                <th style={{ padding: "10px 16px", textAlign: "left", fontWeight: 600, color: P.muted, fontSize: 11, textTransform: "uppercase" }}>Insumo</th>
-                <th style={{ padding: "10px 16px", textAlign: "left", fontWeight: 600, color: P.muted, fontSize: 11, textTransform: "uppercase" }}>SKU</th>
-                <th style={{ padding: "10px 16px", textAlign: "right", fontWeight: 600, color: P.muted, fontSize: 11, textTransform: "uppercase" }}>Teor (%)</th>
-                <th style={{ padding: "10px 16px", textAlign: "right", fontWeight: 600, color: P.muted, fontSize: 11, textTransform: "uppercase" }}>Saldo Pote</th>
-              </tr>
-            </thead>
-            <tbody>
-              {teores.map((t, i) => (
-                <tr key={t.id} style={{ borderTop: i > 0 ? `1px solid ${P.border}` : "none" }}>
-                  <td style={{ padding: "10px 16px", color: P.text, fontWeight: 500 }}>{t.nome}</td>
-                  <td style={{ padding: "10px 16px", color: P.muted, fontFamily: "monospace" }}>{t.sku}</td>
-                  <td style={{ padding: "10px 16px", textAlign: "right" }}>
-                    {editingId === t.id ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
-                        <input
-                          type="number"
-                          value={editValue}
-                          min={0.01}
-                          max={100}
-                          step="0.01"
-                          onChange={e => setEditValue(e.target.value)}
-                          style={{ width: 80, border: `1px solid ${P.border}`, borderRadius: 6, padding: "4px 8px", fontSize: 13, textAlign: "right" }}
-                          autoFocus
-                        />
-                        <span style={{ color: P.muted, fontSize: 13 }}>%</span>
-                        <button
-                          onClick={() => void saveEdit(t.id)}
-                          disabled={savingId === t.id}
-                          style={{ background: P.verde, color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
-                        >
-                          {savingId === t.id ? "..." : "OK"}
-                        </button>
-                        <button
-                          onClick={cancelEdit}
-                          style={{ background: "none", border: "none", cursor: "pointer", color: P.muted, padding: "4px 6px" }}
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                        <span style={{ fontWeight: 700, color: erroId === t.id ? P.vermelho : P.text }}>
-                          {(Number(t.teor) * 100).toFixed(2)}%
-                        </span>
-                        {canEdit && (
-                          <button
-                            onClick={() => startEdit(t)}
-                            style={{ background: "none", border: `1px solid ${P.border}`, borderRadius: 6, padding: "2px 8px", cursor: "pointer", color: P.muted, fontSize: 11 }}
-                          >
-                            editar
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ padding: "10px 16px", textAlign: "right", color: P.muted }}>{t.saldo != null ? Number(t.saldo).toFixed(2) + "g" : "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Mapeamento Liga */}
-      <div>
-        <h2 style={{ fontSize: 16, fontWeight: 700, color: P.text, marginBottom: 4 }}>Mapeamento Liga</h2>
-        <p style={{ fontSize: 13, color: P.muted, marginBottom: 12 }}>Qual liga italiana usar para cada tipo de Ouro 18k na fundição.</p>
-        <div style={{ background: P.card, border: `1px solid ${P.border}`, borderRadius: 12, overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: P.bg }}>
-                <th style={{ padding: "10px 16px", textAlign: "left", fontWeight: 600, color: P.muted, fontSize: 11, textTransform: "uppercase" }}>Tipo 18k</th>
-                <th style={{ padding: "10px 16px", textAlign: "left", fontWeight: 600, color: P.muted, fontSize: 11, textTransform: "uppercase" }}>Liga</th>
-                <th style={{ padding: "10px 16px", textAlign: "right", fontWeight: 600, color: P.muted, fontSize: 11, textTransform: "uppercase" }}>Teor Padrão</th>
-                <th style={{ padding: "10px 16px", textAlign: "right", fontWeight: 600, color: P.muted, fontSize: 11, textTransform: "uppercase" }}>Saldo Liga</th>
-                <th style={{ padding: "10px 16px", textAlign: "center", fontWeight: 600, color: P.muted, fontSize: 11, textTransform: "uppercase" }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ligaTipos.map((lt, i) => (
-                <tr key={lt.id} style={{ borderTop: i > 0 ? `1px solid ${P.border}` : "none" }}>
-                  <td style={{ padding: "10px 16px", color: P.text, fontWeight: 500 }}>{lt.tipo_18k_nome}</td>
-                  <td style={{ padding: "10px 16px", color: P.muted }}>{lt.liga_nome}</td>
-                  <td style={{ padding: "10px 16px", textAlign: "right", color: P.text, fontWeight: 700 }}>{(Number(lt.teor_default) * 100).toFixed(2)}%</td>
-                  <td style={{ padding: "10px 16px", textAlign: "right", color: P.muted }}>{Number(lt.saldo_liga).toFixed(2)}g</td>
-                  <td style={{ padding: "10px 16px", textAlign: "center" }}>
-                    <span style={{
-                      fontSize: 11,
-                      background: lt.ativo ? "#dcfce7" : "#fee2e2",
-                      color: lt.ativo ? P.verde : P.vermelho,
-                      borderRadius: 6,
-                      padding: "2px 8px",
-                      fontWeight: 600,
-                    }}>
-                      {lt.ativo ? "Ativo" : "Inativo"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 }

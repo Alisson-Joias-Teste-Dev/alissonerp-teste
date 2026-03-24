@@ -64,6 +64,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
     concluir_purificacao: false,
     abrir_ligacao:        false,
     concluir_ligacao:     false,
+    editar_teor_ligacao:  false,
   });
   const [permLoading, setPermLoading] = useState(false);
   const [mostrarSenha, setMostrarSenha] = useState(false);
@@ -124,6 +125,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
               concluir_purificacao: !!data.permissoes.concluir_purificacao,
               abrir_ligacao:        !!data.permissoes.abrir_ligacao,
               concluir_ligacao:     !!data.permissoes.concluir_ligacao,
+              editar_teor_ligacao:  !!data.permissoes.editar_teor_ligacao,
             });
           }
         })
@@ -487,6 +489,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
                     ["concluir_purificacao", "Concluir purificação"],
                     ["abrir_ligacao",        "Abrir ligação"],
                     ["concluir_ligacao",     "Concluir ligação"],
+                    ["editar_teor_ligacao",  "Editar teor na ligação"],
                   ] as [keyof typeof permPurif, string][]
                 ).map(([key, label]) => (
                   <label key={key} className="flex items-center gap-2.5 cursor-pointer select-none">

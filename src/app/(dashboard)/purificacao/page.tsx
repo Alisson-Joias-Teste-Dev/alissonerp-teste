@@ -17,6 +17,7 @@ export default async function PurificacaoPage() {
     concluir_purificacao: false,
     abrir_ligacao: false,
     concluir_ligacao: false,
+    editar_teor_ligacao: false,
   };
 
   if (user) {

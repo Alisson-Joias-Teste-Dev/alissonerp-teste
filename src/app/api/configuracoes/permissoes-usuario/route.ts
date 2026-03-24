@@ -3,7 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 
-const ACOES_VALIDAS = ["abrir_purificacao", "concluir_purificacao", "abrir_ligacao", "concluir_ligacao"] as const;
+const ACOES_VALIDAS = ["abrir_purificacao", "concluir_purificacao", "abrir_ligacao", "concluir_ligacao", "editar_teor_ligacao"] as const;
 
 // GET /api/configuracoes/permissoes-usuario?user_id=UUID
 export async function GET(req: NextRequest) {
