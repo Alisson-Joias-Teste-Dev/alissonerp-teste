@@ -8,6 +8,14 @@ import NovaProtocoloModal from "@/components/forms/NovaProtocoloModal";
 import ConcluirProtocoloModal from "@/components/forms/ConcluirProtocoloModal";
 import { MobileCard } from "@/components/ui/MobileCard";
 
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+
+function resolveStorageUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (path.startsWith("http")) return path;
+  return `${SUPABASE_URL}/storage/v1/object/public/protocolo-fotos/${path}`;
+}
+
 const C = {
   esmeralda: "#184036",
   creme: "#F3EADA",
@@ -16,6 +24,7 @@ const C = {
 };
 
 type Tab = "ida" | "volta" | "entregas";
+type Filtro = "pendentes" | "concluidos" | "todos";
 
 interface ProtocoloRow {
   id: number;
@@ -23,6 +32,10 @@ interface ProtocoloRow {
   data_conclusao: string | null;
   created_at: string;
   total_ordens: number;
+  criado_por_nome: string | null;
+  concluido_por_nome: string | null;
+  foto_criacao: string | null;
+  foto_conclusao: string | null;
 }
 
 interface AprovacaoRow {
@@ -59,6 +72,8 @@ interface ProtocoloConcluido {
   data_conclusao: string | null;
   criado_por_nome: string | null;
   concluido_por_nome: string | null;
+  foto_criacao: string | null;
+  foto_conclusao: string | null;
   ordens: OrdemConcluida[];
 }
 
@@ -110,6 +125,21 @@ export default function ProtocoloClient({ ida, volta }: Props) {
   const [concluirProt, setConcluirProt] = useState<ProtocoloRow | null>(null);
   const [isPending, startTransition] = useTransition();
   const [concluidos, setConcluidos] = useState<ProtocoloConcluido[] | null>(null);
+  const [fotoModal, setFotoModal] = useState<{ url: string; titulo: string } | null>(null);
+  const [fotoZoom, setFotoZoom] = useState(1);
+  const [fotoPan, setFotoPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [filtroIda, setFiltroIda] = useState<Filtro>("pendentes");
+  const [filtroVolta, setFiltroVolta] = useState<Filtro>("pendentes");
+
+  const abrirFotoModal = (url: string | null | undefined, titulo: string) => {
+    if (url) {
+      setFotoModal({ url, titulo });
+      setFotoZoom(1);
+      setFotoPan({ x: 0, y: 0 });
+    }
+  };
 
   const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
 
@@ -188,6 +218,9 @@ export default function ProtocoloClient({ ida, volta }: Props) {
           rows={ida}
           direcao="ida"
           onConcluir={(row) => setConcluirProt(row)}
+          onAbrirFoto={abrirFotoModal}
+          filtro={filtroIda}
+          onFiltroChange={setFiltroIda}
         />
       )}
 
@@ -197,6 +230,9 @@ export default function ProtocoloClient({ ida, volta }: Props) {
           rows={volta}
           direcao="volta"
           onConcluir={(row) => setConcluirProt(row)}
+          onAbrirFoto={abrirFotoModal}
+          filtro={filtroVolta}
+          onFiltroChange={setFiltroVolta}
         />
       )}
 
@@ -224,11 +260,43 @@ export default function ProtocoloClient({ ida, volta }: Props) {
                 <EtapaBadge etapa="concluido" />
               </div>
 
-              {/* Responsáveis + data */}
-              <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2 text-xs" style={{ color: "#6B7280", borderBottom: `1px solid ${C.cremeBorder}` }}>
-                {p.criado_por_nome && <span>Entregue por: <span style={{ color: "#374151" }}>{p.criado_por_nome}</span></span>}
-                {p.concluido_por_nome && <span>Recebido por: <span style={{ color: "#374151" }}>{p.concluido_por_nome}</span></span>}
-                <span>Concluído em: <span style={{ color: "#374151" }}>{fmt(p.data_conclusao)}</span></span>
+              {/* Responsáveis + data + fotos */}
+              <div className="px-4 py-2 border-b" style={{ borderColor: C.cremeBorder }}>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs mb-2" style={{ color: "#6B7280" }}>
+                  {p.criado_por_nome && <span>Entregue por: <span style={{ color: "#374151" }}>{p.criado_por_nome}</span></span>}
+                  {p.concluido_por_nome && <span>Recebido por: <span style={{ color: "#374151" }}>{p.concluido_por_nome}</span></span>}
+                  <span>Concluído em: <span style={{ color: "#374151" }}>{fmt(p.data_conclusao)}</span></span>
+                </div>
+                {(resolveStorageUrl(p.foto_criacao) || resolveStorageUrl(p.foto_conclusao)) && (
+                  <div className="flex gap-3">
+                    {resolveStorageUrl(p.foto_criacao) && (
+                      <div>
+                        <span className="text-[10px] block mb-1" style={{ color: "#9CA3AF" }}>Foto Criação</span>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={resolveStorageUrl(p.foto_criacao)!}
+                          alt="Foto criação"
+                          className="w-16 h-16 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => abrirFotoModal(resolveStorageUrl(p.foto_criacao), "Foto de Criação")}
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      </div>
+                    )}
+                    {resolveStorageUrl(p.foto_conclusao) && (
+                      <div>
+                        <span className="text-[10px] block mb-1" style={{ color: "#9CA3AF" }}>Foto Conclusão</span>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={resolveStorageUrl(p.foto_conclusao)!}
+                          alt="Foto conclusão"
+                          className="w-16 h-16 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => abrirFotoModal(resolveStorageUrl(p.foto_conclusao), "Foto de Conclusão")}
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Ordens */}
@@ -297,6 +365,119 @@ export default function ProtocoloClient({ ida, volta }: Props) {
           onSuccess={() => { setConcluirProt(null); refresh(); }}
         />
       )}
+
+      {/* Modal foto ampliada com zoom */}
+      {fotoModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.82)" }}
+          onClick={() => setFotoModal(null)}
+        >
+          <div className="relative max-w-3xl w-full" onClick={(e) => e.stopPropagation()}>
+            {/* Header: título + controles de zoom */}
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-medium text-sm" style={{ color: "#fff" }}>{fotoModal.titulo}</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setFotoZoom(z => Math.max(1, z - 0.5)); setFotoPan({ x: 0, y: 0 }); }}
+                  disabled={fotoZoom <= 1}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold disabled:opacity-30 hover:opacity-80 transition-opacity"
+                  style={{ backgroundColor: "rgba(255,255,255,0.15)", color: "#fff" }}
+                >
+                  −
+                </button>
+                <span className="text-xs min-w-[3rem] text-center" style={{ color: "rgba(255,255,255,0.6)" }}>
+                  {Math.round(fotoZoom * 100)}%
+                </span>
+                <button
+                  onClick={() => setFotoZoom(z => Math.min(5, z + 0.5))}
+                  disabled={fotoZoom >= 5}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold disabled:opacity-30 hover:opacity-80 transition-opacity"
+                  style={{ backgroundColor: "rgba(255,255,255,0.15)", color: "#fff" }}
+                >
+                  +
+                </button>
+                {fotoZoom > 1 && (
+                  <button
+                    onClick={() => { setFotoZoom(1); setFotoPan({ x: 0, y: 0 }); }}
+                    className="px-2 py-1 rounded text-xs hover:opacity-80 transition-opacity"
+                    style={{ backgroundColor: "rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)" }}
+                  >
+                    Reset
+                  </button>
+                )}
+                <button
+                  onClick={() => setFotoModal(null)}
+                  className="text-2xl leading-none ml-2 hover:opacity-70 transition-opacity"
+                  style={{ color: "rgba(255,255,255,0.8)" }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Container da imagem com zoom + pan */}
+            <div
+              className="overflow-hidden rounded-lg"
+              style={{
+                maxHeight: "75vh",
+                backgroundColor: "rgba(0,0,0,0.4)",
+                cursor: fotoZoom > 1 ? (isDragging ? "grabbing" : "grab") : "default",
+              }}
+              onWheel={(e) => {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? -0.25 : 0.25;
+                setFotoZoom(z => {
+                  const novoZoom = Math.max(1, Math.min(5, z + delta));
+                  if (novoZoom === 1) setFotoPan({ x: 0, y: 0 });
+                  return novoZoom;
+                });
+              }}
+              onMouseDown={(e) => {
+                if (fotoZoom > 1) {
+                  setIsDragging(true);
+                  setDragStart({ x: e.clientX - fotoPan.x, y: e.clientY - fotoPan.y });
+                }
+              }}
+              onMouseMove={(e) => {
+                if (isDragging && fotoZoom > 1) {
+                  setFotoPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+                }
+              }}
+              onMouseUp={() => setIsDragging(false)}
+              onMouseLeave={() => setIsDragging(false)}
+              onDoubleClick={() => {
+                if (fotoZoom === 1) {
+                  setFotoZoom(2.5);
+                } else {
+                  setFotoZoom(1);
+                  setFotoPan({ x: 0, y: 0 });
+                }
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={fotoModal.url}
+                alt={fotoModal.titulo}
+                draggable={false}
+                className="w-full h-auto object-contain select-none"
+                style={{
+                  maxHeight: "75vh",
+                  transform: `scale(${fotoZoom}) translate(${fotoPan.x / fotoZoom}px, ${fotoPan.y / fotoZoom}px)`,
+                  transition: isDragging ? "none" : "transform 0.2s ease",
+                }}
+              />
+            </div>
+
+            {/* Dica de uso */}
+            <p className="text-xs text-center mt-2" style={{ color: "rgba(255,255,255,0.35)" }}>
+              {fotoZoom === 1
+                ? "Scroll ou duplo clique para zoom · Clique fora para fechar"
+                : "Arraste para mover · Scroll para zoom · Duplo clique para resetar"}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -305,19 +486,65 @@ function ProtocoloTable({
   rows,
   direcao,
   onConcluir,
+  onAbrirFoto,
+  filtro,
+  onFiltroChange,
 }: {
   rows: ProtocoloRow[];
   direcao: "ida" | "volta";
   onConcluir: (row: ProtocoloRow) => void;
+  onAbrirFoto: (url: string | null | undefined, titulo: string) => void;
+  filtro: Filtro;
+  onFiltroChange: (f: Filtro) => void;
 }) {
+  const countPendentes = rows.filter((r) => r.etapas !== "concluido").length;
+  const countConcluidos = rows.filter((r) => r.etapas === "concluido").length;
+
+  const rowsFiltrados =
+    filtro === "pendentes" ? rows.filter((r) => r.etapas !== "concluido") :
+    filtro === "concluidos" ? rows.filter((r) => r.etapas === "concluido") :
+    rows;
+
+  const opFiltro: { value: Filtro; label: string; count: number }[] = [
+    { value: "pendentes", label: "Pendentes", count: countPendentes },
+    { value: "concluidos", label: "Concluídas", count: countConcluidos },
+    { value: "todos",      label: "Todas",     count: rows.length },
+  ];
+
   return (
     <>
+      {/* Pills de filtro */}
+      <div className="flex gap-1.5 mb-4 flex-wrap">
+        {opFiltro.map((op) => (
+          <button
+            key={op.value}
+            onClick={() => onFiltroChange(op.value)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+            style={{
+              backgroundColor: filtro === op.value ? C.esmeralda : C.creme,
+              color: filtro === op.value ? C.creme : "#6B7280",
+            }}
+          >
+            {op.label}
+            <span
+              className="text-[10px] font-bold px-1 py-0.5 rounded-full"
+              style={{
+                backgroundColor: filtro === op.value ? "rgba(255,255,255,0.2)" : "#18403618",
+                color: filtro === op.value ? C.creme : C.esmeralda,
+              }}
+            >
+              {op.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {/* Lista mobile */}
       <div className="block md:hidden space-y-3 mb-3">
-        {rows.length === 0 && (
+        {rowsFiltrados.length === 0 && (
           <p className="text-center py-8 text-sm" style={{ color: "#9CA3AF" }}>Nenhum protocolo encontrado</p>
         )}
-        {rows.map((r) => (
+        {rowsFiltrados.map((r) => (
           <MobileCard
             key={r.id}
             titulo={`Protocolo #${r.id}`}
@@ -329,6 +556,35 @@ function ProtocoloTable({
               { label: "Ordens", valor: String(r.total_ordens) },
               { label: "Criado em", valor: fmt(r.created_at) },
               { label: "Concluído em", valor: fmt(r.data_conclusao) },
+              ...(r.criado_por_nome ? [{ label: "Responsável", valor: r.criado_por_nome }] : []),
+              ...(r.concluido_por_nome ? [{ label: "Concluído por", valor: r.concluido_por_nome }] : []),
+              ...((resolveStorageUrl(r.foto_criacao) || resolveStorageUrl(r.foto_conclusao)) ? [{
+                label: "Fotos",
+                valor: (
+                  <div className="flex gap-2">
+                    {resolveStorageUrl(r.foto_criacao) && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveStorageUrl(r.foto_criacao)!}
+                        alt="Criação"
+                        className="w-12 h-12 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={(e) => { e.stopPropagation(); onAbrirFoto(resolveStorageUrl(r.foto_criacao), "Foto de Criação"); }}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    )}
+                    {resolveStorageUrl(r.foto_conclusao) && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveStorageUrl(r.foto_conclusao)!}
+                        alt="Conclusão"
+                        className="w-12 h-12 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={(e) => { e.stopPropagation(); onAbrirFoto(resolveStorageUrl(r.foto_conclusao), "Foto de Conclusão"); }}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    )}
+                  </div>
+                ),
+              }] : []),
               { label: "Ação", valor: r.etapas === "pendente" ? (
                 <button
                   onClick={(e) => { e.stopPropagation(); onConcluir(r); }}
@@ -348,16 +604,16 @@ function ProtocoloTable({
         <table className="w-full text-sm">
           <thead>
             <tr style={{ backgroundColor: C.cremeBg, borderBottom: "1px solid #E8DCC8" }}>
-              {["ID", "Status", "Ordens", "Criado em", "Concluído em", ""].map((h) => (
+              {["ID", "Status", "Ordens", "Criado em", "Concluído em", "Responsável", "Concluído por", "Fotos", ""].map((h) => (
                 <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
-              <tr><td colSpan={6} className="text-center py-12 text-sm" style={{ color: "#9CA3AF" }}>Nenhum protocolo encontrado</td></tr>
+            {rowsFiltrados.length === 0 && (
+              <tr><td colSpan={9} className="text-center py-12 text-sm" style={{ color: "#9CA3AF" }}>Nenhum protocolo encontrado</td></tr>
             )}
-            {rows.map((r, i) => (
+            {rowsFiltrados.map((r, i) => (
               <tr key={r.id} style={{ borderTop: i > 0 ? "1px solid #F3EADA" : undefined }}>
                 <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>#{r.id}</td>
                 <td className="px-4 py-3"><EtapaBadge etapa={r.etapas} /></td>
@@ -365,6 +621,34 @@ function ProtocoloTable({
                 <td className="px-4 py-3 font-mono text-[11px]" style={{ color: "#9CA3AF" }}>{fmt(r.created_at)}</td>
                 <td className="px-4 py-3 font-mono text-[11px]" style={{ color: r.data_conclusao ? "#059669" : "#9CA3AF" }}>
                   {fmt(r.data_conclusao)}
+                </td>
+                <td className="px-4 py-3 text-[12px]" style={{ color: "#374151" }}>{r.criado_por_nome || "—"}</td>
+                <td className="px-4 py-3 text-[12px]" style={{ color: "#374151" }}>{r.concluido_por_nome || "—"}</td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-1.5">
+                    {resolveStorageUrl(r.foto_criacao) && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveStorageUrl(r.foto_criacao)!}
+                        alt="Criação"
+                        title="Foto de Criação"
+                        className="w-10 h-10 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => onAbrirFoto(resolveStorageUrl(r.foto_criacao), "Foto de Criação")}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    )}
+                    {resolveStorageUrl(r.foto_conclusao) && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveStorageUrl(r.foto_conclusao)!}
+                        alt="Conclusão"
+                        title="Foto de Conclusão"
+                        className="w-10 h-10 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => onAbrirFoto(resolveStorageUrl(r.foto_conclusao), "Foto de Conclusão")}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-3 text-right">
                   {r.etapas === "pendente" && (
