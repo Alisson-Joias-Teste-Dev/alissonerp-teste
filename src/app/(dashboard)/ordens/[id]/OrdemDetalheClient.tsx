@@ -201,17 +201,32 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
               </p>
               <InfoRow label="Cliente"        value={ordem.cliente_nome} />
               <InfoRow label="Vendedor(a)"    value={ordem.vendedor_nome} />
-              <InfoRow label="Data Entrega"   value={ordem.data_entrega ? new Date(ordem.data_entrega).toLocaleDateString("pt-BR") : null} />
-              <InfoRow label="Peso Negociado" value={ordem.peso_metal_negociado ? `${Number(ordem.peso_metal_negociado).toFixed(2)}g` : null} mono />
+              {ordem.data_entrega != null && (
+                <InfoRow label="Data Entrega" value={new Date(ordem.data_entrega).toLocaleDateString("pt-BR")} />
+              )}
+              {Number(ordem.peso_metal_negociado) > 0 && (
+                <InfoRow label="Peso Negociado" value={`${Number(ordem.peso_metal_negociado).toFixed(2)}g`} mono />
+              )}
+              {Number(ordem.peso_metal_externo) > 0 && (
+                <InfoRow label="Metal Externo" value={`${Number(ordem.peso_metal_externo).toFixed(2)}g`} mono />
+              )}
             </div>
             <div className="bg-white rounded-xl border p-5" style={{ borderColor: C.cremeBorder }}>
               <p className="text-[10px] font-semibold uppercase tracking-wider mb-3" style={{ color: "#9CA3AF" }}>
                 Produção
               </p>
-              <InfoRow label="PCP"            value={temPcp ? `#${ordem.pcp_id} — ${ordem.pcp_etapas}` : "Sem PCP"} />
-              <InfoRow label="Operador"       value={ordem.pcp_operador_nome !== "Sem operador" ? ordem.pcp_operador_nome : null} />
-              <InfoRow label="Setor Atual"    value={ordem.setor_nome} />
-              <InfoRow label="Metal Externo"  value={Number(ordem.pcp_metal_externo || 0) > 0 ? `${Number(ordem.pcp_metal_externo).toFixed(2)}g` : "—"} mono />
+              {temPcp && (
+                <InfoRow label="PCP" value={`#${ordem.pcp_id} — ${ordem.pcp_etapas}`} />
+              )}
+              {ordem.pcp_operador_nome && ordem.pcp_operador_nome !== "Sem operador" && (
+                <InfoRow label="Operador" value={ordem.pcp_operador_nome} />
+              )}
+              {ordem.setor_nome && (
+                <InfoRow label="Setor Atual" value={ordem.setor_nome} />
+              )}
+              {Number(ordem.pcp_metal_externo) > 0 && (
+                <InfoRow label="Metal Externo" value={`${Number(ordem.pcp_metal_externo).toFixed(2)}g`} mono />
+              )}
             </div>
           </div>
 
