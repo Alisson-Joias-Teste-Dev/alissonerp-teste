@@ -15,6 +15,8 @@ import {
   AlertTriangle,
   X,
   TrendingDown,
+  Lock,
+  Unlock,
 } from "lucide-react";
 
 // ─── Paleta (mesma do PurificacaoClient) ──────────────────────────────────────
@@ -128,6 +130,7 @@ export default function LigacaoTab({
   permissoes?: {
     abrir_ligacao: boolean;
     concluir_ligacao: boolean;
+    editar_teor_ligacao?: boolean;
   };
 }) {
   const router = useRouter();
@@ -142,6 +145,7 @@ export default function LigacaoTab({
   const isFullAccess = userRole === "admin" || userRole === "desenvolvedor";
   const canCreate  = isFullAccess || (permissoes?.abrir_ligacao ?? false);
   const canConcluir = isFullAccess || (permissoes?.concluir_ligacao ?? false);
+  const podeEditarTeor = isFullAccess || (permissoes?.editar_teor_ligacao ?? false);
   const canCancel  = userRole ? ROLES_CANCELAR.includes(userRole) : false;
 
   const filtradas = filtroStatus === "todos"
@@ -287,6 +291,7 @@ export default function LigacaoTab({
           saldo24k={saldo24k}
           userRole={userRole}
           userId={userId}
+          podeEditarTeor={podeEditarTeor}
           onClose={() => setModalNova(false)}
           onSaved={reload}
         />
@@ -472,6 +477,7 @@ function ModalNovaLigacao({
   saldo24k,
   userRole,
   userId,
+  podeEditarTeor,
   onClose,
   onSaved,
 }: {
@@ -479,6 +485,7 @@ function ModalNovaLigacao({
   saldo24k: number;
   userRole: string | null;
   userId: string | null;
+  podeEditarTeor: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -487,6 +494,7 @@ function ModalNovaLigacao({
   const [peso24k, setPeso24k] = useState("");
   const [pureza, setPureza] = useState("100.00");
   const [teor, setTeor] = useState(primeiro ? String((Number(primeiro.teor_default) * 100).toFixed(2)) : "75.00");
+  const [teorManual, setTeorManual] = useState(false);
   const [observacao, setObservacao] = useState("");
   const [fotoBase64, setFotoBase64] = useState<string | null>(null);
   const [fotoFile, setFotoFile] = useState<File | null>(null);
@@ -510,7 +518,22 @@ function ModalNovaLigacao({
     const t = ligaTipos.find(lt => lt.tipo_18k_insumo_id === id);
     if (t) {
       setTipoSelecionado(t);
-      setTeor(String((Number(t.teor_default) * 100).toFixed(2)));
+      // Só atualiza teor automaticamente se não está no modo manual
+      if (!teorManual) {
+        setTeor(String((Number(t.teor_default) * 100).toFixed(2)));
+      }
+    }
+  }
+
+  function toggleTeorManual() {
+    if (teorManual) {
+      // Ao travar de volta: restaurar teor automático do tipo selecionado
+      if (tipoSelecionado) {
+        setTeor(String((Number(tipoSelecionado.teor_default) * 100).toFixed(2)));
+      }
+      setTeorManual(false);
+    } else {
+      setTeorManual(true);
     }
   }
 
@@ -661,18 +684,55 @@ function ModalNovaLigacao({
             </div>
           </div>
 
-          {/* Teor — read-only, preenchido automaticamente pelo tipo de ouro */}
+          {/* Teor — automático ou manual (bloqueado por permissão) */}
           <div>
-            <label style={labelStyle}>Teor (%) — automático</label>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>
+                TEOR (%) — {teorManual ? "MANUAL" : "AUTOMÁTICO"}
+              </label>
+              {podeEditarTeor && (
+                <button
+                  type="button"
+                  onClick={toggleTeorManual}
+                  title={teorManual ? "Travar teor (voltar ao automático)" : "Desbloquear edição manual do teor"}
+                  style={{
+                    background: "none",
+                    border: `1px solid ${teorManual ? P.amber : P.border}`,
+                    borderRadius: 6,
+                    padding: "2px 8px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    color: teorManual ? P.amber : P.muted,
+                    fontSize: 11,
+                  }}
+                >
+                  {teorManual
+                    ? <><Lock size={11} /> Travar</>
+                    : <><Unlock size={11} /> Editar</>
+                  }
+                </button>
+              )}
+            </div>
             <input
               type="number"
               value={teor}
-              readOnly
-              style={{ ...inputStyle, background: "#f3f4f6", cursor: "not-allowed", color: P.muted }}
-              title="Definido na aba Teores"
+              readOnly={!teorManual}
+              onChange={e => teorManual && setTeor(e.target.value)}
+              style={{
+                ...inputStyle,
+                background: teorManual ? "#ffffff" : "#f3f4f6",
+                cursor: teorManual ? "text" : "not-allowed",
+                color: teorManual ? P.text : P.muted,
+                borderColor: teorManual ? P.amber : P.border,
+              }}
+              title={teorManual ? "Teor editado manualmente" : "Definido nas configurações"}
             />
-            <div style={{ fontSize: 11, color: P.muted, marginTop: 3 }}>
-              Definido na aba Teores — selecione o tipo de ouro para preencher
+            <div style={{ fontSize: 11, color: teorManual ? P.amber : P.muted, marginTop: 3 }}>
+              {teorManual
+                ? "⚠️ Teor editado manualmente"
+                : "Definido nas configurações — selecione o tipo de ouro para preencher"}
             </div>
           </div>
 

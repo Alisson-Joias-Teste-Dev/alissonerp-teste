@@ -14,7 +14,7 @@ const C = {
 
 interface ItemOrdem {
   id: number;
-  qtd: number;
+  quantidade: number;
   produto_id: string | number;
   produto_nome: string | null;
   produto_sku: string | null;
@@ -117,9 +117,9 @@ export default function ItensOrdemSection({ ordemId }: { ordemId: number }) {
                   {item.produto_sku ?? "—"}
                 </td>
                 <td className="px-4 py-2.5 font-mono text-sm font-semibold" style={{ color: C.dourado }}>
-                  {Number(item.qtd) % 1 === 0
-                    ? Number(item.qtd).toFixed(0)
-                    : Number(item.qtd).toFixed(2)}
+                  {Number(item.quantidade) % 1 === 0
+                    ? Number(item.quantidade).toFixed(0)
+                    : Number(item.quantidade).toFixed(2)}
                 </td>
                 <td className="px-4 py-2.5 font-mono text-[12px]" style={{ color: "#6B7280" }}>
                   {item.produto_peso != null ? Number(item.produto_peso).toFixed(2) : "—"}

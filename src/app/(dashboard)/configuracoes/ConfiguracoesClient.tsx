@@ -96,6 +96,17 @@ interface TeorOuro {
   updated_at: string;
 }
 
+interface LigaTipo {
+  id: number;
+  tipo_18k_insumo_id: number;
+  tipo_18k_nome: string;
+  liga_insumo_id: number;
+  liga_nome: string;
+  teor_default: number;
+  ativo: boolean;
+  saldo_liga: number;
+}
+
 interface Props {
   parametros: Parametros;
   webhooks: Webhook[];
@@ -103,6 +114,7 @@ interface Props {
   usuarios: Usuario[];
   depositos: DepositoEdit[];
   teores: TeorOuro[];
+  ligaTipos: LigaTipo[];
 }
 
 type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores";
@@ -2251,7 +2263,7 @@ function TabPermissoes() {
 }
 
 // ─── Tab Teores de Ouro ───────────────────────────────────────────────────────
-function TabTeores({ teores: initial }: { teores: TeorOuro[] }) {
+function TabTeores({ teores: initial, ligaTipos: initialLiga }: { teores: TeorOuro[]; ligaTipos: LigaTipo[] }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [teores, setTeores] = useState<TeorOuro[]>(initial);
@@ -2260,6 +2272,13 @@ function TabTeores({ teores: initial }: { teores: TeorOuro[] }) {
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<number | null>(null);
   const [erros, setErros] = useState<Record<number, string>>({});
+
+  const [ligaTipos, setLigaTipos] = useState<LigaTipo[]>(initialLiga);
+  const [editandoLigaId, setEditandoLigaId] = useState<number | null>(null);
+  const [editLigaTeor, setEditLigaTeor] = useState<string>("");
+  const [savingLiga, setSavingLiga] = useState(false);
+  const [savedLigaId, setSavedLigaId] = useState<number | null>(null);
+  const [errosLiga, setErrosLiga] = useState<Record<number, string>>({});
 
   async function handleSave(t: TeorOuro) {
     const novoTeor = parseFloat(editTeor) / 100;
@@ -2287,95 +2306,208 @@ function TabTeores({ teores: initial }: { teores: TeorOuro[] }) {
     startTransition(() => router.refresh());
   }
 
+  async function handleSaveLiga(lt: LigaTipo) {
+    const novoTeor = parseFloat(editLigaTeor) / 100;
+    if (isNaN(novoTeor) || novoTeor <= 0 || novoTeor > 1) {
+      setErrosLiga(prev => ({ ...prev, [lt.id]: "Teor deve ser entre 0.01 e 100%" }));
+      return;
+    }
+    setSavingLiga(true);
+    setErrosLiga(prev => { const n = { ...prev }; delete n[lt.id]; return n; });
+    const res = await fetch(`/api/purificacao/liga-tipos/${lt.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teor_default: novoTeor, user_role: "admin" }),
+    });
+    setSavingLiga(false);
+    if (!res.ok) {
+      const d = await res.json();
+      setErrosLiga(prev => ({ ...prev, [lt.id]: d.error ?? "Erro ao salvar" }));
+      return;
+    }
+    setLigaTipos(prev => prev.map(x => x.id === lt.id ? { ...x, teor_default: novoTeor } : x));
+    setEditandoLigaId(null);
+    setSavedLigaId(lt.id);
+    setTimeout(() => setSavedLigaId(null), 2000);
+    startTransition(() => router.refresh());
+  }
+
   return (
-    <div className="space-y-4 max-w-lg">
+    <div className="space-y-8 max-w-2xl">
+      {/* Seção A — Teores de Purificação */}
       <div>
-        <p className="text-xs" style={{ color: P.muted }}>
+        <h3 className="text-sm font-semibold mb-1" style={{ color: P.creme }}>Teores de Purificação</h3>
+        <p className="text-xs mb-3" style={{ color: P.muted }}>
           Teor de ouro puro por liga. Usado no cálculo da purificação (24k esperado).
         </p>
-      </div>
-      <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr style={{ backgroundColor: P.bg, borderBottom: `1px solid ${P.border}` }}>
-              {["Tipo de Ouro", "SKU", "Teor (%)", "Status", ""].map(h => (
-                <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium" style={{ color: P.muted }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {teores.map(t => (
-              <tr key={t.id} style={{ borderBottom: `1px solid ${P.bg}` }}>
-                <td className="px-4 py-3 font-medium text-sm" style={{ color: P.creme }}>{t.nome}</td>
-                <td className="px-4 py-3 text-xs font-mono" style={{ color: P.muted }}>{t.sku}</td>
-                <td className="px-4 py-3">
-                  {editandoId === t.id ? (
-                    <div>
-                      <input
-                        type="number"
-                        value={editTeor}
-                        min={1}
-                        max={100}
-                        step={0.01}
-                        onChange={e => setEditTeor(e.target.value)}
-                        className="w-24 rounded-lg px-2 py-1 text-sm outline-none"
-                        style={{ border: `1px solid ${P.border}`, color: P.creme }}
-                        autoFocus
-                      />
-                      {erros[t.id] && <div className="text-[11px] mt-1" style={{ color: P.vermelho }}>{erros[t.id]}</div>}
-                    </div>
-                  ) : (
-                    <span className="font-semibold" style={{ color: P.dourado }}>
-                      {savedId === t.id ? "✓ " : ""}{(t.teor * 100).toFixed(2)}%
+        <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ backgroundColor: P.bg, borderBottom: `1px solid ${P.border}` }}>
+                {["Tipo de Ouro", "SKU", "Teor (%)", "Status", ""].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium" style={{ color: P.muted }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {teores.map(t => (
+                <tr key={t.id} style={{ borderBottom: `1px solid ${P.bg}` }}>
+                  <td className="px-4 py-3 font-medium text-sm" style={{ color: P.creme }}>{t.nome}</td>
+                  <td className="px-4 py-3 text-xs font-mono" style={{ color: P.muted }}>{t.sku}</td>
+                  <td className="px-4 py-3">
+                    {editandoId === t.id ? (
+                      <div>
+                        <input
+                          type="number"
+                          value={editTeor}
+                          min={1}
+                          max={100}
+                          step={0.01}
+                          onChange={e => setEditTeor(e.target.value)}
+                          className="w-24 rounded-lg px-2 py-1 text-sm outline-none"
+                          style={{ border: `1px solid ${P.border}`, color: P.creme }}
+                          autoFocus
+                        />
+                        {erros[t.id] && <div className="text-[11px] mt-1" style={{ color: P.vermelho }}>{erros[t.id]}</div>}
+                      </div>
+                    ) : (
+                      <span className="font-semibold" style={{ color: P.dourado }}>
+                        {savedId === t.id ? "✓ " : ""}{(t.teor * 100).toFixed(2)}%
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span style={{ color: t.ativo ? P.verde : P.muted, fontSize: 12 }}>
+                      {t.ativo ? "Ativo" : "Inativo"}
                     </span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <span style={{ color: t.ativo ? P.verde : P.muted, fontSize: 12 }}>
-                    {t.ativo ? "Ativo" : "Inativo"}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {editandoId === t.id ? (
-                    <div className="flex items-center justify-end gap-2">
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {editandoId === t.id ? (
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleSave(t)}
+                          disabled={saving}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50"
+                          style={{ backgroundColor: P.verde, color: "#fff" }}
+                        >
+                          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                          Salvar
+                        </button>
+                        <button
+                          onClick={() => setEditandoId(null)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                          style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+                        >
+                          <X size={12} /> Cancelar
+                        </button>
+                      </div>
+                    ) : (
                       <button
-                        onClick={() => handleSave(t)}
-                        disabled={saving}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50"
-                        style={{ backgroundColor: P.verde, color: "#fff" }}
-                      >
-                        {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                        Salvar
-                      </button>
-                      <button
-                        onClick={() => setEditandoId(null)}
+                        onClick={() => { setEditandoId(t.id); setEditTeor(String((t.teor * 100).toFixed(2))); }}
                         className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
                         style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
                       >
-                        <X size={12} /> Cancelar
+                        <Pencil size={12} /> Editar
                       </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => { setEditandoId(t.id); setEditTeor(String((t.teor * 100).toFixed(2))); }}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
-                      style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
-                    >
-                      <Pencil size={12} /> Editar
-                    </button>
-                  )}
-                </td>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Seção B — Mapeamento Liga */}
+      <div>
+        <h3 className="text-sm font-semibold mb-1" style={{ color: P.creme }}>Mapeamento Liga</h3>
+        <p className="text-xs mb-3" style={{ color: P.muted }}>
+          Qual liga italiana usar para cada tipo de Ouro 18k na fundição, e o teor padrão de cada combinação.
+        </p>
+        <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ backgroundColor: P.bg, borderBottom: `1px solid ${P.border}` }}>
+                {["Tipo 18k", "Liga", "Teor Padrão (%)", "Saldo Liga", "Status", ""].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium" style={{ color: P.muted }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {ligaTipos.map(lt => (
+                <tr key={lt.id} style={{ borderBottom: `1px solid ${P.bg}` }}>
+                  <td className="px-4 py-3 font-medium text-sm" style={{ color: P.creme }}>{lt.tipo_18k_nome}</td>
+                  <td className="px-4 py-3 text-sm" style={{ color: P.muted }}>{lt.liga_nome}</td>
+                  <td className="px-4 py-3">
+                    {editandoLigaId === lt.id ? (
+                      <div>
+                        <input
+                          type="number"
+                          value={editLigaTeor}
+                          min={1}
+                          max={100}
+                          step={0.01}
+                          onChange={e => setEditLigaTeor(e.target.value)}
+                          className="w-24 rounded-lg px-2 py-1 text-sm outline-none"
+                          style={{ border: `1px solid ${P.border}`, color: P.creme }}
+                          autoFocus
+                        />
+                        {errosLiga[lt.id] && <div className="text-[11px] mt-1" style={{ color: P.vermelho }}>{errosLiga[lt.id]}</div>}
+                      </div>
+                    ) : (
+                      <span className="font-semibold" style={{ color: P.dourado }}>
+                        {savedLigaId === lt.id ? "✓ " : ""}{(Number(lt.teor_default) * 100).toFixed(2)}%
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm" style={{ color: P.muted }}>{Number(lt.saldo_liga).toFixed(2)}g</td>
+                  <td className="px-4 py-3">
+                    <span style={{ color: lt.ativo ? P.verde : P.muted, fontSize: 12 }}>
+                      {lt.ativo ? "Ativo" : "Inativo"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {editandoLigaId === lt.id ? (
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleSaveLiga(lt)}
+                          disabled={savingLiga}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50"
+                          style={{ backgroundColor: P.verde, color: "#fff" }}
+                        >
+                          {savingLiga ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                          Salvar
+                        </button>
+                        <button
+                          onClick={() => setEditandoLigaId(null)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                          style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+                        >
+                          <X size={12} /> Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setEditandoLigaId(lt.id); setEditLigaTeor(String((Number(lt.teor_default) * 100).toFixed(2))); }}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                        style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+                      >
+                        <Pencil size={12} /> Editar
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export default function ConfiguracoesClient({ parametros, webhooks, logs, usuarios, depositos, teores }: Props) {
+export default function ConfiguracoesClient({ parametros, webhooks, logs, usuarios, depositos, teores, ligaTipos }: Props) {
   const [tab, setTab] = useState<Tab>("parametros");
   const [initialUserId, setInitialUserId] = useState<string | null>(null);
   const { role: currentRole } = useAuth();
@@ -2447,7 +2579,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "usuarios"    && <TabUsuarios usuarios={usuarios} depositos={depositos} initialUserId={initialUserId} />}
       {tab === "ia"          && <TabIA />}
       {tab === "depositos"   && <TabDepositos />}
-      {tab === "teores"      && <TabTeores teores={teores} />}
+      {tab === "teores"      && <TabTeores teores={teores} ligaTipos={ligaTipos} />}
       {tab === "permissoes"  && isSuperAdmin && <TabPermissoes />}
     </div>
   );
