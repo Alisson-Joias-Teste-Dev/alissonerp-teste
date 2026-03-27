@@ -7,7 +7,7 @@ const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8", crem
 
 type TipoLancamento = "entrada" | "saida" | "transferencia" | "sangria";
 
-interface Insumo   { id: number; nome: string; sku?: string; }
+interface Insumo   { id: number; nome: string; sku?: string; categoria_id?: number; peso_pedra?: number | null; peso_pedra_ct?: number | null; }
 interface Deposito  { id: number; nome: string; }
 interface Categoria { categoria_id: number; categoria_nome: string; }
 
@@ -41,16 +41,20 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
   const [depositoId, setDepositoId] = useState("");
   const [depositoDestinoId, setDepositoDestinoId] = useState("");
   const [peso, setPeso]             = useState("");
+  const [pesoCT, setPesoCT]         = useState("");
   const [obs, setObs]           = useState("");
 
   // Categoria + insumo com autocomplete
-  const [categoriaId, setCategoriaId]         = useState<number | null>(null);
-  const [categorias, setCategorias]           = useState<Categoria[]>([]);
-  const [insumos, setInsumos]                 = useState<Insumo[]>([]);
-  const [insumoId, setInsumoId]               = useState<number | null>(null);
-  const [buscaInsumo, setBuscaInsumo]         = useState("");
-  const [mostrarDropdown, setMostrarDropdown] = useState(false);
+  const [categoriaId, setCategoriaId]             = useState<number | null>(null);
+  const [categorias, setCategorias]               = useState<Categoria[]>([]);
+  const [insumos, setInsumos]                     = useState<Insumo[]>([]);
+  const [insumoId, setInsumoId]                   = useState<number | null>(null);
+  const [insumoSelecionado, setInsumoSelecionado] = useState<Insumo | null>(null);
+  const [buscaInsumo, setBuscaInsumo]             = useState("");
+  const [mostrarDropdown, setMostrarDropdown]     = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const [qtdCalculada, setQtdCalculada] = useState<number | null>(null);
 
   const [depositos, setDepositos] = useState<Deposito[]>([]);
 
@@ -65,11 +69,14 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
     setCategoriaId(null);
     setInsumos([]);
     setInsumoId(null);
+    setInsumoSelecionado(null);
     setBuscaInsumo("");
     setMostrarDropdown(false);
     setDepositoId("");
     setDepositoDestinoId("");
     setPeso("");
+    setPesoCT("");
+    setQtdCalculada(null);
     setObs("");
     setError("");
     setSuccess(false);
@@ -111,16 +118,42 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
 
   function selecionarInsumo(ins: Insumo) {
     setInsumoId(ins.id);
+    setInsumoSelecionado(ins);
     setBuscaInsumo(ins.nome);
     setMostrarDropdown(false);
+    setPeso("");
+    setPesoCT("");
+    setQtdCalculada(null);
     setError("");
   }
 
   function handleCategoriaChange(id: number | null) {
     setCategoriaId(id);
     setInsumoId(null);
+    setInsumoSelecionado(null);
     setBuscaInsumo("");
     setMostrarDropdown(false);
+    setPeso("");
+    setPesoCT("");
+    setQtdCalculada(null);
+  }
+
+  const isPedra    = categoriaId === 2;
+  const ctUnitario = insumoSelecionado?.peso_pedra_ct ?? null;
+
+  function handlePesoCTChange(v: string) {
+    setPesoCT(v);
+    setError("");
+    const ct = parseFloat(v);
+    if (!isNaN(ct) && ct > 0 && ctUnitario && ctUnitario > 0) {
+      const qtd = Math.round(ct / ctUnitario);
+      const g   = Number((ct * 0.2).toFixed(3));
+      setQtdCalculada(qtd);
+      setPeso(String(g));
+    } else {
+      setQtdCalculada(null);
+      setPeso(!isNaN(ct) && ct > 0 ? (ct * 0.2).toFixed(3) : "");
+    }
   }
 
   async function handleSubmit() {
@@ -341,22 +374,96 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
             </div>
           )}
 
-          {/* Peso */}
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
-              Peso / Quantidade
-            </label>
-            <input
-              type="number"
-              step="0.001"
-              min="0.001"
-              value={peso}
-              onChange={(e) => { setPeso(e.target.value); setError(""); }}
-              placeholder="0.000"
-              className="w-full px-3 py-2.5 rounded-lg border text-sm font-mono focus:outline-none"
-              style={{ borderColor: C.cremeBorder }}
-            />
-          </div>
+          {/* Peso — condicional: ct+calc para Pedra, g direto para Metal/outros */}
+          {isPedra ? (
+            <div className="space-y-3">
+              {/* Aviso se insumo sem ct cadastrado */}
+              {insumoSelecionado && !ctUnitario && (
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg text-[12px]"
+                  style={{ backgroundColor: "#FFFBEB", border: "1px solid #FCD34D", color: "#92400E" }}>
+                  <AlertCircle size={13} className="shrink-0 mt-0.5" />
+                  <span>Peso unitário em ct não cadastrado para este insumo. Cadastre em <strong>Insumos</strong> primeiro.</span>
+                </div>
+              )}
+
+              {/* Campo ct */}
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
+                  Peso total (ct) <span style={{ color: "#DC2626" }}>*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.001"
+                    min="0.001"
+                    value={pesoCT}
+                    onChange={(e) => handlePesoCTChange(e.target.value)}
+                    placeholder="0.000"
+                    disabled={!insumoSelecionado}
+                    className="w-full px-3 py-2.5 rounded-lg border text-sm font-mono focus:outline-none pr-12 disabled:opacity-50"
+                    style={{ borderColor: C.cremeBorder }}
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold" style={{ color: "#9CA3AF" }}>ct</span>
+                </div>
+              </div>
+
+              {/* Card de cálculo automático */}
+              {pesoCT && parseFloat(pesoCT) > 0 && (
+                <div className="rounded-lg border px-4 py-3 space-y-1.5 text-[12px]"
+                  style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: "#9CA3AF" }}>
+                    Cálculo automático
+                  </p>
+                  <div className="flex justify-between">
+                    <span style={{ color: "#6B7280" }}>Ct unitário (cadastro):</span>
+                    <span className="font-semibold" style={{ color: "#374151" }}>
+                      {ctUnitario ? `${ctUnitario}ct` : <span style={{ color: "#D97706" }}>não cadastrado</span>}
+                    </span>
+                  </div>
+                  {ctUnitario && qtdCalculada !== null && (
+                    <>
+                      <div className="flex justify-between">
+                        <span style={{ color: "#6B7280" }}>Quantidade:</span>
+                        <span className="font-bold text-[14px]" style={{ color: C.esmeralda }}>
+                          {qtdCalculada} pedras
+                        </span>
+                      </div>
+                      {Math.abs(parseFloat(pesoCT) / ctUnitario - qtdCalculada) > 0.01 && (
+                        <div className="flex items-center gap-1.5 mt-1 pt-1.5 border-t" style={{ borderColor: C.cremeBorder }}>
+                          <AlertCircle size={11} style={{ color: "#D97706" }} />
+                          <span style={{ color: "#92400E" }}>
+                            Resultado exato: {(parseFloat(pesoCT) / ctUnitario).toFixed(2)} — arredondado para {qtdCalculada}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <div className="flex justify-between pt-1 border-t" style={{ borderColor: C.cremeBorder }}>
+                    <span style={{ color: "#6B7280" }}>Peso total:</span>
+                    <span className="font-semibold" style={{ color: "#374151" }}>
+                      {peso ? `${peso}g` : "—"}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
+                Peso / Quantidade
+              </label>
+              <input
+                type="number"
+                step="0.001"
+                min="0.001"
+                value={peso}
+                onChange={(e) => { setPeso(e.target.value); setError(""); }}
+                placeholder="0.000"
+                className="w-full px-3 py-2.5 rounded-lg border text-sm font-mono focus:outline-none"
+                style={{ borderColor: C.cremeBorder }}
+              />
+            </div>
+          )}
 
           {/* Obs */}
           <div>
@@ -392,7 +499,7 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
           </button>
           <button
             onClick={handleSubmit}
-            disabled={loading || success}
+            disabled={loading || success || (isPedra && !!insumoSelecionado && !ctUnitario)}
             className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
             style={{ backgroundColor: C.esmeralda, color: C.creme }}
           >
