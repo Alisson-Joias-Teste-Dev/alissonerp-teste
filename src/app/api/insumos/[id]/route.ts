@@ -24,6 +24,7 @@ export async function PATCH(
     foto_remover?: boolean;       // true = remover foto atual
     fornecedor_id?: number | null;
     peso_pedra?: number | null;
+    peso_pedra_ct?: number | null;
     observacao?: string | null;
     ativo?: boolean;
   };
@@ -31,7 +32,7 @@ export async function PATCH(
   const {
     nome, sku, categoria_id, unidade, descricao,
     estoque_minimo, estoque_maximo, custo_compra,
-    foto, foto_remover, fornecedor_id, peso_pedra, observacao, ativo,
+    foto, foto_remover, fornecedor_id, peso_pedra, peso_pedra_ct, observacao, ativo,
   } = body;
 
   // ── Upload / remoção de foto ────────────────────────────────────────────────
@@ -86,12 +87,13 @@ export async function PATCH(
       foto           = ${fotoUrl !== undefined ? fotoUrl : sql`foto`},
       fornecedor_id  = ${fornecedor_id !== undefined ? sql`${fornecedor_id}::bigint` : sql`fornecedor_id`},
       peso_pedra     = ${peso_pedra !== undefined ? sql`${peso_pedra}::real` : sql`peso_pedra`},
+      peso_pedra_ct  = ${peso_pedra_ct !== undefined ? sql`${peso_pedra_ct}::numeric` : sql`peso_pedra_ct`},
       observacao     = ${observacao !== undefined ? sql`${observacao}` : sql`observacao`},
       ativo          = ${ativo !== undefined ? sql`${ativo}::boolean` : sql`ativo`},
       updated_at     = now()
     WHERE id = ${id}
     RETURNING id, nome, sku, categoria_id, unidade, estoque_minimo, estoque_maximo,
-              custo_compra, foto, fornecedor_id, peso_pedra, observacao, ativo
+              custo_compra, foto, fornecedor_id, peso_pedra, peso_pedra_ct, observacao, ativo
   `;
 
   if (!rows[0]) return NextResponse.json({ error: "Não encontrado" }, { status: 404 });
