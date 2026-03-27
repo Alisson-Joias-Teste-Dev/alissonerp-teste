@@ -32,6 +32,7 @@ interface InsumoData {
   categoria_id?: number;
   unidade?: string;
   peso_pedra?: number | null;
+  peso_pedra_ct?: number | null;
   fornecedor_id?: number | null;
   observacao?: string | null;
   ativo?: boolean;
@@ -206,7 +207,14 @@ export default function InsumoEditDrawer({ insumo, categorias, onClose, onSaved 
   const [sku, setSku] = useState(insumo?.sku ?? "");
   const [categoriaId, setCategoriaId] = useState<number | "">(insumo?.categoria_id ?? "");
   const [unidade, setUnidade] = useState(insumo?.unidade ?? "g");
-  const [pesoPedra, setPesoPedra] = useState(insumo?.peso_pedra != null ? String(insumo.peso_pedra) : "");
+  const [pesoPedraCT, setPesoPedraCT] = useState(insumo?.peso_pedra_ct != null ? String(insumo.peso_pedra_ct) : "");
+  const [pesoPedra,   setPesoPedra]   = useState(insumo?.peso_pedra   != null ? String(insumo.peso_pedra)    : "");
+
+  function handlePesoCTChange(v: string) {
+    setPesoPedraCT(v);
+    const num = parseFloat(v);
+    setPesoPedra(!isNaN(num) && num > 0 ? Number((num * 0.2).toFixed(3)).toString() : "");
+  }
   const [observacao, setObservacao] = useState(insumo?.observacao ?? "");
   const [ativo, setAtivo] = useState(insumo?.ativo !== false);
   const [fornecedor, setFornecedor] = useState<{ id: number; nome: string } | null>(null);
@@ -276,7 +284,8 @@ export default function InsumoEditDrawer({ insumo, categorias, onClose, onSaved 
       };
 
       if (categoriaId === CAT_PEDRAS_ID) {
-        payload.peso_pedra = pesoPedra ? Number(pesoPedra) : null;
+        payload.peso_pedra_ct = pesoPedraCT ? Number(pesoPedraCT) : null;
+        payload.peso_pedra    = pesoPedra   ? Number(pesoPedra)   : null;
       }
 
       if (fotoBase64) {
@@ -463,23 +472,40 @@ export default function InsumoEditDrawer({ insumo, categorias, onClose, onSaved 
               </div>
             </div>
 
-            {/* ── Peso unitário (só Pedras) ── */}
+            {/* ── Peso em quilates + gramas (só Pedras) ── */}
             {isCatPedras && (
-              <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#9CA3AF" }}>
-                  Peso Unitário (ct / mm)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={pesoPedra}
-                  onChange={(e) => setPesoPedra(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none focus:ring-1 focus:ring-[#184036]/30"
-                  style={{ borderColor: C.cremeBorder }}
-                />
-              </div>
+              <>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#9CA3AF" }}>
+                    Peso (ct) <span style={{ color: "#EF4444" }}>*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    value={pesoPedraCT}
+                    onChange={(e) => handlePesoCTChange(e.target.value)}
+                    placeholder="0.000"
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none focus:ring-1 focus:ring-[#184036]/30"
+                    style={{ borderColor: C.cremeBorder }}
+                  />
+                  <p className="text-[10px] mt-1" style={{ color: "#9CA3AF" }}>1 quilate = 0.2 g</p>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#9CA3AF" }}>
+                    Peso (g) — calculado automaticamente
+                  </label>
+                  <input
+                    type="number"
+                    value={pesoPedra}
+                    readOnly
+                    tabIndex={-1}
+                    placeholder="0.000"
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none cursor-default"
+                    style={{ borderColor: C.cremeBorder, backgroundColor: "#F9FAFB", color: "#6B7280" }}
+                  />
+                </div>
+              </>
             )}
 
             {/* ── Fornecedor ── */}

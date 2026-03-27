@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/insumos
 export async function POST(req: NextRequest) {
-  const { nome, sku, categoria_id, unidade, descricao, estoque_minimo, estoque_maximo, custo_compra } =
+  const { nome, sku, categoria_id, unidade, descricao, estoque_minimo, estoque_maximo, custo_compra, peso_pedra, peso_pedra_ct } =
     await req.json() as {
       nome: string;
       sku?: string;
@@ -24,6 +24,8 @@ export async function POST(req: NextRequest) {
       estoque_minimo?: number;
       estoque_maximo?: number;
       custo_compra?: number;
+      peso_pedra?: number | null;
+      peso_pedra_ct?: number | null;
     };
 
   if (!nome || !categoria_id) {
@@ -32,11 +34,12 @@ export async function POST(req: NextRequest) {
 
   const rows = await sql`
     INSERT INTO alissonerp.insumos
-      (nome, sku, categoria_id, unidade, descricao, estoque_minimo, estoque_maximo, custo_compra, ativo)
+      (nome, sku, categoria_id, unidade, descricao, estoque_minimo, estoque_maximo, custo_compra, peso_pedra, peso_pedra_ct, ativo)
     VALUES
       (${nome}, ${sku ?? null}, ${categoria_id}, ${unidade ?? "g"},
-       ${descricao ?? null}, ${estoque_minimo ?? 0}, ${estoque_maximo ?? 0}, ${custo_compra ?? 0}, true)
-    RETURNING id, nome, sku, categoria_id, unidade
+       ${descricao ?? null}, ${estoque_minimo ?? 0}, ${estoque_maximo ?? 0}, ${custo_compra ?? 0},
+       ${peso_pedra ?? null}::real, ${peso_pedra_ct ?? null}::numeric, true)
+    RETURNING id, nome, sku, categoria_id, unidade, peso_pedra, peso_pedra_ct
   `;
   return NextResponse.json(rows[0], { status: 201 });
 }
