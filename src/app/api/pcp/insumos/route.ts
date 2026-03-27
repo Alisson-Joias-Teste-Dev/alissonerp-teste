@@ -7,14 +7,14 @@ export async function GET(req: NextRequest) {
 
   const rows = categoria_id
     ? await sql`
-        SELECT id, nome, sku, categoria_id, peso_pedra
+        SELECT id, nome, sku, categoria_id, peso_pedra, peso_pedra_ct
         FROM alissonerp.insumos
         WHERE ativo = true
           AND categoria_id = ${parseInt(categoria_id)}
         ORDER BY nome
       `
     : await sql`
-        SELECT id, nome, sku, categoria_id, peso_pedra
+        SELECT id, nome, sku, categoria_id, peso_pedra, peso_pedra_ct
         FROM alissonerp.insumos
         WHERE ativo = true
         ORDER BY nome
