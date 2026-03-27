@@ -1,7 +1,9 @@
 # Arquitetura — fabricaAJ ERP
 
+> 📋 Última atualização automática: 27/03/2026 — Versão: v2.13.0 <!-- Revisado 27/03/2026 -->
+
 Sistema ERP para a Joalheria ALISSON. Stack: Next.js 16.1.6 + PostgreSQL 15 (Supabase self-hosted).
-**Versão atual: v2.9.1 | Atualizado: 20/03/2026 — Estorno lote + storage público + baixa pedras PCP + metal externo + insumos completo**
+**Versão atual: v2.13.0 | Atualizado: 27/03/2026 — Módulo Service + is_operador_service + tabela servicos + trg_criar_servico_from_pcp + trg_calcular_peso_pedra + peso_pedra_ct + Sidebar Produção inclui Painel Service**
 
 ---
 
@@ -131,6 +133,132 @@ O cliente Supabase (`src/lib/supabase/client.ts` e `server.ts`) esta configurado
 | `081_estorno_distribuicao.sql` | CREATE `alissonerp.estornos_distribuicao` (distribuicao_id INT FK, ordem_id INT NULLABLE FK, motivo TEXT, justificativa TEXT, estornado_por UUID, dados_revertidos JSONB). |
 | `082_estorno_lote_distribuicao.sql` | ADD `estornos_distribuicao.ordem_id` como NULLABLE (era NOT NULL). Endpoint `POST /api/distribuicao/[id]/estorno-lote` com 5 fases atômicas. |
 | `083_transferencia_avulsa_destino.sql` | ADD `lancamentos.deposito_destino_id INT FK` + trigger atualizado. Transferência avulsa agora registra depósito de destino. |
+| `084_purificacao.sql` | Módulo Purificação de Ouro (18k→24k). CREATE `alissonerp.purificacoes`. |
+| `085_ligacao.sql` | Módulo Ligação (24k→18k). CREATE `alissonerp.ligacoes`, `alissonerp.tipos_liga`. |
+| `086_ligacao_pureza.sql` | ADD `pureza NUMERIC(5,2)` em `alissonerp.ligacoes`. |
+| `086_wa_assistant.sql` | WhatsApp Assistant — CREATE tabelas `wa_assistants`, `wa_conversations`, `wa_messages`, `wa_kb_articles`. |
+| `087_wa_kb_seed.sql` | WhatsApp Assistant — seed knowledge base inicial. |
+| `088_user_profiles_phone.sql` | ADD `phone VARCHAR(20)` em `public.user_profiles`. Vinculação WhatsApp → usuário ERP. |
+| `089_permissoes_purificacao_ligacao.sql` | CREATE `alissonerp.permissoes_usuario` (usuario_id, acao, permitido). 5 ações granulares: abrir/concluir purificação, abrir/concluir ligação, editar_teor_ligação. |
+| `090_editar_teor_ligacao.sql` | Seed permissão `editar_teor_ligacao` para admin/desenvolvedor. |
+| `091_fichas_tecnicas_produto.sql` | CREATE `alissonerp.fichas_tecnicas_produto` (ficha técnica por produto com IA). CREATE bucket `produto-3d`. ADD permissão `upload_modelo_3d`. |
+| `092_modulo_service.sql` | Módulo Service v2.13.0. ADD `alissonerp.usuarios.is_operador_service BOOLEAN`. CREATE `alissonerp.servicos` (id, ordem_id, pcp_id, operador_id, tentativa, pesos, solda, pedras, status, fotos, timestamps, motivo_reprovacao). SEED `configuracoes_sistema`: `operador_servico_padrao`, `service_tipos_ordem`. CREATE TRIGGER `trg_criar_servico_from_pcp` (AFTER INSERT pcp → fn_criar_servico_from_pcp: cria servico automático para servico_venda e garantia). CREATE TRIGGER `trg_calcular_peso_pedra` (BEFORE INSERT/UPDATE insumos → fn_calcular_peso_pedra_gramas: peso_pedra = peso_pedra_ct × 0.2). ADD colunas `peso_pedra_ct NUMERIC`, `sku_interno TEXT` em insumos. CREATE bucket `service-fotos`. GRANTS. | <!-- Revisado 27/03/2026 -->
+
+---
+
+## Módulo Service (v2.13.0) <!-- Revisado 27/03/2026 -->
+
+### Páginas `/service` e `/service-painel`
+
+**`/service`** — App dark theme para operadores service (requer `is_operador_service=true`)
+**`/service-painel`** — Painel gerente com KPIs (requer ROLES_SERVICE_PANEL)
+
+### Flag `is_operador_service`
+```
+Tabela: alissonerp.usuarios.is_operador_service BOOLEAN DEFAULT false
+NÃO é role — qualquer role pode ter a flag ativa
+useAuth() retorna isOperadorService via /api/user/permissoes
+Sidebar: item "Service" aparece ANTES dos grupos (standalone) quando isOperadorService=true
+Sidebar: item "Painel Service" aparece dentro do grupo PRODUÇÃO (após Purificação) para ROLES_SERVICE_PANEL
+```
+
+### DashboardShell e ServiceLayout
+```
+DashboardShell.tsx detecta pathname.startsWith('/service') → usa ServiceLayout (dark theme)
+Isso afeta /service e /service-painel — ambos têm layout escuro
+```
+
+### Fluxo automático (migration 092)
+```
+PCP inserido para servico_venda ou garantia
+  → TRIGGER trg_criar_servico_from_pcp (AFTER INSERT pcp)
+  → fn_criar_servico_from_pcp():
+      1. Busca tipo_ordem e peso_peca_servico da ordem
+      2. Verifica se tipo está em configuracoes_sistema.service_tipos_ordem
+      3. Busca operador_servico_padrao (deposito_id)
+      4. INSERT alissonerp.servicos (status='em_servico')
+      5. Auto-atribui PCP ao operador padrão (se pcp.deposito_id = NULL)
+```
+
+### Sidebar — grupo PRODUÇÃO (fix 27/03/2026)
+```
+ANTES: Painel Service aparecia como item solto (via serviceExtras hardcoded)
+DEPOIS: Painel Service dentro do accordion PRODUÇÃO
+
+Solução em Sidebar.tsx:
+  modulosEfetivos = [...modulos_leitura, 'service_painel'] quando:
+    - role está em ROLES_SERVICE_PANEL
+    - 'service_painel' não veio do banco (banco pode não ter o módulo)
+  getMenuGroupsForModulos(modulosEfetivos) → Produção inclui Painel Service
+
+permissions.ts: MENU_GROUPS['Produção'] = [dashboard-fabrica, ordens, pcp, distribuicao, purificacao, service-painel]
+```
+
+### APIs Service
+```
+GET  /api/service/pendentes       — ordens aguardando (status=aguardando)
+POST /api/service/receber         — operador recebe peça (foto obrigatória)
+GET  /api/service/meus            — serviços em_servico do operador logado
+GET  /api/service/[id]            — detalhe completo
+POST /api/service/[id]/concluir   — finaliza serviço (peso_saida, foto, solda, pedras)
+POST /api/service/[id]/transferir — transfere para outro operador
+GET  /api/service/solda-saldo     — saldo de solda do operador
+GET  /api/service/painel          — painel gerente (ROLES_SERVICE_PANEL)
+GET  /api/service/concluidos      — histórico
+GET  /api/service/operadores      — operadores service ativos
+GET  /api/service/pedras          — pedras disponíveis no estoque do operador
+POST /api/service/carregar-solda  — registra carregamento de solda
+```
+
+### Pitfalls específicos do Service
+```
+⚠️ câmera HTTP vs HTTPS:
+   navigator.mediaDevices é undefined em HTTP (não-localhost)
+   ServiceCamera.tsx usa fallback: <input type="file" accept="image/*" capture="environment">
+   SEMPRE testar em HTTPS em produção
+
+⚠️ valor::jsonb (configuracoes_sistema):
+   configuracoes_sistema.valor é TEXT — SEMPRE usar ::jsonb ao comparar com JSONB
+   Correto: WHERE valor::jsonb ? 'servico_venda'
+   Errado:  WHERE valor = '["servico_venda"]'
+
+⚠️ Quilates → gramas:
+   1 quilate = 0.200 gramas (não 0.2 arredondado — usar ct × 0.2 exato)
+   TRIGGER trg_calcular_peso_pedra → fn_calcular_peso_pedra_gramas
+   Frontend exibe pedras em ct (quilates), backend armazena gramas em peso_pedra
+```
+
+---
+
+## Módulo de Purificação e Ligação (v2.10.0)
+
+### Página `/purificacao` (roles: admin, desenvolvedor, gerente_fabrica + permissões granulares)
+
+2 abas:
+1. **Purificação (18k→24k)** — transforma ouro 18k bruto em ouro 24k fino
+2. **Ligação (24k→18k)** — adiciona liga metálica ao ouro 24k para criar ouro 18k
+
+### Permissões granulares (5 ações):
+- `abrir_purificacao`, `concluir_purificacao`, `abrir_ligacao`, `concluir_ligacao`, `editar_teor_ligacao`
+- Verificadas via `src/lib/permissoes.ts` → `temPermissao(userId, acao, role)`
+- Admin/dev sempre têm acesso (fullAccess)
+- Configurável em `/configuracoes` aba Usuários
+
+### Componentes:
+- `src/app/(dashboard)/purificacao/PurificacaoClient.tsx`
+- `src/app/(dashboard)/purificacao/LigacaoTab.tsx`
+
+### APIs:
+```
+GET/POST  /api/purificacao              — lista/cria purificação
+GET/PATCH /api/purificacao/[id]         — detalhe/atualiza purificação
+GET/POST  /api/purificacao/teores       — lista/cria teores
+PATCH     /api/purificacao/teores/[id]  — edita teor
+GET/POST  /api/purificacao/liga-tipos   — lista/cria tipos de liga
+PATCH     /api/purificacao/liga-tipos/[id] — edita tipo de liga
+GET/POST  /api/purificacao/ligacao      — lista/cria ligação
+GET/PATCH /api/purificacao/ligacao/[id] — detalhe/atualiza ligação
+```
 
 ---
 
@@ -378,6 +506,12 @@ Estrutura com Route Groups (Next.js 16):
 | `/precificacao`     | `app/(dashboard)/precificacao/page.tsx`              | Server+Client | Precificacao de produtos                           |
 | `/produtos`         | `app/(dashboard)/produtos/page.tsx`                  | Server+Client | Catalogo de produtos ERP (pai/variacao)            |
 | `/vendas`           | `app/(dashboard)/vendas/page.tsx`                    | Server+Client | Vendas                                             |
+| `/purificacao`      | `app/(dashboard)/purificacao/page.tsx`                | Server+Client | Purificação (18k→24k) e Ligação (24k→18k)         |
+| `/conferencia`      | `app/(dashboard)/conferencia/page.tsx`                | Server+Client | Conferência de ordens (consultora)                 |
+| `/entrega`          | `app/(dashboard)/entrega/page.tsx`                    | Server+Client | Controle de entregas                               |
+| `/service`          | `app/(dashboard)/service/page.tsx`                    | Client        | App operador service (dark theme, mobile-first) — requer is_operador_service=true |
+| `/service-painel`   | `app/(dashboard)/service-painel/page.tsx`             | Server+Client | Painel gerente service (KPIs, lista serviços) — grupo PRODUÇÃO na sidebar |
+<!-- Revisado 27/03/2026 -->
 
 ---
 
@@ -416,6 +550,27 @@ Estrutura com Route Groups (Next.js 16):
 | `MobileCard.tsx`                                     | `src/components/ui/MobileCard.tsx`                        | Componente reutilizável para cards de tabela no mobile (dual-render pattern) |
 | `SidebarContext.tsx`                                 | `src/contexts/SidebarContext.tsx`                         | Context React para controle abrir/fechar sidebar no mobile |
 | `ServiceWorkerRegister.tsx`                          | `src/components/ServiceWorkerRegister.tsx`                | Registro do Service Worker via componente React (incluído em layout.tsx) |
+| `PurificacaoClient.tsx`                              | `app/(dashboard)/purificacao/PurificacaoClient.tsx`      | Purificação 18k→24k com aba dedicada |
+| `LigacaoTab.tsx`                                     | `app/(dashboard)/purificacao/LigacaoTab.tsx`             | Aba Ligação 24k→18k dentro de Purificação |
+| `ConferenciaClient.tsx`                              | `app/(dashboard)/conferencia/ConferenciaClient.tsx`      | Conferência de ordens por consultora |
+| `EntregaClient.tsx`                                  | `app/(dashboard)/entrega/EntregaClient.tsx`              | Controle de entregas |
+| `InsumoEditDrawer.tsx`                               | `src/components/insumos/InsumoEditDrawer.tsx`            | Drawer de edição de insumo (foto, fornecedor, peso_pedra, ativo) |
+| `Paginacao.tsx`                                      | `src/components/ui/Paginacao.tsx`                        | Componente reutilizável de paginação |
+| `ServiceLayout.tsx`                                  | `src/components/layout/ServiceLayout.tsx`                | Layout dark theme para /service (detectado pelo DashboardShell via pathname) |
+| `ServiceApp.tsx`                                     | `src/components/service/ServiceApp.tsx`                  | App operador service: 4 views (pendentes, em_servico, concluidos, painel) |
+| `ServiceCamera.tsx`                                  | `src/components/service/ServiceCamera.tsx`               | Câmera mobile: navigator.mediaDevices (HTTPS) + fallback input[type=file] (HTTP) |
+| `ServicePainelClient.tsx`                            | `src/components/service/ServicePainelClient.tsx`         | Painel gerente: stats, KPIs, lista serviços por status |
+| `ServiceDetalheDrawer.tsx`                           | `src/components/service/ServiceDetalheDrawer.tsx`        | Drawer detalhe do serviço (peso, solda, pedras, fotos, timeline) |
+| `CarregarSoldaModal.tsx`                             | `src/components/service/CarregarSoldaModal.tsx`          | Modal para carregar solda para operador service |
+<!-- Revisado 27/03/2026 -->
+
+---
+
+## Libs adicionais
+
+| Arquivo | O que faz |
+|---------|-----------|
+| `src/lib/permissoes.ts` | `temPermissao(userId, acao, role)`: verifica permissão granular via `alissonerp.permissoes_usuario`. Admin/dev passam direto (fullAccess). |
 
 ---
 

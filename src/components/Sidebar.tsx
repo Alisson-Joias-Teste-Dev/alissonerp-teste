@@ -35,7 +35,7 @@ import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
 import { useAuth } from "@/hooks/useAuth";
 import { getMenuGroupsForRole, getMenuGroupsForModulos, type MenuGroup, type MenuEntry, type MenuItem } from "@/lib/auth/permissions";
-import { isFullAccess, ROLES_SERVICE_PANEL } from "@/lib/roles";
+import { ROLES_SERVICE_PANEL } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/client";
 import UserAvatar from "@/components/UserAvatar";
 import { useSidebar } from "@/contexts/SidebarContext";
@@ -82,22 +82,25 @@ export default function Sidebar() {
   const { role, nome, fotoUrl, loading, user, modulos_leitura, isOperadorService } = useAuth();
   const { aberta, setAberta } = useSidebar();
 
+  // Painel Service: injetar no banco se a role qualifica mas o módulo não veio do banco
+  const hasServicePanel = role && ROLES_SERVICE_PANEL.includes(role as typeof ROLES_SERVICE_PANEL[number]);
+  const modulosEfetivos = modulos_leitura.length > 0 && hasServicePanel && !modulos_leitura.includes("service_painel")
+    ? [...modulos_leitura, "service_painel"]
+    : modulos_leitura;
+
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)
-  const allEntries = modulos_leitura.length > 0
-    ? getMenuGroupsForModulos(modulos_leitura)
+  const allEntries = modulosEfetivos.length > 0
+    ? getMenuGroupsForModulos(modulosEfetivos)
     : getMenuGroupsForRole(role);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const configEntry = allEntries.find(e => !isGroup(e) && (e as any).href === "/configuracoes") as (MenuEntry & { href: string; icon: string }) | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const entries     = allEntries.filter(e => isGroup(e) || (e as any).href !== "/configuracoes");
 
-  // Itens extras: Service (flag) e Painel Service (role)
+  // Item extra: Service (flag isOperadorService) — Painel Service é tratado pelo grupo Produção
   const serviceExtras: MenuItem[] = [];
   if (isOperadorService) {
     serviceExtras.push({ label: "Service", href: "/service", icon: "Smartphone" });
-  }
-  if (role && ROLES_SERVICE_PANEL.includes(role as typeof ROLES_SERVICE_PANEL[number])) {
-    serviceExtras.push({ label: "Painel Service", href: "/service-painel", icon: "Wrench" });
   }
 
   // Grupos abertos: inicia com o grupo que contém a rota ativa

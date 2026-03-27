@@ -1,7 +1,9 @@
 # MEMORY.md — Alisson ERP (Joalheria de Alto Padrão)
 
+> 📋 Última atualização automática: 27/03/2026 — Versão: v2.13.0 <!-- Revisado 27/03/2026 -->
+
 > **LEITURA OBRIGATÓRIA antes de qualquer sessão.**
-> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 20/03/2026 — v2.9.1 — Estorno lote distribuição + storage público + baixa pedras PCP + metal externo + insumos completo**
+> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 27/03/2026 — v2.13.0 — Módulo Service (app operador + painel gerente) + is_operador_service + tabela servicos + service-fotos + trg_criar_servico_from_pcp + trg_calcular_peso_pedra + peso_pedra_ct/sku_interno em insumos + Sidebar Produção inclui Painel Service**
 
 ---
 
@@ -32,7 +34,7 @@ são INACEITÁVEIS — significam que não consultou o banco.
 |--------|--------|----------|
 | `public` | READONLY | contatos (=CLIENTES), vendedores, produtos, vendas, pedidos, user_profiles |
 | `directus` | READONLY | ordens, pcp, apontamento, controle_estoque, protocolo, ficha_tecnica_ordem, insumos |
-| `alissonerp` | LEITURA+ESCRITA | 60 tabelas reais, 43 views reais, 33 triggers reais |
+| `alissonerp` | LEITURA+ESCRITA | 65+ tabelas reais, 43+ views reais, 33+ triggers reais |
 
 ### Erros que NUNCA devem acontecer
 ```
@@ -56,6 +58,9 @@ são INACEITÁVEIS — significam que não consultou o banco.
 ❌ auditorias.tipo              → ✅ auditorias.tipo_auditoria (coluna real é tipo_auditoria)
 ❌ WHERE integer_col = ${uuidVar} → ✅ usar parseInt(id) ou cast explícito (nunca ::uuid em coluna INT)
 ❌ directus.itens_ordem_1 para ordens ERP → ✅ alissonerp.itens_ordem (fonte separada por origem)
+❌ configuracoes_sistema.valor = ${jsonValue} → ✅ configuracoes_sistema.valor::jsonb
+   PITFALL: configuracoes_sistema.valor é TEXT — SEMPRE usar ::jsonb ao comparar com JSONB
+   Exemplo: WHERE chave='service_tipos_ordem' AND valor::jsonb ? 'servico_venda'
    REGRA: ordens legadas (origem='legado') → itens em directus.itens_ordem_1
           ordens ERP (origem='erp')       → itens em alissonerp.itens_ordem
 ❌ tipo_ordem='servico'         → ✅ tipo_ordem='servico_venda' (migration 071 renomeou o enum)
@@ -91,10 +96,18 @@ itens_ordem      — ordens criadas no ERP (NÃO do PDV)
   (desnormalizada: nome_produto e sku para performance)
 
 ── SUPRIMENTOS ──
-insumos (251 registros) — colunas novas (migration 076):
-  foto TEXT        — URL completa no bucket insumo-fotos
-  observacao TEXT  — observação livre
-  (+ colunas existentes: nome, unidade, ativo, peso_pedra, ultimo_preco_compra_usd, etc.)
+insumos (251+ registros) — colunas (migration 076 + 092):
+  nome TEXT, unidade VARCHAR, categoria_id INT, ativo BOOLEAN
+  peso_pedra REAL      — peso em gramas (calculado automaticamente de peso_pedra_ct via trigger)
+  peso_pedra_ct NUMERIC — peso em quilates (source of truth para pedras — migration 092)
+  sku_interno TEXT     — SKU interno opcional (migration 092)
+  descricao TEXT       — campo livre adicional
+  foto TEXT            — URL completa no bucket insumo-fotos (migration 076)
+  observacao TEXT      — observação livre (migration 076)
+  fornecedor_id BIGINT, ultimo_preco_compra_usd, sku, etc.
+  TRIGGER trg_calcular_peso_pedra: BEFORE INSERT/UPDATE em insumos
+    → fn_calcular_peso_pedra_gramas: peso_pedra = peso_pedra_ct × 0.2 (1ct = 0.2g)
+    → preenche peso_pedra automaticamente ao salvar peso_pedra_ct
 categorias_insumo (8 categorias: Metal/Ouro=1, Pedras=2, Liga, Solda, Banho, Acabamento, Embalagem, Outros)
 depositos (= operadores: Almoxarifado=1, Ourives, Laser, Banca)
 setores (vinculados ao depósito)
@@ -109,14 +122,69 @@ protocolo_ordens, protocolo_fotos
 auditorias (loja + fábrica)
   ATENÇÃO: coluna tipo_auditoria (NÃO 'tipo') — varchar(10), valor 'saida_pcp'
 
+── PURIFICAÇÃO E LIGAÇÃO (v2.10.0, migrations 084-090) ──
+purificacoes — módulo 18k→24k (ouro bruto → ouro fino)
+  id SERIAL, peso_entrada, peso_saida, pureza_entrada, pureza_saida,
+  operador_id UUID, deposito_id INT, status (pendente/em_andamento/concluido),
+  created_by UUID, created_at, concluido_em, concluido_por
+ligacoes — módulo 24k→18k (ouro fino + liga → ouro 18k)
+  id SERIAL, peso_ouro_24k, peso_liga, peso_total_18k, pureza,
+  tipo_liga_id INT FK, operador_id UUID, deposito_id INT,
+  status (pendente/em_andamento/concluido),
+  created_by UUID, created_at, concluido_em, concluido_por
+tipos_liga — tipos de liga metálica (ex: Cu+Ag amarelo, Pd+Ag branco)
+teores — teores de pureza (configurável em /configuracoes)
+permissoes_usuario — permissões granulares por usuário (migration 089):
+  usuario_id UUID, acao VARCHAR, permitido BOOLEAN
+  Ações: abrir_purificacao, concluir_purificacao, abrir_ligacao,
+         concluir_ligacao, editar_teor_ligacao
+
+── WHATSAPP ASSISTANT (v2.10.0, migrations 086-088) ──
+wa_assistants, wa_conversations, wa_messages, wa_kb_articles
+  Tabelas para assistente WhatsApp (integração n8n)
+  user_profiles.phone VARCHAR(20) — vinculação automática WhatsApp → usuário ERP
+
+── FICHAS TÉCNICAS PRODUTO (v2.12.0, migration 091) ──
+fichas_tecnicas_produto — ficha técnica por produto (não por ordem)
+  id SERIAL, produto_id BIGINT, tipo_peca, largura, altura, profundidade,
+  diametro_interno, peso_estimado_metal, qtd_pedras, tamanho_pedras_mm/ct,
+  tipo_cravacao, qtd_garras, largura_garra, altura_garra, modelo, modelo_interno,
+  arquivo_3dm TEXT, arquivo_glb TEXT, ia_provider, ia_raw_response JSONB,
+  ia_confianca, revisado_por UUID, revisado_em, created_at
+  Bucket: produto-3d (para modelos 3D .glb/.3dm)
+
 ── SISTEMA ──
 configuracoes_sistema (config IA: provedor, modelos, ativa)
 configuracoes_secrets (API keys IA)
+
+── SERVICE (v2.13.0, migration 092) ──
+servicos — tabela principal do módulo Service
+  id SERIAL, ordem_id INT FK, pcp_id INT FK, operador_id INT FK (depositos)
+  tentativa INT DEFAULT 1 — número da tentativa (loop reprovação)
+  peso_entrada NUMERIC(10,2), peso_saida NUMERIC(10,2)
+  usou_solda BOOLEAN, peso_fio_antes NUMERIC(10,2), peso_fio_depois NUMERIC(10,2)
+  consumo_solda NUMERIC(10,2) — modo A1: pesagem do fio de solda
+  colocou_pedra BOOLEAN DEFAULT false
+  pedras_colocadas JSONB DEFAULT '[]' — [{insumo_id, nome, qtd, peso_unitario, peso_total, origem}]
+    origem: 'estoque' | 'cliente'
+  status VARCHAR(20): aguardando | em_servico | concluido | reprovado
+  foto_recebimento TEXT, foto_conclusao TEXT, foto_fio_solda TEXT (URLs completas, bucket service-fotos)
+  motivo_reprovacao TEXT, foto_reprovacao TEXT, reprovado_em TIMESTAMPTZ, reprovado_por UUID
+  recebido_em TIMESTAMPTZ, concluido_em TIMESTAMPTZ, concluido_por UUID
+  created_at TIMESTAMPTZ
+  TRIGGER trg_criar_servico_from_pcp: AFTER INSERT em pcp
+    → fn_criar_servico_from_pcp: cria servico automaticamente quando PCP é criado para
+      tipos em configuracoes_sistema.service_tipos_ordem (default: servico_venda, garantia)
+    → usa configuracoes_sistema.operador_servico_padrao para deposito_id padrão
 
 ── USUÁRIOS ──
 usuarios — coluna nova (migration 073):
   tipos_ordem_permitidos JSONB DEFAULT '[]'
   — array de tipos permitidos por usuário; admin/dev ignoram (fullAccess)
+  is_operador_service BOOLEAN DEFAULT false — migration 092
+  — Flag: usuário tem acesso ao app Service (dark mobile). INDEPENDENTE da role.
+  — Checked via useAuth().isOperadorService → mostra /service na sidebar
+  — NÃO é role — qualquer role pode ser operador service
 
 ── COMENTÁRIOS E NOTIFICAÇÕES ──
 comentarios_ordem (id, ordem_id, autor_id UUID, texto, mencoes UUID[], editado, editado_em,
@@ -351,7 +419,7 @@ pcp              → PCP completo
 
 ⚠️ Role enum real é 'motoboy' — NÃO 'logistica'. Usar 'logistica' causa erro de constraint.
 
-Tabela: alissonerp.usuarios.role (enum_role, inclui 'desenvolvedor')
+Tabela: alissonerp.usuarios.role (VARCHAR(50), migrado de enum_role em migration 068)
 NUNCA hardcodar verificação de role. Usar sempre:
   import { isFullAccess, ROLES_FULL_ACCESS } from '@/lib/roles'
 
@@ -386,6 +454,14 @@ supabase.auth.getUser() funciona | supabase.storage funciona
 TODO novo fetch alissonerp → API route. NUNCA supabase.from()
 
 ✅ R1 CORRIGIDO: ComprasClient.tsx e LancamentoAvulsoModal.tsx migrados para fetch() API routes
+
+── PÁGINA /purificacao (v2.10.0) ──
+Roles: admin, desenvolvedor, gerente_fabrica (+ permissões granulares)
+Componentes: PurificacaoClient.tsx, LigacaoTab.tsx
+Abas: Purificação (18k→24k), Ligação (24k→18k)
+Permissões granulares (5 ações via permissoes_usuario):
+  abrir_purificacao, concluir_purificacao, abrir_ligacao, concluir_ligacao, editar_teor_ligacao
+Lib: src/lib/permissoes.ts — temPermissao(userId, acao, role) → boolean
 ```
 
 ---
@@ -487,6 +563,7 @@ GET  /api/distribuicao/[id] (dist + ordens: peso_fechamento, pedras_fechamento, 
 POST /api/distribuicao/[id]/saida (body: ordem_id, peso_bruto, pedras_utilizadas[], foto_balanca, user_id)
 GET  /api/distribuicao/[id]/pedras-apontadas (pedras com saldo disponível no lote)
 POST /api/distribuicao/[id]/concluir (sem body — valida data_baixa em todas ordens, calcula totais, SET etapas='concluido')
+POST /api/distribuicao/[id]/estorno (estorno individual)
 POST /api/distribuicao/[id]/estorno-lote (5 fases atômicas — só admin/dev/gerente_fabrica)
 POST /api/distribuicao/[id]/adicionar-ordens (body: ordem_ids[] — valida não concluída/duplicada/outro lote)
 POST /api/distribuicao/apontamentos
@@ -531,10 +608,46 @@ POST /api/lancamentos-avulso            → INSERT { tipo_lancamento, insumo_id,
                                           trigger trg_lancamento_avulso executa movimentação automática
                                           enum_tipo_lancamento: entrada|saida|transferencia|sangria
 
+── SERVICE (v2.13.0, migration 092) ──
+GET  /api/service/pendentes          → ordens aguardando recebimento pelo operador service
+POST /api/service/receber            → operador recebe a peça (foto obrigatória)
+GET  /api/service/meus               → serviços em_servico do operador logado
+POST /api/service/[id]/concluir      → operador finaliza o serviço (peso_saida + foto + solda + pedras)
+POST /api/service/[id]/transferir    → transfere serviço para outro operador
+GET  /api/service/solda-saldo        → saldo de solda disponível para o operador
+GET  /api/service/painel             → painel gerente: stats, lista serviços, KPIs (ROLES_SERVICE_PANEL)
+GET  /api/service/concluidos         → histórico de serviços concluídos
+GET  /api/service/operadores         → lista de operadores service ativos
+GET  /api/service/[id]               → detalhe completo do serviço
+GET  /api/service/pedras             → pedras disponíveis no estoque do operador
+POST /api/service/carregar-solda     → registra carregamento de solda para operador
+
+── PURIFICAÇÃO (v2.10.0) ──
+GET    /api/purificacao               → lista purificações com filtros
+POST   /api/purificacao               → cria purificação
+GET    /api/purificacao/[id]          → detalhe purificação
+PATCH  /api/purificacao/[id]          → atualiza/conclui purificação
+GET    /api/purificacao/teores        → lista teores configurados
+POST   /api/purificacao/teores        → cria teor
+PATCH  /api/purificacao/teores/[id]   → edita teor
+GET    /api/purificacao/liga-tipos    → lista tipos de liga
+POST   /api/purificacao/liga-tipos    → cria tipo de liga
+PATCH  /api/purificacao/liga-tipos/[id] → edita tipo de liga
+GET    /api/purificacao/ligacao       → lista ligações
+POST   /api/purificacao/ligacao       → cria ligação
+GET    /api/purificacao/ligacao/[id]  → detalhe ligação
+PATCH  /api/purificacao/ligacao/[id]  → atualiza/conclui ligação
+
 ── CONFIGURAÇÕES ──
 GET/PATCH /api/configuracoes/ia
 POST      /api/configuracoes/ia/key
+GET/PATCH /api/configuracoes/parametros    → parâmetros sistema (cotações, limiares)
+GET/PATCH /api/configuracoes/permissoes    → permissões por role e módulo
+GET       /api/configuracoes/roles         → lista roles do sistema
+PATCH     /api/configuracoes/roles/[nome]  → edita role
+GET/PATCH /api/configuracoes/permissoes-usuario → permissões granulares por usuário (5 ações)
 GET       /api/user/role?user_id=UUID → retorna role, name, avatar_url
+GET       /api/user → lista todos os usuários (admin/dev)
 POST      /api/user/avatar (FormData: file, user_id?) → upload bucket avatars
 PATCH     /api/user/[id] → body: {nome?,role?,ativo?,deposito_id?,email?,nova_senha?,tipos_ordem_permitidos?}
               email → sync auth.users+usuarios+user_profiles | senha → crypt direto no auth.users
@@ -549,6 +662,7 @@ POST   /api/produtos/[id]/composicao
 PATCH  /api/produtos/[id]/composicao/[itemId]
 DELETE /api/produtos/[id]/composicao/[itemId]
 POST   /api/produtos/[id]/propagar                → propaga medidas/BOM do pai para variações
+POST   /api/produtos/[id]/modelo-3d              → upload modelo 3D (.glb/.3dm) + IA extrai ficha técnica (migration 091)
 GET    /api/produtos/insumos?categoria_id=N       → lista insumos para dropdown do BOM
 GET    /api/produtos/setup                        → nextSku, categorias, cotação ouro/dolar
 
@@ -569,7 +683,7 @@ PATCH     /api/precificacao/rejeitar/[id]
 ## 13. IA — VALIDAÇÃO DE PESO
 
 ```
-Provedores: claude (claude-haiku-4-5-20251001), openai (gpt-4o), gemini (gemini-2.0-flash)
+Provedores: claude (claude-sonnet-4-20250514), openai (gpt-4o), gemini (gemini-2.5-flash)
 Config: configuracoes_sistema + configuracoes_secrets
 Lib: src/lib/ia-validar-peso.ts (parseAIResponse robusto, regex fallback)
 Tolerância: ZERO (bloqueia salvamento se não bater)
@@ -578,13 +692,13 @@ Input peso: normalizar vírgula → ponto antes de parseFloat
 IA desabilitada → aceita sem conferência
 Aba IA em /configuracoes: toggle on/off, selecionar provedor, salvar key, testar
 
-⚠️ Modelos reais no código (15/03/2026):
-   Claude:  claude-haiku-4-5-20251001 (em uso — funcionando)
-   Gemini:  gemini-2.0-flash (em uso — funcionando)
+⚠️ Modelos reais no banco (27/03/2026 — configuracoes_sistema):
+   Claude:  claude-sonnet-4-20250514
+   Gemini:  gemini-2.5-flash  (⚠️ NÃO usar gemini-2.0-flash — desatualizado)
    OpenAI:  gpt-4o
-   Nota: configuracoes/ia/route.ts usa claude-sonnet-4-20250514 como fallback no GET —
-         inconsistência interna menor, corrigir quando necessário
+   ia_margem_pedra_pct: 10 (tolerância pedras 10%)
 ```
+<!-- Revisado 27/03/2026 -->
 
 ---
 
@@ -610,16 +724,22 @@ Favicon: /logo.leaoverde.webp (definido em layout.tsx metadata.icons)
 
 ---
 
-## 14b. SIDEBAR AGRUPADA
+## 14b. SIDEBAR AGRUPADA <!-- Revisado 27/03/2026 -->
 
 ```
 📊 Dashboard
-🔧 Produção      → Dashboard Fábrica, Ordens, PCP, Distribuição
+🔧 Produção      → Dashboard Fábrica, Ordens, PCP, Distribuição, Purificação, Painel Service
 📦 Suprimentos   → Estoque, Quebra, Insumos, Compras
 🚚 Logística     → Protocolo, Conferência, Entrega
 ✅ Qualidade     → Auditoria
 💼 Comercial     → Vendas, Financeiro, Produtos, Precificação
 ⚙️ Configurações
+
+Painel Service (/service-painel): grupo PRODUÇÃO, após Purificação (fix 27/03/2026)
+  Roles: ROLES_SERVICE_PANEL = admin, desenvolvedor, gerente_fabrica, gerente_loja
+  Injetado via modulosEfetivos no Sidebar.tsx quando role qualifica mas banco não retornou o módulo
+Service (/service): item solto ANTES dos grupos (flag isOperadorService)
+  NÃO é role — flag is_operador_service em alissonerp.usuarios
 
 Dashboard Fábrica (/dashboard-fabrica):
   Roles: desenvolvedor, admin, gerente_fabrica
@@ -714,6 +834,7 @@ apontamento-fotos    SIM      10MB     image/jpeg, image/png, image/webp
 ordem-fotos          SIM      10MB     image/jpeg, image/png, image/webp, image/heic
 ordem-videos         SIM      100MB    video/mp4, video/webm, video/quicktime, video/avi
 insumo-fotos         SIM      10MB     image/jpeg, image/png, image/webp (migration 076)
+produto-3d           SIM      50MB     .glb, .3dm (migration 091 — modelos 3D de produtos)
 
 avatars:
   Caminho: {user_id}.{ext}
@@ -735,6 +856,62 @@ ordem-videos (migration 073):
   Caminho: ordens/{ordemId}/video-{timestamp}-{userId8}.{ext}
   URL completa salva em: alissonerp.ordens.video_observacao TEXT
   Usado em ordens tipo servico_venda
+
+purificacao-fotos:  SIM      10MB     image/jpeg, image/png, image/webp
+  Bucket para fotos do módulo Purificação (migrations 084-090)
+
+service-fotos (migration 092):  SIM      10MB     image/jpeg, image/png, image/webp
+  Caminhos: service/{servicoId}/recebimento-{timestamp}.{ext}
+            service/{servicoId}/conclusao-{timestamp}.{ext}
+            service/{servicoId}/fio-solda-{timestamp}.{ext}
+  URLs salvas em: servicos.foto_recebimento, servicos.foto_conclusao, servicos.foto_fio_solda
+```
+<!-- Revisado 27/03/2026 -->
+
+---
+
+## 16b. MÓDULO SERVICE (v2.13.0) <!-- Revisado 27/03/2026 -->
+
+```
+OBJETIVO: App mobile dark para operadores de serviço (conserto/garantia de peças)
+PÁGINA: /service (app operador, dark theme, mobile-first)
+PÁGINA: /service-painel (painel gerente, grupo PRODUÇÃO na sidebar)
+ROLES: is_operador_service=true → acessa /service | ROLES_SERVICE_PANEL → acessa /service-painel
+
+COMPONENTES:
+  src/components/layout/ServiceLayout.tsx       — layout dark theme, detectado pelo DashboardShell
+  src/components/service/ServiceApp.tsx         — app operador (4 views: pendentes, em_servico, concluidos, painel)
+  src/components/service/ServiceCamera.tsx      — câmera mobile (navigator.mediaDevices)
+    ⚠️ PITFALL: navigator.mediaDevices é undefined em HTTP (só funciona em HTTPS ou localhost)
+    Fallback: <input type="file" accept="image/*" capture="environment"> para HTTP
+  src/components/service/ServicePainelClient.tsx — painel gerente (Sprint 4)
+  src/components/service/ServiceDetalheDrawer.tsx — drawer detalhe serviço
+  src/components/service/CarregarSoldaModal.tsx — modal carregar solda para operador
+
+FLUXO DO SERVIÇO:
+  1. Ordem tipo servico_venda ou garantia → protocolo ida
+  2. fn_concluir_protocolo → cria PCP → trg_criar_servico_from_pcp → cria servicos (status=em_servico)
+  3. Operador vê em /service/pendentes (status=aguardando) ou meus (status=em_servico)
+     ⚠️ status inicial é 'em_servico' (não 'aguardando') quando operador padrão configurado
+  4. POST /api/service/receber → foto obrigatória → status=em_servico
+  5. Operador executa serviço, pode carregar solda (POST /api/service/carregar-solda)
+  6. POST /api/service/[id]/concluir → peso_saida + foto + solda + pedras → status=concluido
+  7. Auditoria fábrica auto-aprovada para serviços (NÃO bloqueia protocolo volta)
+  8. REPROVAÇÃO: consultora reprova → cria nova tentativa (servicos.tentativa++)
+
+CONTROLE DE SOLDA (modo A1):
+  Pesagem do fio de solda antes/depois (peso_fio_antes, peso_fio_depois)
+  consumo_solda = peso_fio_antes - peso_fio_depois
+  GET /api/service/solda-saldo → saldo disponível do operador
+
+QUILATES (pedras):
+  peso_pedra_ct → gramas: 1 quilate = 0.200 gramas (ct × 0.2)
+  TRIGGER trg_calcular_peso_pedra → preenche insumos.peso_pedra automaticamente ao salvar peso_pedra_ct
+  Frontend: exibir pedras em quilates (ct), NÃO em gramas
+
+CONFIGURAÇÕES (configuracoes_sistema):
+  service_tipos_ordem: ["servico_venda", "garantia"] — tipos que ativam módulo service
+  operador_servico_padrao: {"deposito_id": 2} — operador padrão para novos serviços
 ```
 
 ---

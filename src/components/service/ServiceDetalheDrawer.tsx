@@ -49,7 +49,10 @@ interface TentativaRow {
   peso_saida: number | null;
   consumo_solda: number | null;
   foto_conclusao: string | null;
+  foto_reprovacao: string | null;
+  motivo_reprovacao: string | null;
   concluido_em: string | null;
+  reprovado_em: string | null;
   operador_nome: string | null;
 }
 
@@ -297,8 +300,30 @@ export default function ServiceDetalheDrawer({ servico, onClose }: Props) {
                         {t.peso_saida != null && <div>Peso saída: {t.peso_saida.toFixed(3)}g</div>}
                         {t.consumo_solda != null && <div>Consumo solda: {t.consumo_solda.toFixed(3)}g</div>}
                         {t.operador_nome && <div>Operador: {t.operador_nome}</div>}
-                        {t.concluido_em && <div>Em: {fmt(t.concluido_em)}</div>}
+                        {t.concluido_em && <div>Concluído: {fmt(t.concluido_em)}</div>}
                       </div>
+                      {/* Reprovação */}
+                      {t.status === "reprovado" && (
+                        <div className="mt-2 rounded-lg px-3 py-2 space-y-1.5" style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA" }}>
+                          {t.motivo_reprovacao && (
+                            <p className="text-xs" style={{ color: "#991B1B" }}>
+                              <strong>Motivo:</strong> {t.motivo_reprovacao}
+                            </p>
+                          )}
+                          {t.reprovado_em && (
+                            <p className="text-[10px]" style={{ color: "#DC2626" }}>
+                              Reprovado em {fmt(t.reprovado_em)}
+                            </p>
+                          )}
+                          {t.foto_reprovacao && (
+                            <button onClick={() => setZoomFoto(t.foto_reprovacao!)} className="mt-1">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={t.foto_reprovacao} alt="Foto reprovação"
+                                className="w-14 h-14 rounded-lg object-cover border border-red-200 hover:opacity-80 transition-opacity" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
