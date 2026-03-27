@@ -64,9 +64,9 @@ const ROLE_MENUS: Record<Role, string[]> = {
 
 // Agrupamento do menu lateral
 const MENU_GROUPS: MenuGroup[] = [
-  { type: "group", label: "Produção",    icon: "Factory",     items: ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao"].map(h => ALL_MENUS.find(m => m.href === h)!) },
+  { type: "group", label: "Produção",    icon: "Factory",     items: ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/service-painel"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Suprimentos", icon: "Package",     items: ["/estoque", "/quebra", "/insumos", "/compras"].map(h => ALL_MENUS.find(m => m.href === h)!) },
-  { type: "group", label: "Logística",   icon: "Truck",       items: ["/protocolo", "/conferencia", "/entrega", "/service-painel"].map(h => ALL_MENUS.find(m => m.href === h)!) },
+  { type: "group", label: "Logística",   icon: "Truck",       items: ["/protocolo", "/conferencia", "/entrega"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Qualidade",   icon: "ShieldCheck", items: ["/auditoria"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Comercial",   icon: "Briefcase",   items: ["/vendas", "/financeiro", "/produtos", "/precificacao"].map(h => ALL_MENUS.find(m => m.href === h)!) },
 ];

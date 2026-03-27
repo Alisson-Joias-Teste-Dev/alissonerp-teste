@@ -55,11 +55,21 @@ export async function GET(_req: NextRequest) {
       o.foto_peca_servico,
       o.peso_peca_servico,
       c.nome AS cliente_nome,
-      d.nome AS operador_nome
+      d.nome AS operador_nome,
+      prev_svc.motivo_reprovacao AS motivo_reprovacao_anterior,
+      prev_svc.foto_reprovacao   AS foto_reprovacao_anterior
     FROM alissonerp.servicos s
     JOIN alissonerp.ordens o ON o.id = s.ordem_id
     LEFT JOIN public.contatos c ON c.id_contato = o.cliente_id
     LEFT JOIN alissonerp.depositos d ON d.id = s.operador_id
+    LEFT JOIN LATERAL (
+      SELECT motivo_reprovacao, foto_reprovacao
+      FROM alissonerp.servicos prev
+      WHERE prev.ordem_id = s.ordem_id
+        AND prev.tentativa = s.tentativa - 1
+        AND prev.status = 'reprovado'
+      LIMIT 1
+    ) prev_svc ON true
     WHERE s.operador_id = ${caller.deposito_id as number}
       AND s.status IN ('em_servico', 'aguardando')
     ORDER BY s.created_at ASC

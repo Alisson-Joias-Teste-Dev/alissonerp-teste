@@ -1,5 +1,7 @@
 # Regras para Agentes — Alisson ERP (fabricaAJ)
 
+> 📋 Última atualização automática: 27/03/2026 — Versão: v2.13.0 <!-- Revisado 27/03/2026 -->
+
 > Este documento é OBRIGATÓRIO. Todo agente DEVE ler antes de qualquer task.
 > Violação de qualquer regra é considerada GRAVE.
 
@@ -90,7 +92,21 @@ chore: descrição (vX.Y.Z)  → manutenção/docs
 ⚠️ Peso ouro: sempre 2 casas decimais (.toFixed(2) ou formatPeso())
 ⚠️ Pedras: quantidade em UN, nunca exibir como gramas
 ⚠️ fn_concluir_protocolo / fn_processar_auditoria: NÃO MEXER
+⚠️ permissoes_usuario: tabela de permissões granulares (5 ações purificação/ligação)
+   Usar src/lib/permissoes.ts → temPermissao() para verificar
+⚠️ fichas_tecnicas_produto: ficha por PRODUTO (não por ordem) — migration 091
+⚠️ usuarios.role agora é VARCHAR(50) (NÃO mais enum_role) — migration 068
+⚠️ configuracoes_sistema.valor é TEXT — SEMPRE usar ::jsonb ao comparar com JSONB
+   Correto: WHERE chave='service_tipos_ordem' AND valor::jsonb ? 'servico_venda'
+   Errado:  WHERE valor = '["servico_venda","garantia"]'
+⚠️ is_operador_service: flag em alissonerp.usuarios (NÃO é role) — migration 092
+   Verificar via /api/user/permissoes → useAuth().isOperadorService
+⚠️ peso_pedra_ct: salvar em quilates → trigger calcula peso_pedra em gramas automaticamente
+   1 quilate = 0.2 gramas | NÃO converter manualmente
+⚠️ câmera mobile: navigator.mediaDevices undefined em HTTP (só HTTPS/localhost)
+   ServiceCamera.tsx tem fallback input[type=file] — manter ambos caminhos
 ```
+<!-- Revisado 27/03/2026 -->
 
 ---
 
@@ -105,7 +121,13 @@ chore: descrição (vX.Y.Z)  → manutenção/docs
 ✅ upsert: true no upload (sobrescreve se existe)
 ❌ NUNCA usar createSignedUrl()
 ❌ NUNCA upload client-side (supabase.storage.from().upload() no browser)
+
+Buckets existentes (10 total — verificar SELECT id,name FROM storage.buckets):
+  avatars, imagens, protocolo-fotos, apontamento-fotos, ordem-fotos, ordem-videos,
+  insumo-fotos, purificacao-fotos, produto-3d, service-fotos
+  ⚠️ service-fotos: migration 092 — fotos de recebimento/conclusão/fio_solda do módulo Service
 ```
+<!-- Revisado 27/03/2026 -->
 
 ---
 
@@ -125,6 +147,7 @@ Documentos de referência:
 - docs/CHANGELOG.md → Histórico por versão (append-only, nunca deleta)
 - docs/referencia-storage-imagens.md → Padrão de upload
 - AGENT-RULES.md → Este documento (regras dos agentes)
+- src/lib/permissoes.ts → Verificação de permissões granulares
 ```
 
 ---
@@ -169,6 +192,8 @@ Documentos de referência:
    - fn_processar_fechamento_dist (020)
    - fn_concluir_protocolo
    - fn_processar_auditoria
+   - fn_criar_servico_from_pcp (092) — cria servicos automaticamente ao inserir PCP
+   - fn_calcular_peso_pedra_gramas (092) — calcula peso_pedra a partir de peso_pedra_ct
 
 ❌ NÃO alterar schemas readonly:
    - public.* (PDV/Tiny) — READONLY
@@ -198,6 +223,7 @@ estoquista_loja = estoque loja
 
 Constantes em src/lib/roles.ts (NUNCA hardcoded)
 ROLES_FULL_ACCESS = ['admin', 'desenvolvedor']
+Permissões granulares: src/lib/permissoes.ts → temPermissao(userId, acao, role)
 ```
 
 ---

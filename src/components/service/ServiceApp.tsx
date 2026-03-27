@@ -47,6 +47,8 @@ interface ServicoMeu {
   foto_peca_servico: string | null;
   peso_peca_servico: number | null;
   cliente_nome: string | null;
+  motivo_reprovacao_anterior: string | null;
+  foto_reprovacao_anterior: string | null;
 }
 
 interface InsumoOpcao {
@@ -1269,7 +1271,7 @@ export default function ServiceApp() {
             </div>
           ) : meus.map(svc => (
             <Card key={svc.id}
-              style={svc.tentativa > 1 ? { backgroundColor: "rgba(55,138,221,0.06)", borderColor: "rgba(55,138,221,0.2)" } : undefined}>
+              style={svc.tentativa > 1 ? { backgroundColor: "rgba(251,146,60,0.06)", borderColor: "rgba(251,146,60,0.3)" } : undefined}>
               <div className="flex items-start gap-3">
                 {svc.foto_recebimento ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -1285,13 +1287,20 @@ export default function ServiceApp() {
                     <span className="font-semibold text-sm" style={{ color: S.text }}>{svc.numero_ordem ?? `#${svc.ordem_id}`}</span>
                     <TipoBadge tipo={svc.tipo_ordem} />
                     {svc.tentativa > 1 && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: "rgba(55,138,221,0.2)", color: "#85B7EB" }}>
-                        #{svc.tentativa}ª tentativa
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ backgroundColor: "rgba(251,146,60,0.25)", color: "#EA580C" }}>
+                        Retorno · {svc.tentativa}ª tentativa
                       </span>
                     )}
                   </div>
+                  {/* Motivo da reprovação anterior */}
+                  {svc.tentativa > 1 && svc.motivo_reprovacao_anterior && (
+                    <div className="mt-1 rounded-lg px-2 py-1.5" style={{ backgroundColor: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)" }}>
+                      <p className="text-[10px] font-semibold" style={{ color: "#C2410C" }}>Reprovado por:</p>
+                      <p className="text-[10px] line-clamp-2" style={{ color: "#EA580C" }}>{svc.motivo_reprovacao_anterior}</p>
+                    </div>
+                  )}
                   {svc.detalhes_ordem && (
-                    <p className="text-[11px] line-clamp-1" style={{ color: S.textMuted }}>{svc.detalhes_ordem}</p>
+                    <p className="text-[11px] line-clamp-1 mt-0.5" style={{ color: S.textMuted }}>{svc.detalhes_ordem}</p>
                   )}
                   <div className="flex items-center gap-3 mt-1">
                     <span className="text-[10px] flex items-center gap-1" style={{ color: S.textFaint }}>

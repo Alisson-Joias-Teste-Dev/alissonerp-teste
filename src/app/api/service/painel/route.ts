@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const statusFiltro     = sp.get("status") || null;
   const operadorIdFiltro = sp.get("operador_id") ? parseInt(sp.get("operador_id")!) : null;
+  const ordemIdFiltro    = sp.get("ordem_id")    ? parseInt(sp.get("ordem_id")!)    : null;
   const inicio           = sp.get("inicio") || null;
   const fim              = sp.get("fim")    || null;
 
@@ -49,6 +50,9 @@ export async function GET(req: NextRequest) {
       s.foto_recebimento,
       s.foto_conclusao,
       s.foto_fio_solda,
+      s.motivo_reprovacao,
+      s.foto_reprovacao,
+      s.reprovado_em,
       s.recebido_em,
       s.concluido_em,
       s.created_at,
@@ -67,9 +71,10 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.usuarios u ON u.id = s.concluido_por::uuid
     WHERE (${statusFiltro}::text IS NULL OR s.status = ${statusFiltro})
       AND (${operadorIdFiltro}::int IS NULL OR s.operador_id = ${operadorIdFiltro})
+      AND (${ordemIdFiltro}::int IS NULL OR s.ordem_id = ${ordemIdFiltro})
       AND (${inicio}::timestamptz IS NULL OR s.created_at >= ${inicio}::timestamptz)
       AND (${fim}::timestamptz IS NULL OR s.created_at <= ${fim}::timestamptz + INTERVAL '1 day')
-    ORDER BY s.created_at DESC
+    ORDER BY s.tentativa ASC, s.created_at DESC
   `;
 
   const servicos = rows.map(r => normalizeRow(r as Record<string, unknown>, [
