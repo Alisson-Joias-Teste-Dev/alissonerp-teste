@@ -92,6 +92,20 @@ export default async function OrdensPage({
         AND data_entrega < CURRENT_DATE
         AND status NOT IN ('Concluído', 'Concluido')
       )` :
+    status === 'vencidas_processo' ? sql`AND (
+        data_entrega IS NOT NULL
+        AND data_entrega < CURRENT_DATE
+        AND status NOT IN ('Concluído', 'Concluido')
+      )` :
+    status === 'vencidas_producao' ? sql`AND (
+        data_entrega IS NOT NULL
+        AND data_entrega < CURRENT_DATE
+        AND status NOT ILIKE 'conclu%'
+        AND id IN (
+          SELECT p.ordem_id FROM alissonerp.pcp p
+          WHERE p.etapas NOT IN ('concluido', 'cancelado')
+        )
+      )` :
     sql``;
 
   const [ordensResult, countResult, contagensResult] = await Promise.all([
@@ -143,8 +157,18 @@ export default async function OrdensPage({
             AND data_entrega >= CURRENT_DATE
             AND data_entrega <= CURRENT_DATE + interval '3 days'
             AND status NOT IN ('Concluído', 'Concluido')
-        ) AS a_vencer
-      FROM alissonerp.vw_ordens_completa
+        ) AS a_vencer,
+        COUNT(*) FILTER (
+          WHERE v.data_entrega IS NOT NULL
+            AND v.data_entrega < CURRENT_DATE
+            AND v.status NOT ILIKE 'conclu%'
+            AND EXISTS (
+              SELECT 1 FROM alissonerp.pcp p
+              WHERE p.ordem_id = v.id
+                AND p.etapas NOT IN ('concluido', 'cancelado')
+            )
+        ) AS vencidas_producao
+      FROM alissonerp.vw_ordens_completa v
       WHERE 1=1
         ${whereVendedor}
         ${whereBusca}
@@ -156,12 +180,14 @@ export default async function OrdensPage({
   const totalOrdens = Number(countResult[0].total);
   const totalPages  = Math.ceil(totalOrdens / PAGE_SIZE);
   const contagens   = {
-    todos:        Number(contagensResult[0].todos),
-    aguardando:   Number(contagensResult[0].aguardando),
-    em_andamento: Number(contagensResult[0].em_andamento),
-    concluido:    Number(contagensResult[0].concluido),
-    vencidas:     Number(contagensResult[0].vencidas),
-    a_vencer:     Number(contagensResult[0].a_vencer),
+    todos:             Number(contagensResult[0].todos),
+    aguardando:        Number(contagensResult[0].aguardando),
+    em_andamento:      Number(contagensResult[0].em_andamento),
+    concluido:         Number(contagensResult[0].concluido),
+    vencidas:          Number(contagensResult[0].vencidas),
+    a_vencer:          Number(contagensResult[0].a_vencer),
+    vencidas_producao: Number(contagensResult[0].vencidas_producao),
+    vencidas_processo: Number(contagensResult[0].vencidas),  // mesmo que vencidas
   };
 
   return (

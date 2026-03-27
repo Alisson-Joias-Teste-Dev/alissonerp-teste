@@ -28,12 +28,14 @@ import {
   BarChart2,
   Bell,
   Flame,
+  Smartphone,
+  Wrench,
 } from "lucide-react";
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
 import { useAuth } from "@/hooks/useAuth";
-import { getMenuGroupsForRole, getMenuGroupsForModulos, type MenuGroup, type MenuEntry } from "@/lib/auth/permissions";
-import { isFullAccess } from "@/lib/roles";
+import { getMenuGroupsForRole, getMenuGroupsForModulos, type MenuGroup, type MenuEntry, type MenuItem } from "@/lib/auth/permissions";
+import { isFullAccess, ROLES_SERVICE_PANEL } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/client";
 import UserAvatar from "@/components/UserAvatar";
 import { useSidebar } from "@/contexts/SidebarContext";
@@ -60,6 +62,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?
   Tag,
   BarChart2,
   Flame,
+  Smartphone,
+  Wrench,
 };
 
 function isGroup(entry: MenuEntry): entry is MenuGroup {
@@ -75,7 +79,7 @@ function isActiveInGroup(group: MenuGroup, pathname: string) {
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { role, nome, fotoUrl, loading, user, modulos_leitura } = useAuth();
+  const { role, nome, fotoUrl, loading, user, modulos_leitura, isOperadorService } = useAuth();
   const { aberta, setAberta } = useSidebar();
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)
@@ -86,6 +90,15 @@ export default function Sidebar() {
   const configEntry = allEntries.find(e => !isGroup(e) && (e as any).href === "/configuracoes") as (MenuEntry & { href: string; icon: string }) | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const entries     = allEntries.filter(e => isGroup(e) || (e as any).href !== "/configuracoes");
+
+  // Itens extras: Service (flag) e Painel Service (role)
+  const serviceExtras: MenuItem[] = [];
+  if (isOperadorService) {
+    serviceExtras.push({ label: "Service", href: "/service", icon: "Smartphone" });
+  }
+  if (role && ROLES_SERVICE_PANEL.includes(role as typeof ROLES_SERVICE_PANEL[number])) {
+    serviceExtras.push({ label: "Painel Service", href: "/service-painel", icon: "Wrench" });
+  }
 
   // Grupos abertos: inicia com o grupo que contém a rota ativa
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
@@ -228,6 +241,26 @@ export default function Sidebar() {
           </div>
         ) : (
           <div className="space-y-0.5">
+            {/* Itens Service (flag isOperadorService) e Painel Service (role) */}
+            {serviceExtras.map((item) => {
+              const active = pathname === item.href || pathname.startsWith(item.href + "/");
+              const Icon = ICON_MAP[item.icon];
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setAberta(false)}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
+                  style={{
+                    backgroundColor: active ? "#0F2922" : "transparent",
+                    color: active ? "#F3EADA" : "#80A795",
+                  }}
+                >
+                  {Icon && <Icon size={15} strokeWidth={1.75} />}
+                  <span className="tracking-wide">{item.label}</span>
+                </Link>
+              );
+            })}
             {entries.map((entry) => {
               if (!isGroup(entry)) {
                 // Item standalone (ex: Dashboard)

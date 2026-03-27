@@ -51,6 +51,7 @@ export async function PATCH(
     email?: string;
     nova_senha?: string;
     tipos_ordem_permitidos?: string[];
+    is_operador_service?: boolean;
   };
 
   // Não-admin: só pode alterar nome (proteção backend)
@@ -60,6 +61,7 @@ export async function PATCH(
   const vendedor_id           = isAdmin ? body.vendedor_id           : undefined;
   const email                 = isAdmin ? body.email                 : undefined;
   const tipos_ordem_permitidos = isAdmin ? body.tipos_ordem_permitidos : undefined;
+  const is_operador_service    = isAdmin ? body.is_operador_service   : undefined;
 
   // Usuário NUNCA pode alterar sua própria role (proteção dupla: frontend + backend)
   const role = isSelfUpdate ? undefined : body.role;
@@ -118,6 +120,16 @@ export async function PATCH(
     await sql`
       UPDATE alissonerp.usuarios
       SET tipos_ordem_permitidos = ${JSON.stringify(tipos_ordem_permitidos)}::jsonb,
+          updated_at = now()
+      WHERE id = ${id}::uuid
+    `;
+  }
+
+  // 1c. Atualizar flag is_operador_service (separado, apenas admin)
+  if (is_operador_service !== undefined) {
+    await sql`
+      UPDATE alissonerp.usuarios
+      SET is_operador_service = ${is_operador_service},
           updated_at = now()
       WHERE id = ${id}::uuid
     `;

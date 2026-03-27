@@ -16,6 +16,7 @@ export interface UsuarioEdit {
   deposito_id: number | null;
   vendedor_id: number | null;
   tipos_ordem_permitidos?: string[];
+  is_operador_service?: boolean;
 }
 
 const TODOS_TIPOS_ORDEM: Record<string, string> = {
@@ -74,6 +75,8 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
   const [rolesDisponiveis, setRolesDisponiveis] = useState<{ value: string; label: string }[]>([]);
   const [tiposPermitidos, setTiposPermitidos] = useState<string[]>([]);
 
+  const [isOperadorService, setIsOperadorService] = useState(false);
+
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [uploadando, setUploadando] = useState(false);
@@ -113,6 +116,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
       setConfirmar("");
       setMsg(null);
       setTiposPermitidos(usuario.tipos_ordem_permitidos ?? []);
+      setIsOperadorService(usuario.is_operador_service ?? false);
 
       // Buscar permissões granulares do usuário
       setPermLoading(true);
@@ -220,6 +224,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
       deposito_id:           depositoId ? parseInt(depositoId) : null,
       vendedor_id:           (role === "consultora" || role === "gerente_loja") ? vendedorId : null,
       tipos_ordem_permitidos: tiposPermitidos,
+      is_operador_service:   isOperadorService,
     };
     // Só envia email se mudou
     if (email.trim() !== usuario.email) body.email = email.trim();
@@ -427,6 +432,32 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
               >
                 <span className="w-2 h-2 rounded-full bg-gray-400" />
                 Inativo
+              </button>
+            </div>
+          </div>
+
+          {/* Operador Service */}
+          <div className="border-t border-gray-100 pt-5">
+            <label className={labelCls}>App Service</label>
+            <div className="flex items-center justify-between mt-2 px-3 py-3 rounded-lg border border-gray-200 bg-gray-50">
+              <div>
+                <p className="text-sm font-medium text-gray-800">Operador Service</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  Acessa o app Service no celular — receber, concluir, transferir serviços
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsOperadorService(v => !v)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+                  isOperadorService ? "bg-[#184036]" : "bg-gray-200"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform duration-200 ${
+                    isOperadorService ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
               </button>
             </div>
           </div>
