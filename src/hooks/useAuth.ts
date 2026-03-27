@@ -13,6 +13,7 @@ interface AuthState {
   loading: boolean;
   modulos_leitura: string[];
   modulos_escrita: string[];
+  isOperadorService: boolean;
 }
 
 export function useAuth(): AuthState {
@@ -24,6 +25,7 @@ export function useAuth(): AuthState {
     loading: true,
     modulos_leitura: [],
     modulos_escrita: [],
+    isOperadorService: false,
   });
 
   useEffect(() => {
@@ -52,15 +54,16 @@ export function useAuth(): AuthState {
         const perm    = permRes?.ok    ? await permRes.json()    : null;
         setState({
           user,
-          role:            (perm?.role ?? roleFromToken) as Role | null,
-          nome:            profile?.name ?? nome,
-          fotoUrl:         profile?.avatar_url ?? null,
-          loading:         false,
-          modulos_leitura: perm?.modulos_leitura ?? [],
-          modulos_escrita: perm?.modulos_escrita ?? [],
+          role:              (perm?.role ?? roleFromToken) as Role | null,
+          nome:              profile?.name ?? nome,
+          fotoUrl:           profile?.avatar_url ?? null,
+          loading:           false,
+          modulos_leitura:   perm?.modulos_leitura ?? [],
+          modulos_escrita:   perm?.modulos_escrita ?? [],
+          isOperadorService: perm?.is_operador_service ?? false,
         });
       } else {
-        setState({ user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [] });
+        setState({ user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false });
       }
     }
 
@@ -77,16 +80,17 @@ export function useAuth(): AuthState {
         ]).then(([profile, perm]) => {
           setState({
             user,
-            role:            (perm?.role ?? roleFromToken) as Role | null,
-            nome:            profile?.name ?? nome,
-            fotoUrl:         profile?.avatar_url ?? null,
-            loading:         false,
-            modulos_leitura: perm?.modulos_leitura ?? [],
-            modulos_escrita: perm?.modulos_escrita ?? [],
+            role:              (perm?.role ?? roleFromToken) as Role | null,
+            nome:              profile?.name ?? nome,
+            fotoUrl:           profile?.avatar_url ?? null,
+            loading:           false,
+            modulos_leitura:   perm?.modulos_leitura ?? [],
+            modulos_escrita:   perm?.modulos_escrita ?? [],
+            isOperadorService: perm?.is_operador_service ?? false,
           });
-        }).catch(() => setState({ user, role: roleFromToken, nome, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [] }));
+        }).catch(() => setState({ user, role: roleFromToken, nome, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false }));
       } else {
-        setState({ user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [] });
+        setState({ user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false });
       }
     });
 

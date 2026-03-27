@@ -14,9 +14,9 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   if (user.id !== userId) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  // Buscar role na fonte de verdade (não user_metadata — pode estar desatualizado)
+  // Buscar role + flag service na fonte de verdade (não user_metadata — pode estar desatualizado)
   const [usuario] = await sql`
-    SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid
+    SELECT role, is_operador_service FROM alissonerp.usuarios WHERE id = ${userId}::uuid
   `;
   if (!usuario) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
 
@@ -32,5 +32,5 @@ export async function GET(req: NextRequest) {
   const modulos_leitura  = rows.filter(p => p.pode_ler).map(p => p.modulo as string);
   const modulos_escrita  = rows.filter(p => p.pode_escrever).map(p => p.modulo as string);
 
-  return NextResponse.json({ role, modulos_leitura, modulos_escrita });
+  return NextResponse.json({ role, modulos_leitura, modulos_escrita, is_operador_service: usuario.is_operador_service ?? false });
 }

@@ -8,6 +8,9 @@ export const ROLES_CONCLUIR_PROTOCOLO = [
   "gerente_loja",
 ] as const;
 
+// Roles com acesso ao painel gerencial do Service
+export const ROLES_SERVICE_PANEL = ["admin", "desenvolvedor", "gerente_fabrica", "gerente_loja"] as const;
+
 // Roles com acesso à precificação (ver, editar, simular, enviar pra aprovação)
 export const ROLES_PRECIFICACAO = [...ROLES_FULL_ACCESS, "gerente_loja"] as const;
 

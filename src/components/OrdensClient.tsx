@@ -41,6 +41,8 @@ interface Contagens {
   concluido: number;
   a_vencer: number;
   vencidas: number;
+  vencidas_producao: number;
+  vencidas_processo: number;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -52,6 +54,12 @@ function menosNDias(n: number): string {
 }
 function fmtDate(s: string): string {
   return new Date(s + "T12:00:00").toLocaleDateString("pt-BR");
+}
+function isEntregaVencida(dataEntrega: unknown, status: string): boolean {
+  if (!dataEntrega) return false;
+  const str = typeof dataEntrega === "string" ? dataEntrega.slice(0, 10) : new Date(dataEntrega as string).toISOString().slice(0, 10);
+  const hojeStr = new Date().toISOString().slice(0, 10);
+  return str < hojeStr && status !== "Concluído" && status !== "Concluido";
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -229,6 +237,7 @@ export default function OrdensClient({
   const counts: Contagens = contagens ?? {
     todos: ordens.length, aguardando: 0, em_andamento: 0,
     concluido: 0, a_vencer: 0, vencidas: 0,
+    vencidas_producao: 0, vencidas_processo: 0,
   };
 
   return (
@@ -479,16 +488,27 @@ export default function OrdensClient({
             }}>
             A Vencer <span className="opacity-70">({counts.a_vencer})</span>
           </button>
-          <button onClick={() => navigate({ status: "vencidas" })}
+          <button onClick={() => navigate({ status: filtros.status === "vencidas_producao" ? "" : "vencidas_producao" })}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border"
             style={{
-              ...(filtros.status === "vencidas"
-                ? { backgroundColor: "#991B1B", color: "#FEE2E2", borderColor: "#991B1B" }
-                : counts.vencidas > 0
-                ? { backgroundColor: "#FEE2E2", color: "#991B1B", borderColor: "#FCA5A5" }
+              ...(filtros.status === "vencidas_producao"
+                ? { backgroundColor: "#7F1D1D", color: "#FEE2E2", borderColor: "#7F1D1D" }
+                : counts.vencidas_producao > 0
+                ? { backgroundColor: "#FEE2E2", color: "#7F1D1D", borderColor: "#EF4444" }
                 : { backgroundColor: "#F3EADA", color: "#9CA3AF", borderColor: "transparent" }),
             }}>
-            Vencidas <span className="opacity-70">({counts.vencidas})</span>
+            🔴 Em produção <span className="opacity-70">({counts.vencidas_producao})</span>
+          </button>
+          <button onClick={() => navigate({ status: filtros.status === "vencidas_processo" ? "" : "vencidas_processo" })}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border"
+            style={{
+              ...(filtros.status === "vencidas_processo"
+                ? { backgroundColor: "#7C2D12", color: "#FFEDD5", borderColor: "#7C2D12" }
+                : counts.vencidas_processo > 0
+                ? { backgroundColor: "#FFEDD5", color: "#7C2D12", borderColor: "#FB923C" }
+                : { backgroundColor: "#F3EADA", color: "#9CA3AF", borderColor: "transparent" }),
+            }}>
+            🟠 No processo <span className="opacity-70">({counts.vencidas_processo})</span>
           </button>
         </div>
       )}
@@ -533,19 +553,38 @@ export default function OrdensClient({
           }}>
           A Vencer <span className="opacity-70">({counts.a_vencer})</span>
         </button>
-        <button onClick={() => navigate({ status: "vencidas" })}
+        {/* Separador */}
+        <span className="text-gray-300 select-none hidden md:inline">|</span>
+
+        {/* Pill: Vencidas em produção (vermelho urgente) */}
+        <button onClick={() => navigate({ status: filtros.status === "vencidas_producao" ? "" : "vencidas_producao" })}
           className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border"
           style={{
-            ...(filtros.status === "vencidas"
-              ? { backgroundColor: "#991B1B", color: "#FEE2E2", borderColor: "#991B1B" }
-              : counts.vencidas > 0
-              ? { backgroundColor: "#FEE2E2", color: "#991B1B", borderColor: "#FCA5A5" }
+            ...(filtros.status === "vencidas_producao"
+              ? { backgroundColor: "#7F1D1D", color: "#FEE2E2", borderColor: "#7F1D1D" }
+              : counts.vencidas_producao > 0
+              ? { backgroundColor: "#FEE2E2", color: "#7F1D1D", borderColor: "#EF4444" }
               : { backgroundColor: "#F3EADA", color: "#9CA3AF", borderColor: "transparent" }),
-            ...(counts.vencidas > 0 && filtros.status !== "vencidas"
+            ...(counts.vencidas_producao > 0 && filtros.status !== "vencidas_producao"
               ? { animation: "pulse-soft 2s ease-in-out infinite" }
               : undefined),
-          }}>
-          Vencidas <span className="opacity-70">({counts.vencidas})</span>
+          }}
+          title="Ordens vencidas ainda em produção (PCP ativo)">
+          🔴 Em produção <span className="opacity-70">({counts.vencidas_producao})</span>
+        </button>
+
+        {/* Pill: Vencidas no processo (laranja atenção) */}
+        <button onClick={() => navigate({ status: filtros.status === "vencidas_processo" ? "" : "vencidas_processo" })}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border"
+          style={{
+            ...(filtros.status === "vencidas_processo"
+              ? { backgroundColor: "#7C2D12", color: "#FFEDD5", borderColor: "#7C2D12" }
+              : counts.vencidas_processo > 0
+              ? { backgroundColor: "#FFEDD5", color: "#7C2D12", borderColor: "#FB923C" }
+              : { backgroundColor: "#F3EADA", color: "#9CA3AF", borderColor: "transparent" }),
+          }}
+          title="Todas as ordens vencidas não concluídas">
+          🟠 No processo <span className="opacity-70">({counts.vencidas_processo})</span>
         </button>
       </div>
 
@@ -609,8 +648,23 @@ export default function OrdensClient({
                   <td className="px-4 py-2.5 text-xs" style={{ color: "#6B7280" }}>{o.vendedor_nome ?? "—"}</td>
                   <td className="px-4 py-2.5 text-xs font-medium" style={{ color: "#184036" }}>{o.cliente_nome ?? "—"}</td>
                   <td className="px-4 py-2.5 text-xs" style={{ color: "#6B7280" }}>{o.setor_nome ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-xs font-mono" style={{ color: "#6B7280" }}>
-                    {o.data_entrega ? new Date(o.data_entrega).toLocaleDateString("pt-BR") : "—"}
+                  <td className="px-4 py-2.5 text-xs font-mono">
+                    {o.data_entrega ? (
+                      isEntregaVencida(o.data_entrega, o.status) ? (
+                        <span className="flex items-center gap-1.5">
+                          <span style={{ color: "#DC2626", fontWeight: 600 }}>
+                            {new Date(o.data_entrega).toLocaleDateString("pt-BR")}
+                          </span>
+                          <span className="px-1 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: "#FEE2E2", color: "#991B1B" }}>
+                            VENCIDA
+                          </span>
+                        </span>
+                      ) : (
+                        <span style={{ color: "#6B7280" }}>{new Date(o.data_entrega).toLocaleDateString("pt-BR")}</span>
+                      )
+                    ) : (
+                      <span style={{ color: "#6B7280" }}>—</span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-xs font-mono" style={{ color: "#6B7280" }}>
                     {o.date_created ? new Date(o.date_created).toLocaleDateString("pt-BR") : "—"}
