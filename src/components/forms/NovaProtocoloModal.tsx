@@ -6,20 +6,32 @@ import { createClient } from "@/lib/supabase/client";
 
 const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8", cremeBg: "#FAFAF7" };
 
+const TIPO_LABEL: Record<string, string> = {
+  servico_venda: "Serv. Venda",
+  fabricacao: "Fabricação",
+  reposicao_venda: "Rep. Venda",
+  reposicao_loja: "Rep. Loja",
+  compra_fornecedor: "Compra",
+  garantia: "Garantia",
+  servico_interno: "S. Interno",
+};
+
 interface OrdemOption {
   id: number;
   numero_ordem: string | null;
   status: string | null;
+  tipo_ordem?: string | null;
 }
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   direcao: "ida" | "volta";
+  tipoProtocolo: string;
   onSuccess?: () => void;
 }
 
-export default function NovaProtocoloModal({ isOpen, onClose, direcao, onSuccess }: Props) {
+export default function NovaProtocoloModal({ isOpen, onClose, direcao, tipoProtocolo, onSuccess }: Props) {
   const [ordens, setOrdens] = useState<OrdemOption[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState("");
@@ -30,6 +42,7 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, onSuccess
   const [fotoFile, setFotoFile] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
 
+  // Buscar ordens ao abrir (tipo já definido pelo dropdown)
   useEffect(() => {
     if (!isOpen) return;
     setSelected(new Set());
@@ -38,16 +51,15 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, onSuccess
     setSuccess(false);
     setFotoFile(null);
     setFotoPreview(null);
+    setOrdens([]);
     setLoadingOrdens(true);
 
-    fetch(`/api/protocolo/ordens?direcao=${direcao}`)
+    fetch(`/api/protocolo/ordens?direcao=${direcao}&tipo_protocolo=${tipoProtocolo}`)
       .then((r) => r.json())
-      .then((data) => {
-        setOrdens(Array.isArray(data) ? data : []);
-        setLoadingOrdens(false);
-      })
-      .catch(() => setLoadingOrdens(false));
-  }, [isOpen, direcao]);
+      .then((data) => setOrdens(Array.isArray(data) ? data : []))
+      .catch(() => setOrdens([]))
+      .finally(() => setLoadingOrdens(false));
+  }, [isOpen, direcao, tipoProtocolo]);
 
   const filtered = ordens.filter((o) => {
     if (!search) return true;
@@ -75,7 +87,6 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, onSuccess
     setLoading(true);
 
     try {
-      // Upload foto direto no Storage (authenticated, não usa PostgREST)
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       const fotoPath = `criacao/${user?.id ?? "anon"}/${Date.now()}.jpg`;
@@ -93,6 +104,7 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, onSuccess
           motoboy_id: user?.id,
           foto_criacao: fotoPath,
           user_id: user?.id,
+          tipo_protocolo: tipoProtocolo,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -108,15 +120,27 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, onSuccess
 
   if (!isOpen) return null;
 
-  const titulo = direcao === "ida" ? "Novo Protocolo — Ida (Loja → Fábrica)" : "Novo Protocolo — Volta (Fábrica → Loja)";
+  const isService = tipoProtocolo === "service";
+  const titulo = direcao === "ida" ? "Novo Protocolo Ida" : "Novo Protocolo Volta";
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white w-full max-h-[92vh] overflow-y-auto flex flex-col rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-lg md:mx-4 md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
+        {/* Header com badge de tipo fixo */}
         <div className="flex items-center justify-between px-6 py-4 border-b shrink-0 sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
           <div>
-            <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>{titulo}</h3>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>{titulo}</h3>
+              <span
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
+                style={{
+                  backgroundColor: isService ? "#FEF3C7" : "#F3F4F6",
+                  color: isService ? "#B45309" : "#6B7280",
+                }}
+              >
+                {isService ? "🔧 Service" : "🏭 Fábrica"}
+              </span>
+            </div>
             <p className="text-[12px] mt-0.5" style={{ color: "#9CA3AF" }}>
               {selected.size} ordem{selected.size !== 1 ? "s" : ""} selecionada{selected.size !== 1 ? "s" : ""}
             </p>
@@ -176,7 +200,9 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, onSuccess
                       <p className="text-sm font-medium truncate" style={{ color: C.esmeralda }}>
                         {o.numero_ordem ?? `Ordem #${o.id}`}
                       </p>
-                      <p className="text-[11px]" style={{ color: "#9CA3AF" }}>{o.status ?? "—"}</p>
+                      <p className="text-[11px]" style={{ color: "#9CA3AF" }}>
+                        {o.tipo_ordem ? (TIPO_LABEL[o.tipo_ordem] ?? o.tipo_ordem) : (o.status ?? "—")}
+                      </p>
                     </div>
                   </button>
                 );

@@ -279,7 +279,7 @@ export default function ProtocoloMotoboy() {
     setSucessoCriar(false);
     setView("criar");
     setLoadingDisponiveis(true);
-    const res  = await fetch(`/api/protocolo/ordens?direcao=${dir}`);
+    const res  = await fetch(`/api/protocolo/ordens?direcao=${dir}&tipo_protocolo=fabrica`);
     const data: OrdemDisponivel[] = await res.json().catch(() => []);
     setOrdensDisponiveis(data);
     setLoadingDisponiveis(false);
@@ -302,11 +302,12 @@ export default function ProtocoloMotoboy() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          direcao:    direcaoCriar,
-          ordem_ids:  Array.from(selectedCriar),
-          motoboy_id: userId,
-          foto_criacao: fotoPath,
-          user_id:    userId,
+          direcao:        direcaoCriar,
+          ordem_ids:      Array.from(selectedCriar),
+          motoboy_id:     userId,
+          foto_criacao:   fotoPath,
+          user_id:        userId,
+          tipo_protocolo: "fabrica",
         }),
       });
       const data = await res.json().catch(() => ({}));

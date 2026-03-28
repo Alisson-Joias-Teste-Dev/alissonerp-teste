@@ -16,6 +16,7 @@ export interface UsuarioEdit {
   deposito_id: number | null;
   vendedor_id: number | null;
   tipos_ordem_permitidos?: string[];
+  tipos_protocolo_permitidos?: string[];
   is_operador_service?: boolean;
 }
 
@@ -74,6 +75,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
   const [vendedores, setVendedores] = useState<{ id_vendedor: number; nome: string }[]>([]);
   const [rolesDisponiveis, setRolesDisponiveis] = useState<{ value: string; label: string }[]>([]);
   const [tiposPermitidos, setTiposPermitidos] = useState<string[]>([]);
+  const [tiposProtocoloPermitidos, setTiposProtocoloPermitidos] = useState<string[]>([]);
 
   const [isOperadorService, setIsOperadorService] = useState(false);
 
@@ -116,6 +118,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
       setConfirmar("");
       setMsg(null);
       setTiposPermitidos(usuario.tipos_ordem_permitidos ?? []);
+      setTiposProtocoloPermitidos(usuario.tipos_protocolo_permitidos ?? []);
       setIsOperadorService(usuario.is_operador_service ?? false);
 
       // Buscar permissões granulares do usuário
@@ -218,13 +221,14 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
     setMsg(null);
 
     const body: Record<string, unknown> = {
-      nome:                  nome.trim(),
+      nome:                        nome.trim(),
       role,
       ativo,
-      deposito_id:           depositoId ? parseInt(depositoId) : null,
-      vendedor_id:           (role === "consultora" || role === "gerente_loja") ? vendedorId : null,
-      tipos_ordem_permitidos: tiposPermitidos,
-      is_operador_service:   isOperadorService,
+      deposito_id:                 depositoId ? parseInt(depositoId) : null,
+      vendedor_id:                 (role === "consultora" || role === "gerente_loja") ? vendedorId : null,
+      tipos_ordem_permitidos:      tiposPermitidos,
+      tipos_protocolo_permitidos:  tiposProtocoloPermitidos,
+      is_operador_service:         isOperadorService,
     };
     // Só envia email se mudou
     if (email.trim() !== usuario.email) body.email = email.trim();
@@ -495,6 +499,52 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
                 })}
                 <p className="text-[10px] text-gray-400 mt-2">
                   Vazio = não pode criar nenhuma ordem (botão oculto).
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Permissões de Protocolo */}
+          <div className="border-t border-gray-100 pt-5">
+            <label className={labelCls}>Permissões de Protocolo</label>
+            {["admin", "desenvolvedor"].includes(role) ? (
+              <div className="flex items-start gap-2 mt-2 px-3 py-2.5 rounded-lg text-xs bg-blue-50 border border-blue-200 text-blue-700">
+                <Shield size={12} className="mt-0.5 shrink-0" />
+                <span>Este usuário tem acesso total — estas permissões não se aplicam.</span>
+              </div>
+            ) : (
+              <div className="mt-2 space-y-1.5">
+                <p className="text-[10px] text-gray-400 mb-2">
+                  Tipos de protocolo que este usuário pode criar:
+                </p>
+                {(
+                  [
+                    ["fabrica", "🏭 Protocolo Fábrica", "ida/volta com motoboy"],
+                    ["service", "🔧 Protocolo Service", "ida/volta loja ↔ service"],
+                  ] as [string, string, string][]
+                ).map(([value, label, hint]) => {
+                  const checked = tiposProtocoloPermitidos.includes(value);
+                  return (
+                    <label key={value} className="flex items-start gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setTiposProtocoloPermitidos((prev) =>
+                            checked ? prev.filter((t) => t !== value) : [...prev, value]
+                          )
+                        }
+                        className="w-4 h-4 rounded border-gray-300 accent-[#184036] mt-0.5"
+                      />
+                      <span className="text-sm text-gray-700">
+                        {label}
+                        <span className="block text-[10px] text-gray-400">{hint}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+                <p className="text-[10px] text-gray-400 mt-2">
+                  Vazio = não pode criar nenhum protocolo.
                 </p>
               </div>
             )}

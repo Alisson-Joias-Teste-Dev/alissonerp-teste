@@ -1,9 +1,9 @@
 # MEMORY.md — Alisson ERP (Joalheria de Alto Padrão)
 
-> 📋 Última atualização automática: 27/03/2026 — Versão: v2.13.0 <!-- Revisado 27/03/2026 -->
+> 📋 Última atualização automática: 28/03/2026 — Versão: v2.14.0 <!-- Revisado 28/03/2026 -->
 
 > **LEITURA OBRIGATÓRIA antes de qualquer sessão.**
-> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 27/03/2026 — v2.13.0 — Módulo Service (app operador + painel gerente) + is_operador_service + tabela servicos + service-fotos + trg_criar_servico_from_pcp + trg_calcular_peso_pedra + peso_pedra_ct/sku_interno em insumos + Sidebar Produção inclui Painel Service**
+> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 28/03/2026 — v2.14.0 — Tipos de Protocolo (Fábrica vs Service): tipo_protocolo em protocolos + tipos_protocolo_permitidos em usuarios + permissão por role + NovaProtocoloModal seletor de tipo + ProtocoloClient badge**
 
 ---
 
@@ -115,8 +115,17 @@ controle_estoque / movimentacoes_estoque
   Marcadores SP (Saída Pedra consumida), QBP (Quebra Pedra) — adicionados migration 079
 
 ── LOGÍSTICA ──
-protocolos (foto_criacao, foto_conclusao, motoboy_id, recebedor_id)
+protocolos (foto_criacao, foto_conclusao, motoboy_id, recebedor_id, tipo_protocolo VARCHAR(20) DEFAULT 'fabrica')
+  tipo_protocolo: 'fabrica' (vai pra fábrica via motoboy) | 'service' (vai pra service ao lado)
+  Backfill migration 093: ordens servico_venda/garantia → 'service', demais → 'fabrica'
 protocolo_ordens, protocolo_fotos
+
+usuarios — colunas novas (migration 093):
+  tipos_protocolo_permitidos JSONB DEFAULT '[]'
+  Permissões por role: motoboy=["fabrica"], gerente=["fabrica","service"], consultora=["service"]
+  Admin/dev ignoram (fullAccess). Verificado via /api/user/[id]/permissoes-protocolo
+  API /api/protocolo POST: valida tipos_protocolo_permitidos antes de inserir
+  API /api/protocolo/ordens: aceita ?tipo_protocolo=fabrica|service para filtrar ordens por tipo
 
 ── QUALIDADE ──
 auditorias (loja + fábrica)
