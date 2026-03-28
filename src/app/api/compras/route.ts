@@ -1,20 +1,113 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { normalizeRow } from "@/lib/db";
+
+// GET /api/compras — lista todas as compras com JOIN locais_estoque + fornecedor
+// Query params: ?situacao=rascunho&local_id=1
+export async function GET(req: NextRequest) {
+  const situacaoFilter = req.nextUrl.searchParams.get("situacao");
+  const localIdFilter  = req.nextUrl.searchParams.get("local_id");
+
+  let rows;
+  if (situacaoFilter && localIdFilter) {
+    rows = await sql`
+      SELECT c.*,
+        ct.nome   AS fornecedor_nome,
+        le.nome   AS local_nome,
+        COUNT(ic.id)::int AS total_itens,
+        u.nome    AS recebido_por_nome
+      FROM alissonerp.compras c
+      LEFT JOIN public.contatos ct ON ct.id_contato = c.fornecedor_id
+      LEFT JOIN alissonerp.locais_estoque le ON le.id = c.local_destino_id
+      LEFT JOIN alissonerp.itens_compra ic ON ic.compra_id = c.id
+      LEFT JOIN alissonerp.usuarios u ON u.id = c.recebido_por
+      WHERE c.situacao = ${situacaoFilter}
+        AND c.local_destino_id = ${parseInt(localIdFilter)}
+      GROUP BY c.id, ct.nome, le.nome, u.nome
+      ORDER BY c.id DESC
+    `;
+  } else if (situacaoFilter) {
+    rows = await sql`
+      SELECT c.*,
+        ct.nome   AS fornecedor_nome,
+        le.nome   AS local_nome,
+        COUNT(ic.id)::int AS total_itens,
+        u.nome    AS recebido_por_nome
+      FROM alissonerp.compras c
+      LEFT JOIN public.contatos ct ON ct.id_contato = c.fornecedor_id
+      LEFT JOIN alissonerp.locais_estoque le ON le.id = c.local_destino_id
+      LEFT JOIN alissonerp.itens_compra ic ON ic.compra_id = c.id
+      LEFT JOIN alissonerp.usuarios u ON u.id = c.recebido_por
+      WHERE c.situacao = ${situacaoFilter}
+      GROUP BY c.id, ct.nome, le.nome, u.nome
+      ORDER BY c.id DESC
+    `;
+  } else if (localIdFilter) {
+    rows = await sql`
+      SELECT c.*,
+        ct.nome   AS fornecedor_nome,
+        le.nome   AS local_nome,
+        COUNT(ic.id)::int AS total_itens,
+        u.nome    AS recebido_por_nome
+      FROM alissonerp.compras c
+      LEFT JOIN public.contatos ct ON ct.id_contato = c.fornecedor_id
+      LEFT JOIN alissonerp.locais_estoque le ON le.id = c.local_destino_id
+      LEFT JOIN alissonerp.itens_compra ic ON ic.compra_id = c.id
+      LEFT JOIN alissonerp.usuarios u ON u.id = c.recebido_por
+      WHERE c.local_destino_id = ${parseInt(localIdFilter)}
+      GROUP BY c.id, ct.nome, le.nome, u.nome
+      ORDER BY c.id DESC
+    `;
+  } else {
+    rows = await sql`
+      SELECT c.*,
+        ct.nome   AS fornecedor_nome,
+        le.nome   AS local_nome,
+        COUNT(ic.id)::int AS total_itens,
+        u.nome    AS recebido_por_nome
+      FROM alissonerp.compras c
+      LEFT JOIN public.contatos ct ON ct.id_contato = c.fornecedor_id
+      LEFT JOIN alissonerp.locais_estoque le ON le.id = c.local_destino_id
+      LEFT JOIN alissonerp.itens_compra ic ON ic.compra_id = c.id
+      LEFT JOIN alissonerp.usuarios u ON u.id = c.recebido_por
+      GROUP BY c.id, ct.nome, le.nome, u.nome
+      ORDER BY c.id DESC
+    `;
+  }
+
+  const normalized = rows.map((r) =>
+    normalizeRow(r as Record<string, unknown>, ["total", "total_itens"], [])
+  );
+  return NextResponse.json(normalized);
+}
 
 // POST /api/compras
-// Body: { fornecedor_id?: number, obs?: string, created_by?: string }
+// Body: { fornecedor_id?, obs?, local_destino_id?, numero_nf?, data_compra?, created_by? }
 export async function POST(req: NextRequest) {
-  const { fornecedor_id, obs, created_by } = await req.json() as {
-    fornecedor_id?: number | null;
-    obs?: string | null;
-    created_by?: string | null;
-  };
+  const { fornecedor_id, obs, local_destino_id, numero_nf, data_compra, created_by } =
+    await req.json() as {
+      fornecedor_id?: number | null;
+      obs?: string | null;
+      local_destino_id?: number | null;
+      numero_nf?: string | null;
+      data_compra?: string | null;
+      created_by?: string | null;
+    };
 
   const [row] = await sql`
-    INSERT INTO alissonerp.compras (situacao, fornecedor_id, obs, created_by)
-    VALUES ('pendente', ${fornecedor_id ?? null}, ${obs ?? null}, ${created_by ?? null}::uuid)
-    RETURNING id, situacao, total, obs, bloqueado, created_at
+    INSERT INTO alissonerp.compras
+      (fornecedor_id, obs, situacao, local_destino_id, numero_nf, data_compra, created_by)
+    VALUES (
+      ${fornecedor_id ?? null},
+      ${obs ?? null},
+      'rascunho',
+      ${local_destino_id ?? 1},
+      ${numero_nf ?? null},
+      ${data_compra ?? null},
+      ${created_by ?? null}::uuid
+    )
+    RETURNING *
   `;
 
-  return NextResponse.json(row);
+  return NextResponse.json(normalizeRow(row as Record<string, unknown>, ["total"], []), { status: 201 });
 }

@@ -1434,7 +1434,7 @@ Posição na UI: acima das tabs, abaixo dos cards Comercial/Produção
 
 ---
 
-## 26. MÓDULO CRIAÇÃO DE ORDENS (18/03/2026)
+## 26. MÓDULO CRIAÇÃO DE ORDENS (28/03/2026 — atualizado task ordens-02)
 
 ```
 ── TABELA ──
@@ -1451,34 +1451,50 @@ alissonerp.itens_ordem (desnormalizada para performance):
 
 ── PERMISSÕES DE CRIAÇÃO ──
 alissonerp.usuarios.tipos_ordem_permitidos JSONB DEFAULT '[]'
-  [] vazio = sem acesso a criar ordens
-  ['fabricacao', 'garantia'] = só esses tipos
+  [] vazio = sem acesso a criar ordens (botão some)
+  ['fabricacao', 'garantia'] = só esses tipos no dropdown
   admin/desenvolvedor ignoram a coluna (fullAccess sempre)
   Gerenciado em: UserEditDrawer → seção "Permissões de Criação"
   PATCH /api/user/[id] com campo tipos_ordem_permitidos
 
 ── APIS ──
 POST /api/ordens              → cria ordem + itens (alissonerp.itens_ordem) + auditoria loja
+  Aceita: cliente_id? vendedor_id? detalhes_ordem? fotos_base64[]? itens[{produto_id,qtd,peso_estimado?}]
+  fotos_base64[]: upload server-side → bucket ordem-fotos → salvo em ordens.fotos_paths TEXT[]
+  Rollback: se qualquer upload falhar, limpa órfãos e retorna 500 (sem criar ordem)
 GET  /api/ordens/contatos     → ?busca= autocomplete clientes (public.contatos)
 GET  /api/ordens/vendedores   → lista vendedores ativos (public.vendedores)
 GET  /api/ordens/produtos-busca → ?busca= busca produtos (public.produtos + erp_produtos)
+GET  /api/produtos/[id]/variacoes → variações ativas de produto pai (erp_produtos.parent_id)
+  Retorna: { variacoes[], produto_pai: {nome,sku} }
+  Se não-pai ou não-existe em erp_produtos → variacoes: []
+
+── REPOSIÇÃO LOJA (v2.14.0 — FUNCIONAL) ──
+Tipo: reposicao_loja | Rota: pcp | Origem: erp
+Ordem interna: sem cliente_id, sem vendedor_id
+Solicitante = created_by (UUID do usuário autenticado, set server-side)
+1 produto por ordem: pode ter múltiplas variações selecionadas
+Peso estimado = peso_precificado do produto (editável para produtos simples)
+Fotos de referência: opcionais, bucket ordem-fotos, ordens.fotos_paths TEXT[]
+Segue fluxo completo: auditoria loja (pendente) → PCP
 
 ── FLUXO DE CRIAÇÃO ──
 1. Botão "Nova Ordem" → dropdown com 7 tipos (ícones Lucide por tipo)
-   Visibilidade: filtra pelos tipos_ordem_permitidos do usuário (admin/dev = tudo)
-2. Clicar tipo → abre NovaOrdemModal com badge tipo fixo (não editável)
-3. Modal: autocomplete cliente (debounce 300ms), autocomplete produto, peso estimado
-4. Para servico_venda: campos obrigatórios adicionais:
-   foto_peca_servico: upload com compressão canvas (obrigatório)
-   peso_peca_servico: peso da peça em gramas (obrigatório)
-   video_observacao: upload vídeo direto para bucket ordem-videos (opcional)
-5. Salvar: transação atômica — INSERT ordens + itens_ordem + auditorias
-6. Número da ordem = MAX(alissonerp.ordens.id, directus.ordens.id) + 1 (evita colisão)
+   servico_loja NÃO aparece (escondido do frontend)
+2. reposicao_loja → abre NovaOrdemReposicaoLojaModal
+   Demais tipos → toast "🚧 Em construção — [Tipo] estará disponível em breve!"
+3. Sucesso → toast "✓ Ordem C-XXXX criada com sucesso!" + router.refresh()
+
+── TOAST SYSTEM ──
+Sem biblioteca externa (sem sonner/react-hot-toast)
+Custom: useState<string | null> + setTimeout
+Estilo: fixed bottom-6 right-6, bg #184036, rounded-xl shadow-lg
 
 ── COMPONENTES ──
-src/components/ordens/NovaOrdemModal.tsx      → modal criação (autocomplete, upload, validação)
-src/components/ordens/ItensOrdemSection.tsx   → exibe itens na página /ordens/[id]
-src/components/ordens/NovaOrdemButton.tsx     → botão dropdown com 7 tipos
+src/components/ordens/NovaOrdemButton.tsx           → dropdown 7 tipos + wiring modais + toast
+src/components/ordens/NovaOrdemReposicaoLojaModal.tsx → modal reposição loja (NOVO v2.14.0)
+src/components/ordens/NovaOrdemModal.tsx            → modal criação genérico (aguardando integração)
+src/components/ordens/ItensOrdemSection.tsx         → exibe itens na página /ordens/[id]
 
 ── CARD PEÇA DO CLIENTE ──
 Visível somente para tipo=servico_venda na página /ordens/[id]
@@ -1747,3 +1763,220 @@ Popular telefones: UPDATE public.user_profiles SET phone = '551199...' WHERE id_
 4. Webhook secret: valor de EVOLUTION_WEBHOOK_SECRET (header x-webhook-secret)
 5. Testar: enviar "oi" para o número de suporte
 ```
+
+---
+
+## APIs Atualizadas + Novas (Sprint 3) — v2.14.0
+
+Data de modificação: 28/03/2026
+
+── PCP (MODIFICADAS) ──
+POST /api/pcp/apontamentos       → tipos 3/6: aceita peso_g_pedra, calcula peso_ct (backward: qtd)
+POST /api/pcp/validar-peso       → tipo=pedra+peso_ct: IA lê ct da balança (modo_ct=true)
+POST /api/pcp/saida              → pedras_utilizadas[].peso_ct_utilizado (backward: qtd_utilizada)
+GET  /api/pcp/[id]/resumo        → totais inclui pedras_ct, pedras_entrada_ct, pedras_retorno_ct
+GET  /api/pcp/[id]/pedras-disponiveis → retorna saldo_ct + saldo_un + peso_pedra_ct
+GET  /api/pcp/insumos            → já retornava peso_pedra_ct (sem mudança necessária)
+
+── DISTRIBUIÇÃO (MODIFICADAS) ──
+POST /api/distribuicao/[id]/saida → pedras aceita peso_ct_utilizado (backward: qtd_utilizada)
+GET  /api/distribuicao/[id]/pedras-apontadas → saldo em ct (saldo_ct + peso_pedra_ct)
+
+── COMPRAS (REESCRITAS com pg.Pool via sql) ──
+GET  /api/compras                 → +JOIN locais_estoque + filtros ?situacao + ?local_id
+POST /api/compras                 → +local_destino_id, +numero_nf, +data_compra; situacao='rascunho'
+GET  /api/compras/[id]/itens      → +categoria + peso_pedra_ct + deposito_nome
+POST /api/compras/[id]/itens      → campos por categoria (pedras: peso_ct, custo_por_ct)
+DELETE /api/compras/[id]/itens/[itemId] → verificação bloqueado + 404 se não encontrado
+PATCH /api/compras/[id]/receber   → NOVA: marca recebida (data_recebimento, recebido_por)
+PATCH /api/compras/[id]/concluir  → aceita recebida/rascunho/pendente (backward compat)
+
+── LOCAIS DE ESTOQUE (NOVAS) ──
+GET  /api/locais-estoque          → lista locais ativos
+POST /api/locais-estoque          → cria local (roles: admin, desenvolvedor)
+PATCH /api/locais-estoque/[id]    → edita (id=1 Fábrica não pode desativar)
+
+── TRANSFERÊNCIA ENTRE LOCAIS (NOVA) ──
+POST /api/estoque/transferir-local → CE dupla (TA) entre locais + validação saldo
+  Roles: admin, desenvolvedor, gerente_fabrica
+
+── ESTOQUE (MODIFICADA) ──
+GET /api/insumos/pote             → ?local_id=N filtra por local (vw_saldo_por_local com saldo_ct)
+                                    sem local_id: total por categoria (vw_saldo_pote)
+
+---
+
+## Frontend PCP + Estoque CT + Multi-Local (Sprint 4) — v2.14.0
+
+Data de modificação: 28/03/2026
+
+FORMATTERS (src/lib/formatters.ts):
+  formatPesoCt(valor) → "X.XXXX ct" (4 casas, pedras)
+  gramasToCt(g) → ct = g / 0.2
+  ctToGramas(ct) → g = ct × 0.2
+
+COMPONENTES MODIFICADOS:
+  ApontamentoPCPModal: tipos 3/6 → input gramas + display ct ao lado
+    Envia: peso_g_pedra (não mais quantidade)
+    IA: envia peso_ct para validação (IA lê ct da balança)
+  
+  SaidaOrdemModal: pedras em peso_ct_utilizado
+    Lista saldo: em ct (formatPesoCt)
+  
+  FecharOrdemDistModal: pedras em ct (mesmo padrão)
+  
+  ApontamentoDistModal: tipos 3/6 em ct (mesmo padrão PCP)
+  
+  PCPDetalheModal: resumo mostra pedras_ct
+  
+  EstoqueClient: 
+    Pedras exibidas em ct (formatPesoCt)
+    Filtro por local (dropdown GET /api/locais-estoque)
+    Botão "Transferir entre Locais" → TransferirLocalModal
+  
+  InsumoEditDrawer: já tinha ct input + g display (sem mudança)
+  
+  DistribuicaoClient: pedras em ct nos resumos
+
+COMPONENTES NOVOS:
+  LocaisEstoqueTab: aba em /configuracoes → CRUD locais
+  TransferirLocalModal: CE dupla entre locais (marcador TA)
+
+UX PEDRAS:
+  Input → operador digita GRAMAS
+  Display → sistema mostra CT ao lado (tempo real)
+  Estoque/Dashboard → SÓ CT (4 casas)
+  Metal → 2 casas decimais (g), sem mudança
+
+### Frontend Compras Reescrito (Sprint 5) — v2.14.0
+
+Data de modificação: 28/03/2026
+
+COMPONENTE REESCRITO:
+  ComprasClient.tsx — REESCRITA TOTAL (supabase.from → fetch /api/*)
+  
+  Layout: Lista + Detalhe inline (padrão DistribuicaoClient)
+  Stats: Total mês, Rascunho, Recebidas, Concluídas
+  
+  Filtros: busca, situação, local
+  Tabela: #, fornecedor, status badge, itens, total R$, data, local
+  
+  FORM CONDICIONAL POR CATEGORIA:
+    Metal/Liga/Solda (cat 1,3,4): peso(g) + valor_unitario(R$/g)
+    Pedras (cat 2): peso(g)→ct + qtd_pecas + custo_por_ct(R$/ct) + lote
+    Banho (cat 5): qtd(ml) + valor_unitario(R$/ml)
+    Acabamento/Embalagem/Outros (cat 6,7,8): qtd(un) + valor_unitario(R$/un)
+  
+  FLUXO 3 ETAPAS:
+    rascunho → recebida → concluída
+    Botão "Registrar Recebimento" (PATCH /api/compras/[id]/receber)
+    Botão "Concluir Compra" (PATCH /api/compras/[id]/concluir)
+    Backward compat: rascunho → concluída direto também funciona
+  
+  TIMELINE VISUAL: 3 pontos (rascunho → recebida → concluída)
+  LOCAL DESTINO: selecionável (GET /api/locais-estoque)
+  BLOQUEIO: readonly + badge cadeado + sem ações
+  PERMISSÕES: admin, desenvolvedor, gerente_fabrica, estoquista_fabrica
+
+PÁGINA:
+  compras/page.tsx — Server Component com sql (postgres.js)
+  Query completa: JOIN locais_estoque, contatos, usuarios, itens_compra
+
+FORMATTERS:
+  formatMoeda adicionado em src/lib/formatters.ts
+
+---
+
+## 32. MÓDULO COMPRAS + PEDRAS CT + MULTI-LOCAL (v2.14.0)
+
+Última modificação: 28/03/2026
+
+### Visão Geral
+- Pedras controladas em Quilates (CT) em vez de Unidades (UN)
+- Compras expandidas: form por categoria + 3 etapas + local de destino
+- Estoque multi-local (Fábrica + Loja, cadastrável)
+- Conversão: 1 ct = 0.2g | ct = gramas / 0.2
+
+### Migrations executadas
+- 094: locais_estoque + seed (Fábrica=1, Loja=2) + FK em depositos e movimentacoes
+- 095: peso_pedra_ct em insumos, total_pedras_ct em pcp, peso_ct/peso_g_pedra em apontamentos
+- 096: compras expandidas (local_destino_id, numero_nf, data_compra, data_recebimento, etc.)
+- 097: views atualizadas (vw_saldo_estoque, vw_detalhe_pote, vw_saldo_por_local)
+- 098: triggers atualizados (7 funções modificadas para ct + local_estoque_id)
+
+### Tabela locais_estoque
+  id SERIAL PK, nome VARCHAR(100), ativo BOOLEAN DEFAULT true, created_at
+  Seed: 1=Fábrica, 2=Loja
+  id=1 PROTEGIDO (não pode desativar via API)
+
+### Pedras em CT — Regras
+  INPUT: operador digita GRAMAS → sistema mostra CT ao lado (÷ 0.2)
+  EXIBIÇÃO: estoque/dashboard/resumo → SÓ CT (formatPesoCt, 4 casas)
+  IA: lê CT da balança → compara com ct calculado (margem ia_margem_pedra_pct, default 10%)
+  ESTOQUE: movimentações de pedras registradas em CT
+  BACKWARD COMPAT: apontamentos antigos em UN continuam funcionando
+
+### Compras — Fluxo 3 etapas
+  rascunho → recebida → concluída
+  Local destino: selecionável (default Fábrica=1)
+  Form condicional:
+    Metal/Liga/Solda (cat 1,3,4): peso(g) + valor_unitario(R$/g)
+    Pedras (cat 2): peso(g)→ct + qtd_pecas + custo_por_ct(R$/ct) + lote
+    Banho (cat 5): qtd(ml) + valor_unitario(R$/ml)
+    Outros (cat 6,7,8): qtd(un) + valor_unitario(R$/un)
+  Trigger fn_calcular_item_compra: pedras = peso_ct × custo_por_ct
+  Trigger fn_concluir_compra: CE EA por item (ct para pedras)
+  Acesso: admin, dev, gerente_fabrica, estoquista_fabrica
+
+### APIs Novas (Sprint 3)
+  GET/POST /api/locais-estoque → CRUD locais
+  PATCH /api/locais-estoque/[id] → editar (id=1 protegido)
+  POST /api/estoque/transferir-local → CE dupla (marcador TA)
+  PATCH /api/compras/[id]/receber → marca recebida
+
+### APIs Modificadas (Sprint 3)
+  POST /api/pcp/apontamentos → tipos 3/6: peso_g_pedra + peso_ct
+  POST /api/pcp/validar-peso → pedras: IA lê ct da balança
+  POST /api/pcp/saida → peso_ct_utilizado (backward: qtd_utilizada)
+  GET /api/pcp/[id]/resumo → totais inclui pedras_ct
+  GET /api/pcp/[id]/pedras-disponiveis → saldo_ct
+  GET /api/pcp/insumos → retorna peso_pedra_ct
+  POST /api/distribuicao/[id]/saida → pedras ct
+  GET /api/distribuicao/[id]/pedras-apontadas → saldo ct
+  GET /api/insumos/pote → pedras ct + filtro ?local_id=N
+  Todas APIs de compras reescritas com pg.Pool (corrige supabase.from bug)
+
+### Componentes Novos (Sprint 4)
+  LocaisEstoqueTab.tsx — CRUD locais em /configuracoes
+  TransferirLocalModal.tsx — CE dupla entre locais
+
+### Componentes Modificados (Sprint 4)
+  ApontamentoPCPModal — tipos 3/6: input g + display ct; envia peso_g_pedra
+  SaidaOrdemModal — pedras: peso_ct_utilizado; saldo em ct
+  FecharOrdemDistModal — pedras ct (mesmo padrão)
+  ApontamentoDistModal — pedras ct (mesmo padrão PCP)
+  PCPDetalheModal — resumo mostra pedras_ct (formatPesoCt)
+  EstoqueClient — pedras ct + filtro local + botão Transferir
+  DistribuicaoClient — pedras ct nos cards
+  InsumoEditDrawer — exibe peso_pedra_ct readonly
+  ConfiguracoesClient — aba "Locais" adicionada
+
+### Componente Reescrito (Sprint 5)
+  ComprasClient — REESCRITA TOTAL (~900 linhas)
+    ZERO supabase.from() → fetch /api/*
+    Layout lista+detalhe, 4 stats cards, filtros
+    Timeline visual 3 etapas
+    Form condicional por categoria
+    Confirmação antes de concluir
+
+### Formatters (src/lib/formatters.ts)
+  formatPesoCt(valor) → "X.XXXX ct"
+  gramasToCt(g) → ct = g / 0.2
+  ctToGramas(ct) → g = ct × 0.2
+  formatMoeda(valor) → "R$ X.XX"
+
+### IA — Pedras CT (Sprint 6)
+  PROMPT_PEDRA_CT: prompt separado para balança de pedras (modo_ct=true)
+  Comparação: Math.abs(ctBalanca - ctEsperado) <= ctEsperado × (ia_margem_pedra_pct/100)
+  Fallback modelo Gemini corrigido: "gemini-2.5-flash" (era "gemini-2.0-flash")
+  ia_margem_pedra_pct = 10 (configurável via /configuracoes > IA)

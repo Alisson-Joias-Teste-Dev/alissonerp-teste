@@ -7,7 +7,7 @@ import {
   Package, ArrowLeftRight, CheckSquare, RefreshCw,
 } from "lucide-react";
 import UserAvatar from "@/components/UserAvatar";
-import { formatPeso } from "@/lib/formatters";
+import { formatPeso, formatPesoCt } from "@/lib/formatters";
 import ApontamentoPCPModal from "@/components/forms/ApontamentoPCPModal";
 import TransferenciaPCPModal from "@/components/forms/TransferenciaPCPModal";
 import SaidaOrdemModal from "@/components/forms/SaidaOrdemModal";
@@ -84,6 +84,7 @@ interface TotaisResumo {
   pedras_peso: number;
   pedras_entrada_qtd: number;
   pedras_retorno_qtd: number;
+  pedras_ct?: number;
 }
 
 type SubModal = "apontamento" | "transferencia" | "saida" | null;
@@ -187,9 +188,13 @@ export default function PCPDetalheModal({ pcp, onClose, onSuccess }: Props) {
   function fmtQtd(e: EventoHistorico) {
     if (e.qtd === undefined) return null;
     if (e.categoria_id === 2) {
-      const un = Math.round(e.qtd);
-      const gStr = e.peso_pedra ? ` · ${formatPeso(e.qtd * e.peso_pedra)}g` : "";
-      return `${un} UN${gStr}`;
+      // Show in CT if peso_pedra available, else UN
+      if (e.peso_pedra) {
+        const totalG = e.qtd * e.peso_pedra;
+        const ctVal = parseFloat((totalG / 0.2).toFixed(4));
+        return `${formatPesoCt(ctVal)}`;
+      }
+      return `${Math.round(e.qtd)} UN`;
     }
     return `${formatPeso(e.qtd)}g`;
   }
@@ -344,7 +349,9 @@ export default function PCPDetalheModal({ pcp, onClose, onSuccess }: Props) {
                           <div className="flex justify-between text-sm font-semibold">
                             <span style={{ color: "#374151" }}>Total Pedras</span>
                             <span className="font-mono" style={{ color: "#7C3AED" }}>
-                              {Math.round(totais.pedras_qtd)} UN · {formatPeso(totais.pedras_peso)}g
+                              {totais.pedras_ct != null
+                                ? formatPesoCt(totais.pedras_ct)
+                                : `${Math.round(totais.pedras_qtd)} UN`}
                               {totais.pedras_retorno_qtd > 0 && (
                                 <span className="text-[10px] font-normal ml-1" style={{ color: "#9CA3AF" }}>
                                   ({Math.round(totais.pedras_entrada_qtd)} ent − {Math.round(totais.pedras_retorno_qtd)} ret)

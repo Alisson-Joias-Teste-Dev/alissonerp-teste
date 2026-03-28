@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { X, Loader2, CheckCircle, AlertCircle, Camera, RefreshCw } from "lucide-react";
-import { formatPeso } from "@/lib/formatters";
+import { formatPeso, gramasToCt } from "@/lib/formatters";
 import { createClient } from "@/lib/supabase/client";
 
 const C = {
@@ -93,6 +93,7 @@ export default function ApontamentoPCPModal({
   const [tipoId, setTipoId] = useState<number | "">("");
   const [insumoId, setInsumoId] = useState<number | "">("");
   const [qtd, setQtd] = useState("");
+  const [pesoGPedra, setPesoGPedra] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -115,6 +116,7 @@ export default function ApontamentoPCPModal({
   const precisaFotoIA = tipoId === TIPO_FOTO_IA || tipoId === TIPO_ADITIVO || tipoId === TIPO_RETORNO || tipoId === TIPO_ENTRADA_PEDRA || tipoId === TIPO_RETORNO_PEDRA || tipoId === TIPO_OUTROS;
   const isPedra  = TIPO_PEDRA.includes(tipoId as number);
   const isOutros = tipoId === TIPO_OUTROS;
+  const pesoCt = pesoGPedra && !isNaN(parseFloat(pesoGPedra)) ? gramasToCt(parseFloat(pesoGPedra)) : 0;
 
   // ─── Carregar tipos e depósitos ao abrir ──────────────────────────────────
   useEffect(() => {
@@ -244,11 +246,11 @@ export default function ApontamentoPCPModal({
     };
   }, []);
 
-  // ─── Resetar validação quando qtd muda (precisa revalidar) ─────────────────
+  // ─── Resetar validação quando qtd ou pesoGPedra muda (precisa revalidar) ───
   useEffect(() => {
     if (validacaoIA !== null) setValidacaoIA(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qtd]);
+  }, [qtd, pesoGPedra]);
 
   // ─── Validação IA ──────────────────────────────────────────────────────────
   const validarComIA = useCallback(async (file: File, valor: number, tipo: "metal" | "pedra" = "metal") => {
@@ -272,24 +274,35 @@ export default function ApontamentoPCPModal({
       setFotoPreview(URL.createObjectURL(file));
       setValidacaoIA(null);
 
-      const num = parseFloat(qtd);
-      if (!isNaN(num) && num > 0) {
-        // Para pedra: envia o peso CALCULADO (qtd × peso_pedra) em vez da quantidade
-        const valorIA = isPedra && pesoPedraUnitario !== null ? num * pesoPedraUnitario : num;
-        await validarComIA(file, valorIA, isPedra ? "pedra" : "metal");
+      if (isPedra) {
+        const g = parseFloat(pesoGPedra);
+        if (!isNaN(g) && g > 0) {
+          await validarComIA(file, gramasToCt(g), "pedra");
+        }
+      } else {
+        const num = parseFloat(qtd);
+        if (!isNaN(num) && num > 0) {
+          const valorIA = pesoPedraUnitario !== null ? num * pesoPedraUnitario : num;
+          await validarComIA(file, valorIA, "metal");
+        }
       }
     },
-    [qtd, validarComIA, isPedra, pesoPedraUnitario]
+    [qtd, pesoGPedra, validarComIA, isPedra, pesoPedraUnitario]
   );
 
   const handleRevalidar = useCallback(() => {
     if (!fotoFile) return;
-    const num = parseFloat(qtd);
-    if (!isNaN(num) && num > 0) {
-      const valorIA = isPedra && pesoPedraUnitario !== null ? num * pesoPedraUnitario : num;
-      validarComIA(fotoFile, valorIA, isPedra ? "pedra" : "metal");
+    if (isPedra) {
+      const g = parseFloat(pesoGPedra);
+      if (!isNaN(g) && g > 0) validarComIA(fotoFile, gramasToCt(g), "pedra");
+    } else {
+      const num = parseFloat(qtd);
+      if (!isNaN(num) && num > 0) {
+        const valorIA = pesoPedraUnitario !== null ? num * pesoPedraUnitario : num;
+        validarComIA(fotoFile, valorIA, "metal");
+      }
     }
-  }, [fotoFile, qtd, validarComIA, isPedra, pesoPedraUnitario]);
+  }, [fotoFile, qtd, pesoGPedra, validarComIA, isPedra, pesoPedraUnitario]);
 
   // ─── Reset ─────────────────────────────────────────────────────────────────
   function resetForm() {
@@ -298,6 +311,7 @@ export default function ApontamentoPCPModal({
     setTipoId("");
     setInsumoId("");
     setQtd("");
+    setPesoGPedra("");
     setPesoPedraUnitario(null);
     setBuscaPedra("");
     setDropdownAberto(false);
@@ -334,10 +348,20 @@ export default function ApontamentoPCPModal({
       setError("Selecione o insumo.");
       return;
     }
-    const qtdNum = parseFloat(qtd);
-    if (isNaN(qtdNum) || qtdNum <= 0) {
-      setError("Quantidade deve ser maior que zero.");
-      return;
+    let qtdNum: number;
+    if (isPedra) {
+      const g = parseFloat(pesoGPedra);
+      if (isNaN(g) || g <= 0) {
+        setError("Peso das pedras deve ser maior que zero.");
+        return;
+      }
+      qtdNum = g; // será enviado como peso_g_pedra
+    } else {
+      qtdNum = parseFloat(qtd);
+      if (isNaN(qtdNum) || qtdNum <= 0) {
+        setError("Quantidade deve ser maior que zero.");
+        return;
+      }
     }
 
     // Validações extras para tipos com foto + IA
@@ -371,6 +395,10 @@ export default function ApontamentoPCPModal({
       fotoPath = path;
     }
 
+    const bodyPedra = isPedra
+      ? { peso_g_pedra: qtdNum, peso_ct: gramasToCt(qtdNum) }
+      : { qtd: qtdNum };
+
     const res = await fetch("/api/pcp/apontamentos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -380,7 +408,7 @@ export default function ApontamentoPCPModal({
         setor_id: usaDepositoDoCard ? setorId : (setorSelecionado || null),
         insumo_id: TIPO_SEM_INSUMO.includes(tipoId as number) ? null : insumoId,
         pcp_id: pcpId,
-        qtd: qtdNum,
+        ...bodyPedra,
         foto_balanca: fotoPath,
       }),
     });
@@ -471,6 +499,7 @@ export default function ApontamentoPCPModal({
                 setSetorSelecionado(setorId ?? "");
                 setInsumoId("");
                 setQtd("");
+                setPesoGPedra("");
                 setBuscaPedra("");
                 setDropdownAberto(false);
                 setPesoPedraUnitario(null);
@@ -725,40 +754,48 @@ export default function ApontamentoPCPModal({
               </div>
 
               {/* Peso / Quantidade */}
-              <div>
-                <label
-                  className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
-                  style={{ color: "#6B7280" }}
-                >
-                  {isPedra ? "Quantidade (unidades)" : "Peso (gramas)"}
-                </label>
-                <input
-                  type="number"
-                  step={isPedra ? "1" : "0.001"}
-                  min={isPedra ? "1" : "0.001"}
-                  value={qtd}
-                  onChange={(e) => {
-                    setQtd(e.target.value);
-                    setError("");
-                  }}
-                  placeholder={isPedra ? "0" : "0.000"}
-                  className="w-full px-3 py-2.5 rounded-lg border text-sm font-mono focus:outline-none"
-                  style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}
-                />
-              </div>
-
-              {/* Peso calculado (só para pedra) */}
-              {isPedra && !!insumoId && !!qtd && pesoPedraUnitario !== null && (
-                <div
-                  className="rounded-lg px-3 py-2.5 text-[12px]"
-                  style={{ backgroundColor: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}
-                >
-                  <span style={{ color: "#6B7280" }}>Peso total: </span>
-                  <span className="font-mono font-semibold" style={{ color: C.esmeralda }}>
-                    {Math.round(parseFloat(qtd) || 0)} × {pesoPedraUnitario.toFixed(4)}g
-                    {" = "}
-                    {formatPeso((parseFloat(qtd) || 0) * pesoPedraUnitario)}g
-                  </span>
+              {isPedra ? (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Peso (g)</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={pesoGPedra}
+                      onChange={(e) => { setPesoGPedra(e.target.value); setError(""); }}
+                      className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      placeholder="Ex: 0.40"
+                      required
+                    />
+                    {pesoGPedra && parseFloat(pesoGPedra) > 0 && (
+                      <span className="text-sm font-medium text-emerald-700 bg-emerald-50 px-3 py-2 rounded-md whitespace-nowrap">
+                        = {gramasToCt(parseFloat(pesoGPedra)).toFixed(4)} ct
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label
+                    className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
+                    style={{ color: "#6B7280" }}
+                  >
+                    Peso (gramas)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    min="0.001"
+                    value={qtd}
+                    onChange={(e) => {
+                      setQtd(e.target.value);
+                      setError("");
+                    }}
+                    placeholder="0.000"
+                    className="w-full px-3 py-2.5 rounded-lg border text-sm font-mono focus:outline-none"
+                    style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}
+                  />
                 </div>
               )}
 

@@ -28,11 +28,13 @@ import {
   Lock,
   PenLine,
   Flame,
+  MapPin,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
 import UserEditDrawer, { type UsuarioEdit, type Deposito as DepositoEdit } from "@/components/UserEditDrawer";
 import { useAuth } from "@/hooks/useAuth";
+import LocaisEstoqueTab from "@/components/LocaisEstoqueTab";
 
 // ─── Paleta (tema claro — alinhado com aba Usuários) ─────────────────────────
 const P = {
@@ -118,7 +120,7 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -2521,7 +2523,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
     const u = params.get("user");
-    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores"].includes(t)) {
+    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais"].includes(t)) {
       setTab(t as Tab);
     }
     if (u) setInitialUserId(u);
@@ -2534,6 +2536,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "ia",         label: "IA",          icon: Bot },
     { key: "depositos",  label: "Depósitos",   icon: Warehouse },
     { key: "teores",     label: "Teores Ouro", icon: Flame },
+    { key: "locais",     label: "Locais",      icon: MapPin },
   ];
   const tabs = isSuperAdmin
     ? [...baseTabs, { key: "permissoes" as Tab, label: "Permissões", icon: Shield }]
@@ -2584,6 +2587,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "depositos"   && <TabDepositos />}
       {tab === "teores"      && <TabTeores teores={teores} ligaTipos={ligaTipos} />}
       {tab === "permissoes"  && isSuperAdmin && <TabPermissoes />}
+      {tab === "locais"      && <LocaisEstoqueTab canEdit={isSuperAdmin} />}
     </div>
   );
 }

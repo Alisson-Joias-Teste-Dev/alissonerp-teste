@@ -1,9 +1,9 @@
 # Arquitetura — fabricaAJ ERP
 
-> 📋 Última atualização automática: 27/03/2026 — Versão: v2.13.0 <!-- Revisado 27/03/2026 -->
+> 📋 Última atualização automática: 28/03/2026 — Versão: v2.14.0 <!-- Revisado 28/03/2026 -->
 
 Sistema ERP para a Joalheria ALISSON. Stack: Next.js 16.1.6 + PostgreSQL 15 (Supabase self-hosted).
-**Versão atual: v2.13.0 | Atualizado: 27/03/2026 — Módulo Service + is_operador_service + tabela servicos + trg_criar_servico_from_pcp + trg_calcular_peso_pedra + peso_pedra_ct + Sidebar Produção inclui Painel Service**
+**Versão atual: v2.14.0 | Atualizado: 28/03/2026 — Compras + Pedras CT + Multi-Local: locais_estoque (094-098), pedras em quilates, form condicional compras, vw_saldo_por_local, LocaisEstoqueTab, TransferirLocalModal, ComprasClient reescrito, IA prompt CT**
 
 ---
 
@@ -143,6 +143,12 @@ O cliente Supabase (`src/lib/supabase/client.ts` e `server.ts`) esta configurado
 | `090_editar_teor_ligacao.sql` | Seed permissão `editar_teor_ligacao` para admin/desenvolvedor. |
 | `091_fichas_tecnicas_produto.sql` | CREATE `alissonerp.fichas_tecnicas_produto` (ficha técnica por produto com IA). CREATE bucket `produto-3d`. ADD permissão `upload_modelo_3d`. |
 | `092_modulo_service.sql` | Módulo Service v2.13.0. ADD `alissonerp.usuarios.is_operador_service BOOLEAN`. CREATE `alissonerp.servicos` (id, ordem_id, pcp_id, operador_id, tentativa, pesos, solda, pedras, status, fotos, timestamps, motivo_reprovacao). SEED `configuracoes_sistema`: `operador_servico_padrao`, `service_tipos_ordem`. CREATE TRIGGER `trg_criar_servico_from_pcp` (AFTER INSERT pcp → fn_criar_servico_from_pcp: cria servico automático para servico_venda e garantia). CREATE TRIGGER `trg_calcular_peso_pedra` (BEFORE INSERT/UPDATE insumos → fn_calcular_peso_pedra_gramas: peso_pedra = peso_pedra_ct × 0.2). ADD colunas `peso_pedra_ct NUMERIC`, `sku_interno TEXT` em insumos. CREATE bucket `service-fotos`. GRANTS. | <!-- Revisado 27/03/2026 -->
+| `093_tipo_protocolo.sql` | Sprint protocolo tipos. ADD `protocolos.tipo_protocolo VARCHAR(20) DEFAULT 'fabrica'`. ADD `usuarios.tipos_protocolo_permitidos JSONB DEFAULT '[]'`. Backfill: 20 protocolos service, 3 fabrica. Seed permissões: motoboy→["fabrica"], gerente→["fabrica","service"], consultora→["service"]. |
+| `094_locais_estoque.sql` | Sprint 1 v2.14.0. CREATE `alissonerp.locais_estoque` (id, nome, ativo). SEED: Fábrica=1, Loja=2. ADD `depositos.local_estoque_id FK`. Backfill: todos os 8 depósitos → local_id=1. ADD `movimentacoes_estoque.local_estoque_id FK` (nullable, dados históricos). INDEX `idx_movimentacoes_local_estoque`. |
+| `095_pedras_quilates_ct.sql` | Sprint 1 v2.14.0. ADD `pcp.total_pedras_ct NUMERIC(10,4)`. ADD `apontamentos_pcp.peso_ct + peso_g_pedra NUMERIC(10,4)`. ADD `distribuicao_saida_pedras.peso_ct_utilizado NUMERIC(10,4)`. Backfill `insumos.peso_pedra_ct` onde null (peso_pedra/0.2) para categoria_id=2. NOTA: insumos.peso_pedra_ct já existia (migration 092). |
+| `096_compras_expandidas.sql` | Sprint 1 v2.14.0. ADD compras: `local_destino_id FK`, `numero_nf`, `data_compra`, `data_recebimento`, `recebido_por UUID`. ADD itens_compra: `unidade`, `peso_ct`, `qtd_pecas`, `custo_por_ct`, `lote_referencia`, `observacao`. 3 indexes. |
+| `097_views_saldo_multilocal_ct.sql` | Sprint 1 v2.14.0. Recria `vw_saldo_estoque` com `local_estoque_id` no GROUP BY. Recria `vw_detalhe_pote` com `saldo_ct + peso_pedra_ct`. Recria `vw_saldo_pote` (dependente). CREATE `vw_saldo_por_local` (saldo por local_estoque + saldo_ct para pedras). |
+| `098_triggers_pedras_ct_compras.sql` | Sprint 2 v2.14.0. UPDATE `fn_criar_par_movimentacao` (add `p_local_id` 10º param). UPDATE `fn_processar_apontamento_pcp` (tipos 3/6 com ct; acumula `pcp.total_pedras_ct`; local=1). UPDATE `fn_processar_saida_ordem` (SP pedras ÷0.2; local=1). UPDATE `fn_calcular_item_compra` (pedras: peso_ct×custo_por_ct). UPDATE `fn_concluir_compra` (CE por categoria + local_destino_id + guard status). UPDATE `fn_processar_apontamento_dist` (tipos 3/6 ct; `distribuicoes.total_pedras_ct`; local=1). UPDATE `fn_processar_fechamento_dist` (acumula `pcp.total_pedras_ct`; TEDD local=1). ADD `distribuicoes.total_pedras_ct`, `apontamentos_distribuicao.peso_ct`. |
 
 ---
 
@@ -345,6 +351,7 @@ POST /api/produtos/[id]/composicao           — upsert item BOM
 PATCH /api/produtos/[id]/composicao/[itemId] — editar item BOM
 DELETE /api/produtos/[id]/composicao/[itemId]— remover item BOM
 GET  /api/produtos/insumos?categoria_id=N    — lista insumos para dropdown do BOM form
+GET  /api/produtos/[id]/variacoes           — variações ativas de produto pai (reposição loja)
 ```
 
 ### Sidebar
@@ -526,7 +533,7 @@ Estrutura com Route Groups (Next.js 16):
 | `EstoqueClient.tsx`                                  | `src/components/EstoqueClient.tsx`                        | Estoque com 3 abas, busca e filtro por categoria |
 | `QuebraClient.tsx`                                   | `src/components/QuebraClient.tsx`                         | Dashboard de quebra com PieChart + BarChart (Recharts) |
 | `DistribuicaoClient.tsx`                             | `src/components/DistribuicaoClient.tsx`                   | Distribuicao de ordens para operadores |
-| `ComprasClient.tsx`                                  | `src/components/ComprasClient.tsx`                        | Compras de insumos — ⚠️ R1: usa supabase.from() p/ alissonerp (silently broken) |
+| `ComprasClient.tsx`                                  | `src/components/ComprasClient.tsx`                        | Compras de insumos — lista+detalhe, form condicional por categoria, fluxo 3 etapas, zero supabase.from() (v2.14.0) |
 | `OrdemDetalheClient.tsx`                             | `app/(dashboard)/ordens/[id]/OrdemDetalheClient.tsx`      | Detalhe da ordem: header, cards, card PMC, 4 tabs, timeline |
 | `ProtocoloClient.tsx`                                | `app/(dashboard)/protocolo/ProtocoloClient.tsx`           | Cards Ida/Volta + tabela com busca, protocolo.directus |
 | `AuditoriaClient.tsx`                                | `app/(dashboard)/auditoria/AuditoriaClient.tsx`           | KPIs + tabela quebra% colorida + modal. Ficha tecnica visivel no modal sem sair da pagina |
@@ -544,6 +551,8 @@ Estrutura com Route Groups (Next.js 16):
 | `UserEditDrawer.tsx`                                 | `src/components/UserEditDrawer.tsx`                       | Edicao de usuario pelo admin |
 | `NotificacoesDrawer.tsx`                             | `src/components/NotificacoesDrawer.tsx`                   | Drawer de notificacoes (mencoes, sistema) — left-0 md:left-56 |
 | `ProtocoloMotoboy.tsx`                               | `src/components/motoboy/ProtocoloMotoboy.tsx`             | PWA dark theme para motoboy (protocolo simplificado) |
+| `NovaOrdemButton.tsx`                                | `src/components/ordens/NovaOrdemButton.tsx`               | Dropdown 7 tipos: reposicao_loja abre modal, demais mostram toast "Em construção"; useAuth para userName |
+| `NovaOrdemReposicaoLojaModal.tsx`                    | `src/components/ordens/NovaOrdemReposicaoLojaModal.tsx`   | Modal reposição loja: busca produto, checklist variações+qtd, fotos referência (canvas→base64→upload server) |
 | `NovaOrdemModal.tsx`                                 | `src/components/ordens/NovaOrdemModal.tsx`                | Modal criação de ordens: autocomplete cliente/produto (debounce 300ms), upload foto+video, campos servico_venda condicionais |
 | `ItensOrdemSection.tsx`                              | `src/components/ordens/ItensOrdemSection.tsx`             | Exibe itens da ordem em /ordens/[id]: duas fontes (directus.itens_ordem_1 legado, alissonerp.itens_ordem ERP) |
 | `MobileHeader.tsx`                                   | `src/components/MobileHeader.tsx`                         | Header fixo h-14 mobile: ☰ toggle sidebar + logo + avatar (visível apenas < 768px) |
@@ -562,7 +571,9 @@ Estrutura com Route Groups (Next.js 16):
 | `ServicePainelClient.tsx`                            | `src/components/service/ServicePainelClient.tsx`         | Painel gerente: stats, KPIs, lista serviços por status |
 | `ServiceDetalheDrawer.tsx`                           | `src/components/service/ServiceDetalheDrawer.tsx`        | Drawer detalhe do serviço (peso, solda, pedras, fotos, timeline) |
 | `CarregarSoldaModal.tsx`                             | `src/components/service/CarregarSoldaModal.tsx`          | Modal para carregar solda para operador service |
-<!-- Revisado 27/03/2026 -->
+| `LocaisEstoqueTab.tsx`                               | `src/components/LocaisEstoqueTab.tsx`                    | Aba CRUD de locais de estoque em /configuracoes (v2.14.0) |
+| `TransferirLocalModal.tsx`                           | `src/components/forms/TransferirLocalModal.tsx`          | Modal transferência de insumos entre locais físicos — CE dupla marcador TA (v2.14.0) |
+<!-- Revisado 28/03/2026 — v2.14.0 -->
 
 ---
 
@@ -1735,6 +1746,11 @@ Todo `supabase.from("tabela_alissonerp")` falha silenciosamente (retorna 406 ou 
 | `/api/entrega/[id]` | PATCH | Concluir preparação de entrega |
 | `/api/user/role` | GET | Role do usuário (`?user_id=uuid`) via bridge auth.users→user_profiles |
 
+| `GET/POST` | `/api/locais-estoque` | CRUD locais de estoque (GET: lista ativos; POST: criar — admin/dev) |
+| `PATCH` | `/api/locais-estoque/[id]` | Editar local (id=1 Fábrica não pode ser desativado) |
+| `POST` | `/api/estoque/transferir-local` | CE dupla entre locais com validação de saldo (marcador TA) |
+| `PATCH` | `/api/compras/[id]/receber` | Marcar compra como recebida (data_recebimento, recebido_por) |
+
 **Regra:** Todo novo acesso ao `alissonerp` a partir do client → API route. NUNCA `supabase.from()`.
 
 ### Bridge de roles (CRÍTICO)
@@ -1830,8 +1846,8 @@ WHERE au.id = $user_id::uuid
 - Erro HTTP 422 se saldo insuficiente
 
 ### IA multi-provedor
-- Provedores: Claude (`claude-haiku-4-5-20251001`), OpenAI (`gpt-4o`), Gemini (`gemini-2.0-flash`)
-- ⚠️ Modelos reais em uso (15/03/2026) — funcionando. Atualizar quando necessário.
+- Provedores: Claude (`claude-sonnet-4-20250514`), OpenAI (`gpt-4o`), Gemini (`gemini-2.5-flash`)
+- ⚠️ Modelos reais em uso (28/03/2026 — configuracoes_sistema). Gemini: gemini-2.5-flash (NÃO gemini-2.0-flash).
 - Config em `configuracoes_sistema` + `configuracoes_secrets`
 - Lib: `src/lib/ia-validar-peso.ts`
 - Tolerância: `Math.abs(a - b) < 0.005`

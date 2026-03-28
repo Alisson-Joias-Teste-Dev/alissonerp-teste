@@ -8,6 +8,7 @@ import NovaDistribuicaoModal from "@/components/forms/NovaDistribuicaoModal";
 import ApontamentoDistModal from "@/components/forms/ApontamentoDistModal";
 import FecharOrdemDistModal from "@/components/forms/FecharOrdemDistModal";
 import ConcluirDistModal from "@/components/forms/ConcluirDistModal";
+import { gramasToCt } from "@/lib/formatters";
 
 // Labels para o enum legado (distribuições antigas sem deposito_id)
 const SETOR_LABEL: Record<string, string> = {
@@ -895,14 +896,15 @@ export default function DistribuicaoClient({
           const totalMetalEntrada = apontamentos.filter(a => a.tipo_apontamento_id === 2).reduce((s, a) => s + a.qtd, 0);
           const totalMetalAditivo = apontamentos.filter(a => a.tipo_apontamento_id === 1).reduce((s, a) => s + a.qtd, 0);
           const totalRetornoMetal = apontamentos.filter(a => a.tipo_apontamento_id === 5).reduce((s, a) => s + a.qtd, 0);
-          const totalPedrasEntrada = apontamentos.filter(a => a.tipo_apontamento_id === 3).reduce((s, a) => s + a.qtd, 0);
-          const totalPedrasRetorno = apontamentos.filter(a => a.tipo_apontamento_id === 6).reduce((s, a) => s + a.qtd, 0);
+          const totalPedrasEntradaG = apontamentos.filter(a => a.tipo_apontamento_id === 3).reduce((s, a) => s + a.qtd, 0);
+          const totalPedrasRetornoG = apontamentos.filter(a => a.tipo_apontamento_id === 6).reduce((s, a) => s + a.qtd, 0);
+          const totalPedrasLiquidoCt = gramasToCt(totalPedrasEntradaG - totalPedrasRetornoG);
           return (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
               {[
                 { label: "Entrada Metal", value: `${(totalMetalEntrada + totalMetalAditivo).toFixed(2)}g`, color: "#184036" },
                 { label: "Retorno Metal", value: `${totalRetornoMetal.toFixed(2)}g`, color: "#6B7280" },
-                { label: "Pedras (UN)", value: `${Math.round(totalPedrasEntrada - totalPedrasRetorno)}`, color: "#7C3AED" },
+                { label: "Pedras (ct)", value: totalPedrasLiquidoCt > 0 ? `${totalPedrasLiquidoCt.toFixed(4)} ct` : "0.0000 ct", color: "#7C3AED" },
               ].map(({ label, value, color }) => (
                 <div key={label} className="rounded-xl p-3 border" style={{ backgroundColor: "#FAFAF7", borderColor: "#E8DCC8" }}>
                   <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5" style={{ color: "#9CA3AF" }}>{label}</p>

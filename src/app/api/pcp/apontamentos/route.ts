@@ -5,20 +5,70 @@ import { createServerSupabase } from "@/lib/supabase/server";
 
 // POST /api/pcp/apontamentos
 export async function POST(req: NextRequest) {
-  const { tipo_apontamento_id, deposito_id, setor_id, insumo_id, pcp_id, qtd, foto_balanca } =
-    await req.json() as {
-      tipo_apontamento_id: number;
-      deposito_id: number;
-      setor_id: number | null;
-      insumo_id: number | null;
-      pcp_id: number;
-      qtd: number;
-      foto_balanca?: string | null;
-    };
+  const {
+    tipo_apontamento_id,
+    deposito_id,
+    setor_id,
+    insumo_id,
+    pcp_id,
+    qtd,
+    foto_balanca,
+    // Sprint 3: novos campos para pedras (tipos 3/6)
+    peso_g_pedra,
+    created_by,
+  } = await req.json() as {
+    tipo_apontamento_id: number;
+    deposito_id: number;
+    setor_id: number | null;
+    insumo_id: number | null;
+    pcp_id: number;
+    qtd: number;
+    foto_balanca?: string | null;
+    peso_g_pedra?: number | null;
+    created_by?: string | null;
+  };
 
-  if (!tipo_apontamento_id || !deposito_id || !pcp_id || !qtd) {
+  // Para tipos 3 e 6 (pedras): calcular peso_ct e peso_g_pedra_final
+  const ehPedra = tipo_apontamento_id === 3 || tipo_apontamento_id === 6;
+  let peso_g_pedra_final: number | null = null;
+  let peso_ct_final: number | null = null;
+
+  if (ehPedra) {
+    if (peso_g_pedra != null && peso_g_pedra > 0) {
+      // Novo modo: peso em gramas fornecido → calcular ct
+      peso_g_pedra_final = peso_g_pedra;
+      peso_ct_final = parseFloat((peso_g_pedra / 0.2).toFixed(4));
+    } else if (qtd > 0 && insumo_id) {
+      // Backward compat: qtd em unidades — buscar peso_pedra_ct do insumo
+      const [ins] = await sql`
+        SELECT COALESCE(peso_pedra_ct, 0)::float8 AS ppct,
+               COALESCE(peso_pedra, 0)::float8     AS pp
+        FROM alissonerp.insumos WHERE id = ${insumo_id} LIMIT 1
+      `;
+      if (ins) {
+        const ppct = Number(ins.ppct ?? 0);
+        const pp   = Number(ins.pp ?? 0);
+        peso_g_pedra_final = parseFloat((qtd * pp).toFixed(4));
+        peso_ct_final      = parseFloat((qtd * ppct).toFixed(4));
+      }
+    }
+  }
+
+  if (!tipo_apontamento_id || !deposito_id || !pcp_id) {
     return NextResponse.json(
-      { error: "tipo_apontamento_id, deposito_id, pcp_id e qtd são obrigatórios" },
+      { error: "tipo_apontamento_id, deposito_id e pcp_id são obrigatórios" },
+      { status: 400 }
+    );
+  }
+  if (!ehPedra && !qtd) {
+    return NextResponse.json(
+      { error: "qtd é obrigatório para tipos não-pedra" },
+      { status: 400 }
+    );
+  }
+  if (ehPedra && !peso_g_pedra && !qtd) {
+    return NextResponse.json(
+      { error: "Para pedras (tipo 3/6): forneça peso_g_pedra ou qtd" },
       { status: 400 }
     );
   }
@@ -59,28 +109,61 @@ export async function POST(req: NextRequest) {
 
   // Validação de estoque para tipos 1, 2, 3 e 8 (todos saem do Almoxarifado Central)
   if ((tipo_apontamento_id === 1 || tipo_apontamento_id === 2 || tipo_apontamento_id === 3 || tipo_apontamento_id === 8) && insumo_id) {
-    const saldo = await sql`
-      SELECT saldo FROM alissonerp.vw_saldo_estoque
-      WHERE deposito_id = 1 AND insumo_id = ${insumo_id}
-      LIMIT 1
-    `;
-    const saldoAtual = Number(saldo[0]?.saldo ?? 0);
-    if (saldoAtual < qtd) {
-      const ehPedra = tipo_apontamento_id === 3;
-      const unidade = ehPedra ? "UN" : "g";
-      const fmt = (v: number) => ehPedra ? Math.round(v).toString() : v.toFixed(2);
-      return NextResponse.json(
-        { error: `Saldo insuficiente no Almoxarifado Central. Disponível: ${fmt(saldoAtual)}${unidade}, solicitado: ${fmt(qtd)}${unidade}.` },
-        { status: 422 }
-      );
+    if (tipo_apontamento_id === 3 && peso_ct_final != null) {
+      // Pedras: validar saldo em CT
+      const saldoRows = await sql`
+        SELECT COALESCE(SUM(entrada_ct), 0) - COALESCE(SUM(saida_ct), 0) AS saldo_ct
+        FROM (
+          SELECT
+            CASE WHEN entrada > 0 THEN COALESCE(peso_ct, entrada * (
+              SELECT COALESCE(peso_pedra_ct, 0) FROM alissonerp.insumos WHERE id = ${insumo_id} LIMIT 1
+            )) ELSE 0 END AS entrada_ct,
+            CASE WHEN saida > 0 THEN COALESCE(peso_ct, saida * (
+              SELECT COALESCE(peso_pedra_ct, 0) FROM alissonerp.insumos WHERE id = ${insumo_id} LIMIT 1
+            )) ELSE 0 END AS saida_ct
+          FROM alissonerp.movimentacoes_estoque
+          WHERE insumo_id = ${insumo_id} AND deposito_id = 1
+        ) t
+      `;
+      const saldoCt = Number(saldoRows[0]?.saldo_ct ?? 0);
+      if (saldoCt < peso_ct_final) {
+        return NextResponse.json(
+          { error: `Saldo insuficiente no Almoxarifado Central. Disponível: ${saldoCt.toFixed(4)}ct, solicitado: ${peso_ct_final.toFixed(4)}ct.` },
+          { status: 422 }
+        );
+      }
+    } else {
+      const saldo = await sql`
+        SELECT saldo FROM alissonerp.vw_saldo_estoque
+        WHERE deposito_id = 1 AND insumo_id = ${insumo_id}
+        LIMIT 1
+      `;
+      const saldoAtual = Number(saldo[0]?.saldo ?? 0);
+      if (saldoAtual < qtd) {
+        const unidade = tipo_apontamento_id === 3 ? "UN" : "g";
+        const fmt = (v: number) => tipo_apontamento_id === 3 ? Math.round(v).toString() : v.toFixed(2);
+        return NextResponse.json(
+          { error: `Saldo insuficiente no Almoxarifado Central. Disponível: ${fmt(saldoAtual)}${unidade}, solicitado: ${fmt(qtd)}${unidade}.` },
+          { status: 422 }
+        );
+      }
     }
   }
 
+  // Para pedras: qtd = peso_g_pedra_final (backward compat) ou qtd original
+  const qtdParaInserir = ehPedra && peso_g_pedra_final != null ? peso_g_pedra_final : qtd;
+
   const rows = await sql`
     INSERT INTO alissonerp.apontamentos_pcp
-      (tipo_apontamento_id, deposito_id, setor_id, insumo_id, pcp_id, qtd, foto_balanca)
+      (tipo_apontamento_id, deposito_id, setor_id, insumo_id, pcp_id, qtd,
+       peso_g_pedra, peso_ct, foto_balanca, created_by)
     VALUES
-      (${tipo_apontamento_id}, ${deposito_id}, ${setor_id ?? null}, ${insumo_id ?? null}, ${pcp_id}, ${qtd}, ${foto_balanca ?? null})
+      (${tipo_apontamento_id}, ${deposito_id}, ${setor_id ?? null}, ${insumo_id ?? null}, ${pcp_id},
+       ${qtdParaInserir},
+       ${peso_g_pedra_final ?? null},
+       ${peso_ct_final ?? null},
+       ${foto_balanca ?? null},
+       ${created_by ?? null}::uuid)
     RETURNING id
   `;
 

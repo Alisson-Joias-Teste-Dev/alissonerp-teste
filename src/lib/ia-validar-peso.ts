@@ -11,11 +11,22 @@ export interface ResultadoValidacao {
 
 type MediaType = "image/jpeg" | "image/png" | "image/webp" | "image/gif";
 
-const PROMPT = `Analise esta foto de uma balança de precisão usada em joalheria.
+const PROMPT_METAL = `Analise esta foto de uma balança de precisão usada em joalheria.
 Extraia APENAS o peso exibido no display da balança.
 Responda SOMENTE com JSON no formato: {"peso": 12.34, "unidade": "g", "confianca": "alta"}
 Se não conseguir ler o peso: {"peso": null, "unidade": null, "confianca": "nenhuma"}
 Nenhum texto adicional. Apenas o JSON.`;
+
+// Prompt para pedras: lê valor em quilates (ct) da balança
+const PROMPT_PEDRA_CT = `Analise esta foto de uma balança de precisão usada em joalheria para pesagem de pedras.
+Leia o valor em quilates (ct) exibido no display da balança.
+A balança pode exibir "ct" ou "CT" após o número.
+Responda SOMENTE com JSON no formato: {"peso": 1.2500, "unidade": "ct", "confianca": "alta"}
+Se não conseguir ler o valor: {"peso": null, "unidade": null, "confianca": "nenhuma"}
+Nenhum texto adicional. Apenas o JSON.`;
+
+// Manter o PROMPT original como alias para backward compat
+const PROMPT = PROMPT_METAL;
 
 function parseAIResponse(text: string): { peso: number | null; confianca: string } {
   // Tentativa 1: extrair bloco JSON de dentro de qualquer texto
@@ -50,8 +61,9 @@ function parseAIResponse(text: string): { peso: number | null; confianca: string
 export async function validarPesoBalanca(
   imagemBase64: string,
   mediaTypeRaw: string,
-  pesoReferencia: number,               // metal: peso digitado | pedra: peso calculado (qtd × peso_pedra)
-  tipo: "metal" | "pedra" = "metal"
+  pesoReferencia: number,               // metal: peso digitado (g) | pedra: peso_ct (ct) quando modo_ct=true, ou peso_g (g) quando modo_ct=false
+  tipo: "metal" | "pedra" = "metal",
+  modo_ct: boolean = false              // Sprint 3: true = IA lê ct diretamente; false = IA lê gramas (behavior original)
 ): Promise<ResultadoValidacao> {
   const mediaType = (mediaTypeRaw || "image/jpeg") as MediaType;
 
@@ -61,7 +73,7 @@ export async function validarPesoBalanca(
     ia_provedor: "claude",
     ia_modelo_claude: "claude-haiku-4-5-20251001",
     ia_modelo_openai: "gpt-4o",
-    ia_modelo_gemini: "gemini-2.0-flash",
+    ia_modelo_gemini: "gemini-2.5-flash",
     ia_margem_pedra_pct: "10",
   };
 
@@ -119,6 +131,9 @@ export async function validarPesoBalanca(
   }
 
   // ── 4. Chamar o provedor ─────────────────────────────────────────────────────
+  // Selecionar prompt: pedra em modo ct → PROMPT_PEDRA_CT; caso contrário → PROMPT_METAL
+  const promptAtivo = (tipo === "pedra" && modo_ct) ? PROMPT_PEDRA_CT : PROMPT_METAL;
+
   let pesoBalanca: number | null = null;
   let confianca = "nenhuma";
 
@@ -140,7 +155,7 @@ export async function validarPesoBalanca(
               role: "user",
               content: [
                 { type: "image", source: { type: "base64", media_type: mediaType, data: imagemBase64 } },
-                { type: "text", text: PROMPT },
+                { type: "text", text: promptAtivo },
               ],
             },
           ],
@@ -166,7 +181,7 @@ export async function validarPesoBalanca(
               role: "user",
               content: [
                 { type: "image_url", image_url: { url: `data:${mediaType};base64,${imagemBase64}` } },
-                { type: "text", text: PROMPT },
+                { type: "text", text: promptAtivo },
               ],
             },
           ],
@@ -177,7 +192,7 @@ export async function validarPesoBalanca(
       ({ peso: pesoBalanca, confianca } = parseAIResponse(text));
 
     } else if (provedor === "gemini") {
-      const modelo = config.ia_modelo_gemini ?? "gemini-2.0-flash";
+      const modelo = config.ia_modelo_gemini ?? "gemini-2.5-flash";
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${apiKey}`,
         {
@@ -188,7 +203,7 @@ export async function validarPesoBalanca(
               {
                 parts: [
                   { inline_data: { mime_type: mediaType, data: imagemBase64 } },
-                  { text: PROMPT },
+                  { text: promptAtivo },
                 ],
               },
             ],
@@ -230,8 +245,20 @@ export async function validarPesoBalanca(
       : pesoBalanca === null
       ? "Não foi possível ler o peso. Tente com foto mais nítida."
       : `Peso não confere. Digitado: ${pesoReferencia}g | Balança: ${pesoBalanca}g — Corrija o valor`;
+  } else if (tipo === "pedra" && modo_ct) {
+    // Pedra modo CT: IA leu ct da balança, pesoReferencia é peso_ct esperado
+    const margemPct = parseFloat(config.ia_margem_pedra_pct ?? "10") / 100;
+    const margemAbsoluta = pesoReferencia * margemPct;
+    const diferenca = pesoBalanca !== null ? Math.abs(pesoBalanca - pesoReferencia) : Infinity;
+    match = pesoBalanca !== null && diferenca <= margemAbsoluta;
+    const margemDisplay = (margemPct * 100).toFixed(0);
+    mensagem = match
+      ? `CT dentro da margem — Esperado: ${pesoReferencia.toFixed(4)}ct | Balança: ${pesoBalanca!.toFixed(4)}ct | Dif: ${diferenca.toFixed(4)}ct (margem ${margemDisplay}%)`
+      : pesoBalanca === null
+      ? "Não foi possível ler o valor em ct. Tente com foto mais nítida."
+      : `CT fora da margem — Esperado: ${pesoReferencia.toFixed(4)}ct | Balança: ${pesoBalanca.toFixed(4)}ct | Dif: ${diferenca.toFixed(4)}ct > margem ${margemDisplay}%`;
   } else {
-    // Pedra: margem configurável
+    // Pedra: margem configurável (mode gramas — comportamento original)
     const margemPct = parseFloat(config.ia_margem_pedra_pct ?? "10") / 100;
     const margemAbsoluta = pesoReferencia * margemPct;
     const diferenca = pesoBalanca !== null ? Math.abs(pesoBalanca - pesoReferencia) : Infinity;

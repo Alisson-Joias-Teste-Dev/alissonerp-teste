@@ -32,7 +32,8 @@ export async function POST(req: NextRequest) {
   } = await req.json() as {
     pcp_id: number;
     peso_bruto: number;
-    pedras_utilizadas?: { insumo_id: number; qtd_utilizada: number }[];
+    // Sprint 3: aceita peso_ct_utilizado (quilates) e/ou qtd_utilizada (backward compat)
+    pedras_utilizadas?: { insumo_id: number; qtd_utilizada?: number; peso_ct_utilizado?: number }[];
     peso_outros?: number | null;
     metal_externo?: number | null;
     foto_balanca?: string | null;
@@ -90,7 +91,10 @@ export async function POST(req: NextRequest) {
       SELECT
         a.insumo_id,
         (SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -
-         SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END))::integer AS disponivel
+         SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END))::integer AS disponivel,
+        -- Sprint 3: saldo em ct
+        SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) -
+        SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) AS disponivel_ct
       FROM alissonerp.apontamentos_pcp a
       JOIN alissonerp.insumos i ON i.id = a.insumo_id
       WHERE a.pcp_id = ${pcp_id}
@@ -101,34 +105,59 @@ export async function POST(req: NextRequest) {
         SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END)
       ) > 0
     `;
-    const dispMap = new Map<number, number>(
+    const dispMap    = new Map<number, number>(
       dispRows.map((r) => [r.insumo_id as number, Number(r.disponivel)])
+    );
+    const dispMapCT  = new Map<number, number>(
+      dispRows.map((r) => [r.insumo_id as number, Number(r.disponivel_ct ?? 0)])
     );
 
     for (const p of pedras_utilizadas ?? []) {
-      if (!p.qtd_utilizada || p.qtd_utilizada < 0) continue;
-      const disponivel = dispMap.get(p.insumo_id) ?? 0;
-      if (p.qtd_utilizada > disponivel) {
-        return NextResponse.json(
-          {
-            error: `Pedra insumo_id=${p.insumo_id}: quantidade utilizada (${p.qtd_utilizada}) excede disponível (${disponivel}) no PCP.`,
-          },
-          { status: 400 },
-        );
+      if (p.peso_ct_utilizado != null && p.peso_ct_utilizado > 0) {
+        // Modo CT
+        const dispCT = dispMapCT.get(p.insumo_id) ?? 0;
+        if (p.peso_ct_utilizado > dispCT) {
+          return NextResponse.json(
+            { error: `Pedra insumo_id=${p.insumo_id}: peso_ct_utilizado (${p.peso_ct_utilizado}) excede disponível em ct (${dispCT.toFixed(4)}) no PCP.` },
+            { status: 400 },
+          );
+        }
+      } else {
+        // Modo UN (backward compat)
+        const qtdUtil = p.qtd_utilizada ?? 0;
+        if (!qtdUtil || qtdUtil < 0) continue;
+        const disponivel = dispMap.get(p.insumo_id) ?? 0;
+        if (qtdUtil > disponivel) {
+          return NextResponse.json(
+            { error: `Pedra insumo_id=${p.insumo_id}: quantidade utilizada (${qtdUtil}) excede disponível (${disponivel}) no PCP.` },
+            { status: 400 },
+          );
+        }
       }
     }
   }
 
   for (const p of pedras_utilizadas ?? []) {
-    if (!p.qtd_utilizada || p.qtd_utilizada <= 0) continue;
     const [ins] = await sql`
-      SELECT COALESCE(peso_pedra, 0)::float8 AS peso_pedra
+      SELECT COALESCE(peso_pedra, 0)::float8    AS peso_pedra,
+             COALESCE(peso_pedra_ct, 0)::float8 AS peso_pedra_ct
       FROM alissonerp.insumos WHERE id = ${p.insumo_id} LIMIT 1
     `;
-    const pu = Number(ins?.peso_pedra ?? 0);
-    const pt = p.qtd_utilizada * pu;
-    peso_pedras_total += pt;
-    pedrasInfo.push({ insumo_id: p.insumo_id, qtd: p.qtd_utilizada, peso_unitario: pu, peso_total: pt });
+    const pu_g  = Number(ins?.peso_pedra ?? 0);
+    const pu_ct = Number(ins?.peso_pedra_ct ?? 0);
+
+    if (p.peso_ct_utilizado != null && p.peso_ct_utilizado > 0) {
+      // Sprint 3: converter ct → g
+      const pt = p.peso_ct_utilizado * 0.2;
+      peso_pedras_total += pt;
+      pedrasInfo.push({ insumo_id: p.insumo_id, qtd: p.peso_ct_utilizado / (pu_ct || 1), peso_unitario: pu_g, peso_total: pt });
+    } else {
+      const qtdUtil = p.qtd_utilizada ?? 0;
+      if (!qtdUtil || qtdUtil <= 0) continue;
+      const pt = qtdUtil * pu_g;
+      peso_pedras_total += pt;
+      pedrasInfo.push({ insumo_id: p.insumo_id, qtd: qtdUtil, peso_unitario: pu_g, peso_total: pt });
+    }
   }
 
   // 3. Calcular valores finais
@@ -277,7 +306,9 @@ export async function POST(req: NextRequest) {
     SELECT
       a.insumo_id,
       (SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -
-       SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END))::integer AS disponivel
+       SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END))::integer AS disponivel,
+      SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) -
+      SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) AS disponivel_ct
     FROM alissonerp.apontamentos_pcp a
     JOIN alissonerp.insumos i ON i.id = a.insumo_id
     WHERE a.pcp_id = ${pcp_id}
@@ -290,18 +321,30 @@ export async function POST(req: NextRequest) {
   `;
 
   for (const row of dispRows2) {
-    const insumoId   = row.insumo_id as number;
-    const disponivel = Number(row.disponivel);
+    const insumoId      = row.insumo_id as number;
+    const disponivel    = Number(row.disponivel);
+    const disponivelCT  = Number(row.disponivel_ct ?? 0);
 
-    // Determinar qtdUtilizada
+    // Determinar qtdUtilizada (em unidades para CEs existentes)
     const info = (pedras_utilizadas ?? []).find((p) => p.insumo_id === insumoId);
     let qtdUtilizada: number;
+
     if (!pedrasBodyDefinido) {
       // Body não enviou campo pedras_utilizadas → tudo consumido (default legado)
       qtdUtilizada = disponivel;
     } else if (info !== undefined) {
-      // Pedra presente no array → usar valor informado
-      qtdUtilizada = Number(info.qtd_utilizada);
+      if (info.peso_ct_utilizado != null && info.peso_ct_utilizado > 0) {
+        // Modo CT: converter para unidades usando peso_pedra_ct do insumo
+        const [ins] = await sql`
+          SELECT COALESCE(peso_pedra_ct, 1)::float8 AS ppct
+          FROM alissonerp.insumos WHERE id = ${insumoId} LIMIT 1
+        `;
+        const ppct = Number(ins?.ppct ?? 1);
+        qtdUtilizada = ppct > 0 ? Math.round(info.peso_ct_utilizado / ppct) : 0;
+      } else {
+        // Pedra presente no array → usar valor informado
+        qtdUtilizada = Number(info.qtd_utilizada ?? 0);
+      }
     } else {
       // Pedra disponível mas ausente do array → operador não declarou consumo → tudo QBP
       qtdUtilizada = 0;

@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  ChevronDown, Loader2, Plus,
-  Wrench, Hammer, RotateCcw, Store, Package, Shield, Settings,
+  ChevronDown, Loader2,
   SlidersHorizontal, X,
 } from "lucide-react";
-import NovaOrdemModal from "@/components/ordens/NovaOrdemModal";
+import NovaOrdemButton from "@/components/ordens/NovaOrdemButton";
 import { MobileCard } from "@/components/ui/MobileCard";
 import Paginacao from "@/components/ui/Paginacao";
 
@@ -82,18 +81,6 @@ function Badge({ label, map }: { label: string; map: Record<string, { bg: string
     </span>
   );
 }
-
-// ─── Tipos de ordem dropdown ──────────────────────────────────────────────────
-
-const TIPOS_ORDEM_DROPDOWN = [
-  { tipo: "servico_venda",     label: "Serviço Venda",     Icon: Wrench,    color: "#1E40AF" },
-  { tipo: "fabricacao",        label: "Fabricação",         Icon: Hammer,    color: "#92400E" },
-  { tipo: "reposicao_venda",   label: "Reposição Venda",   Icon: RotateCcw, color: "#6B21A8" },
-  { tipo: "reposicao_loja",    label: "Reposição Loja",    Icon: Store,     color: "#0369A1" },
-  { tipo: "compra_fornecedor", label: "Compra Fornecedor", Icon: Package,   color: "#065F46" },
-  { tipo: "garantia",          label: "Garantia",           Icon: Shield,    color: "#991B1B" },
-  { tipo: "servico_interno",   label: "Serviço Interno",   Icon: Settings,  color: "#166534" },
-];
 
 // ─── Funil card config ────────────────────────────────────────────────────────
 
@@ -180,30 +167,6 @@ export default function OrdensClient({
   const [funilError, setFunilError] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<CardKey | null>(null);
 
-  // ── Nova Ordem dropdown ───────────────────────────────────────────────────────
-  const [dropdownAberto, setDropdownAberto]   = useState(false);
-  const [tipoSelecionado, setTipoSelecionado] = useState<string | null>(null);
-  const [toastMsg, setToastMsg]               = useState<string | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const podeNovOrdem = tiposPermitidos.length > 0;
-
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownAberto(false);
-      }
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  function handleOrdemCriada(numeroOrdem: string) {
-    setTipoSelecionado(null);
-    setToastMsg(`Ordem ${numeroOrdem} criada com sucesso`);
-    setTimeout(() => setToastMsg(null), 4000);
-    router.refresh();
-  }
-
   // ── Funil fetch (sem filtro de data — total geral) ───────────────────────────
   async function fetchFunil() {
     setFunilLoading(true);
@@ -262,57 +225,8 @@ export default function OrdensClient({
             {totalOrdens} ordens — página {currentPage} de {totalPages}
           </p>
         </div>
-        {podeNovOrdem && (
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => setDropdownAberto((v) => !v)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90"
-              style={{ backgroundColor: "#184036" }}
-            >
-              <Plus size={15} />
-              Nova Ordem
-              <ChevronDown size={13} className={`transition-transform ${dropdownAberto ? "rotate-180" : ""}`} />
-            </button>
-            {dropdownAberto && (
-              <div
-                className="absolute right-0 top-full mt-1.5 z-30 bg-white rounded-xl shadow-lg border overflow-hidden min-w-[190px]"
-                style={{ borderColor: "#E8DCC8" }}
-              >
-                {TIPOS_ORDEM_DROPDOWN.filter((t) => tiposPermitidos.includes(t.tipo)).map((t) => (
-                  <button
-                    key={t.tipo}
-                    onClick={() => { setTipoSelecionado(t.tipo); setDropdownAberto(false); }}
-                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors text-left border-b last:border-0"
-                    style={{ borderColor: "#F3EADA", color: "#1A1A1A" }}
-                  >
-                    <t.Icon size={14} style={{ color: t.color, flexShrink: 0 }} />
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        <NovaOrdemButton tiposPermitidos={tiposPermitidos} />
       </div>
-
-      {/* Modal nova ordem */}
-      {tipoSelecionado && (
-        <NovaOrdemModal
-          tipoOrdem={tipoSelecionado}
-          onClose={() => setTipoSelecionado(null)}
-          onSuccess={handleOrdemCriada}
-        />
-      )}
-
-      {/* Toast */}
-      {toastMsg && (
-        <div
-          className="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
-          style={{ backgroundColor: "#184036" }}
-        >
-          ✓ {toastMsg}
-        </div>
-      )}
 
       {/* ══════════════════════════════════════════════════════════════════════
           FUNIL DE PRODUÇÃO
