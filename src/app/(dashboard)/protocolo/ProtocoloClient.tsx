@@ -1,12 +1,17 @@
 "use client";
 
-import { useState, useCallback, useTransition, useEffect } from "react";
+import { useState, useCallback, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, CheckCircle2, Clock, Package } from "lucide-react";
+import { Plus, CheckCircle2, Clock, Package, ChevronDown } from "lucide-react";
 import NovaProtocoloModal from "@/components/forms/NovaProtocoloModal";
 import ConcluirProtocoloModal from "@/components/forms/ConcluirProtocoloModal";
 import { MobileCard } from "@/components/ui/MobileCard";
+
+const TIPOS_PROTOCOLO_DROPDOWN = [
+  { tipo: "fabrica", label: "Fábrica", emoji: "🏭" },
+  { tipo: "service", label: "Service", emoji: "🔧" },
+];
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 
@@ -29,6 +34,7 @@ type Filtro = "pendentes" | "concluidos" | "todos";
 interface ProtocoloRow {
   id: number;
   etapas: string;
+  tipo_protocolo?: string | null;
   data_conclusao: string | null;
   created_at: string;
   total_ordens: number;
@@ -82,6 +88,7 @@ interface Props {
   volta: ProtocoloRow[];
   aprovacoes: AprovacaoRow[];
   entregas: EntregaRow[];
+  tiposProtocoloPermitidos?: string[];
 }
 
 const TIPO_LABEL: Record<string, string> = {
@@ -113,15 +120,34 @@ function EtapaBadge({ etapa }: { etapa: string }) {
   );
 }
 
+function TipoBadge({ tipo }: { tipo?: string | null }) {
+  if (!tipo) return null;
+  const isService = tipo === "service";
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+      style={{
+        backgroundColor: isService ? "#FEF3C7" : "#F3F4F6",
+        color: isService ? "#B45309" : "#6B7280",
+      }}
+    >
+      {isService ? "🔧 Service" : "🏭 Fábrica"}
+    </span>
+  );
+}
+
 function fmt(d: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("pt-BR");
 }
 
-export default function ProtocoloClient({ ida, volta }: Props) {
+export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos = [] }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("ida");
-  const [activeModal, setActiveModal] = useState<"nova-ida" | "nova-volta" | null>(null);
+
+  // Modal state: which direcao + which tipo was selected from dropdown
+  const [modalAberto, setModalAberto] = useState<{ direcao: "ida" | "volta"; tipo: string } | null>(null);
+
   const [concluirProt, setConcluirProt] = useState<ProtocoloRow | null>(null);
   const [isPending, startTransition] = useTransition();
   const [concluidos, setConcluidos] = useState<ProtocoloConcluido[] | null>(null);
@@ -132,6 +158,34 @@ export default function ProtocoloClient({ ida, volta }: Props) {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [filtroIda, setFiltroIda] = useState<Filtro>("pendentes");
   const [filtroVolta, setFiltroVolta] = useState<Filtro>("pendentes");
+
+  // Dropdown state para cada tab
+  const [dropdownIdaAberto, setDropdownIdaAberto] = useState(false);
+  const [dropdownVoltaAberto, setDropdownVoltaAberto] = useState(false);
+  const dropdownIdaRef  = useRef<HTMLDivElement>(null);
+  const dropdownVoltaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (dropdownIdaRef.current && !dropdownIdaRef.current.contains(e.target as Node))
+        setDropdownIdaAberto(false);
+      if (dropdownVoltaRef.current && !dropdownVoltaRef.current.contains(e.target as Node))
+        setDropdownVoltaAberto(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function abrirModal(direcao: "ida" | "volta", tipo: string) {
+    setDropdownIdaAberto(false);
+    setDropdownVoltaAberto(false);
+    setModalAberto({ direcao, tipo });
+  }
+
+  const podeNovProtocolo = tiposProtocoloPermitidos.length > 0;
+  const dropdownAberto  = tab === "ida" ? dropdownIdaAberto  : dropdownVoltaAberto;
+  const setDropdown     = tab === "ida" ? setDropdownIdaAberto : setDropdownVoltaAberto;
+  const dropdownRef     = tab === "ida" ? dropdownIdaRef      : dropdownVoltaRef;
 
   const abrirFotoModal = (url: string | null | undefined, titulo: string) => {
     if (url) {
@@ -170,14 +224,51 @@ export default function ProtocoloClient({ ida, volta }: Props) {
             Transporte Loja ↔ Fábrica
           </p>
         </div>
-        {(tab === "ida" || tab === "volta") && (
-          <button
-            onClick={() => setActiveModal(tab === "ida" ? "nova-ida" : "nova-volta")}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
-            style={{ backgroundColor: C.esmeralda, color: C.creme }}
-          >
-            <Plus size={15} /> Novo Protocolo {tab === "ida" ? "Ida" : "Volta"}
-          </button>
+        {(tab === "ida" || tab === "volta") && podeNovProtocolo && (
+          <div className="relative" ref={dropdownRef}>
+            {tiposProtocoloPermitidos.length === 1 ? (
+              /* Só 1 tipo permitido → botão direto */
+              <button
+                onClick={() => abrirModal(tab, tiposProtocoloPermitidos[0])}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-90"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}
+              >
+                <Plus size={15} />
+                Novo Protocolo {tab === "ida" ? "Ida" : "Volta"}
+              </button>
+            ) : (
+              /* Múltiplos tipos → dropdown */
+              <>
+                <button
+                  onClick={() => setDropdown((v) => !v)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                >
+                  <Plus size={15} />
+                  Novo Protocolo {tab === "ida" ? "Ida" : "Volta"}
+                  <ChevronDown size={13} className={`transition-transform ${dropdownAberto ? "rotate-180" : ""}`} />
+                </button>
+                {dropdownAberto && (
+                  <div
+                    className="absolute right-0 top-full mt-1.5 z-30 bg-white rounded-xl shadow-lg border overflow-hidden min-w-[170px]"
+                    style={{ borderColor: C.cremeBorder }}
+                  >
+                    {TIPOS_PROTOCOLO_DROPDOWN.filter((t) => tiposProtocoloPermitidos.includes(t.tipo)).map((t) => (
+                      <button
+                        key={t.tipo}
+                        onClick={() => abrirModal(tab, t.tipo)}
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors text-left border-b last:border-0"
+                        style={{ borderColor: "#F3EADA", color: "#1A1A1A" }}
+                      >
+                        <span>{t.emoji}</span>
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         )}
       </div>
 
@@ -342,19 +433,16 @@ export default function ProtocoloClient({ ida, volta }: Props) {
 
       </div>{/* fim do wrapper isPending */}
 
-      {/* Modals */}
-      <NovaProtocoloModal
-        isOpen={activeModal === "nova-ida"}
-        onClose={() => setActiveModal(null)}
-        direcao="ida"
-        onSuccess={() => { setActiveModal(null); refresh(); }}
-      />
-      <NovaProtocoloModal
-        isOpen={activeModal === "nova-volta"}
-        onClose={() => setActiveModal(null)}
-        direcao="volta"
-        onSuccess={() => { setActiveModal(null); refresh(); }}
-      />
+      {/* Modal novo protocolo — tipo vem do dropdown */}
+      {modalAberto && (
+        <NovaProtocoloModal
+          isOpen={true}
+          onClose={() => setModalAberto(null)}
+          direcao={modalAberto.direcao}
+          tipoProtocolo={modalAberto.tipo}
+          onSuccess={() => { setModalAberto(null); refresh(); }}
+        />
+      )}
       {concluirProt && (
         <ConcluirProtocoloModal
           isOpen={true}
@@ -550,7 +638,8 @@ function ProtocoloTable({
             titulo={`Protocolo #${r.id}`}
             subtitulo={direcao === "ida" ? "Loja → Fábrica" : "Fábrica → Loja"}
             badges={[
-              { label: r.etapas === "concluido" ? "Concluído" : r.etapas === "em_andamento" ? "Em Andamento" : "Pendente", cor: r.etapas === "concluido" ? "bg-green-100 text-green-700" : r.etapas === "em_andamento" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-700" }
+              { label: r.etapas === "concluido" ? "Concluído" : r.etapas === "em_andamento" ? "Em Andamento" : "Pendente", cor: r.etapas === "concluido" ? "bg-green-100 text-green-700" : r.etapas === "em_andamento" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-700" },
+              ...(r.tipo_protocolo ? [{ label: r.tipo_protocolo === "service" ? "🔧 Service" : "🏭 Fábrica", cor: r.tipo_protocolo === "service" ? "bg-amber-50 text-amber-700" : "bg-gray-100 text-gray-600" }] : []),
             ]}
             campos={[
               { label: "Ordens", valor: String(r.total_ordens) },
@@ -604,18 +693,19 @@ function ProtocoloTable({
         <table className="w-full text-sm">
           <thead>
             <tr style={{ backgroundColor: C.cremeBg, borderBottom: "1px solid #E8DCC8" }}>
-              {["ID", "Status", "Ordens", "Criado em", "Concluído em", "Responsável", "Concluído por", "Fotos", ""].map((h) => (
+              {["ID", "Tipo", "Status", "Ordens", "Criado em", "Concluído em", "Responsável", "Concluído por", "Fotos", ""].map((h) => (
                 <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rowsFiltrados.length === 0 && (
-              <tr><td colSpan={9} className="text-center py-12 text-sm" style={{ color: "#9CA3AF" }}>Nenhum protocolo encontrado</td></tr>
+              <tr><td colSpan={10} className="text-center py-12 text-sm" style={{ color: "#9CA3AF" }}>Nenhum protocolo encontrado</td></tr>
             )}
             {rowsFiltrados.map((r, i) => (
               <tr key={r.id} style={{ borderTop: i > 0 ? "1px solid #F3EADA" : undefined }}>
                 <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>#{r.id}</td>
+                <td className="px-4 py-3"><TipoBadge tipo={r.tipo_protocolo} /></td>
                 <td className="px-4 py-3"><EtapaBadge etapa={r.etapas} /></td>
                 <td className="px-4 py-3 font-mono text-center" style={{ color: "#374151" }}>{r.total_ordens}</td>
                 <td className="px-4 py-3 font-mono text-[11px]" style={{ color: "#9CA3AF" }}>{fmt(r.created_at)}</td>

@@ -28,6 +28,7 @@ export default async function ConfiguracoesPage() {
       SELECT
         u.id, u.email, u.nome, u.role, u.ativo, u.created_at,
         u.tipos_ordem_permitidos,
+        u.tipos_protocolo_permitidos,
         up.avatar_url
       FROM alissonerp.usuarios u
       LEFT JOIN public.user_profiles up ON up.id_user = u.id

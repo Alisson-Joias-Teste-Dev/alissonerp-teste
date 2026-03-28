@@ -5,6 +5,9 @@ import ProtocoloMotoboy from "@/components/motoboy/ProtocoloMotoboy";
 
 export const dynamic = 'force-dynamic';
 
+const FULL_ACCESS_ROLES = ["admin", "desenvolvedor"];
+const ALL_TIPOS_PROTOCOLO = ["fabrica", "service"];
+
 export default async function ProtocoloPage() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -12,11 +15,27 @@ export default async function ProtocoloPage() {
     return <ProtocoloMotoboy />;
   }
 
+  // Buscar permissões de protocolo do usuário logado
+  let tiposProtocoloPermitidos: string[] = [];
+  if (user) {
+    const [usuario] = await sql`
+      SELECT role::text AS role, tipos_protocolo_permitidos
+      FROM alissonerp.usuarios
+      WHERE id = ${user.id}::uuid LIMIT 1
+    `;
+    if (usuario) {
+      tiposProtocoloPermitidos = FULL_ACCESS_ROLES.includes(usuario.role)
+        ? ALL_TIPOS_PROTOCOLO
+        : (usuario.tipos_protocolo_permitidos ?? []);
+    }
+  }
+
   const [ida, volta, aprovacoes, entregas] = await Promise.all([
     sql`
       SELECT
         p.id,
         p.etapas::text,
+        p.tipo_protocolo,
         p.data_conclusao,
         p.created_at,
         p.foto_criacao,
@@ -37,6 +56,7 @@ export default async function ProtocoloPage() {
       SELECT
         p.id,
         p.etapas::text,
+        p.tipo_protocolo,
         p.data_conclusao,
         p.created_at,
         p.foto_criacao,
@@ -89,6 +109,7 @@ export default async function ProtocoloPage() {
       volta={volta as any[]}
       aprovacoes={aprovacoes as any[]}
       entregas={entregas as any[]}
+      tiposProtocoloPermitidos={tiposProtocoloPermitidos}
     />
   );
 }

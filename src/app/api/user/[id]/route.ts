@@ -51,6 +51,7 @@ export async function PATCH(
     email?: string;
     nova_senha?: string;
     tipos_ordem_permitidos?: string[];
+    tipos_protocolo_permitidos?: string[];
     is_operador_service?: boolean;
   };
 
@@ -60,8 +61,9 @@ export async function PATCH(
   const deposito_id           = isAdmin ? body.deposito_id           : undefined;
   const vendedor_id           = isAdmin ? body.vendedor_id           : undefined;
   const email                 = isAdmin ? body.email                 : undefined;
-  const tipos_ordem_permitidos = isAdmin ? body.tipos_ordem_permitidos : undefined;
-  const is_operador_service    = isAdmin ? body.is_operador_service   : undefined;
+  const tipos_ordem_permitidos     = isAdmin ? body.tipos_ordem_permitidos     : undefined;
+  const tipos_protocolo_permitidos = isAdmin ? body.tipos_protocolo_permitidos : undefined;
+  const is_operador_service        = isAdmin ? body.is_operador_service         : undefined;
 
   // Usuário NUNCA pode alterar sua própria role (proteção dupla: frontend + backend)
   const role = isSelfUpdate ? undefined : body.role;
@@ -125,7 +127,20 @@ export async function PATCH(
     `;
   }
 
-  // 1c. Atualizar flag is_operador_service (separado, apenas admin)
+  // 1c. Atualizar tipos_protocolo_permitidos (separado, apenas admin)
+  if (tipos_protocolo_permitidos !== undefined) {
+    if (!Array.isArray(tipos_protocolo_permitidos)) {
+      return NextResponse.json({ error: "tipos_protocolo_permitidos deve ser um array" }, { status: 400 });
+    }
+    await sql`
+      UPDATE alissonerp.usuarios
+      SET tipos_protocolo_permitidos = ${JSON.stringify(tipos_protocolo_permitidos)}::jsonb,
+          updated_at = now()
+      WHERE id = ${id}::uuid
+    `;
+  }
+
+  // 1d. Atualizar flag is_operador_service (separado, apenas admin)
   if (is_operador_service !== undefined) {
     await sql`
       UPDATE alissonerp.usuarios
@@ -219,6 +234,7 @@ export async function PATCH(
   const [updated] = await sql`
     SELECT
       u.id, u.email, u.nome, u.role::text, u.ativo, u.deposito_id, u.vendedor_id, u.created_at,
+      u.tipos_ordem_permitidos, u.tipos_protocolo_permitidos, u.is_operador_service,
       up.avatar_url
     FROM alissonerp.usuarios u
     LEFT JOIN public.user_profiles up ON up.id_user = u.id

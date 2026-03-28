@@ -84,6 +84,7 @@ interface Usuario {
   created_at: string;
   avatar_url: string | null;
   tipos_ordem_permitidos?: string[];
+  tipos_protocolo_permitidos?: string[];
 }
 
 interface TeorOuro {
@@ -501,7 +502,8 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
         avatar_url:            u.avatar_url ?? null,
         deposito_id:           null,
         vendedor_id:           null,
-        tipos_ordem_permitidos: u.tipos_ordem_permitidos ?? [],
+        tipos_ordem_permitidos:     u.tipos_ordem_permitidos ?? [],
+        tipos_protocolo_permitidos: u.tipos_protocolo_permitidos ?? [],
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -509,15 +511,16 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
 
   function abrirDrawer(u: Usuario) {
     setEditando({
-      id:                    u.id,
-      email:                 u.email,
-      nome:                  u.nome,
-      role:                  u.role,
-      ativo:                 u.ativo,
-      avatar_url:            u.avatar_url ?? null,
-      deposito_id:           null,
-      vendedor_id:           null,
-      tipos_ordem_permitidos: u.tipos_ordem_permitidos ?? [],
+      id:                         u.id,
+      email:                      u.email,
+      nome:                       u.nome,
+      role:                       u.role,
+      ativo:                      u.ativo,
+      avatar_url:                 u.avatar_url ?? null,
+      deposito_id:                null,
+      vendedor_id:                null,
+      tipos_ordem_permitidos:     u.tipos_ordem_permitidos ?? [],
+      tipos_protocolo_permitidos: u.tipos_protocolo_permitidos ?? [],
     });
   }
 
