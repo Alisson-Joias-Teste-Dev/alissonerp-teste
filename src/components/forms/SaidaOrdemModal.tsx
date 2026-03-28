@@ -6,7 +6,7 @@ import {
   Camera, RefreshCw,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { formatPeso } from "@/lib/formatters";
+import { formatPeso, gramasToCt, formatPesoCt } from "@/lib/formatters";
 
 const C = {
   esmeralda: "#184036",
@@ -39,6 +39,7 @@ interface PedraPCP {
   sku: string | null;
   peso_pedra: number;
   qtd_disponivel: number;
+  saldo_ct?: number | null;
 }
 
 interface OutroInsumo {
@@ -82,7 +83,8 @@ export default function SaidaOrdemModal({
   const [outrosPesos, setOutrosPesos]     = useState("");  // campo livre (quando sem insumos)
   const [outros, setOutros]               = useState<OutroInsumo[]>([]);
   const [pesoOutros, setPesoOutros]       = useState<Record<number, string>>({}); // insumo_id → g
-  const [qtdPedras, setQtdPedras]         = useState<Record<number, string>>({}); // insumo_id → qtd
+  const [qtdPedras, setQtdPedras]         = useState<Record<number, string>>({}); // insumo_id → qtd (legacy)
+  const [pesoGPedras, setPesoGPedras]     = useState<Record<number, string>>({}); // insumo_id → gramas
   // Metal externo: pré-preenchido com o peso da ordem, editável pelo operador
   const [metalExterno, setMetalExterno]   = useState(String(pesoMetalExterno ?? 0));
 
@@ -125,8 +127,15 @@ export default function SaidaOrdemModal({
       if (Array.isArray(ped)) {
         setPedras(ped);
         const initPedras: Record<number, string> = {};
-        for (const p of ped) initPedras[p.insumo_id] = String(p.qtd_disponivel);
+        const initPesoG: Record<number, string> = {};
+        for (const p of ped) {
+          initPedras[p.insumo_id] = String(p.qtd_disponivel);
+          // Pre-fill with all available pedras weight in grams
+          const saldoCtNum = p.saldo_ct != null ? Number(p.saldo_ct) : p.qtd_disponivel * p.peso_pedra;
+          initPesoG[p.insumo_id] = (saldoCtNum * 0.2).toFixed(4);
+        }
         setQtdPedras(initPedras);
+        setPesoGPedras(initPesoG);
       }
       if (Array.isArray(out) && out.length > 0) {
         setOutros(out);
@@ -156,10 +165,15 @@ export default function SaidaOrdemModal({
 
   const pesoPedrasTotal = useMemo(() => {
     return pedras.reduce((acc, p) => {
+      // Use gram-based input if available, fall back to unit-based legacy
+      const gStr = pesoGPedras[p.insumo_id];
+      if (gStr !== undefined) {
+        return acc + (parseFloat(gStr) || 0);
+      }
       const q = parseInt(qtdPedras[p.insumo_id] ?? "0") || 0;
       return acc + q * p.peso_pedra;
     }, 0);
-  }, [pedras, qtdPedras]);
+  }, [pedras, qtdPedras, pesoGPedras]);
 
   const metalExternoNum = Number(metalExterno.replace(",", ".")) || 0;
 
@@ -229,6 +243,7 @@ export default function SaidaOrdemModal({
     setOutros([]);
     setPesoOutros({});
     setQtdPedras({});
+    setPesoGPedras({});
     setMetalExterno(String(pesoMetalExterno ?? 0));
     setFotoFile(null);
     setFotoPreview(null);
@@ -279,13 +294,20 @@ export default function SaidaOrdemModal({
     }
     fotoPath = path;
 
-    // Montar lista de pedras utilizadas
+    // Montar lista de pedras utilizadas (ct-based)
     const pedras_utilizadas = pedras
-      .map((p) => ({
-        insumo_id:    p.insumo_id,
-        qtd_utilizada: parseInt(qtdPedras[p.insumo_id] ?? "0") || 0,
-      }))
-      .filter((p) => p.qtd_utilizada > 0);
+      .map((p) => {
+        const gStr = pesoGPedras[p.insumo_id];
+        const pesoG = gStr !== undefined ? (parseFloat(gStr) || 0) : 0;
+        const peso_ct_utilizado = gramasToCt(pesoG);
+        return {
+          insumo_id: p.insumo_id,
+          peso_ct_utilizado,
+          // backward compat
+          qtd_utilizada: parseInt(qtdPedras[p.insumo_id] ?? "0") || 0,
+        };
+      })
+      .filter((p) => p.peso_ct_utilizado > 0);
 
     // Chamar API de saída
     const res = await fetch("/api/pcp/saida", {
@@ -506,61 +528,64 @@ export default function SaidaOrdemModal({
                     Pedras utilizadas na peça
                   </p>
                   <div className="space-y-2">
-                    {pedras.map((p) => (
-                      <div
-                        key={p.insumo_id}
-                        className="flex items-center gap-3 rounded-lg px-3 py-2.5"
-                        style={{ backgroundColor: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[12px] font-medium truncate" style={{ color: "#111827" }}>
-                            {p.insumo_nome}
-                            {p.sku ? (
-                              <span className="ml-1 text-[10px]" style={{ color: "#9CA3AF" }}>({p.sku})</span>
-                            ) : null}
-                          </p>
-                          <p className="text-[10px]" style={{ color: "#9CA3AF" }}>
-                            {p.peso_pedra.toFixed(4)}g/un · {p.qtd_disponivel} UN disponíveis
-                          </p>
+                    {pedras.map((p) => {
+                      const saldoCtVal = p.saldo_ct != null
+                        ? Number(p.saldo_ct)
+                        : gramasToCt(p.qtd_disponivel * p.peso_pedra);
+                      const gInput = pesoGPedras[p.insumo_id] ?? "";
+                      const ctInput = gInput && parseFloat(gInput) > 0
+                        ? gramasToCt(parseFloat(gInput))
+                        : null;
+                      return (
+                        <div
+                          key={p.insumo_id}
+                          className="rounded-lg px-3 py-2.5"
+                          style={{ backgroundColor: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[12px] font-medium truncate" style={{ color: "#111827" }}>
+                                {p.insumo_nome}
+                                {p.sku ? (
+                                  <span className="ml-1 text-[10px]" style={{ color: "#9CA3AF" }}>({p.sku})</span>
+                                ) : null}
+                              </p>
+                              <p className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                                Disp: {formatPesoCt(saldoCtVal)}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={gInput}
+                                onChange={(e) => {
+                                  setPesoGPedras((prev) => ({ ...prev, [p.insumo_id]: e.target.value }));
+                                  setError("");
+                                }}
+                                className="w-24 px-2 py-1.5 rounded-md border text-sm font-mono text-right focus:outline-none"
+                                style={{ borderColor: C.cremeBorder }}
+                                placeholder="0.00"
+                              />
+                              <span className="text-[11px] w-4 shrink-0" style={{ color: "#9CA3AF" }}>g</span>
+                            </div>
+                          </div>
+                          {ctInput !== null && ctInput > 0 && (
+                            <p className="text-[10px] mt-1 text-right font-medium" style={{ color: "#7C3AED" }}>
+                              = {ctInput.toFixed(4)} ct
+                            </p>
+                          )}
                         </div>
-                        <div className="flex flex-col items-end gap-0.5">
-                          <input
-                            type="number"
-                            step="1"
-                            min="0"
-                            max={p.qtd_disponivel}
-                            value={qtdPedras[p.insumo_id] ?? "0"}
-                            onChange={(e) => {
-                              const v = Math.min(parseInt(e.target.value) || 0, p.qtd_disponivel);
-                              setQtdPedras((prev) => ({ ...prev, [p.insumo_id]: String(v) }));
-                              setError("");
-                            }}
-                            className="w-20 px-2 py-1.5 rounded-md border text-sm font-mono text-center focus:outline-none"
-                            style={{ borderColor: C.cremeBorder }}
-                          />
-                          {(() => {
-                            const qtd = parseInt(qtdPedras[p.insumo_id] ?? "0") || 0;
-                            const quebra = p.qtd_disponivel - qtd;
-                            if (quebra <= 0) return null;
-                            return (
-                              <span className="text-[10px] font-semibold" style={{ color: "#DC2626" }}>
-                                Quebra: {quebra} UN
-                              </span>
-                            );
-                          })()}
-                        </div>
-                        <span className="text-[11px] w-16 text-right" style={{ color: "#6B7280" }}>
-                          {formatPeso((parseInt(qtdPedras[p.insumo_id] ?? "0") || 0) * p.peso_pedra)}g
-                        </span>
-                      </div>
-                    ))}
+                      );
+                    })}
 
                     {/* Total pedras */}
                     {pesoPedrasTotal > 0 && (
                       <div className="flex justify-between text-[12px] px-1">
                         <span style={{ color: "#6B7280" }}>Total pedras</span>
                         <span className="font-mono font-semibold" style={{ color: "#7C3AED" }}>
-                          {formatPeso(pesoPedrasTotal)}g
+                          {gramasToCt(pesoPedrasTotal).toFixed(4)} ct · {formatPeso(pesoPedrasTotal)}g
                         </span>
                       </div>
                     )}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { uploadFile, deleteFile } from "@/lib/storage";
 
 const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
 const ALL_TIPOS = [
@@ -12,7 +13,9 @@ const SERVICO_TIPOS = ["servico_venda", "servico_loja"];
 // POST /api/ordens — cria uma nova ordem no ERP
 // Body: { tipo_ordem, cliente_id?, vendedor_id?, data_entrega?, peso_metal_negociado?,
 //         foto_peca_servico?, peso_peca_servico?, video_observacao?,
-//         itens?: [{ produto_id, quantidade }] }
+//         detalhes_ordem?,   (observações livres, vai em ordens.detalhes_ordem)
+//         fotos_base64?,     (string[] base64 — upload server-side para bucket ordem-fotos)
+//         itens?: [{ produto_id, quantidade, peso_estimado? }] }
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -28,6 +31,8 @@ export async function POST(req: NextRequest) {
     foto_peca_servico,   // storage path (já enviado pelo client)
     peso_peca_servico,
     video_observacao,    // storage path (já enviado pelo client)
+    detalhes_ordem,      // texto livre de observações
+    fotos_base64,        // string[] — upload server-side para bucket ordem-fotos
     itens = [],
   } = body;
 
@@ -57,6 +62,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ── Upload de fotos de referência (server-side, antes da transação) ──────
+  // Se qualquer upload falhar → retorna erro sem criar a ordem
+  const fotosPaths: string[] = [];
+  if (Array.isArray(fotos_base64) && fotos_base64.length > 0) {
+    for (let i = 0; i < fotos_base64.length; i++) {
+      const base64 = fotos_base64[i] as string;
+      if (!base64) continue;
+      const path = `reposicao/${Date.now()}_${i}.jpg`;
+      const result = await uploadFile("ordem-fotos", path, base64, "image/jpeg");
+      if ("error" in result) {
+        // Limpar uploads já realizados para evitar órfãos
+        for (const p of fotosPaths) {
+          await deleteFile("ordem-fotos", p).catch(() => {});
+        }
+        return NextResponse.json(
+          { error: `Erro ao enviar foto ${i + 1}: ${result.error}` },
+          { status: 500 }
+        );
+      }
+      fotosPaths.push(result.path);
+    }
+  }
+
   // ── Gerar numero_ordem (C-XXXX) ─────────────────────────────────────────
   // Verifica MAX nos dois schemas para evitar colisão com PDV
   const [{ max_num: maxAlisson }] = await sql`
@@ -75,6 +103,8 @@ export async function POST(req: NextRequest) {
   // ── Determinar rota ──────────────────────────────────────────────────────
   const rota = SERVICO_TIPOS.includes(tipo_ordem) ? "protocolo" : "pcp";
 
+  const fotosPathsVal = fotosPaths.length > 0 ? fotosPaths : null;
+
   // ── Transação: ordem + itens + auditoria loja ───────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const novaOrdem = await sql.begin(async (tx: any) => {
@@ -84,6 +114,7 @@ export async function POST(req: NextRequest) {
         numero_ordem, tipo_ordem, cliente_id, vendedor_id,
         data_entrega, peso_metal_negociado,
         foto_peca_servico, peso_peca_servico, video_observacao,
+        detalhes_ordem, fotos_paths,
         situacao, status, rota, origem, created_by
       ) VALUES (
         ${numeroOrdem},
@@ -95,6 +126,8 @@ export async function POST(req: NextRequest) {
         ${foto_peca_servico ?? null},
         ${peso_peca_servico ?? null},
         ${video_observacao ?? null},
+        ${detalhes_ordem ?? null},
+        ${fotosPathsVal},
         'criado',
         'aguardando',
         ${rota}::alissonerp.enum_rota_ordem,
@@ -114,6 +147,10 @@ export async function POST(req: NextRequest) {
         LIMIT 1
       `;
       if (!produto) continue;
+      // peso_estimado: respeita valor do body se fornecido, senão usa DB
+      const pesoEstimado = item.peso_estimado != null
+        ? Number(item.peso_estimado)
+        : (produto.peso_precificado != null ? Number(produto.peso_precificado) : null);
       await tx`
         INSERT INTO alissonerp.itens_ordem (
           ordem_id, produto_id, nome_produto, sku, quantidade, peso_estimado
@@ -123,7 +160,7 @@ export async function POST(req: NextRequest) {
           ${produto.nome},
           ${produto.sku},
           ${item.quantidade ?? 1},
-          ${produto.peso_precificado ?? null}
+          ${pesoEstimado}
         )
       `;
     }

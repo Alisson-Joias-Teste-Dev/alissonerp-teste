@@ -16,7 +16,13 @@ export async function DELETE(_req: NextRequest, { params }: { params: Params }) 
   if (!compra) return NextResponse.json({ error: "Compra não encontrada" }, { status: 404 });
   if (compra.bloqueado) return NextResponse.json({ error: "Compra bloqueada — não permite edição" }, { status: 409 });
 
-  await sql`DELETE FROM alissonerp.itens_compra WHERE id = ${itemIdNum} AND compra_id = ${compraId}`;
+  const result = await sql`
+    DELETE FROM alissonerp.itens_compra WHERE id = ${itemIdNum} AND compra_id = ${compraId}
+    RETURNING id
+  `;
+  if (result.length === 0) {
+    return NextResponse.json({ error: "Item não encontrado" }, { status: 404 });
+  }
 
   return NextResponse.json({ ok: true });
 }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { X, Loader2, CheckCircle, AlertCircle, Camera, RefreshCw, AlertTriangle } from "lucide-react";
+import { gramasToCt, formatPesoCt } from "@/lib/formatters";
 import { createClient } from "@/lib/supabase/client";
 
 const MOTIVOS_SEM_PESO = [
@@ -59,6 +60,7 @@ export default function FecharOrdemDistModal({
   const [peso, setPeso] = useState("");
   const [pedrasApontadas, setPedrasApontadas] = useState<PedraApontada[]>([]);
   const [pedrasQtd, setPedrasQtd] = useState<Record<number, string>>({});
+  const [pesoGPedras, setPesoGPedras] = useState<Record<number, string>>({}); // insumo_id → gramas
   const [loadingPedras, setLoadingPedras] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -77,7 +79,7 @@ export default function FecharOrdemDistModal({
   const [obsMotivo, setObsMotivo] = useState("");
 
   function resetForm() {
-    setPeso(""); setPedrasQtd({}); setError(""); setSuccess(false);
+    setPeso(""); setPedrasQtd({}); setPesoGPedras({}); setError(""); setSuccess(false);
     setFotoFile(null); setFotoPreview(null); setValidacaoIA(null); setValidando(false);
     setSemPeso(false); setMotivo(""); setObsMotivo("");
   }
@@ -92,8 +94,13 @@ export default function FecharOrdemDistModal({
         const lista = Array.isArray(data) ? data : [];
         setPedrasApontadas(lista);
         const init: Record<number, string> = {};
-        lista.forEach((p) => { init[p.insumo_id] = "0"; });
+        const initG: Record<number, string> = {};
+        lista.forEach((p) => {
+          init[p.insumo_id] = "0";
+          initG[p.insumo_id] = "";
+        });
         setPedrasQtd(init);
+        setPesoGPedras(initG);
       })
       .catch(() => setPedrasApontadas([]))
       .finally(() => setLoadingPedras(false));
@@ -106,6 +113,10 @@ export default function FecharOrdemDistModal({
   const pesoBrutoNum = parseFloat(peso) || 0;
 
   const pesoPedrasTotal = pedrasApontadas.reduce((sum, p) => {
+    const gStr = pesoGPedras[p.insumo_id];
+    if (gStr !== undefined && gStr !== "") {
+      return sum + (parseFloat(gStr) || 0);
+    }
     const qtd = parseInt(pedrasQtd[p.insumo_id] || "0") || 0;
     return sum + qtd * (p.peso_pedra ?? 0);
   }, 0);
@@ -193,9 +204,11 @@ export default function FecharOrdemDistModal({
       return;
     }
     for (const p of pedrasApontadas) {
-      const qtd = parseInt(pedrasQtd[p.insumo_id] || "0") || 0;
-      if (qtd > p.qtd_disponivel) {
-        setError(`"${p.insumo_nome}" excede o disponível (${p.qtd_disponivel} UN).`);
+      const gStr = pesoGPedras[p.insumo_id];
+      const pesoG = gStr && gStr !== "" ? (parseFloat(gStr) || 0) : 0;
+      const maxG = p.qtd_disponivel * (p.peso_pedra ?? 0);
+      if (pesoG > maxG + 0.0001) {
+        setError(`"${p.insumo_nome}" excede o disponível (${maxG.toFixed(4)}g).`);
         return;
       }
     }
@@ -217,8 +230,17 @@ export default function FecharOrdemDistModal({
     const { data: { user } } = await supabase.auth.getUser();
 
     const pedrasUtilizadas = pedrasApontadas
-      .map((p) => ({ insumo_id: p.insumo_id, qtd_utilizada: parseInt(pedrasQtd[p.insumo_id] || "0") || 0 }))
-      .filter((p) => p.qtd_utilizada > 0);
+      .map((p) => {
+        const gStr = pesoGPedras[p.insumo_id];
+        const pesoG = gStr && gStr !== "" ? (parseFloat(gStr) || 0) : 0;
+        const peso_ct_utilizado = pesoG > 0 ? gramasToCt(pesoG) : 0;
+        return {
+          insumo_id: p.insumo_id,
+          peso_ct_utilizado,
+          qtd_utilizada: parseInt(pedrasQtd[p.insumo_id] || "0") || 0,
+        };
+      })
+      .filter((p) => p.peso_ct_utilizado > 0 || p.qtd_utilizada > 0);
 
     const res = await fetch(`/api/distribuicao/${distribuicaoId}/saida`, {
       method: "POST",
@@ -477,9 +499,12 @@ export default function FecharOrdemDistModal({
               </label>
               <div className="space-y-2">
                 {pedrasApontadas.map((p) => {
-                  const qtd = parseInt(pedrasQtd[p.insumo_id] || "0") || 0;
-                  const pesoT = qtd * p.peso_pedra;
-                  const excede = qtd > p.qtd_disponivel;
+                  const maxG = p.qtd_disponivel * (p.peso_pedra ?? 0);
+                  const saldoCt = gramasToCt(maxG);
+                  const gInput = pesoGPedras[p.insumo_id] ?? "";
+                  const pesoGNum = parseFloat(gInput) || 0;
+                  const excede = pesoGNum > maxG + 0.0001;
+                  const ctDisplay = pesoGNum > 0 ? gramasToCt(pesoGNum) : null;
                   return (
                     <div
                       key={p.insumo_id}
@@ -501,29 +526,29 @@ export default function FecharOrdemDistModal({
                           )}
                         </div>
                         <span className="text-[11px] shrink-0 ml-2" style={{ color: excede ? "#DC2626" : "#6B7280" }}>
-                          disp.: {p.qtd_disponivel} UN
+                          disp.: {formatPesoCt(saldoCt)}
                         </span>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         <input
                           type="number"
-                          step="1"
+                          step="0.01"
                           min="0"
-                          max={p.qtd_disponivel}
-                          value={pedrasQtd[p.insumo_id] ?? "0"}
+                          value={gInput}
                           onChange={(e) => {
-                            setPedrasQtd((prev) => ({ ...prev, [p.insumo_id]: e.target.value }));
+                            setPesoGPedras((prev) => ({ ...prev, [p.insumo_id]: e.target.value }));
                             setError("");
                           }}
-                          className="w-20 px-2 py-1.5 rounded-md border text-sm font-mono text-center focus:outline-none"
+                          className="w-24 px-2 py-1.5 rounded-md border text-sm font-mono text-right focus:outline-none"
                           style={{ borderColor: excede ? "#F87171" : C.cremeBorder }}
+                          placeholder="0.00"
                         />
-                        <span className="text-[11px]" style={{ color: "#6B7280" }}>
-                          UN × {p.peso_pedra.toFixed(3)}g ={" "}
-                          <span className="font-semibold" style={{ color: "#184036" }}>
-                            {pesoT.toFixed(3)}g
+                        <span className="text-[11px] w-4" style={{ color: "#9CA3AF" }}>g</span>
+                        {ctDisplay !== null && ctDisplay > 0 && (
+                          <span className="text-[11px] font-semibold" style={{ color: "#7C3AED" }}>
+                            = {ctDisplay.toFixed(4)} ct
                           </span>
-                        </span>
+                        )}
                       </div>
                     </div>
                   );
@@ -553,7 +578,7 @@ export default function FecharOrdemDistModal({
                 {pesoPedrasTotal > 0 && (
                   <div className="flex justify-between">
                     <span style={{ color: "#7C3AED" }}>
-                      Pedras ({totalPedrasUn} UN)
+                      Pedras ({gramasToCt(pesoPedrasTotal).toFixed(4)} ct)
                     </span>
                     <span style={{ color: "#7C3AED" }}>− {pesoPedrasTotal.toFixed(3)}g</span>
                   </div>

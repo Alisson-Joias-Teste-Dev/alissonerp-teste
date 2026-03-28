@@ -1,81 +1,280 @@
 "use client";
 
-import { useState, useCallback, useTransition, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { Plus, ArrowLeft, Lock, Loader2, CheckCircle2, AlertCircle, X } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import {
+  Plus, ArrowLeft, Lock, Loader2, CheckCircle2, AlertCircle, X,
+  Search, Package, ShoppingCart,
+} from "lucide-react";
+import { formatPesoCt, formatPeso, formatMoeda, gramasToCt } from "@/lib/formatters";
+import { useAuth } from "@/hooks/useAuth";
 
-const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8", cremeBg: "#FAFAF7" };
+// ─── Color palette ──────────────────────────────────────────────────────────
+const C = {
+  esmeralda: "#184036",
+  creme: "#F3EADA",
+  cremeBorder: "#E8DCC8",
+  cremeBg: "#FAFAF7",
+};
 
-interface CompraRow {
+// ─── Types ───────────────────────────────────────────────────────────────────
+interface Compra {
   id: number;
-  situacao: string;
+  situacao: "rascunho" | "recebida" | "concluida" | "concluido" | "pendente";
   total: number;
-  obs: string | null;
   bloqueado: boolean;
+  obs?: string;
+  local_destino_id?: number;
+  numero_nf?: string;
+  data_compra?: string;
+  data_recebimento?: string;
+  recebido_por?: string;
   created_at: string;
-  fornecedor_nome: string | null;
+  fornecedor_id?: number;
+  fornecedor_nome?: string;
+  local_nome?: string;
+  recebido_por_nome?: string;
   total_itens: number;
 }
 
 interface ItemCompra {
   id: number;
+  compra_id: number;
   insumo_id: number;
-  deposito_id: number;
+  insumo_nome: string;
+  categoria_id: number;
+  categoria_nome: string;
   qtd: number;
-  valor_unitario: number | null;
-  valor_total: number | null;
-  insumo_nome?: string;
+  valor_unitario: number;
+  valor_total: number;
+  unidade?: string;
+  peso_ct?: number;
+  qtd_pecas?: number;
+  custo_por_ct?: number;
+  lote_referencia?: string;
+  deposito_id?: number;
   deposito_nome?: string;
+  peso_pedra_ct?: number;
 }
 
-interface Insumo  { id: number; nome: string; }
-interface Deposito { id: number; nome: string; }
-interface Contato  { id_contato: number; nome: string; }
+interface Insumo {
+  id: number;
+  nome: string;
+  categoria_id: number;
+  unidade?: string;
+  peso_pedra_ct?: number;
+}
 
-function SituacaoBadge({ situacao, bloqueado }: { situacao: string; bloqueado: boolean }) {
-  if (bloqueado) return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: "#F3F4F6", color: "#6B7280" }}>
-      <Lock size={9} /> Bloqueada
-    </span>
-  );
+interface Local {
+  id: number;
+  nome: string;
+}
+
+interface Fornecedor {
+  id: number;
+  nome: string;
+}
+
+// ─── Roles ────────────────────────────────────────────────────────────────────
+const ROLES_COMPRAS = ["admin", "desenvolvedor", "gerente_fabrica", "estoquista_fabrica"] as const;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function fmtDate(d?: string | null): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("pt-BR");
+}
+
+// ─── SituacaoBadge ────────────────────────────────────────────────────────────
+function SituacaoBadge({
+  situacao,
+  bloqueado,
+}: {
+  situacao: string;
+  bloqueado: boolean;
+}) {
+  if (bloqueado) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold"
+        style={{ backgroundColor: "#F3F4F6", color: "#6B7280" }}
+      >
+        <Lock size={9} /> Bloqueada
+      </span>
+    );
+  }
   const map: Record<string, { bg: string; color: string; label: string }> = {
-    pendente:  { bg: "#FEF3C7", color: "#92400E", label: "Pendente" },
+    rascunho:  { bg: "#FEF3C7", color: "#92400E", label: "Rascunho" },
+    recebida:  { bg: "#DBEAFE", color: "#1D4ED8", label: "Recebida" },
+    concluida: { bg: "#ECFDF5", color: "#059669", label: "Concluída" },
+    // backward compat
     concluido: { bg: "#ECFDF5", color: "#059669", label: "Concluída" },
+    pendente:  { bg: "#FEF3C7", color: "#92400E", label: "Pendente" },
   };
   const s = map[situacao] ?? { bg: "#F3F4F6", color: "#6B7280", label: situacao };
   return (
-    <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>
+    <span
+      className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold"
+      style={{ backgroundColor: s.bg, color: s.color }}
+    >
       {s.label}
     </span>
   );
 }
 
-function fmt(d: string) {
-  return new Date(d).toLocaleDateString("pt-BR");
+// ─── Stats Card ───────────────────────────────────────────────────────────────
+function StatCard({
+  label,
+  value,
+  sub,
+  color,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  color?: string;
+}) {
+  return (
+    <div
+      className="rounded-xl p-4 border flex flex-col gap-1"
+      style={{ backgroundColor: C.cremeBg, borderColor: C.cremeBorder }}
+    >
+      <p
+        className="text-[11px] font-semibold uppercase tracking-wider"
+        style={{ color: "#9CA3AF" }}
+      >
+        {label}
+      </p>
+      <p className="text-lg font-bold" style={{ color: color ?? C.esmeralda }}>
+        {value}
+      </p>
+      {sub && (
+        <p className="text-[11px]" style={{ color: "#9CA3AF" }}>
+          {sub}
+        </p>
+      )}
+    </div>
+  );
 }
 
-// ─── Modal Nova Compra ──────────────────────────────────────────────────────
-function NovaCompraModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void }) {
+// ─── Timeline ────────────────────────────────────────────────────────────────
+function Timeline({ compra }: { compra: Compra }) {
+  const steps = [
+    { key: "rascunho", label: "Rascunho", date: compra.data_compra ?? compra.created_at },
+    { key: "recebida", label: "Recebida", date: compra.data_recebimento },
+    {
+      key: "concluida",
+      label: "Concluída",
+      date: compra.bloqueado ? "Bloqueada" : null,
+    },
+  ];
+
+  const currentStep =
+    compra.situacao === "rascunho" || compra.situacao === "pendente"
+      ? 0
+      : compra.situacao === "recebida"
+      ? 1
+      : 2;
+
+  // also handle legacy "concluido"
+  const resolvedStep =
+    compra.situacao === "concluido" ? 2 : currentStep;
+
+  return (
+    <div className="flex items-center gap-0 mb-4">
+      {steps.map((step, i) => {
+        const reached = i <= resolvedStep;
+        const isLast = i === steps.length - 1;
+        return (
+          <div key={step.key} className="flex items-center">
+            {/* Dot + label */}
+            <div className="flex flex-col items-center">
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center border-2 text-[11px] font-bold transition-all"
+                style={{
+                  backgroundColor: reached ? C.esmeralda : "white",
+                  borderColor: reached ? C.esmeralda : C.cremeBorder,
+                  color: reached ? C.creme : "#9CA3AF",
+                }}
+              >
+                {i + 1}
+              </div>
+              <span
+                className="text-[10px] mt-1 whitespace-nowrap"
+                style={{ color: reached ? C.esmeralda : "#9CA3AF", fontWeight: reached ? 600 : 400 }}
+              >
+                {step.label}
+              </span>
+              {step.date && (
+                <span className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                  {typeof step.date === "string" && step.date !== "Bloqueada"
+                    ? fmtDate(step.date)
+                    : step.date}
+                </span>
+              )}
+            </div>
+            {/* Connector */}
+            {!isLast && (
+              <div
+                className="h-0.5 w-10 md:w-16 mx-1 mb-5 transition-all"
+                style={{ backgroundColor: i < resolvedStep ? C.esmeralda : C.cremeBorder }}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Modal Nova Compra ────────────────────────────────────────────────────────
+function NovaCompraModal({
+  isOpen,
+  onClose,
+  onSuccess,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: (id: number) => void;
+}) {
   const [fornecedorId, setFornecedorId] = useState("");
+  const [localId, setLocalId] = useState("1");
+  const [numeroNf, setNumeroNf] = useState("");
+  const [dataCompra, setDataCompra] = useState(new Date().toISOString().slice(0, 10));
   const [obs, setObs] = useState("");
-  const [contatos, setContatos] = useState<Contato[]>([]);
+  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [locais, setLocais] = useState<Local[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!isOpen) return;
-    setObs(""); setError(""); setFornecedorId("");
+    if (!isOpen) {
+      setObs(""); setError(""); setFornecedorId(""); setNumeroNf("");
+      setDataCompra(new Date().toISOString().slice(0, 10));
+      return;
+    }
     fetch("/api/compras/fornecedores")
       .then((r) => r.json())
-      .then((data) => setContatos((data as Contato[]) ?? []));
+      .then((data: { id_contato: number; nome: string }[]) =>
+        setFornecedores((data ?? []).map((c) => ({ id: c.id_contato, nome: c.nome })))
+      );
+    fetch("/api/locais-estoque")
+      .then((r) => r.json())
+      .then((data: Local[]) => {
+        setLocais(data ?? []);
+        if (data?.[0]) setLocalId(String(data[0].id));
+      });
   }, [isOpen]);
 
   async function handleSubmit() {
     setError("");
     setLoading(true);
-    const body: Record<string, unknown> = {};
+    const body: Record<string, unknown> = {
+      local_destino_id: localId ? Number(localId) : 1,
+    };
     if (fornecedorId) body.fornecedor_id = Number(fornecedorId);
-    if (obs) body.obs = obs;
+    if (numeroNf.trim()) body.numero_nf = numeroNf.trim();
+    if (dataCompra) body.data_compra = dataCompra;
+    if (obs.trim()) body.obs = obs.trim();
+
     const res = await fetch("/api/compras", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -84,39 +283,166 @@ function NovaCompraModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onCl
     const data = await res.json();
     setLoading(false);
     if (!res.ok) { setError(data.error ?? "Erro ao criar compra"); return; }
-    onSuccess();
+    onSuccess(data.id as number);
   }
 
   if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4 md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
-          <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>Nova Compra</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100"><X size={17} style={{ color: "#9CA3AF" }} /></button>
+    <div
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10"
+          style={{ borderColor: C.cremeBorder }}
+        >
+          <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>
+            Nova Compra
+          </h3>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100"
+          >
+            <X size={17} style={{ color: "#9CA3AF" }} />
+          </button>
         </div>
+
+        {/* Body */}
         <div className="px-6 py-5 space-y-4">
+          {/* Fornecedor */}
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>Fornecedor (opcional)</label>
-            <select value={fornecedorId} onChange={(e) => setFornecedorId(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none" style={{ borderColor: C.cremeBorder }}>
+            <label
+              className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
+              style={{ color: "#6B7280" }}
+            >
+              Fornecedor (opcional)
+            </label>
+            <select
+              value={fornecedorId}
+              onChange={(e) => setFornecedorId(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none"
+              style={{ borderColor: C.cremeBorder }}
+            >
               <option value="">— Sem fornecedor —</option>
-              {contatos.map((c) => <option key={c.id_contato} value={c.id_contato}>{c.nome}</option>)}
+              {fornecedores.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.nome}
+                </option>
+              ))}
             </select>
           </div>
+
+          {/* Local de destino */}
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>Observação</label>
-            <textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={2} placeholder="Detalhes da compra..."
-              className="w-full px-3 py-2.5 rounded-lg border text-sm resize-none focus:outline-none" style={{ borderColor: C.cremeBorder }} />
+            <label
+              className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
+              style={{ color: "#6B7280" }}
+            >
+              Local de Destino
+            </label>
+            <select
+              value={localId}
+              onChange={(e) => setLocalId(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none"
+              style={{ borderColor: C.cremeBorder }}
+            >
+              {locais.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.nome}
+                </option>
+              ))}
+            </select>
           </div>
-          {error && <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]" style={{ backgroundColor: "#FEF2F2", color: "#DC2626" }}><AlertCircle size={14} />{error}</div>}
+
+          {/* NF + Data */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label
+                className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
+                style={{ color: "#6B7280" }}
+              >
+                Número NF
+              </label>
+              <input
+                type="text"
+                value={numeroNf}
+                onChange={(e) => setNumeroNf(e.target.value)}
+                placeholder="Ex: 001234"
+                className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none"
+                style={{ borderColor: C.cremeBorder }}
+              />
+            </div>
+            <div>
+              <label
+                className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
+                style={{ color: "#6B7280" }}
+              >
+                Data da Compra
+              </label>
+              <input
+                type="date"
+                value={dataCompra}
+                onChange={(e) => setDataCompra(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none"
+                style={{ borderColor: C.cremeBorder }}
+              />
+            </div>
+          </div>
+
+          {/* Obs */}
+          <div>
+            <label
+              className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
+              style={{ color: "#6B7280" }}
+            >
+              Observação
+            </label>
+            <textarea
+              value={obs}
+              onChange={(e) => setObs(e.target.value)}
+              rows={2}
+              placeholder="Detalhes da compra..."
+              className="w-full px-3 py-2.5 rounded-lg border text-sm resize-none focus:outline-none"
+              style={{ borderColor: C.cremeBorder }}
+            />
+          </div>
+
+          {error && (
+            <div
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]"
+              style={{ backgroundColor: "#FEF2F2", color: "#DC2626" }}
+            >
+              <AlertCircle size={14} />
+              {error}
+            </div>
+          )}
         </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t" style={{ borderColor: C.cremeBorder }}>
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px]" style={{ color: "#6B7280" }}>Cancelar</button>
-          <button onClick={handleSubmit} disabled={loading}
+
+        {/* Footer */}
+        <div
+          className="flex items-center justify-end gap-3 px-6 py-4 border-t"
+          style={{ borderColor: C.cremeBorder }}
+        >
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px]" style={{ color: "#6B7280" }}>
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
             className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
-            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-            {loading ? <><Loader2 size={14} className="animate-spin" />Criando...</> : "Criar Compra"}
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}
+          >
+            {loading ? (
+              <><Loader2 size={14} className="animate-spin" /> Criando...</>
+            ) : (
+              "Criar Compra"
+            )}
           </button>
         </div>
       </div>
@@ -124,301 +450,978 @@ function NovaCompraModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onCl
   );
 }
 
-// ─── Detalhe da Compra ──────────────────────────────────────────────────────
-function CompraDetalhe({ compra, onBack, onRefresh }: { compra: CompraRow; onBack: () => void; onRefresh: () => void }) {
+// ─── AddItemForm ──────────────────────────────────────────────────────────────
+function AddItemForm({
+  compraId,
+  insumos,
+  onAdded,
+}: {
+  compraId: number;
+  insumos: Insumo[];
+  onAdded: () => void;
+}) {
+  const [busca, setBusca] = useState("");
+  const [insumoSelecionado, setInsumoSelecionado] = useState<Insumo | null>(null);
+  const [pesoG, setPesoG] = useState("");
+  const [qtd, setQtd] = useState("");
+  const [valorUnitario, setValorUnitario] = useState("");
+  const [custoPorCt, setCustoPorCt] = useState("");
+  const [qtdPecas, setQtdPecas] = useState("");
+  const [loteRef, setLoteRef] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState("");
+
+  const insumosFiltrados = useMemo(() => {
+    if (!busca.trim()) return insumos.slice(0, 50);
+    const b = busca.toLowerCase();
+    return insumos.filter((i) => i.nome.toLowerCase().includes(b)).slice(0, 50);
+  }, [insumos, busca]);
+
+  function selectInsumo(ins: Insumo) {
+    setInsumoSelecionado(ins);
+    setBusca(ins.nome);
+    setPesoG(""); setQtd(""); setValorUnitario("");
+    setCustoPorCt(""); setQtdPecas(""); setLoteRef("");
+    setError("");
+  }
+
+  const catId = insumoSelecionado?.categoria_id ?? 0;
+  const ehPedra = catId === 2;
+  const ehMetal = [1, 3, 4].includes(catId);
+  const ehBanho = catId === 5;
+  const pesoCt = pesoG ? gramasToCt(parseFloat(pesoG)) : 0;
+
+  // Preview do total
+  let previewTotal = 0;
+  if (ehMetal || ehBanho || (!ehPedra && !ehMetal && !ehBanho)) {
+    const q = parseFloat(ehMetal ? pesoG : qtd);
+    const v = parseFloat(valorUnitario);
+    if (!isNaN(q) && !isNaN(v)) previewTotal = q * v;
+  } else if (ehPedra) {
+    const c = parseFloat(custoPorCt);
+    if (!isNaN(pesoCt) && pesoCt > 0 && !isNaN(c)) previewTotal = pesoCt * c;
+  }
+
+  async function handleAdd() {
+    setError("");
+    if (!insumoSelecionado) { setError("Selecione um insumo"); return; }
+
+    let body: Record<string, unknown>;
+
+    if (ehMetal) {
+      const q = parseFloat(pesoG);
+      if (isNaN(q) || q <= 0) { setError("Informe o peso (g)"); return; }
+      body = { insumo_id: insumoSelecionado.id, qtd: q, valor_unitario: valorUnitario ? parseFloat(valorUnitario) : null };
+    } else if (ehPedra) {
+      if (!pesoG || parseFloat(pesoG) <= 0) { setError("Informe o peso em gramas"); return; }
+      const ptCt = gramasToCt(parseFloat(pesoG));
+      body = {
+        insumo_id: insumoSelecionado.id,
+        peso_ct: ptCt,
+        qtd_pecas: qtdPecas ? parseInt(qtdPecas) : undefined,
+        custo_por_ct: custoPorCt ? parseFloat(custoPorCt) : undefined,
+        lote_referencia: loteRef || undefined,
+      };
+    } else {
+      const q = parseFloat(qtd);
+      if (isNaN(q) || q <= 0) { setError("Informe a quantidade"); return; }
+      body = { insumo_id: insumoSelecionado.id, qtd: q, valor_unitario: valorUnitario ? parseFloat(valorUnitario) : null };
+    }
+
+    setAdding(true);
+    const res = await fetch(`/api/compras/${compraId}/itens`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    setAdding(false);
+    if (!res.ok) { setError(data.error ?? "Erro ao adicionar item"); return; }
+    // Reset form
+    setInsumoSelecionado(null);
+    setBusca(""); setPesoG(""); setQtd(""); setValorUnitario("");
+    setCustoPorCt(""); setQtdPecas(""); setLoteRef("");
+    onAdded();
+  }
+
+  return (
+    <div
+      className="rounded-xl border p-4 space-y-3"
+      style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>
+        Adicionar Item
+      </p>
+
+      {/* Busca de insumo */}
+      <div className="relative">
+        <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
+          Insumo
+        </label>
+        <div className="relative">
+          <Search size={13} className="absolute left-2.5 top-2.5" style={{ color: "#9CA3AF" }} />
+          <input
+            type="text"
+            value={busca}
+            onChange={(e) => { setBusca(e.target.value); setInsumoSelecionado(null); }}
+            placeholder="Buscar insumo..."
+            className="w-full pl-7 pr-3 py-2 rounded-lg border text-sm focus:outline-none bg-white"
+            style={{ borderColor: C.cremeBorder }}
+          />
+        </div>
+        {busca && !insumoSelecionado && insumosFiltrados.length > 0 && (
+          <div
+            className="absolute z-20 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto"
+            style={{ borderColor: C.cremeBorder }}
+          >
+            {insumosFiltrados.map((ins) => (
+              <button
+                key={ins.id}
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-amber-50 transition-colors"
+                style={{ color: C.esmeralda }}
+                onClick={() => selectInsumo(ins)}
+              >
+                {ins.nome}
+                <span className="ml-2 text-[11px]" style={{ color: "#9CA3AF" }}>
+                  cat.{ins.categoria_id}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Campos condicionais */}
+      {insumoSelecionado && (
+        <>
+          {ehMetal && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
+                  Peso (g)
+                </label>
+                <input
+                  type="number" step="0.001" min="0.001"
+                  value={pesoG} onChange={(e) => setPesoG(e.target.value)}
+                  placeholder="0.000"
+                  className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
+                  style={{ borderColor: C.cremeBorder }}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
+                  Valor unitário (R$/g)
+                </label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={valorUnitario} onChange={(e) => setValorUnitario(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
+                  style={{ borderColor: C.cremeBorder }}
+                />
+              </div>
+            </div>
+          )}
+
+          {ehPedra && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
+                    Peso (g)
+                  </label>
+                  <input
+                    type="number" step="0.0001" min="0.0001"
+                    value={pesoG} onChange={(e) => setPesoG(e.target.value)}
+                    placeholder="0.0000"
+                    className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
+                    style={{ borderColor: C.cremeBorder }}
+                  />
+                  {pesoG && parseFloat(pesoG) > 0 && (
+                    <p className="text-[11px] mt-1" style={{ color: "#6B7280" }}>
+                      = {formatPesoCt(pesoCt)}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
+                    Custo por ct (R$/ct)
+                  </label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={custoPorCt} onChange={(e) => setCustoPorCt(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
+                    style={{ borderColor: C.cremeBorder }}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
+                    Qtd peças (opcional)
+                  </label>
+                  <input
+                    type="number" step="1" min="1"
+                    value={qtdPecas} onChange={(e) => setQtdPecas(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
+                    style={{ borderColor: C.cremeBorder }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
+                    Lote referência
+                  </label>
+                  <input
+                    type="text"
+                    value={loteRef} onChange={(e) => setLoteRef(e.target.value)}
+                    placeholder="Ex: LOTE-001"
+                    className="w-full px-2.5 py-2 rounded-lg border text-sm focus:outline-none bg-white"
+                    style={{ borderColor: C.cremeBorder }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {ehBanho && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
+                  Quantidade (ml)
+                </label>
+                <input
+                  type="number" step="0.01" min="0.01"
+                  value={qtd} onChange={(e) => setQtd(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
+                  style={{ borderColor: C.cremeBorder }}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
+                  Valor unitário (R$/ml)
+                </label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={valorUnitario} onChange={(e) => setValorUnitario(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
+                  style={{ borderColor: C.cremeBorder }}
+                />
+              </div>
+            </div>
+          )}
+
+          {!ehMetal && !ehPedra && !ehBanho && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
+                  Quantidade (un)
+                </label>
+                <input
+                  type="number" step="1" min="1"
+                  value={qtd} onChange={(e) => setQtd(e.target.value)}
+                  placeholder="0"
+                  className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
+                  style={{ borderColor: C.cremeBorder }}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
+                  Valor unitário (R$/un)
+                </label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={valorUnitario} onChange={(e) => setValorUnitario(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
+                  style={{ borderColor: C.cremeBorder }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Preview */}
+          {previewTotal > 0 && (
+            <div
+              className="flex items-center justify-between px-3 py-2 rounded-lg text-[13px]"
+              style={{ backgroundColor: "#ECFDF5", color: "#059669" }}
+            >
+              <span>Total previsto</span>
+              <span className="font-bold">{formatMoeda(previewTotal)}</span>
+            </div>
+          )}
+        </>
+      )}
+
+      {error && (
+        <div
+          className="flex items-center gap-2 px-3 py-2 rounded-lg text-[13px]"
+          style={{ backgroundColor: "#FEF2F2", color: "#DC2626" }}
+        >
+          <AlertCircle size={14} />
+          {error}
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <button
+          onClick={handleAdd}
+          disabled={adding || !insumoSelecionado}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
+          style={{ backgroundColor: "#18403612", color: C.esmeralda }}
+        >
+          {adding ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+          Adicionar Item
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── ConfirmDialog ────────────────────────────────────────────────────────────
+function ConfirmDialog({
+  isOpen,
+  title,
+  message,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onCancel}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-semibold mb-2" style={{ color: "#111827" }}>{title}</h3>
+        <p className="text-sm mb-6" style={{ color: "#6B7280" }}>{message}</p>
+        <div className="flex justify-end gap-3">
+          <button onClick={onCancel} className="px-4 py-2 rounded-lg text-[13px]" style={{ color: "#6B7280" }}>
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}
+          >
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+            Confirmar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Detail Panel ─────────────────────────────────────────────────────────────
+function CompraDetalhe({
+  compra,
+  insumos,
+  canEdit,
+  onBack,
+  onRefreshCompra,
+}: {
+  compra: Compra;
+  insumos: Insumo[];
+  canEdit: boolean;
+  onBack: () => void;
+  onRefreshCompra: () => void;
+}) {
   const [itens, setItens] = useState<ItemCompra[]>([]);
-  const [insumos, setInsumos] = useState<Insumo[]>([]);
-  const [depositos, setDepositos] = useState<Deposito[]>([]);
-  const [loadingItens, setLoadingItens] = useState(true);
+  const [loadingItens, setLoadingItens] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [confirmConcluir, setConfirmConcluir] = useState(false);
 
-  // Novo item form
-  const [novoInsumo, setNovoInsumo] = useState("");
-  const [novoDeposito, setNovoDeposito] = useState("1");
-  const [novoQtd, setNovoQtd] = useState("");
-  const [novoValor, setNovoValor] = useState("");
-  const [addingItem, setAddingItem] = useState(false);
+  const bloqueada = compra.bloqueado || compra.situacao === "concluida" || compra.situacao === "concluido";
 
   const loadItens = useCallback(async () => {
     setLoadingItens(true);
-    const data = await fetch(`/api/compras/${compra.id}/itens`).then((r) => r.json());
-    setItens((data as ItemCompra[]) ?? []);
-    setLoadingItens(false);
+    try {
+      const data = await fetch(`/api/compras/${compra.id}/itens`).then((r) => r.json());
+      setItens((data as ItemCompra[]) ?? []);
+    } finally {
+      setLoadingItens(false);
+    }
   }, [compra.id]);
 
   useEffect(() => {
     loadItens();
-    fetch("/api/pcp/insumos")
-      .then((r) => r.json())
-      .then((data: Insumo[]) => { setInsumos(data ?? []); if (data?.[0]) setNovoInsumo(String(data[0].id)); });
-    fetch("/api/depositos")
-      .then((r) => r.json())
-      .then((data: Deposito[]) => setDepositos(data ?? []));
-  }, []);
-
-  async function handleAddItem() {
-    setError("");
-    const qtdNum = parseFloat(novoQtd);
-    if (!novoInsumo || isNaN(qtdNum) || qtdNum <= 0) { setError("Informe insumo e quantidade."); return; }
-    setAddingItem(true);
-    const res = await fetch(`/api/compras/${compra.id}/itens`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        insumo_id: Number(novoInsumo),
-        deposito_id: Number(novoDeposito) || 1,
-        qtd: qtdNum,
-        valor_unitario: novoValor ? parseFloat(novoValor) : null,
-      }),
-    });
-    const data = await res.json();
-    setAddingItem(false);
-    if (!res.ok) { setError(data.error ?? "Erro ao adicionar item"); return; }
-    setNovoQtd(""); setNovoValor("");
-    loadItens();
-    onRefresh();
-  }
+  }, [loadItens]);
 
   async function handleRemoveItem(itemId: number) {
     await fetch(`/api/compras/${compra.id}/itens/${itemId}`, { method: "DELETE" });
     loadItens();
-    onRefresh();
+    onRefreshCompra();
+  }
+
+  async function handleReceber() {
+    setError(""); setSuccess(""); setActionLoading(true);
+    const res = await fetch(`/api/compras/${compra.id}/receber`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    setActionLoading(false);
+    if (!res.ok) { setError(data.error ?? "Erro ao registrar recebimento"); return; }
+    setSuccess("Recebimento registrado!");
+    onRefreshCompra();
   }
 
   async function handleConcluir() {
-    setError(""); setSuccess("");
-    setActionLoading(true);
+    setError(""); setSuccess(""); setActionLoading(true);
+    setConfirmConcluir(false);
     const res = await fetch(`/api/compras/${compra.id}/concluir`, { method: "PATCH" });
     const data = await res.json();
     setActionLoading(false);
     if (!res.ok) { setError(data.error ?? "Erro ao concluir compra"); return; }
     setSuccess("Compra concluída! Estoque atualizado.");
-    onRefresh();
-    setTimeout(onBack, 1500);
+    onRefreshCompra();
   }
 
-  const totalItens = itens.reduce((sum, i) => sum + Number(i.valor_total ?? 0), 0);
-  const bloqueada = compra.bloqueado || compra.situacao === "concluido";
+  const totalCalc = itens.reduce((sum, i) => sum + Number(i.valor_total ?? 0), 0);
 
   return (
-    <div className="px-3 md:px-6 py-4 md:py-8">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-sm mb-4 transition-opacity hover:opacity-70" style={{ color: "#6B7280" }}>
-        <ArrowLeft size={15} /> Voltar à lista
-      </button>
-
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-4 md:mb-6">
-        <div>
-          <h2 className="text-xl md:text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
+    <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+      {/* Header */}
+      <div className="px-4 md:px-6 py-4 border-b" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+        <div className="flex items-center gap-3 mb-1">
+          {/* Mobile back */}
+          <button
+            onClick={onBack}
+            className="md:hidden flex items-center gap-1.5 text-sm transition-opacity hover:opacity-70"
+            style={{ color: "#6B7280" }}
+          >
+            <ArrowLeft size={15} />
+          </button>
+          <h3
+            className="text-lg font-semibold"
+            style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}
+          >
             Compra #{compra.id}
-          </h2>
-          <p className="text-sm mt-1" style={{ color: "#6B7280" }}>
-            {compra.fornecedor_nome ?? "Sem fornecedor"} · {fmt(compra.created_at)}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+            {compra.fornecedor_nome ? ` — ${compra.fornecedor_nome}` : ""}
+          </h3>
           <SituacaoBadge situacao={compra.situacao} bloqueado={compra.bloqueado} />
-          {!bloqueada && itens.length > 0 && (
-            <button onClick={handleConcluir} disabled={actionLoading}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-              {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-              Concluir Compra
-            </button>
-          )}
         </div>
+        {compra.local_nome && (
+          <p className="text-[12px]" style={{ color: "#6B7280" }}>
+            Local: {compra.local_nome}
+          </p>
+        )}
       </div>
 
-      {/* Stat card */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-4 md:mb-6">
-        {[
-          { label: "Itens", value: String(itens.length), color: C.esmeralda },
-          { label: "Total Calculado", value: `R$ ${totalItens.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`, color: "#059669" },
-          { label: "Obs", value: compra.obs ?? "—", color: "#6B7280" },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="rounded-xl p-4 border" style={{ backgroundColor: C.cremeBg, borderColor: C.cremeBorder }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#9CA3AF" }}>{label}</p>
-            <p className="text-sm font-semibold" style={{ color }}>{value}</p>
+      <div className="px-4 md:px-6 py-4 space-y-4">
+        {/* Timeline */}
+        <Timeline compra={compra} />
+
+        {/* Stats cards */}
+        <div className="grid grid-cols-3 gap-3">
+          <StatCard label="Total" value={formatMoeda(totalCalc || compra.total)} color="#059669" />
+          <StatCard label="Itens" value={String(compra.total_itens)} />
+          <StatCard label="NF" value={compra.numero_nf || "—"} />
+        </div>
+
+        {/* Feedback */}
+        {error && (
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]" style={{ backgroundColor: "#FEF2F2", color: "#DC2626" }}>
+            <AlertCircle size={14} />{error}
           </div>
-        ))}
-      </div>
+        )}
+        {success && (
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]" style={{ backgroundColor: "#ECFDF5", color: "#059669" }}>
+            <CheckCircle2 size={14} />{success}
+          </div>
+        )}
 
-      {/* Feedback */}
-      {error && <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px] mb-4" style={{ backgroundColor: "#FEF2F2", color: "#DC2626" }}><AlertCircle size={14} />{error}</div>}
-      {success && <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px] mb-4" style={{ backgroundColor: "#ECFDF5", color: "#059669" }}><CheckCircle2 size={14} />{success}</div>}
-
-      {/* Itens table */}
-      <div className="rounded-xl border overflow-hidden mb-4" style={{ borderColor: C.cremeBorder }}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr style={{ backgroundColor: C.cremeBg, borderBottom: "1px solid #E8DCC8" }}>
-              {["Insumo", "Depósito", "Qtd", "Valor Unit.", "Valor Total", ""].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loadingItens && (
-              <tr><td colSpan={6} className="text-center py-8"><Loader2 size={18} className="animate-spin mx-auto" style={{ color: "#9CA3AF" }} /></td></tr>
-            )}
-            {!loadingItens && itens.length === 0 && (
-              <tr><td colSpan={6} className="text-center py-10 text-sm" style={{ color: "#9CA3AF" }}>Nenhum item adicionado</td></tr>
-            )}
-            {itens.map((item, i) => {
-              const ins = insumos.find((x) => x.id === item.insumo_id);
-              const dep = depositos.find((x) => x.id === item.deposito_id);
-              return (
-                <tr key={item.id} style={{ borderTop: i > 0 ? "1px solid #F3EADA" : undefined }}>
-                  <td className="px-4 py-3 font-medium" style={{ color: C.esmeralda }}>{ins?.nome ?? `#${item.insumo_id}`}</td>
-                  <td className="px-4 py-3 text-sm" style={{ color: "#6B7280" }}>{dep?.nome ?? `#${item.deposito_id}`}</td>
-                  <td className="px-4 py-3 font-mono text-sm">{Number(item.qtd).toFixed(2)}</td>
-                  <td className="px-4 py-3 font-mono text-sm" style={{ color: "#6B7280" }}>
-                    {item.valor_unitario != null ? `R$ ${Number(item.valor_unitario).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—"}
-                  </td>
-                  <td className="px-4 py-3 font-mono font-semibold" style={{ color: "#059669" }}>
-                    {item.valor_total != null ? `R$ ${Number(item.valor_total).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {!bloqueada && (
-                      <button onClick={() => handleRemoveItem(item.id)} className="text-[11px] px-2 py-1 rounded hover:bg-red-50 transition-colors" style={{ color: "#DC2626" }}>
-                        Remover
-                      </button>
-                    )}
+        {/* Items table */}
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
+                {["Insumo", "Categoria", "Qtd/Peso", "Unid", "Vlr Unit.", "Total", ""].map((h) => (
+                  <th
+                    key={h}
+                    className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider"
+                    style={{ color: "#9CA3AF" }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loadingItens && (
+                <tr>
+                  <td colSpan={7} className="text-center py-8">
+                    <Loader2 size={18} className="animate-spin mx-auto" style={{ color: "#9CA3AF" }} />
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              )}
+              {!loadingItens && itens.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="text-center py-10 text-sm" style={{ color: "#9CA3AF" }}>
+                    Nenhum item adicionado
+                  </td>
+                </tr>
+              )}
+              {itens.map((item, i) => {
+                const isPedra = item.categoria_id === 2;
+                const isMetal = [1, 3, 4].includes(item.categoria_id);
+                const qtdDisplay = isPedra
+                  ? formatPesoCt(item.peso_ct)
+                  : isMetal
+                  ? `${formatPeso(item.qtd)} g`
+                  : `${Number(item.qtd).toFixed(2)} ${item.unidade ?? ""}`;
+                const vlrUnit = isPedra
+                  ? (item.custo_por_ct != null ? formatMoeda(item.custo_por_ct) : "—")
+                  : item.valor_unitario != null
+                  ? formatMoeda(item.valor_unitario)
+                  : "—";
+
+                return (
+                  <tr
+                    key={item.id}
+                    style={{ borderTop: i > 0 ? `1px solid ${C.creme}` : undefined }}
+                  >
+                    <td className="px-3 py-2.5 font-medium text-[13px]" style={{ color: C.esmeralda }}>
+                      {item.insumo_nome}
+                      {isPedra && item.qtd_pecas ? (
+                        <span className="block text-[11px]" style={{ color: "#9CA3AF" }}>
+                          {item.qtd_pecas} pç
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2.5 text-[12px]" style={{ color: "#6B7280" }}>
+                      {item.categoria_nome}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-[12px]">{qtdDisplay}</td>
+                    <td className="px-3 py-2.5 text-[12px]" style={{ color: "#9CA3AF" }}>
+                      {isPedra ? "ct" : item.unidade ?? ""}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-[12px]" style={{ color: "#6B7280" }}>
+                      {vlrUnit}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono font-semibold text-[12px]" style={{ color: "#059669" }}>
+                      {item.valor_total != null ? formatMoeda(item.valor_total) : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      {!bloqueada && canEdit && (
+                        <button
+                          onClick={() => handleRemoveItem(item.id)}
+                          className="text-[11px] px-2 py-1 rounded hover:bg-red-50 transition-colors"
+                          style={{ color: "#DC2626" }}
+                        >
+                          Remover
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Add item form */}
+        {!bloqueada && canEdit && (
+          <AddItemForm
+            compraId={compra.id}
+            insumos={insumos}
+            onAdded={() => { loadItens(); onRefreshCompra(); }}
+          />
+        )}
+
+        {/* Action buttons */}
+        {canEdit && (
+          <div className="flex items-center gap-3 flex-wrap">
+            {!bloqueada && (compra.situacao === "rascunho" || compra.situacao === "pendente") && (
+              <>
+                <button
+                  onClick={handleReceber}
+                  disabled={actionLoading}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50 border"
+                  style={{ borderColor: "#1D4ED8", color: "#1D4ED8", backgroundColor: "#EFF6FF" }}
+                >
+                  {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <Package size={14} />}
+                  Registrar Recebimento
+                </button>
+                <button
+                  onClick={() => setConfirmConcluir(true)}
+                  disabled={actionLoading || itens.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                >
+                  {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                  Concluir Direto
+                </button>
+              </>
+            )}
+
+            {!bloqueada && compra.situacao === "recebida" && (
+              <button
+                onClick={() => setConfirmConcluir(true)}
+                disabled={actionLoading || itens.length === 0}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}
+              >
+                {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                Concluir Compra
+              </button>
+            )}
+
+            {bloqueada && (
+              <div
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-[13px]"
+                style={{ backgroundColor: "#F3F4F6", color: "#6B7280" }}
+              >
+                <Lock size={14} /> Compra bloqueada
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Adicionar item */}
-      {!bloqueada && (
-        <div className="rounded-xl border p-4" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
-          <p className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "#9CA3AF" }}>Adicionar Item</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
-            <div>
-              <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>Insumo</label>
-              <select value={novoInsumo} onChange={(e) => setNovoInsumo(e.target.value)}
-                className="w-full px-2.5 py-2 rounded-lg border text-sm focus:outline-none bg-white" style={{ borderColor: C.cremeBorder }}>
-                {insumos.map((i) => <option key={i.id} value={i.id}>{i.nome}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>Depósito</label>
-              <select value={novoDeposito} onChange={(e) => setNovoDeposito(e.target.value)}
-                className="w-full px-2.5 py-2 rounded-lg border text-sm focus:outline-none bg-white" style={{ borderColor: C.cremeBorder }}>
-                {depositos.map((d) => <option key={d.id} value={d.id}>{d.nome}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>Qtd (g)</label>
-              <input type="number" step="0.001" min="0.001" value={novoQtd} onChange={(e) => setNovoQtd(e.target.value)}
-                placeholder="0.000" className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white" style={{ borderColor: C.cremeBorder }} />
-            </div>
-            <div>
-              <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>Valor Unit. (R$)</label>
-              <input type="number" step="0.01" min="0" value={novoValor} onChange={(e) => setNovoValor(e.target.value)}
-                placeholder="0.00" className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white" style={{ borderColor: C.cremeBorder }} />
-            </div>
-          </div>
-          <div className="mt-3 flex justify-end">
-            <button onClick={handleAddItem} disabled={addingItem}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
-              style={{ backgroundColor: "#18403612", color: C.esmeralda }}>
-              {addingItem ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-              Adicionar Item
-            </button>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        isOpen={confirmConcluir}
+        title="Concluir Compra"
+        message={`Ao concluir, os itens serão adicionados ao estoque${compra.local_nome ? ` do local ${compra.local_nome}` : ""}. Esta ação não pode ser desfeita.`}
+        onConfirm={handleConcluir}
+        onCancel={() => setConfirmConcluir(false)}
+        loading={actionLoading}
+      />
     </div>
   );
 }
 
-// ─── Main Client ────────────────────────────────────────────────────────────
-export default function ComprasClient({ compras }: { compras: CompraRow[] }) {
-  const router = useRouter();
-  const [selected, setSelected] = useState<CompraRow | null>(null);
-  const [modalNova, setModalNova] = useState(false);
-  const [, startTransition] = useTransition();
+// ─── Main Client ──────────────────────────────────────────────────────────────
+export default function ComprasClient({ compras: initialCompras }: { compras: Compra[] }) {
+  const { role } = useAuth();
+  const canEdit = ROLES_COMPRAS.includes(role as typeof ROLES_COMPRAS[number]);
 
-  const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
+  const [compras, setCompras] = useState<Compra[]>(initialCompras);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [insumos, setInsumos] = useState<Insumo[]>([]);
+  const [locais, setLocais] = useState<Local[]>([]);
+  const [showNovaCompra, setShowNovaCompra] = useState(false);
 
-  if (selected) {
-    return (
-      <CompraDetalhe
-        compra={selected}
-        onBack={() => { setSelected(null); refresh(); }}
-        onRefresh={refresh}
-      />
-    );
+  // Filters
+  const [busca, setBusca] = useState("");
+  const [filtroSituacao, setFiltroSituacao] = useState<"" | "rascunho" | "recebida" | "concluida">("");
+  const [filtroLocal, setFiltroLocal] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch("/api/pcp/insumos")
+      .then((r) => r.json())
+      .then((data: Insumo[]) => setInsumos(data ?? []));
+    fetch("/api/locais-estoque")
+      .then((r) => r.json())
+      .then((data: Local[]) => setLocais(data ?? []));
+  }, []);
+
+  const reloadCompras = useCallback(async () => {
+    const params = new URLSearchParams();
+    if (filtroSituacao) params.set("situacao", filtroSituacao);
+    if (filtroLocal) params.set("local_id", String(filtroLocal));
+    const url = `/api/compras${params.toString() ? "?" + params.toString() : ""}`;
+    const data = await fetch(url).then((r) => r.json());
+    setCompras((data as Compra[]) ?? []);
+  }, [filtroSituacao, filtroLocal]);
+
+  // Reload when filters change
+  useEffect(() => {
+    reloadCompras();
+  }, [reloadCompras]);
+
+  // Stats
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  const stats = useMemo(() => {
+    const totalMes = compras
+      .filter((c) => {
+        const d = new Date(c.created_at);
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      })
+      .reduce((sum, c) => sum + Number(c.total ?? 0), 0);
+
+    const rascunho = compras.filter((c) => c.situacao === "rascunho" || c.situacao === "pendente").length;
+    const recebidas = compras.filter((c) => c.situacao === "recebida").length;
+    const concluidas = compras.filter((c) => c.situacao === "concluida" || c.situacao === "concluido").length;
+
+    return { totalMes, rascunho, recebidas, concluidas };
+  }, [compras, currentMonth, currentYear]);
+
+  // Filtered list
+  const filteredCompras = useMemo(() => {
+    let list = compras;
+    if (busca.trim()) {
+      const b = busca.toLowerCase();
+      list = list.filter((c) => c.fornecedor_nome?.toLowerCase().includes(b));
+    }
+    return list;
+  }, [compras, busca]);
+
+  const selectedCompra = selectedId != null ? compras.find((c) => c.id === selectedId) ?? null : null;
+
+  function handleSelectCompra(compra: Compra) {
+    setSelectedId(compra.id);
+  }
+
+  async function handleNovaCompraSuccess(newId: number) {
+    setShowNovaCompra(false);
+    await reloadCompras();
+    setSelectedId(newId);
   }
 
   return (
-    <div className="px-3 md:px-6 py-4 md:py-8">
-      {/* Header */}
-      <div className="mb-4 md:mb-6 flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-xl md:text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
-            Compras
-          </h2>
-          <p className="text-sm mt-1" style={{ color: "#6B7280" }}>
-            {compras.length} compra{compras.length !== 1 ? "s" : ""} — alissonerp.compras
-          </p>
-        </div>
-        <button
-          onClick={() => setModalNova(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
-          style={{ backgroundColor: C.esmeralda, color: C.creme }}
-        >
-          <Plus size={15} /> Nova Compra
-        </button>
+    <div className="p-4 md:p-6 space-y-4">
+      {/* Stats Row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard
+          label="Total do mês"
+          value={formatMoeda(stats.totalMes)}
+          color="#059669"
+        />
+        <StatCard
+          label="Rascunho"
+          value={String(stats.rascunho)}
+          color="#92400E"
+        />
+        <StatCard
+          label="Recebidas"
+          value={String(stats.recebidas)}
+          color="#1D4ED8"
+        />
+        <StatCard
+          label="Concluídas"
+          value={String(stats.concluidas)}
+          color="#059669"
+        />
       </div>
 
-      {/* Tabela */}
-      <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr style={{ backgroundColor: C.cremeBg, borderBottom: "1px solid #E8DCC8" }}>
-              {["ID", "Fornecedor", "Status", "Itens", "Total (R$)", "Data", ""].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {compras.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-12 text-sm" style={{ color: "#9CA3AF" }}>Nenhuma compra encontrada</td></tr>
-            )}
-            {compras.map((c, i) => (
-              <tr
-                key={c.id}
-                className="cursor-pointer transition-colors hover:bg-amber-50"
-                style={{ borderTop: i > 0 ? "1px solid #F3EADA" : undefined }}
-                onClick={() => setSelected(c)}
+      {/* List + Detail */}
+      <div className="flex flex-col md:flex-row gap-4">
+        {/* Left: List */}
+        <div className={`${selectedId != null ? "hidden md:block" : ""} md:w-2/5`}>
+          {/* List header */}
+          <div
+            className="rounded-t-xl border border-b-0 px-4 py-3 flex items-center justify-between gap-3"
+            style={{ backgroundColor: C.cremeBg, borderColor: C.cremeBorder }}
+          >
+            <div className="flex items-center gap-2">
+              <ShoppingCart size={16} style={{ color: C.esmeralda }} />
+              <span className="text-sm font-semibold" style={{ color: C.esmeralda }}>
+                Compras
+              </span>
+              <span
+                className="text-[11px] px-1.5 py-0.5 rounded-full"
+                style={{ backgroundColor: "#E5E7EB", color: "#6B7280" }}
               >
-                <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>#{c.id}</td>
-                <td className="px-4 py-3 font-medium" style={{ color: C.esmeralda }}>{c.fornecedor_nome ?? "—"}</td>
-                <td className="px-4 py-3"><SituacaoBadge situacao={c.situacao} bloqueado={c.bloqueado} /></td>
-                <td className="px-4 py-3 font-mono text-center" style={{ color: "#374151" }}>{c.total_itens}</td>
-                <td className="px-4 py-3 font-mono font-semibold" style={{ color: c.total > 0 ? "#059669" : "#9CA3AF" }}>
-                  {c.total > 0 ? `R$ ${Number(c.total).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—"}
-                </td>
-                <td className="px-4 py-3 font-mono text-[11px]" style={{ color: "#9CA3AF" }}>{fmt(c.created_at)}</td>
-                <td className="px-4 py-3 text-right">
-                  {c.bloqueado && <Lock size={13} style={{ color: "#9CA3AF", display: "inline" }} />}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                {filteredCompras.length}
+              </span>
+            </div>
+            {canEdit && (
+              <button
+                onClick={() => setShowNovaCompra(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}
+              >
+                <Plus size={12} /> Nova Compra
+              </button>
+            )}
+          </div>
+
+          {/* Filters */}
+          <div
+            className="border border-b-0 px-4 py-2.5 space-y-2"
+            style={{ backgroundColor: "white", borderColor: C.cremeBorder }}
+          >
+            {/* Search */}
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-2.5" style={{ color: "#9CA3AF" }} />
+              <input
+                type="text"
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar fornecedor..."
+                className="w-full pl-7 pr-3 py-2 rounded-lg border text-[13px] focus:outline-none"
+                style={{ borderColor: C.cremeBorder }}
+              />
+            </div>
+
+            {/* Situacao + Local */}
+            <div className="flex gap-2">
+              <select
+                value={filtroSituacao}
+                onChange={(e) => setFiltroSituacao(e.target.value as "" | "rascunho" | "recebida" | "concluida")}
+                className="flex-1 px-2.5 py-1.5 rounded-lg border text-[12px] focus:outline-none"
+                style={{ borderColor: C.cremeBorder }}
+              >
+                <option value="">Todas situações</option>
+                <option value="rascunho">Rascunho</option>
+                <option value="recebida">Recebida</option>
+                <option value="concluida">Concluída</option>
+              </select>
+              <select
+                value={filtroLocal ?? ""}
+                onChange={(e) => setFiltroLocal(e.target.value ? Number(e.target.value) : null)}
+                className="flex-1 px-2.5 py-1.5 rounded-lg border text-[12px] focus:outline-none"
+                style={{ borderColor: C.cremeBorder }}
+              >
+                <option value="">Todos locais</option>
+                {locais.map((l) => (
+                  <option key={l.id} value={l.id}>{l.nome}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Table (desktop) / Cards (mobile) */}
+          <div
+            className="rounded-b-xl border overflow-hidden"
+            style={{ borderColor: C.cremeBorder }}
+          >
+            {/* Desktop table */}
+            <table className="hidden md:table w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
+                  {["#", "Fornecedor", "Status", "Itens", "Total", "Data", "Local"].map((h) => (
+                    <th
+                      key={h}
+                      className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider"
+                      style={{ color: "#9CA3AF" }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredCompras.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="text-center py-10 text-sm" style={{ color: "#9CA3AF" }}>
+                      Nenhuma compra encontrada
+                    </td>
+                  </tr>
+                )}
+                {filteredCompras.map((c, i) => (
+                  <tr
+                    key={c.id}
+                    className="cursor-pointer transition-colors hover:bg-amber-50"
+                    style={{
+                      borderTop: i > 0 ? `1px solid ${C.creme}` : undefined,
+                      backgroundColor: selectedId === c.id ? "#FEF3C7" : undefined,
+                    }}
+                    onClick={() => handleSelectCompra(c)}
+                  >
+                    <td className="px-3 py-2.5 font-mono text-[11px]" style={{ color: "#9CA3AF" }}>
+                      #{c.id}
+                    </td>
+                    <td className="px-3 py-2.5 font-medium text-[13px]" style={{ color: C.esmeralda }}>
+                      {c.fornecedor_nome ?? "—"}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <SituacaoBadge situacao={c.situacao} bloqueado={c.bloqueado} />
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-center text-[12px]" style={{ color: "#374151" }}>
+                      {c.total_itens}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono font-semibold text-[12px]" style={{ color: c.total > 0 ? "#059669" : "#9CA3AF" }}>
+                      {c.total > 0 ? formatMoeda(c.total) : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-[11px]" style={{ color: "#9CA3AF" }}>
+                      {fmtDate(c.data_compra ?? c.created_at)}
+                    </td>
+                    <td className="px-3 py-2.5 text-[11px]" style={{ color: "#6B7280" }}>
+                      {c.local_nome ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y" style={{ borderColor: C.cremeBorder }}>
+              {filteredCompras.length === 0 && (
+                <div className="text-center py-10 text-sm" style={{ color: "#9CA3AF" }}>
+                  Nenhuma compra encontrada
+                </div>
+              )}
+              {filteredCompras.map((c) => (
+                <div
+                  key={c.id}
+                  className="px-4 py-3 cursor-pointer hover:bg-amber-50 transition-colors"
+                  style={{ backgroundColor: selectedId === c.id ? "#FEF3C7" : undefined }}
+                  onClick={() => handleSelectCompra(c)}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-semibold text-[13px]" style={{ color: C.esmeralda }}>
+                      #{c.id} {c.fornecedor_nome ?? "Sem fornecedor"}
+                    </span>
+                    <SituacaoBadge situacao={c.situacao} bloqueado={c.bloqueado} />
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px]" style={{ color: "#9CA3AF" }}>
+                    <span>{c.total_itens} itens</span>
+                    <span>{c.total > 0 ? formatMoeda(c.total) : "—"}</span>
+                    <span>{fmtDate(c.data_compra ?? c.created_at)}</span>
+                    {c.local_nome && <span>{c.local_nome}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Detail */}
+        {selectedId != null && selectedCompra && (
+          <div className="flex-1 md:w-3/5">
+            <CompraDetalhe
+              compra={selectedCompra}
+              insumos={insumos}
+              canEdit={canEdit}
+              onBack={() => setSelectedId(null)}
+              onRefreshCompra={reloadCompras}
+            />
+          </div>
+        )}
+
+        {/* Placeholder when no selection (desktop) */}
+        {selectedId == null && (
+          <div
+            className="hidden md:flex flex-1 md:w-3/5 rounded-xl border items-center justify-center"
+            style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg, minHeight: "300px" }}
+          >
+            <div className="text-center space-y-2">
+              <ShoppingCart size={32} style={{ color: "#E8DCC8", margin: "0 auto" }} />
+              <p className="text-sm" style={{ color: "#9CA3AF" }}>
+                Selecione uma compra para ver os detalhes
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* Modal Nova Compra */}
       <NovaCompraModal
-        isOpen={modalNova}
-        onClose={() => setModalNova(false)}
-        onSuccess={() => { setModalNova(false); refresh(); }}
+        isOpen={showNovaCompra}
+        onClose={() => setShowNovaCompra(false)}
+        onSuccess={handleNovaCompraSuccess}
       />
     </div>
   );

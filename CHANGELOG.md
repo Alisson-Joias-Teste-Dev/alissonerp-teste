@@ -1,4 +1,72 @@
-> 📋 Última atualização automática: 26/03/2026 — Versão: v2.13.0
+> 📋 Última atualização automática: 28/03/2026 — Versão: v2.14.0
+
+## v2.14.0 — Reposição Loja — Primeiro tipo de ordem funcional (28/03/2026)
+<!-- Última atualização: 28/03/2026 — Task ordens-02 reposicao_loja -->
+
+### Features
+- Tipo "Reposição Loja": primeiro tipo de ordem funcional no módulo criação
+- `NovaOrdemReposicaoLojaModal`: busca produto, checklist de variações com qtd, fotos de referência
+- `GET /api/produtos/[id]/variacoes`: variações ativas de um produto pai (usa `erp_produtos.parent_id`)
+- `POST /api/ordens` adaptado: aceita `fotos_base64[]` (upload server-side) e `detalhes_ordem`
+- Peso estimado auto-preenchido de `public.produtos.peso_precificado` (editável em produto simples)
+- Fotos de referência: compressão canvas client-side → base64 → upload server-side em `ordem-fotos`
+- Rollback de fotos se upload parcial falhar (cleanups de órfãos)
+- `NovaOrdemButton`: `reposicao_loja` abre modal; demais tipos mantêm toast "Em construção"
+- Responsivo: bottom-sheet no mobile, modal centrado no desktop
+- Ordem segue fluxo completo: auditoria loja → PCP
+
+---
+
+## v2.14.0 — Compras + Pedras CT + Multi-Local (28/03/2026)
+
+### Adicionado
+- Tabela `locais_estoque` (Fábrica=1, Loja=2) com CRUD e aba em /configuracoes
+- Controle de pedras em quilates (CT) — conversão: 1 ct = 0.2g
+- Formatters: `formatPesoCt`, `gramasToCt`, `ctToGramas`, `formatMoeda`
+- Filtro por local de estoque em /estoque
+- Transferência entre locais físicos (`TransferirLocalModal`, CE dupla marcador TA)
+- Etapa "receber" no fluxo de compras (3 etapas: rascunho→recebida→concluída)
+- Form condicional de compras por categoria (Metal/Pedras/Banho/Outros)
+- Local de destino selecionável nas compras (default: Fábrica)
+- Campo NF nas compras
+- View `vw_saldo_por_local` — saldo agrupado por local físico e categoria
+- `LocaisEstoqueTab` — componente CRUD de locais em /configuracoes
+- Dropdown "Nova Ordem" com 7 tipos via `NovaOrdemButton` (filtrado por permissão, toast placeholder)
+
+### Modificado
+- 7 triggers atualizados para suportar CT e local_estoque_id
+- 15+ APIs modificadas para CT, multi-local e compras expandidas
+- ComprasClient reescrito com fetch /api/* (corrige supabase.from bug silencioso)
+- Componentes PCP/Distribuição/Estoque exibem pedras em CT (4 casas decimais)
+- Input de pedras: operador digita gramas → sistema exibe CT ao lado em tempo real
+- IA de validação: prompt para pedras lê CT da balança (antes contava unidades)
+- Views vw_saldo_estoque e vw_detalhe_pote atualizadas com saldo_ct
+
+### Corrigido
+- ComprasClient silently broken (supabase.from para schema alissonerp) → pg.Pool via fetch
+- `ia-validar-peso`: default fallback modelo Gemini corrigido de `gemini-2.0-flash` para `gemini-2.5-flash`
+
+### Migrations
+- `094_locais_estoque.sql`
+- `095_pedras_quilates_ct.sql`
+- `096_compras_expandidas.sql`
+- `097_views_saldo_multilocal_ct.sql`
+- `098_triggers_pedras_ct_compras.sql`
+
+### Sprints
+1. Banco (094-097) → 2. Triggers (098) → 3. APIs → 4. Frontend PCP+Estoque → 5. Frontend Compras → 6. IA+Testes+Docs
+
+## v2.13.4 (28/03/2026)
+### Fixes
+- Service: `/api/service/operadores` retornava lista vazia — corrigido bug postgres.js `IS NULL` em parâmetro inteiro (branch JS)
+- Protocolo: tipos fábrica e service ajustados (garantia em ambos; servico_interno → service)
+
+## v2.13.3 (28/03/2026)
+### Features
+- Protocolo: tipos Fábrica e Service com permissões por usuário (`tipos_protocolo_permitidos` JSONB em `usuarios`)
+- Protocolo: seletor de tipo via dropdown no header (padrão OrdensClient), badge no modal e na lista
+- Protocolo: `tipo_protocolo VARCHAR(20)` em `alissonerp.protocolos` (migration 093)
+- UserEditDrawer: seção "Permissões de Protocolo" com checkboxes Fábrica/Service
 
 ## v2.13.0 (26/03/2026)
 ### Features

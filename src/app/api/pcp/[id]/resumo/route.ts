@@ -24,6 +24,8 @@ export async function GET(
                ELSE 0 END)                                      AS peso_pedras,
       -- Qtd de pedras (unidades)
       SUM(CASE WHEN i.categoria_id = 2 THEN a.qtd ELSE 0 END) AS qtd_pedras,
+      -- Sprint 3: peso em quilates (ct)
+      SUM(CASE WHEN i.categoria_id = 2 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) AS pedras_ct,
       COALESCE(MIN(i.categoria_id), 0)::int                    AS categoria_id
     FROM alissonerp.apontamentos_pcp a
     JOIN alissonerp.tipos_apontamento ta ON ta.id = a.tipo_apontamento_id
@@ -46,6 +48,9 @@ export async function GET(
   const pedrasRetornoQtd  = rows.filter((r) => r.tipo_id === 6).reduce((s, r) => s + Number(r.qtd_pedras ?? 0), 0);
   const pedrasEntradaPeso = rows.filter((r) => r.tipo_id === 3).reduce((s, r) => s + Number(r.peso_pedras ?? 0), 0);
   const pedrasRetornoPeso = rows.filter((r) => r.tipo_id === 6).reduce((s, r) => s + Number(r.peso_pedras ?? 0), 0);
+  // Sprint 3: saldo em quilates
+  const pedrasEntradaCT   = rows.filter((r) => r.tipo_id === 3).reduce((s, r) => s + Number(r.pedras_ct ?? 0), 0);
+  const pedrasRetornoCT   = rows.filter((r) => r.tipo_id === 6).reduce((s, r) => s + Number(r.pedras_ct ?? 0), 0);
 
   return NextResponse.json({
     resumo: rows,
@@ -55,8 +60,11 @@ export async function GET(
       metal_liquido: totalMetalEntrada - totalMetalRetorno,
       pedras_qtd:   pedrasEntradaQtd - pedrasRetornoQtd,
       pedras_peso:  pedrasEntradaPeso - pedrasRetornoPeso,
+      pedras_ct:    parseFloat((pedrasEntradaCT - pedrasRetornoCT).toFixed(4)),
       pedras_entrada_qtd:  pedrasEntradaQtd,
       pedras_retorno_qtd:  pedrasRetornoQtd,
+      pedras_entrada_ct:   parseFloat(pedrasEntradaCT.toFixed(4)),
+      pedras_retorno_ct:   parseFloat(pedrasRetornoCT.toFixed(4)),
     },
   });
 }

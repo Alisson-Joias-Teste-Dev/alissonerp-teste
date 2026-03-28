@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useMemo, useCallback, useTransition } from "react";
+import { useState, useMemo, useCallback, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, SlidersHorizontal } from "lucide-react";
+import { Plus, SlidersHorizontal, ArrowLeftRight } from "lucide-react";
 import LancamentoAvulsoModal from "@/components/forms/LancamentoAvulsoModal";
+import TransferirLocalModal from "@/components/forms/TransferirLocalModal";
 import { MobileCard } from "@/components/ui/MobileCard";
+import { formatPesoCt } from "@/lib/formatters";
+import { useAuth } from "@/hooks/useAuth";
 
 const C = {
   esmeralda: "#184036",
@@ -68,9 +71,14 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
   const [searchMov, setSearchMov] = useState("");
   const [filterCat, setFilterCat] = useState("Todos");
   const [modalAvulso, setModalAvulso] = useState(false);
+  const [modalTransferir, setModalTransferir] = useState(false);
   const [filtrosAbertos, setFiltrosAbertos] = useState(false);
+  const [locais, setLocais] = useState<{id: number, nome: string}[]>([]);
+  const [localSelecionado, setLocalSelecionado] = useState<number | null>(null);
   const [, startTransition] = useTransition();
   const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
+  const { role } = useAuth();
+  const podeTransferir = ["admin", "desenvolvedor", "gerente_fabrica"].includes(role ?? "");
 
   const totalOuro = useMemo(
     () => saldos.filter((s) => s.categoria_id === 1 && s.deposito_id === 1).reduce((sum, s) => sum + Number(s.saldo || 0), 0),
@@ -91,6 +99,13 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
     const cats = [...new Set(saldos.map((s) => s.categoria_nome).filter(Boolean))];
     return ["Todos", ...cats];
   }, [saldos]);
+
+  useEffect(() => {
+    fetch("/api/locais-estoque")
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setLocais(data); })
+      .catch(() => {});
+  }, []);
 
   const filteredSaldos = useMemo(() => {
     return saldos.filter((s) => {
@@ -136,13 +151,24 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
             Leitura de directus.controle_estoque + directus.insumos
           </p>
         </div>
-        <button
-          onClick={() => setModalAvulso(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
-          style={{ backgroundColor: C.esmeralda, color: C.creme }}
-        >
-          <Plus size={15} /> Lançamento Avulso
-        </button>
+        <div className="flex items-center gap-2">
+          {podeTransferir && (
+            <button
+              onClick={() => setModalTransferir(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border"
+              style={{ borderColor: C.cremeBorder, color: C.esmeralda, backgroundColor: "#fff" }}
+            >
+              <ArrowLeftRight size={15} /> Transferir entre Locais
+            </button>
+          )}
+          <button
+            onClick={() => setModalAvulso(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}
+          >
+            <Plus size={15} /> Lançamento Avulso
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -160,10 +186,15 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
         </div>
         <div className="bg-white rounded-xl border p-5" style={{ borderColor: C.cremeBorder }}>
           <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#6B7280" }}>
-            Pedras (un)
+            Pedras (ct)
           </p>
           <p className="text-2xl font-mono font-semibold" style={{ color: C.esmeralda }}>
-            {Math.round(totalPedrasUn).toLocaleString("pt-BR")}
+            {(() => {
+              const saldosCt = saldos.filter((s) => s.categoria_id === 2 && s.deposito_id === 1);
+              const totalCt = saldosCt.reduce((sum, s) => sum + Number(s.saldo_ct ?? 0), 0);
+              if (totalCt > 0) return formatPesoCt(totalCt);
+              return `${Math.round(totalPedrasUn).toLocaleString("pt-BR")} un`;
+            })()}
           </p>
           <p className="text-[11px] mt-1" style={{ color: "#6B7280" }}>Almoxarifado Central</p>
         </div>
@@ -262,6 +293,17 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
               className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[200px] outline-none"
               style={{ borderColor: C.cremeBorder }}
             />
+            {locais.length > 0 && (
+              <select
+                value={localSelecionado ?? ''}
+                onChange={(e) => setLocalSelecionado(e.target.value ? parseInt(e.target.value) : null)}
+                className="rounded-md border px-3 py-2 text-sm"
+                style={{ borderColor: C.cremeBorder }}
+              >
+                <option value="">Todos os locais</option>
+                {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+              </select>
+            )}
             <div className="flex gap-1 rounded-lg p-0.5" style={{ backgroundColor: C.creme }}>
               {categorias.slice(0, 6).map((c) => (
                 <button
@@ -349,7 +391,9 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
                           className="font-mono text-sm font-semibold"
                           style={{ color: Number(s.saldo) < 0 ? C.danger : C.dourado }}
                         >
-                          {Number(s.saldo).toFixed(2)}
+                          {s.categoria_id === 2 && s.saldo_ct != null
+                            ? formatPesoCt(s.saldo_ct)
+                            : `${Number(s.saldo).toFixed(2)}`}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 font-mono text-[11px] text-center" style={{ color: "#6B7280" }}>
@@ -534,6 +578,12 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
         isOpen={modalAvulso}
         onClose={() => setModalAvulso(false)}
         onSuccess={() => { setModalAvulso(false); refresh(); }}
+      />
+      <TransferirLocalModal
+        isOpen={modalTransferir}
+        onClose={() => setModalTransferir(false)}
+        onSuccess={() => { setModalTransferir(false); refresh(); }}
+        locais={locais}
       />
     </div>
   );

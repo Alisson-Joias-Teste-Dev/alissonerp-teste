@@ -6,6 +6,7 @@ type Params = Promise<{ id: string }>;
 // PATCH /api/compras/[id]/concluir
 // Seta situacao='concluido' → trigger trg_concluir_compra gera CE de estoque
 //                           → trigger trg_aa_bloquear_compra seta bloqueado=true
+// Aceita situacao 'recebida' OU 'rascunho'/'pendente' (backward compat)
 export async function PATCH(_req: NextRequest, { params }: { params: Params }) {
   const { id } = await params;
   const compraId = parseInt(id);
@@ -17,14 +18,24 @@ export async function PATCH(_req: NextRequest, { params }: { params: Params }) {
   if (compra.bloqueado) return NextResponse.json({ error: "Compra já bloqueada" }, { status: 409 });
   if (compra.situacao === "concluido") return NextResponse.json({ error: "Compra já concluída" }, { status: 409 });
 
+  // Aceitar: recebida, rascunho ou pendente (backward compat)
+  const situacoesPermitidas = ["recebida", "rascunho", "pendente"];
+  if (!situacoesPermitidas.includes(compra.situacao as string)) {
+    return NextResponse.json(
+      { error: `Compra está em situação "${compra.situacao}" — não pode ser concluída` },
+      { status: 409 },
+    );
+  }
+
   try {
     await sql`UPDATE alissonerp.compras SET situacao = 'concluido' WHERE id = ${compraId}`;
     return NextResponse.json({ ok: true });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const error = err as { message?: string; code?: string };
     // Trigger trg_aa_bloquear_compra lança exception se bloqueado=true
-    if (err.message?.includes("bloqueado") || err.code === "P0001") {
+    if (error.message?.includes("bloqueado") || error.code === "P0001") {
       return NextResponse.json({ error: "Compra bloqueada — não permite alteração" }, { status: 409 });
     }
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: error.message ?? "Erro interno" }, { status: 500 });
   }
 }

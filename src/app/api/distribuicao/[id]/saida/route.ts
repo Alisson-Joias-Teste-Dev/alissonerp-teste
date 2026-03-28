@@ -42,7 +42,8 @@ export async function POST(
   } = await req.json() as {
     ordem_id: number;
     peso_bruto?: number;
-    pedras_utilizadas?: { insumo_id: number; qtd_utilizada: number }[];
+    // Sprint 3: aceita peso_ct_utilizado (quilates) e/ou qtd_utilizada (backward compat)
+    pedras_utilizadas?: { insumo_id: number; qtd_utilizada?: number; peso_ct_utilizado?: number }[];
     foto_balanca?: string | null;
     user_id?: string | null;
     sem_peso?: boolean;
@@ -114,18 +115,36 @@ export async function POST(
 
   // 2. Calcular peso das pedras + buscar insumo unitário
   let peso_pedras_total = 0;
-  const pedrasComPeso: { insumo_id: number; qtd: number; peso_unitario: number; peso_total: number }[] = [];
+  const pedrasComPeso: {
+    insumo_id: number;
+    qtd: number;
+    peso_unitario: number;
+    peso_total: number;
+    peso_ct_utilizado?: number;
+  }[] = [];
 
   for (const p of pedras_utilizadas ?? []) {
-    if (!p.qtd_utilizada || p.qtd_utilizada <= 0) continue;
     const [ins] = await sql`
-      SELECT COALESCE(peso_pedra, 0)::float8 AS peso_pedra
+      SELECT COALESCE(peso_pedra, 0)::float8    AS peso_pedra,
+             COALESCE(peso_pedra_ct, 0)::float8 AS peso_pedra_ct
       FROM alissonerp.insumos WHERE id = ${p.insumo_id} LIMIT 1
     `;
-    const pu = Number(ins?.peso_pedra ?? 0);
-    const pt = p.qtd_utilizada * pu;
-    peso_pedras_total += pt;
-    pedrasComPeso.push({ insumo_id: p.insumo_id, qtd: p.qtd_utilizada, peso_unitario: pu, peso_total: pt });
+    const pu_g  = Number(ins?.peso_pedra ?? 0);
+    const pu_ct = Number(ins?.peso_pedra_ct ?? 0);
+
+    if (p.peso_ct_utilizado != null && p.peso_ct_utilizado > 0) {
+      // Sprint 3: converter ct → g
+      const pt  = p.peso_ct_utilizado * 0.2;
+      const qtd = pu_ct > 0 ? p.peso_ct_utilizado / pu_ct : 0;
+      peso_pedras_total += pt;
+      pedrasComPeso.push({ insumo_id: p.insumo_id, qtd, peso_unitario: pu_g, peso_total: pt, peso_ct_utilizado: p.peso_ct_utilizado });
+    } else {
+      const qtdUtil = p.qtd_utilizada ?? 0;
+      if (!qtdUtil || qtdUtil <= 0) continue;
+      const pt = qtdUtil * pu_g;
+      peso_pedras_total += pt;
+      pedrasComPeso.push({ insumo_id: p.insumo_id, qtd: qtdUtil, peso_unitario: pu_g, peso_total: pt });
+    }
   }
 
   const peso_ouro_real = peso_bruto! - peso_pedras_total;
@@ -134,9 +153,9 @@ export async function POST(
   for (const p of pedrasComPeso) {
     await sql`
       INSERT INTO alissonerp.distribuicao_saida_pedras
-        (distribuicao_ordem_id, insumo_id, qtd_utilizada, peso_unitario, peso_total)
+        (distribuicao_ordem_id, insumo_id, qtd_utilizada, peso_unitario, peso_total, peso_ct_utilizado)
       VALUES
-        (${doo.id}, ${p.insumo_id}, ${p.qtd}, ${p.peso_unitario}, ${p.peso_total})
+        (${doo.id}, ${p.insumo_id}, ${p.qtd}, ${p.peso_unitario}, ${p.peso_total}, ${p.peso_ct_utilizado ?? null})
     `;
   }
 
