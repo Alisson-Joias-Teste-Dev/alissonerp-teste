@@ -25,22 +25,39 @@ export async function GET(_req: NextRequest) {
 
   const meuDepositoId = caller.deposito_id as number | null;
 
-  const rows = await sql`
-    SELECT
-      d.id,
-      d.nome,
-      (
-        SELECT COUNT(*)::int
-        FROM alissonerp.servicos s
-        WHERE s.operador_id = d.id
-          AND s.status = 'em_servico'
-      ) AS qtd_servicos
-    FROM alissonerp.depositos d
-    JOIN alissonerp.usuarios u ON u.deposito_id = d.id
-    WHERE u.is_operador_service = true
-      AND (${meuDepositoId} IS NULL OR d.id != ${meuDepositoId})
-    ORDER BY d.nome
-  `;
+  // Branch no JS: evita "could not determine data type of parameter" do postgres.js
+  const rows = meuDepositoId
+    ? await sql`
+        SELECT
+          d.id,
+          d.nome,
+          (
+            SELECT COUNT(*)::int
+            FROM alissonerp.servicos s
+            WHERE s.operador_id = d.id
+              AND s.status = 'em_servico'
+          ) AS qtd_servicos
+        FROM alissonerp.depositos d
+        JOIN alissonerp.usuarios u ON u.deposito_id = d.id
+        WHERE u.is_operador_service = true
+          AND d.id != ${meuDepositoId}
+        ORDER BY d.nome
+      `
+    : await sql`
+        SELECT
+          d.id,
+          d.nome,
+          (
+            SELECT COUNT(*)::int
+            FROM alissonerp.servicos s
+            WHERE s.operador_id = d.id
+              AND s.status = 'em_servico'
+          ) AS qtd_servicos
+        FROM alissonerp.depositos d
+        JOIN alissonerp.usuarios u ON u.deposito_id = d.id
+        WHERE u.is_operador_service = true
+        ORDER BY d.nome
+      `;
 
   return NextResponse.json(rows);
 }
