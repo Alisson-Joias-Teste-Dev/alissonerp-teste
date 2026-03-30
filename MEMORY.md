@@ -1,9 +1,9 @@
 # MEMORY.md — Alisson ERP (Joalheria de Alto Padrão)
 
-> 📋 Última atualização automática: 28/03/2026 — Versão: v2.14.0 <!-- Revisado 28/03/2026 -->
+> 📋 Última atualização automática: 30/03/2026 — Versão: v2.15.0 <!-- Revisado 30/03/2026 -->
 
 > **LEITURA OBRIGATÓRIA antes de qualquer sessão.**
-> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 28/03/2026 — v2.14.0 — Tipos de Protocolo (Fábrica vs Service): tipo_protocolo em protocolos + tipos_protocolo_permitidos em usuarios + permissão por role + NovaProtocoloModal seletor de tipo + ProtocoloClient badge**
+> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 30/03/2026 — v2.15.0 — Serviço Interno: tipos_servico, modal com foto+vídeo, migration 100**
 
 ---
 
@@ -185,6 +185,23 @@ servicos — tabela principal do módulo Service
     → fn_criar_servico_from_pcp: cria servico automaticamente quando PCP é criado para
       tipos em configuracoes_sistema.service_tipos_ordem (default: servico_venda, garantia)
     → usa configuracoes_sistema.operador_servico_padrao para deposito_id padrão
+
+── TIPOS DE SERVIÇO (v2.15.0, migration 100) ──
+tipos_servico — tabela de tipos de serviço para ordens servico_interno
+  id SERIAL, nome TEXT, ativo BOOLEAN DEFAULT true, created_at TIMESTAMPTZ
+  Seed: Solda Laser, Cravação Manual, Acabamento e polimento, Ajuste Manual, Solda e Limpeza
+  Admin: /configuracoes → aba "Tipos Serviço" (CRUD, admin/dev)
+  API: GET/POST/PATCH /api/tipos-servico
+
+── SERVIÇO INTERNO (v2.15.0) ──
+Tipo: servico_interno | Rota: pcp | Origem: erp
+1 produto, qtd=1. Sem cliente, sem vendedor.
+Tipos serviço: múltipla seleção → ordens.tipos_servico_ids INTEGER[]
+Foto peça: obrigatória → ordens.foto_peca_servico (bucket ordem-fotos)
+Vídeo: obrigatório → ordens.video_observacao (bucket ordem-videos, 100MB)
+  Gravar (MediaRecorder API) OU upload arquivo
+Componente: NovaOrdemServicoInternoModal.tsx
+Upload server-side: POST/DELETE /api/ordens/upload-arquivo
 
 ── USUÁRIOS ──
 usuarios — coluna nova (migration 073):

@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import NovaOrdemReposicaoLojaModal from "@/components/ordens/NovaOrdemReposicaoLojaModal";
+import NovaOrdemServicoInternoModal from "@/components/ordens/NovaOrdemServicoInternoModal";
 
 // servico_loja NÃO aparece — escondido do frontend
 const TIPOS_ORDEM = [
@@ -26,11 +27,12 @@ export default function NovaOrdemButton({
   tiposPermitidos: string[];
 }) {
   const router = useRouter();
-  const { nome } = useAuth();
+  const { nome, user } = useAuth();
 
-  const [aberto, setAberto]                     = useState(false);
-  const [toastMsg, setToastMsg]                 = useState<string | null>(null);
-  const [reposicaoLojaOpen, setReposicaoLojaOpen] = useState(false);
+  const [aberto, setAberto]                         = useState(false);
+  const [toastMsg, setToastMsg]                     = useState<string | null>(null);
+  const [reposicaoLojaOpen, setReposicaoLojaOpen]   = useState(false);
+  const [servicoInternoOpen, setServicoInternoOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -53,6 +55,10 @@ export default function NovaOrdemButton({
       setReposicaoLojaOpen(true);
       return;
     }
+    if (value === "servico_interno") {
+      setServicoInternoOpen(true);
+      return;
+    }
     // Placeholder para os demais tipos
     setToastMsg(`🚧 Em construção — ${label} estará disponível em breve!`);
     setTimeout(() => setToastMsg(null), 3000);
@@ -60,6 +66,12 @@ export default function NovaOrdemButton({
 
   function handleReposicaoLojaSuccess(numeroOrdem: string) {
     setToastMsg(`✓ Ordem ${numeroOrdem} criada com sucesso!`);
+    setTimeout(() => setToastMsg(null), 4000);
+    router.refresh();
+  }
+
+  function handleServicoInternoSuccess() {
+    setToastMsg(`✓ Ordem de serviço interno criada com sucesso!`);
     setTimeout(() => setToastMsg(null), 4000);
     router.refresh();
   }
@@ -105,6 +117,15 @@ export default function NovaOrdemButton({
         isOpen={reposicaoLojaOpen}
         onClose={() => setReposicaoLojaOpen(false)}
         onSuccess={handleReposicaoLojaSuccess}
+        userName={nome ?? "Usuário"}
+      />
+
+      {/* Modal Serviço Interno */}
+      <NovaOrdemServicoInternoModal
+        isOpen={servicoInternoOpen}
+        onClose={() => setServicoInternoOpen(false)}
+        onSuccess={handleServicoInternoSuccess}
+        userId={user?.id ?? ""}
         userName={nome ?? "Usuário"}
       />
 

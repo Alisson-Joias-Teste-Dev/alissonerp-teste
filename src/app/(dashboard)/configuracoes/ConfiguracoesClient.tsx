@@ -29,6 +29,7 @@ import {
   PenLine,
   Flame,
   MapPin,
+  Wrench,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
@@ -120,7 +121,7 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -2511,6 +2512,291 @@ function TabTeores({ teores: initial, ligaTipos: initialLiga }: { teores: TeorOu
   );
 }
 
+// ─── Tab Tipos de Serviço ─────────────────────────────────────────────────────
+
+interface TipoServico {
+  id: number;
+  nome: string;
+  ativo: boolean;
+  created_at: string;
+}
+
+function TabTiposServico() {
+  const [tipos, setTipos]             = useState<TipoServico[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [erro, setErro]               = useState("");
+
+  // Estado form novo/editar
+  const [novoNome, setNovoNome]       = useState("");
+  const [criando, setCriando]         = useState(false);
+  const [erroCriar, setErroCriar]     = useState("");
+  const [showForm, setShowForm]       = useState(false);
+
+  const [editandoId, setEditandoId]   = useState<number | null>(null);
+  const [editNome, setEditNome]       = useState("");
+  const [salvandoId, setSalvandoId]   = useState<number | null>(null);
+  const [savedId, setSavedId]         = useState<number | null>(null);
+
+  async function carregar() {
+    setLoading(true);
+    setErro("");
+    const res = await fetch("/api/tipos-servico?todos=true").catch(() => null);
+    if (!res?.ok) { setErro("Erro ao carregar tipos"); setLoading(false); return; }
+    const data = await res.json();
+    setTipos(data.tipos ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => { carregar(); }, []);
+
+  async function handleCriar() {
+    const nome = novoNome.trim();
+    if (!nome) { setErroCriar("Nome é obrigatório"); return; }
+    setCriando(true); setErroCriar("");
+    const res = await fetch("/api/tipos-servico", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome }),
+    }).catch(() => null);
+    setCriando(false);
+    if (!res?.ok) {
+      const d = await res?.json().catch(() => ({}));
+      setErroCriar(d?.error ?? "Erro ao criar");
+      return;
+    }
+    setNovoNome(""); setShowForm(false);
+    carregar();
+  }
+
+  async function handleEditar(id: number, nome: string) {
+    const nomeTrimmed = nome.trim();
+    if (!nomeTrimmed) return;
+    setSalvandoId(id);
+    await fetch("/api/tipos-servico", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, nome: nomeTrimmed }),
+    }).catch(() => null);
+    setSalvandoId(null);
+    setEditandoId(null);
+    setSavedId(id);
+    setTimeout(() => setSavedId(null), 2000);
+    carregar();
+  }
+
+  async function handleToggleAtivo(t: TipoServico) {
+    setSalvandoId(t.id);
+    await fetch("/api/tipos-servico", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: t.id, ativo: !t.ativo }),
+    }).catch(() => null);
+    setSalvandoId(null);
+    carregar();
+  }
+
+  if (loading) return (
+    <div className="flex items-center gap-2 py-8" style={{ color: P.muted }}>
+      <Loader2 size={14} className="animate-spin" /> Carregando...
+    </div>
+  );
+
+  return (
+    <div className="space-y-5 max-w-xl">
+      {/* Header + botão novo */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold" style={{ color: P.creme }}>Tipos de Serviço</h3>
+          <p className="text-xs mt-0.5" style={{ color: P.muted }}>
+            Tipos usados em ordens de Serviço Interno. Múltipla seleção por ordem.
+          </p>
+        </div>
+        {!showForm && (
+          <button
+            onClick={() => { setShowForm(true); setNovoNome(""); setErroCriar(""); }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
+            style={{ backgroundColor: P.verde, color: "#fff" }}
+          >
+            <Plus size={13} /> Novo Tipo
+          </button>
+        )}
+      </div>
+
+      {/* Form novo */}
+      {showForm && (
+        <div
+          className="rounded-xl p-4 space-y-3"
+          style={{ border: `1px solid ${P.border}`, backgroundColor: P.bg }}
+        >
+          <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: P.sage }}>
+            Novo Tipo de Serviço
+          </p>
+          <input
+            type="text"
+            value={novoNome}
+            onChange={e => { setNovoNome(e.target.value); setErroCriar(""); }}
+            placeholder="Ex: Polimento Manual"
+            className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-[#184036]"
+            style={{ borderColor: P.border, color: P.creme }}
+            autoFocus
+            onKeyDown={e => { if (e.key === "Enter") handleCriar(); if (e.key === "Escape") setShowForm(false); }}
+          />
+          {erroCriar && (
+            <div className="flex items-center gap-1.5 text-xs" style={{ color: P.vermelho }}>
+              <AlertTriangle size={12} /> {erroCriar}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCriar}
+              disabled={criando}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
+              style={{ backgroundColor: P.verde, color: "#fff" }}
+            >
+              {criando ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+              Salvar
+            </button>
+            <button
+              onClick={() => { setShowForm(false); setErroCriar(""); }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs"
+              style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+            >
+              <X size={12} /> Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Erro geral */}
+      {erro && (
+        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs" style={{ backgroundColor: P.vermelho + "15", color: P.vermelho }}>
+          <AlertTriangle size={13} /> {erro}
+        </div>
+      )}
+
+      {/* Tabela */}
+      <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ backgroundColor: P.bg, borderBottom: `1px solid ${P.border}` }}>
+              {["Nome", "Status", "Ações"].map(h => (
+                <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium" style={{ color: P.muted }}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {tipos.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="px-4 py-6 text-center text-sm" style={{ color: P.muted }}>
+                  Nenhum tipo cadastrado
+                </td>
+              </tr>
+            ) : (
+              tipos.map(t => (
+                <tr key={t.id} style={{ borderBottom: `1px solid ${P.bg}` }} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-3">
+                    {editandoId === t.id ? (
+                      <input
+                        type="text"
+                        value={editNome}
+                        onChange={e => setEditNome(e.target.value)}
+                        className="border rounded-lg px-2 py-1.5 text-sm outline-none focus:border-[#184036] w-full max-w-xs"
+                        style={{ borderColor: P.border, color: P.creme }}
+                        autoFocus
+                        onKeyDown={e => { if (e.key === "Enter") handleEditar(t.id, editNome); if (e.key === "Escape") setEditandoId(null); }}
+                      />
+                    ) : (
+                      <span className="font-medium" style={{ color: P.creme }}>
+                        {t.nome}
+                        {savedId === t.id && (
+                          <span className="ml-2 text-xs" style={{ color: P.verde }}>
+                            <CheckCircle size={12} className="inline" /> Salvo
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                      style={{
+                        backgroundColor: t.ativo ? P.verde + "15" : P.muted + "20",
+                        color: t.ativo ? P.verde : P.muted,
+                      }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: t.ativo ? P.verde : P.muted }} />
+                      {t.ativo ? "Ativo" : "Inativo"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      {editandoId === t.id ? (
+                        <>
+                          <button
+                            onClick={() => handleEditar(t.id, editNome)}
+                            disabled={salvandoId === t.id}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50"
+                            style={{ backgroundColor: P.verde, color: "#fff" }}
+                          >
+                            {salvandoId === t.id ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                            Salvar
+                          </button>
+                          <button
+                            onClick={() => setEditandoId(null)}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                            style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+                          >
+                            <X size={11} /> Cancelar
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => { setEditandoId(t.id); setEditNome(t.nome); }}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                            style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+                          >
+                            <Pencil size={11} /> Editar
+                          </button>
+                          <button
+                            onClick={() => handleToggleAtivo(t)}
+                            disabled={salvandoId === t.id}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs disabled:opacity-50"
+                            style={{
+                              backgroundColor: t.ativo ? P.vermelho + "15" : P.verde + "15",
+                              color: t.ativo ? P.vermelho : P.verde,
+                              border: `1px solid ${t.ativo ? P.vermelho + "40" : P.verde + "40"}`,
+                            }}
+                          >
+                            {salvandoId === t.id ? (
+                              <Loader2 size={11} className="animate-spin" />
+                            ) : t.ativo ? (
+                              <ToggleLeft size={11} />
+                            ) : (
+                              <ToggleRight size={11} />
+                            )}
+                            {t.ativo ? "Desativar" : "Ativar"}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-[10px]" style={{ color: P.muted }}>
+        Tipos inativos não aparecem no modal de criação de ordens, mas são mantidos no histórico.
+      </p>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function ConfiguracoesClient({ parametros, webhooks, logs, usuarios, depositos, teores, ligaTipos }: Props) {
   const [tab, setTab] = useState<Tab>("parametros");
@@ -2523,20 +2809,21 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
     const u = params.get("user");
-    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais"].includes(t)) {
+    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico"].includes(t)) {
       setTab(t as Tab);
     }
     if (u) setInitialUserId(u);
   }, []);
 
   const baseTabs: { key: Tab; label: string; icon: React.ElementType }[] = [
-    { key: "parametros", label: "Parâmetros",  icon: Settings },
-    { key: "webhooks",   label: "Webhooks",    icon: Webhook },
-    { key: "usuarios",   label: "Usuários",    icon: Users },
-    { key: "ia",         label: "IA",          icon: Bot },
-    { key: "depositos",  label: "Depósitos",   icon: Warehouse },
-    { key: "teores",     label: "Teores Ouro", icon: Flame },
-    { key: "locais",     label: "Locais",      icon: MapPin },
+    { key: "parametros",    label: "Parâmetros",     icon: Settings },
+    { key: "webhooks",      label: "Webhooks",       icon: Webhook },
+    { key: "usuarios",      label: "Usuários",       icon: Users },
+    { key: "ia",            label: "IA",             icon: Bot },
+    { key: "depositos",     label: "Depósitos",      icon: Warehouse },
+    { key: "teores",        label: "Teores Ouro",    icon: Flame },
+    { key: "locais",        label: "Locais",         icon: MapPin },
+    { key: "tipos_servico", label: "Tipos Serviço",  icon: Wrench },
   ];
   const tabs = isSuperAdmin
     ? [...baseTabs, { key: "permissoes" as Tab, label: "Permissões", icon: Shield }]
@@ -2586,8 +2873,9 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "ia"          && <TabIA />}
       {tab === "depositos"   && <TabDepositos />}
       {tab === "teores"      && <TabTeores teores={teores} ligaTipos={ligaTipos} />}
-      {tab === "permissoes"  && isSuperAdmin && <TabPermissoes />}
-      {tab === "locais"      && <LocaisEstoqueTab canEdit={isSuperAdmin} />}
+      {tab === "permissoes"    && isSuperAdmin && <TabPermissoes />}
+      {tab === "locais"        && <LocaisEstoqueTab canEdit={isSuperAdmin} />}
+      {tab === "tipos_servico" && <TabTiposServico />}
     </div>
   );
 }

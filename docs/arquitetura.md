@@ -1,9 +1,9 @@
 # Arquitetura — fabricaAJ ERP
 
-> 📋 Última atualização automática: 28/03/2026 — Versão: v2.14.0 <!-- Revisado 28/03/2026 -->
+> 📋 Última atualização automática: 30/03/2026 — Versão: v2.15.0 <!-- Revisado 30/03/2026 -->
 
 Sistema ERP para a Joalheria ALISSON. Stack: Next.js 16.1.6 + PostgreSQL 15 (Supabase self-hosted).
-**Versão atual: v2.14.0 | Atualizado: 28/03/2026 — Compras + Pedras CT + Multi-Local: locais_estoque (094-098), pedras em quilates, form condicional compras, vw_saldo_por_local, LocaisEstoqueTab, TransferirLocalModal, ComprasClient reescrito, IA prompt CT**
+**Versão atual: v2.15.0 | Atualizado: 30/03/2026 — Serviço Interno: tipos_servico CRUD, modal foto+vídeo (MediaRecorder), migration 100**
 
 ---
 
@@ -149,6 +149,8 @@ O cliente Supabase (`src/lib/supabase/client.ts` e `server.ts`) esta configurado
 | `096_compras_expandidas.sql` | Sprint 1 v2.14.0. ADD compras: `local_destino_id FK`, `numero_nf`, `data_compra`, `data_recebimento`, `recebido_por UUID`. ADD itens_compra: `unidade`, `peso_ct`, `qtd_pecas`, `custo_por_ct`, `lote_referencia`, `observacao`. 3 indexes. |
 | `097_views_saldo_multilocal_ct.sql` | Sprint 1 v2.14.0. Recria `vw_saldo_estoque` com `local_estoque_id` no GROUP BY. Recria `vw_detalhe_pote` com `saldo_ct + peso_pedra_ct`. Recria `vw_saldo_pote` (dependente). CREATE `vw_saldo_por_local` (saldo por local_estoque + saldo_ct para pedras). |
 | `098_triggers_pedras_ct_compras.sql` | Sprint 2 v2.14.0. UPDATE `fn_criar_par_movimentacao` (add `p_local_id` 10º param). UPDATE `fn_processar_apontamento_pcp` (tipos 3/6 com ct; acumula `pcp.total_pedras_ct`; local=1). UPDATE `fn_processar_saida_ordem` (SP pedras ÷0.2; local=1). UPDATE `fn_calcular_item_compra` (pedras: peso_ct×custo_por_ct). UPDATE `fn_concluir_compra` (CE por categoria + local_destino_id + guard status). UPDATE `fn_processar_apontamento_dist` (tipos 3/6 ct; `distribuicoes.total_pedras_ct`; local=1). UPDATE `fn_processar_fechamento_dist` (acumula `pcp.total_pedras_ct`; TEDD local=1). ADD `distribuicoes.total_pedras_ct`, `apontamentos_distribuicao.peso_ct`. |
+| `099_data_entrega_fabricacao.sql` | Função utilitária `fn_adicionar_dias_uteis` + trigger ponte calcula data_entrega=+10 dias úteis para ordens fabricacao. |
+| `100_tipos_servico.sql` | v2.15.0. CREATE `alissonerp.tipos_servico` (id SERIAL, nome TEXT, ativo BOOLEAN, created_at). SEED 5 tipos: Solda Laser, Cravação Manual, Acabamento e polimento, Ajuste Manual, Solda e Limpeza. ADD `alissonerp.ordens.tipos_servico_ids INTEGER[]`. GRANTS authenticated/anon. |
 
 ---
 

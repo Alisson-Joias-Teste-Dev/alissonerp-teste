@@ -33,11 +33,25 @@ export async function POST(req: NextRequest) {
     video_observacao,    // storage path (já enviado pelo client)
     detalhes_ordem,      // texto livre de observações
     fotos_base64,        // string[] — upload server-side para bucket ordem-fotos
+    tipos_servico_ids,   // integer[] — tipos de serviço para servico_interno
     itens = [],
   } = body;
 
   if (!tipo_ordem) {
     return NextResponse.json({ error: "tipo_ordem é obrigatório" }, { status: 400 });
+  }
+
+  // ── Validações específicas por tipo ─────────────────────────────────────
+  if (tipo_ordem === "servico_interno") {
+    if (!foto_peca_servico) {
+      return NextResponse.json({ error: "foto_peca_servico é obrigatória para serviço interno" }, { status: 400 });
+    }
+    if (!video_observacao) {
+      return NextResponse.json({ error: "video_observacao é obrigatório para serviço interno" }, { status: 400 });
+    }
+    if (!Array.isArray(tipos_servico_ids) || tipos_servico_ids.length === 0) {
+      return NextResponse.json({ error: "Selecione pelo menos um tipo de serviço" }, { status: 400 });
+    }
   }
 
   // ── Verificar permissão ──────────────────────────────────────────────────
@@ -103,31 +117,48 @@ export async function POST(req: NextRequest) {
   // ── Determinar rota ──────────────────────────────────────────────────────
   const rota = SERVICO_TIPOS.includes(tipo_ordem) ? "protocolo" : "pcp";
 
+  // ── Data de entrega: fabricação → sempre 10 dias úteis a partir de hoje ─
+  let dataEntregaFinal: Date | null = data_entrega ? new Date(data_entrega) : null;
+  if (tipo_ordem === "fabricacao") {
+    const [{ data_entrega: de }] = await sql`
+      SELECT alissonerp.fn_adicionar_dias_uteis(CURRENT_DATE, 10) AS data_entrega
+    `;
+    dataEntregaFinal = de;
+  }
+
   const fotosPathsVal = fotosPaths.length > 0 ? fotosPaths : null;
 
   // ── Transação: ordem + itens + auditoria loja ───────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const novaOrdem = await sql.begin(async (tx: any) => {
     // 1. Inserir ordem
+    // Preparar tipos_servico_ids como array SQL (pode ser null ou vazio)
+    const tiposIds: number[] = Array.isArray(tipos_servico_ids)
+      ? tipos_servico_ids.map(Number).filter(n => !isNaN(n))
+      : [];
+    // postgres.js: passar array diretamente é o approach correto
+    const tiposIdsVal = tiposIds.length > 0 ? tiposIds : ([] as number[]);
+
     const [ordem] = await tx`
       INSERT INTO alissonerp.ordens (
         numero_ordem, tipo_ordem, cliente_id, vendedor_id,
         data_entrega, peso_metal_negociado,
         foto_peca_servico, peso_peca_servico, video_observacao,
-        detalhes_ordem, fotos_paths,
+        detalhes_ordem, fotos_paths, tipos_servico_ids,
         situacao, status, rota, origem, created_by
       ) VALUES (
         ${numeroOrdem},
         ${tipo_ordem}::alissonerp.enum_tipo_ordem,
         ${cliente_id ?? null},
         ${vendedor_id ?? null},
-        ${data_entrega ?? null},
+        ${dataEntregaFinal},
         ${peso_metal_negociado ?? 0},
         ${foto_peca_servico ?? null},
         ${peso_peca_servico ?? null},
         ${video_observacao ?? null},
         ${detalhes_ordem ?? null},
         ${fotosPathsVal},
+        ${tiposIdsVal},
         'criado',
         'aguardando',
         ${rota}::alissonerp.enum_rota_ordem,
