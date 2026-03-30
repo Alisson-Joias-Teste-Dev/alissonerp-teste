@@ -121,10 +121,11 @@ async function _handler(
     );
   }
 
-  const operadorId = servico.operador_id as number;
-  const ordemId    = servico.ordem_id as number;
-  const pcpId      = servico.pcp_id as number | null;
-  const numeroOrdem = servico.numero_ordem as string;
+  const operadorId  = (servico.operador_id  ?? null) as number | null;
+  const ordemId     = (servico.ordem_id     ?? null) as number | null;
+  const pcpId       = (servico.pcp_id       ?? null) as number | null;
+  const numeroOrdem = (servico.numero_ordem ?? "") as string;
+  const userId      = user.id ?? null;
 
   // ── 2. IA valida peso da peça ─────────────────────────────────────────────
   const mediaTypePeca = extrairMediaType(foto_peca_base64);
@@ -196,6 +197,14 @@ async function _handler(
   }
 
   // ── 5. Gravar tudo em transação ───────────────────────────────────────────
+  console.log("[concluir] vars pré-tx:", {
+    servicoId, ordemId, pcpId, operadorId, userId,
+    peso_saida, usou_solda, pesoFioAntes, consumoSolda,
+    peso_fio_depois: peso_fio_depois ?? null,
+    colocou_pedra, pedras_count: pedras_colocadas.length,
+    fotoUrl: !!fotoUrl, fotoFioUrl: !!fotoFioUrl,
+  });
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (sql as any).begin(async (tx: typeof sql) => {
     // 5a. Movimentação de consumo de solda (SM = Saída Metal do depósito do operador)
@@ -207,7 +216,7 @@ async function _handler(
           (1, ${operadorId}, ${consumoSolda}::real, 0,
            'SM'::alissonerp.enum_marcador_estoque,
            ${'Consumo solda serviço #' + servicoId + ' - ordem ' + numeroOrdem},
-           NOW(), 0, 0, ${user.id}::uuid, ${ordemId})
+           NOW(), 0, 0, ${userId}::uuid, ${ordemId})
       `;
     }
 
@@ -218,10 +227,10 @@ async function _handler(
           INSERT INTO alissonerp.movimentacoes_estoque
             (insumo_id, deposito_id, saida, entrada, marcador, obs, data_hora, valor_total, preco_compra, created_by, ordem_id)
           VALUES
-            (${pedra.insumo_id}, ${operadorId}, ${pedra.peso_total}::real, 0,
+            (${pedra.insumo_id ?? null}, ${operadorId}, ${pedra.peso_total ?? null}::real, 0,
              'SP'::alissonerp.enum_marcador_estoque,
              ${'Pedra serviço #' + servicoId + ' - ordem ' + numeroOrdem},
-             NOW(), 0, 0, ${user.id}::uuid, ${ordemId})
+             NOW(), 0, 0, ${userId}::uuid, ${ordemId})
         `;
       }
     }
@@ -237,10 +246,10 @@ async function _handler(
           colocou_pedra    = ${colocou_pedra},
           pedras_colocadas = ${JSON.stringify(pedras_colocadas)}::jsonb,
           foto_conclusao   = ${fotoUrl},
-          foto_fio_solda   = ${fotoFioUrl},
+          foto_fio_solda   = ${fotoFioUrl ?? null},
           status           = 'concluido',
           concluido_em     = NOW(),
-          concluido_por    = ${user.id}::uuid
+          concluido_por    = ${userId}::uuid
       WHERE id = ${servicoId}
     `;
 
