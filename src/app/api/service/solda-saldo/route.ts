@@ -23,8 +23,12 @@ export async function GET(_req: NextRequest) {
   const hasAccess = isFullAccess(caller.role as string) || caller.is_operador_service === true;
   if (!hasAccess) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  if (!caller.deposito_id) {
+  if (!caller.deposito_id && !isFullAccess(caller.role as string)) {
     return NextResponse.json({ error: "Usuário não possui depósito/operador vinculado" }, { status: 422 });
+  }
+
+  if (!caller.deposito_id) {
+    return NextResponse.json({ deposito_id: null, insumo_id: 1, saldo: 0 });
   }
 
   const depositoId = caller.deposito_id as number;

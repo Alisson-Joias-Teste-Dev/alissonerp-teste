@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Plus, FlaskConical, Search, X, Loader2, AlertCircle, ChevronDown, Package } from "lucide-react";
+import { formatPeso, formatPesoCt, gramasToCt } from "@/lib/formatters";
 import InsumoEditDrawer from "@/components/insumos/InsumoEditDrawer";
 
 const C = {
@@ -39,6 +40,7 @@ interface InsumoRow {
   peso_pedra?: number | null;
   observacao?: string | null;
   created_at?: string | null;
+  saldo_ct?: number | null;
 }
 
 interface CategoriaRow {
@@ -276,6 +278,11 @@ function NovoInsumoModal({ categorias, onSuccess, onClose }: ModalProps) {
   );
 }
 
+// ─── Sort types ───────────────────────────────────────────────────────────────
+
+type SortField = 'insumo_nome' | 'sku' | 'categoria_nome' | 'unidade' | 'saldo_real' | 'estoque_minimo' | 'custo_compra' | 'ativo';
+type SortDir = 'asc' | 'desc';
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function InsumosClient() {
@@ -286,6 +293,8 @@ export default function InsumosClient() {
   const [busca, setBusca] = useState("");
   const [loadingData, setLoadingData] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [sortField, setSortField] = useState<SortField>('insumo_nome');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
 
   // drawerInsumo: undefined = fechado | null = novo | InsumoRow = editar
   const [drawerInsumo, setDrawerInsumo] = useState<InsumoRow | null | undefined>(undefined);
@@ -332,6 +341,54 @@ export default function InsumosClient() {
     id: c.categoria_id,
     nome: c.categoria_nome,
   }));
+
+  // Ordenação
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedData = [...insumosFiltrados].sort((a, b) => {
+    let valA: unknown = a[sortField as keyof typeof a];
+    let valB: unknown = b[sortField as keyof typeof b];
+
+    if (valA == null) valA = '';
+    if (valB == null) valB = '';
+
+    if (['saldo_real', 'estoque_minimo', 'custo_compra'].includes(sortField)) {
+      const numA = parseFloat(String(valA)) || 0;
+      const numB = parseFloat(String(valB)) || 0;
+      return sortDir === 'asc' ? numA - numB : numB - numA;
+    }
+
+    const strA = String(valA).toLowerCase();
+    const strB = String(valB).toLowerCase();
+    return sortDir === 'asc'
+      ? strA.localeCompare(strB, 'pt-BR')
+      : strB.localeCompare(strA, 'pt-BR');
+  });
+
+  const SortableHeader = ({ label, field }: { label: string; field: SortField }) => {
+    const isActive = sortField === field;
+    return (
+      <th
+        className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer hover:text-gray-700 hover:bg-gray-50 select-none transition-colors"
+        style={{ color: isActive ? "#374151" : "#9CA3AF" }}
+        onClick={() => handleSort(field)}
+      >
+        <div className="flex items-center gap-1">
+          {label}
+          <span className={`text-[10px] ${isActive ? 'text-gray-700' : 'text-gray-300'}`}>
+            {isActive ? (sortDir === 'asc' ? '▲' : '▼') : '▲▼'}
+          </span>
+        </div>
+      </th>
+    );
+  };
 
   return (
     <div className="px-3 md:px-6 py-4 md:py-8">
@@ -410,9 +467,16 @@ export default function InsumosClient() {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
-              {["", "Insumo", "SKU", "Categoria", "Und.", "Saldo Real", "Est. Mín", "Custo", "Status", ""].map((h, idx) => (
-                <th key={idx} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{h}</th>
-              ))}
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}></th>
+              <SortableHeader label="Insumo" field="insumo_nome" />
+              <SortableHeader label="SKU" field="sku" />
+              <SortableHeader label="Categoria" field="categoria_nome" />
+              <SortableHeader label="Und." field="unidade" />
+              <SortableHeader label="Saldo Real" field="saldo_real" />
+              <SortableHeader label="Est. Mín" field="estoque_minimo" />
+              <SortableHeader label="Custo" field="custo_compra" />
+              <SortableHeader label="Status" field="ativo" />
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}></th>
             </tr>
           </thead>
           <tbody>
@@ -430,7 +494,7 @@ export default function InsumosClient() {
                 </td>
               </tr>
             )}
-            {!loadingData && insumosFiltrados.map((insumo, i) => {
+            {!loadingData && sortedData.map((insumo, i) => {
               const color = saldoColor(insumo.saldo_real, insumo.estoque_minimo);
               return (
                 <tr
@@ -459,12 +523,24 @@ export default function InsumosClient() {
                   <td className="px-4 py-3 font-medium" style={{ color: "#111827" }}>{insumo.insumo_nome}</td>
                   <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#9CA3AF" }}>{insumo.sku ?? "—"}</td>
                   <td className="px-4 py-3 text-[12px]" style={{ color: "#6B7280" }}>{insumo.categoria_nome}</td>
-                  <td className="px-4 py-3 text-center text-[12px]" style={{ color: "#6B7280" }}>{insumo.unidade}</td>
+                  <td className="px-4 py-3 text-center text-[12px]" style={{ color: "#6B7280" }}>
+                    {insumo.categoria_id === 2 ? 'ct' : (insumo.unidade || 'g')}
+                  </td>
                   <td className="px-4 py-3 font-mono font-semibold text-[13px]" style={{ color }}>
-                    {fmtNum(insumo.saldo_real, 2)} <span className="text-[10px] font-normal" style={{ color: "#9CA3AF" }}>{insumo.unidade}</span>
+                    {insumo.categoria_id === 2
+                      ? <span className="font-medium text-emerald-700">{formatPesoCt(insumo.saldo_ct != null ? insumo.saldo_ct : gramasToCt(parseFloat(String(insumo.saldo_real)) || 0))}</span>
+                      : <>{formatPeso(insumo.saldo_real)} <span className="text-[10px] font-normal" style={{ color: "#9CA3AF" }}>g</span></>
+                    }
                   </td>
                   <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>
-                    {insumo.estoque_minimo > 0 ? `${fmtNum(insumo.estoque_minimo, 0)} ${insumo.unidade}` : "—"}
+                    {insumo.categoria_id === 2
+                      ? (insumo.estoque_minimo && parseFloat(String(insumo.estoque_minimo)) > 0
+                          ? `${gramasToCt(parseFloat(String(insumo.estoque_minimo))).toFixed(4)} ct`
+                          : '—')
+                      : (insumo.estoque_minimo && parseFloat(String(insumo.estoque_minimo)) > 0
+                          ? <>{parseFloat(String(insumo.estoque_minimo)).toFixed(2)} <span className="text-gray-400 text-xs">g</span></>
+                          : '—')
+                    }
                   </td>
                   <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>{fmtCusto(insumo.custo_compra)}</td>
                   {/* Badge ativo */}

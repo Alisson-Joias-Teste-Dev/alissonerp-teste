@@ -5,7 +5,7 @@ import {
   Plus, ArrowLeft, Lock, Loader2, CheckCircle2, AlertCircle, X,
   Search, Package, ShoppingCart,
 } from "lucide-react";
-import { formatPesoCt, formatPeso, formatMoeda, gramasToCt } from "@/lib/formatters";
+import { formatPesoCt, formatPeso, formatMoeda } from "@/lib/formatters";
 import { useAuth } from "@/hooks/useAuth";
 
 // ─── Color palette ──────────────────────────────────────────────────────────
@@ -453,7 +453,7 @@ function NovaCompraModal({
 // ─── AddItemForm ──────────────────────────────────────────────────────────────
 function AddItemForm({
   compraId,
-  insumos,
+  insumos: insumosProp,
   onAdded,
 }: {
   compraId: number;
@@ -462,14 +462,42 @@ function AddItemForm({
 }) {
   const [busca, setBusca] = useState("");
   const [insumoSelecionado, setInsumoSelecionado] = useState<Insumo | null>(null);
+  const [insumos, setInsumos] = useState<Insumo[]>(insumosProp);
   const [pesoG, setPesoG] = useState("");
+  const [pesoCt, setPesoCt] = useState("");
+  const [custoTotal, setCustoTotal] = useState("");
   const [qtd, setQtd] = useState("");
   const [valorUnitario, setValorUnitario] = useState("");
-  const [custoPorCt, setCustoPorCt] = useState("");
   const [qtdPecas, setQtdPecas] = useState("");
   const [loteRef, setLoteRef] = useState("");
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
+
+  // Categorias + novo insumo inline
+  const [categorias, setCategorias] = useState<{ id: number; nome: string }[]>([]);
+  const [showNovoInsumo, setShowNovoInsumo] = useState(false);
+  const [novoInsumoForm, setNovoInsumoForm] = useState({
+    nome: "",
+    sku: "",
+    categoria_id: "",
+    peso_pedra: "",
+  });
+  const [cadastrando, setCadastrando] = useState(false);
+
+  // Sync insumos when prop changes
+  useEffect(() => {
+    setInsumos(insumosProp);
+  }, [insumosProp]);
+
+  // Load categorias on mount
+  useEffect(() => {
+    fetch("/api/insumos/categorias")
+      .then((r) => r.json())
+      .then((data: { categoria_id: number; categoria_nome: string }[]) =>
+        setCategorias((data ?? []).map((c) => ({ id: c.categoria_id, nome: c.categoria_nome })))
+      )
+      .catch(() => {});
+  }, []);
 
   const insumosFiltrados = useMemo(() => {
     if (!busca.trim()) return insumos.slice(0, 50);
@@ -480,16 +508,22 @@ function AddItemForm({
   function selectInsumo(ins: Insumo) {
     setInsumoSelecionado(ins);
     setBusca(ins.nome);
-    setPesoG(""); setQtd(""); setValorUnitario("");
-    setCustoPorCt(""); setQtdPecas(""); setLoteRef("");
+    setPesoG(""); setPesoCt(""); setCustoTotal("");
+    setQtd(""); setValorUnitario("");
+    setQtdPecas(""); setLoteRef("");
     setError("");
+    setShowNovoInsumo(false);
   }
 
   const catId = insumoSelecionado?.categoria_id ?? 0;
   const ehPedra = catId === 2;
   const ehMetal = [1, 3, 4].includes(catId);
   const ehBanho = catId === 5;
-  const pesoCt = pesoG ? gramasToCt(parseFloat(pesoG)) : 0;
+  // custo/ct calculado para pedras (novo fluxo)
+  const custoPorCtCalc =
+    pesoCt && custoTotal && parseFloat(pesoCt) > 0
+      ? parseFloat(custoTotal) / parseFloat(pesoCt)
+      : 0;
 
   // Preview do total
   let previewTotal = 0;
@@ -498,8 +532,46 @@ function AddItemForm({
     const v = parseFloat(valorUnitario);
     if (!isNaN(q) && !isNaN(v)) previewTotal = q * v;
   } else if (ehPedra) {
-    const c = parseFloat(custoPorCt);
-    if (!isNaN(pesoCt) && pesoCt > 0 && !isNaN(c)) previewTotal = pesoCt * c;
+    previewTotal = parseFloat(custoTotal || "0") || 0;
+  }
+
+  async function handleCadastrarInsumo() {
+    if (!novoInsumoForm.nome || !novoInsumoForm.categoria_id) return;
+    const body: Record<string, unknown> = {
+      nome: novoInsumoForm.nome,
+      categoria_id: parseInt(novoInsumoForm.categoria_id),
+      ativo: true,
+    };
+    if (novoInsumoForm.sku.trim()) body.sku = novoInsumoForm.sku.trim();
+    if (novoInsumoForm.peso_pedra && parseFloat(novoInsumoForm.peso_pedra) > 0) {
+      const pg = parseFloat(novoInsumoForm.peso_pedra);
+      body.peso_pedra = pg;
+      body.peso_pedra_ct = parseFloat((pg / 0.2).toFixed(4));
+    }
+    setCadastrando(true);
+    try {
+      const res = await fetch("/api/insumos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const novo = await res.json();
+      if (!res.ok) { setError(novo.error ?? "Erro ao cadastrar insumo"); return; }
+      // Reload insumos list from pcp endpoint (same as main load)
+      const insumosRes = await fetch("/api/pcp/insumos");
+      if (insumosRes.ok) {
+        const insumosData = await insumosRes.json();
+        setInsumos((insumosData as Insumo[]) ?? []);
+      }
+      // Auto-select
+      selectInsumo({ id: novo.id, nome: novo.nome, categoria_id: novo.categoria_id, unidade: novo.unidade, peso_pedra_ct: novo.peso_pedra_ct });
+      setNovoInsumoForm({ nome: "", sku: "", categoria_id: "", peso_pedra: "" });
+      setShowNovoInsumo(false);
+    } catch {
+      setError("Erro ao cadastrar insumo");
+    } finally {
+      setCadastrando(false);
+    }
   }
 
   async function handleAdd() {
@@ -513,13 +585,13 @@ function AddItemForm({
       if (isNaN(q) || q <= 0) { setError("Informe o peso (g)"); return; }
       body = { insumo_id: insumoSelecionado.id, qtd: q, valor_unitario: valorUnitario ? parseFloat(valorUnitario) : null };
     } else if (ehPedra) {
-      if (!pesoG || parseFloat(pesoG) <= 0) { setError("Informe o peso em gramas"); return; }
-      const ptCt = gramasToCt(parseFloat(pesoG));
+      if (!pesoCt || parseFloat(pesoCt) <= 0) { setError("Informe o peso em ct"); return; }
+      if (!custoTotal || parseFloat(custoTotal) <= 0) { setError("Informe o custo total"); return; }
       body = {
         insumo_id: insumoSelecionado.id,
-        peso_ct: ptCt,
+        peso_ct: parseFloat(pesoCt),
         qtd_pecas: qtdPecas ? parseInt(qtdPecas) : undefined,
-        custo_por_ct: custoPorCt ? parseFloat(custoPorCt) : undefined,
+        custo_por_ct: custoPorCtCalc > 0 ? custoPorCtCalc : undefined,
         lote_referencia: loteRef || undefined,
       };
     } else {
@@ -539,8 +611,9 @@ function AddItemForm({
     if (!res.ok) { setError(data.error ?? "Erro ao adicionar item"); return; }
     // Reset form
     setInsumoSelecionado(null);
-    setBusca(""); setPesoG(""); setQtd(""); setValorUnitario("");
-    setCustoPorCt(""); setQtdPecas(""); setLoteRef("");
+    setBusca(""); setPesoG(""); setPesoCt(""); setCustoTotal("");
+    setQtd(""); setValorUnitario("");
+    setQtdPecas(""); setLoteRef("");
     onAdded();
   }
 
@@ -558,16 +631,31 @@ function AddItemForm({
         <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
           Insumo
         </label>
-        <div className="relative">
-          <Search size={13} className="absolute left-2.5 top-2.5" style={{ color: "#9CA3AF" }} />
-          <input
-            type="text"
-            value={busca}
-            onChange={(e) => { setBusca(e.target.value); setInsumoSelecionado(null); }}
-            placeholder="Buscar insumo..."
-            className="w-full pl-7 pr-3 py-2 rounded-lg border text-sm focus:outline-none bg-white"
-            style={{ borderColor: C.cremeBorder }}
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search size={13} className="absolute left-2.5 top-2.5" style={{ color: "#9CA3AF" }} />
+            <input
+              type="text"
+              value={busca}
+              onChange={(e) => { setBusca(e.target.value); setInsumoSelecionado(null); }}
+              placeholder="Buscar insumo..."
+              className="w-full pl-7 pr-3 py-2 rounded-lg border text-sm focus:outline-none bg-white"
+              style={{ borderColor: C.cremeBorder }}
+            />
+          </div>
+          <button
+            type="button"
+            title="Cadastrar novo insumo"
+            onClick={() => setShowNovoInsumo((v) => !v)}
+            className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg border text-sm font-bold transition-colors"
+            style={{
+              borderColor: showNovoInsumo ? "#2563EB" : C.cremeBorder,
+              color: showNovoInsumo ? "#2563EB" : "#6B7280",
+              backgroundColor: showNovoInsumo ? "#EFF6FF" : "white",
+            }}
+          >
+            <Plus size={14} />
+          </button>
         </div>
         {busca && !insumoSelecionado && insumosFiltrados.length > 0 && (
           <div
@@ -591,6 +679,93 @@ function AddItemForm({
           </div>
         )}
       </div>
+
+      {/* Mini-form cadastro insumo inline */}
+      {showNovoInsumo && (
+        <div className="border border-blue-200 rounded-lg p-4 bg-blue-50 space-y-3">
+          <p className="text-sm font-medium text-blue-800">Cadastrar Novo Insumo</p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#374151" }}>Nome *</label>
+              <input
+                type="text"
+                value={novoInsumoForm.nome}
+                onChange={(e) => setNovoInsumoForm((p) => ({ ...p, nome: e.target.value }))}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none"
+                placeholder="Nome do insumo"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#374151" }}>SKU (opcional)</label>
+              <input
+                type="text"
+                value={novoInsumoForm.sku}
+                onChange={(e) => setNovoInsumoForm((p) => ({ ...p, sku: e.target.value }))}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none"
+                placeholder="Código SKU"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-1" style={{ color: "#374151" }}>Categoria *</label>
+            <select
+              value={novoInsumoForm.categoria_id}
+              onChange={(e) => setNovoInsumoForm((p) => ({ ...p, categoria_id: e.target.value }))}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none"
+            >
+              <option value="">Selecione...</option>
+              {categorias.map((c) => (
+                <option key={c.id} value={c.id}>{c.nome}</option>
+              ))}
+            </select>
+          </div>
+
+          {novoInsumoForm.categoria_id === "2" && (
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#374151" }}>Peso unitário (g)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number" step="0.001" min="0.001"
+                  value={novoInsumoForm.peso_pedra}
+                  onChange={(e) => setNovoInsumoForm((p) => ({ ...p, peso_pedra: e.target.value }))}
+                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none"
+                  placeholder="Ex: 0.01"
+                />
+                {novoInsumoForm.peso_pedra && parseFloat(novoInsumoForm.peso_pedra) > 0 && (
+                  <span className="text-sm text-emerald-700 bg-emerald-50 px-2 py-2 rounded whitespace-nowrap">
+                    = {(parseFloat(novoInsumoForm.peso_pedra) / 0.2).toFixed(4)} ct
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setShowNovoInsumo(false);
+                setNovoInsumoForm({ nome: "", sku: "", categoria_id: "", peso_pedra: "" });
+              }}
+              className="px-3 py-2 text-sm border rounded-md hover:bg-gray-50 transition-colors"
+              style={{ color: "#6B7280", borderColor: "#D1D5DB" }}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleCadastrarInsumo}
+              disabled={cadastrando || !novoInsumoForm.nome || !novoInsumoForm.categoria_id}
+              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {cadastrando ? <Loader2 size={13} className="animate-spin" /> : null}
+              Cadastrar e Selecionar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Campos condicionais */}
       {insumoSelecionado && (
@@ -629,41 +804,46 @@ function AddItemForm({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
-                    Peso (g)
+                    Peso (ct) *
                   </label>
                   <input
                     type="number" step="0.0001" min="0.0001"
-                    value={pesoG} onChange={(e) => setPesoG(e.target.value)}
-                    placeholder="0.0000"
+                    value={pesoCt} onChange={(e) => setPesoCt(e.target.value)}
+                    placeholder="Ex: 2.5000"
                     className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
                     style={{ borderColor: C.cremeBorder }}
                   />
-                  {pesoG && parseFloat(pesoG) > 0 && (
-                    <p className="text-[11px] mt-1" style={{ color: "#6B7280" }}>
-                      = {formatPesoCt(pesoCt)}
-                    </p>
-                  )}
                 </div>
                 <div>
                   <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
-                    Custo por ct (R$/ct)
+                    Custo total (R$) *
                   </label>
                   <input
-                    type="number" step="0.01" min="0"
-                    value={custoPorCt} onChange={(e) => setCustoPorCt(e.target.value)}
-                    placeholder="0.00"
+                    type="number" step="0.01" min="0.01"
+                    value={custoTotal} onChange={(e) => setCustoTotal(e.target.value)}
+                    placeholder="Ex: 500.00"
                     className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
                     style={{ borderColor: C.cremeBorder }}
                   />
                 </div>
               </div>
+              {custoPorCtCalc > 0 && (
+                <div
+                  className="flex items-center gap-3 text-[12px] px-3 py-2 rounded-lg"
+                  style={{ backgroundColor: "#ECFDF5", color: "#059669" }}
+                >
+                  <span><span className="font-medium">Custo/ct:</span> R$ {custoPorCtCalc.toFixed(4)}</span>
+                  <span style={{ color: "#6EE7B7" }}>|</span>
+                  <span><span className="font-medium">Total:</span> R$ {parseFloat(custoTotal || "0").toFixed(2)}</span>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] mb-1" style={{ color: "#6B7280" }}>
                     Qtd peças (opcional)
                   </label>
                   <input
-                    type="number" step="1" min="1"
+                    type="number" step="1" min="0"
                     value={qtdPecas} onChange={(e) => setQtdPecas(e.target.value)}
                     placeholder="0"
                     className="w-full px-2.5 py-2 rounded-lg border text-sm font-mono focus:outline-none bg-white"
@@ -846,6 +1026,7 @@ function CompraDetalhe({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [confirmConcluir, setConfirmConcluir] = useState(false);
+  const [reverterLoading, setReverterLoading] = useState(false);
 
   const bloqueada = compra.bloqueado || compra.situacao === "concluida" || compra.situacao === "concluido";
 
@@ -891,6 +1072,20 @@ function CompraDetalhe({
     setActionLoading(false);
     if (!res.ok) { setError(data.error ?? "Erro ao concluir compra"); return; }
     setSuccess("Compra concluída! Estoque atualizado.");
+    onRefreshCompra();
+  }
+
+  async function handleReverterRascunho() {
+    const confirmed = window.confirm(
+      "Deseja reverter para rascunho? Os dados de recebimento serão apagados."
+    );
+    if (!confirmed) return;
+    setError(""); setSuccess(""); setReverterLoading(true);
+    const res = await fetch(`/api/compras/${compra.id}/reverter-rascunho`, { method: "PATCH" });
+    const data = await res.json();
+    setReverterLoading(false);
+    if (!res.ok) { setError(data.error ?? "Erro ao reverter compra"); return; }
+    setSuccess("Compra revertida para rascunho.");
     onRefreshCompra();
   }
 
@@ -983,12 +1178,12 @@ function CompraDetalhe({
                 const isPedra = item.categoria_id === 2;
                 const isMetal = [1, 3, 4].includes(item.categoria_id);
                 const qtdDisplay = isPedra
-                  ? formatPesoCt(item.peso_ct)
+                  ? formatPesoCt(item.peso_ct) + (item.qtd_pecas ? ` (${item.qtd_pecas} pç)` : "")
                   : isMetal
                   ? `${formatPeso(item.qtd)} g`
                   : `${Number(item.qtd).toFixed(2)} ${item.unidade ?? ""}`;
                 const vlrUnit = isPedra
-                  ? (item.custo_por_ct != null ? formatMoeda(item.custo_por_ct) : "—")
+                  ? (item.custo_por_ct != null ? `R$ ${Number(item.custo_por_ct).toFixed(4)}/ct` : "—")
                   : item.valor_unitario != null
                   ? formatMoeda(item.valor_unitario)
                   : "—";
@@ -1000,11 +1195,6 @@ function CompraDetalhe({
                   >
                     <td className="px-3 py-2.5 font-medium text-[13px]" style={{ color: C.esmeralda }}>
                       {item.insumo_nome}
-                      {isPedra && item.qtd_pecas ? (
-                        <span className="block text-[11px]" style={{ color: "#9CA3AF" }}>
-                          {item.qtd_pecas} pç
-                        </span>
-                      ) : null}
                     </td>
                     <td className="px-3 py-2.5 text-[12px]" style={{ color: "#6B7280" }}>
                       {item.categoria_nome}
@@ -1073,15 +1263,26 @@ function CompraDetalhe({
             )}
 
             {!bloqueada && compra.situacao === "recebida" && (
-              <button
-                onClick={() => setConfirmConcluir(true)}
-                disabled={actionLoading || itens.length === 0}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
-                style={{ backgroundColor: C.esmeralda, color: C.creme }}
-              >
-                {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                Concluir Compra
-              </button>
+              <>
+                <button
+                  onClick={handleReverterRascunho}
+                  disabled={reverterLoading || actionLoading}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50 border"
+                  style={{ borderColor: "#D97706", color: "#92400E", backgroundColor: "#FFFBEB" }}
+                >
+                  {reverterLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                  ← Voltar p/ Rascunho
+                </button>
+                <button
+                  onClick={() => setConfirmConcluir(true)}
+                  disabled={actionLoading || reverterLoading || itens.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                >
+                  {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                  Concluir Compra
+                </button>
+              </>
             )}
 
             {bloqueada && (

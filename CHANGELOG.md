@@ -1,4 +1,22 @@
-> 📋 Última atualização automática: 28/03/2026 — Versão: v2.14.0
+> 📋 Última atualização automática: 28/03/2026 — Versão: v2.14.1
+
+## v2.14.1 — Refinamentos Compras R5-R7 (28/03/2026)
+
+### Adicionado
+- Botão "Voltar p/ Rascunho" em compras recebidas (PATCH /api/compras/[id]/reverter-rascunho)
+- Cadastro de insumo inline no form de compras (botão "+" ao lado da busca → mini-form)
+- Pedras nas compras: input direto em ct + custo total → sistema calcula custo/ct automaticamente
+
+### Modificado
+- ComprasClient: form de pedras invertido — usuário informa peso em ct + custo total; custo/ct é calculado (custo_total ÷ peso_ct)
+- ComprasClient: tabela de itens pedras exibe peso_ct (ct), custo/ct com 4 casas + qtd_pecas no mesmo campo
+- Tela /insumos: headers ordenáveis + pedras em ct (R1-R4 anterior)
+
+## v2.14.1 — Refinamentos Insumos (28/03/2026)
+
+### Modificado
+- Tela /insumos: headers de coluna clicáveis com ordenação asc/desc (▲/▼)
+- Tela /insumos: pedras (cat. 2) exibem unidade "ct", saldo em ct (4 casas), est. mín em ct
 
 ## v2.14.0 — Reposição Loja — Primeiro tipo de ordem funcional (28/03/2026)
 <!-- Última atualização: 28/03/2026 — Task ordens-02 reposicao_loja -->

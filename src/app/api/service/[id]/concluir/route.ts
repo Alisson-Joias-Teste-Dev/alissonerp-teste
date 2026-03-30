@@ -32,6 +32,22 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  try {
+    return await _handler(req, params);
+  } catch (err: unknown) {
+    const e = err as Error;
+    console.error("[service/concluir] ERRO NÃO CAPTURADO:", e?.message, e?.stack);
+    return NextResponse.json(
+      { error: e?.message ?? "Erro desconhecido", hint: e?.stack?.split("\n")[1]?.trim() },
+      { status: 500 }
+    );
+  }
+}
+
+async function _handler(
+  req: NextRequest,
+  params: Promise<{ id: string }>
+) {
   const { id } = await params;
   const servicoId = parseInt(id);
   if (isNaN(servicoId)) {
@@ -265,3 +281,4 @@ export async function POST(
     consumo_solda: usou_solda ? parseFloat(consumoSolda.toFixed(4)) : 0,
   });
 }
+

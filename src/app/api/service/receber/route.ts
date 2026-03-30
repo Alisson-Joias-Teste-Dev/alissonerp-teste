@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
         SELECT jsonb_array_elements_text(
           COALESCE(
             (SELECT valor::jsonb FROM alissonerp.configuracoes_sistema WHERE chave = 'service_tipos_ordem'),
-            '["servico_venda","garantia"]'::jsonb
+            '["servico_venda","garantia","servico_interno"]'::jsonb
           )
         )
       )
