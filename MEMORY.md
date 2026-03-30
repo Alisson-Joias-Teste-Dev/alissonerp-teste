@@ -1211,6 +1211,14 @@ REGRA: trigger só atualiza produto_composicao — NÃO toca public.produtos (s�
    NUNCA dividir por PMC (distorce pra cima)
 ⚠️ Saída PCP: NÃO faz entrada no Almoxarifado. Ouro virou peça = consumido.
    Movimentação: só baixa (saída) do depósito do operador.
+⚠️ itens_ordem_insumos.peso: SEMPRE em gramas — nunca em unidades ou ct (fix migration 101, 30/03/2026)
+   Para pedras (cat=2): peso = qtd × insumos.peso_pedra (gramas reais)
+   Para metal: peso = qtd (já é gramas). fn_processar_saida_ordem divide por 0.2 para SP pedras.
+⚠️ fn_criar_itens_ordem: 6º param p_peso_gramas REAL (DEFAULT NULL) — obrigatorio para pedras
+   Metal: omitir 6º param → COALESCE usa p_qtd (backward compat total)
+   Pedras tipo 3/6: passar v_peso_pedra_unitario × NEW.qtd como p_peso_gramas
+⚠️ fn_processar_transferencia + fn_processar_lancamento_avulso:
+   local_estoque_id = 1 explícito em todos os INSERTs/fn_criar_par_movimentacao (migration 101)
 ⚠️ auditorias.tipo_auditoria: coluna REAL é tipo_auditoria, NÃO 'tipo'
    varchar(10), valor correto: 'saida_pcp' (9 chars), NÃO 'saida_producao' (14 chars)
 ⚠️ WHERE id = ${uuidVar}::uuid em coluna INTEGER: causa erro de cast no PostgreSQL

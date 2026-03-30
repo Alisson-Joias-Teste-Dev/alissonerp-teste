@@ -167,12 +167,12 @@ export async function POST(
       if (quebraLote > 0) {
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at)
+            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at, local_estoque_id)
           VALUES
             (1, ${depDist}, ${quebraLote}, 0,
              'ESTORNO'::alissonerp.enum_marcador_estoque,
              ${`${obsBase} — estorno quebra lote`},
-             ${user.id}::uuid, now())
+             ${user.id}::uuid, now(), 1)
         `;
       }
 
@@ -190,7 +190,7 @@ export async function POST(
       if (entradaReversa > 0 || saidaReversa > 0) {
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, ordem_id, obs, created_by, created_at)
+            (insumo_id, deposito_id, entrada, saida, marcador, ordem_id, obs, created_by, created_at, local_estoque_id)
           VALUES (
             ${ce.insumo_id as number},
             ${ce.deposito_id as number},
@@ -200,7 +200,8 @@ export async function POST(
             ${ce.ordem_id as number},
             ${`${obsBase} — reversão CE #${ce.id}`},
             ${user.id}::uuid,
-            now()
+            now(),
+            1
           )
         `;
       }
@@ -220,25 +221,25 @@ export async function POST(
         // Entrada (Almox → Operador): reversa devolve ao Almox
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at)
-          VALUES (${ins}, ${dep},   0,     ${qtd}, 'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now())
+            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at, local_estoque_id)
+          VALUES (${ins}, ${dep},   0,     ${qtd}, 'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now(), 1)
         `;
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at)
-          VALUES (${ins}, ${almox}, ${qtd},   0,    'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now())
+            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at, local_estoque_id)
+          VALUES (${ins}, ${almox}, ${qtd},   0,    'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now(), 1)
         `;
       } else if ([5, 6].includes(tipo)) {
         // Retorno (Operador → Almox): reversa devolve ao Operador
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at)
-          VALUES (${ins}, ${almox}, 0,     ${qtd}, 'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now())
+            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at, local_estoque_id)
+          VALUES (${ins}, ${almox}, 0,     ${qtd}, 'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now(), 1)
         `;
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at)
-          VALUES (${ins}, ${dep},  ${qtd},   0,    'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now())
+            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at, local_estoque_id)
+          VALUES (${ins}, ${dep},  ${qtd},   0,    'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now(), 1)
         `;
       }
     }

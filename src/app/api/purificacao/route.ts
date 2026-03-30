@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
   for (const item of itens) {
     await sql`
       INSERT INTO alissonerp.movimentacoes_estoque
-        (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at)
+        (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at, local_estoque_id)
       VALUES
         (
           ${item.insumo_id},
@@ -232,7 +232,8 @@ export async function POST(req: NextRequest) {
           'PURIF_SAIDA'::alissonerp.enum_marcador_estoque,
           ${'Purificação #' + purif_id + ' — envio para refino'},
           ${user_id}::uuid,
-          NOW()
+          NOW(),
+          1
         )
     `;
   }

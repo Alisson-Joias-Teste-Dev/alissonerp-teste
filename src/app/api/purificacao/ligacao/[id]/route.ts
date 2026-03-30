@@ -116,14 +116,14 @@ export async function PATCH(
   const tipo_18k_insumo_id = Number((ligacao as any).tipo_18k_insumo_id);
   await sql`
     INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at)
+      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
     VALUES (
       ${tipo_18k_insumo_id}, 1,
       ${peso_18k_real}::real,
       'LIGA_ENTRADA_18K'::alissonerp.enum_marcador_estoque,
       ${'Ligação #' + ligacao_id + ' — entrada ' + (ligacao as any).tipo_18k_nome},
       ${user_id}::uuid,
-      NOW()
+      NOW(), 1
     )
   `;
 
@@ -187,28 +187,28 @@ export async function DELETE(
   // CE reversa: 24k volta pro pote
   await sql`
     INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at)
+      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
     VALUES (
       275, 1,
       ${Number(peso_24k)}::real,
       'LIGA_CANCEL'::alissonerp.enum_marcador_estoque,
       ${'Cancelamento Ligação #' + ligacao_id + ' — estorno Ouro 24k'},
       ${user_id}::uuid,
-      NOW()
+      NOW(), 1
     )
   `;
 
   // CE reversa: liga volta pro pote
   await sql`
     INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at)
+      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
     VALUES (
       ${Number(liga_insumo_id)}, 1,
       ${Number(peso_liga_calculado)}::real,
       'LIGA_CANCEL'::alissonerp.enum_marcador_estoque,
       ${'Cancelamento Ligação #' + ligacao_id + ' — estorno ' + liga_nome},
       ${user_id}::uuid,
-      NOW()
+      NOW(), 1
     )
   `;
 

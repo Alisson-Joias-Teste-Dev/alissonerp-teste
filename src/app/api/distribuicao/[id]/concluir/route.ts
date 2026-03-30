@@ -117,10 +117,10 @@ export async function POST(
   if (round3(quebraLote) > 0) {
     await sql`
       INSERT INTO alissonerp.movimentacoes_estoque
-        (insumo_id, deposito_id, saida, marcador, created_at)
+        (insumo_id, deposito_id, saida, marcador, created_at, local_estoque_id)
       VALUES
         (1, ${dist.deposito_id as number}, ${round3(quebraLote)},
-         'QUEBRA_LOTE'::alissonerp.enum_marcador_estoque, NOW())
+         'QUEBRA_LOTE'::alissonerp.enum_marcador_estoque, NOW(), 1)
     `;
   }
 

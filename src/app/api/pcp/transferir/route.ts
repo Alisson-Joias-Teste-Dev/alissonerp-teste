@@ -112,22 +112,22 @@ export async function POST(req: NextRequest) {
     await sql`
       INSERT INTO alissonerp.movimentacoes_estoque
         (insumo_id, deposito_id, setor_id, ordem_id, saida, entrada,
-         marcador, obs, data_hora, valor_total, preco_compra, created_by)
+         marcador, obs, data_hora, valor_total, preco_compra, created_by, local_estoque_id)
       VALUES
         (${insumo.insumo_id}, ${origemDepositoId}, ${null}, ${ordemId ?? null},
          ${insumo.quantidade}, ${0},
-         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user_id ?? null}::uuid)
+         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user_id ?? null}::uuid, ${1})
     `;
 
     // ENTRADA no destino
     await sql`
       INSERT INTO alissonerp.movimentacoes_estoque
         (insumo_id, deposito_id, setor_id, ordem_id, saida, entrada,
-         marcador, obs, data_hora, valor_total, preco_compra, created_by)
+         marcador, obs, data_hora, valor_total, preco_compra, created_by, local_estoque_id)
       VALUES
         (${insumo.insumo_id}, ${destino_deposito_id}, ${setor_id ?? null}, ${ordemId ?? null},
          ${0}, ${insumo.quantidade},
-         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user_id ?? null}::uuid)
+         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user_id ?? null}::uuid, ${1})
     `;
   }
 
@@ -160,13 +160,13 @@ export async function POST(req: NextRequest) {
       if (quebraTransf > 0) {
         await sql`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, saida, marcador, ordem_id, obs, created_at)
+            (insumo_id, deposito_id, saida, marcador, ordem_id, obs, created_at, local_estoque_id)
           VALUES
             (1, ${origemDepositoId}, ${quebraTransf}::real,
              'QUEBRA_PCP'::alissonerp.enum_marcador_estoque,
              ${ordemId ?? null},
              ${'Quebra transferência PCP #' + pcp_id},
-             NOW())
+             NOW(), 1)
         `;
       }
     }

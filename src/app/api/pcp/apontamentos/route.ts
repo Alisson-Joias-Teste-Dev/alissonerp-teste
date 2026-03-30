@@ -182,7 +182,8 @@ export async function POST(req: NextRequest) {
         ${setor_id ?? null}::integer,
         'EOID'::alissonerp.enum_marcador_estoque,
         ${pcp.ordem_id ?? null}::integer,
-        ${'Outros PCP #' + pcp_id}
+        ${'Outros PCP #' + pcp_id},
+        1                      -- local_estoque_id = Fabrica
       )
     `;
   }

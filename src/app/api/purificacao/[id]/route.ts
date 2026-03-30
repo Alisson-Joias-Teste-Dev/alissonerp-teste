@@ -171,7 +171,7 @@ export async function PATCH(
   // Inserir movimentação de entrada de Ouro 24k no pote (deposito_id=1)
   await sql`
     INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at)
+      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
     VALUES
       (
         ${ouro24k_id},
@@ -180,7 +180,8 @@ export async function PATCH(
         'PURIF_ENTRADA'::alissonerp.enum_marcador_estoque,
         ${'Purificação #' + purif_id + ' — retorno 24k fino'},
         ${user_id}::uuid,
-        NOW()
+        NOW(),
+        1
       )
   `;
 
@@ -245,7 +246,7 @@ export async function DELETE(
   for (const item of itens) {
     await sql`
       INSERT INTO alissonerp.movimentacoes_estoque
-        (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at)
+        (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
       VALUES
         (
           ${item.insumo_id},
@@ -254,7 +255,8 @@ export async function DELETE(
           'PURIF_CANCEL'::alissonerp.enum_marcador_estoque,
           ${'Cancelamento purificação #' + purif_id + ' — estorno de saída'},
           ${user_id}::uuid,
-          NOW()
+          NOW(),
+          1
         )
     `;
   }
