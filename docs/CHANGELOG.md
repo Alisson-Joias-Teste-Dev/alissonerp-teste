@@ -4,6 +4,28 @@
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
 
+## v2.14.1 (30/03/2026)
+### Fixes (migrations 101 + 102)
+- Bug critico: fn_criar_itens_ordem gravava unidades como peso para pedras (devia gravar gramas)
+  - fn_processar_saida_ordem (Sprint 2) lia ioi.peso assumindo gramas e dividia por 0.2 → SP errado
+  - Fix: novo parametro p_peso_gramas (6º, DEFAULT NULL); tipo 3/6 passa qtd × peso_pedra (g)
+  - Metal: backward compat via COALESCE(NULL, p_qtd) = p_qtd — sem mudanca
+- fn_processar_transferencia: local_estoque_id=1 explicito nos CEs (TED)
+- fn_processar_lancamento_avulso: local_estoque_id=1 explicito em todos os INSERTs de CE
+- Varredura completa local_estoque_id NOT NULL (migration 102 + 10 arquivos TS):
+  - fn_criar_par_movimentacao: COALESCE(p_local_id, 1) — backward compat para callers sem 10 arg
+  - fn_processar_outros_insumos_dist + fn_processar_outros_insumos_pcp: local_estoque_id=1
+  - /api/pcp/transferir: TED saida+entrada+QUEBRA_PCP
+  - /api/pcp/saida: SM, QUEBRA_PCP, SP, QBP
+  - /api/service/[id]/concluir: SM (solda), SP (pedra)
+  - /api/purificacao: PURIF_SAIDA, PURIF_ENTRADA, PURIF_CANCEL
+  - /api/purificacao/ligacao: LIGA_SAIDA_24K, LIGA_SAIDA_LIGA, LIGA_ENTRADA_18K, LIGA_CANCEL
+  - /api/distribuicao/[id]/concluir: QUEBRA_LOTE
+  - /api/distribuicao/[id]/estorno: ESTORNO (3 CEs)
+  - /api/distribuicao/[id]/estorno-lote: ESTORNO (7 CEs)
+  - /api/pcp/apontamentos: fn_criar_par_movimentacao 10 arg explicito (EOID)
+- Dados historicos itens_ordem_insumos pedras: 16 registros com peso em unidades (aguardando confirmacao Jonathan)
+
 ## v2.15.0 (30/03/2026)
 ### Features
 - Tipo "Serviço Interno" — foto obrigatória, vídeo obrigatório (gravar ou upload) e tipos de serviço configuráveis

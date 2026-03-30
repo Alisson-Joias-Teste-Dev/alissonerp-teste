@@ -145,11 +145,11 @@ export async function POST(
       if (quebraLote > 0) {
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_at)
+            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_at, local_estoque_id)
           VALUES
             (1, ${depDist}, ${quebraLote}, 0,
              'ESTORNO'::alissonerp.enum_marcador_estoque,
-             ${`${obsEstorno} — estorno quebra lote`}, now())
+             ${`${obsEstorno} — estorno quebra lote`}, now(), 1)
         `;
       }
 
@@ -165,20 +165,20 @@ export async function POST(
       // Devolver ouro ao operador (entrada no dep_dist)
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, entrada, saida, marcador, obs, ordem_id, created_at)
+          (insumo_id, deposito_id, entrada, saida, marcador, obs, ordem_id, created_at, local_estoque_id)
         VALUES
           (1, ${depDist}, ${pmc}, 0,
            'ESTORNO'::alissonerp.enum_marcador_estoque,
-           ${obsEstorno}, ${ordem_id}, now())
+           ${obsEstorno}, ${ordem_id}, now(), 1)
       `;
       // Retirar ouro do almoxarifado (saída do dep1)
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, entrada, saida, marcador, obs, ordem_id, created_at)
+          (insumo_id, deposito_id, entrada, saida, marcador, obs, ordem_id, created_at, local_estoque_id)
         VALUES
           (1, 1, 0, ${pmc},
            'ESTORNO'::alissonerp.enum_marcador_estoque,
-           ${obsEstorno}, ${ordem_id}, now())
+           ${obsEstorno}, ${ordem_id}, now(), 1)
       `;
     }
 

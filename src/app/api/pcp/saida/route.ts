@@ -234,13 +234,13 @@ export async function POST(req: NextRequest) {
   if (temOuro && peso_ouro_real > 0) {
     await sql`
       INSERT INTO alissonerp.movimentacoes_estoque
-        (insumo_id, deposito_id, saida, marcador, ordem_id, obs, created_at)
+        (insumo_id, deposito_id, saida, marcador, ordem_id, obs, created_at, local_estoque_id)
       VALUES
         (1, ${depositoId}, ${peso_ouro_real}::real,
          'SM'::alissonerp.enum_marcador_estoque,
          ${ordemId},
          ${'Saída PCP #' + pcp_id + ' → saida_id #' + saidaId},
-         NOW())
+         NOW(), 1)
     `;
   }
 
@@ -250,11 +250,11 @@ export async function POST(req: NextRequest) {
   if (depositoId !== 1 && quebra > 0) {
     await sql`
       INSERT INTO alissonerp.movimentacoes_estoque
-        (insumo_id, deposito_id, saida, marcador, ordem_id, created_at)
+        (insumo_id, deposito_id, saida, marcador, ordem_id, created_at, local_estoque_id)
       VALUES
         (1, ${depositoId}, ${Math.round(quebra * 1000) / 1000},
          'QUEBRA_PCP'::alissonerp.enum_marcador_estoque,
-         ${ordemId}, NOW())
+         ${ordemId}, NOW(), 1)
     `;
   }
 
@@ -355,12 +355,12 @@ export async function POST(req: NextRequest) {
     if (qtdUtilizada > 0) {
       await sql`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, entrada, marcador, ordem_id, obs)
+          (insumo_id, deposito_id, saida, entrada, marcador, ordem_id, obs, local_estoque_id)
         VALUES
           (${insumoId}, ${depositoId}, ${qtdUtilizada}::real, 0,
            'SP'::alissonerp.enum_marcador_estoque,
            ${ordemId},
-           ${'Pedra consumida PCP #' + pcp_id + ' → saida_id #' + saidaId})
+           ${'Pedra consumida PCP #' + pcp_id + ' → saida_id #' + saidaId}, 1)
       `;
     }
 
@@ -368,12 +368,12 @@ export async function POST(req: NextRequest) {
     if (quebraPedra > 0) {
       await sql`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, entrada, marcador, ordem_id, obs)
+          (insumo_id, deposito_id, saida, entrada, marcador, ordem_id, obs, local_estoque_id)
         VALUES
           (${insumoId}, ${depositoId}, ${quebraPedra}::real, 0,
            'QBP'::alissonerp.enum_marcador_estoque,
            ${ordemId},
-           ${'Quebra pedra PCP #' + pcp_id + ' → saida_id #' + saidaId})
+           ${'Quebra pedra PCP #' + pcp_id + ' → saida_id #' + saidaId}, 1)
       `;
     }
   }

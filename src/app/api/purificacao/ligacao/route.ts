@@ -253,28 +253,28 @@ export async function POST(req: NextRequest) {
   // CE saída 24k do pote
   await sql`
     INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at)
+      (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at, local_estoque_id)
     VALUES (
       275, 1,
       ${peso_24k}::real,
       'LIGA_SAIDA_24K'::alissonerp.enum_marcador_estoque,
       ${'Ligação #' + ligacao_id + ' — saída Ouro 24k'},
       ${user_id}::uuid,
-      NOW()
+      NOW(), 1
     )
   `;
 
   // CE saída liga do pote
   await sql`
     INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at)
+      (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at, local_estoque_id)
     VALUES (
       ${liga_insumo_id}, 1,
       ${peso_liga_calculado}::real,
       'LIGA_SAIDA_LIGA'::alissonerp.enum_marcador_estoque,
       ${'Ligação #' + ligacao_id + ' — saída ' + liga_nome},
       ${user_id}::uuid,
-      NOW()
+      NOW(), 1
     )
   `;
 

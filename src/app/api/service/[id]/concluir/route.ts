@@ -211,12 +211,12 @@ async function _handler(
     if (usou_solda && consumoSolda > 0) {
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, entrada, marcador, obs, data_hora, valor_total, preco_compra, created_by, ordem_id)
+          (insumo_id, deposito_id, saida, entrada, marcador, obs, data_hora, valor_total, preco_compra, created_by, ordem_id, local_estoque_id)
         VALUES
           (1, ${operadorId}, ${consumoSolda}::real, 0,
            'SM'::alissonerp.enum_marcador_estoque,
            ${'Consumo solda serviço #' + servicoId + ' - ordem ' + numeroOrdem},
-           NOW(), 0, 0, ${userId}::uuid, ${ordemId})
+           NOW(), 0, 0, ${userId}::uuid, ${ordemId}, 1)
       `;
     }
 
@@ -225,12 +225,12 @@ async function _handler(
       if (pedra.origem === "estoque" && pedra.qtd > 0 && pedra.insumo_id) {
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, saida, entrada, marcador, obs, data_hora, valor_total, preco_compra, created_by, ordem_id)
+            (insumo_id, deposito_id, saida, entrada, marcador, obs, data_hora, valor_total, preco_compra, created_by, ordem_id, local_estoque_id)
           VALUES
             (${pedra.insumo_id}, ${operadorId}, ${pedra.peso_total ?? 0}::real, 0,
              'SP'::alissonerp.enum_marcador_estoque,
              ${'Pedra serviço #' + servicoId + ' - ordem ' + numeroOrdem},
-             NOW(), 0, 0, ${userId}::uuid, ${ordemId})
+             NOW(), 0, 0, ${userId}::uuid, ${ordemId}, 1)
         `;
       }
     }
