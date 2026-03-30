@@ -30,9 +30,8 @@ export async function POST(req: NextRequest) {
   // Tipos 1 (Aditivo), 2 (Entrada Metal), 3 (Entrada Pedra): saem do Almoxarifado
   if ((tipo_apontamento_id === 1 || tipo_apontamento_id === 2 || tipo_apontamento_id === 3) && insumo_id) {
     const saldo = await sql`
-      SELECT saldo FROM alissonerp.vw_saldo_estoque
+      SELECT COALESCE(SUM(saldo), 0) AS saldo FROM alissonerp.vw_saldo_estoque
       WHERE deposito_id = 1 AND insumo_id = ${insumo_id}
-      LIMIT 1
     `;
     const saldoAtual = Number(saldo[0]?.saldo ?? 0);
     if (saldoAtual < qtd) {

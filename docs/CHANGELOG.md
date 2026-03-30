@@ -1,8 +1,25 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 27/03/2026 — Versão: v2.13.0 <!-- Revisado 27/03/2026 -->
+> 📋 Última atualização automática: 30/03/2026 — Versão: v2.15.0 <!-- Revisado 30/03/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.15.0 (30/03/2026)
+### Features
+- Tipo "Serviço Interno" — foto obrigatória, vídeo obrigatório (gravar ou upload) e tipos de serviço configuráveis
+- Tabela `alissonerp.tipos_servico` com CRUD admin + 5 tipos iniciais (Solda Laser, Cravação Manual, Acabamento e polimento, Ajuste Manual, Solda e Limpeza)
+- Múltiplos tipos de serviço por ordem — checkboxes no modal → `ordens.tipos_servico_ids INTEGER[]`
+- Gravação de vídeo no navegador via MediaRecorder API (webm/mp4 fallback) + opção de upload
+- Admin UI em `/configuracoes` — nova aba "Tipos Serviço" com CRUD inline (admin/dev)
+- API `GET/POST/PATCH /api/tipos-servico` — sem `supabase.from()`, apenas `pg.Pool` SQL direto
+- API `POST/DELETE /api/ordens/upload-arquivo` — endpoint de upload/cleanup server-side
+- Migration `100_tipos_servico.sql`: CREATE tipos_servico + ADD ordens.tipos_servico_ids + GRANTS
+- `NovaOrdemButton.tsx` — `servico_interno` abre `NovaOrdemServicoInternoModal` (não mais toast "Em construção")
+- Cleanup de câmera/streams ao fechar modal (`track.stop()` + `revokeObjectURL`)
+
+## v2.14.0 (28/03/2026)
+### Features (já existente — ver migration 094-098)
+- Locais de estoque (Fábrica/Loja), pedras em quilates, compras expandidas, vw_saldo_por_local
 
 ## v2.13.1 (27/03/2026)
 ### Fixes
