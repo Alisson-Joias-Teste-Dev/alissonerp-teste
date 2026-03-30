@@ -222,12 +222,12 @@ async function _handler(
 
     // 5b. Movimentações de pedras (SP = Saída Pedra, apenas origem='estoque')
     for (const pedra of pedras_colocadas) {
-      if (pedra.origem === "estoque" && pedra.qtd > 0) {
+      if (pedra.origem === "estoque" && pedra.qtd > 0 && pedra.insumo_id) {
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
             (insumo_id, deposito_id, saida, entrada, marcador, obs, data_hora, valor_total, preco_compra, created_by, ordem_id)
           VALUES
-            (${pedra.insumo_id ?? null}, ${operadorId}, ${pedra.peso_total ?? null}::real, 0,
+            (${pedra.insumo_id}, ${operadorId}, ${pedra.peso_total ?? 0}::real, 0,
              'SP'::alissonerp.enum_marcador_estoque,
              ${'Pedra serviço #' + servicoId + ' - ordem ' + numeroOrdem},
              NOW(), 0, 0, ${userId}::uuid, ${ordemId})
