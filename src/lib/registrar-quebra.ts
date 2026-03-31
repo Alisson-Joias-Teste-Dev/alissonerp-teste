@@ -18,7 +18,7 @@ export interface RegistroQuebra {
   numero_ordem?:   string | null;
   deposito_nome:   string;
   setor_nome?:     string | null;
-  tipo:            "transferencia" | "saida_pcp" | "conclusao_lote";
+  tipo:            "transferencia" | "saida_pcp" | "conclusao_lote" | "devolucao_service";
   ouro_recebido:   number;       // quanto ENTROU neste operador
   ouro_entregue:   number;       // quanto SAIU (transferido ou na peça)
   created_by?:     string | null;

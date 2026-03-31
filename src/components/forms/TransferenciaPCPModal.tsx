@@ -36,6 +36,8 @@ interface TransferenciaPCPModalProps {
 
 interface Deposito { id: number; nome: string; }
 interface Setor    { id: number; nome: string; }
+interface OperadorService { id: number; nome: string; qtd_servicos?: number; }
+type ModoTransf = "interna" | "service";
 
 interface InsumoItem {
   insumo_id:          number;
@@ -63,6 +65,10 @@ export default function TransferenciaPCPModal({
   const [destDepositoId, setDestDepositoId] = useState<number | "">("");
   const [destSetorId, setDestSetorId]       = useState<number | "">("");
   const [obs, setObs]                       = useState("");
+  const [modoTransf, setModoTransf]         = useState<ModoTransf>("interna");
+  const [operadoresService, setOperadoresService] = useState<OperadorService[]>([]);
+  const [loadingOps, setLoadingOps]         = useState(false);
+  const [destServiceDepId, setDestServiceDepId] = useState<number | "">("");
 
   // Origem resolvida da API (pode ser Almox se veio da distribuição)
   const [origemId, setOrigemId]     = useState<number>(depositoId);
@@ -90,7 +96,9 @@ export default function TransferenciaPCPModal({
     (i) => i.categoria_id === 1 && i.selecionado && i.quantidade > 0,
   );
   const fotoConfirmada = !temMetalSelecionado || validacaoIA?.match === true;
-  const podeConfirmar  = !!destDepositoId && fotoConfirmada && !loading && !success;
+  const podeConfirmar  = modoTransf === "interna"
+    ? (!!destDepositoId && fotoConfirmada && !loading && !success)
+    : (!!destServiceDepId && !loading && !success);
 
   // Depósitos disponíveis: exclui Almox (1) e a origem
   const depositos = todosDepositos.filter((d) => d.id !== 1 && d.id !== origemId);
@@ -110,6 +118,17 @@ export default function TransferenciaPCPModal({
         }
       })
       .catch(() => {});
+
+    // Operadores service
+    setLoadingOps(true);
+    fetch("/api/service/operadores")
+      .then((r) => r.json())
+      .then((data: unknown) => {
+        const list = Array.isArray(data) ? data : [];
+        setOperadoresService(list as OperadorService[]);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingOps(false));
 
     // Insumos pré-preenchidos
     setLoadingInsumos(true);
@@ -199,6 +218,8 @@ export default function TransferenciaPCPModal({
     setDestDepositoId("");
     setDestSetorId("");
     setObs("");
+    setModoTransf("interna");
+    setDestServiceDepId("");
     setError("");
     setSuccess(false);
     setSetores([]);
@@ -241,18 +262,41 @@ export default function TransferenciaPCPModal({
   }
 
   async function handleSubmit() {
-    if (!destDepositoId) {
-      setError("Selecione o depósito de destino.");
-      return;
-    }
-    if (temMetalSelecionado && !validacaoIA?.match) {
-      setError("Foto da balança obrigatória para transferência de metal. Tire a foto e aguarde a validação IA.");
-      return;
-    }
     setError("");
     setLoading(true);
 
     try {
+      // ── Modo Service ──────────────────────────────────────────────────────
+      if (modoTransf === "service") {
+        if (!destServiceDepId) { setError("Selecione o operador service."); setLoading(false); return; }
+        const res = await fetch("/api/pcp/transferir-service", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pcp_id: pcpId,
+            deposito_destino_id: destServiceDepId,
+            observacao: obs.trim() || null,
+          }),
+        });
+        const json = await res.json() as { error?: string };
+        if (!res.ok) { setError(json.error ?? "Erro ao registrar transferência service"); setLoading(false); return; }
+        setSuccess(true);
+        setTimeout(() => { resetForm(); onSuccess?.(); onClose(); }, 1500);
+        return;
+      }
+
+      // ── Modo Interna ──────────────────────────────────────────────────────
+      if (!destDepositoId) {
+        setError("Selecione o depósito de destino.");
+        setLoading(false);
+        return;
+      }
+      if (temMetalSelecionado && !validacaoIA?.match) {
+        setError("Foto da balança obrigatória para transferência de metal. Tire a foto e aguarde a validação IA.");
+        setLoading(false);
+        return;
+      }
+
       // Upload foto para Supabase Storage
       let fotoCaminho: string | null = null;
       if (fotoFile) {
@@ -264,6 +308,7 @@ export default function TransferenciaPCPModal({
           .upload(path, fotoFile, { upsert: false });
         if (uploadErr) {
           setError("Erro ao enviar foto. Tente novamente.");
+          setLoading(false);
           return;
         }
         fotoCaminho = path;
@@ -288,14 +333,11 @@ export default function TransferenciaPCPModal({
       const json = await res.json() as { error?: string };
       if (!res.ok) {
         setError(json.error ?? "Erro ao registrar transferência");
+        setLoading(false);
         return;
       }
       setSuccess(true);
-      setTimeout(() => {
-        resetForm();
-        onSuccess?.();
-        onClose();
-      }, 1500);
+      setTimeout(() => { resetForm(); onSuccess?.(); onClose(); }, 1500);
     } catch {
       setError("Erro de conexão");
     } finally {
@@ -341,6 +383,24 @@ export default function TransferenciaPCPModal({
         {/* Body com scroll */}
         <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
 
+          {/* Toggle Interna / Service */}
+          <div className="flex gap-2">
+            {(["interna", "service"] as ModoTransf[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => { setModoTransf(m); setDestDepositoId(""); setDestServiceDepId(""); setError(""); }}
+                className="flex-1 py-2 rounded-lg text-[13px] font-semibold transition-colors"
+                style={{
+                  backgroundColor: modoTransf === m ? C.esmeralda : C.cremeBg,
+                  color: modoTransf === m ? C.creme : "#6B7280",
+                  border: `1px solid ${modoTransf === m ? C.esmeralda : C.cremeBorder}`,
+                }}
+              >
+                {m === "interna" ? "Interna" : "Service"}
+              </button>
+            ))}
+          </div>
+
           {/* Origem → Destino */}
           <div
             className="flex items-center gap-3 rounded-lg px-4 py-3"
@@ -375,10 +435,48 @@ export default function TransferenciaPCPModal({
             </div>
           </div>
 
-          {/* Depósito destino */}
+          {/* Service: seletor de operadores */}
+          {modoTransf === "service" && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
+                  Operador Service
+                </label>
+                {loadingOps ? (
+                  <div className="flex items-center gap-2 text-[12px]" style={{ color: "#9CA3AF" }}>
+                    <Loader2 size={12} className="animate-spin" /> Carregando...
+                  </div>
+                ) : operadoresService.length === 0 ? (
+                  <p className="text-[12px]" style={{ color: "#9CA3AF" }}>Nenhum operador service cadastrado.</p>
+                ) : (
+                  <select
+                    value={destServiceDepId}
+                    onChange={(e) => { setDestServiceDepId(e.target.value ? parseInt(e.target.value) : ""); setError(""); }}
+                    className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none"
+                    style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}
+                  >
+                    <option value="">Selecione o operador...</option>
+                    {operadoresService.map((op) => (
+                      <option key={op.id} value={op.id}>{op.nome}{op.qtd_servicos ? ` (${op.qtd_servicos} em serviço)` : ""}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div
+                className="flex items-start gap-2 px-3 py-2.5 rounded-lg text-[12px]"
+                style={{ backgroundColor: "#FFFBEB", border: "1px solid #FDE68A", color: "#92400E" }}
+              >
+                <AlertCircle size={13} className="flex-shrink-0 mt-0.5" />
+                Protocolo automatico criado. Motoboy precisara levar a peca.
+              </div>
+            </div>
+          )}
+
+          {/* Interna: Depósito destino */}
+          {modoTransf === "interna" && (
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
-              Depósito de Destino
+              Deposito de Destino
             </label>
             <select
               value={destDepositoId}
@@ -395,9 +493,10 @@ export default function TransferenciaPCPModal({
               ))}
             </select>
           </div>
+          )}
 
-          {/* Setor destino */}
-          {destDepositoId && (
+          {/* Setor destino (só interna) */}
+          {modoTransf === "interna" && destDepositoId && (
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
                 Setor <span style={{ color: "#D1D5DB" }}>(opcional)</span>
@@ -426,8 +525,8 @@ export default function TransferenciaPCPModal({
             </div>
           )}
 
-          {/* Insumos a transferir */}
-          <div>
+          {/* Insumos a transferir (só interna) */}
+          {modoTransf === "interna" && <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#6B7280" }}>
                 Insumos a Transferir
@@ -513,10 +612,10 @@ export default function TransferenciaPCPModal({
                 Confira os valores. Os insumos selecionados sairão da origem e entrarão no destino.
               </p>
             )}
-          </div>
+          </div>}
 
-          {/* Foto da balança — obrigatória quando metal selecionado */}
-          {temMetalSelecionado && (
+          {/* Foto da balança — obrigatória quando metal selecionado (só interna) */}
+          {modoTransf === "interna" && temMetalSelecionado && (
             <div>
               <div className="flex items-center gap-1.5 mb-2">
                 <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#6B7280" }}>
@@ -652,7 +751,9 @@ export default function TransferenciaPCPModal({
               style={{ backgroundColor: "#ECFDF5", color: "#059669" }}
             >
               <CheckCircle size={14} className="shrink-0" />
-              Transferência registrada! O estoque foi movimentado.
+              {modoTransf === "service"
+                ? "Transferência service registrada! Protocolo ida criado."
+                : "Transferência registrada! O estoque foi movimentado."}
             </div>
           )}
         </div>
@@ -675,8 +776,9 @@ export default function TransferenciaPCPModal({
             className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
             style={{ backgroundColor: C.esmeralda, color: C.creme }}
             title={
-              !destDepositoId ? "Selecione o destino" :
-              temMetalSelecionado && !fotoConfirmada ? "Foto da balança obrigatória para metal" :
+              modoTransf === "service" && !destServiceDepId ? "Selecione o operador service" :
+              modoTransf === "interna" && !destDepositoId ? "Selecione o destino" :
+              modoTransf === "interna" && temMetalSelecionado && !fotoConfirmada ? "Foto da balança obrigatória para metal" :
               undefined
             }
           >

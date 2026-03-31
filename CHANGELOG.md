@@ -1,4 +1,55 @@
-> 📋 Última atualização automática: 28/03/2026 — Versão: v2.14.1
+> 📋 Última atualização automática: 31/03/2026 — Versão: v2.15.0
+
+## v2.15.0 — Transferência Service (31/03/2026)
+
+### Adicionado
+
+#### Back-end
+- Migration `103_transferencia_service.sql`: 4 novas colunas
+  - `transferencias_ordem.tipo_transferencia` VARCHAR(20) DEFAULT 'interna'
+  - `transferencias_ordem.protocolo_id` FK → protocolos
+  - `transferencias_ordem.deposito_origem_id` FK → depositos
+  - `servicos.transferencia_service_id` FK → transferencias_ordem
+- `POST /api/pcp/transferir-service` — gerente_fabrica/pcp inicia transferência de peça para operador service externo
+  - Valida `deposito.is_operador_service=true`
+  - Move saldo líquido de ouro via CEs duplas (TED: origem→destino)
+  - Cria protocolo ida automático (tipo_protocolo='fabrica', etapas='pendente')
+  - Vincula protocolo na transferencia_ordem
+  - Atualiza `pcp.deposito_id` + `pcp.etapas='em_andamento'` + `ordens.local_atual`
+- `POST /api/pcp/transferir-service/receber` — operador service recebe peça via protocolo
+  - Conclui protocolo (dispara fn_concluir_protocolo)
+  - Limpa PCP duplicado + saida_ordem criados pelo trigger
+  - Cria `servicos` com `transferencia_service_id` + `status='em_servico'`
+- `POST /api/service/[id]/devolver` — operador service devolve peça ao Pote (dep=1)
+  - Validação IA de peso da peça + fio de solda
+  - SM (consumo solda), TED (operador→pote), quebra + QUEBRA_PCP CE
+  - Cria protocolo volta para motoboy buscar
+  - Atualiza `servicos.status='devolvido'`
+- `GET /api/service/operadores` — expandido para aceitar gerente_fabrica/pcp/gerente_loja
+- `GET /api/service/meus` — inclui `transferencia_service_id` + `deposito_origem_nome` (JOIN deposito origem)
+- `GET /api/pcp/[id]` — inclui info do serviço ativo via LATERAL JOIN em servicos
+
+#### Front-end
+- `TransferenciaPCPModal`: toggle "Interna / Service" — modo service lista operadores service, envia para `/api/pcp/transferir-service`
+- `ServiceApp`: badge "Da fabrica (nome)", botão Devolver (ouro) para serviços com `transferencia_service_id`, view Devolver completa (peso + foto IA + solda)
+- `KanbanClient`: badge "Na service" (laranja) em cards com serviço ativo service
+- `PCPDetalheModal`: seção "Na service externa" mostra operador, status e data de recebimento
+- `pcp/page.tsx`: campo `na_service` via EXISTS subquery nos PCPs
+
+### Modificado
+- `registrar-quebra.ts`: tipo `"devolucao_service"` adicionado à union de RegistroQuebra
+
+---
+
+## v2.14.2 — Fix Quebra Double-counting (31/03/2026)
+
+### Corrigido
+- `buscarOuroRecebido`: retorna saldo líquido (SUM entradas − SUM saídas) em vez de apenas SUM entradas
+  - Antes: múltiplas transferências de aditivo para o mesmo operador causavam double-counting
+  - Agora: calcula saldo real disponível no operador para a ordem
+- Impacta: quebra de transferência PCP, quebra de saída PCP, quebra de devolução service
+
+---
 
 ## v2.14.1 — Refinamentos Compras R5-R7 (28/03/2026)
 
