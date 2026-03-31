@@ -50,6 +50,7 @@ export async function GET(_req: NextRequest) {
           s.recebido_em,
           s.concluido_em,
           s.created_at,
+          s.transferencia_service_id,
           o.numero_ordem,
           o.tipo_ordem::text AS tipo_ordem,
           o.detalhes_ordem,
@@ -57,12 +58,17 @@ export async function GET(_req: NextRequest) {
           o.peso_peca_servico,
           c.nome AS cliente_nome,
           d.nome AS operador_nome,
+          d_orig.nome AS deposito_origem_nome,
           prev_svc.motivo_reprovacao AS motivo_reprovacao_anterior,
           prev_svc.foto_reprovacao   AS foto_reprovacao_anterior
         FROM alissonerp.servicos s
         JOIN alissonerp.ordens o ON o.id = s.ordem_id
         LEFT JOIN public.contatos c ON c.id_contato = o.cliente_id
         LEFT JOIN alissonerp.depositos d ON d.id = s.operador_id
+        LEFT JOIN alissonerp.transferencias_ordem ts
+          ON ts.id = s.transferencia_service_id
+        LEFT JOIN alissonerp.depositos d_orig
+          ON d_orig.id = ts.deposito_origem_id
         LEFT JOIN LATERAL (
           SELECT motivo_reprovacao, foto_reprovacao
           FROM alissonerp.servicos prev
@@ -97,6 +103,7 @@ export async function GET(_req: NextRequest) {
           s.recebido_em,
           s.concluido_em,
           s.created_at,
+          s.transferencia_service_id,
           o.numero_ordem,
           o.tipo_ordem::text AS tipo_ordem,
           o.detalhes_ordem,
@@ -104,12 +111,17 @@ export async function GET(_req: NextRequest) {
           o.peso_peca_servico,
           c.nome AS cliente_nome,
           d.nome AS operador_nome,
+          d_orig.nome AS deposito_origem_nome,
           prev_svc.motivo_reprovacao AS motivo_reprovacao_anterior,
           prev_svc.foto_reprovacao   AS foto_reprovacao_anterior
         FROM alissonerp.servicos s
         JOIN alissonerp.ordens o ON o.id = s.ordem_id
         LEFT JOIN public.contatos c ON c.id_contato = o.cliente_id
         LEFT JOIN alissonerp.depositos d ON d.id = s.operador_id
+        LEFT JOIN alissonerp.transferencias_ordem ts
+          ON ts.id = s.transferencia_service_id
+        LEFT JOIN alissonerp.depositos d_orig
+          ON d_orig.id = ts.deposito_origem_id
         LEFT JOIN LATERAL (
           SELECT motivo_reprovacao, foto_reprovacao
           FROM alissonerp.servicos prev

@@ -6,7 +6,9 @@ import { isFullAccess } from "@/lib/roles";
 // GET /api/service/operadores
 // Lista depósitos de operadores com is_operador_service=true.
 // Exclui o próprio caller. Inclui qtd_servicos em andamento.
-// Auth: is_operador_service = true OU fullAccess
+// Auth: is_operador_service = true OU fullAccess OU gerente_fabrica OU pcp
+
+const ROLES_PODE_LISTAR = ["admin", "desenvolvedor", "gerente_fabrica", "pcp", "gerente_loja"];
 
 export async function GET(_req: NextRequest) {
   const supabase = await createServerSupabase();
@@ -20,7 +22,9 @@ export async function GET(_req: NextRequest) {
   `;
   if (!caller) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
 
-  const hasAccess = isFullAccess(caller.role as string) || caller.is_operador_service === true;
+  const hasAccess = isFullAccess(caller.role as string)
+    || caller.is_operador_service === true
+    || ROLES_PODE_LISTAR.includes(caller.role as string);
   if (!hasAccess) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   const meuDepositoId = caller.deposito_id as number | null;
