@@ -49,6 +49,8 @@ interface ServicoMeu {
   cliente_nome: string | null;
   motivo_reprovacao_anterior: string | null;
   foto_reprovacao_anterior: string | null;
+  transferencia_service_id: number | null;
+  deposito_origem_nome: string | null;
 }
 
 interface InsumoOpcao {
@@ -117,7 +119,7 @@ interface ServicoDetalhe extends ServicoConcluido {
   operador_nome: string | null;
 }
 
-type View     = "meus" | "receber" | "concluidos" | "concluir" | "transferir" | "camera";
+type View     = "meus" | "receber" | "concluidos" | "concluir" | "devolver" | "transferir" | "camera";
 type CameraCtx = "receber" | "peca" | "fio";
 type Periodo   = "hoje" | "semana" | "mes";
 
@@ -235,6 +237,7 @@ export default function ServiceApp() {
   const [view,       setView]       = useState<View>("meus");
   const [cameraCtx,  setCameraCtx]  = useState<CameraCtx>("receber");
   const prevView = useRef<View>("meus");
+  const [modoFinalizar, setModoFinalizar] = useState<"concluir" | "devolver">("concluir");
 
   // ── Dados ─────────────────────────────────────────────────────────────────
   const [pendentes,    setPendentes]    = useState<ProtocoloPendente[]>([]);
@@ -486,9 +489,49 @@ export default function ServiceApp() {
 
   function iniciarConcluir(svc: ServicoMeu) {
     resetConcluir();
+    setModoFinalizar("concluir");
     setServicoConcluindo(svc);
     fetchInsumoPedras();
     setView("concluir");
+  }
+
+  function iniciarDevolver(svc: ServicoMeu) {
+    resetConcluir();
+    setModoFinalizar("devolver");
+    setServicoConcluindo(svc);
+    setView("devolver");
+  }
+
+  // ── AÇÃO: Confirmar devolução ─────────────────────────────────────────────
+  async function handleDevolver() {
+    if (!servicoConcluindo) return;
+    if (!fotoPecaB64) { showToast("Foto da peça obrigatória", false); return; }
+    if (!pesoSaida)   { showToast("Informe o peso de saída", false); return; }
+    setProcessando(true);
+
+    const body: Record<string, unknown> = {
+      peso_saida:       parseFloat(pesoSaida),
+      foto_peca_base64: fotoPecaB64,
+      usou_solda:       usouSolda ?? false,
+    };
+    if (usouSolda && fotoFioB64 && pesoFioDepois) {
+      body.foto_fio_base64 = fotoFioB64;
+      body.peso_fio_depois = parseFloat(pesoFioDepois);
+    }
+
+    const res  = await fetch(`/api/service/${servicoConcluindo.id}/devolver`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(body),
+    }).catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => ({})) : await res?.json().catch(() => ({}));
+    setProcessando(false);
+    if (!res?.ok) { showToast(data?.error ?? "Erro ao devolver", false); return; }
+    showToast("Peca devolvida. Protocolo volta criado.");
+    resetConcluir();
+    fetchMeus();
+    fetchSaldo();
+    setView("meus");
   }
 
   // ── AÇÃO: Transferir ─────────────────────────────────────────────────────
@@ -654,6 +697,141 @@ export default function ServiceApp() {
             className="w-full h-14 text-base"
           >
             {processando ? <><Loader2 size={18} className="animate-spin" />Processando...</> : <><CheckCircle2 size={18} />Confirmar Recebimento</>}
+          </Btn>
+        </div>
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // VIEW: DEVOLVER (retorna peça ao pote da fábrica)
+  // ══════════════════════════════════════════════════════════════════════════
+  if (view === "devolver" && servicoConcluindo) {
+    const svc = servicoConcluindo;
+    const podeConfirmarDev = !!fotoPecaB64 && !!pesoSaida &&
+      (usouSolda === false || (usouSolda === true && !!fotoFioB64 && !!pesoFioDepois)) &&
+      (!validandoPeca) && (validacaoPeca?.match !== false) &&
+      (!validandoFio) && (usouSolda !== true || validacaoFio?.match !== false);
+
+    return (
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex items-center gap-3 px-4 py-3 shrink-0" style={{ borderBottom: `1px solid ${S.border}` }}>
+          <button onClick={() => { resetConcluir(); setView("meus"); }}
+            className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: S.cardBg }}>
+            <ChevronLeft size={18} color={S.text} />
+          </button>
+          <div className="flex-1">
+            <p className="text-sm font-semibold" style={{ color: S.text }}>Devolver peca</p>
+            <p className="text-[10px]" style={{ color: S.textMuted }}>{svc.numero_ordem} · Ouro vai pro pote</p>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4" style={{ paddingBottom: "calc(90px + env(safe-area-inset-bottom))" }}>
+          {/* Peso saída */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>
+              Peso de saída (g) <span style={{ color: "#EF4444" }}>*</span>
+            </p>
+            <input
+              type="number" step="0.01" min="0.01" placeholder="0.00"
+              value={pesoSaida}
+              onChange={e => { setPesoSaida(e.target.value); setValidacaoPeca(null); }}
+              className="w-full rounded-2xl px-4 py-3.5 text-lg font-semibold focus:outline-none"
+              style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}`, color: S.text }}
+            />
+          </div>
+
+          {/* Foto peça */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>
+              Foto da peca na balanca <span style={{ color: "#EF4444" }}>*</span>
+            </p>
+            {fotoPecaPreview ? (
+              <div className="relative rounded-2xl overflow-hidden">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={fotoPecaPreview} alt="peca" className="w-full h-48 object-cover" />
+                <button onClick={() => { setFotoPecaB64(null); setFotoPecaPreview(null); setValidacaoPeca(null); }}
+                  className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center"
+                  style={{ backgroundColor: "rgba(0,0,0,0.55)" }}>
+                  <X size={14} color="#fff" />
+                </button>
+                {validandoPeca && <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}><Loader2 size={24} className="animate-spin text-white" /></div>}
+              </div>
+            ) : (
+              <button onClick={() => abrirCamera("peca", "devolver")}
+                className="w-full flex flex-col items-center justify-center gap-2 rounded-2xl transition-colors active:scale-[0.98]"
+                style={{ height: 120, backgroundColor: S.cardBg, border: `2px dashed rgba(212,175,55,0.3)` }}>
+                <Camera size={26} color={S.gold} />
+                <span className="text-sm" style={{ color: S.textMuted }}>Foto da peca</span>
+              </button>
+            )}
+            {validacaoPeca && !validacaoPeca.match && (
+              <p className="text-[11px] mt-1.5 px-2" style={{ color: "#EF4444" }}>{validacaoPeca.mensagem}</p>
+            )}
+            {validacaoPeca?.match && (
+              <p className="text-[11px] mt-1.5 px-2 flex items-center gap-1" style={{ color: "#1D9E75" }}>
+                <CheckCircle size={11} /> Peso confirmado: {validacaoPeca.peso_balanca?.toFixed(3)}g
+              </p>
+            )}
+          </div>
+
+          {/* Usou solda */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Usou solda?</p>
+            <div className="flex gap-2">
+              {([false, true] as const).map(v => (
+                <button key={String(v)} onClick={() => setUsouSolda(v)}
+                  className="flex-1 py-3 rounded-2xl text-sm font-semibold transition-all"
+                  style={{ backgroundColor: usouSolda === v ? (v ? S.btnBlue : S.btnGreen) : S.cardBg, color: usouSolda === v ? "#fff" : S.textMuted, border: `1px solid ${S.border}` }}>
+                  {v ? "Sim" : "Nao"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Fio de solda */}
+          {usouSolda === true && (
+            <div className="space-y-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>
+                  Peso fio depois (g) <span style={{ color: "#EF4444" }}>*</span>
+                </p>
+                <input type="number" step="0.001" min="0" placeholder="0.000" value={pesoFioDepois}
+                  onChange={e => { setPesoFioDepois(e.target.value); setValidacaoFio(null); }}
+                  className="w-full rounded-2xl px-4 py-3 text-base font-semibold focus:outline-none"
+                  style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}`, color: S.text }} />
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>
+                  Foto fio <span style={{ color: "#EF4444" }}>*</span>
+                </p>
+                {fotoFioPreview ? (
+                  <div className="relative rounded-2xl overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={fotoFioPreview} alt="fio" className="w-full h-32 object-cover" />
+                    <button onClick={() => { setFotoFioB64(null); setFotoFioPreview(null); setValidacaoFio(null); }}
+                      className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: "rgba(0,0,0,0.55)" }}>
+                      <X size={12} color="#fff" />
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => abrirCamera("fio", "devolver")}
+                    className="w-full flex flex-col items-center justify-center gap-2 rounded-2xl"
+                    style={{ height: 90, backgroundColor: S.cardBg, border: `2px dashed rgba(212,175,55,0.3)` }}>
+                    <Camera size={20} color={S.gold} />
+                    <span className="text-xs" style={{ color: S.textMuted }}>Foto do fio</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="fixed bottom-0 left-0 right-0 px-4 pt-3 z-20"
+          style={{ backgroundColor: "rgba(24,64,54,0.97)", borderTop: `1px solid ${S.border}`, paddingBottom: "calc(12px + env(safe-area-inset-bottom))" }}>
+          <Btn variant="gold" onClick={handleDevolver} disabled={!podeConfirmarDev || processando} className="w-full h-14 text-base">
+            {processando ? <><Loader2 size={18} className="animate-spin" />Processando...</> : <><CheckCircle size={18} />Confirmar Devolucao</>}
           </Btn>
         </div>
       </div>
@@ -1302,6 +1480,12 @@ export default function ServiceApp() {
                   {svc.detalhes_ordem && (
                     <p className="text-[11px] line-clamp-1 mt-0.5" style={{ color: S.textMuted }}>{svc.detalhes_ordem}</p>
                   )}
+                  {/* Badge de transferência da fábrica */}
+                  {svc.transferencia_service_id && (
+                    <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-semibold mt-1" style={{ backgroundColor: "rgba(168,85,247,0.15)", color: "#C084FC" }}>
+                      Da fabrica{svc.deposito_origem_nome ? ` (${svc.deposito_origem_nome})` : ""}
+                    </span>
+                  )}
                   <div className="flex items-center gap-3 mt-1">
                     <span className="text-[10px] flex items-center gap-1" style={{ color: S.textFaint }}>
                       <Scale size={10} />{svc.peso_entrada}g entrada
@@ -1316,11 +1500,17 @@ export default function ServiceApp() {
               {/* Ações */}
               <div className="flex gap-2 mt-3">
                 <Btn variant="green" onClick={() => iniciarConcluir(svc)} className="flex-1 h-11">
-                  <CheckCircle2 size={15} />Concluído
+                  <CheckCircle2 size={15} />Concluido
                 </Btn>
-                <Btn variant="outline-blue" onClick={() => abrirTransferir(svc)} className="flex-1 h-11">
-                  <ArrowLeftRight size={15} />Transferir
-                </Btn>
+                {svc.transferencia_service_id ? (
+                  <Btn variant="gold" onClick={() => iniciarDevolver(svc)} className="flex-1 h-11">
+                    <CheckCircle size={15} />Devolver
+                  </Btn>
+                ) : (
+                  <Btn variant="outline-blue" onClick={() => abrirTransferir(svc)} className="flex-1 h-11">
+                    <ArrowLeftRight size={15} />Transferir
+                  </Btn>
+                )}
               </div>
             </Card>
           ))}

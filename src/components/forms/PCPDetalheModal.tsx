@@ -63,6 +63,10 @@ interface PCPDetalhe {
   dist_pedras_qtd: number | null;
   dist_pedras_g: number | null;
   dist_quebra: number | null;
+  service_servico_id: number | null;
+  service_status: string | null;
+  service_operador_nome: string | null;
+  service_recebido_em: string | null;
 }
 
 interface ResumoApontamento {
@@ -272,6 +276,36 @@ export default function PCPDetalheModal({ pcp, onClose, onSuccess }: Props) {
                     <span style={{ color: "#374151" }}>
                       {detalhe.deposito_nome}{detalhe.setor_nome ? ` · ${detalhe.setor_nome}` : ""}
                     </span>
+                  </div>
+                )}
+                {detalhe?.service_servico_id != null && (
+                  <div
+                    className="mt-2 rounded-lg px-3 py-2.5 space-y-1"
+                    style={{ backgroundColor: "#FFF7ED", border: "1px solid #FED7AA" }}
+                  >
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#C2410C" }}>
+                      <ArrowLeftRight size={11} strokeWidth={2.5} />
+                      Na service externa
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span style={{ color: "#92400E" }}>Operador</span>
+                      <span className="font-medium" style={{ color: "#78350F" }}>{detalhe.service_operador_nome ?? "—"}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span style={{ color: "#92400E" }}>Status</span>
+                      <span className="font-medium" style={{ color: "#78350F" }}>
+                        {detalhe.service_status === "em_servico" ? "Em serviço"
+                          : detalhe.service_status === "aguardando" ? "Aguardando"
+                          : detalhe.service_status === "devolvido" ? "Devolvido"
+                          : detalhe.service_status ?? "—"}
+                      </span>
+                    </div>
+                    {detalhe.service_recebido_em && (
+                      <div className="flex justify-between text-sm">
+                        <span style={{ color: "#92400E" }}>Recebido em</span>
+                        <span style={{ color: "#78350F" }}>{fmtData(detalhe.service_recebido_em)}</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="flex justify-between text-sm">

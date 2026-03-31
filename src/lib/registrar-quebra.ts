@@ -18,7 +18,7 @@ export interface RegistroQuebra {
   numero_ordem?:   string | null;
   deposito_nome:   string;
   setor_nome?:     string | null;
-  tipo:            "transferencia" | "saida_pcp" | "conclusao_lote";
+  tipo:            "transferencia" | "saida_pcp" | "conclusao_lote" | "devolucao_service";
   ouro_recebido:   number;       // quanto ENTROU neste operador
   ouro_entregue:   number;       // quanto SAIU (transferido ou na peça)
   created_by?:     string | null;
@@ -65,21 +65,23 @@ export async function registrarQuebra(dados: RegistroQuebra) {
 }
 
 /**
- * Retorna o total de ouro recebido por um operador para uma ordem.
- * Soma todas as entradas de insumos Metal/Ouro (categoria_id=1) naquele
- * depósito para aquela ordem — captura tanto Entrada de Metal quanto Aditivos.
+ * Retorna o saldo líquido de ouro de um operador para uma ordem.
+ * Saldo = SUM(entrada) - SUM(saída) de insumos Metal/Ouro (categoria_id=1)
+ * naquele depósito para aquela ordem.
+ *
+ * Usar saldo líquido evita dupla-contagem quando o operador recebe metal
+ * da mesma ordem mais de uma vez (ex: transferência adicional de aditivo).
  */
 export async function buscarOuroRecebido(
   ordem_id: number,
   deposito_id: number,
 ): Promise<number> {
   const [row] = await sql`
-    SELECT COALESCE(SUM(me.entrada), 0)::float8 AS total
+    SELECT COALESCE(SUM(me.entrada) - SUM(me.saida), 0)::float8 AS total
     FROM alissonerp.movimentacoes_estoque me
     JOIN alissonerp.insumos i ON i.id = me.insumo_id
     WHERE me.ordem_id    = ${ordem_id}
       AND me.deposito_id = ${deposito_id}
-      AND me.entrada     > 0
       AND i.categoria_id = 1
   `;
   return row ? Number(row.total) : 0;

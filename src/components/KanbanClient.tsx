@@ -224,6 +224,15 @@ function KanbanCard({
           {pcp.numero_ordem ?? `#${pcp.ordem_id}`}
         </Link>
         <div className="flex items-center gap-1.5">
+          {/* Badge Na Service */}
+          {pcp.na_service && (
+            <span
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+              style={{ backgroundColor: "#FFF7ED", color: "#C2410C", border: "1px solid #FED7AA" }}
+            >
+              Na service
+            </span>
+          )}
           {/* Badge de teste */}
           {pcp.eh_teste && (
             <span

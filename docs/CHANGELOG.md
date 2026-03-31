@@ -4,6 +4,19 @@
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
 
+## v2.14.2 (30/03/2026)
+### Fixes — Bug critico: dupla-contagem de ouro em buscarOuroRecebido
+- `buscarOuroRecebido` retornava SUM(entrada) em vez de SUM(entrada)-SUM(saida)
+  - Cenario: operador recebe ouro, transfere parte, recebe de volta, transfere novamente
+  - Bug: a funcao somava TODAS as entradas historicas ignorando saidas anteriores
+  - Resultado: ouro_recebido inflado → QUEBRA_PCP CE errado → saldo negativo do operador
+- Fix: formula alterada para saldo liquido: SUM(entrada) - SUM(saida) para categoria_id=1
+- Fix: `pcp/transferir/route.ts` — buscarOuroRecebido movido para ANTES das CEs TED/QUEBRA_PCP
+- Fix: `pcp/saida/route.ts` — buscarOuroRecebido movido para ANTES das CEs SM/QUEBRA_PCP
+- Correcao dados C-1060 (ordem_id=1292): CE QUEBRA_PCP id=468 saida 12.56→0.25; quebra_operador id=47 ouro_recebido 21.54→9.23 quebra 12.56→0.25
+- Correcao dados C-1129 (ordem_id=1317): quebra_operador id=31 ouro_recebido 2.67→1.52 quebra 1.47→0.32
+- Varredura: outros 5 operadores com multiplas entradas verificados — sem CEs erradas (saida/pcp usa total_metal do PCP, nao buscarOuroRecebido)
+
 ## v2.14.1 (30/03/2026)
 ### Fixes (migrations 101 + 102)
 - Bug critico: fn_criar_itens_ordem gravava unidades como peso para pedras (devia gravar gramas)

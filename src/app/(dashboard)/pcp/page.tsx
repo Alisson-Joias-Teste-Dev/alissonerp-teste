@@ -32,7 +32,13 @@ export default async function PcpPage() {
           v.peso_final, v.total_metal, v.data_conclusao,
           v.created_at, v.deposito_id, v.setor_id,
           COALESCE(o.eh_teste, false) AS eh_teste,
-          o.peso_metal_externo
+          o.peso_metal_externo,
+          EXISTS (
+            SELECT 1 FROM alissonerp.servicos s
+            WHERE s.pcp_id = v.id
+              AND s.status IN ('em_servico', 'aguardando')
+              AND s.transferencia_service_id IS NOT NULL
+          ) AS na_service
         FROM alissonerp.vw_pcp_erp v
         LEFT JOIN alissonerp.ordens o ON o.id = v.ordem_id
         WHERE v.deposito_id = ${depositoIdFiltro}
@@ -46,7 +52,13 @@ export default async function PcpPage() {
           v.peso_final, v.total_metal, v.data_conclusao,
           v.created_at, v.deposito_id, v.setor_id,
           COALESCE(o.eh_teste, false) AS eh_teste,
-          o.peso_metal_externo
+          o.peso_metal_externo,
+          EXISTS (
+            SELECT 1 FROM alissonerp.servicos s
+            WHERE s.pcp_id = v.id
+              AND s.status IN ('em_servico', 'aguardando')
+              AND s.transferencia_service_id IS NOT NULL
+          ) AS na_service
         FROM alissonerp.vw_pcp_erp v
         LEFT JOIN alissonerp.ordens o ON o.id = v.ordem_id
         ORDER BY v.id DESC
