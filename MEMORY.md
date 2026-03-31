@@ -1204,6 +1204,9 @@ REGRA: trigger só atualiza produto_composicao — NÃO toca public.produtos (s�
 ⚠️ Marcador 'QUEBRA_PCP': saída sem par no pote — baixa definitiva da quebra
    da saída do PCP. Junto com 'QUEBRA_LOTE' (distribuição), são as únicas
    saídas sem CE dupla no sistema.
+⚠️ buscarOuroRecebido: retorna SALDO LÍQUIDO (entradas − saídas), NÃO apenas entradas.
+   Bug corrigido 31/03/2026 (v2.14.2): double-counting quando operador recebia metal >1 vez da mesma ordem.
+   Timing: chamar ANTES de criar CEs (TED/SM/QUEBRA_PCP), senão o próprio CE entra no cálculo.
 ⚠️ % Quebra: fórmula ÚNICA em todo o sistema:
    metal_liquido = total_metal - retorno_metal
    % = quebra / metal_liquido × 100
@@ -1376,11 +1379,11 @@ QUEBRA = ouro_recebido − ouro_entregue
 QUANDO REGISTRA:
   1. Transferência operador→operador: quebra do operador de ORIGEM
      tipo='transferencia'
-     ouro_recebido = SUM(entradas cat=1) no depósito de origem para aquela ordem
+     ouro_recebido = SALDO LÍQUIDO (SUM entradas − SUM saídas) de cat=1 no depósito de origem para aquela ordem
      ouro_entregue = quantidade do insumo_id=1 sendo transferido
   2. Saída PCP (conclusão): quebra do operador que finalizou
      tipo='saida_pcp'
-     ouro_recebido = SUM(entradas cat=1) no depósito do operador para aquela ordem
+     ouro_recebido = SALDO LÍQUIDO (SUM entradas − SUM saídas) de cat=1 no depósito do operador para aquela ordem
      ouro_entregue = peso_ouro_real (bruto − pedras − outros)
   3. Conclusão do lote de distribuição: quebra do operador do lote
      tipo='conclusao_lote'
@@ -1406,7 +1409,7 @@ OBS vw_ouro_em_producao:
 
 LIB: src/lib/registrar-quebra.ts
   registrarQuebra(dados: RegistroQuebra) → INSERT + retorna registro
-  buscarOuroRecebido(ordem_id, deposito_id) → SUM(entradas cat=1) no depósito
+  buscarOuroRecebido(ordem_id, deposito_id) → SALDO LÍQUIDO (SUM entradas − SUM saídas) de cat=1 no depósito
 
 VIEWS (migration 066):
   vw_saldo_pote_ouro    → saldo ouro (cat=1) no almoxarifado (depósito=1)
