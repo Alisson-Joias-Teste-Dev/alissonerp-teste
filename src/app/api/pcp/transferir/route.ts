@@ -107,6 +107,17 @@ export async function POST(req: NextRequest) {
       ? insumos.filter((i) => i.quantidade > 0)
       : await calcularSaldoAutomatico(pcp_id, distOuroReal);
 
+  // 3a-pre. Capturar saldo líquido de ouro da origem ANTES de inserir qualquer CE.
+  //   buscarOuroRecebido retorna SUM(entrada)−SUM(saída) do operador para esta ordem.
+  //   Precisa ser chamado aqui para evitar dupla-contagem: se o operador já recebeu
+  //   ouro desta ordem antes, as saídas anteriores devem ser subtraídas das entradas.
+  const ouroInsumoParaQuebra = origemDepositoId !== 1
+    ? insumosParaMovimentar.find((i) => i.insumo_id === 1)
+    : undefined;
+  const ouroRecebidoAntes = (origemDepositoId !== 1 && ouroInsumoParaQuebra && ouroInsumoParaQuebra.quantidade > 0)
+    ? await buscarOuroRecebido(ordemId!, origemDepositoId)
+    : 0;
+
   for (const insumo of insumosParaMovimentar) {
     // SAÍDA da origem
     await sql`
@@ -132,11 +143,11 @@ export async function POST(req: NextRequest) {
   }
 
   // 3b. Registrar quebra do operador de ORIGEM (se não for o pote)
-  //     Ouro entregue = quantidade do insumo_id=1 sendo transferido
-  if (origemDepositoId !== 1) {
-    const ouroInsumo = insumosParaMovimentar.find((i) => i.insumo_id === 1);
-    if (ouroInsumo && ouroInsumo.quantidade > 0) {
-      const ouroRecebido = await buscarOuroRecebido(ordemId!, origemDepositoId);
+  //     Usa ouroRecebidoAntes (saldo líquido capturado ANTES das CEs desta transferência).
+  if (origemDepositoId !== 1 && ouroInsumoParaQuebra && ouroInsumoParaQuebra.quantidade > 0) {
+    {
+      const ouroInsumo = ouroInsumoParaQuebra;
+      const ouroRecebido = ouroRecebidoAntes;
       await registrarQuebra({
         ordem_id:      ordemId!,
         pcp_id,

@@ -229,6 +229,14 @@ export async function POST(req: NextRequest) {
     WHERE id = ${ordemId}
   `;
 
+  // 7-pre. Capturar saldo líquido de ouro do operador ANTES de inserir qualquer CE de saída.
+  //   buscarOuroRecebido retorna SUM(entrada)−SUM(saída) para esta ordem e depósito.
+  //   Precisa ser chamado ANTES do SM e do QUEBRA_PCP para não subtrair saídas desta operação.
+  let ouroRecebidoParaQuebra = 0;
+  if (temOuro && depositoId !== 1 && peso_ouro_real > 0) {
+    ouroRecebidoParaQuebra = await buscarOuroRecebido(ordemId, depositoId);
+  }
+
   // 7. CE: SM — saída do depósito do operador (ouro virou peça — sem entrada no pote)
   //    Só cria se houver ouro real E ouro foi apontado (temOuro evita CE fantasma)
   if (temOuro && peso_ouro_real > 0) {
@@ -259,6 +267,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 7d. Registrar quebra do operador que realizou a saída (se não for o pote e houve ouro)
+  //     Usa ouroRecebidoParaQuebra capturado ANTES das CEs desta saída.
   if (temOuro && depositoId !== 1 && peso_ouro_real > 0) {
     const [depRow] = await sql`
       SELECT nome FROM alissonerp.depositos WHERE id = ${depositoId} LIMIT 1
@@ -270,7 +279,6 @@ export async function POST(req: NextRequest) {
       LEFT JOIN alissonerp.setores s ON s.id = o.setor_atual
       WHERE p.id = ${pcp_id} LIMIT 1
     `;
-    const ouroRecebido = await buscarOuroRecebido(ordemId, depositoId);
     await registrarQuebra({
       ordem_id:      ordemId,
       pcp_id,
@@ -280,7 +288,7 @@ export async function POST(req: NextRequest) {
       deposito_nome: (depRow?.nome as string) ?? "",
       setor_nome:    (pcpSetor?.setor_nome as string | null) ?? null,
       tipo:          "saida_pcp",
-      ouro_recebido: ouroRecebido,
+      ouro_recebido: ouroRecebidoParaQuebra,
       ouro_entregue: peso_ouro_real,
       created_by:    user_id ?? null,
     });
