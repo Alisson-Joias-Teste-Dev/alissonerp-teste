@@ -455,12 +455,6 @@ export default function NovaOrdemServicoBaseModal({
       mediaStreamRef.current = stream;
       chunksRef.current = [];
 
-      // Mostrar preview ao vivo
-      if (videoPreviewRef.current) {
-        videoPreviewRef.current.srcObject = stream;
-        videoPreviewRef.current.play();
-      }
-
       const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
         ? "video/webm;codecs=vp9"
         : MediaRecorder.isTypeSupported("video/webm")
@@ -485,11 +479,11 @@ export default function NovaOrdemServicoBaseModal({
         if (videoPreviewRef.current) videoPreviewRef.current.srcObject = null;
       };
 
-      recorder.start(1000); // chunk a cada 1s
+      recorder.start(1000);
+      // Ativar estado ANTES de conectar o stream — o useEffect abaixo faz a conexão após render
       setGravando(true);
       setGravandoTimer(30);
 
-      // Countdown 30s → para automaticamente
       timerRef.current = setInterval(() => {
         setGravandoTimer(prev => {
           if (prev <= 1) {
@@ -503,6 +497,15 @@ export default function NovaOrdemServicoBaseModal({
       setErro("Não foi possível acessar a câmera. Verifique as permissões ou use \"Enviar da galeria\".");
     }
   }
+
+  // Callback ref: conecta o stream assim que o <video> monta no DOM
+  const videoPreviewCallbackRef = useCallback((node: HTMLVideoElement | null) => {
+    (videoPreviewRef as React.MutableRefObject<HTMLVideoElement | null>).current = node;
+    if (node && mediaStreamRef.current) {
+      node.srcObject = mediaStreamRef.current;
+      node.play().catch(() => {});
+    }
+  }, [gravando]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function pararGravacao() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
@@ -1061,7 +1064,8 @@ export default function NovaOrdemServicoBaseModal({
                 {gravando ? (
                   <div className="rounded-xl overflow-hidden relative bg-black">
                     <video
-                      ref={videoPreviewRef}
+                      ref={videoPreviewCallbackRef}
+                      autoPlay
                       muted
                       playsInline
                       className="w-full max-h-48 rounded-xl object-cover"
