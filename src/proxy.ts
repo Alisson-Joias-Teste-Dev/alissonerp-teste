@@ -15,8 +15,9 @@ const MODULO_TO_PREFIX: Record<string, string> = {
   conferencia:       "/conferencia",
   entrega:           "/entrega",
   auditoria:         "/auditoria",
-  vendas:            "/vendas",
-  financeiro:        "/financeiro",
+  vendas:              "/vendas",
+  estoque_comercial:   "/estoque-comercial",
+  financeiro:          "/financeiro",
   produtos:          "/produtos",
   precificacao:      "/precificacao",
   configuracoes:     "/configuracoes",
@@ -24,7 +25,7 @@ const MODULO_TO_PREFIX: Record<string, string> = {
 
 const PREFIXOS_PROTEGIDOS = new Set(Object.values(MODULO_TO_PREFIX));
 
-// Cache de permissões por role (TTL 5 min) — evita query ao banco a cada request
+// Cache de permissões por userId (TTL 5 min) — evita query ao banco a cada request
 const rolePermCache = new Map<string, { modulos: string[]; exp: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -66,6 +67,7 @@ export async function proxy(request: NextRequest) {
     pathname === "/" ||
     pathname.startsWith("/api/") ||
     pathname.startsWith("/login") ||
+    pathname.startsWith("/orcamento") ||
     pathname.startsWith("/_next/") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/logo") ||

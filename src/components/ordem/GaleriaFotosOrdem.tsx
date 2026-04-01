@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
 
 const C = {
   esmeralda: "#184036",
@@ -18,6 +17,18 @@ interface FotoItem {
   origem: "pdv" | "erp";
 }
 
+/** Extrai timestamp do path do arquivo (Date.now() de 13 dígitos) */
+function extrairData(path: string): string | null {
+  const match = path.match(/(\d{13})/);
+  if (!match) return null;
+  const d = new Date(parseInt(match[1]));
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleString("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
 interface GaleriaFotosOrdemProps {
   ordemId: number;
   // Permite passar paths iniciais já carregados (opcional — se não passar, busca via API)
@@ -25,9 +36,6 @@ interface GaleriaFotosOrdemProps {
 }
 
 export default function GaleriaFotosOrdem({ ordemId, arquivosPaths }: GaleriaFotosOrdemProps) {
-  const { role } = useAuth();
-  const isAdmin = role === "admin" || role === "desenvolvedor";
-
   const [fotos, setFotos] = useState<FotoItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -157,20 +165,7 @@ export default function GaleriaFotosOrdem({ ordemId, arquivosPaths }: GaleriaFot
     }
   }
 
-  async function removerFoto(path: string) {
-    if (!confirm("Remover esta foto da ordem?")) return;
-
-    const res = await fetch(`/api/ordens/${ordemId}/fotos`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    });
-
-    if (res.ok) {
-      setFotos((prev) => prev.filter((f) => f.path !== path));
-      if (modalAberto) fecharModal();
-    }
-  }
+  // Remoção de fotos desabilitada — fotos são registro permanente
 
   if (loading) {
     return (
@@ -301,48 +296,47 @@ export default function GaleriaFotosOrdem({ ordemId, arquivosPaths }: GaleriaFot
           </div>
         ) : (
           <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 lg:grid-cols-6">
-            {fotos.map((foto, idx) => (
-              <div key={foto.path} className="relative group">
-                <button
-                  onClick={() => abrirModal(idx)}
-                  className="w-full aspect-square rounded-lg overflow-hidden border transition-all hover:border-current"
-                  style={{ borderColor: C.cremeBorder }}
-                  title="Ver foto"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={foto.url}
-                    alt={`Foto ${idx + 1}`}
-                    className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                  />
-                </button>
-
-                {/* Badge de origem */}
-                <span
-                  className="absolute bottom-1 left-1 px-1 py-0.5 rounded text-[9px] font-bold leading-none"
-                  style={{
-                    backgroundColor: foto.origem === "pdv" ? "rgba(59,130,246,0.85)" : "rgba(24,64,54,0.75)",
-                    color: "#fff",
-                  }}
-                >
-                  {foto.origem === "pdv" ? "PDV" : "ERP"}
-                </span>
-
-                {/* Botão remover (somente admin, somente fotos ERP) */}
-                {isAdmin && foto.origem === "erp" && (
+            {fotos.map((foto, idx) => {
+              const dataStr = extrairData(foto.path);
+              return (
+                <div key={foto.path} className="relative group">
                   <button
-                    onClick={() => removerFoto(foto.path)}
-                    className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{ backgroundColor: "rgba(220,38,38,0.85)" }}
-                    title="Remover foto"
+                    onClick={() => abrirModal(idx)}
+                    className="w-full aspect-square rounded-lg overflow-hidden border transition-all hover:border-current"
+                    style={{ borderColor: C.cremeBorder }}
+                    title="Ver foto"
                   >
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <path d="M18 6L6 18M6 6l12 12"/>
-                    </svg>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={foto.url}
+                      alt={`Foto ${idx + 1}`}
+                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                    />
                   </button>
-                )}
-              </div>
-            ))}
+
+                  {/* Badge de origem */}
+                  <span
+                    className="absolute top-1 left-1 px-1 py-0.5 rounded text-[9px] font-bold leading-none"
+                    style={{
+                      backgroundColor: foto.origem === "pdv" ? "rgba(59,130,246,0.85)" : "rgba(24,64,54,0.75)",
+                      color: "#fff",
+                    }}
+                  >
+                    {foto.origem === "pdv" ? "PDV" : "ERP"}
+                  </span>
+
+                  {/* Data/hora de adição */}
+                  {dataStr && (
+                    <span
+                      className="absolute bottom-0 left-0 right-0 px-1 py-0.5 text-[8px] text-center leading-tight"
+                      style={{ backgroundColor: "rgba(0,0,0,0.55)", color: "#fff" }}
+                    >
+                      {dataStr}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -414,21 +408,15 @@ export default function GaleriaFotosOrdem({ ordemId, arquivosPaths }: GaleriaFot
             </button>
           )}
 
-          {/* Remover (admin, somente fotos ERP) */}
-          {isAdmin && fotos[modalIdx].origem === "erp" && (
-            <button
-              className="absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-white transition-colors hover:bg-white/10"
-              onClick={(e) => { e.stopPropagation(); removerFoto(fotos[modalIdx].path); }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="3 6 5 6 21 6"/>
-                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                <path d="M10 11v6M14 11v6"/>
-                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-              </svg>
-              Remover foto
-            </button>
-          )}
+          {/* Data/hora no lightbox */}
+          {(() => {
+            const d = extrairData(fotos[modalIdx].path);
+            return d ? (
+              <div className="absolute bottom-4 right-4 text-white text-xs bg-black/50 px-3 py-1.5 rounded-lg">
+                Adicionada em {d}
+              </div>
+            ) : null;
+          })()}
 
           {/* Thumbnails na base */}
           {fotos.length > 1 && (

@@ -7,6 +7,7 @@ import MobileHeader from "@/components/MobileHeader";
 import { SidebarProvider } from "@/contexts/SidebarContext";
 import ServiceLayout from "@/components/layout/ServiceLayout";
 import ServiceApp from "@/components/service/ServiceApp";
+import GlobalErrorToast from "@/components/ui/GlobalErrorToast";
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const { loading, isOperadorService } = useAuth();
@@ -43,6 +44,8 @@ export default function DashboardShell({ children }: { children: React.ReactNode
           {children}
         </main>
       </div>
+      {/* Toast de erros global — visível em todas as páginas */}
+      <GlobalErrorToast />
     </SidebarProvider>
   );
 }
