@@ -403,15 +403,36 @@ export default function NovaOrdemServicoBaseModal({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pesoDebounced]);
 
-  // ── Upload vídeo ──────────────────────────────────────────────────────────
+  // ── Upload vídeo (máx. 30s) ───────────────────────────────────────────────
   function handleVideoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     const maxBytes = 100 * 1024 * 1024; // 100 MB
     if (file.size > maxBytes) { setErro("Vídeo muito grande. Máximo 100 MB."); return; }
-    if (video) URL.revokeObjectURL(video.url);
-    const ext = file.name.split(".").pop() ?? "mp4";
-    setVideo({ blob: file, url: URL.createObjectURL(file), ext });
+
+    // Validar duração (máx. 30s)
+    const objUrl = URL.createObjectURL(file);
+    const tempVideo = document.createElement("video");
+    tempVideo.preload = "metadata";
+    tempVideo.onloadedmetadata = () => {
+      if (tempVideo.duration > 30) {
+        URL.revokeObjectURL(objUrl);
+        setErro(`Vídeo tem ${Math.round(tempVideo.duration)}s — máximo permitido é 30 segundos.`);
+        return;
+      }
+      if (video) URL.revokeObjectURL(video.url);
+      const ext = file.name.split(".").pop() ?? "mp4";
+      setVideo({ blob: file, url: objUrl, ext });
+      setErro(null);
+    };
+    tempVideo.onerror = () => {
+      URL.revokeObjectURL(objUrl);
+      // Se não conseguiu ler metadata, aceita o arquivo mesmo assim
+      if (video) URL.revokeObjectURL(video.url);
+      const ext = file.name.split(".").pop() ?? "mp4";
+      setVideo({ blob: file, url: URL.createObjectURL(file), ext });
+    };
+    tempVideo.src = objUrl;
   }
 
   // ── Fotos adicionais ──────────────────────────────────────────────────────
@@ -941,10 +962,10 @@ export default function NovaOrdemServicoBaseModal({
                 </div>
               </div>
 
-              {/* Vídeo de observação */}
+              {/* Vídeo de observação (máx. 30s) */}
               <div>
                 <label className="block text-xs font-semibold text-gray-500 mb-1.5 flex items-center gap-1">
-                  <Video size={12} /> Vídeo de Detalhes (opcional)
+                  <Video size={12} /> Vídeo de Detalhes — máx. 30s (opcional)
                 </label>
                 {video ? (
                   <div className="rounded-xl overflow-hidden relative">
@@ -957,20 +978,39 @@ export default function NovaOrdemServicoBaseModal({
                     </button>
                   </div>
                 ) : (
-                  <button
-                    className="w-full h-16 rounded-xl border-2 border-dashed flex items-center justify-center gap-2 hover:opacity-80 transition-opacity"
-                    style={{ borderColor: C.cremeBorder }}
-                    onClick={() => videoInputRef.current?.click()}
-                  >
-                    <Upload size={15} className="text-gray-400" />
-                    <p className="text-xs text-gray-400">Anexar vídeo (máx. 100 MB)</p>
-                  </button>
+                  <div className="flex gap-2">
+                    {/* Gravar vídeo (câmera) */}
+                    <button
+                      className="flex-1 h-16 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 hover:opacity-80 transition-opacity"
+                      style={{ borderColor: C.cremeBorder }}
+                      onClick={() => {
+                        // Input com capture para abrir câmera direto
+                        const input = document.createElement("input");
+                        input.type = "file";
+                        input.accept = "video/*";
+                        input.capture = "environment";
+                        input.onchange = (ev) => handleVideoUpload(ev as unknown as React.ChangeEvent<HTMLInputElement>);
+                        input.click();
+                      }}
+                    >
+                      <Video size={15} className="text-gray-400" />
+                      <p className="text-[10px] text-gray-400">Gravar</p>
+                    </button>
+                    {/* Upload vídeo (galeria) */}
+                    <button
+                      className="flex-1 h-16 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 hover:opacity-80 transition-opacity"
+                      style={{ borderColor: C.cremeBorder }}
+                      onClick={() => videoInputRef.current?.click()}
+                    >
+                      <Upload size={15} className="text-gray-400" />
+                      <p className="text-[10px] text-gray-400">Enviar da galeria</p>
+                    </button>
+                  </div>
                 )}
                 <input
                   ref={videoInputRef}
                   type="file"
                   accept="video/*"
-                  capture="environment"
                   className="hidden"
                   onChange={handleVideoUpload}
                 />

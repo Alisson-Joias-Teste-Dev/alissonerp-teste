@@ -17,9 +17,12 @@ export default async function OrdemDetalhePage({
 
   const [ordens, apontamentos, movEstoque, transferencias, fichas, timeline] = await Promise.all([
     sql`
-      SELECT *
-      FROM alissonerp.vw_ordem_detalhe
-      WHERE id = ${ordemId}
+      SELECT vod.*,
+        u_criador.nome AS created_by_nome
+      FROM alissonerp.vw_ordem_detalhe vod
+      LEFT JOIN alissonerp.ordens o2 ON o2.id = vod.id
+      LEFT JOIN alissonerp.usuarios u_criador ON u_criador.id = o2.created_by
+      WHERE vod.id = ${ordemId}
       LIMIT 1
     `,
     sql`

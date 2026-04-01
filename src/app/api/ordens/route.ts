@@ -75,13 +75,16 @@ export async function POST(req: NextRequest) {
 
   // ── Verificar permissão ──────────────────────────────────────────────────
   const [usuario] = await sql`
-    SELECT role, tipos_ordem_permitidos
+    SELECT role, tipos_ordem_permitidos, vendedor_id
     FROM alissonerp.usuarios
     WHERE id = ${user.id}::uuid LIMIT 1
   `;
   if (!usuario) {
     return NextResponse.json({ error: "Usuário não encontrado no ERP" }, { status: 403 });
   }
+
+  // Auto-preencher vendedor_id a partir do usuário logado se não veio no body
+  const vendedorIdFinal = vendedor_id ?? usuario.vendedor_id ?? null;
 
   const isFullAccess = FULL_ACCESS_ROLES.includes(usuario.role);
   const tiposPermitidos: string[] = isFullAccess
@@ -174,7 +177,7 @@ export async function POST(req: NextRequest) {
         ${numeroOrdem},
         ${tipo_ordem}::alissonerp.enum_tipo_ordem,
         ${cliente_id ?? null},
-        ${vendedor_id ?? null},
+        ${vendedorIdFinal},
         ${dataEntregaFinal},
         ${peso_metal_negociado ?? 0},
         ${peso_metal_externo ?? null},
