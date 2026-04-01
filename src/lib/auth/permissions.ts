@@ -41,6 +41,7 @@ const ALL_MENUS: MenuItem[] = [
   { label: "Entrega",            href: "/entrega",            icon: "PackageCheck"    },
   { label: "Financeiro",         href: "/financeiro",         icon: "DollarSign"      },
   { label: "Vendas",             href: "/vendas",             icon: "ShoppingBag"     },
+  { label: "Est. Comercial",     href: "/estoque-comercial",  icon: "Store"           },
   { label: "Produtos",           href: "/produtos",           icon: "Tag"             },
   { label: "Precificação",       href: "/precificacao",       icon: "TrendingUp"      },
   { label: "Auditoria",          href: "/auditoria",          icon: "ClipboardCheck"  },
@@ -50,10 +51,10 @@ const ALL_MENUS: MenuItem[] = [
 ];
 
 const ROLE_MENUS: Record<Role, string[]> = {
-  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro", "/produtos", "/precificacao", "/configuracoes", "/service-painel"],
-  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro", "/produtos", "/precificacao", "/configuracoes", "/service-painel"],
-  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/vendas", "/financeiro", "/service-painel"],
-  gerente_loja:       ["/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/produtos", "/precificacao", "/service-painel"],
+  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/configuracoes", "/service-painel"],
+  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/configuracoes", "/service-painel"],
+  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/vendas", "/estoque-comercial", "/financeiro", "/service-painel"],
+  gerente_loja:       ["/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/estoque-comercial", "/produtos", "/precificacao", "/service-painel"],
   ourives:            ["/ordens", "/pcp"],
   motoboy:            ["/protocolo"],
   consultora:         ["/ordens", "/estoque", "/conferencia"],
@@ -68,7 +69,7 @@ const MENU_GROUPS: MenuGroup[] = [
   { type: "group", label: "Suprimentos", icon: "Package",     items: ["/estoque", "/quebra", "/insumos", "/compras"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Logística",   icon: "Truck",       items: ["/protocolo", "/conferencia", "/entrega"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Qualidade",   icon: "ShieldCheck", items: ["/auditoria"].map(h => ALL_MENUS.find(m => m.href === h)!) },
-  { type: "group", label: "Comercial",   icon: "Briefcase",   items: ["/vendas", "/financeiro", "/produtos", "/precificacao"].map(h => ALL_MENUS.find(m => m.href === h)!) },
+  { type: "group", label: "Comercial",   icon: "Briefcase",   items: ["/vendas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao"].map(h => ALL_MENUS.find(m => m.href === h)!) },
 ];
 
 export function getMenusForRole(role: Role | null | undefined): MenuItem[] {
@@ -110,8 +111,9 @@ const HREF_TO_MODULO: Record<string, string> = {
   "/conferencia":       "conferencia",
   "/entrega":           "entrega",
   "/auditoria":         "auditoria",
-  "/vendas":            "vendas",
-  "/financeiro":        "financeiro",
+  "/vendas":              "vendas",
+  "/estoque-comercial":  "estoque_comercial",
+  "/financeiro":         "financeiro",
   "/produtos":          "produtos",
   "/precificacao":      "precificacao",
   "/configuracoes":     "configuracoes",

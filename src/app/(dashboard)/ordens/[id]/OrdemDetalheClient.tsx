@@ -84,40 +84,48 @@ function PecaClienteCard({ fotoPeca, pesoPeca, videoObs }: {
       <p className="text-[10px] font-semibold uppercase tracking-wider mb-3" style={{ color: "#9CA3AF" }}>
         Peça do Cliente
       </p>
-      <div className="flex gap-5 flex-wrap">
-        {fotoUrl && (
-          <a href={fotoUrl} target="_blank" rel="noreferrer" className="shrink-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={fotoUrl}
-              alt="Foto da peça"
-              className="w-32 h-32 object-cover rounded-lg border"
-              style={{ borderColor: "#E8DCC8" }}
-            />
-          </a>
-        )}
-        <div className="flex flex-col justify-center gap-2">
-          {pesoPeca != null && (
-            <div>
-              <span className="text-[11px] uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Peso</span>
-              <p className="font-mono text-[15px] mt-0.5" style={{ color: "#1A1A1A" }}>{Number(pesoPeca).toFixed(2)}g</p>
-            </div>
-          )}
-          {videoUrl && (
-            <a
-              href={videoUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border"
-              style={{ color: "#184036", borderColor: "#E8DCC8" }}
-            >
-              ▶ Ver vídeo de observação
+      <div className="space-y-4">
+        <div className="flex gap-5 flex-wrap">
+          {fotoUrl && (
+            <a href={fotoUrl} target="_blank" rel="noreferrer" className="shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={fotoUrl}
+                alt="Foto da peça"
+                className="w-32 h-32 object-cover rounded-lg border"
+                style={{ borderColor: "#E8DCC8" }}
+              />
             </a>
           )}
-          {!fotoUrl && pesoPeca == null && !videoUrl && (
-            <p className="text-[13px]" style={{ color: "#9CA3AF" }}>Sem dados registrados.</p>
-          )}
+          <div className="flex flex-col justify-center gap-2">
+            {pesoPeca != null && (
+              <div>
+                <span className="text-[11px] uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Peso</span>
+                <p className="font-mono text-[15px] mt-0.5" style={{ color: "#1A1A1A" }}>{Number(pesoPeca).toFixed(2)}g</p>
+              </div>
+            )}
+            {!fotoUrl && pesoPeca == null && !videoUrl && (
+              <p className="text-[13px]" style={{ color: "#9CA3AF" }}>Sem dados registrados.</p>
+            )}
+          </div>
         </div>
+
+        {/* Vídeo player inline */}
+        {videoUrl && (
+          <div>
+            <span className="text-[11px] uppercase tracking-wider block mb-2" style={{ color: "#9CA3AF" }}>
+              Vídeo de Observação
+            </span>
+            <video
+              src={videoUrl}
+              controls
+              playsInline
+              preload="metadata"
+              className="w-full max-h-64 rounded-xl border bg-black"
+              style={{ borderColor: "#E8DCC8" }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -248,8 +256,8 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
             </div>
           )}
 
-          {/* Peça do Cliente — só para servico_venda quando há dados */}
-          {ordem.tipo_ordem_cod === "servico_venda" &&
+          {/* Peça do Cliente — servico_venda e garantia quando há dados */}
+          {(ordem.tipo_ordem_cod === "servico_venda" || ordem.tipo_ordem_cod === "garantia") &&
             (ordem.foto_peca_servico || ordem.peso_peca_servico != null || ordem.video_observacao) && (
             <PecaClienteCard
               fotoPeca={ordem.foto_peca_servico}

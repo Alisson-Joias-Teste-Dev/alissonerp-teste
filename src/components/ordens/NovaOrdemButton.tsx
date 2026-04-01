@@ -9,6 +9,8 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import NovaOrdemReposicaoLojaModal from "@/components/ordens/NovaOrdemReposicaoLojaModal";
 import NovaOrdemServicoInternoModal from "@/components/ordens/NovaOrdemServicoInternoModal";
+import NovaOrdemGarantiaModal from "@/components/ordens/NovaOrdemGarantiaModal";
+import NovaOrdemServicoVendaModal from "@/components/ordens/NovaOrdemServicoVendaModal";
 
 // servico_loja NÃO aparece — escondido do frontend
 const TIPOS_ORDEM = [
@@ -31,8 +33,10 @@ export default function NovaOrdemButton({
 
   const [aberto, setAberto]                         = useState(false);
   const [toastMsg, setToastMsg]                     = useState<string | null>(null);
-  const [reposicaoLojaOpen, setReposicaoLojaOpen]   = useState(false);
+  const [reposicaoLojaOpen,  setReposicaoLojaOpen]  = useState(false);
   const [servicoInternoOpen, setServicoInternoOpen] = useState(false);
+  const [garantiaOpen,       setGarantiaOpen]       = useState(false);
+  const [servicoVendaOpen,   setServicoVendaOpen]   = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,6 +63,14 @@ export default function NovaOrdemButton({
       setServicoInternoOpen(true);
       return;
     }
+    if (value === "garantia") {
+      setGarantiaOpen(true);
+      return;
+    }
+    if (value === "servico_venda") {
+      setServicoVendaOpen(true);
+      return;
+    }
     // Placeholder para os demais tipos
     setToastMsg(`🚧 Em construção — ${label} estará disponível em breve!`);
     setTimeout(() => setToastMsg(null), 3000);
@@ -72,6 +84,18 @@ export default function NovaOrdemButton({
 
   function handleServicoInternoSuccess() {
     setToastMsg(`✓ Ordem de serviço interno criada com sucesso!`);
+    setTimeout(() => setToastMsg(null), 4000);
+    router.refresh();
+  }
+
+  function handleGarantiaSuccess(numeroOrdem: string) {
+    setToastMsg(`✓ Ordem de garantia ${numeroOrdem} criada com sucesso!`);
+    setTimeout(() => setToastMsg(null), 4000);
+    router.refresh();
+  }
+
+  function handleServicoVendaSuccess(numeroOrdem: string) {
+    setToastMsg(`✓ Ordem de serviço venda ${numeroOrdem} criada com sucesso!`);
     setTimeout(() => setToastMsg(null), 4000);
     router.refresh();
   }
@@ -125,6 +149,24 @@ export default function NovaOrdemButton({
         isOpen={servicoInternoOpen}
         onClose={() => setServicoInternoOpen(false)}
         onSuccess={handleServicoInternoSuccess}
+        userId={user?.id ?? ""}
+        userName={nome ?? "Usuário"}
+      />
+
+      {/* Modal Garantia */}
+      <NovaOrdemGarantiaModal
+        isOpen={garantiaOpen}
+        onClose={() => setGarantiaOpen(false)}
+        onSuccess={handleGarantiaSuccess}
+        userId={user?.id ?? ""}
+        userName={nome ?? "Usuário"}
+      />
+
+      {/* Modal Serviço Venda */}
+      <NovaOrdemServicoVendaModal
+        isOpen={servicoVendaOpen}
+        onClose={() => setServicoVendaOpen(false)}
+        onSuccess={handleServicoVendaSuccess}
         userId={user?.id ?? ""}
         userName={nome ?? "Usuário"}
       />

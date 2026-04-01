@@ -8,7 +8,7 @@ const ALL_TIPOS = [
   "servico_venda", "servico_loja", "fabricacao", "reposicao_venda",
   "reposicao_loja", "compra_fornecedor", "garantia", "servico_interno",
 ];
-const SERVICO_TIPOS = ["servico_venda", "servico_loja"];
+const SERVICO_TIPOS = ["servico_venda", "servico_loja", "garantia"];
 
 // POST /api/ordens — cria uma nova ordem no ERP
 // Body: { tipo_ordem, cliente_id?, vendedor_id?, data_entrega?, peso_metal_negociado?,
@@ -30,10 +30,13 @@ export async function POST(req: NextRequest) {
     peso_metal_negociado,
     foto_peca_servico,   // storage path (já enviado pelo client)
     peso_peca_servico,
+    peso_metal_externo,  // peso do metal do cliente (garantia)
     video_observacao,    // storage path (já enviado pelo client)
     detalhes_ordem,      // texto livre de observações
     fotos_base64,        // string[] — upload server-side para bucket ordem-fotos
-    tipos_servico_ids,   // integer[] — tipos de serviço para servico_interno
+    tipos_servico_ids,   // integer[] — tipos de serviço (servico_interno + garantia)
+    venda_id,            // integer — referência à venda (garantia)
+    venda_item_ids,      // integer[] — itens da venda em garantia
     itens = [],
   } = body;
 
@@ -48,6 +51,22 @@ export async function POST(req: NextRequest) {
     }
     if (!video_observacao) {
       return NextResponse.json({ error: "video_observacao é obrigatório para serviço interno" }, { status: 400 });
+    }
+    if (!Array.isArray(tipos_servico_ids) || tipos_servico_ids.length === 0) {
+      return NextResponse.json({ error: "Selecione pelo menos um tipo de serviço" }, { status: 400 });
+    }
+  }
+
+  if (tipo_ordem === "garantia" || tipo_ordem === "servico_venda") {
+    const label = tipo_ordem === "garantia" ? "garantia" : "serviço venda";
+    if (!cliente_id) {
+      return NextResponse.json({ error: `Cliente é obrigatório para ${label}` }, { status: 400 });
+    }
+    if (!foto_peca_servico) {
+      return NextResponse.json({ error: `Foto da balança é obrigatória para ${label}` }, { status: 400 });
+    }
+    if (!peso_metal_externo && peso_metal_externo !== 0) {
+      return NextResponse.json({ error: `Peso do metal externo é obrigatório para ${label}` }, { status: 400 });
     }
     if (!Array.isArray(tipos_servico_ids) || tipos_servico_ids.length === 0) {
       return NextResponse.json({ error: "Selecione pelo menos um tipo de serviço" }, { status: 400 });
@@ -139,12 +158,17 @@ export async function POST(req: NextRequest) {
     // postgres.js: passar array diretamente é o approach correto
     const tiposIdsVal = tiposIds.length > 0 ? tiposIds : ([] as number[]);
 
+    const vendaItemIdsVal: number[] = Array.isArray(venda_item_ids)
+      ? venda_item_ids.map(Number).filter((n: number) => !isNaN(n))
+      : [];
+
     const [ordem] = await tx`
       INSERT INTO alissonerp.ordens (
         numero_ordem, tipo_ordem, cliente_id, vendedor_id,
-        data_entrega, peso_metal_negociado,
+        data_entrega, peso_metal_negociado, peso_metal_externo,
         foto_peca_servico, peso_peca_servico, video_observacao,
         detalhes_ordem, fotos_paths, tipos_servico_ids,
+        venda_id, venda_item_ids,
         situacao, status, rota, origem, created_by
       ) VALUES (
         ${numeroOrdem},
@@ -153,12 +177,15 @@ export async function POST(req: NextRequest) {
         ${vendedor_id ?? null},
         ${dataEntregaFinal},
         ${peso_metal_negociado ?? 0},
+        ${peso_metal_externo ?? null},
         ${foto_peca_servico ?? null},
         ${peso_peca_servico ?? null},
         ${video_observacao ?? null},
         ${detalhes_ordem ?? null},
         ${fotosPathsVal},
         ${tiposIdsVal},
+        ${venda_id ?? null},
+        ${vendaItemIdsVal.length > 0 ? vendaItemIdsVal : null},
         'criado',
         'aguardando',
         ${rota}::alissonerp.enum_rota_ordem,
