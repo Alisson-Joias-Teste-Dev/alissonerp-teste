@@ -205,7 +205,16 @@ export default function NovaOrdemServicoBaseModal({
 
   // Vídeo
   const [video, setVideo] = useState<{ blob: Blob; url: string; ext: string } | null>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);        // galeria
+
+  // Gravador de vídeo nativo
+  const [gravando, setGravando] = useState(false);
+  const [gravandoTimer, setGravandoTimer] = useState(0);
+  const videoPreviewRef = useRef<HTMLVideoElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fotos adicionais da peça
   const [fotosAdicional, setFotosAdicional] = useState<{ file: File; preview: string }[]>([]);
@@ -434,6 +443,89 @@ export default function NovaOrdemServicoBaseModal({
     };
     tempVideo.src = objUrl;
   }
+
+  // ── Gravador de vídeo nativo ───────────────────────────────────────────────
+  async function iniciarGravacao() {
+    setErro(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: true,
+      });
+      mediaStreamRef.current = stream;
+      chunksRef.current = [];
+
+      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+        ? "video/webm;codecs=vp9"
+        : MediaRecorder.isTypeSupported("video/webm")
+        ? "video/webm"
+        : "video/mp4";
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        const ext = mimeType.includes("webm") ? "webm" : "mp4";
+        if (video) URL.revokeObjectURL(video.url);
+        setVideo({ blob, url: URL.createObjectURL(blob), ext });
+        // Limpar stream
+        stream.getTracks().forEach(t => t.stop());
+        mediaStreamRef.current = null;
+        if (videoPreviewRef.current) videoPreviewRef.current.srcObject = null;
+      };
+
+      recorder.start(1000);
+      // Ativar estado ANTES de conectar o stream — o useEffect abaixo faz a conexão após render
+      setGravando(true);
+      setGravandoTimer(30);
+
+      timerRef.current = setInterval(() => {
+        setGravandoTimer(prev => {
+          if (prev <= 1) {
+            pararGravacao();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } catch {
+      setErro("Não foi possível acessar a câmera. Verifique as permissões ou use \"Enviar da galeria\".");
+    }
+  }
+
+  // Callback ref: conecta o stream assim que o <video> monta no DOM
+  const videoPreviewCallbackRef = useCallback((node: HTMLVideoElement | null) => {
+    (videoPreviewRef as React.MutableRefObject<HTMLVideoElement | null>).current = node;
+    if (node && mediaStreamRef.current) {
+      node.srcObject = mediaStreamRef.current;
+      node.play().catch(() => {});
+    }
+  }, [gravando]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function pararGravacao() {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(t => t.stop());
+    }
+    setGravando(false);
+    setGravandoTimer(0);
+  }
+
+  // Cleanup no unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (mediaStreamRef.current) mediaStreamRef.current.getTracks().forEach(t => t.stop());
+    };
+  }, []);
 
   // ── Fotos adicionais ──────────────────────────────────────────────────────
   async function handleFotosAdicionalChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -967,7 +1059,40 @@ export default function NovaOrdemServicoBaseModal({
                 <label className="block text-xs font-semibold text-gray-500 mb-1.5 flex items-center gap-1">
                   <Video size={12} /> Vídeo de Detalhes — máx. 30s (opcional)
                 </label>
-                {video ? (
+
+                {/* Modo gravando — preview ao vivo + timer */}
+                {gravando ? (
+                  <div className="rounded-xl overflow-hidden relative bg-black">
+                    <video
+                      ref={videoPreviewCallbackRef}
+                      autoPlay
+                      muted
+                      playsInline
+                      className="w-full max-h-48 rounded-xl object-cover"
+                    />
+                    {/* Timer countdown */}
+                    <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-red-600 text-white px-2.5 py-1 rounded-full text-xs font-bold">
+                      <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                      {gravandoTimer}s
+                    </div>
+                    {/* Barra de progresso */}
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/30">
+                      <div
+                        className="h-full bg-red-500 transition-all duration-1000"
+                        style={{ width: `${((30 - gravandoTimer) / 30) * 100}%` }}
+                      />
+                    </div>
+                    {/* Botão parar */}
+                    <button
+                      className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-red-600 text-white px-4 py-2 rounded-full text-xs font-semibold flex items-center gap-1.5 shadow-lg"
+                      onClick={pararGravacao}
+                    >
+                      <span className="w-3 h-3 rounded-sm bg-white" />
+                      Parar Gravação
+                    </button>
+                  </div>
+                ) : video ? (
+                  /* Vídeo gravado/enviado — preview */
                   <div className="rounded-xl overflow-hidden relative">
                     <video src={video.url} controls className="w-full max-h-40 rounded-xl" />
                     <button
@@ -978,25 +1103,16 @@ export default function NovaOrdemServicoBaseModal({
                     </button>
                   </div>
                 ) : (
+                  /* Sem vídeo — botões gravar/galeria */
                   <div className="flex gap-2">
-                    {/* Gravar vídeo (câmera) */}
                     <button
                       className="flex-1 h-16 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 hover:opacity-80 transition-opacity"
                       style={{ borderColor: C.cremeBorder }}
-                      onClick={() => {
-                        // Input com capture para abrir câmera direto
-                        const input = document.createElement("input");
-                        input.type = "file";
-                        input.accept = "video/*";
-                        input.capture = "environment";
-                        input.onchange = (ev) => handleVideoUpload(ev as unknown as React.ChangeEvent<HTMLInputElement>);
-                        input.click();
-                      }}
+                      onClick={iniciarGravacao}
                     >
                       <Video size={15} className="text-gray-400" />
                       <p className="text-[10px] text-gray-400">Gravar</p>
                     </button>
-                    {/* Upload vídeo (galeria) */}
                     <button
                       className="flex-1 h-16 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 hover:opacity-80 transition-opacity"
                       style={{ borderColor: C.cremeBorder }}
