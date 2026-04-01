@@ -1,245 +1,356 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { Search, RefreshCw, Loader2 } from "lucide-react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Search, RefreshCw, Loader2, Plus, TrendingUp,
+  ShoppingBag, DollarSign, ChevronRight, Trophy,
+} from "lucide-react";
+import Link from "next/link";
 
+// ─── Design tokens ──────────────────────────────────────────────────────────
 const C = {
   esmeralda:   "#184036",
+  esmeraldaLt: "#18403612",
   creme:       "#F3EADA",
   cremeBorder: "#E8DCC8",
   cremeBg:     "#FAFAF7",
 };
 
-// status integer do PDV: 1=Pendente 2=Aprovado 3=Enviado 4=Cancelado
-const STATUS_LABEL: Record<number, { label: string; bg: string; color: string }> = {
-  1: { label: "Pendente",  bg: "#FEF3C7", color: "#92400E" },
-  2: { label: "Aprovado",  bg: "#ECFDF5", color: "#059669" },
-  3: { label: "Enviado",   bg: "#EFF6FF", color: "#2563EB" },
-  4: { label: "Cancelado", bg: "#FEF2F2", color: "#DC2626" },
+// ─── Situação config ─────────────────────────────────────────────────────────
+const SITUACAO: Record<string, { label: string; bg: string; color: string }> = {
+  rascunho:  { label: "Rascunho",  bg: "#F3F4F6", color: "#6B7280" },
+  aprovado:  { label: "Aprovado",  bg: "#ECFDF5", color: "#059669" },
+  enviado:   { label: "Enviado",   bg: "#EFF6FF", color: "#2563EB" },
+  cancelado: { label: "Cancelado", bg: "#FEF2F2", color: "#DC2626" },
+  concluido: { label: "Concluído", bg: "#F0FDF4", color: "#16A34A" },
 };
 
-interface Venda {
-  id: number;
-  numero_pedido: number | null;
-  data_venda: string | null;
-  total_venda: number;
+const TABS = [
+  { key: "",          label: "Todos"     },
+  { key: "rascunho",  label: "Rascunho"  },
+  { key: "aprovado",  label: "Aprovado"  },
+  { key: "enviado",   label: "Enviado"   },
+  { key: "concluido", label: "Concluído" },
+  { key: "cancelado", label: "Cancelado" },
+];
+
+// ─── Roles com acesso total ──────────────────────────────────────────────────
+const FULL_ACCESS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "financeiro"];
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+interface VendaERP {
+  id:             number;
+  numero_venda:   string;
+  cliente_id:     number | null;
+  cliente_nome:   string | null;
+  vendedor_id:    number | null;
+  vendedor_nome:  string | null;
+  data_venda:     string;
+  data_entrega:   string | null;
   total_produtos: number;
-  total_itens_qnt: number;
-  status: number | null;
-  entregue: boolean;
-  observacoes: string | null;
-  cliente_nome: string | null;
-  cliente_cpf: string | null;
-  vendedor_nome: string | null;
-  vendedor_id: number | null;
+  total_desconto: number;
+  total_frete:    number;
+  total_venda:    number;
+  total_comissao: number;
+  situacao:       string;
+  bloqueado:      boolean;
+  qtd_itens:      number;
+  total_pago:     number;
 }
 
-// ─── Period helpers ────────────────────────────────────────────────────────────
+interface Vendedor {
+  id_vendedor: number;
+  nome:        string;
+}
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 function toYMD(d: Date) { return d.toISOString().slice(0, 10); }
 function hoje() { return toYMD(new Date()); }
 function menosNDias(n: number) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return toYMD(d);
+  const d = new Date(); d.setDate(d.getDate() - n); return toYMD(d);
 }
-
-// ─── Formatters ────────────────────────────────────────────────────────────────
-
 function fmt(v: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 }
-
 function fmtDate(d: string | null) {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("pt-BR");
+  return new Date(d + "T00:00:00").toLocaleDateString("pt-BR");
 }
 
-// ─── Main ──────────────────────────────────────────────────────────────────────
+// ─── Props ───────────────────────────────────────────────────────────────────
+interface Props {
+  role:        string;
+  vendedorId:  number | null;
+  nomeUsuario: string;
+}
 
 type Preset = "today" | "7d" | "30d" | "custom";
 
-const PRESETS: { key: Preset; label: string }[] = [
-  { key: "today",  label: "Hoje" },
-  { key: "7d",     label: "7 dias" },
-  { key: "30d",    label: "30 dias" },
-  { key: "custom", label: "Personalizado" },
-];
+// ─── Component ───────────────────────────────────────────────────────────────
+export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
+  const router       = useRouter();
+  const isFullAccess = FULL_ACCESS.includes(role);
 
-export default function VendasClient() {
+  // Período
   const [preset, setPreset] = useState<Preset>("30d");
   const [inicio, setInicio] = useState(() => menosNDias(30));
   const [fim,    setFim]    = useState(() => hoje());
 
-  const [vendas,  setVendas]  = useState<Venda[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState<string | null>(null);
+  // Filtros
+  const [tabSituacao,   setTabSituacao]   = useState("");
+  const [busca,         setBusca]         = useState("");
+  const [vendedorFiltro, setVendedorFiltro] = useState<number | "">(
+    isFullAccess ? "" : (vendedorId ?? "")
+  );
 
-  const [busca,        setBusca]        = useState("");
-  const [statusFiltro, setStatusFiltro] = useState<number | "todos">("todos");
+  // Dados
+  const [vendas,     setVendas]     = useState<VendaERP[]>([]);
+  const [vendedores, setVendedores] = useState<Vendedor[]>([]);
+  const [loading,    setLoading]    = useState(false);
+  const [error,      setError]      = useState<string | null>(null);
 
-  async function fetchVendas(ini: string, fi: string) {
+  // Carregar vendedores (apenas acesso total)
+  useEffect(() => {
+    if (!isFullAccess) return;
+    fetch("/api/vendedores")
+      .then(r => r.json())
+      .then(setVendedores)
+      .catch(() => {});
+  }, [isFullAccess]);
+
+  // Fetch vendas
+  const fetchVendas = useCallback(async (ini: string, fi: string, vId?: number | "") => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/vendas?inicio=${ini}&fim=${fi}`);
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
-      }
-      setVendas(await res.json());
-    } catch (e: unknown) {
+      const params = new URLSearchParams({ inicio: ini, fim: fi });
+      if (tabSituacao) params.set("situacao", tabSituacao);
+      const vid = vId !== undefined ? vId : vendedorFiltro;
+      if (vid) params.set("vendedor_id", String(vid));
+
+      const res  = await fetch(`/api/vendas?${params}`);
+      const body = await res.json() as VendaERP[] | { error: string };
+      if (!res.ok) throw new Error((body as { error: string }).error ?? `HTTP ${res.status}`);
+      setVendas(body as VendaERP[]);
+    } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao carregar vendas");
     } finally {
       setLoading(false);
     }
-  }
+  }, [tabSituacao, vendedorFiltro]);
 
+  // Carregar ao montar + quando tab muda
   useEffect(() => {
     fetchVendas(inicio, fim);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [tabSituacao]);
+
+  // Filtro local
+  const filtradas = useMemo(() => {
+    const q = busca.toLowerCase().trim();
+    return vendas.filter(v => {
+      if (!q) return true;
+      return (
+        v.numero_venda?.toLowerCase().includes(q) ||
+        v.cliente_nome?.toLowerCase().includes(q) ||
+        v.vendedor_nome?.toLowerCase().includes(q)
+      );
+    });
+  }, [vendas, busca]);
+
+  // Stats
+  const stats = useMemo(() => ({
+    count:     filtradas.length,
+    faturado:  filtradas.reduce((s, v) => s + v.total_venda,    0),
+    comissao:  filtradas.reduce((s, v) => s + v.total_comissao, 0),
+    pago:      filtradas.reduce((s, v) => s + v.total_pago,     0),
+  }), [filtradas]);
 
   function applyPreset(p: Preset) {
-    let ini = inicio;
-    let fi  = fim;
-    if (p === "today") { ini = hoje();         fi = hoje(); }
-    if (p === "7d")    { ini = menosNDias(7);  fi = hoje(); }
-    if (p === "30d")   { ini = menosNDias(30); fi = hoje(); }
-    setPreset(p);
-    setInicio(ini);
-    setFim(fi);
+    let ini = inicio, fi = fim;
+    if (p === "today") { ini = hoje();        fi = hoje(); }
+    if (p === "7d")    { ini = menosNDias(7); fi = hoje(); }
+    if (p === "30d")   { ini = menosNDias(30);fi = hoje(); }
+    setPreset(p); setInicio(ini); setFim(fi);
     fetchVendas(ini, fi);
   }
 
-  function applyCustom() {
-    setPreset("custom");
-    fetchVendas(inicio, fim);
-  }
-
-  const filtradas = useMemo(() => {
-    const q = busca.toLowerCase().trim();
-    return vendas.filter((v) => {
-      const matchStatus = statusFiltro === "todos" || v.status === statusFiltro;
-      const matchBusca =
-        !q ||
-        String(v.numero_pedido ?? "").includes(q) ||
-        v.cliente_nome?.toLowerCase().includes(q) ||
-        v.vendedor_nome?.toLowerCase().includes(q) ||
-        String(v.id).includes(q);
-      return matchStatus && matchBusca;
-    });
-  }, [vendas, busca, statusFiltro]);
-
   return (
-    <div className="px-3 md:px-6 py-4 md:py-8">
-      {/* Header */}
-      <div className="mb-4 md:mb-6">
-        <h2
-          className="text-xl md:text-2xl font-semibold"
-          style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}
-        >
-          Vendas
-        </h2>
-        <p className="text-sm mt-1" style={{ color: "#6B7280" }}>
-          Consulta de vendas — somente leitura
-        </p>
+    <div className="px-3 md:px-6 py-4 md:py-8 max-w-7xl mx-auto">
+
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h2
+            className="text-xl md:text-2xl font-semibold"
+            style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}
+          >
+            Vendas
+          </h2>
+          <p className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>
+            {isFullAccess ? "Todas as vendas ERP" : `Minhas vendas — ${nomeUsuario}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {isFullAccess && (
+            <Link
+              href="/vendas/ranking"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition-opacity hover:opacity-80"
+              style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+            >
+              <Trophy size={14} />
+              Ranking
+            </Link>
+          )}
+          <Link
+            href="/vendas/nova"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-80"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}
+          >
+            <Plus size={15} strokeWidth={2.5} />
+            Nova Venda
+          </Link>
+        </div>
       </div>
 
-      {/* Filtro de período */}
+      {/* ── Stats ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        {[
+          { icon: ShoppingBag,  label: "Vendas",    value: String(stats.count),       mono: false },
+          { icon: TrendingUp,   label: "Faturado",  value: fmt(stats.faturado),        mono: true  },
+          { icon: DollarSign,   label: "Comissão",  value: fmt(stats.comissao),        mono: true  },
+          { icon: DollarSign,   label: "Recebido",  value: fmt(stats.pago),            mono: true  },
+        ].map(({ icon: Icon, label, value, mono }) => (
+          <div
+            key={label}
+            className="rounded-xl p-3 border"
+            style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}
+          >
+            <div className="flex items-center gap-1.5 mb-1">
+              <Icon size={12} style={{ color: "#9CA3AF" }} />
+              <span className="text-[11px] uppercase tracking-wide font-medium" style={{ color: "#9CA3AF" }}>
+                {label}
+              </span>
+            </div>
+            <p
+              className={`text-base font-semibold ${mono ? "tabular-nums" : ""}`}
+              style={{ color: C.esmeralda }}
+            >
+              {loading ? <span className="text-gray-300">—</span> : value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Período ── */}
       <div
         className="flex flex-wrap items-center gap-2 mb-4 p-3 rounded-xl border"
         style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}
       >
-        {PRESETS.map(({ key, label }) => {
-          const isActive = preset === key;
+        {(["today", "7d", "30d", "custom"] as Preset[]).map(p => {
+          const labels: Record<Preset, string> = { today: "Hoje", "7d": "7 dias", "30d": "30 dias", custom: "Período" };
           return (
             <button
-              key={key}
-              onClick={() => key !== "custom" ? applyPreset(key) : setPreset("custom")}
+              key={p}
+              onClick={() => p !== "custom" ? applyPreset(p) : setPreset("custom")}
               className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
               style={{
-                backgroundColor: isActive ? "#18403620" : "transparent",
-                border: `1px solid ${isActive ? C.esmeralda : C.cremeBorder}`,
-                color: isActive ? C.esmeralda : "#6B7280",
+                backgroundColor: preset === p ? C.esmeraldaLt : "transparent",
+                border: `1px solid ${preset === p ? C.esmeralda : C.cremeBorder}`,
+                color: preset === p ? C.esmeralda : "#6B7280",
               }}
             >
-              {label}
+              {labels[p]}
             </button>
           );
         })}
 
         {preset === "custom" && (
-          <div className="flex items-center gap-1.5">
-            <input
-              type="date"
-              value={inicio}
-              onChange={(e) => setInicio(e.target.value)}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <input type="date" value={inicio} onChange={e => setInicio(e.target.value)}
               className="border rounded-lg px-2 py-1 text-xs outline-none"
-              style={{ borderColor: C.cremeBorder, color: "#1A1A1A", backgroundColor: "#fff" }}
-            />
+              style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }} />
             <span className="text-xs" style={{ color: "#9CA3AF" }}>até</span>
-            <input
-              type="date"
-              value={fim}
-              onChange={(e) => setFim(e.target.value)}
+            <input type="date" value={fim} onChange={e => setFim(e.target.value)}
               className="border rounded-lg px-2 py-1 text-xs outline-none"
-              style={{ borderColor: C.cremeBorder, color: "#1A1A1A", backgroundColor: "#fff" }}
-            />
+              style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }} />
             <button
-              onClick={applyCustom}
+              onClick={() => fetchVendas(inicio, fim)}
               disabled={loading}
               className="px-3 py-1 rounded-lg text-xs font-medium disabled:opacity-50"
               style={{ backgroundColor: C.esmeralda, color: C.creme }}
-            >
-              Aplicar
-            </button>
+            >Aplicar</button>
           </div>
         )}
 
         <button
           onClick={() => fetchVendas(inicio, fim)}
           disabled={loading}
-          className="ml-auto p-1.5 rounded-lg transition-opacity hover:opacity-70 disabled:opacity-40"
+          className="ml-auto p-1.5 rounded-lg hover:opacity-70 disabled:opacity-40 transition-opacity"
           style={{ border: `1px solid ${C.cremeBorder}`, color: "#9CA3AF" }}
           title="Atualizar"
         >
-          {loading
-            ? <Loader2 size={13} className="animate-spin" />
-            : <RefreshCw size={13} strokeWidth={1.75} />
-          }
+          {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} strokeWidth={1.75} />}
         </button>
       </div>
 
-      {/* Busca + status */}
-      <div className="flex flex-wrap gap-3 mb-4">
+      {/* ── Tabs situação ── */}
+      <div className="flex gap-1 mb-4 overflow-x-auto pb-1">
+        {TABS.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTabSituacao(t.key)}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
+            style={{
+              backgroundColor: tabSituacao === t.key ? C.esmeralda : "transparent",
+              color: tabSituacao === t.key ? C.creme : "#6B7280",
+              border: `1px solid ${tabSituacao === t.key ? C.esmeralda : C.cremeBorder}`,
+            }}
+          >
+            {t.label}
+            {t.key !== "" && (
+              <span className="ml-1.5 text-[10px] opacity-70">
+                {vendas.filter(v => v.situacao === t.key).length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Busca + Vendedor ── */}
+      <div className="flex flex-wrap gap-2 mb-4">
         <div
-          className="flex items-center gap-2 rounded-lg px-3 py-2 flex-1 min-w-48 border"
+          className="flex items-center gap-2 rounded-lg px-3 py-2 flex-1 min-w-40 border"
           style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}
         >
           <Search size={13} style={{ color: "#9CA3AF" }} />
           <input
             className="bg-transparent text-sm outline-none flex-1"
             style={{ color: "#1A1A1A" }}
-            placeholder="Buscar por pedido, cliente, vendedor..."
+            placeholder="Buscar número, cliente, vendedor..."
             value={busca}
-            onChange={(e) => setBusca(e.target.value)}
+            onChange={e => setBusca(e.target.value)}
           />
         </div>
-        <select
-          className="rounded-lg px-3 py-2 text-sm outline-none border"
-          style={{ borderColor: C.cremeBorder, backgroundColor: "#fff", color: "#374151" }}
-          value={statusFiltro}
-          onChange={(e) =>
-            setStatusFiltro(e.target.value === "todos" ? "todos" : Number(e.target.value))
-          }
-        >
-          <option value="todos">Todos os status</option>
-          <option value={1}>Pendente</option>
-          <option value={2}>Aprovado</option>
-          <option value={3}>Enviado</option>
-          <option value={4}>Cancelado</option>
-        </select>
+
+        {isFullAccess && (
+          <select
+            className="rounded-lg px-3 py-2 text-sm outline-none border"
+            style={{ borderColor: C.cremeBorder, backgroundColor: "#fff", color: "#374151" }}
+            value={vendedorFiltro}
+            onChange={e => {
+              const v = e.target.value === "" ? "" : Number(e.target.value);
+              setVendedorFiltro(v);
+              fetchVendas(inicio, fim, v);
+            }}
+          >
+            <option value="">Todas as vendedoras</option>
+            {vendedores.map(v => (
+              <option key={v.id_vendedor} value={v.id_vendedor}>{v.nome}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {error && (
@@ -248,16 +359,16 @@ export default function VendasClient() {
         </div>
       )}
 
-      {/* Tabela */}
+      {/* ── Tabela ── */}
       <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
-                {["Pedido", "Data", "Cliente", "Vendedor", "Itens", "Total", "Status", "Entregue"].map((h) => (
+                {["Nº Venda", "Data", "Cliente", "Vendedor", "Itens", "Total", "Recebido", "Situação", ""].map(h => (
                   <th
                     key={h}
-                    className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider"
+                    className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap"
                     style={{ color: "#9CA3AF" }}
                   >
                     {h}
@@ -266,66 +377,80 @@ export default function VendasClient() {
               </tr>
             </thead>
             <tbody>
-              {loading && vendas.length === 0 ? (
+              {loading && filtradas.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-sm" style={{ color: "#9CA3AF" }}>
+                  <td colSpan={9} className="px-4 py-12 text-center text-sm" style={{ color: "#9CA3AF" }}>
                     <Loader2 size={16} className="animate-spin inline-block mr-2" />
                     Carregando...
                   </td>
                 </tr>
               ) : filtradas.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-sm" style={{ color: "#9CA3AF" }}>
-                    Nenhuma venda encontrada no período
+                  <td colSpan={9} className="px-4 py-12 text-center" style={{ color: "#9CA3AF" }}>
+                    <ShoppingBag size={32} className="mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">Nenhuma venda no período</p>
+                    {isFullAccess && (
+                      <Link
+                        href="/vendas/nova"
+                        className="inline-flex items-center gap-1 mt-3 px-4 py-2 rounded-lg text-sm font-medium"
+                        style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                      >
+                        <Plus size={14} /> Nova Venda
+                      </Link>
+                    )}
                   </td>
                 </tr>
               ) : (
                 filtradas.map((v, i) => {
-                  const st = v.status != null
-                    ? (STATUS_LABEL[v.status] ?? { label: String(v.status), bg: "#F3F4F6", color: "#6B7280" })
-                    : { label: "—", bg: "#F3F4F6", color: "#6B7280" };
+                  const sit = SITUACAO[v.situacao] ?? { label: v.situacao, bg: "#F3F4F6", color: "#6B7280" };
+                  const saldo = v.total_venda - v.total_pago;
                   return (
                     <tr
                       key={v.id}
+                      className="hover:bg-stone-50 transition-colors cursor-pointer"
                       style={{ borderTop: i > 0 ? `1px solid ${C.creme}` : undefined }}
-                      className="hover:bg-stone-50 transition-colors"
+                      onClick={() => router.push(`/vendas/${v.id}`)}
                     >
-                      <td className="px-4 py-3 font-medium" style={{ color: C.esmeralda }}>
-                        {v.numero_pedido != null ? `#${v.numero_pedido}` : `id ${v.id}`}
+                      <td className="px-4 py-3 font-mono text-xs font-semibold" style={{ color: C.esmeralda }}>
+                        {v.numero_venda}
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap font-mono text-[12px]" style={{ color: "#9CA3AF" }}>
+                      <td className="px-4 py-3 whitespace-nowrap text-xs tabular-nums" style={{ color: "#9CA3AF" }}>
                         {fmtDate(v.data_venda)}
                       </td>
-                      <td className="px-4 py-3 max-w-[180px] truncate" style={{ color: "#374151" }}>
-                        {v.cliente_nome ?? "—"}
+                      <td className="px-4 py-3 max-w-[160px]" style={{ color: "#374151" }}>
+                        <p className="truncate text-xs">{v.cliente_nome ?? <span style={{ color: "#9CA3AF" }}>—</span>}</p>
                       </td>
-                      <td className="px-4 py-3 max-w-[140px] truncate" style={{ color: "#374151" }}>
-                        {v.vendedor_nome ?? "—"}
+                      <td className="px-4 py-3 max-w-[120px]" style={{ color: "#374151" }}>
+                        <p className="truncate text-xs">{v.vendedor_nome ?? <span style={{ color: "#9CA3AF" }}>—</span>}</p>
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums" style={{ color: "#6B7280" }}>
-                        {v.total_itens_qnt ?? 0}
+                      <td className="px-4 py-3 text-center text-xs tabular-nums" style={{ color: "#6B7280" }}>
+                        {v.qtd_itens}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums font-medium whitespace-nowrap" style={{ color: "#374151" }}>
-                        {fmt(Number(v.total_venda))}
+                      <td className="px-4 py-3 text-right tabular-nums text-xs font-medium whitespace-nowrap" style={{ color: "#374151" }}>
+                        {fmt(v.total_venda)}
                       </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className="text-[11px] px-2 py-0.5 rounded-full font-semibold"
-                          style={{ backgroundColor: st.bg, color: st.color }}
-                        >
-                          {st.label}
+                      <td className="px-4 py-3 text-right tabular-nums text-xs whitespace-nowrap">
+                        <span style={{ color: v.total_pago >= v.total_venda ? "#059669" : saldo > 0 ? "#D97706" : "#9CA3AF" }}>
+                          {fmt(v.total_pago)}
                         </span>
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className="text-[11px] px-2 py-0.5 rounded-full font-semibold"
-                          style={{
-                            backgroundColor: v.entregue ? "#ECFDF5" : "#F3F4F6",
-                            color: v.entregue ? "#059669" : "#6B7280",
-                          }}
+                          className="text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap"
+                          style={{ backgroundColor: sit.bg, color: sit.color }}
                         >
-                          {v.entregue ? "Sim" : "Não"}
+                          {sit.label}
                         </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Link
+                          href={`/vendas/${v.id}`}
+                          className="p-1 rounded hover:bg-gray-100 transition-colors inline-flex"
+                          style={{ color: "#9CA3AF" }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <ChevronRight size={14} />
+                        </Link>
                       </td>
                     </tr>
                   );
@@ -334,12 +459,14 @@ export default function VendasClient() {
             </tbody>
           </table>
         </div>
+
         {filtradas.length > 0 && (
           <div
-            className="px-4 py-2 text-[11px] text-right"
+            className="px-4 py-2 flex items-center justify-between text-[11px]"
             style={{ color: "#9CA3AF", borderTop: `1px solid ${C.cremeBorder}` }}
           >
-            {filtradas.length} de {vendas.length} vendas exibidas
+            <span>{filtradas.length} de {vendas.length} vendas</span>
+            {loading && <Loader2 size={12} className="animate-spin" />}
           </div>
         )}
       </div>
