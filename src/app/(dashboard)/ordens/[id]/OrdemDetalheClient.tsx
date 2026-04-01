@@ -208,7 +208,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                 Comercial
               </p>
               <InfoRow label="Cliente"        value={ordem.cliente_nome} />
-              <InfoRow label="Vendedor(a)"    value={ordem.vendedor_nome} />
+              <InfoRow label="Vendedor(a)"    value={ordem.vendedor_nome ?? ordem.created_by_nome} />
               {ordem.data_entrega != null && (
                 <InfoRow label="Data Entrega" value={new Date(ordem.data_entrega).toLocaleDateString("pt-BR")} />
               )}
