@@ -644,7 +644,7 @@ export default function ConferenciaClient({ aprovacoes, servicosConferencia }: P
                       )}
                       {row.consumo_solda != null && (
                         <span className="text-xs" style={{ color: "#6B7280" }}>
-                          · Solda: <strong>{fmtNum(row.consumo_solda)}</strong>
+                          · Aditivo: <strong>{fmtNum(row.consumo_solda)}</strong>
                         </span>
                       )}
                     </div>

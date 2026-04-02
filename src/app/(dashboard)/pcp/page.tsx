@@ -42,6 +42,11 @@ export default async function PcpPage() {
         FROM alissonerp.vw_pcp_erp v
         LEFT JOIN alissonerp.ordens o ON o.id = v.ordem_id
         WHERE v.deposito_id = ${depositoIdFiltro}
+          AND NOT EXISTS (
+            SELECT 1 FROM alissonerp.servicos s
+            WHERE s.pcp_id = v.id
+              AND s.status IN ('em_servico', 'aguardando', 'concluido')
+          )
         ORDER BY v.id DESC
         LIMIT 300
       `
@@ -61,6 +66,11 @@ export default async function PcpPage() {
           ) AS na_service
         FROM alissonerp.vw_pcp_erp v
         LEFT JOIN alissonerp.ordens o ON o.id = v.ordem_id
+        WHERE NOT EXISTS (
+            SELECT 1 FROM alissonerp.servicos s
+            WHERE s.pcp_id = v.id
+              AND s.status IN ('em_servico', 'aguardando', 'concluido')
+          )
         ORDER BY v.id DESC
         LIMIT 300
       `;

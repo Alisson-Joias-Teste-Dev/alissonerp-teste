@@ -241,7 +241,7 @@ function TabHistorico({ rows, operadores, onSelect }: { rows: ServicoRow[]; oper
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b" style={{ backgroundColor: C.bg, borderColor: C.border }}>
-              {["Ordem", "Tipo", "Operador", "Entrada", "Saída", "Solda", "Pedras", "Tent.", "Data"].map(h => (
+              {["Ordem", "Tipo", "Operador", "Entrada", "Saída", "Aditivo", "Pedras", "Tent.", "Data"].map(h => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -278,7 +278,7 @@ function TabHistorico({ rows, operadores, onSelect }: { rows: ServicoRow[]; oper
   );
 }
 
-// ── Tab Solda ─────────────────────────────────────────────────────────────────
+// ── Tab Aditivo ───────────────────────────────────────────────────────────────
 
 function TabSolda({ operadores, consumo, historico, onCarregar }: {
   operadores: Operador[];
@@ -325,7 +325,7 @@ function TabSolda({ operadores, consumo, historico, onCarregar }: {
                   <p className="text-xs text-gray-500">Saldo: <span className={`font-bold ${baixo ? "text-red-600" : "text-emerald-700"}`}>{op.saldo_solda.toFixed(3)}g</span></p>
                 </div>
                 {baixo && (
-                  <div title="Fio de solda acabando">
+                  <div title="Aditivo acabando">
                     <AlertTriangle size={18} color="#dc2626" />
                   </div>
                 )}
@@ -345,7 +345,7 @@ function TabSolda({ operadores, consumo, historico, onCarregar }: {
                   onClick={() => onCarregar(op.deposito_id)}
                   className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white"
                   style={{ backgroundColor: COLORS[i % COLORS.length] }}>
-                  Carregar fio
+                  Carregar aditivo
                 </button>
               </div>
             </div>
@@ -356,7 +356,7 @@ function TabSolda({ operadores, consumo, historico, onCarregar }: {
       {/* Gráfico consumo por semana */}
       {chartData.length > 0 && (
         <div className="bg-white rounded-xl border p-5" style={{ borderColor: C.border }}>
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">Consumo de solda por semana</h3>
+          <h3 className="text-sm font-semibold text-gray-700 mb-4">Consumo de aditivo por semana</h3>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -374,7 +374,7 @@ function TabSolda({ operadores, consumo, historico, onCarregar }: {
 
       {chartData.length === 0 && (
         <div className="bg-white rounded-xl border p-8 text-center" style={{ borderColor: C.border }}>
-          <p className="text-sm text-gray-400">Nenhum consumo de solda registrado nas últimas 12 semanas</p>
+          <p className="text-sm text-gray-400">Nenhum consumo de aditivo registrado nas últimas 12 semanas</p>
         </div>
       )}
     </div>
@@ -454,7 +454,7 @@ function TabPedras() {
 
 // ── Componente principal ──────────────────────────────────────────────────────
 
-const TABS = ["Em serviço", "Histórico", "Solda", "Pedras"] as const;
+const TABS = ["Em serviço", "Histórico", "Aditivo", "Pedras"] as const;
 type Tab = typeof TABS[number];
 
 export default function ServicePainelClient({ stats, operadores, ativos, historico, consumoSolda }: Props) {
@@ -501,7 +501,7 @@ export default function ServicePainelClient({ stats, operadores, ativos, histori
         <div className="pt-5">
           {tab === "Em serviço" && <TabAtivos    rows={ativos}   operadores={operadores} onSelect={setServico} />}
           {tab === "Histórico"  && <TabHistorico rows={historico} operadores={operadores} onSelect={setServico} />}
-          {tab === "Solda"      && (
+          {tab === "Aditivo"    && (
             <TabSolda
               operadores={operadores}
               consumo={consumoSolda}
@@ -518,7 +518,7 @@ export default function ServicePainelClient({ stats, operadores, ativos, histori
         <ServiceDetalheDrawer servico={servico} onClose={() => setServico(null)} />
       )}
 
-      {/* Modal carregar solda */}
+      {/* Modal carregar aditivo */}
       {carregarOp !== null && (
         <CarregarSoldaModal
           operadores={operadores}

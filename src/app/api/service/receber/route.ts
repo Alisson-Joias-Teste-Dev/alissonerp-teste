@@ -87,49 +87,60 @@ export async function POST(req: NextRequest) {
   }
   const fotoUrl = uploadResult.url;
 
-  // 4. Concluir protocolo com guard de concorrência (WHERE etapas='pendente').
-  //    Dispara fn_concluir_protocolo → cria PCP → trg_criar_servico_from_pcp cria
-  //    servicos com operador_id=NULL e status='aguardando'.
-  const [protocoloAtualizado] = await sql`
-    UPDATE alissonerp.protocolos
-    SET etapas         = 'concluido',
-        recebedor_id   = ${user.id}::uuid,
-        foto_conclusao = ${fotoUrl},
-        data_conclusao = NOW(),
-        updated_at     = NOW()
-    WHERE id = ${protocolo_id}
-      AND etapas = 'pendente'
-    RETURNING id
-  `;
-  if (!protocoloAtualizado) {
-    return NextResponse.json(
-      { error: "Este protocolo já foi recebido por outro operador" },
-      { status: 409 }
-    );
+  // 4-6. Transação atômica: conclui protocolo + atribui serviços ao operador.
+  //    Se qualquer passo falhar, tudo é revertido.
+  let servicoIds: number[] = [];
+  try {
+    await (sql as any).begin(async (tx: typeof sql) => {
+      // 4. Concluir protocolo com guard de concorrência (WHERE etapas='pendente').
+      //    Dispara fn_concluir_protocolo → cria PCP → trg_criar_servico_from_pcp cria
+      //    servicos com operador_id=NULL e status='aguardando'.
+      const [protocoloAtualizado] = await tx`
+        UPDATE alissonerp.protocolos
+        SET etapas         = 'concluido',
+            recebedor_id   = ${user.id}::uuid,
+            foto_conclusao = ${fotoUrl},
+            data_conclusao = NOW(),
+            updated_at     = NOW()
+        WHERE id = ${protocolo_id}
+          AND etapas = 'pendente'
+        RETURNING id
+      `;
+      if (!protocoloAtualizado) {
+        throw new Error("RACE_CONDITION");
+      }
+
+      // 5. Buscar ordens do protocolo
+      const ordemRows = await tx`
+        SELECT ordem_id FROM alissonerp.protocolo_ordens
+        WHERE protocolo_id = ${protocolo_id}
+      `;
+      const ordemIds = ordemRows.map(r => r.ordem_id as number);
+
+      // 6. Atribuir servicos ao operador que clicou "Receber".
+      //    AND operador_id IS NULL garante que só o primeiro recebimento é aceito.
+      const servicosAssigned = await tx`
+        UPDATE alissonerp.servicos
+        SET operador_id      = ${caller.deposito_id as number},
+            status           = 'em_servico',
+            foto_recebimento = ${fotoUrl},
+            recebido_em      = NOW()
+        WHERE ordem_id = ANY(${ordemIds}::int[])
+          AND status = 'aguardando'
+          AND operador_id IS NULL
+        RETURNING id
+      `;
+      servicoIds = servicosAssigned.map(r => r.id as number);
+    });
+  } catch (e) {
+    if (e instanceof Error && e.message === "RACE_CONDITION") {
+      return NextResponse.json(
+        { error: "Este protocolo já foi recebido por outro operador" },
+        { status: 409 }
+      );
+    }
+    throw e;
   }
-
-  // 5. Buscar ordens do protocolo
-  const ordemRows = await sql`
-    SELECT ordem_id FROM alissonerp.protocolo_ordens
-    WHERE protocolo_id = ${protocolo_id}
-  `;
-  const ordemIds = ordemRows.map(r => r.ordem_id as number);
-
-  // 6. Atribuir servicos ao operador que clicou "Receber".
-  //    AND operador_id IS NULL garante que só o primeiro recebimento é aceito.
-  const servicosAssigned = await sql`
-    UPDATE alissonerp.servicos
-    SET operador_id      = ${caller.deposito_id as number},
-        status           = 'em_servico',
-        foto_recebimento = ${fotoUrl},
-        recebido_em      = NOW()
-    WHERE ordem_id = ANY(${ordemIds}::int[])
-      AND status = 'aguardando'
-      AND operador_id IS NULL
-    RETURNING id
-  `;
-
-  const servicoIds = servicosAssigned.map(r => r.id as number);
 
   return NextResponse.json({
     success: true,

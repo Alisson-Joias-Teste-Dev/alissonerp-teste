@@ -251,17 +251,21 @@ export async function POST(req: NextRequest) {
       `;
     }
 
-    // 3. Criar auditoria loja (igual ao fn_ponte)
+    // 3. Criar auditoria loja
+    //    Ordens que vão para Service (protocolo + tipos service) → auto-aprovada
+    //    Demais → pendente (aguarda conferência da loja)
+    const isServiceOrder = rota === "protocolo" && SERVICO_TIPOS.includes(tipo_ordem);
     await tx`
       INSERT INTO alissonerp.auditorias (
         situacao, tipo_auditoria, rota_processo, ordem_id,
-        peso_negociado, dados_ordem
+        peso_negociado, parecer, dados_ordem
       ) VALUES (
-        'pendente',
+        ${isServiceOrder ? 'aprovado' : 'pendente'},
         'loja',
         'entrada_ordem',
         ${ordem.id},
         ${peso_metal_negociado ?? 0},
+        ${isServiceOrder ? 'Aprovação automática — ordem de serviço' : null},
         ${JSON.stringify({
           numero_ordem: numeroOrdem,
           tipo_ordem,

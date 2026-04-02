@@ -111,7 +111,7 @@ export default function CarregarSoldaModal({ operadores, preSelected, onClose, o
     setLoading(true);
     setErro("");
 
-    const res = await fetch("/api/service/carregar-solda", {
+    const res = await fetch("/api/service/carregar-aditivo", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -146,7 +146,7 @@ export default function CarregarSoldaModal({ operadores, preSelected, onClose, o
 
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 sticky top-0 bg-white z-10">
-            <h2 className="font-bold text-gray-800">Carregar fio de solda</h2>
+            <h2 className="font-bold text-gray-800">Carregar aditivo</h2>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
               <X size={18} />
             </button>
