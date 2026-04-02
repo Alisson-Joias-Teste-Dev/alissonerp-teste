@@ -73,6 +73,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (tipo_ordem === "reposicao_venda") {
+    if (!cliente_id) {
+      return NextResponse.json({ error: "Cliente é obrigatório para reposição venda" }, { status: 400 });
+    }
+    if (!Array.isArray(itens) || itens.length === 0) {
+      return NextResponse.json({ error: "Selecione pelo menos um item para reposição" }, { status: 400 });
+    }
+  }
+
   // ── Verificar permissão ──────────────────────────────────────────────────
   const [usuario] = await sql`
     SELECT role, tipos_ordem_permitidos, vendedor_id

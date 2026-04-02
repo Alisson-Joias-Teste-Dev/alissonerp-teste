@@ -11,6 +11,7 @@ import NovaOrdemReposicaoLojaModal from "@/components/ordens/NovaOrdemReposicaoL
 import NovaOrdemServicoInternoModal from "@/components/ordens/NovaOrdemServicoInternoModal";
 import NovaOrdemGarantiaModal from "@/components/ordens/NovaOrdemGarantiaModal";
 import NovaOrdemServicoVendaModal from "@/components/ordens/NovaOrdemServicoVendaModal";
+import NovaOrdemReposicaoVendaModal from "@/components/ordens/NovaOrdemReposicaoVendaModal";
 
 // servico_loja NÃO aparece — escondido do frontend
 const TIPOS_ORDEM = [
@@ -37,6 +38,7 @@ export default function NovaOrdemButton({
   const [servicoInternoOpen, setServicoInternoOpen] = useState(false);
   const [garantiaOpen,       setGarantiaOpen]       = useState(false);
   const [servicoVendaOpen,   setServicoVendaOpen]   = useState(false);
+  const [reposicaoVendaOpen, setReposicaoVendaOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,6 +73,10 @@ export default function NovaOrdemButton({
       setServicoVendaOpen(true);
       return;
     }
+    if (value === "reposicao_venda") {
+      setReposicaoVendaOpen(true);
+      return;
+    }
     // Placeholder para os demais tipos
     setToastMsg(`🚧 Em construção — ${label} estará disponível em breve!`);
     setTimeout(() => setToastMsg(null), 3000);
@@ -96,6 +102,12 @@ export default function NovaOrdemButton({
 
   function handleServicoVendaSuccess(numeroOrdem: string) {
     setToastMsg(`✓ Ordem de serviço venda ${numeroOrdem} criada com sucesso!`);
+    setTimeout(() => setToastMsg(null), 4000);
+    router.refresh();
+  }
+
+  function handleReposicaoVendaSuccess(numeroOrdem: string) {
+    setToastMsg(`✓ Reposição venda ${numeroOrdem} criada com sucesso!`);
     setTimeout(() => setToastMsg(null), 4000);
     router.refresh();
   }
@@ -167,6 +179,15 @@ export default function NovaOrdemButton({
         isOpen={servicoVendaOpen}
         onClose={() => setServicoVendaOpen(false)}
         onSuccess={handleServicoVendaSuccess}
+        userId={user?.id ?? ""}
+        userName={nome ?? "Usuário"}
+      />
+
+      {/* Modal Reposição Venda */}
+      <NovaOrdemReposicaoVendaModal
+        isOpen={reposicaoVendaOpen}
+        onClose={() => setReposicaoVendaOpen(false)}
+        onSuccess={handleReposicaoVendaSuccess}
         userId={user?.id ?? ""}
         userName={nome ?? "Usuário"}
       />
