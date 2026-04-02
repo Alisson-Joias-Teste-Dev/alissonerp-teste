@@ -12,6 +12,7 @@ import NovaOrdemServicoInternoModal from "@/components/ordens/NovaOrdemServicoIn
 import NovaOrdemGarantiaModal from "@/components/ordens/NovaOrdemGarantiaModal";
 import NovaOrdemServicoVendaModal from "@/components/ordens/NovaOrdemServicoVendaModal";
 import NovaOrdemReposicaoVendaModal from "@/components/ordens/NovaOrdemReposicaoVendaModal";
+import NovaOrdemFabricacaoModal from "@/components/ordens/NovaOrdemFabricacaoModal";
 
 // servico_loja NÃO aparece — escondido do frontend
 const TIPOS_ORDEM = [
@@ -39,6 +40,7 @@ export default function NovaOrdemButton({
   const [garantiaOpen,       setGarantiaOpen]       = useState(false);
   const [servicoVendaOpen,   setServicoVendaOpen]   = useState(false);
   const [reposicaoVendaOpen, setReposicaoVendaOpen] = useState(false);
+  const [fabricacaoOpen,     setFabricacaoOpen]     = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -77,6 +79,10 @@ export default function NovaOrdemButton({
       setReposicaoVendaOpen(true);
       return;
     }
+    if (value === "fabricacao") {
+      setFabricacaoOpen(true);
+      return;
+    }
     // Placeholder para os demais tipos
     setToastMsg(`🚧 Em construção — ${label} estará disponível em breve!`);
     setTimeout(() => setToastMsg(null), 3000);
@@ -108,6 +114,12 @@ export default function NovaOrdemButton({
 
   function handleReposicaoVendaSuccess(numeroOrdem: string) {
     setToastMsg(`✓ Reposição venda ${numeroOrdem} criada com sucesso!`);
+    setTimeout(() => setToastMsg(null), 4000);
+    router.refresh();
+  }
+
+  function handleFabricacaoSuccess(numeroOrdem: string) {
+    setToastMsg(`✓ Fabricação ${numeroOrdem} criada com sucesso!`);
     setTimeout(() => setToastMsg(null), 4000);
     router.refresh();
   }
@@ -188,6 +200,15 @@ export default function NovaOrdemButton({
         isOpen={reposicaoVendaOpen}
         onClose={() => setReposicaoVendaOpen(false)}
         onSuccess={handleReposicaoVendaSuccess}
+        userId={user?.id ?? ""}
+        userName={nome ?? "Usuário"}
+      />
+
+      {/* Modal Fabricação */}
+      <NovaOrdemFabricacaoModal
+        isOpen={fabricacaoOpen}
+        onClose={() => setFabricacaoOpen(false)}
+        onSuccess={handleFabricacaoSuccess}
         userId={user?.id ?? ""}
         userName={nome ?? "Usuário"}
       />
