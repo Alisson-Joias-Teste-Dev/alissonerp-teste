@@ -223,6 +223,9 @@ function TabPagar({ pagar }: { pagar: ContaPagar[] }) {
       }, ...prev]);
       setForm({ descricao: "", valor: "", data_vencimento: "", categoria: "", obs: "" });
       setShowForm(false);
+    } else {
+      const data = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+      alert(data.error || "Erro ao criar conta a pagar");
     }
   }
 
@@ -235,6 +238,9 @@ function TabPagar({ pagar }: { pagar: ContaPagar[] }) {
     });
     if (res.ok) {
       setLista((prev) => prev.map((p) => p.id === id ? { ...p, situacao: "pago", data_pagamento: new Date().toISOString().slice(0, 10) } : p));
+    } else {
+      const data = await res.json().catch(() => ({ error: "Erro" }));
+      alert(data.error || "Erro ao marcar como pago");
     }
     setActionId(null);
   }
@@ -276,7 +282,7 @@ function TabPagar({ pagar }: { pagar: ContaPagar[] }) {
             </div>
             <div>
               <label className="text-[10px] uppercase tracking-widest block mb-1" style={{ color: "#4A7568" }}>Valor *</label>
-              <input type="number" step="0.01" value={form.valor} onChange={(e) => setForm((f) => ({ ...f, valor: e.target.value }))} className="w-full rounded-lg bg-transparent px-3 py-2 text-sm outline-none" style={{ border: "1px solid #1C3D32", color: "#F3EADA" }} />
+              <input type="number" step="0.01" min="0.01" value={form.valor} onChange={(e) => setForm((f) => ({ ...f, valor: e.target.value }))} className="w-full rounded-lg bg-transparent px-3 py-2 text-sm outline-none" style={{ border: "1px solid #1C3D32", color: "#F3EADA" }} />
             </div>
             <div>
               <label className="text-[10px] uppercase tracking-widest block mb-1" style={{ color: "#4A7568" }}>Vencimento</label>
@@ -415,6 +421,9 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
       }, ...prev]);
       setForm({ descricao: "", valor: "", data_vencimento: "", categoria: "", obs: "" });
       setShowForm(false);
+    } else {
+      const data = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+      alert(data.error || "Erro ao criar conta a receber");
     }
   }
 
@@ -427,6 +436,9 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
     });
     if (res.ok) {
       setLista((prev) => prev.map((r) => r.id === id ? { ...r, situacao: "recebido", data_recebimento: new Date().toISOString().slice(0, 10) } : r));
+    } else {
+      const data = await res.json().catch(() => ({ error: "Erro" }));
+      alert(data.error || "Erro ao marcar como recebido");
     }
     setActionId(null);
   }
@@ -467,7 +479,7 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
             </div>
             <div>
               <label className="text-[10px] uppercase tracking-widest block mb-1" style={{ color: "#4A7568" }}>Valor *</label>
-              <input type="number" step="0.01" value={form.valor} onChange={(e) => setForm((f) => ({ ...f, valor: e.target.value }))} className="w-full rounded-lg bg-transparent px-3 py-2 text-sm outline-none" style={{ border: "1px solid #1C3D32", color: "#F3EADA" }} />
+              <input type="number" step="0.01" min="0.01" value={form.valor} onChange={(e) => setForm((f) => ({ ...f, valor: e.target.value }))} className="w-full rounded-lg bg-transparent px-3 py-2 text-sm outline-none" style={{ border: "1px solid #1C3D32", color: "#F3EADA" }} />
             </div>
             <div>
               <label className="text-[10px] uppercase tracking-widest block mb-1" style={{ color: "#4A7568" }}>Vencimento</label>
@@ -584,7 +596,7 @@ function TabConciliacao({ extratos: extratosInit, lancamentos: lancamentosInit }
         const data = await res.json();
         setSugestoes(data.sugestoes ?? []);
       }
-    } catch { /* silenciar */ }
+    } catch (e) { console.error("Erro ao carregar sugestões:", e); }
     setLoadingSugestoes(false);
   }, []);
 
