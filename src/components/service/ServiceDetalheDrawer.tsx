@@ -201,19 +201,19 @@ export default function ServiceDetalheDrawer({ servico, onClose }: Props) {
             </div>
           </section>
 
-          {/* Solda */}
+          {/* Aditivo */}
           <section>
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-              <Flame size={12} /> Solda
+              <Flame size={12} /> Aditivo
             </h3>
             <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-1">
               {servico.usou_solda ? (
                 <>
                   <InfoRow label="Consumo"         value={servico.consumo_solda != null ? `${servico.consumo_solda.toFixed(3)}g` : "—"} />
-                  <InfoRow label="Fio antes"        value={null} />
+                  <InfoRow label="Aditivo antes"     value={null} />
                 </>
               ) : (
-                <InfoRow label="Solda" value="Não usou" />
+                <InfoRow label="Aditivo" value="Não usou" />
               )}
             </div>
           </section>
@@ -261,7 +261,7 @@ export default function ServiceDetalheDrawer({ servico, onClose }: Props) {
                 { label: "Entrada na loja",           url: servico.foto_peca_servico  },
                 { label: "Recebido pelo operador",     url: servico.foto_recebimento   },
                 { label: "Peça concluída",             url: servico.foto_conclusao     },
-                { label: "Fio na balança",             url: servico.foto_fio_solda     },
+                { label: "Aditivo na balança",          url: servico.foto_fio_solda     },
               ].filter(f => f.url).map((f, i) => (
                 <div key={i} className="flex items-center gap-3">
                   <button onClick={() => setZoomFoto(f.url!)} className="shrink-0">
@@ -298,7 +298,7 @@ export default function ServiceDetalheDrawer({ servico, onClose }: Props) {
                       </div>
                       <div className="text-xs text-gray-500 space-y-0.5">
                         {t.peso_saida != null && <div>Peso saída: {t.peso_saida.toFixed(3)}g</div>}
-                        {t.consumo_solda != null && <div>Consumo solda: {t.consumo_solda.toFixed(3)}g</div>}
+                        {t.consumo_solda != null && <div>Consumo aditivo: {t.consumo_solda.toFixed(3)}g</div>}
                         {t.operador_nome && <div>Operador: {t.operador_nome}</div>}
                         {t.concluido_em && <div>Concluído: {fmt(t.concluido_em)}</div>}
                       </div>

@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
         NULL::integer,
         'AD'::alissonerp.enum_marcador_estoque,
         NULL::integer,
-        ${'Carga fio de solda para ' + operador_nome + ' - Service'}
+        ${'Carga de aditivo para ' + operador_nome + ' - Service'}
       )
     `;
   });

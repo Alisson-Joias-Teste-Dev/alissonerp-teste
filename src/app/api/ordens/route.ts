@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
     tipos_servico_ids,   // integer[] — tipos de serviço (servico_interno + garantia)
     venda_id,            // integer — referência à venda (garantia)
     venda_item_ids,      // integer[] — itens da venda em garantia
+    rota_override,       // "pcp" | "protocolo" — para fabricação (escolha do usuário)
     itens = [],
   } = body;
 
@@ -79,6 +80,18 @@ export async function POST(req: NextRequest) {
     }
     if (!Array.isArray(itens) || itens.length === 0) {
       return NextResponse.json({ error: "Selecione pelo menos um item para reposição" }, { status: 400 });
+    }
+  }
+
+  if (tipo_ordem === "fabricacao") {
+    if (!cliente_id) {
+      return NextResponse.json({ error: "Cliente é obrigatório para fabricação" }, { status: 400 });
+    }
+    if (!Array.isArray(itens) || itens.length === 0) {
+      return NextResponse.json({ error: "Selecione pelo menos um item para fabricação" }, { status: 400 });
+    }
+    if (!peso_metal_negociado && peso_metal_negociado !== 0) {
+      return NextResponse.json({ error: "Peso do metal negociado é obrigatório para fabricação" }, { status: 400 });
     }
   }
 
@@ -134,11 +147,14 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Determinar rota ──────────────────────────────────────────────────────
-  const rota = SERVICO_TIPOS.includes(tipo_ordem) ? "protocolo" : "pcp";
+  // Rota: fabricação permite override (PCP ou Protocolo), demais seguem regra padrão
+  const rota = tipo_ordem === "fabricacao" && rota_override
+    ? (rota_override === "protocolo" ? "protocolo" : "pcp")
+    : SERVICO_TIPOS.includes(tipo_ordem) ? "protocolo" : "pcp";
 
-  // ── Data de entrega: fabricação → sempre 10 dias úteis a partir de hoje ─
+  // ── Data de entrega: fabricação usa data informada ou +10 dias úteis ─────
   let dataEntregaFinal: Date | null = data_entrega ? new Date(data_entrega) : null;
-  if (tipo_ordem === "fabricacao") {
+  if (tipo_ordem === "fabricacao" && !dataEntregaFinal) {
     const [{ data_entrega: de }] = await sql`
       SELECT alissonerp.fn_adicionar_dias_uteis(CURRENT_DATE, 10) AS data_entrega
     `;
@@ -229,17 +245,21 @@ export async function POST(req: NextRequest) {
       `;
     }
 
-    // 3. Criar auditoria loja (igual ao fn_ponte)
+    // 3. Criar auditoria loja
+    //    Ordens que vão para Service (protocolo + tipos service) → auto-aprovada
+    //    Demais → pendente (aguarda conferência da loja)
+    const isServiceOrder = rota === "protocolo" && SERVICO_TIPOS.includes(tipo_ordem);
     await tx`
       INSERT INTO alissonerp.auditorias (
         situacao, tipo_auditoria, rota_processo, ordem_id,
-        peso_negociado, dados_ordem
+        peso_negociado, parecer, dados_ordem
       ) VALUES (
-        'pendente',
+        ${isServiceOrder ? 'aprovado' : 'pendente'},
         'loja',
         'entrada_ordem',
         ${ordem.id},
         ${peso_metal_negociado ?? 0},
+        ${isServiceOrder ? 'Aprovação automática — ordem de serviço' : null},
         ${JSON.stringify({
           numero_ordem: numeroOrdem,
           tipo_ordem,

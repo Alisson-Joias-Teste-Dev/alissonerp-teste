@@ -150,7 +150,7 @@ async function _handler(
     const validacaoFio = await validarPesoBalanca(base64Fio, mediaTypeFio, peso_fio_depois, "metal");
     if (!validacaoFio.match) {
       return NextResponse.json(
-        { error: `Peso do fio de solda não confirmado pela IA: ${validacaoFio.mensagem}` },
+        { error: `Peso do aditivo não confirmado pela IA: ${validacaoFio.mensagem}` },
         { status: 422 }
       );
     }
@@ -197,7 +197,7 @@ async function _handler(
         VALUES
           (1, ${operadorId}::integer, ${consumoSolda}::real, 0,
            'SM'::alissonerp.enum_marcador_estoque,
-           ${'Consumo solda devolucao service #' + servicoId + ' - ' + numeroOrdem},
+           ${'Consumo aditivo devolucao service #' + servicoId + ' - ' + numeroOrdem},
            ${ordemId}::integer, ${userId}::uuid, 1)
       `;
     }

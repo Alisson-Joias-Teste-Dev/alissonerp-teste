@@ -8,6 +8,7 @@ import {
   Gem, Scale,
 } from "lucide-react";
 import ServiceCamera from "@/components/service/ServiceCamera";
+import { useGlobalError } from "@/stores/errorStore";
 import { S } from "@/components/layout/ServiceLayout";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -210,7 +211,7 @@ function SaldoBar({ saldo }: { saldo: number | null }) {
     >
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: S.textFaint }}>
-          Saldo fio de solda
+          Saldo aditivo
         </span>
         <span
           className="text-[12px] font-semibold"
@@ -232,6 +233,7 @@ function SaldoBar({ saldo }: { saldo: number | null }) {
 // ══════════════════════════════════════════════════════════════════════════════
 export default function ServiceApp() {
   const supabase = createClient();
+  const { pushError } = useGlobalError();
 
   // ── Views e estado de navegação ───────────────────────────────────────────
   const [view,       setView]       = useState<View>("meus");
@@ -258,13 +260,16 @@ export default function ServiceApp() {
   const [loadingDep,   setLoadingDep]   = useState(false);
   const [processando,  setProcessando]  = useState(false);
 
-  // ── Toast ──────────────────────────────────────────────────────────────────
+  // ── Toast (com cleanup para evitar memory leak) ────────────────────────────
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function showToast(msg: string, ok = true) {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3000);
+    toastTimerRef.current = setTimeout(() => { setToast(null); toastTimerRef.current = null; }, 3000);
   }
+  useEffect(() => { return () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }; }, []);
 
   // ── Receber: protocolo selecionado + foto ─────────────────────────────────
   const [protocoloReceber, setProtocoloReceber] = useState<ProtocoloPendente | null>(null);
@@ -312,7 +317,7 @@ export default function ServiceApp() {
   }, []);
 
   const fetchSaldo = useCallback(async () => {
-    const res  = await fetch("/api/service/solda-saldo").catch(() => null);
+    const res  = await fetch("/api/service/aditivo-saldo").catch(() => null);
     const data = res?.ok ? await res.json().catch(() => null) : null;
     if (data?.saldo != null) setSaldoSolda(data.saldo);
   }, []);
@@ -382,7 +387,7 @@ export default function ServiceApp() {
     return () => { supabase.removeChannel(channel); };
   }, [supabase, fetchMeus, fetchSaldo, fetchPendentes]);
 
-  // ── Consumo de solda calculado (live) ─────────────────────────────────────
+  // ── Consumo de aditivo calculado (live) ─────────────────────────────────────
   const consumoSoldaCalc = (() => {
     if (!usouSolda || saldoSolda === null || !pesoFioDepois) return null;
     const depois = parseFloat(pesoFioDepois);
@@ -418,14 +423,28 @@ export default function ServiceApp() {
   async function handleReceber() {
     if (!protocoloReceber || !fotoReceber) return;
     setProcessando(true);
-    const res  = await fetch("/api/service/receber", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ protocolo_id: protocoloReceber.id, foto_base64: fotoReceber }),
-    }).catch(() => null);
-    const data = res?.ok ? await res.json().catch(() => ({})) : await res?.json().catch(() => ({}));
+    let res: Response | null = null;
+    try {
+      res = await fetch("/api/service/receber", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ protocolo_id: protocoloReceber.id, foto_base64: fotoReceber }),
+      });
+    } catch {
+      setProcessando(false);
+      const msg = "Sem conexão com o servidor. Verifique sua internet.";
+      showToast(msg, false);
+      pushError("Falha ao receber peça", msg);
+      return;
+    }
+    const data = res.ok ? await res.json().catch(() => ({})) : await res.json().catch(() => ({}));
     setProcessando(false);
-    if (!res?.ok) { showToast(data?.error ?? "Erro ao receber", false); return; }
+    if (!res.ok) {
+      const msg = data?.error ?? "Erro ao receber peça";
+      showToast(msg, false);
+      pushError("Falha ao receber peça", msg);
+      return;
+    }
     showToast("Peça recebida com sucesso!");
     setProtocoloReceber(null);
     setFotoReceber(null);
@@ -454,14 +473,28 @@ export default function ServiceApp() {
       body.peso_fio_depois = parseFloat(pesoFioDepois);
     }
 
-    const res  = await fetch(`/api/service/${servicoConcluindo.id}/concluir`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(body),
-    }).catch(() => null);
-    const data = res?.ok ? await res.json().catch(() => ({})) : await res?.json().catch(() => ({}));
+    let res: Response | null = null;
+    try {
+      res = await fetch(`/api/service/${servicoConcluindo.id}/concluir`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(body),
+      });
+    } catch {
+      setProcessando(false);
+      const msg = "Sem conexão com o servidor. Verifique sua internet.";
+      showToast(msg, false);
+      pushError("Falha ao concluir serviço", msg);
+      return;
+    }
+    const data = res.ok ? await res.json().catch(() => ({})) : await res.json().catch(() => ({}));
     setProcessando(false);
-    if (!res?.ok) { showToast(data?.error ?? "Erro ao concluir", false); return; }
+    if (!res.ok) {
+      const msg = data?.error ?? "Erro ao concluir serviço";
+      showToast(msg, false);
+      pushError("Falha ao concluir serviço", msg);
+      return;
+    }
     showToast("Serviço concluído!");
     resetConcluir();
     fetchMeus();
@@ -519,14 +552,28 @@ export default function ServiceApp() {
       body.peso_fio_depois = parseFloat(pesoFioDepois);
     }
 
-    const res  = await fetch(`/api/service/${servicoConcluindo.id}/devolver`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(body),
-    }).catch(() => null);
-    const data = res?.ok ? await res.json().catch(() => ({})) : await res?.json().catch(() => ({}));
+    let res: Response | null = null;
+    try {
+      res = await fetch(`/api/service/${servicoConcluindo.id}/devolver`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(body),
+      });
+    } catch {
+      setProcessando(false);
+      const msg = "Sem conexão com o servidor. Verifique sua internet.";
+      showToast(msg, false);
+      pushError("Falha ao devolver peça", msg);
+      return;
+    }
+    const data = res.ok ? await res.json().catch(() => ({})) : await res.json().catch(() => ({}));
     setProcessando(false);
-    if (!res?.ok) { showToast(data?.error ?? "Erro ao devolver", false); return; }
+    if (!res.ok) {
+      const msg = data?.error ?? "Erro ao devolver peça";
+      showToast(msg, false);
+      pushError("Falha ao devolver peça", msg);
+      return;
+    }
     showToast("Peca devolvida. Protocolo volta criado.");
     resetConcluir();
     fetchMeus();
@@ -538,14 +585,28 @@ export default function ServiceApp() {
   async function handleTransferir() {
     if (!servicoTransf || !destDepositoId) return;
     setProcessando(true);
-    const res  = await fetch(`/api/service/${servicoTransf.id}/transferir`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ deposito_destino_id: destDepositoId }),
-    }).catch(() => null);
-    const data = res?.ok ? await res.json().catch(() => ({})) : await res?.json().catch(() => ({}));
+    let res: Response | null = null;
+    try {
+      res = await fetch(`/api/service/${servicoTransf.id}/transferir`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ deposito_destino_id: destDepositoId }),
+      });
+    } catch {
+      setProcessando(false);
+      const msg = "Sem conexão com o servidor. Verifique sua internet.";
+      showToast(msg, false);
+      pushError("Falha ao transferir serviço", msg);
+      return;
+    }
+    const data = res.ok ? await res.json().catch(() => ({})) : await res.json().catch(() => ({}));
     setProcessando(false);
-    if (!res?.ok) { showToast(data?.error ?? "Erro ao transferir", false); return; }
+    if (!res.ok) {
+      const msg = data?.error ?? "Erro ao transferir serviço";
+      showToast(msg, false);
+      pushError("Falha ao transferir serviço", msg);
+      return;
+    }
     showToast("Transferido com sucesso!");
     setServicoTransf(null);
     setDestDepositoId(null);
@@ -587,7 +648,7 @@ export default function ServiceApp() {
     const titulos: Record<CameraCtx, string> = {
       receber: "Foto de Recebimento",
       peca:    "Foto da Peça na Balança",
-      fio:     "Foto do Fio na Balança",
+      fio:     "Foto do Aditivo na Balança",
     };
     const dicas: Record<CameraCtx, string> = {
       receber: "Fotografe a peça ao receber",
@@ -775,9 +836,9 @@ export default function ServiceApp() {
             )}
           </div>
 
-          {/* Usou solda */}
+          {/* Usou aditivo */}
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Usou solda?</p>
+            <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Usou aditivo?</p>
             <div className="flex gap-2">
               {([false, true] as const).map(v => (
                 <button key={String(v)} onClick={() => setUsouSolda(v)}
@@ -789,12 +850,12 @@ export default function ServiceApp() {
             </div>
           </div>
 
-          {/* Fio de solda */}
+          {/* Aditivo */}
           {usouSolda === true && (
             <div className="space-y-3">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>
-                  Peso fio depois (g) <span style={{ color: "#EF4444" }}>*</span>
+                  Peso aditivo depois (g) <span style={{ color: "#EF4444" }}>*</span>
                 </p>
                 <input type="number" step="0.001" min="0" placeholder="0.000" value={pesoFioDepois}
                   onChange={e => { setPesoFioDepois(e.target.value); setValidacaoFio(null); }}
@@ -803,7 +864,7 @@ export default function ServiceApp() {
               </div>
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>
-                  Foto fio <span style={{ color: "#EF4444" }}>*</span>
+                  Foto aditivo <span style={{ color: "#EF4444" }}>*</span>
                 </p>
                 {fotoFioPreview ? (
                   <div className="relative rounded-2xl overflow-hidden">
@@ -870,11 +931,11 @@ export default function ServiceApp() {
 
         <div className="flex-1 overflow-y-auto px-4 py-5 pb-28">
 
-          {/* STEP 1: Usou solda? */}
+          {/* STEP 1: Usou aditivo? */}
           {step === 1 && (
             <div className="flex flex-col gap-4">
               <div className="text-center py-3">
-                <p className="text-lg font-semibold" style={{ color: S.text }}>Usou solda neste serviço?</p>
+                <p className="text-lg font-semibold" style={{ color: S.text }}>Usou aditivo neste serviço?</p>
                 <p className="text-xs mt-1" style={{ color: S.textMuted }}>{svc.numero_ordem}</p>
               </div>
               <button
@@ -886,7 +947,7 @@ export default function ServiceApp() {
                 }}
               >
                 <Gem size={22} color={usouSolda === true ? "#1D9E75" : S.textMuted} />
-                <span className="font-semibold text-base" style={{ color: usouSolda === true ? "#1D9E75" : S.text }}>SIM — Usei solda</span>
+                <span className="font-semibold text-base" style={{ color: usouSolda === true ? "#1D9E75" : S.text }}>SIM — Usei aditivo</span>
               </button>
               <button
                 onClick={() => setUsouSolda(false)}
@@ -897,7 +958,7 @@ export default function ServiceApp() {
                 }}
               >
                 <X size={22} color={S.textMuted} />
-                <span className="font-semibold text-base" style={{ color: S.text }}>NÃO — Sem solda</span>
+                <span className="font-semibold text-base" style={{ color: S.text }}>NÃO — Sem aditivo</span>
               </button>
               <div className="fixed bottom-0 left-0 right-0 px-4 pt-3 z-20"
                 style={{ backgroundColor: "rgba(24,64,54,0.97)", borderTop: `1px solid ${S.border}`, paddingBottom: "calc(12px + env(safe-area-inset-bottom))" }}>
@@ -988,18 +1049,18 @@ export default function ServiceApp() {
             </div>
           )}
 
-          {/* STEP 3: Fio de solda */}
+          {/* STEP 3: Aditivo */}
           {step === 3 && (
             <div className="space-y-4">
               {!usouSolda ? (
                 <div className="flex flex-col items-center justify-center py-12 gap-3">
                   <CheckCircle2 size={40} color="#1D9E75" />
-                  <p className="text-sm" style={{ color: S.textMuted }}>Sem solda — pular para pedras</p>
+                  <p className="text-sm" style={{ color: S.textMuted }}>Sem aditivo — pular para pedras</p>
                 </div>
               ) : (
                 <>
                   <div>
-                    <p className="text-base font-semibold mb-1" style={{ color: S.text }}>Peso do fio após serviço</p>
+                    <p className="text-base font-semibold mb-1" style={{ color: S.text }}>Peso do aditivo após serviço</p>
                     {saldoSolda != null && (
                       <p className="text-[11px] mb-3" style={{ color: S.textMuted }}>
                         Saldo atual: <span style={{ color: S.gold }}>{saldoSolda.toFixed(3)}g</span>
@@ -1023,10 +1084,10 @@ export default function ServiceApp() {
                       </div>
                     )}
                   </div>
-                  {/* Foto fio */}
+                  {/* Foto aditivo */}
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>
-                      Foto fio na balança <span style={{ color: "#EF4444" }}>*</span>
+                      Foto aditivo na balança <span style={{ color: "#EF4444" }}>*</span>
                     </p>
                     {fotoFioPreview ? (
                       <div className="relative rounded-2xl overflow-hidden">
@@ -1043,13 +1104,13 @@ export default function ServiceApp() {
                         className="w-full flex flex-col items-center justify-center gap-2 rounded-2xl active:scale-[0.98]"
                         style={{ height: 100, backgroundColor: S.cardBg, border: `2px dashed rgba(212,175,55,0.3)` }}>
                         <Camera size={24} color={S.gold} />
-                        <span className="text-sm" style={{ color: S.textMuted }}>Foto fio na balança</span>
+                        <span className="text-sm" style={{ color: S.textMuted }}>Foto aditivo na balança</span>
                       </button>
                     )}
                   </div>
                 </>
               )}
-              {/* Feedback IA — fio de solda */}
+              {/* Feedback IA — aditivo */}
               {usouSolda && (
                 <>
                   {validandoFio && (
@@ -1202,7 +1263,7 @@ export default function ServiceApp() {
                   const delta = parseFloat(pesoSaida) - (svc.peso_entrada ?? 0);
                   return `${delta >= 0 ? "+" : ""}${delta.toFixed(3)}g`;
                 })()} />
-                <ResumoLinha label="Solda" value={usouSolda && consumoSoldaCalc != null ? `${consumoSoldaCalc.toFixed(3)}g consumido` : "Não usou"} />
+                <ResumoLinha label="Aditivo" value={usouSolda && consumoSoldaCalc != null ? `${consumoSoldaCalc.toFixed(3)}g consumido` : "Não usou"} />
                 <ResumoLinha label="Pedras" value={pedras.length > 0 ? `${pedras.length} item(s)` : "Nenhuma"} />
               </Card>
 
@@ -1418,7 +1479,7 @@ export default function ServiceApp() {
                     </span>
                     {svc.usou_solda && svc.consumo_solda != null && (
                       <span className="text-[11px]" style={{ color: S.textFaint }}>
-                        Solda: {svc.consumo_solda.toFixed(3)}g
+                        Aditivo: {svc.consumo_solda.toFixed(3)}g
                       </span>
                     )}
                   </div>
@@ -1517,7 +1578,7 @@ export default function ServiceApp() {
         </div>
       )}
 
-      {/* Saldo solda fixo */}
+      {/* Saldo aditivo fixo */}
       <SaldoBar saldo={saldoSolda} />
 
       {/* Toast */}
@@ -1604,24 +1665,24 @@ export default function ServiceApp() {
                 </div>
               </div>
 
-              {/* Solda */}
+              {/* Aditivo */}
               <div className="rounded-2xl px-4 py-3" style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}` }}>
-                <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Solda</p>
+                <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Aditivo</p>
                 {servicoDetalhe.usou_solda ? (
                   <div className="space-y-1">
-                    <DetalheRow label="Usou solda" value="Sim" valueColor="#1D9E75" />
+                    <DetalheRow label="Usou aditivo" value="Sim" valueColor="#1D9E75" />
                     {servicoDetalhe.consumo_solda != null && (
                       <DetalheRow label="Consumo" value={`${servicoDetalhe.consumo_solda.toFixed(3)}g`} valueColor={S.gold} />
                     )}
                     {servicoDetalhe.peso_fio_antes != null && (
-                      <DetalheRow label="Fio antes" value={`${servicoDetalhe.peso_fio_antes}g`} />
+                      <DetalheRow label="Aditivo antes" value={`${servicoDetalhe.peso_fio_antes}g`} />
                     )}
                     {servicoDetalhe.peso_fio_depois != null && (
-                      <DetalheRow label="Fio depois" value={`${servicoDetalhe.peso_fio_depois}g`} />
+                      <DetalheRow label="Aditivo depois" value={`${servicoDetalhe.peso_fio_depois}g`} />
                     )}
                   </div>
                 ) : (
-                  <DetalheRow label="Usou solda" value="Não" />
+                  <DetalheRow label="Usou aditivo" value="Não" />
                 )}
               </div>
 
@@ -1661,7 +1722,7 @@ export default function ServiceApp() {
                 { label: "Peça (loja)",     url: servicoDetalhe.foto_peca_servico },
                 { label: "Recebimento",     url: servicoDetalhe.foto_recebimento },
                 { label: "Conclusão",       url: servicoDetalhe.foto_conclusao },
-                { label: "Fio na balança",  url: servicoDetalhe.foto_fio_solda },
+                { label: "Aditivo na balança",  url: servicoDetalhe.foto_fio_solda },
               ].filter(f => !!f.url).map(f => (
                 <div key={f.label}>
                   <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>{f.label}</p>
