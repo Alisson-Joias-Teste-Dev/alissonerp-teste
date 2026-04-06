@@ -18,6 +18,7 @@ export interface UsuarioEdit {
   tipos_ordem_permitidos?: string[];
   tipos_protocolo_permitidos?: string[];
   is_operador_service?: boolean;
+  mx_desconto_permitido?: number | null;
 }
 
 const TODOS_TIPOS_ORDEM: Record<string, string> = {
@@ -78,6 +79,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
   const [tiposProtocoloPermitidos, setTiposProtocoloPermitidos] = useState<string[]>([]);
 
   const [isOperadorService, setIsOperadorService] = useState(false);
+  const [mxDesconto, setMxDesconto] = useState<string>("");
 
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
@@ -120,6 +122,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
       setTiposPermitidos(usuario.tipos_ordem_permitidos ?? []);
       setTiposProtocoloPermitidos(usuario.tipos_protocolo_permitidos ?? []);
       setIsOperadorService(usuario.is_operador_service ?? false);
+      setMxDesconto(usuario.mx_desconto_permitido != null ? String(usuario.mx_desconto_permitido) : "");
 
       // Buscar permissões granulares do usuário
       setPermLoading(true);
@@ -229,6 +232,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
       tipos_ordem_permitidos:      tiposPermitidos,
       tipos_protocolo_permitidos:  tiposProtocoloPermitidos,
       is_operador_service:         isOperadorService,
+      mx_desconto_permitido:       mxDesconto !== "" ? parseFloat(mxDesconto) : null,
     };
     // Só envia email se mudou
     if (email.trim() !== usuario.email) body.email = email.trim();
@@ -268,6 +272,10 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
   const senhasMismatch    = novaSenha && confirmar && novaSenha !== confirmar;
   const senhaCurta        = novaSenha && novaSenha.length < 6;
   const isProprioUsuario  = !!(userLogadoId && usuario && userLogadoId === usuario.id);
+
+  const isVendedor  = ["consultora", "gerente_loja"].includes(role);
+  const isFabrica   = ["ourives", "pcp", "gerente_fabrica", "motoboy"].includes(role);
+  const isSuperAdmin2 = ["desenvolvedor", "admin"].includes(role);
 
   return (
     <>
@@ -373,43 +381,57 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
             )}
           </div>
 
-          {/* Vendedor(a) Vinculado — visível só para consultora/gerente_loja */}
-          {(role === "consultora" || role === "gerente_loja") && (
-            <div>
-              <label className={labelCls}>Vendedor(a) Vinculado</label>
-              <select
-                value={vendedorId ?? ""}
-                onChange={(e) => setVendedorId(e.target.value ? Number(e.target.value) : null)}
-                className={inputCls}
-              >
-                <option value="">Nenhum</option>
-                {vendedores.map((v) => (
-                  <option key={v.id_vendedor} value={v.id_vendedor}>{v.nome}</option>
-                ))}
-              </select>
-              <p className="text-[10px] text-gray-400 mt-0.5">
-                Vincula o usuário a um vendedor(a) no ERP
-              </p>
-            </div>
+          {/* ── Campos de Vendedor ────────────────────────────────── */}
+          {isVendedor && (
+            <>
+              <div>
+                <label className={labelCls}>Vendedor(a) Vinculado</label>
+                <select
+                  value={vendedorId ?? ""}
+                  onChange={(e) => setVendedorId(e.target.value ? Number(e.target.value) : null)}
+                  className={inputCls}
+                >
+                  <option value="">Nenhum</option>
+                  {vendedores.map((v) => (
+                    <option key={v.id_vendedor} value={v.id_vendedor}>{v.nome}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-400 mt-0.5">Vincula o usuário a um vendedor(a) no ERP</p>
+              </div>
+
+              <div>
+                <label className={labelCls}>Desconto máximo permitido (%)</label>
+                <input
+                  type="number" min={0} max={100} step={0.5}
+                  value={mxDesconto}
+                  onChange={e => setMxDesconto(e.target.value)}
+                  placeholder="Padrão por role (deixe em branco)"
+                  className={inputCls}
+                />
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  Deixe em branco para usar o padrão do perfil.
+                </p>
+              </div>
+            </>
           )}
 
-          {/* Depósito / Operador */}
-          <div>
-            <label className={labelCls}>Depósito / Operador</label>
-            <select
-              value={depositoId}
-              onChange={(e) => setDepositoId(e.target.value)}
-              className={inputCls}
-            >
-              <option value="">Sem vínculo</option>
-              {depositos.map((d) => (
-                <option key={d.id} value={String(d.id)}>{d.nome}</option>
-              ))}
-            </select>
-            <p className="text-[10px] text-gray-400 mt-0.5">
-              Vincula o usuário a um depósito/operador no PCP
-            </p>
-          </div>
+          {/* ── Campos de Fábrica/PCP ─────────────────────────────── */}
+          {isFabrica && (
+            <div>
+              <label className={labelCls}>Depósito / Operador</label>
+              <select
+                value={depositoId}
+                onChange={(e) => setDepositoId(e.target.value)}
+                className={inputCls}
+              >
+                <option value="">Sem vínculo</option>
+                {depositos.map((d) => (
+                  <option key={d.id} value={String(d.id)}>{d.nome}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-gray-400 mt-0.5">Vincula o usuário a um depósito/operador no PCP</p>
+            </div>
+          )}
 
           {/* Status ativo/inativo */}
           <div>
@@ -440,8 +462,8 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
             </div>
           </div>
 
-          {/* Operador Service */}
-          <div className="border-t border-gray-100 pt-5">
+          {/* Operador Service — apenas fábrica/motoboy */}
+          {isFabrica && <div className="border-t border-gray-100 pt-5">
             <label className={labelCls}>App Service</label>
             <div className="flex items-center justify-between mt-2 px-3 py-3 rounded-lg border border-gray-200 bg-gray-50">
               <div>
@@ -464,12 +486,13 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
                 />
               </button>
             </div>
-          </div>
+          </div>}
 
-          {/* Permissões de Criação de Ordens */}
-          <div className="border-t border-gray-100 pt-5">
+          {/* ── Permissões de Vendedor ────────────────────────────── */}
+          {/* Permissões de Criação de Ordens — apenas vendedor */}
+          {isVendedor && <div className="border-t border-gray-100 pt-5">
             <label className={labelCls}>Permissões de Criação de Ordens</label>
-            {["admin", "desenvolvedor"].includes(role) ? (
+            {isSuperAdmin2 ? (
               <div className="flex items-start gap-2 mt-2 px-3 py-2.5 rounded-lg text-xs bg-blue-50 border border-blue-200 text-blue-700">
                 <Shield size={12} className="mt-0.5 shrink-0" />
                 <span>Este usuário tem acesso total — estas permissões não se aplicam.</span>
@@ -502,12 +525,12 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
                 </p>
               </div>
             )}
-          </div>
+          </div>}
 
-          {/* Permissões de Protocolo */}
-          <div className="border-t border-gray-100 pt-5">
+          {/* Permissões de Protocolo — apenas vendedor */}
+          {isVendedor && <div className="border-t border-gray-100 pt-5">
             <label className={labelCls}>Permissões de Protocolo</label>
-            {["admin", "desenvolvedor"].includes(role) ? (
+            {isSuperAdmin2 ? (
               <div className="flex items-start gap-2 mt-2 px-3 py-2.5 rounded-lg text-xs bg-blue-50 border border-blue-200 text-blue-700">
                 <Shield size={12} className="mt-0.5 shrink-0" />
                 <span>Este usuário tem acesso total — estas permissões não se aplicam.</span>
@@ -548,17 +571,12 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
                 </p>
               </div>
             )}
-          </div>
+          </div>}
 
-          {/* Permissões: Purificação / Ligação */}
-          <div className="border-t border-gray-100 pt-5">
+          {/* Purificação / Ligação — apenas fábrica */}
+          {isFabrica && <div className="border-t border-gray-100 pt-5">
             <label className={labelCls}>Purificação / Ligação</label>
-            {["admin", "desenvolvedor"].includes(role) ? (
-              <div className="flex items-start gap-2 mt-2 px-3 py-2.5 rounded-lg text-xs bg-blue-50 border border-blue-200 text-blue-700">
-                <Shield size={12} className="mt-0.5 shrink-0" />
-                <span>Este usuário tem acesso total — permissões ignoradas.</span>
-              </div>
-            ) : permLoading ? (
+            {permLoading ? (
               <div className="flex items-center gap-2 mt-2 text-xs text-gray-400">
                 <Loader2 size={12} className="animate-spin" /> Carregando...
               </div>
@@ -587,7 +605,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
                 ))}
               </div>
             )}
-          </div>
+          </div>}
 
           {/* Alterar senha */}
           <div className="border-t border-gray-100 pt-5">

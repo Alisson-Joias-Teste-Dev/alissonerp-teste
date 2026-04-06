@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Search, RefreshCw, Loader2, Plus, TrendingUp,
   ShoppingBag, DollarSign, ChevronRight, Trophy,
+  ChevronLeft,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -75,7 +76,9 @@ function fmt(v: number) {
 }
 function fmtDate(d: string | null) {
   if (!d) return "—";
-  return new Date(d + "T00:00:00").toLocaleDateString("pt-BR");
+  const date = new Date(String(d).includes("T") ? d : d + "T12:00:00");
+  if (isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("pt-BR");
 }
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -85,7 +88,7 @@ interface Props {
   nomeUsuario: string;
 }
 
-type Preset = "today" | "7d" | "30d" | "custom";
+type Preset = "today" | "7d" | "30d" | "mes" | "custom";
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
@@ -96,6 +99,10 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
   const [preset, setPreset] = useState<Preset>("30d");
   const [inicio, setInicio] = useState(() => menosNDias(30));
   const [fim,    setFim]    = useState(() => hoje());
+  const nowDate = new Date();
+  const [mesSel, setMesSel] = useState(
+    `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}`
+  );
 
   // Filtros
   const [tabSituacao,   setTabSituacao]   = useState("");
@@ -146,6 +153,9 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabSituacao]);
 
+  const [pagina, setPagina] = useState(1);
+  const POR_PAGINA = 15;
+
   // Filtro local
   const filtradas = useMemo(() => {
     const q = busca.toLowerCase().trim();
@@ -159,6 +169,13 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
     });
   }, [vendas, busca]);
 
+  const totalPaginas = Math.max(1, Math.ceil(filtradas.length / POR_PAGINA));
+  const paginaAtual  = Math.min(pagina, totalPaginas);
+  const visiveis     = filtradas.slice((paginaAtual - 1) * POR_PAGINA, paginaAtual * POR_PAGINA);
+
+  // Reset página ao filtrar
+  useEffect(() => { setPagina(1); }, [busca, tabSituacao, vendedorFiltro]);
+
   // Stats
   const stats = useMemo(() => ({
     count:     filtradas.length,
@@ -167,11 +184,17 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
     pago:      filtradas.reduce((s, v) => s + v.total_pago,     0),
   }), [filtradas]);
 
-  function applyPreset(p: Preset) {
+  function applyPreset(p: Preset, mes?: string) {
     let ini = inicio, fi = fim;
-    if (p === "today") { ini = hoje();        fi = hoje(); }
-    if (p === "7d")    { ini = menosNDias(7); fi = hoje(); }
-    if (p === "30d")   { ini = menosNDias(30);fi = hoje(); }
+    if (p === "today") { ini = hoje();         fi = hoje(); }
+    if (p === "7d")    { ini = menosNDias(7);  fi = hoje(); }
+    if (p === "30d")   { ini = menosNDias(30); fi = hoje(); }
+    if (p === "mes") {
+      const ref = mes ?? mesSel;
+      const [y, m] = ref.split("-").map(Number);
+      ini = `${y}-${String(m).padStart(2, "0")}-01`;
+      fi  = new Date(y, m, 0).toISOString().slice(0, 10);
+    }
     setPreset(p); setInicio(ini); setFim(fi);
     fetchVendas(ini, fi);
   }
@@ -248,12 +271,12 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
         className="flex flex-wrap items-center gap-2 mb-4 p-3 rounded-xl border"
         style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}
       >
-        {(["today", "7d", "30d", "custom"] as Preset[]).map(p => {
-          const labels: Record<Preset, string> = { today: "Hoje", "7d": "7 dias", "30d": "30 dias", custom: "Período" };
+        {(["today", "7d", "30d", "mes", "custom"] as Preset[]).map(p => {
+          const labels: Record<Preset, string> = { today: "Hoje", "7d": "7 dias", "30d": "30 dias", mes: "Mês", custom: "Período" };
           return (
             <button
               key={p}
-              onClick={() => p !== "custom" ? applyPreset(p) : setPreset("custom")}
+              onClick={() => (p === "custom" || p === "mes") ? setPreset(p) : applyPreset(p)}
               className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
               style={{
                 backgroundColor: preset === p ? C.esmeraldaLt : "transparent",
@@ -265,6 +288,21 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
             </button>
           );
         })}
+
+        {preset === "mes" && (
+          <div className="flex items-center gap-1.5">
+            <input
+              type="month"
+              value={mesSel}
+              onChange={e => {
+                setMesSel(e.target.value);
+                applyPreset("mes", e.target.value);
+              }}
+              className="border rounded-lg px-2 py-1 text-xs outline-none"
+              style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
+            />
+          </div>
+        )}
 
         {preset === "custom" && (
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -401,7 +439,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
                   </td>
                 </tr>
               ) : (
-                filtradas.map((v, i) => {
+                visiveis.map((v, i) => {
                   const sit = SITUACAO[v.situacao] ?? { label: v.situacao, bg: "#F3F4F6", color: "#6B7280" };
                   const saldo = v.total_venda - v.total_pago;
                   return (
@@ -462,11 +500,31 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
 
         {filtradas.length > 0 && (
           <div
-            className="px-4 py-2 flex items-center justify-between text-[11px]"
-            style={{ color: "#9CA3AF", borderTop: `1px solid ${C.cremeBorder}` }}
+            className="px-4 py-2.5 flex items-center justify-between gap-3"
+            style={{ borderTop: `1px solid ${C.cremeBorder}`, backgroundColor: C.cremeBg }}
           >
-            <span>{filtradas.length} de {vendas.length} vendas</span>
-            {loading && <Loader2 size={12} className="animate-spin" />}
+            <span className="text-[11px]" style={{ color: "#9CA3AF" }}>
+              {filtradas.length} venda{filtradas.length !== 1 ? "s" : ""}
+              {" · "}pág. {paginaAtual} de {totalPaginas}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPagina(p => Math.max(1, p - 1))}
+                disabled={paginaAtual === 1}
+                className="p-1.5 rounded-lg border transition-opacity disabled:opacity-30 hover:opacity-70"
+                style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <button
+                onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}
+                disabled={paginaAtual === totalPaginas}
+                className="p-1.5 rounded-lg border transition-opacity disabled:opacity-30 hover:opacity-70"
+                style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
           </div>
         )}
       </div>

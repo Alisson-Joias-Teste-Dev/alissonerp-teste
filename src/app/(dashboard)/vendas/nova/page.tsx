@@ -18,14 +18,19 @@ export default async function NovaVendaPage() {
       LIMIT 1
     `;
     if (u) {
-      role      = u.role as string;
+      role       = u.role as string;
       vendedorId = u.vendedor_id ? Number(u.vendedor_id) : null;
 
-      // mx_desconto_permitido individual sobrepõe regra de role
-      if (u.mx_desconto_permitido != null) {
+      const SUPER = ["desenvolvedor", "admin"];
+      if (SUPER.includes(role)) {
+        // Super-admins: desconto irrestrito, ignora coluna individual
+        maxDesconto = 100;
+      } else if (u.mx_desconto_permitido != null && Number(u.mx_desconto_permitido) > 0) {
+        // Valor individual definido explicitamente
         maxDesconto = Number(u.mx_desconto_permitido);
       } else {
-        const FULL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "financeiro"];
+        // Padrão por role
+        const FULL = ["gerente_fabrica", "gerente_loja", "financeiro"];
         maxDesconto = FULL.includes(role) ? 30 : 15;
       }
     }

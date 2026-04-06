@@ -53,6 +53,7 @@ export async function PATCH(
     tipos_ordem_permitidos?: string[];
     tipos_protocolo_permitidos?: string[];
     is_operador_service?: boolean;
+    mx_desconto_permitido?: number | null;
   };
 
   // Não-admin: só pode alterar nome (proteção backend)
@@ -64,6 +65,7 @@ export async function PATCH(
   const tipos_ordem_permitidos     = isAdmin ? body.tipos_ordem_permitidos     : undefined;
   const tipos_protocolo_permitidos = isAdmin ? body.tipos_protocolo_permitidos : undefined;
   const is_operador_service        = isAdmin ? body.is_operador_service         : undefined;
+  const mx_desconto_permitido      = isAdmin ? body.mx_desconto_permitido       : undefined;
 
   // Usuário NUNCA pode alterar sua própria role (proteção dupla: frontend + backend)
   const role = isSelfUpdate ? undefined : body.role;
@@ -93,23 +95,25 @@ export async function PATCH(
     await sql`
       UPDATE alissonerp.usuarios
       SET
-        nome        = COALESCE(${nome ?? null}, nome),
-        role        = COALESCE(${role}, role),
-        ativo       = COALESCE(${ativo ?? null}, ativo),
-        deposito_id = ${deposito_id ?? null},
-        vendedor_id = ${vendedor_id ?? null},
-        updated_at  = now()
+        nome                  = COALESCE(${nome ?? null}, nome),
+        role                  = COALESCE(${role}, role),
+        ativo                 = COALESCE(${ativo ?? null}, ativo),
+        deposito_id           = ${deposito_id ?? null},
+        vendedor_id           = ${vendedor_id ?? null},
+        mx_desconto_permitido = ${mx_desconto_permitido !== undefined ? (mx_desconto_permitido ?? null) : sql`mx_desconto_permitido`},
+        updated_at            = now()
       WHERE id = ${id}::uuid
     `;
   } else {
     await sql`
       UPDATE alissonerp.usuarios
       SET
-        nome        = COALESCE(${nome ?? null}, nome),
-        ativo       = COALESCE(${ativo ?? null}, ativo),
-        deposito_id = ${deposito_id ?? null},
-        vendedor_id = ${vendedor_id ?? null},
-        updated_at  = now()
+        nome                  = COALESCE(${nome ?? null}, nome),
+        ativo                 = COALESCE(${ativo ?? null}, ativo),
+        deposito_id           = ${deposito_id ?? null},
+        vendedor_id           = ${vendedor_id ?? null},
+        mx_desconto_permitido = ${mx_desconto_permitido !== undefined ? (mx_desconto_permitido ?? null) : sql`mx_desconto_permitido`},
+        updated_at            = now()
       WHERE id = ${id}::uuid
     `;
   }
@@ -234,7 +238,7 @@ export async function PATCH(
   const [updated] = await sql`
     SELECT
       u.id, u.email, u.nome, u.role::text, u.ativo, u.deposito_id, u.vendedor_id, u.created_at,
-      u.tipos_ordem_permitidos, u.tipos_protocolo_permitidos, u.is_operador_service,
+      u.tipos_ordem_permitidos, u.tipos_protocolo_permitidos, u.is_operador_service, u.mx_desconto_permitido,
       up.avatar_url
     FROM alissonerp.usuarios u
     LEFT JOIN public.user_profiles up ON up.id_user = u.id
