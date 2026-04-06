@@ -6,7 +6,10 @@ import Link from "next/link";
 import {
   ArrowLeft, Loader2, CheckCircle, XCircle, Truck, Package,
   CreditCard, FileText, User, RefreshCw, Video, Share2, Copy, Check as CheckIcon,
+  Download, Send,
 } from "lucide-react";
+import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
+import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -155,6 +158,9 @@ export default function VendaDetalheClient({ vendaId, isFullAccess }: Props) {
   const [updErr,    setUpdErr]    = useState("");
   const [sharing,   setSharing]   = useState(false);
   const [copied,    setCopied]    = useState(false);
+  const [gerandoPdf, setGerandoPdf] = useState(false);
+  const [enviandoTiny, setEnviandoTiny] = useState(false);
+  const [tinyMsg, setTinyMsg]       = useState<{ type: "ok" | "erro"; text: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -252,6 +258,63 @@ export default function VendaDetalheClient({ vendaId, isFullAccess }: Props) {
     }
   }
 
+  // ── Gerar PDF (client-side) ──────────────────────────────────────────────────
+  async function gerarPdf() {
+    if (!venda) return;
+    setGerandoPdf(true);
+    try {
+      const dados: OrcamentoPDF = {
+        numero_venda:    venda.numero_venda,
+        cliente_nome:    venda.cliente_nome ?? "Sem cliente",
+        cliente_email:   venda.cliente_email ?? undefined,
+        cliente_telefone: venda.cliente_telefone ?? undefined,
+        cliente_cpf_cnpj: venda.cliente_cpf_cnpj ?? undefined,
+        data_venda:      venda.data_venda,
+        data_entrega:    venda.data_entrega ?? undefined,
+        total_produtos:  venda.total_produtos,
+        total_desconto:  venda.total_desconto,
+        total_frete:     venda.total_frete,
+        total_venda:     venda.total_venda,
+        forma_envio:     venda.forma_envio ?? undefined,
+        observacoes:     venda.observacoes ?? undefined,
+        itens: venda.itens.map((i) => ({
+          nome:           i.nome_produto,
+          sku:            i.sku ?? "—",
+          quantidade:     i.quantidade,
+          preco_lista:    i.preco_lista,
+          desconto_pct:   i.pct_desconto,
+          preco_unitario: i.preco_unitario,
+          total:          i.total_item,
+        })),
+      };
+      const doc = gerarPDFOrcamento(dados);
+      doc.save(`orcamento-${venda.numero_venda}.pdf`);
+    } catch {
+      // silent fallback
+    } finally {
+      setGerandoPdf(false);
+    }
+  }
+
+  // ── Enviar pro Tiny ──────────────────────────────────────────────────────────
+  async function enviarTiny() {
+    if (!venda) return;
+    setEnviandoTiny(true);
+    setTinyMsg(null);
+    try {
+      const res = await fetch(`/api/vendas/${venda.id}/enviar-tiny`, { method: "POST" });
+      const data = await res.json() as { ok?: boolean; message?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setTinyMsg({ type: "ok", text: data.message ?? "Enviado com sucesso" });
+      await load();
+    } catch (e) {
+      setTinyMsg({ type: "erro", text: e instanceof Error ? e.message : "Erro ao enviar" });
+    } finally {
+      setEnviandoTiny(false);
+      setTimeout(() => setTinyMsg(null), 6000);
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -318,6 +381,41 @@ export default function VendaDetalheClient({ vendaId, isFullAccess }: Props) {
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Gerar PDF */}
+          <button
+            onClick={gerarPdf}
+            disabled={gerandoPdf || loading}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 hover:bg-gray-50"
+            style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+            title="Baixar PDF do orçamento"
+          >
+            {gerandoPdf ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+            PDF
+          </button>
+
+          {/* Enviar pro Tiny — só fullAccess */}
+          {isFullAccess && (
+            <button
+              onClick={enviarTiny}
+              disabled={enviandoTiny || loading}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 hover:bg-gray-50"
+              style={{
+                borderColor: venda.tiny_sync_status === "sincronizado" ? "#86EFAC" : C.cremeBorder,
+                color: venda.tiny_sync_status === "erro" ? "#EF4444" : C.esmeralda,
+              }}
+              title={
+                venda.tiny_sync_status === "sincronizado"
+                  ? "Reenviar para o Tiny"
+                  : venda.tiny_sync_status === "erro"
+                    ? "Tentar novamente — houve erro"
+                    : "Enviar pedido ao Tiny"
+              }
+            >
+              {enviandoTiny ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+              {venda.tiny_sync_status === "sincronizado" ? "Reenvar Tiny" : "Enviar Tiny"}
+            </button>
+          )}
+
           {/* Compartilhar link */}
           <button
             onClick={compartilhar}
@@ -347,6 +445,19 @@ export default function VendaDetalheClient({ vendaId, isFullAccess }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Toast Tiny */}
+      {tinyMsg && (
+        <div
+          className="mb-3 px-3 py-2 rounded-lg text-xs font-medium text-center"
+          style={{
+            backgroundColor: tinyMsg.type === "ok" ? "#D1FAE5" : "#FEE2E2",
+            color: tinyMsg.type === "ok" ? "#065F46" : "#991B1B",
+          }}
+        >
+          {tinyMsg.text}
+        </div>
+      )}
 
       <div className="flex flex-col gap-4">
 
