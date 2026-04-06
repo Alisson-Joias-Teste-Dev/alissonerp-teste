@@ -14,7 +14,7 @@ export async function GET() {
 
   const [params] = await sql`SELECT ouro, dollar, euro, prata FROM public.parametros LIMIT 1`;
 
-  let config = { auto_ativo: false, provedor: "openexchangerates", ultimo_update: null as string | null };
+  let config = { auto_ativo: false, provedor: "openexchangerates", ultimo_update: null as string | null, api_key_configured: false };
   try {
     const rows = await sql`
       SELECT chave, valor FROM alissonerp.configuracoes_sistema
@@ -26,6 +26,14 @@ export async function GET() {
       if (r.chave === "cotacao_ultimo_update") config.ultimo_update = String(r.valor).replace(/"/g, "");
     }
   } catch { /* tabela pode não ter as chaves ainda */ }
+
+  // Verificar se API key está configurada (sem expor o valor)
+  try {
+    const [keyRow] = await sql`
+      SELECT 1 FROM alissonerp.configuracoes_secrets WHERE chave = 'cotacao_api_key'
+    `;
+    config.api_key_configured = !!keyRow;
+  } catch { /* sem secrets */ }
 
   return NextResponse.json({
     cotacoes: {

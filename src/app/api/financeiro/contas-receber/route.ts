@@ -61,6 +61,9 @@ export async function POST(req: NextRequest) {
   if (!body.descricao?.trim() || !body.valor) {
     return NextResponse.json({ error: "descricao e valor obrigatórios" }, { status: 400 });
   }
+  if (body.valor <= 0) {
+    return NextResponse.json({ error: "Valor deve ser maior que zero" }, { status: 400 });
+  }
 
   let cliente_nome: string | null = null;
   if (body.cliente_id) {

@@ -2806,6 +2806,7 @@ function TabCotacoes() {
   const [autoAtivo, setAutoAtivo] = useState(false);
   const [ultimoUpdate, setUltimoUpdate] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
+  const [keyConfigured, setKeyConfigured] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [atualizando, setAtualizando] = useState(false);
@@ -2820,6 +2821,7 @@ function TabCotacoes() {
       setCotacoes(data.cotacoes);
       setAutoAtivo(data.config.auto_ativo);
       setUltimoUpdate(data.config.ultimo_update);
+      setKeyConfigured(data.config.api_key_configured ?? false);
     } catch {
       setMsg({ tipo: "erro", texto: "Erro ao carregar cotações" });
     }
@@ -3057,11 +3059,14 @@ function TabIntegracoes() {
     });
     setSaving(false);
     if (res.ok) {
-      setWooConfigured(true);
       setWooUrl("");
       setWooKey("");
       setWooSecret("");
       setMsg({ tipo: "ok", texto: "WooCommerce salvo com sucesso" });
+      // Re-fetch status real do servidor (não usar optimistic update)
+      fetch("/api/configuracoes/integracoes").then(r => r.ok ? r.json() : null).then(d => {
+        if (d) { setWooConfigured(d.woo_configured); setKommoConfigured(d.kommo_configured); }
+      }).catch(() => {});
     } else {
       const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
       setMsg({ tipo: "erro", texto: d.error ?? "Erro ao salvar" });
@@ -3083,10 +3088,13 @@ function TabIntegracoes() {
     });
     setSaving(false);
     if (res.ok) {
-      setKommoConfigured(true);
       setKommoUrl("");
       setKommoToken("");
       setMsg({ tipo: "ok", texto: "Kommo salvo com sucesso" });
+      // Re-fetch status real
+      fetch("/api/configuracoes/integracoes").then(r => r.ok ? r.json() : null).then(d => {
+        if (d) { setWooConfigured(d.woo_configured); setKommoConfigured(d.kommo_configured); }
+      }).catch(() => {});
     } else {
       const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
       setMsg({ tipo: "erro", texto: d.error ?? "Erro ao salvar" });
