@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { registrarQuebra, buscarOuroRecebido } from "@/lib/registrar-quebra";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 // POST /api/pcp/saida — registra saída final do PCP
 //
@@ -39,6 +40,11 @@ export async function POST(req: NextRequest) {
     foto_balanca?: string | null;
     user_id?: string | null;
   };
+
+  // Auth obrigatória — user.id substitui body.user_id para created_by
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   if (!pcp_id) {
     return NextResponse.json({ error: "pcp_id obrigatório" }, { status: 400 });
@@ -172,6 +178,12 @@ export async function POST(req: NextRequest) {
   //   peso_ouro_real = peso_bruto − pedras              (ouro físico na peça)
   //   pmc            = peso_ouro_real − outros − metal_externo
   const peso_ouro_real = peso_bruto - peso_pedras_total;
+  if (peso_ouro_real < 0) {
+    return NextResponse.json(
+      { error: `Peso ouro real negativo (${peso_ouro_real.toFixed(3)}g) — peso das pedras excede o peso bruto` },
+      { status: 400 },
+    );
+  }
   const pmc            = peso_ouro_real - peso_outros_num - metal_externo;
 
   // Total Metal = mesma fórmula do resumo do card:
@@ -198,7 +210,7 @@ export async function POST(req: NextRequest) {
   //    (trigger guard: IF NEW.peso IS NULL OR NEW.peso <= 0 → RETURN NEW)
   const [saida] = await sql`
     INSERT INTO alissonerp.saidas_ordem (ordem_id, deposito_id, peso, metal_externo, obs, created_by)
-    VALUES (${ordemId}, ${depositoId}, 0, ${metal_externo}, 'Saída via PCP — gerenciado pelo ERP', ${user_id ?? null}::uuid)
+    VALUES (${ordemId}, ${depositoId}, 0, ${metal_externo}, 'Saída via PCP — gerenciado pelo ERP', ${user.id}::uuid)
     RETURNING id
   `;
   const saidaId = saida.id as number;
@@ -290,7 +302,7 @@ export async function POST(req: NextRequest) {
       tipo:          "saida_pcp",
       ouro_recebido: ouroRecebidoParaQuebra,
       ouro_entregue: peso_ouro_real,
-      created_by:    user_id ?? null,
+      created_by:    user.id,
     });
   }
 

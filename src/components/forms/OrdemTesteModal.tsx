@@ -71,8 +71,9 @@ export default function OrdemTesteModal({ isOpen, onClose, onSuccess }: Props) {
         onSuccess();
         onClose();
       }, 2000);
-    } catch {
-      setError("Erro de conexão");
+    } catch (err) {
+      console.error("Ordem teste falhou:", err);
+      setError("Erro ao criar ordem de teste — tente novamente");
     } finally {
       setLoading(false);
     }

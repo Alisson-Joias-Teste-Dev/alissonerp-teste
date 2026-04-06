@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { recalcularTotaisPCP } from "@/lib/recalcular-totais-pcp";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 // POST /api/distribuicao/[id]/saida — registra saída por ordem
 //
@@ -50,6 +51,11 @@ export async function POST(
     justificativa_sem_peso?: string | null;
   };
 
+  // Auth obrigatória
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   if (!ordem_id) {
     return NextResponse.json({ error: "ordem_id obrigatório" }, { status: 400 });
   }
@@ -98,7 +104,7 @@ export async function POST(
         peso_pedras            = 0,
         peso_ouro_real         = 0,
         data_baixa             = now(),
-        saida_por              = ${user_id ?? null}
+        saida_por              = ${user.id}
       WHERE id = ${doo.id}
     `;
 
@@ -148,6 +154,12 @@ export async function POST(
   }
 
   const peso_ouro_real = peso_bruto! - peso_pedras_total;
+  if (peso_ouro_real < 0) {
+    return NextResponse.json(
+      { error: `Peso ouro real negativo (${peso_ouro_real.toFixed(3)}g) — peso das pedras excede o peso bruto` },
+      { status: 400 },
+    );
+  }
 
   // 3. INSERT detalhe de pedras usadas
   for (const p of pedrasComPeso) {
@@ -193,7 +205,7 @@ export async function POST(
         pmc             = ${peso_ouro_real},
         total_pedras_un = ${totalPedrasUn},
         foto_balanca    = ${foto_balanca!},
-        created_by      = ${user_id ?? null},
+        created_by      = ${user.id},
         updated_at      = now()
       WHERE id = ${fech.id}
     `;

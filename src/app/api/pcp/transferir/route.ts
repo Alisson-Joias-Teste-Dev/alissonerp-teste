@@ -90,8 +90,9 @@ export async function POST(req: NextRequest) {
   const ordemId      = pcp.ordem_id as number | null;
   const distOuroReal = Number(pcp.dist_ouro_real ?? 0);
 
-  // 2. Depósito de origem = onde a ordem está agora (ordens.local_atual é a fonte de verdade)
-  const origemDepositoId = Number(pcp.local_atual);
+  // 2. Depósito de origem = onde a ordem está agora
+  //    Fonte de verdade: ordens.local_atual, fallback: pcp.deposito_id, último fallback: Almoxarifado (1)
+  const origemDepositoId = Number(pcp.local_atual) || Number(pcp.deposito_id) || 1;
 
   if (origemDepositoId === destino_deposito_id) {
     return NextResponse.json(
@@ -127,7 +128,7 @@ export async function POST(req: NextRequest) {
       VALUES
         (${insumo.insumo_id}, ${origemDepositoId}, ${null}, ${ordemId ?? null},
          ${insumo.quantidade}, ${0},
-         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user_id ?? null}::uuid, ${1})
+         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user?.id ?? null}::uuid, ${1})
     `;
 
     // ENTRADA no destino
@@ -138,7 +139,7 @@ export async function POST(req: NextRequest) {
       VALUES
         (${insumo.insumo_id}, ${destino_deposito_id}, ${setor_id ?? null}, ${ordemId ?? null},
          ${0}, ${insumo.quantidade},
-         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user_id ?? null}::uuid, ${1})
+         ${"TED"}, ${obs ?? null}, now(), ${0}, ${0}, ${user?.id ?? null}::uuid, ${1})
     `;
   }
 
@@ -159,7 +160,7 @@ export async function POST(req: NextRequest) {
         tipo:          "transferencia",
         ouro_recebido: ouroRecebido,
         ouro_entregue: ouroInsumo.quantidade,
-        created_by:    user_id ?? null,
+        created_by:    user?.id ?? null,
       });
 
       // 3c. CE de baixa da quebra no saldo contábil do operador de ORIGEM
@@ -198,7 +199,7 @@ export async function POST(req: NextRequest) {
       (pcp_id, ordem_id, deposito_id, setor_id, obs, created_by)
     VALUES
       (${pcp_id}, ${ordemId ?? null}, ${destino_deposito_id}, ${null},
-       ${obsComFoto}, ${user_id ?? null}::uuid)
+       ${obsComFoto}, ${user?.id ?? null}::uuid)
   `;
 
   // 5. Atualizar depósito do PCP

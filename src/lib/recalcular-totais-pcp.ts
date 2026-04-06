@@ -46,7 +46,10 @@ export async function recalcularTotaisPCP(pcpId: number): Promise<void> {
     LIMIT 1
   `;
 
-  // 3. UPDATE pcp
+  // 3. Se não há distribuição concluída, não atualizar
+  if (!dist) return;
+
+  // 4. UPDATE pcp
   await sql`
     UPDATE alissonerp.pcp
     SET

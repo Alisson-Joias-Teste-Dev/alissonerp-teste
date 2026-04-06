@@ -75,6 +75,9 @@ export async function POST(
   if (!user)
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
+  // TODO: Validar ownership — verificar se o usuário tem permissão para esta ordem específica.
+  // Por ora, qualquer usuário autenticado pode adicionar fotos (colaboração esperada neste sistema).
+
   const { id: ordemId } = await params;
   const { path } = await req.json();
 

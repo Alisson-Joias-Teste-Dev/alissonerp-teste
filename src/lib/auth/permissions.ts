@@ -45,16 +45,18 @@ const ALL_MENUS: MenuItem[] = [
   { label: "Produtos",           href: "/produtos",           icon: "Tag"             },
   { label: "Precificação",       href: "/precificacao",       icon: "TrendingUp"      },
   { label: "Auditoria",          href: "/auditoria",          icon: "ClipboardCheck"  },
+  { label: "Tarefas",            href: "/tarefas",            icon: "ListTodo"        },
+  { label: "Relatórios",         href: "/relatorios",         icon: "FileBarChart"    },
   { label: "Configurações",      href: "/configuracoes",      icon: "Settings"        },
   { label: "Service",            href: "/service",            icon: "Smartphone"      },
   { label: "Painel Service",     href: "/service-painel",     icon: "Wrench"          },
 ];
 
 const ROLE_MENUS: Record<Role, string[]> = {
-  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/configuracoes", "/service-painel"],
-  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/configuracoes", "/service-painel"],
-  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/vendas", "/estoque-comercial", "/financeiro", "/service-painel"],
-  gerente_loja:       ["/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/estoque-comercial", "/produtos", "/precificacao", "/service-painel"],
+  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel"],
+  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel"],
+  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/vendas", "/estoque-comercial", "/financeiro", "/tarefas", "/relatorios", "/service-painel"],
+  gerente_loja:       ["/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/estoque-comercial", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel"],
   ourives:            ["/ordens", "/pcp"],
   motoboy:            ["/protocolo"],
   consultora:         ["/ordens", "/estoque", "/conferencia"],
@@ -69,6 +71,7 @@ const MENU_GROUPS: MenuGroup[] = [
   { type: "group", label: "Suprimentos", icon: "Package",     items: ["/estoque", "/quebra", "/insumos", "/compras"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Logística",   icon: "Truck",       items: ["/protocolo", "/conferencia", "/entrega"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Qualidade",   icon: "ShieldCheck", items: ["/auditoria"].map(h => ALL_MENUS.find(m => m.href === h)!) },
+  { type: "group", label: "Gestão",     icon: "ListTodo",    items: ["/tarefas", "/relatorios"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Comercial",   icon: "Briefcase",   items: ["/vendas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao"].map(h => ALL_MENUS.find(m => m.href === h)!) },
 ];
 
@@ -117,6 +120,8 @@ const HREF_TO_MODULO: Record<string, string> = {
   "/produtos":          "produtos",
   "/precificacao":      "precificacao",
   "/configuracoes":     "configuracoes",
+  "/tarefas":           "tarefas",
+  "/relatorios":        "relatorios",
   "/service":           "service",
   "/service-painel":    "service_painel",
 };

@@ -54,8 +54,9 @@ export default function ConcluirDistModal({
       if (!res.ok) { setError(json.error ?? "Erro ao concluir"); return; }
       setSuccess(true);
       setTimeout(() => { onSuccess?.(); onClose(); }, 1500);
-    } catch {
-      setError("Erro de conexão");
+    } catch (err) {
+      console.error("Concluir distribuição falhou:", err);
+      setError("Erro ao concluir distribuição — tente novamente");
     } finally {
       setLoading(false);
     }

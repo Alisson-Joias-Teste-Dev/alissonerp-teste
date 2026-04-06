@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 // GET /api/estoque-comercial
 // Lista todos os produtos com estoque comercial ativo + alertas
 export async function GET(_req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const rows = await sql`
     SELECT
       produto_id,
@@ -26,5 +31,10 @@ export async function GET(_req: NextRequest) {
       END,
       nome_produto
   `;
-  return NextResponse.json(rows);
+  return NextResponse.json(rows.map(r => ({
+    ...r,
+    saldo: Number(r.saldo ?? 0),
+    estoque_minimo: Number(r.estoque_minimo ?? 0),
+    total_movimentacoes: Number(r.total_movimentacoes ?? 0),
+  })));
 }

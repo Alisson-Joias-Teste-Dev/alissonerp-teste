@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 // GET /api/distribuicao?etapas=em_andamento|concluido
 export async function GET(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const etapas = req.nextUrl.searchParams.get("etapas");
 
   const rows = etapas
@@ -81,6 +86,11 @@ export async function POST(req: NextRequest) {
     user_id?: string | null;
   };
 
+  // Auth obrigatória
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   if (!deposito_id || !ordem_ids?.length) {
     return NextResponse.json(
       { error: "Depósito e ao menos uma ordem são obrigatórios" },
@@ -117,7 +127,7 @@ export async function POST(req: NextRequest) {
     VALUES
       (${deposito_id}, ${setor_id ?? null}, 'em_andamento',
        0, 0, 0, 0, 0, 0,
-       ${user_id ?? null}::uuid)
+       ${user.id}::uuid)
     RETURNING id
   `;
 

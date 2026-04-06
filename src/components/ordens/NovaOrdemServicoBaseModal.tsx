@@ -200,7 +200,8 @@ export default function NovaOrdemServicoBaseModal({
   const fotoBalancaRef = useRef<HTMLInputElement>(null);
 
   // IA validação balança
-  const [iaStatus, setIaStatus] = useState<"idle" | "uploading" | "validating" | "ok" | "erro">("idle");
+  const [iaStatus, setIaStatus] = useState<"idle" | "uploading" | "validating" | "ok" | "erro" | "skip">("idle");
+  const [iaSkipped, setIaSkipped] = useState(false);
   const [iaMensagem, setIaMensagem] = useState("");
 
   // Vídeo
@@ -552,7 +553,7 @@ export default function NovaOrdemServicoBaseModal({
     const peso = parseFloat(pesoDigitado.replace(",", "."));
     if (isNaN(peso) || peso <= 0)       { setErro("Informe o peso do metal externo."); return; }
     if (!fotoBalanca)                   { setErro("Anexe a foto da balança."); return; }
-    if (iaStatus !== "ok")             { setErro("Aguarde a IA validar o peso da balança antes de continuar."); return; }
+    if (iaStatus !== "ok" && iaStatus !== "skip") { setErro("Aguarde a IA validar o peso da balança antes de continuar."); return; }
 
     setErro(null);
     setLoadingNumero(true);
@@ -581,7 +582,7 @@ export default function NovaOrdemServicoBaseModal({
     const peso = parseFloat(pesoDigitado.replace(",", "."));
     if (isNaN(peso) || peso <= 0) { setErro("Informe o peso do metal externo."); return; }
     if (!fotoBalancaPath) { setErro("Valide a foto da balança antes de continuar."); return; }
-    if (iaStatus !== "ok") { setErro("A foto da balança não foi validada pela IA. Verifique o peso."); return; }
+    if (iaStatus !== "ok" && iaStatus !== "skip") { setErro("A foto da balança não foi validada pela IA. Verifique o peso."); return; }
 
     setSalvando(true); setErro(null);
 
@@ -1023,14 +1024,30 @@ export default function NovaOrdemServicoBaseModal({
                         </div>
                       )}
                       {iaStatus === "erro" && (
-                        <button
-                          className="absolute bottom-2 left-2 right-2 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5"
-                          style={{ background: "#DC2626", color: "#fff" }}
-                          onClick={() => { setIaStatus("idle"); setIaMensagem(""); validarComIA(); }}
-                        >
+                        <div className="absolute bottom-2 left-2 right-2 flex flex-col gap-1">
+                          <button
+                            className="w-full py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5"
+                            style={{ background: "#DC2626", color: "#fff" }}
+                            onClick={() => { setIaStatus("idle"); setIaMensagem(""); validarComIA(); }}
+                          >
+                            <AlertCircle size={11} />
+                            {iaMensagem} — Re-validar
+                          </button>
+                          <button
+                            className="w-full py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 border"
+                            style={{ background: "rgba(255,255,255,0.9)", color: "#6B7280", borderColor: "#E8DCC8" }}
+                            onClick={() => { setIaStatus("skip"); setIaSkipped(true); setIaMensagem("Validação IA pulada manualmente"); }}
+                          >
+                            Pular validação IA
+                          </button>
+                        </div>
+                      )}
+                      {iaStatus === "skip" && (
+                        <div className="absolute bottom-2 left-2 right-2 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5"
+                          style={{ background: "#D97706", color: "#fff" }}>
                           <AlertCircle size={11} />
-                          {iaMensagem} — Re-validar
-                        </button>
+                          IA pulada — peso não validado
+                        </div>
                       )}
                     </div>
                   ) : (
@@ -1355,7 +1372,7 @@ export default function NovaOrdemServicoBaseModal({
 
             {/* Step 3 → vai para revisão */}
             {step === 3 && (() => {
-              const iaOk = iaStatus === "ok";
+              const iaOk = iaStatus === "ok" || iaStatus === "skip";
               const iaBusy = iaStatus === "uploading" || iaStatus === "validating";
               const bloqueado = !iaOk || loadingNumero || iaBusy;
               return (

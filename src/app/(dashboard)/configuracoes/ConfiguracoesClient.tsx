@@ -30,6 +30,8 @@ import {
   Flame,
   MapPin,
   Wrench,
+  Link2,
+  DollarSign,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
@@ -121,7 +123,7 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -2797,6 +2799,435 @@ function TabTiposServico() {
   );
 }
 
+// ─── Tab Cotações ─────────────────────────────────────────────────────────────
+function TabCotacoes() {
+  const [loading, setLoading] = useState(true);
+  const [cotacoes, setCotacoes] = useState({ ouro: 0, dollar: 0, euro: 0, prata: 0 });
+  const [autoAtivo, setAutoAtivo] = useState(false);
+  const [ultimoUpdate, setUltimoUpdate] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [atualizando, setAtualizando] = useState(false);
+  const [msg, setMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+
+  async function carregarDados() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/configuracoes/cotacoes");
+      if (!res.ok) throw new Error("Erro ao carregar");
+      const data = await res.json();
+      setCotacoes(data.cotacoes);
+      setAutoAtivo(data.config.auto_ativo);
+      setUltimoUpdate(data.config.ultimo_update);
+    } catch {
+      setMsg({ tipo: "erro", texto: "Erro ao carregar cotações" });
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => { carregarDados(); }, []);
+
+  async function toggleAuto() {
+    const novo = !autoAtivo;
+    setSaving(true);
+    setMsg(null);
+    const res = await fetch("/api/configuracoes/cotacoes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auto_ativo: novo }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setAutoAtivo(novo);
+      setMsg({ tipo: "ok", texto: `Automático ${novo ? "ativado" : "desativado"}` });
+    } else {
+      setMsg({ tipo: "erro", texto: "Erro ao salvar" });
+    }
+    setTimeout(() => setMsg(null), 3000);
+  }
+
+  async function salvarApiKey() {
+    if (!apiKey.trim()) return;
+    setSaving(true);
+    setMsg(null);
+    const res = await fetch("/api/configuracoes/cotacoes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: apiKey.trim() }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setMsg({ tipo: "ok", texto: "API key salva com sucesso" });
+    } else {
+      setMsg({ tipo: "erro", texto: "Erro ao salvar API key" });
+    }
+    setTimeout(() => setMsg(null), 3000);
+  }
+
+  async function atualizarAgora() {
+    setAtualizando(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/configuracoes/cotacoes", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setCotacoes(data.cotacoes);
+        setUltimoUpdate(data.atualizado_em);
+        setMsg({ tipo: "ok", texto: "Cotações atualizadas com sucesso" });
+      } else {
+        setMsg({ tipo: "erro", texto: data.error ?? "Erro ao atualizar" });
+      }
+    } catch {
+      setMsg({ tipo: "erro", texto: "Falha na requisição" });
+    }
+    setAtualizando(false);
+    setTimeout(() => setMsg(null), 5000);
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-10 justify-center text-sm" style={{ color: P.muted }}>
+        <RefreshCw size={14} className="animate-spin" /> Carregando cotações...
+      </div>
+    );
+  }
+
+  const cards = [
+    { label: "Ouro (R$/g)", value: cotacoes.ouro.toFixed(2) },
+    { label: "Dólar (R$)",  value: cotacoes.dollar.toFixed(4) },
+    { label: "Euro (R$)",   value: cotacoes.euro.toFixed(4) },
+    { label: "Prata (R$/g)", value: cotacoes.prata.toFixed(2) },
+  ];
+
+  return (
+    <div className="space-y-5 max-w-xl">
+      {/* Cards de cotação */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {cards.map(({ label, value }) => (
+          <div
+            key={label}
+            className="rounded-xl p-4"
+            style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+          >
+            <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: P.muted }}>{label}</p>
+            <p className="text-lg font-semibold tabular-nums" style={{ color: P.dourado }}>{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Último update */}
+      <p className="text-xs" style={{ color: P.muted }}>
+        Ultimo update: {ultimoUpdate ? fmtDate(ultimoUpdate) : "Nunca"}
+      </p>
+
+      {/* Toggle automático */}
+      <div
+        className="flex items-center justify-between rounded-xl p-4"
+        style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+      >
+        <div>
+          <p className="text-sm font-medium" style={{ color: P.creme }}>Atualização Automática</p>
+          <p className="text-xs" style={{ color: P.muted }}>Atualiza cotações automaticamente via n8n</p>
+        </div>
+        <button
+          onClick={toggleAuto}
+          disabled={saving}
+          className="flex items-center gap-1.5 text-sm disabled:opacity-40 transition-opacity"
+          style={{ color: autoAtivo ? P.verde : P.muted }}
+        >
+          {autoAtivo ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
+          {autoAtivo ? "Ativo" : "Inativo"}
+        </button>
+      </div>
+
+      {/* API Key */}
+      <div
+        className="rounded-xl p-4 space-y-3"
+        style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+      >
+        <p className="text-sm font-medium" style={{ color: P.creme }}>API Key (Open Exchange Rates)</p>
+        <div
+          className="flex items-center rounded-lg overflow-hidden"
+          style={{ border: `1px solid ${P.border}` }}
+        >
+          <input
+            type={showKey ? "text" : "password"}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="Cole sua API key aqui"
+            className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+            style={{ color: P.creme }}
+          />
+          <button
+            onClick={() => setShowKey(!showKey)}
+            className="px-3 py-2.5 transition-opacity hover:opacity-70"
+            style={{ color: P.muted }}
+          >
+            {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
+          </button>
+        </div>
+        <button
+          onClick={salvarApiKey}
+          disabled={saving || !apiKey.trim()}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+          style={{ backgroundColor: P.verde, color: "#fff" }}
+        >
+          <Save size={13} /> Salvar Key
+        </button>
+      </div>
+
+      {/* Botão atualizar agora */}
+      <button
+        onClick={atualizarAgora}
+        disabled={atualizando}
+        className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 transition-opacity"
+        style={{ backgroundColor: P.dourado, color: "#fff" }}
+      >
+        {atualizando ? (
+          <><Loader2 size={15} className="animate-spin" /> Atualizando...</>
+        ) : (
+          <><RefreshCw size={15} /> Atualizar Agora</>
+        )}
+      </button>
+
+      {/* Mensagem */}
+      {msg && (
+        <div
+          className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs"
+          style={{
+            backgroundColor: msg.tipo === "ok" ? P.verde + "22" : P.vermelho + "22",
+            color: msg.tipo === "ok" ? P.verde : P.vermelho,
+          }}
+        >
+          {msg.tipo === "ok" ? <CheckCircle size={13} /> : <AlertTriangle size={13} />}
+          {msg.texto}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab Integrações ──────────────────────────────────────────────────────────
+function TabIntegracoes() {
+  const [loading, setLoading] = useState(true);
+  const [wooConfigured, setWooConfigured] = useState(false);
+  const [kommoConfigured, setKommoConfigured] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+
+  // WooCommerce fields
+  const [wooUrl, setWooUrl] = useState("");
+  const [wooKey, setWooKey] = useState("");
+  const [wooSecret, setWooSecret] = useState("");
+  const [showWooKey, setShowWooKey] = useState(false);
+  const [showWooSecret, setShowWooSecret] = useState(false);
+
+  // Kommo fields
+  const [kommoUrl, setKommoUrl] = useState("");
+  const [kommoToken, setKommoToken] = useState("");
+  const [showKommoToken, setShowKommoToken] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/configuracoes/integracoes");
+        if (res.ok) {
+          const data = await res.json();
+          setWooConfigured(data.woo_configured);
+          setKommoConfigured(data.kommo_configured);
+        }
+      } catch { /* silenciar */ }
+      setLoading(false);
+    })();
+  }, []);
+
+  async function salvarWoo() {
+    if (!wooUrl.trim() && !wooKey.trim() && !wooSecret.trim()) return;
+    setSaving(true);
+    setMsg(null);
+    const body: Record<string, string> = {};
+    if (wooUrl.trim()) body.woo_url = wooUrl.trim();
+    if (wooKey.trim()) body.woo_consumer_key = wooKey.trim();
+    if (wooSecret.trim()) body.woo_consumer_secret = wooSecret.trim();
+    const res = await fetch("/api/configuracoes/integracoes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setWooConfigured(true);
+      setWooUrl("");
+      setWooKey("");
+      setWooSecret("");
+      setMsg({ tipo: "ok", texto: "WooCommerce salvo com sucesso" });
+    } else {
+      const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+      setMsg({ tipo: "erro", texto: d.error ?? "Erro ao salvar" });
+    }
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  async function salvarKommo() {
+    if (!kommoUrl.trim() && !kommoToken.trim()) return;
+    setSaving(true);
+    setMsg(null);
+    const body: Record<string, string> = {};
+    if (kommoUrl.trim()) body.kommo_url = kommoUrl.trim();
+    if (kommoToken.trim()) body.kommo_token = kommoToken.trim();
+    const res = await fetch("/api/configuracoes/integracoes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setKommoConfigured(true);
+      setKommoUrl("");
+      setKommoToken("");
+      setMsg({ tipo: "ok", texto: "Kommo salvo com sucesso" });
+    } else {
+      const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+      setMsg({ tipo: "erro", texto: d.error ?? "Erro ao salvar" });
+    }
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-10 justify-center text-sm" style={{ color: P.muted }}>
+        <RefreshCw size={14} className="animate-spin" /> Carregando...
+      </div>
+    );
+  }
+
+  const StatusBadge = ({ ok }: { ok: boolean }) => (
+    <span
+      className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium"
+      style={{
+        backgroundColor: ok ? P.verde + "22" : P.vermelho + "22",
+        color: ok ? P.verde : P.vermelho,
+      }}
+    >
+      {ok ? <><CheckCircle size={10} /> Configurado</> : <><X size={10} /> Não configurado</>}
+    </span>
+  );
+
+  return (
+    <div className="space-y-6 max-w-xl">
+      {/* Mensagem global */}
+      {msg && (
+        <div
+          className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs"
+          style={{
+            backgroundColor: msg.tipo === "ok" ? P.verde + "22" : P.vermelho + "22",
+            color: msg.tipo === "ok" ? P.verde : P.vermelho,
+          }}
+        >
+          {msg.tipo === "ok" ? <CheckCircle size={13} /> : <AlertTriangle size={13} />}
+          {msg.texto}
+        </div>
+      )}
+
+      {/* WooCommerce */}
+      <div
+        className="rounded-xl p-5 space-y-4"
+        style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: P.creme }}>WooCommerce</p>
+            <p className="text-xs" style={{ color: P.muted }}>Integração com loja virtual</p>
+          </div>
+          <StatusBadge ok={wooConfigured} />
+        </div>
+
+        {[
+          { label: "URL da Loja", value: wooUrl, set: setWooUrl, masked: false, placeholder: "https://sualoja.com.br" },
+          { label: "Consumer Key", value: wooKey, set: setWooKey, masked: !showWooKey, toggle: () => setShowWooKey(!showWooKey), showState: showWooKey, placeholder: "ck_..." },
+          { label: "Consumer Secret", value: wooSecret, set: setWooSecret, masked: !showWooSecret, toggle: () => setShowWooSecret(!showWooSecret), showState: showWooSecret, placeholder: "cs_..." },
+        ].map(({ label, value, set, masked, toggle, showState, placeholder }) => (
+          <div key={label}>
+            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>{label}</label>
+            <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+              <input
+                type={masked ? "password" : "text"}
+                value={value}
+                onChange={(e) => set(e.target.value)}
+                placeholder={placeholder}
+                className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                style={{ color: P.creme }}
+              />
+              {toggle && (
+                <button onClick={toggle} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+                  {showState ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+
+        <button
+          onClick={salvarWoo}
+          disabled={saving || (!wooUrl.trim() && !wooKey.trim() && !wooSecret.trim())}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+          style={{ backgroundColor: P.verde, color: "#fff" }}
+        >
+          <Save size={13} /> Salvar WooCommerce
+        </button>
+      </div>
+
+      {/* Kommo */}
+      <div
+        className="rounded-xl p-5 space-y-4"
+        style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: P.creme }}>Kommo (CRM)</p>
+            <p className="text-xs" style={{ color: P.muted }}>Integração com CRM de vendas</p>
+          </div>
+          <StatusBadge ok={kommoConfigured} />
+        </div>
+
+        {[
+          { label: "URL do Kommo", value: kommoUrl, set: setKommoUrl, masked: false, placeholder: "https://suaempresa.kommo.com" },
+          { label: "Token", value: kommoToken, set: setKommoToken, masked: !showKommoToken, toggle: () => setShowKommoToken(!showKommoToken), showState: showKommoToken, placeholder: "Token de acesso" },
+        ].map(({ label, value, set, masked, toggle, showState, placeholder }) => (
+          <div key={label}>
+            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>{label}</label>
+            <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+              <input
+                type={masked ? "password" : "text"}
+                value={value}
+                onChange={(e) => set(e.target.value)}
+                placeholder={placeholder}
+                className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                style={{ color: P.creme }}
+              />
+              {toggle && (
+                <button onClick={toggle} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+                  {showState ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+
+        <button
+          onClick={salvarKommo}
+          disabled={saving || (!kommoUrl.trim() && !kommoToken.trim())}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+          style={{ backgroundColor: P.verde, color: "#fff" }}
+        >
+          <Save size={13} /> Salvar Kommo
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function ConfiguracoesClient({ parametros, webhooks, logs, usuarios, depositos, teores, ligaTipos }: Props) {
   const [tab, setTab] = useState<Tab>("parametros");
@@ -2809,7 +3240,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
     const u = params.get("user");
-    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico"].includes(t)) {
+    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes"].includes(t)) {
       setTab(t as Tab);
     }
     if (u) setInitialUserId(u);
@@ -2817,6 +3248,8 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
 
   const baseTabs: { key: Tab; label: string; icon: React.ElementType }[] = [
     { key: "parametros",    label: "Parâmetros",     icon: Settings },
+    { key: "cotacoes",      label: "Cotações",       icon: DollarSign },
+    { key: "integracoes",   label: "Integrações",    icon: Link2 },
     { key: "webhooks",      label: "Webhooks",       icon: Webhook },
     { key: "usuarios",      label: "Usuários",       icon: Users },
     { key: "ia",            label: "IA",             icon: Bot },
@@ -2876,6 +3309,8 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "permissoes"    && isSuperAdmin && <TabPermissoes />}
       {tab === "locais"        && <LocaisEstoqueTab canEdit={isSuperAdmin} />}
       {tab === "tipos_servico" && <TabTiposServico />}
+      {tab === "cotacoes" && <TabCotacoes />}
+      {tab === "integracoes" && <TabIntegracoes />}
     </div>
   );
 }

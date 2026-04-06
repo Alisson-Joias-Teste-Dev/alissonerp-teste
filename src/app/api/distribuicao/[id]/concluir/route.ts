@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { registrarQuebra } from "@/lib/registrar-quebra";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 // POST /api/distribuicao/[id]/concluir
 // Conclui a distribuição calculando o balanço do LOTE INTEIRO.
@@ -21,6 +22,11 @@ export async function POST(
   if (isNaN(distId)) {
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
+
+  // Auth obrigatória
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   // 1. Checar que a distribuição existe e está em andamento
   const [dist] = await sql`

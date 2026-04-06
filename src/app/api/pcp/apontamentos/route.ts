@@ -207,7 +207,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Recalcular totais dist_* (fire-and-forget, não bloqueia resposta)
-  recalcularTotaisPCP(pcp_id).catch(() => {});
+  recalcularTotaisPCP(pcp_id).catch((err) => console.error('recalcularTotaisPCP falhou:', err));
 
   return NextResponse.json(rows[0], { status: 201 });
 }

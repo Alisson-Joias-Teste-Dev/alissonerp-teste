@@ -7,6 +7,10 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const { id } = await params;
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });

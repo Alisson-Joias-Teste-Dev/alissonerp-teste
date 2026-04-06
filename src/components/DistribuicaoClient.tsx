@@ -148,7 +148,7 @@ function EstornarLoteModal({
       if (!res.ok) { setError(data.error ?? "Erro ao estornar"); return; }
       setSuccess(true);
       setTimeout(() => { onSuccess(); }, 800);
-    } catch { setError("Erro de conexão"); }
+    } catch (err) { console.error("Estorno falhou:", err); setError("Erro ao estornar — tente novamente"); }
     finally  { setLoading(false); }
   }
 

@@ -74,7 +74,7 @@ interface Props {
   maxDesconto: number;
 }
 
-const FULL_ACCESS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "financeiro"];
+const FULL_ACCESS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 
 // ─── Section card ─────────────────────────────────────────────────────────────
 function Section({ icon: Icon, title, children }: {

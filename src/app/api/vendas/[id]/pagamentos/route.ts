@@ -7,6 +7,10 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const { id } = await params;
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
@@ -55,6 +59,8 @@ export async function POST(
   if (!body.forma) return NextResponse.json({ error: "forma obrigatória" }, { status: 400 });
   if (!body.valor || body.valor <= 0) return NextResponse.json({ error: "valor inválido" }, { status: 400 });
 
+  const statusPagamento = 'pendente'; // Sempre pendente na criação
+
   const [novo] = await sql`
     INSERT INTO alissonerp.pagamentos_venda (
       venda_id, forma, gateway, valor, parcelas, status
@@ -64,7 +70,7 @@ export async function POST(
       ${body.gateway ?? null},
       ${body.valor},
       ${body.parcelas ?? 1},
-      ${body.status ?? 'pendente'}
+      ${statusPagamento}
     )
     RETURNING id
   `;

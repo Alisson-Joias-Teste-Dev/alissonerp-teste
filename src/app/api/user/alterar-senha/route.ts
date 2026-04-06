@@ -15,9 +15,11 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Nova senha deve ter ao menos 6 caracteres" }, { status: 400 });
   }
 
+  if (!user.email) return NextResponse.json({ error: "Email do usuário não encontrado" }, { status: 400 });
+
   // Validate current password using signInWithPassword
   const { error: signInError } = await supabase.auth.signInWithPassword({
-    email: user.email!,
+    email: user.email,
     password: senha_atual,
   });
   if (signInError) {
