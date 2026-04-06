@@ -4,8 +4,21 @@ import { createServerSupabase } from "@/lib/supabase/server";
 
 const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 
+// Mapa situacao ERP → situacao Tiny v3
+// 0=Aberto, 3=Aprovado, 4=Preparando Envio, 1=Faturado, 5=Enviado, 6=Entregue, 2=Cancelado
+const SITUACAO_TINY: Record<string, number> = {
+  rascunho:   0,  // Aberto
+  aprovado:   3,  // Aprovado
+  confirmado: 3,  // Aprovado
+  concluido:  6,  // Entregue
+  cancelado:  2,  // Cancelado
+};
+
 // ─── POST /api/vendas/[id]/enviar-tiny ────────────────────────────────────────
-// Envia venda como pedido para o Tiny ERP
+// Envia venda como pedido para o Tiny ERP via API v3
+// Docs: https://api-docs.erp.olist.com/api-reference/pedidos/criar-pedido
+// Endpoint: POST https://api.tiny.com.br/public-api/v3/pedidos
+// Auth: Bearer token (OAuth2)
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -23,14 +36,17 @@ export async function POST(
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  // Buscar venda
+  // Buscar venda + cliente
   const [venda] = await sql`
     SELECT
-      id, numero_venda, cliente_nome, cliente_cpf_cnpj, cliente_email, cliente_telefone,
-      data_venda, total_produtos, total_desconto, total_frete, total_venda,
-      situacao, tiny_sync_status, tiny_pedido_id, forma_envio
-    FROM alissonerp.vendas_erp
-    WHERE id = ${vendaId}
+      v.id, v.numero_venda, v.cliente_id, v.vendedor_id,
+      v.data_venda, v.data_entrega, v.total_produtos, v.total_desconto,
+      v.total_frete, v.total_venda, v.situacao, v.tiny_sync_status,
+      v.tiny_pedido_id, v.forma_envio, v.observacoes, v.observacoes_internas,
+      c.nome AS cliente_nome, c.cpf_cnpj AS cliente_cpf_cnpj
+    FROM alissonerp.vendas_erp v
+    LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
+    WHERE v.id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
 
@@ -38,7 +54,7 @@ export async function POST(
     return NextResponse.json({ error: "Não é possível enviar venda cancelada" }, { status: 400 });
   }
 
-  // Guard idempotência: não re-enviar se já sincronizado
+  // Guard idempotência
   if (venda.tiny_sync_status === "sincronizado" && venda.tiny_pedido_id) {
     return NextResponse.json(
       { error: "Venda já enviada ao Tiny (pedido #" + venda.tiny_pedido_id + "). Use 'force=true' para reenviar." },
@@ -46,131 +62,128 @@ export async function POST(
     );
   }
 
-  // Buscar token Tiny
+  // Buscar Bearer token OAuth2 do Tiny
   const [tokenRow] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_api_token'
+    SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_bearer_token'
   `;
-  if (!tokenRow?.valor) {
+  // Fallback: chave antiga
+  const [tokenRowLegacy] = !tokenRow ? await sql`
+    SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_api_token'
+  ` : [tokenRow];
+
+  const rawToken = tokenRowLegacy?.valor_encrypted ?? tokenRow?.valor_encrypted;
+  if (!rawToken) {
     return NextResponse.json({ error: "Token do Tiny não configurado. Vá em Configurações > Integrações." }, { status: 400 });
   }
-  // O valor é armazenado como JSON string (ex: "\"abc123\"")
   let tinyToken: string;
-  try {
-    tinyToken = JSON.parse(tokenRow.valor);
-  } catch {
-    tinyToken = tokenRow.valor;
-  }
-
-  if (!tinyToken || tinyToken.trim() === "") {
-    return NextResponse.json({ error: "Token do Tiny inválido" }, { status: 400 });
-  }
+  try { tinyToken = JSON.parse(rawToken); } catch { tinyToken = String(rawToken); }
+  tinyToken = tinyToken.replace(/"/g, "").trim();
+  if (!tinyToken) return NextResponse.json({ error: "Token do Tiny inválido" }, { status: 400 });
 
   // Buscar itens
   const itens = await sql`
-    SELECT nome_produto, sku, quantidade, preco_unitario
+    SELECT produto_id, nome_produto, sku, quantidade, preco_unitario, observacao
     FROM alissonerp.itens_venda_erp
     WHERE venda_id = ${vendaId}
     ORDER BY id
   `;
 
-  // Montar payload Tiny
-  const dataFormatada = venda.data_venda
-    ? new Date(venda.data_venda).toLocaleDateString("pt-BR", { timeZone: "UTC" })
-    : new Date().toLocaleDateString("pt-BR");
+  // Buscar IDs dos produtos no Tiny (public.produtos tem o id original do Tiny)
+  const produtoIds = itens.map(i => i.produto_id).filter(Boolean);
+  const produtosTiny = produtoIds.length > 0 ? await sql`
+    SELECT id_produto, id_api_tiny FROM public.produtos WHERE id_produto = ANY(${produtoIds})
+  ` : [];
+  const tinyIdMap = new Map(produtosTiny.map(p => [Number(p.id_produto), Number(p.id_api_tiny)]));
 
-  const pedidoTiny = {
-    pedido: {
-      numero: venda.numero_venda,
-      data_pedido: dataFormatada,
-      cliente: {
-        nome: venda.cliente_nome || "Cliente não informado",
-        cpf_cnpj: venda.cliente_cpf_cnpj || "",
-        email: venda.cliente_email || "",
-        fone: venda.cliente_telefone || "",
-      },
-      itens: itens.map((item) => ({
-        item: {
-          codigo: item.sku || "",
-          descricao: item.nome_produto,
-          unidade: "UN",
-          quantidade: Number(item.quantidade),
-          valor_unitario: Number(item.preco_unitario),
+  // Montar payload API v3
+  const dataVenda = venda.data_venda
+    ? new Date(venda.data_venda).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+
+  const pedidoV3: Record<string, unknown> = {
+    // Contato (obrigatório)
+    idContato: Number(venda.cliente_id) || undefined,
+
+    // Situacao
+    situacao: SITUACAO_TINY[venda.situacao] ?? 0,
+
+    // Datas
+    data: dataVenda,
+    ...(venda.data_entrega ? { dataEntrega: new Date(venda.data_entrega).toISOString().slice(0, 10) } : {}),
+
+    // Valores
+    ...(Number(venda.total_desconto) > 0 ? { valorDesconto: Number(venda.total_desconto) } : {}),
+    ...(Number(venda.total_frete) > 0 ? { valorFrete: Number(venda.total_frete) } : {}),
+
+    // Observações
+    ...(venda.observacoes ? { observacoes: venda.observacoes } : {}),
+    ...(venda.observacoes_internas ? { observacoesInternas: venda.observacoes_internas } : {}),
+
+    // Vendedor
+    ...(venda.vendedor_id ? { vendedor: { id: Number(venda.vendedor_id) } } : {}),
+
+    // Itens
+    itens: itens.map((item) => {
+      const tinyProdId = tinyIdMap.get(Number(item.produto_id));
+      return {
+        produto: {
+          ...(tinyProdId ? { id: tinyProdId } : {}),
+          tipo: "P", // Produto
         },
-      })),
-      ...(Number(venda.total_frete) > 0
-        ? { valor_frete: Number(venda.total_frete) }
-        : {}),
-      ...(Number(venda.total_desconto) > 0
-        ? { valor_desconto: Number(venda.total_desconto) }
-        : {}),
-    },
+        quantidade: Number(item.quantidade),
+        valorUnitario: Number(item.preco_unitario),
+        ...(item.observacao ? { infoAdicional: item.observacao } : {}),
+      };
+    }),
   };
 
   try {
-    const formData = new URLSearchParams();
-    formData.append("token", tinyToken);
-    formData.append("formato", "json");
-    formData.append("pedido", JSON.stringify(pedidoTiny));
-
-    const res = await fetch("https://api.tiny.com.br/api2/pedido.incluir.php", {
+    const res = await fetch("https://api.tiny.com.br/public-api/v3/pedidos", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formData.toString(),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${tinyToken}`,
+      },
+      body: JSON.stringify(pedidoV3),
       signal: AbortSignal.timeout(15000),
     });
 
-    const data = await res.json() as {
-      retorno?: {
-        status?: string;
-        registros?: {
-          registro?: {
-            id?: number;
-            numero?: string;
-          };
-        };
-        erros?: Array<{ erro: string }> | { erro: string };
-        status_processamento?: string;
-      };
-    };
+    if (!res.ok) {
+      const errBody = await res.text();
+      let erroMsg = `Tiny API ${res.status}`;
+      try {
+        const errJson = JSON.parse(errBody);
+        erroMsg = errJson.message || errJson.error || erroMsg;
+      } catch { erroMsg += `: ${errBody.slice(0, 200)}`; }
 
-    const retorno = data.retorno;
-
-    if (retorno?.status === "OK" || retorno?.status_processamento === "3") {
-      const tinyId = retorno?.registros?.registro?.id;
       await sql`
         UPDATE alissonerp.vendas_erp SET
-          tiny_pedido_id    = ${tinyId ?? null},
-          tiny_sync_status  = 'sincronizado',
-          tiny_sync_at      = NOW(),
-          tiny_sync_erro    = NULL
+          tiny_sync_status = 'erro',
+          tiny_sync_at     = NOW(),
+          tiny_sync_erro   = ${erroMsg}
         WHERE id = ${vendaId}
       `;
-      return NextResponse.json({
-        ok: true,
-        tiny_pedido_id: tinyId,
-        message: "Pedido enviado ao Tiny com sucesso",
-      });
+      return NextResponse.json({ error: erroMsg }, { status: 502 });
     }
 
-    // Erro do Tiny
-    let erroMsg = "Erro desconhecido do Tiny";
-    if (retorno?.erros) {
-      if (Array.isArray(retorno.erros)) {
-        erroMsg = retorno.erros.map((e) => e.erro).join("; ");
-      } else {
-        erroMsg = (retorno.erros as { erro: string }).erro;
-      }
-    }
+    const data = await res.json() as { id?: number; numeroPedido?: string };
 
     await sql`
       UPDATE alissonerp.vendas_erp SET
-        tiny_sync_status = 'erro',
-        tiny_sync_at     = NOW(),
-        tiny_sync_erro   = ${erroMsg}
+        tiny_pedido_id    = ${String(data.id ?? "")},
+        tiny_sync_status  = 'sincronizado',
+        tiny_sync_at      = NOW(),
+        tiny_sync_erro    = NULL
       WHERE id = ${vendaId}
     `;
 
-    return NextResponse.json({ error: erroMsg }, { status: 502 });
+    return NextResponse.json({
+      ok: true,
+      tiny_pedido_id: data.id,
+      tiny_numero_pedido: data.numeroPedido,
+      message: "Pedido enviado ao Tiny com sucesso (API v3)",
+    });
+
   } catch (e) {
     const erroMsg = e instanceof Error ? e.message : "Falha na comunicação com o Tiny";
     await sql`
