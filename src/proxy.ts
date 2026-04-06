@@ -133,7 +133,13 @@ export async function proxy(request: NextRequest) {
   }
 
   // 2. Checar acesso apenas para rotas protegidas
+  //    /service é controlado pelo DashboardShell (flag is_operador_service), não pelo módulo
   const primeiroSegmento = "/" + pathname.split("/").filter(Boolean)[0];
+  if (primeiroSegmento === "/service") {
+    // /service: acesso controlado client-side pelo DashboardShell (is_operador_service)
+    // Proxy apenas garante que está autenticado (já feito acima)
+    return supabaseResponse;
+  }
   if (PREFIXOS_PROTEGIDOS.has(primeiroSegmento)) {
     const origin = request.nextUrl.origin;
     const cookieHeader = request.headers.get("cookie") ?? "";
