@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import sql from "@/lib/db";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 interface Params { params: Promise<{ produtoId: string }> }
 
@@ -10,6 +11,10 @@ export async function GET(
   _req: NextRequest,
   { params }: Params
 ) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const { produtoId } = await params;
   const id = Number(produtoId);
 
@@ -46,6 +51,12 @@ export async function PATCH(
   );
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+
+  const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
+  const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+  if (!usuario || !ROLES_PERMITIDOS.includes(usuario.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
 
   const { produtoId } = await params;
   const id = Number(produtoId);

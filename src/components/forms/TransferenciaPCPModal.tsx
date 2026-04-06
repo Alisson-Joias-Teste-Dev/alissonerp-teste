@@ -338,8 +338,12 @@ export default function TransferenciaPCPModal({
       }
       setSuccess(true);
       setTimeout(() => { resetForm(); onSuccess?.(); onClose(); }, 1500);
-    } catch {
-      setError("Erro de conexão");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      setError(msg.includes("fetch") || msg.includes("network") || msg.includes("Failed")
+        ? "Erro de conexão — verifique sua internet e tente novamente"
+        : "Erro ao transferir ordem — tente novamente ou contate o suporte");
+      console.error("Transferência falhou:", err);
     } finally {
       setLoading(false);
     }

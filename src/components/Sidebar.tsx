@@ -30,6 +30,10 @@ import {
   Flame,
   Smartphone,
   Wrench,
+  ListTodo,
+  PackageCheck,
+  Store,
+  FileBarChart,
 } from "lucide-react";
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
@@ -64,6 +68,10 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?
   Flame,
   Smartphone,
   Wrench,
+  ListTodo,
+  PackageCheck,
+  Store,
+  FileBarChart,
 };
 
 function isGroup(entry: MenuEntry): entry is MenuGroup {
@@ -421,7 +429,7 @@ export default function Sidebar() {
             )}
             {role && (
               <p className="text-[9px] uppercase tracking-wider" style={{ color: "#4A7568" }}>
-                {role.replace("_", " ")}
+                {role.replace(/_/g, " ")}
               </p>
             )}
           </div>

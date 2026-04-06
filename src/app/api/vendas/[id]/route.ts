@@ -7,6 +7,10 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const { id } = await params;
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
@@ -86,6 +90,12 @@ export async function PATCH(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
+  const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
+  const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+  if (!usuario || !ROLES_PERMITIDOS.includes(usuario.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const { id } = await params;
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
@@ -127,44 +137,12 @@ export async function PATCH(
   if (body.total_frete !== undefined) {
     await sql`
       UPDATE alissonerp.vendas_erp
-      SET total_venda = total_produtos + ${body.total_frete}
+      SET total_venda = total_produtos - total_desconto + ${body.total_frete}
       WHERE id = ${vendaId}
     `;
   }
 
-  // Auto-baixa estoque comercial quando venda muda para 'concluido'
-  if (body.situacao === "concluido" && venda.situacao !== "concluido") {
-    const itensVenda = await sql`
-      SELECT iv.produto_id, iv.quantidade
-      FROM alissonerp.itens_venda_erp iv
-      JOIN alissonerp.estoque_comercial_config cfg
-        ON cfg.produto_id = iv.produto_id AND cfg.ativo = true
-      WHERE iv.venda_id = ${vendaId}
-        AND iv.produto_id IS NOT NULL
-    `;
-
-    if (itensVenda.length > 0) {
-      const values = itensVenda.map((item) => ({
-        produto_id:      item.produto_id as number,
-        tipo:            "saida" as const,
-        quantidade:      Number(item.quantidade),
-        motivo:          "venda",
-        referencia_id:   vendaId,
-        referencia_tipo: "venda_erp",
-        created_by:      user.id,
-      }));
-
-      for (const v of values) {
-        await sql`
-          INSERT INTO alissonerp.movimentacoes_estoque_comercial
-            (produto_id, tipo, quantidade, motivo, referencia_id, referencia_tipo, created_by)
-          VALUES
-            (${v.produto_id}, ${v.tipo}, ${v.quantidade}, ${v.motivo},
-             ${v.referencia_id}, ${v.referencia_tipo}, ${v.created_by})
-        `;
-      }
-    }
-  }
+  // Auto-baixa estoque comercial removida — trigger 111 (trg_estoque_comercial_baixa_venda) já cuida disso.
 
   return NextResponse.json({ ok: true });
 }

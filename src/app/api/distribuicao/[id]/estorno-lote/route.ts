@@ -96,7 +96,7 @@ export async function POST(
     FROM alissonerp.movimentacoes_estoque
     WHERE ordem_id = ANY(${ordemIds})
     AND marcador::text IN ('TEDD', 'QUEBRA_LOTE')
-    AND obs ILIKE ${'%distribuicao #' + distId + '%'}
+    AND obs ~ ${'distribuicao #' + distId + '([^0-9]|$)'}
     ORDER BY created_at, id
   `;
 

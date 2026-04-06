@@ -158,7 +158,7 @@ async function _handler(
     const validacaoFio = await validarPesoBalanca(base64Fio, mediaTypeFio, peso_fio_depois, "metal");
     if (!validacaoFio.match) {
       return NextResponse.json(
-        { error: `Peso do fio de solda não confirmado pela IA: ${validacaoFio.mensagem}` },
+        { error: `Peso do aditivo não confirmado pela IA: ${validacaoFio.mensagem}` },
         { status: 422 }
       );
     }
@@ -184,13 +184,13 @@ async function _handler(
 
     if (consumoSolda < 0) {
       return NextResponse.json(
-        { error: `Consumo de solda inválido: peso_fio_depois (${peso_fio_depois}g) > saldo atual (${pesoFioAntes}g)` },
+        { error: `Consumo de aditivo inválido: peso_fio_depois (${peso_fio_depois}g) > saldo atual (${pesoFioAntes}g)` },
         { status: 422 }
       );
     }
     if (consumoSolda > pesoFioAntes) {
       return NextResponse.json(
-        { error: `Consumo de solda (${consumoSolda}g) excede saldo disponível (${pesoFioAntes}g)` },
+        { error: `Consumo de aditivo (${consumoSolda}g) excede saldo disponível (${pesoFioAntes}g)` },
         { status: 422 }
       );
     }
@@ -215,7 +215,7 @@ async function _handler(
         VALUES
           (1, ${operadorId}, ${consumoSolda}::real, 0,
            'SM'::alissonerp.enum_marcador_estoque,
-           ${'Consumo solda serviço #' + servicoId + ' - ordem ' + numeroOrdem},
+           ${'Consumo aditivo serviço #' + servicoId + ' - ordem ' + numeroOrdem},
            NOW(), 0, 0, ${userId}::uuid, ${ordemId}, 1)
       `;
     }

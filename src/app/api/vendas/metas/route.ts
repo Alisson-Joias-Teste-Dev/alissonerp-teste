@@ -4,6 +4,10 @@ import { createServerSupabase } from "@/lib/supabase/server";
 
 // ─── GET /api/vendas/metas?mes=&ano=&vendedor_id= ─────────────────────────────
 export async function GET(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const { searchParams } = new URL(req.url);
   const mes        = searchParams.get("mes");
   const ano        = searchParams.get("ano");

@@ -71,6 +71,7 @@ export async function DELETE(
   `;
   if (!pag) return NextResponse.json({ error: "Pagamento não encontrado" }, { status: 404 });
   if (pag.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
+  if (pag.situacao === "cancelado") return NextResponse.json({ error: "Venda cancelada" }, { status: 409 });
 
   await sql`DELETE FROM alissonerp.pagamentos_venda WHERE id = ${pId}`;
 

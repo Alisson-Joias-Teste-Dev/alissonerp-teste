@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 interface Params { params: Promise<{ produtoId: string }> }
 
@@ -9,6 +10,10 @@ export async function GET(
   req: NextRequest,
   { params }: Params
 ) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const { produtoId } = await params;
   const id = Number(produtoId);
   const url = new URL(req.url);

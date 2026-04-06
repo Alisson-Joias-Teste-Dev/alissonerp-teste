@@ -5,6 +5,10 @@ import { createServerSupabase } from "@/lib/supabase/server";
 // ─── GET /api/vendas ───────────────────────────────────────────────────────────
 // Query params: inicio, fim, situacao, vendedor_id, q (busca)
 export async function GET(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const { searchParams } = new URL(req.url);
   const inicio     = searchParams.get("inicio");
   const fim        = searchParams.get("fim");
@@ -88,6 +92,11 @@ export async function POST(req: NextRequest) {
   `;
   if (!usuario) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
 
+  const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
+  if (!ROLES_PERMITIDOS.includes(usuario.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const body = await req.json() as {
     cliente_id?:          number | null;
     vendedor_id?:         number | null;
@@ -102,7 +111,9 @@ export async function POST(req: NextRequest) {
     pagamentos?:          PagamentoInput[];
   };
 
-  const novaVenda = await sql.begin(async (tx: any) => {
+  let novaVenda;
+  try {
+  novaVenda = await sql.begin(async (tx: any) => {
     // 1. Inserir com numero temporário (usa id depois)
     const [venda] = await tx`
       INSERT INTO alissonerp.vendas_erp (
@@ -133,6 +144,7 @@ export async function POST(req: NextRequest) {
     `;
 
     // 2. Atualizar numero_venda com o id gerado: V-00001
+    // NOTA: LPAD(5) suporta até 99999 vendas. Após isso, o formato V-XXXXX será V-XXXXXX (sem truncar).
     await tx`
       UPDATE alissonerp.vendas_erp
       SET numero_venda = 'V-' || LPAD(${venda.id}::text, 5, '0')
@@ -142,6 +154,24 @@ export async function POST(req: NextRequest) {
     // 3. Inserir itens (trigger recalcula totais automaticamente)
     if (Array.isArray(body.itens) && body.itens.length > 0) {
       for (const item of body.itens) {
+        if (!item.produto_id || item.produto_id <= 0) {
+          throw new Error("produto_id inválido em item");
+        }
+        if (!item.nome_produto || typeof item.nome_produto !== "string" || item.nome_produto.trim() === "") {
+          throw new Error("nome_produto obrigatório em item");
+        }
+        if (item.quantidade == null || item.quantidade < 1) {
+          throw new Error("quantidade deve ser >= 1 em item");
+        }
+        if (typeof item.preco_lista !== "number" || item.preco_lista < 0) {
+          throw new Error("preco_lista deve ser >= 0 em item");
+        }
+        if (typeof item.preco_unitario !== "number" || item.preco_unitario < 0) {
+          throw new Error("preco_unitario deve ser >= 0 em item");
+        }
+        if (typeof item.total_item !== "number" || item.total_item < 0) {
+          throw new Error("total_item deve ser >= 0 em item");
+        }
         await tx`
           INSERT INTO alissonerp.itens_venda_erp (
             venda_id, produto_id, nome_produto, sku,
@@ -171,6 +201,12 @@ export async function POST(req: NextRequest) {
     // 4. Inserir pagamentos
     if (Array.isArray(body.pagamentos) && body.pagamentos.length > 0) {
       for (const pag of body.pagamentos) {
+        if (!pag.forma || typeof pag.forma !== "string" || pag.forma.trim() === "") {
+          throw new Error("forma obrigatória em pagamento");
+        }
+        if (typeof pag.valor !== "number" || pag.valor <= 0) {
+          throw new Error("valor deve ser > 0 em pagamento");
+        }
         await tx`
           INSERT INTO alissonerp.pagamentos_venda (
             venda_id, forma, gateway, valor, parcelas, status
@@ -196,6 +232,10 @@ export async function POST(req: NextRequest) {
 
     return completa;
   });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Erro ao criar venda";
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
 
   return NextResponse.json(
     {

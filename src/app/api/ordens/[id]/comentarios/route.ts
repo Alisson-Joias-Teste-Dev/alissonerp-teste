@@ -14,7 +14,9 @@ export async function GET(
   if (!user)
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const { id: ordemId } = await params;
+  const { id } = await params;
+  const ordemId = parseInt(id);
+  if (isNaN(ordemId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const comentarios = await sql`
     SELECT c.id, c.texto, c.mencoes, c.autor_id, c.editado, c.editado_em, c.created_at,
@@ -22,7 +24,7 @@ export async function GET(
            u.nome AS autor_nome, u.role AS autor_role
     FROM alissonerp.comentarios_ordem c
     JOIN alissonerp.usuarios u ON u.id = c.autor_id
-    WHERE c.ordem_id = ${parseInt(ordemId)} AND (c.excluido = false OR c.excluido IS NULL)
+    WHERE c.ordem_id = ${ordemId} AND (c.excluido = false OR c.excluido IS NULL)
     ORDER BY c.created_at ASC
   `;
 
@@ -41,7 +43,10 @@ export async function POST(
   if (!user)
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const { id: ordemId } = await params;
+  const { id } = await params;
+  const ordemId = parseInt(id);
+  if (isNaN(ordemId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
   const body = await req.json();
   const { texto, mencoes = [], foto_path = null } = body;
 
@@ -59,12 +64,12 @@ export async function POST(
 
   const [comentario] = await sql`
     INSERT INTO alissonerp.comentarios_ordem (ordem_id, autor_id, texto, mencoes, foto_path)
-    VALUES (${parseInt(ordemId)}, ${user.id}::uuid, ${texto}, ${mencoes}::uuid[], ${foto_path ?? null})
+    VALUES (${ordemId}, ${user.id}::uuid, ${texto}, ${mencoes}::uuid[], ${foto_path ?? null})
     RETURNING id, created_at
   `;
 
   const [ordem] = await sql`
-    SELECT numero_ordem FROM alissonerp.ordens WHERE id = ${parseInt(ordemId)}
+    SELECT numero_ordem FROM alissonerp.ordens WHERE id = ${ordemId}
   `;
 
   for (const mencionadoId of mencoes) {
@@ -77,7 +82,7 @@ export async function POST(
         ${`@${autor.nome} mencionou você na ${ordem?.numero_ordem ?? ordemId}`},
         ${texto.substring(0, 100)},
         ${`/ordens/${ordemId}`},
-        ${parseInt(ordemId)},
+        ${ordemId},
         ${comentario.id},
         ${user.id}::uuid
       )

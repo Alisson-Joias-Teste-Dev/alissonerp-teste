@@ -122,6 +122,9 @@ export async function POST(req: NextRequest) {
 
   // ── Upload de fotos de referência (server-side, antes da transação) ──────
   // Se qualquer upload falhar → retorna erro sem criar a ordem
+  if (Array.isArray(fotos_base64) && fotos_base64.length > 10) {
+    return NextResponse.json({ error: "Máximo 10 fotos por ordem" }, { status: 400 });
+  }
   const fotosPaths: string[] = [];
   if (Array.isArray(fotos_base64) && fotos_base64.length > 0) {
     for (let i = 0; i < fotos_base64.length; i++) {
@@ -143,21 +146,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Gerar numero_ordem (C-XXXX) ─────────────────────────────────────────
-  // Verifica MAX nos dois schemas para evitar colisão com PDV
-  const [{ max_num: maxAlisson }] = await sql`
-    SELECT COALESCE(MAX(CAST(SUBSTRING(numero_ordem FROM 3) AS INTEGER)), 0) AS max_num
-    FROM alissonerp.ordens
-    WHERE numero_ordem ~ '^C-[0-9]+$'
-  `;
-  const [{ max_num: maxDirectus }] = await sql`
-    SELECT COALESCE(MAX(CAST(SUBSTRING(numero_ordem FROM 3) AS INTEGER)), 0) AS max_num
-    FROM directus.ordens
-    WHERE numero_ordem ~ '^C-[0-9]+$'
-  `;
-  const nextNum = Math.max(Number(maxAlisson), Number(maxDirectus)) + 1;
-  const numeroOrdem = `C-${String(nextNum).padStart(4, "0")}`;
-
   // ── Determinar rota ──────────────────────────────────────────────────────
   // Rota: fabricação permite override (PCP ou Protocolo), demais seguem regra padrão
   const rota = tipo_ordem === "fabricacao" && rota_override
@@ -178,6 +166,12 @@ export async function POST(req: NextRequest) {
   // ── Transação: ordem + itens + auditoria loja ───────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const novaOrdem = await sql.begin(async (tx: any) => {
+    // 0. Gerar numero_ordem dentro da transação (evita race condition)
+    const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
+    const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
+    const nextNum = Math.max(Number(max_id_ali), Number(max_id_dir)) + 1;
+    const numeroOrdem = "C-" + String(nextNum).padStart(4, "0");
+
     // 1. Inserir ordem
     // Preparar tipos_servico_ids como array SQL (pode ser null ou vazio)
     const tiposIds: number[] = Array.isArray(tipos_servico_ids)
@@ -251,17 +245,21 @@ export async function POST(req: NextRequest) {
       `;
     }
 
-    // 3. Criar auditoria loja (igual ao fn_ponte)
+    // 3. Criar auditoria loja
+    //    Ordens que vão para Service (protocolo + tipos service) → auto-aprovada
+    //    Demais → pendente (aguarda conferência da loja)
+    const isServiceOrder = rota === "protocolo" && SERVICO_TIPOS.includes(tipo_ordem);
     await tx`
       INSERT INTO alissonerp.auditorias (
         situacao, tipo_auditoria, rota_processo, ordem_id,
-        peso_negociado, dados_ordem
+        peso_negociado, parecer, dados_ordem
       ) VALUES (
-        'pendente',
+        ${isServiceOrder ? 'aprovado' : 'pendente'},
         'loja',
         'entrada_ordem',
         ${ordem.id},
         ${peso_metal_negociado ?? 0},
+        ${isServiceOrder ? 'Aprovação automática — ordem de serviço' : null},
         ${JSON.stringify({
           numero_ordem: numeroOrdem,
           tipo_ordem,
