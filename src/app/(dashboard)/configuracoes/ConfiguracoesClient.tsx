@@ -123,7 +123,7 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -3236,6 +3236,187 @@ function TabIntegracoes() {
   );
 }
 
+// ─── Tab Comissões ────────────────────────────────────────────────────────────
+interface FaixaComissao { id: number; desconto_pct: number; comissao_pct: number; ativo: boolean; }
+
+function TabComissoes() {
+  const [faixas,    setFaixas]    = useState<FaixaComissao[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [editId,    setEditId]    = useState<number | null>(null);
+  const [editVal,   setEditVal]   = useState("");
+  const [saving,    setSaving]    = useState(false);
+  const [addMode,   setAddMode]   = useState(false);
+  const [newDesc,   setNewDesc]   = useState("");
+  const [newCom,    setNewCom]    = useState("");
+  const [saveErr,   setSaveErr]   = useState("");
+
+  useEffect(() => {
+    fetch("/api/vendas/faixas-comissao?todas=1")
+      .then(r => r.json())
+      .then((d: FaixaComissao[]) => setFaixas(d))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function salvarEdicao(faixa: FaixaComissao) {
+    const v = parseFloat(editVal.replace(",", "."));
+    if (isNaN(v) || v < 0) return;
+    setSaving(true);
+    await fetch("/api/vendas/faixas-comissao", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: faixa.id, comissao_pct: v }),
+    });
+    setFaixas(prev => prev.map(f => f.id === faixa.id ? { ...f, comissao_pct: v } : f));
+    setEditId(null);
+    setSaving(false);
+  }
+
+  async function toggleAtivo(faixa: FaixaComissao) {
+    await fetch("/api/vendas/faixas-comissao", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: faixa.id, comissao_pct: faixa.comissao_pct, ativo: !faixa.ativo }),
+    });
+    setFaixas(prev => prev.map(f => f.id === faixa.id ? { ...f, ativo: !f.ativo } : f));
+  }
+
+  async function adicionarFaixa() {
+    const d = parseFloat(newDesc.replace(",", "."));
+    const c = parseFloat(newCom.replace(",", "."));
+    if (isNaN(d) || isNaN(c)) { setSaveErr("Valores inválidos"); return; }
+    setSaving(true); setSaveErr("");
+    const res = await fetch("/api/vendas/faixas-comissao", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ desconto_pct: d, comissao_pct: c }),
+    });
+    const row = await res.json() as FaixaComissao;
+    setFaixas(prev => {
+      const sem = prev.filter(f => f.desconto_pct !== row.desconto_pct);
+      return [...sem, { ...row, desconto_pct: Number(row.desconto_pct), comissao_pct: Number(row.comissao_pct) }]
+        .sort((a, b) => a.desconto_pct - b.desconto_pct);
+    });
+    setNewDesc(""); setNewCom(""); setAddMode(false); setSaving(false);
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold" style={{ color: P.creme }}>Tabela de Comissões</h2>
+          <p className="text-xs mt-0.5" style={{ color: P.sage }}>
+            Comissão da vendedora por faixa de desconto concedido ao cliente
+          </p>
+        </div>
+        <button onClick={() => setAddMode(v => !v)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+          style={{ backgroundColor: P.verde, color: "#fff" }}>
+          <Plus size={13} /> Nova faixa
+        </button>
+      </div>
+
+      {addMode && (
+        <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: P.border }}>
+          <p className="text-xs font-semibold" style={{ color: P.creme }}>Nova faixa</p>
+          <div className="flex gap-3 items-end flex-wrap">
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: P.sage }}>Desconto (%)</label>
+              <input type="text" value={newDesc} onChange={e => setNewDesc(e.target.value)}
+                placeholder="ex: 5" className="border rounded-lg px-3 py-2 text-sm w-28 outline-none"
+                style={{ borderColor: P.border }} />
+            </div>
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: P.sage }}>Comissão (%)</label>
+              <input type="text" value={newCom} onChange={e => setNewCom(e.target.value)}
+                placeholder="ex: 3.42" className="border rounded-lg px-3 py-2 text-sm w-28 outline-none"
+                style={{ borderColor: P.border }} />
+            </div>
+            <button onClick={adicionarFaixa} disabled={saving}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium disabled:opacity-40"
+              style={{ backgroundColor: P.verde, color: "#fff" }}>
+              <Save size={13} /> Salvar
+            </button>
+            <button onClick={() => { setAddMode(false); setSaveErr(""); }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium"
+              style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}>
+              <X size={13} /> Cancelar
+            </button>
+          </div>
+          {saveErr && <p className="text-xs" style={{ color: P.vermelho }}>{saveErr}</p>}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-sm text-center py-8" style={{ color: P.sage }}>Carregando...</div>
+      ) : (
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: P.border }}>
+          <table className="w-full text-sm">
+            <thead style={{ backgroundColor: P.bg }}>
+              <tr>
+                {["Desconto concedido", "Comissão da vendedora", "Ativo", ""].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold" style={{ color: P.sage }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {faixas.map(f => (
+                <tr key={f.id} className="border-t" style={{ borderColor: P.border, opacity: f.ativo ? 1 : 0.45 }}>
+                  <td className="px-4 py-2.5 tabular-nums font-medium" style={{ color: P.creme }}>
+                    {f.desconto_pct.toFixed(2)}%
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {editId === f.id ? (
+                      <div className="flex items-center gap-2">
+                        <input autoFocus type="text" value={editVal}
+                          onChange={e => setEditVal(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") salvarEdicao(f); if (e.key === "Escape") setEditId(null); }}
+                          className="border rounded-lg px-2 py-1 text-sm w-24 outline-none"
+                          style={{ borderColor: P.dourado }} />
+                        <span className="text-xs" style={{ color: P.sage }}>%</span>
+                        <button onClick={() => salvarEdicao(f)} disabled={saving}
+                          className="p-1 rounded" style={{ color: P.verde }}>
+                          <CheckCircle size={14} />
+                        </button>
+                        <button onClick={() => setEditId(null)} className="p-1 rounded" style={{ color: P.sage }}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="tabular-nums font-semibold" style={{ color: P.verde }}>
+                        {f.comissao_pct.toFixed(2)}%
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <button onClick={() => toggleAtivo(f)}
+                      className="text-xs px-2 py-0.5 rounded-full font-medium"
+                      style={{
+                        backgroundColor: f.ativo ? "#dcfce7" : "#f3f4f6",
+                        color: f.ativo ? P.verde : P.sage,
+                      }}>
+                      {f.ativo ? "Ativo" : "Inativo"}
+                    </button>
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <button onClick={() => { setEditId(f.id); setEditVal(f.comissao_pct.toFixed(2)); }}
+                      className="p-1 rounded hover:bg-gray-100" style={{ color: P.sage }}>
+                      <Pencil size={13} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="text-xs" style={{ color: P.muted }}>
+        O limite máximo de desconto por vendedora é configurado na aba <strong>Usuários</strong>.
+      </p>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function ConfiguracoesClient({ parametros, webhooks, logs, usuarios, depositos, teores, ligaTipos }: Props) {
   const [tab, setTab] = useState<Tab>("parametros");
@@ -3265,6 +3446,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "teores",        label: "Teores Ouro",    icon: Flame },
     { key: "locais",        label: "Locais",         icon: MapPin },
     { key: "tipos_servico", label: "Tipos Serviço",  icon: Wrench },
+    { key: "comissoes",     label: "Comissões",       icon: PenLine },
   ];
   const tabs = isSuperAdmin
     ? [...baseTabs, { key: "permissoes" as Tab, label: "Permissões", icon: Shield }]
@@ -3319,6 +3501,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "tipos_servico" && <TabTiposServico />}
       {tab === "cotacoes" && <TabCotacoes />}
       {tab === "integracoes" && <TabIntegracoes />}
+      {tab === "comissoes"   && <TabComissoes />}
     </div>
   );
 }

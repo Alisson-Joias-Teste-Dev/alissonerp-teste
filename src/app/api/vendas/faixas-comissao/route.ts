@@ -77,3 +77,28 @@ export async function PATCH(req: NextRequest) {
 
   return NextResponse.json({ ok: true });
 }
+
+// ─── POST /api/vendas/faixas-comissao ─────────────────────────────────────────
+// Cria nova faixa
+export async function POST(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
+  const PODE = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+  if (!usuario || !PODE.includes(usuario.role))
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+
+  const body = await req.json() as { desconto_pct: number; comissao_pct: number };
+  if (body.desconto_pct == null || body.comissao_pct == null)
+    return NextResponse.json({ error: "desconto_pct e comissao_pct são obrigatórios" }, { status: 400 });
+
+  const [row] = await sql`
+    INSERT INTO alissonerp.faixas_comissao (desconto_pct, comissao_pct, updated_by)
+    VALUES (${body.desconto_pct}, ${body.comissao_pct}, ${user.id}::uuid)
+    ON CONFLICT (desconto_pct) DO UPDATE SET comissao_pct = EXCLUDED.comissao_pct, updated_at = now()
+    RETURNING id, desconto_pct::float, comissao_pct::float, ativo
+  `;
+  return NextResponse.json(row);
+}
