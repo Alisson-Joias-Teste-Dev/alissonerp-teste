@@ -41,6 +41,7 @@ interface InsumoRow {
   observacao?: string | null;
   created_at?: string | null;
   saldo_ct?: number | null;
+  quantidade?: number | null;
 }
 
 interface CategoriaRow {
@@ -528,7 +529,14 @@ export default function InsumosClient() {
                   </td>
                   <td className="px-4 py-3 font-mono font-semibold text-[13px]" style={{ color }}>
                     {insumo.categoria_id === 2
-                      ? <span className="font-medium text-emerald-700">{formatPesoCt(insumo.saldo_ct != null ? insumo.saldo_ct : gramasToCt(parseFloat(String(insumo.saldo_real)) || 0))}</span>
+                      ? <>
+                          <span className="font-medium text-emerald-700">{formatPesoCt(insumo.saldo_ct != null ? insumo.saldo_ct : gramasToCt(parseFloat(String(insumo.saldo_real)) || 0))}</span>
+                          {insumo.quantidade != null && (
+                            <span className="block text-[10px] font-normal" style={{ color: "#6B7280" }}>
+                              {Number(insumo.quantidade).toLocaleString("pt-BR")} pedras · {parseFloat(String(insumo.saldo_real)).toFixed(3)}g
+                            </span>
+                          )}
+                        </>
                       : <>{formatPeso(insumo.saldo_real)} <span className="text-[10px] font-normal" style={{ color: "#9CA3AF" }}>g</span></>
                     }
                   </td>

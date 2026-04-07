@@ -9,7 +9,9 @@ export default async function EstoquePage() {
       sql`
         SELECT deposito_id, deposito_nome, insumo_id, insumo_nome, insumo_sku,
                categoria_nome, categoria_id,
-               total_entrada, total_saida, saldo, total_movimentacoes
+               total_entrada, total_saida, saldo,
+               saldo_ct, quantidade, peso_pedra_ct,
+               total_movimentacoes
         FROM alissonerp.vw_estoque_directus_saldo
         WHERE saldo != 0
         ORDER BY ABS(saldo) DESC
