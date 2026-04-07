@@ -1982,7 +1982,7 @@ export default function ServiceApp() {
               )}
 
               {/* Fotos e vídeo */}
-              {ordemDetalhe.foto_peca_servico && (
+              {ordemDetalhe.foto_peca_servico && typeof ordemDetalhe.foto_peca_servico === "string" && ordemDetalhe.foto_peca_servico.startsWith("http") && (
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Foto da peça (loja)</p>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1996,7 +1996,7 @@ export default function ServiceApp() {
                 </div>
               )}
 
-              {ordemDetalhe.video_observacao && (
+              {ordemDetalhe.video_observacao && typeof ordemDetalhe.video_observacao === "string" && ordemDetalhe.video_observacao.startsWith("http") && (
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Vídeo de observação</p>
                   <video
