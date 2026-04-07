@@ -121,13 +121,11 @@ export async function PATCH(
   }
 
   // 1b. Atualizar tipos_ordem_permitidos (separado, apenas admin)
-  if (tipos_ordem_permitidos !== undefined && tipos_ordem_permitidos !== null) {
-    if (!Array.isArray(tipos_ordem_permitidos)) {
-      return NextResponse.json({ error: "tipos_ordem_permitidos deve ser um array" }, { status: 400 });
-    }
+  if (tipos_ordem_permitidos !== undefined) {
+    const arr = Array.isArray(tipos_ordem_permitidos) ? tipos_ordem_permitidos : [];
     await sql`
       UPDATE alissonerp.usuarios
-      SET tipos_ordem_permitidos = ${JSON.stringify(tipos_ordem_permitidos)}::jsonb,
+      SET tipos_ordem_permitidos = ${JSON.stringify(arr)}::jsonb,
           updated_at = now()
       WHERE id = ${id}::uuid
     `;
@@ -135,12 +133,10 @@ export async function PATCH(
 
   // 1c. Atualizar tipos_protocolo_permitidos (separado, apenas admin)
   if (tipos_protocolo_permitidos !== undefined) {
-    if (!Array.isArray(tipos_protocolo_permitidos)) {
-      return NextResponse.json({ error: "tipos_protocolo_permitidos deve ser um array" }, { status: 400 });
-    }
+    const arr = Array.isArray(tipos_protocolo_permitidos) ? tipos_protocolo_permitidos : [];
     await sql`
       UPDATE alissonerp.usuarios
-      SET tipos_protocolo_permitidos = ${JSON.stringify(tipos_protocolo_permitidos)}::jsonb,
+      SET tipos_protocolo_permitidos = ${JSON.stringify(arr)}::jsonb,
           updated_at = now()
       WHERE id = ${id}::uuid
     `;
