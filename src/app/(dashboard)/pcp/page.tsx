@@ -47,6 +47,11 @@ export default async function PcpPage() {
             WHERE s.pcp_id = v.id
               AND s.status IN ('em_servico', 'aguardando', 'concluido')
           )
+          AND NOT EXISTS (
+            SELECT 1 FROM alissonerp.transferencias_ordem t
+            WHERE t.pcp_id = v.id
+              AND t.tipo_transferencia = 'service'
+          )
         ORDER BY v.id DESC
         LIMIT 300
       `
@@ -70,6 +75,11 @@ export default async function PcpPage() {
             SELECT 1 FROM alissonerp.servicos s
             WHERE s.pcp_id = v.id
               AND s.status IN ('em_servico', 'aguardando', 'concluido')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM alissonerp.transferencias_ordem t
+            WHERE t.pcp_id = v.id
+              AND t.tipo_transferencia = 'service'
           )
         ORDER BY v.id DESC
         LIMIT 300
