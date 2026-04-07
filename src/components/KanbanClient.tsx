@@ -161,7 +161,7 @@ const ETAPAS = [
 ];
 
 const ETAPAS_APONTAMENTO   = new Set(["Novas Ordens", "Em Andamento"]);
-const ETAPAS_TRANSFERENCIA = new Set(["Em Andamento"]);
+const ETAPAS_TRANSFERENCIA = new Set(["Novas Ordens", "Em Andamento"]);
 const ETAPAS_SAIDA         = new Set(["Em Andamento"]);
 
 type PCPItem = any;
