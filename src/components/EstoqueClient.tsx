@@ -330,9 +330,10 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
                 subtitulo={s.categoria_nome || "—"}
                 campos={[
                   { label: "Depósito", valor: s.deposito_nome || "—" },
-                  { label: "Saldo", valor: <span style={{ color: Number(s.saldo) < 0 ? C.danger : C.dourado }} className="font-mono font-semibold">{Number(s.saldo).toFixed(2)}</span> },
-                  { label: "Entradas", valor: <span style={{ color: C.success }} className="font-mono">{Number(s.total_entrada).toFixed(2)}</span> },
-                  { label: "Saídas", valor: <span style={{ color: C.danger }} className="font-mono">{Number(s.total_saida).toFixed(2)}</span> },
+                  { label: "Saldo", valor: <span style={{ color: Number(s.saldo) < 0 ? C.danger : C.dourado }} className="font-mono font-semibold">{s.categoria_id === 2 && s.saldo_ct != null ? formatPesoCt(s.saldo_ct) : Number(s.saldo).toFixed(2)}</span> },
+                  ...(s.categoria_id === 2 && s.quantidade != null ? [{ label: "Qtd.", valor: <span className="font-mono">{Number(s.quantidade).toLocaleString("pt-BR")} un</span> }] : []),
+                  { label: "Entradas", valor: <span style={{ color: C.success }} className="font-mono">{s.categoria_id === 2 ? formatPesoCt(Number(s.total_entrada) / 0.2) : Number(s.total_entrada).toFixed(2)}</span> },
+                  { label: "Saídas", valor: <span style={{ color: C.danger }} className="font-mono">{s.categoria_id === 2 ? formatPesoCt(Number(s.total_saida) / 0.2) : Number(s.total_saida).toFixed(2)}</span> },
                 ]}
               />
             ))}
@@ -347,7 +348,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
               <table className="w-full">
                 <thead>
                   <tr style={{ backgroundColor: C.esmeralda }}>
-                    {["Insumo", "SKU", "Categoria", "Depósito", "Entradas", "Saídas", "Saldo", "Movim."].map((h) => (
+                    {["Insumo", "SKU", "Categoria", "Depósito", "Entradas", "Saídas", "Saldo", "Qtd.", "Movim."].map((h) => (
                       <th
                         key={h}
                         className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider"
@@ -381,10 +382,14 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
                         {s.deposito_nome || "—"}
                       </td>
                       <td className="px-4 py-2.5 text-right font-mono text-xs" style={{ color: C.success }}>
-                        {Number(s.total_entrada).toFixed(2)}
+                        {s.categoria_id === 2 && s.saldo_ct != null
+                          ? formatPesoCt(Number(s.total_entrada) / 0.2)
+                          : Number(s.total_entrada).toFixed(2)}
                       </td>
                       <td className="px-4 py-2.5 text-right font-mono text-xs" style={{ color: C.danger }}>
-                        {Number(s.total_saida).toFixed(2)}
+                        {s.categoria_id === 2 && s.saldo_ct != null
+                          ? formatPesoCt(Number(s.total_saida) / 0.2)
+                          : Number(s.total_saida).toFixed(2)}
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <span
@@ -395,6 +400,16 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
                             ? formatPesoCt(s.saldo_ct)
                             : `${Number(s.saldo).toFixed(2)}`}
                         </span>
+                        {s.categoria_id === 2 && s.saldo_ct != null && (
+                          <span className="block text-[10px] font-mono" style={{ color: "#9CA3AF" }}>
+                            {Number(s.saldo).toFixed(3)}g
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-[11px] text-center" style={{ color: "#6B7280" }}>
+                        {s.categoria_id === 2 && s.quantidade != null
+                          ? <>{Number(s.quantidade).toLocaleString("pt-BR")} <span className="text-[9px]">un</span></>
+                          : "—"}
                       </td>
                       <td className="px-4 py-2.5 font-mono text-[11px] text-center" style={{ color: "#6B7280" }}>
                         {s.total_movimentacoes}
@@ -403,7 +418,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
                   ))}
                   {filteredSaldos.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-4 py-12 text-center text-sm" style={{ color: "#6B7280" }}>
+                      <td colSpan={9} className="px-4 py-12 text-center text-sm" style={{ color: "#6B7280" }}>
                         Nenhum resultado
                       </td>
                     </tr>
