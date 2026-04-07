@@ -78,10 +78,8 @@ export async function GET(
   // Buscar itens da ordem
   const ordemId = Number((row as Record<string, unknown>).ordem_id);
   const itens = await sql`
-    SELECT io.id, io.descricao, io.quantidade, io.observacao,
-           p.nome AS produto_nome, p.sku AS produto_sku
+    SELECT io.id, io.nome_produto, io.sku, io.quantidade, io.peso_estimado, io.observacao
     FROM alissonerp.itens_ordem io
-    LEFT JOIN public.produtos p ON p.id_produto = io.produto_id
     WHERE io.ordem_id = ${ordemId}
     ORDER BY io.id
   `;
