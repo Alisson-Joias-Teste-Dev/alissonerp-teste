@@ -120,7 +120,7 @@ interface ServicoDetalhe extends ServicoConcluido {
   operador_nome: string | null;
 }
 
-type View     = "meus" | "receber" | "concluidos" | "concluir" | "devolver" | "transferir" | "camera";
+type View     = "meus" | "receber" | "concluidos" | "concluir" | "devolver" | "transferir" | "transferir-fabrica" | "camera";
 type CameraCtx = "receber" | "peca" | "fio";
 type Periodo   = "hoje" | "semana" | "mes";
 
@@ -304,9 +304,16 @@ export default function ServiceApp() {
   const [validandoFio,       setValidandoFio]     = useState(false);
   const [pedrasDropdown,     setPedrasDropdown]   = useState(false);
 
-  // ── Transferir ────────────────────────────────────────────────────────────
+  // ── Transferir (entre operadores service) ─────────────────────────────────
   const [servicoTransf,  setServicoTransf]   = useState<ServicoMeu | null>(null);
   const [destDepositoId, setDestDepositoId]  = useState<number | null>(null);
+
+  // ── Transferir p/ Fábrica ────────────────────────────────────────────────
+  const [depositosFabrica, setDepositosFabrica] = useState<Deposito[]>([]);
+  const [transportadores, setTransportadores]   = useState<{id: string; nome: string}[]>([]);
+  const [destFabricaId, setDestFabricaId]       = useState<number | null>(null);
+  const [transportadorId, setTransportadorId]   = useState<string>("");
+  const [loadingFabrica, setLoadingFabrica]     = useState(false);
 
   // ── Carregar dados ────────────────────────────────────────────────────────
   const fetchPendentes = useCallback(async () => {
@@ -643,6 +650,54 @@ export default function ServiceApp() {
     setDestDepositoId(null);
     fetchDepositos();
     setView("transferir");
+  }
+
+  function abrirTransferirFabrica(svc: ServicoMeu) {
+    setServicoTransf(svc);
+    setDestFabricaId(null);
+    setTransportadorId("");
+    setLoadingFabrica(true);
+    Promise.all([
+      fetch("/api/pcp/depositos").then(r => r.json()),
+      fetch("/api/usuarios/transportadores", { cache: "no-store" }).then(r => r.json()),
+    ]).then(([deps, transp]) => {
+      setDepositosFabrica(Array.isArray(deps) ? (deps as Deposito[]).filter(d => d.id !== 1) : []);
+      setTransportadores(Array.isArray(transp) ? transp : []);
+      setLoadingFabrica(false);
+    }).catch(() => setLoadingFabrica(false));
+    setView("transferir-fabrica");
+  }
+
+  async function handleTransferirFabrica() {
+    if (!servicoTransf || !destFabricaId) return;
+    setProcessando(true);
+    try {
+      const res = await fetch(`/api/service/${servicoTransf.id}/transferir-fabrica`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          deposito_destino_id: destFabricaId,
+          motoboy_id: transportadorId || null,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        pushError(d.error ?? "Erro ao transferir para fábrica");
+        setProcessando(false);
+        return;
+      }
+    } catch {
+      pushError("Erro de conexão");
+      setProcessando(false);
+      return;
+    }
+    setProcessando(false);
+    showToast("Transferido para fábrica!");
+    setServicoTransf(null);
+    setDestFabricaId(null);
+    setTransportadorId("");
+    fetchMeus();
+    setView("meus");
   }
 
   // ── Filtro dropdown pedras ────────────────────────────────────────────────
@@ -1317,6 +1372,90 @@ export default function ServiceApp() {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  // VIEW: TRANSFERIR P/ FÁBRICA
+  // ══════════════════════════════════════════════════════════════════════════
+  if (view === "transferir-fabrica" && servicoTransf) {
+    return (
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex items-center gap-3 px-4 py-3 shrink-0" style={{ borderBottom: `1px solid ${S.border}` }}>
+          <button onClick={() => { setServicoTransf(null); setView("meus"); }}
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ backgroundColor: S.cardBg }}>
+            <ChevronLeft size={18} color={S.text} />
+          </button>
+          <div>
+            <p className="text-sm font-semibold" style={{ color: S.text }}>Enviar p/ Fábrica</p>
+            <p className="text-[10px]" style={{ color: S.textMuted }}>{servicoTransf.numero_ordem}</p>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-28">
+          {/* Depósito destino */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest mb-3" style={{ color: S.textMuted }}>
+              Depósito de destino (fábrica)
+            </p>
+            {loadingFabrica ? (
+              <div className="flex justify-center py-10"><Loader2 size={22} className="animate-spin" style={{ color: S.textMuted }} /></div>
+            ) : depositosFabrica.map(d => (
+              <button key={d.id} onClick={() => setDestFabricaId(d.id)}
+                className="w-full flex items-center gap-3 rounded-2xl px-4 py-4 transition-all active:scale-[0.98] border-2 mb-2"
+                style={{
+                  backgroundColor: destFabricaId === d.id ? "rgba(168,85,247,0.1)" : S.cardBg,
+                  borderColor:     destFabricaId === d.id ? "#A855F7" : "transparent",
+                }}>
+                <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
+                  style={{ backgroundColor: "rgba(168,85,247,0.15)", color: "#C084FC" }}>
+                  {d.nome.slice(0, 2).toUpperCase()}
+                </div>
+                <span className="text-sm font-medium flex-1 text-left" style={{ color: S.text }}>{d.nome}</span>
+                {destFabricaId === d.id && <CheckCircle2 size={18} color="#A855F7" />}
+              </button>
+            ))}
+          </div>
+
+          {/* Transportador */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>
+              Quem vai levar?
+            </p>
+            {transportadores.length === 0 ? (
+              <p className="text-[11px]" style={{ color: S.textFaint }}>Nenhum transportador habilitado.</p>
+            ) : (
+              <div className="space-y-2">
+                {transportadores.map(t => (
+                  <button key={t.id} onClick={() => setTransportadorId(t.id)}
+                    className="w-full flex items-center gap-3 rounded-2xl px-4 py-3 transition-all active:scale-[0.98] border-2"
+                    style={{
+                      backgroundColor: transportadorId === t.id ? "rgba(55,138,221,0.1)" : S.cardBg,
+                      borderColor:     transportadorId === t.id ? "#378ADD" : "transparent",
+                    }}>
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0"
+                      style={{ backgroundColor: "rgba(55,138,221,0.15)", color: "#85B7EB" }}>
+                      {t.nome.slice(0, 2).toUpperCase()}
+                    </div>
+                    <span className="text-sm font-medium flex-1 text-left" style={{ color: S.text }}>{t.nome}</span>
+                    {transportadorId === t.id && <CheckCircle2 size={16} color="#378ADD" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="fixed bottom-0 left-0 right-0 px-4 pt-3 z-20"
+          style={{ backgroundColor: "rgba(24,64,54,0.97)", borderTop: `1px solid ${S.border}`, paddingBottom: "calc(12px + env(safe-area-inset-bottom))" }}>
+          <Btn variant="blue" onClick={handleTransferirFabrica}
+            disabled={!destFabricaId || processando}
+            className="w-full h-14 text-base">
+            {processando ? <><Loader2 size={18} className="animate-spin" />Transferindo...</> : <><ArrowLeftRight size={18} />Enviar p/ Fábrica</>}
+          </Btn>
+        </div>
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // VIEW: TRANSFERIR
   // ══════════════════════════════════════════════════════════════════════════
   if (view === "transferir" && servicoTransf) {
@@ -1597,13 +1736,22 @@ export default function ServiceApp() {
                   </Btn>
                 )}
               </div>
-              <button
-                onClick={() => abrirOrdemDetalhe(svc.id)}
-                className="w-full mt-2 py-2 rounded-xl text-[11px] font-semibold transition-colors"
-                style={{ backgroundColor: "rgba(255,255,255,0.05)", color: S.textMuted, border: `1px solid ${S.border}` }}
-              >
-                Ver detalhes da ordem
-              </button>
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={() => abrirOrdemDetalhe(svc.id)}
+                  className="flex-1 py-2 rounded-xl text-[11px] font-semibold transition-colors"
+                  style={{ backgroundColor: "rgba(255,255,255,0.05)", color: S.textMuted, border: `1px solid ${S.border}` }}
+                >
+                  Ver ordem
+                </button>
+                <button
+                  onClick={() => abrirTransferirFabrica(svc)}
+                  className="flex-1 py-2 rounded-xl text-[11px] font-semibold transition-colors"
+                  style={{ backgroundColor: "rgba(168,85,247,0.08)", color: "#C084FC", border: "1px solid rgba(168,85,247,0.3)" }}
+                >
+                  Enviar p/ Fábrica
+                </button>
+              </div>
             </Card>
           ))}
         </div>
