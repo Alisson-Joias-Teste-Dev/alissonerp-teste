@@ -127,6 +127,9 @@ async function _handler(
   const numeroOrdem = (servico.numero_ordem ?? "") as string;
   const userId      = user.id ?? null;
 
+  // Service: baixa SEMPRE no local Service (id=3)
+  const localEstoqueId = 3;
+
   // ── 2. IA valida peso da peça ─────────────────────────────────────────────
   const mediaTypePeca = extrairMediaType(foto_peca_base64);
   const base64Peca    = extrairBase64Puro(foto_peca_base64);
@@ -216,7 +219,7 @@ async function _handler(
           (1, ${operadorId}, ${consumoSolda}::real, 0,
            'SM'::alissonerp.enum_marcador_estoque,
            ${'Consumo aditivo serviço #' + servicoId + ' - ordem ' + numeroOrdem},
-           NOW(), 0, 0, ${userId}::uuid, ${ordemId}, 1)
+           NOW(), 0, 0, ${userId}::uuid, ${ordemId}, ${localEstoqueId})
       `;
     }
 
@@ -227,10 +230,10 @@ async function _handler(
           INSERT INTO alissonerp.movimentacoes_estoque
             (insumo_id, deposito_id, saida, entrada, marcador, obs, data_hora, valor_total, preco_compra, created_by, ordem_id, local_estoque_id)
           VALUES
-            (${pedra.insumo_id}, ${operadorId}, ${pedra.peso_total ?? 0}::real, 0,
+            (${pedra.insumo_id}, 1, ${pedra.peso_total ?? 0}::real, 0,
              'SP'::alissonerp.enum_marcador_estoque,
              ${'Pedra serviço #' + servicoId + ' - ordem ' + numeroOrdem},
-             NOW(), 0, 0, ${userId}::uuid, ${ordemId}, 1)
+             NOW(), 0, 0, ${userId}::uuid, ${ordemId}, ${localEstoqueId})
         `;
       }
     }
