@@ -127,11 +127,8 @@ async function _handler(
   const numeroOrdem = (servico.numero_ordem ?? "") as string;
   const userId      = user.id ?? null;
 
-  // Buscar local_estoque_id do depósito do operador (default: 3 = Service)
-  const [depLocal] = operadorId ? await sql`
-    SELECT COALESCE(local_estoque_id, 3) AS local_id FROM alissonerp.depositos WHERE id = ${operadorId}
-  ` : [{ local_id: 3 }];
-  const localEstoqueId = Number(depLocal?.local_id ?? 3);
+  // Service: baixa SEMPRE no local Service (id=3)
+  const localEstoqueId = 3;
 
   // ── 2. IA valida peso da peça ─────────────────────────────────────────────
   const mediaTypePeca = extrairMediaType(foto_peca_base64);
