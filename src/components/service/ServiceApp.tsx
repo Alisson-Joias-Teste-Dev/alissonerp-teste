@@ -1982,32 +1982,38 @@ export default function ServiceApp() {
               )}
 
               {/* Fotos e vídeo */}
-              {ordemDetalhe.foto_peca_servico && typeof ordemDetalhe.foto_peca_servico === "string" && ordemDetalhe.foto_peca_servico.startsWith("http") && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Foto da peça (loja)</p>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={ordemDetalhe.foto_peca_servico}
-                    alt="Peça"
-                    onClick={() => setZoomFoto(ordemDetalhe.foto_peca_servico)}
-                    className="w-full rounded-2xl object-cover cursor-pointer active:scale-[0.99] transition-transform"
-                    style={{ maxHeight: 260 }}
-                  />
-                </div>
-              )}
+              {ordemDetalhe.foto_peca_servico && typeof ordemDetalhe.foto_peca_servico === "string" && (() => {
+                const STORAGE_BASE = process.env.NEXT_PUBLIC_SUPABASE_URL + "/storage/v1/object/public/ordem-fotos/";
+                const fotoUrl = ordemDetalhe.foto_peca_servico.startsWith("http")
+                  ? ordemDetalhe.foto_peca_servico
+                  : STORAGE_BASE + ordemDetalhe.foto_peca_servico;
+                return (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Foto da peça (loja)</p>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={fotoUrl}
+                      alt="Peça"
+                      onClick={() => setZoomFoto(fotoUrl)}
+                      className="w-full rounded-2xl object-cover cursor-pointer active:scale-[0.99] transition-transform"
+                      style={{ maxHeight: 260 }}
+                    />
+                  </div>
+                );
+              })()}
 
-              {ordemDetalhe.video_observacao && typeof ordemDetalhe.video_observacao === "string" && ordemDetalhe.video_observacao.startsWith("http") && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Vídeo de observação</p>
-                  <video
-                    src={ordemDetalhe.video_observacao}
-                    controls
-                    playsInline
-                    className="w-full rounded-2xl"
-                    style={{ maxHeight: 300 }}
-                  />
-                </div>
-              )}
+              {ordemDetalhe.video_observacao && typeof ordemDetalhe.video_observacao === "string" && (() => {
+                const VIDEO_BASE = process.env.NEXT_PUBLIC_SUPABASE_URL + "/storage/v1/object/public/ordem-videos/";
+                const videoUrl = ordemDetalhe.video_observacao.startsWith("http")
+                  ? ordemDetalhe.video_observacao
+                  : VIDEO_BASE + ordemDetalhe.video_observacao;
+                return (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Vídeo de observação</p>
+                    <video src={videoUrl} controls playsInline className="w-full rounded-2xl" style={{ maxHeight: 300 }} />
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
