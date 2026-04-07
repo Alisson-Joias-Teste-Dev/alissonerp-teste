@@ -230,7 +230,7 @@ async function _handler(
           INSERT INTO alissonerp.movimentacoes_estoque
             (insumo_id, deposito_id, saida, entrada, marcador, obs, data_hora, valor_total, preco_compra, created_by, ordem_id, local_estoque_id)
           VALUES
-            (${pedra.insumo_id}, ${operadorId}, ${pedra.peso_total ?? 0}::real, 0,
+            (${pedra.insumo_id}, 1, ${pedra.peso_total ?? 0}::real, 0,
              'SP'::alissonerp.enum_marcador_estoque,
              ${'Pedra serviço #' + servicoId + ' - ordem ' + numeroOrdem},
              NOW(), 0, 0, ${userId}::uuid, ${ordemId}, ${localEstoqueId})
