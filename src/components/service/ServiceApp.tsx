@@ -1995,8 +1995,7 @@ export default function ServiceApp() {
                       src={fotoUrl}
                       alt="Peça"
                       onClick={() => setZoomFoto(fotoUrl)}
-                      className="w-full rounded-2xl object-cover cursor-pointer active:scale-[0.99] transition-transform"
-                      style={{ maxHeight: 260 }}
+                      className="w-20 h-20 rounded-xl object-cover cursor-pointer active:scale-95 transition-transform"
                     />
                   </div>
                 );
