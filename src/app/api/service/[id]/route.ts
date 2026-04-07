@@ -55,6 +55,11 @@ export async function GET(
       o.tipo_ordem::text    AS tipo_ordem,
       o.detalhes_ordem,
       o.foto_peca_servico,
+      o.video_observacao,
+      o.data_entrega,
+      o.tipos_servico_ids,
+      o.peso_peca_servico,
+      o.ficha_tecnica_id,
       c.nome                AS cliente_nome,
       d.nome                AS operador_nome
     FROM alissonerp.servicos s
@@ -67,8 +72,27 @@ export async function GET(
   if (!row) return NextResponse.json({ error: "Serviço não encontrado" }, { status: 404 });
 
   const servico = normalizeRow(row as Record<string, unknown>, [
-    "peso_entrada", "peso_saida", "peso_fio_antes", "peso_fio_depois", "consumo_solda",
-  ], ["pedras_colocadas"]);
+    "peso_entrada", "peso_saida", "peso_fio_antes", "peso_fio_depois", "consumo_solda", "peso_peca_servico",
+  ], ["pedras_colocadas", "tipos_servico_ids"]);
 
-  return NextResponse.json({ servico });
+  // Buscar itens da ordem
+  const itens = await sql`
+    SELECT io.id, io.descricao, io.quantidade, io.observacao,
+           p.nome AS produto_nome, p.sku AS produto_sku
+    FROM alissonerp.itens_ordem io
+    LEFT JOIN public.produtos p ON p.id_produto = io.produto_id
+    WHERE io.ordem_id = ${(row as Record<string, unknown>).ordem_id}
+    ORDER BY io.id
+  `;
+
+  // Buscar nomes dos tipos de serviço
+  const tiposIds = (servico as Record<string, unknown>).tipos_servico_ids as number[] | null;
+  let tiposServico: {id: number; nome: string}[] = [];
+  if (tiposIds && Array.isArray(tiposIds) && tiposIds.length > 0) {
+    tiposServico = await sql`
+      SELECT id, nome FROM alissonerp.tipos_servico WHERE id = ANY(${tiposIds})
+    `;
+  }
+
+  return NextResponse.json({ servico, itens, tipos_servico: tiposServico });
 }

@@ -253,6 +253,15 @@ export default function ServiceApp() {
   const [loadingDetalhe, setLoadingDetalhe] = useState(false);
   const [zoomFoto,       setZoomFoto]       = useState<string | null>(null);
 
+  // Drawer: detalhe da ordem (para operador ver info da ordem)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [ordemDetalhe, setOrdemDetalhe] = useState<Record<string, any> | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [ordemItens, setOrdemItens]     = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [ordemTipos, setOrdemTipos]     = useState<any[]>([]);
+  const [loadingOrdem, setLoadingOrdem] = useState(false);
+
   // ── Carregamentos ─────────────────────────────────────────────────────────
   const [loadingPend,  setLoadingPend]  = useState(false);
   const [loadingMeus,  setLoadingMeus]  = useState(false);
@@ -337,6 +346,21 @@ export default function ServiceApp() {
     const data = res?.ok ? await res.json().catch(() => ({})) : {};
     if (data.servico) setServicoDetalhe(data.servico as ServicoDetalhe);
     setLoadingDetalhe(false);
+  }, []);
+
+  const abrirOrdemDetalhe = useCallback(async (servicoId: number) => {
+    setLoadingOrdem(true);
+    setOrdemDetalhe(null);
+    setOrdemItens([]);
+    setOrdemTipos([]);
+    const res  = await fetch(`/api/service/${servicoId}`).catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => ({})) : {};
+    if (data.servico) {
+      setOrdemDetalhe(data.servico);
+      setOrdemItens(data.itens ?? []);
+      setOrdemTipos(data.tipos_servico ?? []);
+    }
+    setLoadingOrdem(false);
   }, []);
 
   const fetchConcluidos = useCallback(async (per: Periodo = "mes") => {
@@ -1573,6 +1597,13 @@ export default function ServiceApp() {
                   </Btn>
                 )}
               </div>
+              <button
+                onClick={() => abrirOrdemDetalhe(svc.id)}
+                className="w-full mt-2 py-2 rounded-xl text-[11px] font-semibold transition-colors"
+                style={{ backgroundColor: "rgba(255,255,255,0.05)", color: S.textMuted, border: `1px solid ${S.border}` }}
+              >
+                Ver detalhes da ordem
+              </button>
             </Card>
           ))}
         </div>
@@ -1736,6 +1767,125 @@ export default function ServiceApp() {
                   />
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── DRAWER: Detalhe da ordem ───────────────────────────────────────── */}
+      {(ordemDetalhe || loadingOrdem) && (
+        <div className="fixed inset-0 z-40 flex flex-col" style={{ backgroundColor: "#0d2419" }}>
+          <div className="flex items-center gap-3 px-4 py-3 shrink-0" style={{ borderBottom: `1px solid ${S.border}` }}>
+            <button
+              onClick={() => { setOrdemDetalhe(null); setOrdemItens([]); setOrdemTipos([]); }}
+              className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+              style={{ backgroundColor: S.cardBg }}
+            >
+              <ChevronLeft size={18} color={S.text} />
+            </button>
+            {ordemDetalhe ? (
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <span className="font-semibold text-sm truncate" style={{ color: S.text }}>
+                  {ordemDetalhe.numero_ordem ?? `Ordem #${ordemDetalhe.ordem_id}`}
+                </span>
+                <TipoBadge tipo={ordemDetalhe.tipo_ordem} />
+              </div>
+            ) : (
+              <span className="text-sm" style={{ color: S.textMuted }}>Carregando...</span>
+            )}
+          </div>
+
+          {loadingOrdem && (
+            <div className="flex-1 flex items-center justify-center">
+              <Loader2 size={28} className="animate-spin" style={{ color: S.textMuted }} />
+            </div>
+          )}
+
+          {ordemDetalhe && (
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ paddingBottom: "calc(24px + env(safe-area-inset-bottom))" }}>
+
+              {/* Info básica */}
+              <div className="rounded-2xl px-4 py-3 space-y-1.5" style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}` }}>
+                {ordemDetalhe.cliente_nome && (
+                  <DetalheRow label="Cliente" value={ordemDetalhe.cliente_nome} />
+                )}
+                <DetalheRow label="Tipo" value={ordemDetalhe.tipo_ordem} />
+                {ordemDetalhe.data_entrega && (
+                  <DetalheRow label="Data entrega" value={new Date(ordemDetalhe.data_entrega).toLocaleDateString("pt-BR")} valueColor={S.gold} />
+                )}
+                {ordemDetalhe.peso_peca_servico != null && (
+                  <DetalheRow label="Peso peça" value={`${ordemDetalhe.peso_peca_servico}g`} />
+                )}
+                {ordemDetalhe.detalhes_ordem && (
+                  <DetalheRow label="Detalhes" value={ordemDetalhe.detalhes_ordem} />
+                )}
+              </div>
+
+              {/* Tipos de serviço */}
+              {ordemTipos.length > 0 && (
+                <div className="rounded-2xl px-4 py-3" style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}` }}>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Tipos de Serviço</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ordemTipos.map((t: { id: number; nome: string }) => (
+                      <span key={t.id} className="text-[11px] px-2.5 py-1 rounded-full font-medium"
+                        style={{ backgroundColor: "rgba(219,152,100,0.15)", color: S.gold }}>
+                        {t.nome}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Itens da ordem */}
+              {ordemItens.length > 0 && (
+                <div className="rounded-2xl px-4 py-3" style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}` }}>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Itens</p>
+                  <div className="space-y-2">
+                    {ordemItens.map((item: { id: number; produto_nome?: string; descricao?: string; quantidade?: number; observacao?: string; produto_sku?: string }) => (
+                      <div key={item.id} className="py-1.5 border-b last:border-0" style={{ borderColor: S.border }}>
+                        <p className="text-xs font-medium" style={{ color: S.text }}>
+                          {item.produto_nome ?? item.descricao ?? "Item"}
+                          {item.produto_sku && <span className="ml-1 font-mono text-[10px]" style={{ color: S.textFaint }}>({item.produto_sku})</span>}
+                        </p>
+                        {item.quantidade && item.quantidade > 1 && (
+                          <p className="text-[10px]" style={{ color: S.textMuted }}>Qtd: {item.quantidade}</p>
+                        )}
+                        {item.observacao && (
+                          <p className="text-[10px] mt-0.5" style={{ color: S.textFaint }}>{item.observacao}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Fotos e vídeo */}
+              {ordemDetalhe.foto_peca_servico && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Foto da peça (loja)</p>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={ordemDetalhe.foto_peca_servico}
+                    alt="Peça"
+                    onClick={() => setZoomFoto(ordemDetalhe.foto_peca_servico)}
+                    className="w-full rounded-2xl object-cover cursor-pointer active:scale-[0.99] transition-transform"
+                    style={{ maxHeight: 260 }}
+                  />
+                </div>
+              )}
+
+              {ordemDetalhe.video_observacao && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Vídeo de observação</p>
+                  <video
+                    src={ordemDetalhe.video_observacao}
+                    controls
+                    playsInline
+                    className="w-full rounded-2xl"
+                    style={{ maxHeight: 300 }}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>
