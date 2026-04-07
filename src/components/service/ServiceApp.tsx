@@ -1841,14 +1841,17 @@ export default function ServiceApp() {
                 <div className="rounded-2xl px-4 py-3" style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}` }}>
                   <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Itens</p>
                   <div className="space-y-2">
-                    {ordemItens.map((item: { id: number; produto_nome?: string; descricao?: string; quantidade?: number; observacao?: string; produto_sku?: string }) => (
+                    {ordemItens.map((item: { id: number; nome_produto?: string; sku?: string; quantidade?: number; peso_estimado?: number; observacao?: string }) => (
                       <div key={item.id} className="py-1.5 border-b last:border-0" style={{ borderColor: S.border }}>
                         <p className="text-xs font-medium" style={{ color: S.text }}>
-                          {item.produto_nome ?? item.descricao ?? "Item"}
-                          {item.produto_sku && <span className="ml-1 font-mono text-[10px]" style={{ color: S.textFaint }}>({item.produto_sku})</span>}
+                          {item.nome_produto ?? "Item"}
+                          {item.sku && <span className="ml-1 font-mono text-[10px]" style={{ color: S.textFaint }}>({item.sku})</span>}
                         </p>
                         {item.quantidade && item.quantidade > 1 && (
                           <p className="text-[10px]" style={{ color: S.textMuted }}>Qtd: {item.quantidade}</p>
+                        )}
+                        {item.peso_estimado != null && Number(item.peso_estimado) > 0 && (
+                          <p className="text-[10px]" style={{ color: S.textMuted }}>Peso est.: {Number(item.peso_estimado).toFixed(2)}g</p>
                         )}
                         {item.observacao && (
                           <p className="text-[10px] mt-0.5" style={{ color: S.textFaint }}>{item.observacao}</p>
