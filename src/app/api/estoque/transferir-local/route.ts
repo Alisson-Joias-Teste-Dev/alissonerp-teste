@@ -59,7 +59,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Local destino (id=${local_destino_id}) está inativo` }, { status: 400 });
   }
 
-  // Verificar saldo suficiente no local de origem
+  // Verificar se é pedra — pedras vêm em ct, converter para gramas (1ct = 0.2g)
+  const [insumoRow] = await sql`
+    SELECT categoria_id FROM alissonerp.insumos WHERE id = ${insumo_id}
+  `;
+  const isPedra = insumoRow?.categoria_id === 2;
+  const pesoGramas = isPedra ? quantidade * 0.2 : quantidade;
+
+  // Verificar saldo suficiente no local de origem (em gramas)
   const saldoRows = await sql`
     SELECT COALESCE(SUM(COALESCE(entrada, 0)), 0) - COALESCE(SUM(COALESCE(saida, 0)), 0) AS saldo
     FROM alissonerp.movimentacoes_estoque
@@ -68,9 +75,11 @@ export async function POST(req: NextRequest) {
       AND local_estoque_id = ${local_origem_id}
   `;
   const saldo = Number(saldoRows[0]?.saldo ?? 0);
-  if (saldo < quantidade) {
+  if (saldo < pesoGramas) {
+    const dispLabel = isPedra ? `${(saldo / 0.2).toFixed(4)} ct` : `${saldo.toFixed(4)} g`;
+    const solLabel  = isPedra ? `${quantidade.toFixed(4)} ct` : `${quantidade.toFixed(4)} g`;
     return NextResponse.json(
-      { error: `Saldo insuficiente no local origem. Disponível: ${saldo.toFixed(4)}, solicitado: ${quantidade}` },
+      { error: `Saldo insuficiente no local origem. Disponível: ${dispLabel}, solicitado: ${solLabel}` },
       { status: 422 },
     );
   }
@@ -83,7 +92,7 @@ export async function POST(req: NextRequest) {
     INSERT INTO alissonerp.movimentacoes_estoque
       (insumo_id, saida, deposito_id, local_estoque_id, marcador, obs)
     VALUES
-      (${insumo_id}, ${quantidade}::real, 1, ${local_origem_id},
+      (${insumo_id}, ${pesoGramas}::real, 1, ${local_origem_id},
        'TA'::alissonerp.enum_marcador_estoque, ${obsText})
   `;
 
@@ -92,7 +101,7 @@ export async function POST(req: NextRequest) {
     INSERT INTO alissonerp.movimentacoes_estoque
       (insumo_id, entrada, deposito_id, local_estoque_id, marcador, obs)
     VALUES
-      (${insumo_id}, ${quantidade}::real, 1, ${local_destino_id},
+      (${insumo_id}, ${pesoGramas}::real, 1, ${local_destino_id},
        'TA'::alissonerp.enum_marcador_estoque, ${obsText})
   `;
 

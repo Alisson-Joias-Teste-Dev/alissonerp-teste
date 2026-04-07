@@ -102,7 +102,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
   }, [saldos]);
 
   useEffect(() => {
-    fetch("/api/locais-estoque")
+    fetch("/api/locais-estoque", { cache: "no-store" })
       .then((r) => r.json())
       .then((data) => { if (Array.isArray(data)) setLocais(data); })
       .catch(() => {});
@@ -115,10 +115,12 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
       const matchQ =
         !q ||
         s.insumo_nome?.toLowerCase().includes(q) ||
-        s.deposito_nome?.toLowerCase().includes(q);
-      return matchCat && matchQ;
+        s.deposito_nome?.toLowerCase().includes(q) ||
+        s.local_estoque_nome?.toLowerCase().includes(q);
+      const matchLocal = !localSelecionado || Number(s.local_estoque_id) === localSelecionado;
+      return matchCat && matchQ && matchLocal;
     });
-  }, [saldos, searchSaldo, filterCat]);
+  }, [saldos, searchSaldo, filterCat, localSelecionado]);
 
   const filteredMov = useMemo(() => {
     if (!searchMov) return movimentacoes;
@@ -382,6 +384,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
                 subtitulo={s.categoria_nome || "—"}
                 campos={[
                   { label: "Depósito", valor: s.deposito_nome || "—" },
+                  { label: "Local", valor: s.local_estoque_nome || "—" },
                   { label: "Saldo", valor: <span style={{ color: Number(s.saldo) < 0 ? C.danger : C.dourado }} className="font-mono font-semibold">{s.categoria_id === 2 && s.saldo_ct != null ? formatPesoCt(s.saldo_ct) : Number(s.saldo).toFixed(2)}</span> },
                   ...(s.categoria_id === 2 && s.quantidade != null ? [{ label: "Qtd.", valor: <span className="font-mono">{Number(s.quantidade).toLocaleString("pt-BR")} un</span> }] : []),
                   { label: "Entradas", valor: <span style={{ color: C.success }} className="font-mono">{s.categoria_id === 2 ? formatPesoCt(Number(s.total_entrada) / 0.2) : Number(s.total_entrada).toFixed(2)}</span> },
@@ -400,7 +403,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
               <table className="w-full">
                 <thead>
                   <tr style={{ backgroundColor: C.esmeralda }}>
-                    {["Insumo", "SKU", "Categoria", "Depósito", "Entradas", "Saídas", "Saldo", "Qtd.", "Movim."].map((h) => (
+                    {["Insumo", "SKU", "Categoria", "Depósito", "Local", "Entradas", "Saídas", "Saldo", "Qtd.", "Movim."].map((h) => (
                       <th
                         key={h}
                         className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider"
@@ -414,7 +417,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
                 <tbody>
                   {filteredSaldos.map((s, i) => (
                     <tr
-                      key={`${s.deposito_id}-${s.insumo_id}`}
+                      key={`${s.deposito_id}-${s.insumo_id}-${s.local_estoque_id ?? 0}`}
                       className="border-b"
                       style={{
                         borderColor: C.creme,
@@ -432,6 +435,9 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
                       </td>
                       <td className="px-4 py-2.5 text-xs" style={{ color: "#6B7280" }}>
                         {s.deposito_nome || "—"}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs" style={{ color: "#6B7280" }}>
+                        {s.local_estoque_nome || "—"}
                       </td>
                       <td className="px-4 py-2.5 text-right font-mono text-xs" style={{ color: C.success }}>
                         {s.categoria_id === 2 && s.saldo_ct != null
@@ -470,7 +476,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
                   ))}
                   {filteredSaldos.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-4 py-12 text-center text-sm" style={{ color: "#6B7280" }}>
+                      <td colSpan={10} className="px-4 py-12 text-center text-sm" style={{ color: "#6B7280" }}>
                         Nenhum resultado
                       </td>
                     </tr>
@@ -520,7 +526,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
               <table className="w-full">
                 <thead>
                   <tr style={{ backgroundColor: C.esmeralda }}>
-                    {["ID", "Data", "Insumo", "Marcador", "Entrada", "Saída", "Depósito", "Setor", "Ordem"].map((h) => (
+                    {["ID", "Data", "Insumo", "Marcador", "Entrada", "Saída", "Depósito", "Local", "Setor", "Ordem"].map((h) => (
                       <th
                         key={h}
                         className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider"
@@ -556,6 +562,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
                         {Number(m.saida) > 0 ? Number(m.saida).toFixed(2) : ""}
                       </td>
                       <td className="px-3 py-2 text-[11px]" style={{ color: "#6B7280" }}>{m.deposito_nome || "—"}</td>
+                      <td className="px-3 py-2 text-[11px]" style={{ color: "#6B7280" }}>{m.local_estoque_nome || "—"}</td>
                       <td className="px-3 py-2 text-[11px]" style={{ color: "#6B7280" }}>{m.setor_nome || "—"}</td>
                       <td className="px-3 py-2 text-[11px] font-mono" style={{ color: C.esmeralda }}>
                         {m.numero_ordem || "—"}
