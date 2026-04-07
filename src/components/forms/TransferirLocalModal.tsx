@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { X, Loader2, CheckCircle, AlertCircle } from "lucide-react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { X, Loader2, CheckCircle, AlertCircle, Search } from "lucide-react";
 
 const C = {
   esmeralda: "#184036",
@@ -34,6 +34,8 @@ interface Props {
 export default function TransferirLocalModal({ isOpen, onClose, onSuccess, locais }: Props) {
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [insumoId, setInsumoId] = useState<number | "">("");
+  const [insumoSearch, setInsumoSearch] = useState("");
+  const [showDropdown, setShowDropdown] = useState(false);
   const [quantidade, setQuantidade] = useState("");
   const [localOrigemId, setLocalOrigemId] = useState<number | "">("");
   const [localDestinoId, setLocalDestinoId] = useState<number | "">("");
@@ -43,6 +45,9 @@ export default function TransferirLocalModal({ isOpen, onClose, onSuccess, locai
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (!isOpen) return;
     fetch("/api/pcp/insumos")
@@ -51,8 +56,42 @@ export default function TransferirLocalModal({ isOpen, onClose, onSuccess, locai
       .catch(() => {});
   }, [isOpen]);
 
+  // Close dropdown on click outside
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const filteredInsumos = useMemo(() => {
+    if (!insumoSearch.trim()) return insumos;
+    const q = insumoSearch.toLowerCase();
+    return insumos.filter(
+      (i) => i.nome.toLowerCase().includes(q) || (i.sku && i.sku.toLowerCase().includes(q))
+    );
+  }, [insumos, insumoSearch]);
+
+  function selectInsumo(i: Insumo) {
+    setInsumoId(i.id);
+    setInsumoSearch(i.nome + (i.sku ? ` (${i.sku})` : ""));
+    setShowDropdown(false);
+    setError("");
+  }
+
+  function clearInsumo() {
+    setInsumoId("");
+    setInsumoSearch("");
+    setShowDropdown(false);
+  }
+
   function resetForm() {
     setInsumoId("");
+    setInsumoSearch("");
+    setShowDropdown(false);
     setQuantidade("");
     setLocalOrigemId("");
     setLocalDestinoId("");
@@ -141,27 +180,83 @@ export default function TransferirLocalModal({ isOpen, onClose, onSuccess, locai
 
         {/* Body */}
         <div className="px-6 py-5 space-y-4">
-          {/* Insumo */}
-          <div>
+          {/* Insumo — Autocomplete */}
+          <div ref={dropdownRef} className="relative">
             <label
               className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
               style={{ color: "#6B7280" }}
             >
               Insumo <span style={{ color: "#EF4444" }}>*</span>
             </label>
-            <select
-              value={insumoId}
-              onChange={(e) => { setInsumoId(e.target.value ? parseInt(e.target.value) : ""); setError(""); }}
-              className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none"
-              style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}
-            >
-              <option value="">Selecione o insumo...</option>
-              {insumos.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.nome}{i.sku ? ` (${i.sku})` : ""}{i.categoria_id === 2 ? " — Pedra" : ""}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                style={{ color: "#9CA3AF" }}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                value={insumoSearch}
+                onChange={(e) => {
+                  setInsumoSearch(e.target.value);
+                  setShowDropdown(true);
+                  if (insumoId) { setInsumoId(""); }
+                  setError("");
+                }}
+                onFocus={() => setShowDropdown(true)}
+                placeholder="Digite o nome do insumo..."
+                className="w-full pl-9 pr-8 py-2.5 rounded-lg border text-sm focus:outline-none"
+                style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}
+                autoComplete="off"
+              />
+              {insumoId && (
+                <button
+                  onClick={clearInsumo}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-gray-100"
+                >
+                  <X size={14} style={{ color: "#9CA3AF" }} />
+                </button>
+              )}
+            </div>
+            {showDropdown && (
+              <div
+                className="absolute z-20 mt-1 w-full bg-white rounded-lg border shadow-lg max-h-52 overflow-y-auto"
+                style={{ borderColor: C.cremeBorder }}
+              >
+                {filteredInsumos.length === 0 ? (
+                  <div className="px-3 py-3 text-[12px] text-center" style={{ color: "#9CA3AF" }}>
+                    Nenhum insumo encontrado
+                  </div>
+                ) : (
+                  filteredInsumos.slice(0, 50).map((i) => (
+                    <button
+                      key={i.id}
+                      onClick={() => selectInsumo(i)}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                      style={{
+                        borderBottom: `1px solid ${C.cremeBg}`,
+                        backgroundColor: insumoId === i.id ? C.cremeBg : undefined,
+                      }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium block truncate" style={{ color: "#111827" }}>
+                          {i.nome}
+                        </span>
+                        <span className="text-[10px] font-mono" style={{ color: "#9CA3AF" }}>
+                          {i.sku ?? "—"} {i.categoria_id === 2 ? "· Pedra" : ""}
+                        </span>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+            {insumoSelecionado && (
+              <div className="mt-1 text-[11px] font-mono" style={{ color: C.sage }}>
+                {insumoSelecionado.nome} {insumoSelecionado.categoria_id === 2 ? "(Pedra)" : "(Metal/Outro)"}
+              </div>
+            )}
           </div>
 
           {/* Quantidade */}

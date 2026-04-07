@@ -54,7 +54,7 @@ function MarcadorBadge({ marcador }: { marcador: string }) {
   );
 }
 
-type Tab = "saldos" | "movimentacoes" | "insumos";
+type Tab = "saldos" | "movimentacoes" | "insumos" | "depositos";
 
 interface Props {
   saldos: any[];
@@ -130,10 +130,60 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
     );
   }, [movimentacoes, searchMov]);
 
+  const [depositos, setDepositos] = useState<{id: number; nome: string; tipo: string; ativo: boolean}[]>([]);
+  const [novoDeposito, setNovoDeposito] = useState("");
+  const [tipoDeposito, setTipoDeposito] = useState<"producao" | "administrativo">("producao");
+  const [savingDep, setSavingDep] = useState(false);
+  const [editingDep, setEditingDep] = useState<number | null>(null);
+  const [editNome, setEditNome] = useState("");
+
+  const loadDepositos = useCallback(() => {
+    fetch("/api/depositos")
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setDepositos(data); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { if (tab === "depositos") loadDepositos(); }, [tab, loadDepositos]);
+
+  async function criarDeposito() {
+    if (!novoDeposito.trim()) return;
+    setSavingDep(true);
+    const res = await fetch("/api/depositos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome: novoDeposito.trim(), tipo: tipoDeposito }),
+    });
+    setSavingDep(false);
+    if (res.ok) { setNovoDeposito(""); loadDepositos(); }
+  }
+
+  async function toggleDeposito(id: number, ativo: boolean) {
+    await fetch(`/api/depositos/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ativo: !ativo }),
+    });
+    loadDepositos();
+  }
+
+  async function renomearDeposito(id: number) {
+    if (!editNome.trim()) { setEditingDep(null); return; }
+    await fetch(`/api/depositos/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome: editNome.trim() }),
+    });
+    setEditingDep(null);
+    setEditNome("");
+    loadDepositos();
+  }
+
   const tabs: { key: Tab; label: string }[] = [
     { key: "saldos",         label: "Saldos por Depósito" },
     { key: "movimentacoes",  label: `Movimentações (${movimentacoes.length})` },
     { key: "insumos",        label: `Catálogo (${insumos.length})` },
+    { key: "depositos",      label: "Depósitos" },
   ];
 
   return (
@@ -589,6 +639,131 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
         </div>
         </>
       )}
+      {/* TAB: Depósitos */}
+      {tab === "depositos" && (
+        <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+          {/* Formulário novo depósito */}
+          <div className="p-4 border-b flex flex-col md:flex-row gap-3 items-end" style={{ borderColor: C.cremeBorder, backgroundColor: C.bg }}>
+            <div className="flex-1 w-full">
+              <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#6B7280" }}>
+                Nome do Depósito
+              </label>
+              <input
+                type="text"
+                value={novoDeposito}
+                onChange={(e) => setNovoDeposito(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") criarDeposito(); }}
+                placeholder="Ex: Ourives João, Bancada 3..."
+                className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none"
+                style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}
+              />
+            </div>
+            <div className="w-full md:w-40">
+              <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#6B7280" }}>
+                Tipo
+              </label>
+              <select
+                value={tipoDeposito}
+                onChange={(e) => setTipoDeposito(e.target.value as "producao" | "administrativo")}
+                className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none"
+                style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}
+              >
+                <option value="producao">Produção</option>
+                <option value="administrativo">Administrativo</option>
+              </select>
+            </div>
+            <button
+              onClick={criarDeposito}
+              disabled={savingDep || !novoDeposito.trim()}
+              className="px-4 py-2 rounded-lg text-[13px] font-semibold transition-all disabled:opacity-40 whitespace-nowrap"
+              style={{ backgroundColor: C.esmeralda, color: C.creme }}
+            >
+              {savingDep ? "Salvando..." : "+ Criar"}
+            </button>
+          </div>
+
+          {/* Lista */}
+          <table className="w-full">
+            <thead>
+              <tr style={{ backgroundColor: C.esmeralda }}>
+                {["ID", "Nome", "Tipo", "Status", "Ações"].map((h) => (
+                  <th key={h} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.sage }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {depositos.map((dep, i) => (
+                <tr
+                  key={dep.id}
+                  className="border-b"
+                  style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.bg }}
+                >
+                  <td className="px-4 py-2.5 font-mono text-[11px]" style={{ color: "#6B7280" }}>{dep.id}</td>
+                  <td className="px-4 py-2.5 text-sm font-medium" style={{ color: "#1A1A1A" }}>
+                    {editingDep === dep.id ? (
+                      <input
+                        type="text"
+                        value={editNome}
+                        onChange={(e) => setEditNome(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") renomearDeposito(dep.id); if (e.key === "Escape") setEditingDep(null); }}
+                        onBlur={() => renomearDeposito(dep.id)}
+                        autoFocus
+                        className="px-2 py-1 rounded border text-sm focus:outline-none w-full"
+                        style={{ borderColor: C.cremeBorder }}
+                      />
+                    ) : (
+                      <span
+                        className="cursor-pointer hover:underline"
+                        onClick={() => { setEditingDep(dep.id); setEditNome(dep.nome); }}
+                      >
+                        {dep.nome}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-xs" style={{ color: "#6B7280" }}>
+                    {dep.tipo === "producao" ? "Produção" : "Administrativo"}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span
+                      className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                      style={{
+                        backgroundColor: dep.ativo ? "#D1FAE5" : "#FEE2E2",
+                        color: dep.ativo ? "#065F46" : "#991B1B",
+                      }}
+                    >
+                      {dep.ativo ? "Ativo" : "Inativo"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {dep.id !== 1 && (
+                      <button
+                        onClick={() => toggleDeposito(dep.id, dep.ativo)}
+                        className="text-[11px] px-2 py-1 rounded transition-colors hover:bg-gray-100"
+                        style={{ color: dep.ativo ? "#DC2626" : "#059669" }}
+                      >
+                        {dep.ativo ? "Desativar" : "Ativar"}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {depositos.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-12 text-center text-sm" style={{ color: "#6B7280" }}>
+                    Nenhum depósito cadastrado
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <div className="px-4 py-3 border-t text-[11px]" style={{ borderColor: C.creme, color: "#6B7280" }}>
+            {depositos.length} depósitos
+          </div>
+        </div>
+      )}
+
       <LancamentoAvulsoModal
         isOpen={modalAvulso}
         onClose={() => setModalAvulso(false)}
