@@ -102,7 +102,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
   }, [saldos]);
 
   useEffect(() => {
-    fetch("/api/locais-estoque")
+    fetch("/api/locais-estoque", { cache: "no-store" })
       .then((r) => r.json())
       .then((data) => { if (Array.isArray(data)) setLocais(data); })
       .catch(() => {});

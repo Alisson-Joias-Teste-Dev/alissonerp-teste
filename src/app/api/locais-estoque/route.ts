@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/locais-estoque — lista todos os locais ativos
 export async function GET() {
   const rows = await sql`
