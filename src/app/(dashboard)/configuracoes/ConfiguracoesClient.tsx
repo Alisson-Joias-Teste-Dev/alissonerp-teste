@@ -90,6 +90,9 @@ interface Usuario {
   avatar_url: string | null;
   tipos_ordem_permitidos?: string[];
   tipos_protocolo_permitidos?: string[];
+  is_operador_service?: boolean;
+  is_transportador?: boolean;
+  mx_desconto_permitido?: number | null;
 }
 
 interface TeorOuro {
@@ -498,24 +501,13 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
     if (!initialUserId) return;
     const u = usuariosInit.find((u) => u.id === initialUserId);
     if (u) {
-      setEditando({
-        id:                    u.id,
-        email:                 u.email,
-        nome:                  u.nome,
-        role:                  u.role,
-        ativo:                 u.ativo,
-        avatar_url:            u.avatar_url ?? null,
-        deposito_id:           null,
-        vendedor_id:           null,
-        tipos_ordem_permitidos:     u.tipos_ordem_permitidos ?? [],
-        tipos_protocolo_permitidos: u.tipos_protocolo_permitidos ?? [],
-      });
+      setEditando(buildEditObj(u));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialUserId]);
 
-  function abrirDrawer(u: Usuario) {
-    setEditando({
+  function buildEditObj(u: Usuario): UsuarioEdit {
+    return {
       id:                         u.id,
       email:                      u.email,
       nome:                       u.nome,
@@ -526,7 +518,14 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
       vendedor_id:                null,
       tipos_ordem_permitidos:     u.tipos_ordem_permitidos ?? [],
       tipos_protocolo_permitidos: u.tipos_protocolo_permitidos ?? [],
-    });
+      is_operador_service:        u.is_operador_service ?? false,
+      is_transportador:           u.is_transportador ?? false,
+      mx_desconto_permitido:      u.mx_desconto_permitido ?? null,
+    };
+  }
+
+  function abrirDrawer(u: Usuario) {
+    setEditando(buildEditObj(u));
   }
 
   function handleSaved(updated: UsuarioEdit) {

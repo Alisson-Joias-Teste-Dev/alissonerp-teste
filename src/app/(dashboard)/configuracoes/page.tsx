@@ -29,6 +29,8 @@ export default async function ConfiguracoesPage() {
         u.id, u.email, u.nome, u.role, u.ativo, u.created_at,
         u.tipos_ordem_permitidos,
         u.tipos_protocolo_permitidos,
+        u.is_operador_service,
+        u.is_transportador,
         u.mx_desconto_permitido,
         up.avatar_url
       FROM alissonerp.usuarios u

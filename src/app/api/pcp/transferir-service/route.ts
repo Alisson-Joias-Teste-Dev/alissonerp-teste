@@ -43,9 +43,10 @@ async function _handler(req: NextRequest) {
     deposito_destino_id: number;
     observacao?: string | null;
     user_id?: string | null;
+    motoboy_id?: string | null;
   };
 
-  const { pcp_id, deposito_destino_id, observacao, user_id } = body;
+  const { pcp_id, deposito_destino_id, observacao, user_id, motoboy_id } = body;
 
   if (!pcp_id || !deposito_destino_id) {
     return NextResponse.json(
@@ -143,14 +144,15 @@ async function _handler(req: NextRequest) {
       `;
     }
 
-    // 6. Criar protocolo ida automático
+    // 6. Criar protocolo ida automático (com transportador se informado)
     const [proto] = await tx`
       INSERT INTO alissonerp.protocolos
-        (direcao, etapas, tipo_protocolo, created_by)
+        (direcao, etapas, tipo_protocolo, created_by, motoboy_id)
       VALUES
         ('ida'::alissonerp.enum_direcao_protocolo,
          'pendente'::alissonerp.enum_etapas_protocolo,
-         'fabrica', ${user_id ?? user.id}::uuid)
+         'fabrica', ${user_id ?? user.id}::uuid,
+         ${motoboy_id ?? null}::uuid)
       RETURNING id
     `;
     const protocoloId = proto.id as number;

@@ -18,6 +18,7 @@ export interface UsuarioEdit {
   tipos_ordem_permitidos?: string[];
   tipos_protocolo_permitidos?: string[];
   is_operador_service?: boolean;
+  is_transportador?: boolean;
   mx_desconto_permitido?: number | null;
 }
 
@@ -79,6 +80,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
   const [tiposProtocoloPermitidos, setTiposProtocoloPermitidos] = useState<string[]>([]);
 
   const [isOperadorService, setIsOperadorService] = useState(false);
+  const [isTransportador, setIsTransportador] = useState(false);
   const [mxDesconto, setMxDesconto] = useState<string>("");
 
   const [salvando, setSalvando] = useState(false);
@@ -122,6 +124,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
       setTiposPermitidos(usuario.tipos_ordem_permitidos ?? []);
       setTiposProtocoloPermitidos(usuario.tipos_protocolo_permitidos ?? []);
       setIsOperadorService(usuario.is_operador_service ?? false);
+      setIsTransportador(usuario.is_transportador ?? false);
       setMxDesconto(usuario.mx_desconto_permitido != null ? String(usuario.mx_desconto_permitido) : "");
 
       // Buscar permissões granulares do usuário
@@ -232,6 +235,7 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
       tipos_ordem_permitidos:      tiposPermitidos,
       tipos_protocolo_permitidos:  tiposProtocoloPermitidos,
       is_operador_service:         isOperadorService,
+      is_transportador:            isTransportador,
       mx_desconto_permitido:       mxDesconto !== "" ? parseFloat(mxDesconto) : null,
     };
     // Só envia email se mudou
@@ -482,6 +486,29 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
                 <span
                   className={`inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform duration-200 ${
                     isOperadorService ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Toggle Transportador */}
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <p className="text-sm font-medium text-gray-800">Transportador</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  Pode levar peças entre fábrica e service (aparece no &quot;Quem vai levar?&quot;)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTransportador(v => !v)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+                  isTransportador ? "bg-[#184036]" : "bg-gray-200"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform duration-200 ${
+                    isTransportador ? "translate-x-5" : "translate-x-0"
                   }`}
                 />
               </button>
