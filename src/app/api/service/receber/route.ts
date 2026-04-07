@@ -55,25 +55,33 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 2. Validar que TODAS as ordens do protocolo são de tipo service
-  const ordensNaoService = await sql`
-    SELECT o.id FROM alissonerp.protocolo_ordens po
-    JOIN alissonerp.ordens o ON o.id = po.ordem_id
-    WHERE po.protocolo_id = ${protocolo_id}
-      AND o.tipo_ordem::text NOT IN (
-        SELECT jsonb_array_elements_text(
-          COALESCE(
-            (SELECT valor::jsonb FROM alissonerp.configuracoes_sistema WHERE chave = 'service_tipos_ordem'),
-            '["servico_venda","garantia","servico_interno"]'::jsonb
+  // 2. Validar que TODAS as ordens são de tipo service OU vieram de transferência PCP→Service
+  const isTransfService = await sql`
+    SELECT 1 FROM alissonerp.transferencias_ordem t
+    WHERE t.protocolo_id = ${protocolo_id} AND t.tipo_transferencia = 'service'
+    LIMIT 1
+  `;
+  if (isTransfService.length === 0) {
+    // Protocolo normal: validar tipo_ordem
+    const ordensNaoService = await sql`
+      SELECT o.id FROM alissonerp.protocolo_ordens po
+      JOIN alissonerp.ordens o ON o.id = po.ordem_id
+      WHERE po.protocolo_id = ${protocolo_id}
+        AND o.tipo_ordem::text NOT IN (
+          SELECT jsonb_array_elements_text(
+            COALESCE(
+              (SELECT valor::jsonb FROM alissonerp.configuracoes_sistema WHERE chave = 'service_tipos_ordem'),
+              '["servico_venda","garantia","servico_interno"]'::jsonb
+            )
           )
         )
-      )
-  `;
-  if (ordensNaoService.length > 0) {
-    return NextResponse.json(
-      { error: "Este protocolo contém ordens que não são do módulo Service" },
-      { status: 422 }
-    );
+    `;
+    if (ordensNaoService.length > 0) {
+      return NextResponse.json(
+        { error: "Este protocolo contém ordens que não são do módulo Service" },
+        { status: 422 }
+      );
+    }
   }
 
   // 3. Upload foto de recebimento
