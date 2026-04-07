@@ -13,7 +13,7 @@ export async function GET(_req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const [caller] = await sql`
-    SELECT role, is_operador_service
+    SELECT role, is_operador_service, deposito_id
     FROM alissonerp.usuarios
     WHERE id = ${user.id}::uuid
   `;
@@ -21,6 +21,10 @@ export async function GET(_req: NextRequest) {
 
   const hasAccess = isFullAccess(caller.role as string) || caller.is_operador_service === true;
   if (!hasAccess) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+
+  // Buscar deposito_id do operador logado (para filtrar transferências service)
+  const callerDepositoId = caller.deposito_id as number | null;
+  const isFull = isFullAccess(caller.role as string);
 
   const rows = await sql`
     SELECT p.id,
@@ -43,12 +47,37 @@ export async function GET(_req: NextRequest) {
     LEFT JOIN public.contatos c ON c.id_contato = o.cliente_id
     WHERE p.direcao = 'ida'
       AND p.etapas = 'pendente'
-      AND o.tipo_ordem::text IN (
-        SELECT jsonb_array_elements_text(
-          COALESCE(
-            (SELECT valor::jsonb FROM alissonerp.configuracoes_sistema WHERE chave = 'service_tipos_ordem'),
-            '["servico_venda","garantia","servico_interno"]'::jsonb
+      AND (
+        -- Protocolos normais de service: filtrar por tipo_ordem
+        o.tipo_ordem::text IN (
+          SELECT jsonb_array_elements_text(
+            COALESCE(
+              (SELECT valor::jsonb FROM alissonerp.configuracoes_sistema WHERE chave = 'service_tipos_ordem'),
+              '["servico_venda","garantia","servico_interno"]'::jsonb
+            )
           )
+        )
+        -- OU protocolos vindos de transferência PCP→Service (qualquer tipo_ordem)
+        OR EXISTS (
+          SELECT 1 FROM alissonerp.transferencias_ordem t
+          WHERE t.protocolo_id = p.id AND t.tipo_transferencia = 'service'
+        )
+      )
+      AND (
+        -- fullAccess vê tudo
+        ${isFull}::boolean = true
+        -- Protocolos normais (sem transferência service): visíveis para todos os operadores
+        OR NOT EXISTS (
+          SELECT 1 FROM alissonerp.transferencias_ordem t
+          WHERE t.protocolo_id = p.id AND t.tipo_transferencia = 'service'
+        )
+        -- Protocolos de transferência service: só para o operador destino
+        OR EXISTS (
+          SELECT 1 FROM alissonerp.transferencias_ordem t
+          JOIN alissonerp.pcp pcp ON pcp.id = t.pcp_id
+          WHERE t.protocolo_id = p.id
+            AND t.tipo_transferencia = 'service'
+            AND pcp.deposito_id = ${callerDepositoId ?? 0}
         )
       )
     GROUP BY p.id
