@@ -125,20 +125,74 @@ export async function POST(req: NextRequest) {
       `;
       const ordemIds = ordemRows.map(r => r.ordem_id as number);
 
-      // 6. Atribuir servicos ao operador que clicou "Receber".
-      //    AND operador_id IS NULL garante que só o primeiro recebimento é aceito.
-      const servicosAssigned = await tx`
-        UPDATE alissonerp.servicos
-        SET operador_id      = ${caller.deposito_id as number},
-            status           = 'em_servico',
-            foto_recebimento = ${fotoUrl},
-            recebido_em      = NOW()
-        WHERE ordem_id = ANY(${ordemIds}::int[])
-          AND status = 'aguardando'
-          AND operador_id IS NULL
-        RETURNING id
+      // 6. Verificar se é transferência service
+      const [isTransf] = await tx`
+        SELECT id, pcp_id FROM alissonerp.transferencias_ordem
+        WHERE protocolo_id = ${protocolo_id} AND tipo_transferencia = 'service'
+        LIMIT 1
       `;
-      servicoIds = servicosAssigned.map(r => r.id as number);
+
+      if (isTransf) {
+        // Transferência PCP→Service: criar servico manualmente
+        // (fn_concluir_protocolo não cria PCP novo pois já existe)
+        for (const ordemId of ordemIds) {
+          // Buscar PCP ativo desta ordem
+          const [pcp] = await tx`
+            SELECT id FROM alissonerp.pcp
+            WHERE ordem_id = ${ordemId}
+              AND etapas NOT IN ('concluido', 'cancelado')
+            ORDER BY id DESC LIMIT 1
+          `;
+          const [existente] = await tx`
+            SELECT id FROM alissonerp.servicos
+            WHERE ordem_id = ${ordemId}
+              AND status IN ('em_servico', 'aguardando')
+            LIMIT 1
+          `;
+          if (!existente) {
+            const [peso] = await tx`
+              SELECT COALESCE(peso_peca_servico, 0) AS peso FROM alissonerp.ordens WHERE id = ${ordemId}
+            `;
+            const [novo] = await tx`
+              INSERT INTO alissonerp.servicos
+                (ordem_id, pcp_id, operador_id, peso_entrada, status,
+                 foto_recebimento, recebido_em, transferencia_service_id)
+              VALUES
+                (${ordemId}, ${pcp?.id ?? null}, ${caller.deposito_id as number},
+                 ${Number(peso?.peso ?? 0)}, 'em_servico',
+                 ${fotoUrl}, NOW(), ${isTransf.id})
+              RETURNING id
+            `;
+            servicoIds.push(novo.id as number);
+          } else {
+            // Já existe: atualizar operador
+            await tx`
+              UPDATE alissonerp.servicos
+              SET operador_id = ${caller.deposito_id as number},
+                  status = 'em_servico',
+                  foto_recebimento = ${fotoUrl},
+                  recebido_em = NOW()
+              WHERE id = ${existente.id}
+            `;
+            servicoIds.push(existente.id as number);
+          }
+        }
+      } else {
+        // Protocolo normal: atribuir servicos existentes ao operador
+        // AND operador_id IS NULL garante que só o primeiro recebimento é aceito.
+        const servicosAssigned = await tx`
+          UPDATE alissonerp.servicos
+          SET operador_id      = ${caller.deposito_id as number},
+              status           = 'em_servico',
+              foto_recebimento = ${fotoUrl},
+              recebido_em      = NOW()
+          WHERE ordem_id = ANY(${ordemIds}::int[])
+            AND status = 'aguardando'
+            AND operador_id IS NULL
+          RETURNING id
+        `;
+        servicoIds = servicosAssigned.map(r => r.id as number);
+      }
     });
   } catch (e) {
     if (e instanceof Error && e.message === "RACE_CONDITION") {
