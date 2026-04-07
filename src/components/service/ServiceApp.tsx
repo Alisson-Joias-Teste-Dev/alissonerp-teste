@@ -1703,15 +1703,9 @@ export default function ServiceApp() {
                 <Btn variant="green" onClick={() => iniciarConcluir(svc)} className="flex-1 h-11">
                   <CheckCircle2 size={15} />Concluido
                 </Btn>
-                {svc.transferencia_service_id ? (
-                  <Btn variant="gold" onClick={() => iniciarDevolver(svc)} className="flex-1 h-11">
-                    <CheckCircle size={15} />Devolver
-                  </Btn>
-                ) : (
-                  <Btn variant="outline-blue" onClick={() => abrirTransferir(svc)} className="flex-1 h-11">
-                    <ArrowLeftRight size={15} />Transferir
-                  </Btn>
-                )}
+                <Btn variant="outline-blue" onClick={() => abrirTransferir(svc)} className="flex-1 h-11">
+                  <ArrowLeftRight size={15} />Transferir
+                </Btn>
               </div>
               <div className="flex gap-2 mt-2">
                 <button
