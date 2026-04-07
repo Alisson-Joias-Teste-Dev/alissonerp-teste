@@ -58,6 +58,11 @@ interface InsumoOpcao {
   id: number;
   insumo_nome: string;
   unidade: string;
+  saldo?: number;
+  saldo_ct?: number;
+  quantidade?: number;
+  peso_pedra?: number;
+  peso_pedra_ct?: number;
 }
 
 interface PedraSelecionada {
@@ -391,11 +396,11 @@ export default function ServiceApp() {
   }, []);
 
   const fetchInsumoPedras = useCallback(async () => {
-    if (insumoPedras.length > 0) return;
-    const res  = await fetch("/api/insumos?categoria_id=2").catch(() => null);
+    // Buscar pedras com saldo no local Service (local_id=3)
+    const res  = await fetch("/api/service/pedras-estoque?local_id=3", { cache: "no-store" }).catch(() => null);
     const data = res?.ok ? await res.json().catch(() => []) : [];
     setInsumoPedras(Array.isArray(data) ? data : []);
-  }, [insumoPedras.length]);
+  }, []);
 
   // ── Mount + realtime ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -701,7 +706,8 @@ export default function ServiceApp() {
   ).slice(0, 8);
 
   function adicionarPedra(insumo: InsumoOpcao) {
-    setPedras(prev => [...prev, { insumo_id: insumo.id, nome: insumo.insumo_nome, qtd: 1, peso_unitario: 0, peso_total: 0, origem: "estoque" }]);
+    const pesoUni = insumo.peso_pedra ?? 0;
+    setPedras(prev => [...prev, { insumo_id: insumo.id, nome: insumo.insumo_nome, qtd: 1, peso_unitario: pesoUni, peso_total: pesoUni, origem: "estoque" }]);
     setBuscarPedra("");
     setPedrasDropdown(false);
   }
@@ -1230,7 +1236,7 @@ export default function ServiceApp() {
               <p className="text-base font-semibold" style={{ color: S.text }}>Colocou pedra neste serviço?</p>
               <div className="flex gap-3">
                 {([true, false] as const).map(v => (
-                  <button key={String(v)} onClick={() => setColouPedra(v)}
+                  <button key={String(v)} onClick={() => { setColouPedra(v); if (v) fetchInsumoPedras(); }}
                     className="flex-1 h-14 rounded-xl font-semibold text-sm transition-all border-2 active:scale-[0.97]"
                     style={{
                       backgroundColor: colouPedra === v ? (v ? "rgba(29,158,117,0.18)" : S.cardHover) : S.cardBg,
@@ -1260,9 +1266,13 @@ export default function ServiceApp() {
                         style={{ backgroundColor: "#1a4a3c", border: `1px solid ${S.border}` }}>
                         {pedrasFiltradas.map(i => (
                           <button key={i.id} onClick={() => adicionarPedra(i)}
-                            className="w-full px-4 py-3 text-left text-sm border-b last:border-0 active:bg-white/10"
+                            className="w-full px-4 py-3 text-left border-b last:border-0 active:bg-white/10"
                             style={{ borderColor: S.border, color: S.text }}>
-                            {i.insumo_nome}
+                            <span className="text-sm">{i.insumo_nome}</span>
+                            <span className="block text-[10px] mt-0.5" style={{ color: S.textMuted }}>
+                              Estoque: {i.saldo_ct != null ? `${Number(i.saldo_ct).toFixed(2)}ct` : `${Number(i.saldo ?? 0).toFixed(3)}g`}
+                              {i.quantidade != null ? ` · ${Number(i.quantidade)} un` : ""}
+                            </span>
                           </button>
                         ))}
                       </div>
