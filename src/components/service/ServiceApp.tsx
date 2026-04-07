@@ -654,29 +654,24 @@ export default function ServiceApp() {
 
   function abrirTransferirFabrica(svc: ServicoMeu) {
     setServicoTransf(svc);
-    setDestFabricaId(null);
     setTransportadorId("");
     setLoadingFabrica(true);
-    Promise.all([
-      fetch("/api/pcp/depositos").then(r => r.json()),
-      fetch("/api/usuarios/transportadores", { cache: "no-store" }).then(r => r.json()),
-    ]).then(([deps, transp]) => {
-      setDepositosFabrica(Array.isArray(deps) ? (deps as Deposito[]).filter(d => d.id !== 1) : []);
-      setTransportadores(Array.isArray(transp) ? transp : []);
-      setLoadingFabrica(false);
-    }).catch(() => setLoadingFabrica(false));
+    fetch("/api/usuarios/transportadores", { cache: "no-store" })
+      .then(r => r.json())
+      .then(data => { setTransportadores(Array.isArray(data) ? data : []); setLoadingFabrica(false); })
+      .catch(() => setLoadingFabrica(false));
     setView("transferir-fabrica");
   }
 
   async function handleTransferirFabrica() {
-    if (!servicoTransf || !destFabricaId) return;
+    if (!servicoTransf) return;
     setProcessando(true);
     try {
       const res = await fetch(`/api/service/${servicoTransf.id}/transferir-fabrica`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          deposito_destino_id: destFabricaId,
+          deposito_destino_id: 1, // Sempre Pote/Almoxarifado Central
           motoboy_id: transportadorId || null,
         }),
       });
@@ -1390,28 +1385,10 @@ export default function ServiceApp() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-28">
-          {/* Depósito destino */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest mb-3" style={{ color: S.textMuted }}>
-              Depósito de destino (fábrica)
-            </p>
-            {loadingFabrica ? (
-              <div className="flex justify-center py-10"><Loader2 size={22} className="animate-spin" style={{ color: S.textMuted }} /></div>
-            ) : depositosFabrica.map(d => (
-              <button key={d.id} onClick={() => setDestFabricaId(d.id)}
-                className="w-full flex items-center gap-3 rounded-2xl px-4 py-4 transition-all active:scale-[0.98] border-2 mb-2"
-                style={{
-                  backgroundColor: destFabricaId === d.id ? "rgba(168,85,247,0.1)" : S.cardBg,
-                  borderColor:     destFabricaId === d.id ? "#A855F7" : "transparent",
-                }}>
-                <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
-                  style={{ backgroundColor: "rgba(168,85,247,0.15)", color: "#C084FC" }}>
-                  {d.nome.slice(0, 2).toUpperCase()}
-                </div>
-                <span className="text-sm font-medium flex-1 text-left" style={{ color: S.text }}>{d.nome}</span>
-                {destFabricaId === d.id && <CheckCircle2 size={18} color="#A855F7" />}
-              </button>
-            ))}
+          {/* Info destino fixo */}
+          <div className="rounded-2xl px-4 py-3" style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}` }}>
+            <p className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: S.textMuted }}>Destino</p>
+            <p className="text-sm font-medium" style={{ color: S.text }}>Almoxarifado Central (Fábrica)</p>
           </div>
 
           {/* Transportador */}
@@ -1446,7 +1423,7 @@ export default function ServiceApp() {
         <div className="fixed bottom-0 left-0 right-0 px-4 pt-3 z-20"
           style={{ backgroundColor: "rgba(24,64,54,0.97)", borderTop: `1px solid ${S.border}`, paddingBottom: "calc(12px + env(safe-area-inset-bottom))" }}>
           <Btn variant="blue" onClick={handleTransferirFabrica}
-            disabled={!destFabricaId || processando}
+            disabled={processando}
             className="w-full h-14 text-base">
             {processando ? <><Loader2 size={18} className="animate-spin" />Transferindo...</> : <><ArrowLeftRight size={18} />Enviar p/ Fábrica</>}
           </Btn>
