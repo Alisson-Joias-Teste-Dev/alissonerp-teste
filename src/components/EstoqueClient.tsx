@@ -8,6 +8,7 @@ import TransferirLocalModal from "@/components/forms/TransferirLocalModal";
 import { MobileCard } from "@/components/ui/MobileCard";
 import { formatPesoCt } from "@/lib/formatters";
 import { useAuth } from "@/hooks/useAuth";
+import LocaisEstoqueTab from "@/components/LocaisEstoqueTab";
 
 const C = {
   esmeralda: "#184036",
@@ -54,7 +55,7 @@ function MarcadorBadge({ marcador }: { marcador: string }) {
   );
 }
 
-type Tab = "saldos" | "movimentacoes" | "insumos" | "depositos";
+type Tab = "saldos" | "movimentacoes" | "insumos" | "depositos" | "locais";
 
 interface Props {
   saldos: any[];
@@ -184,6 +185,7 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
     { key: "movimentacoes",  label: `Movimentações (${movimentacoes.length})` },
     { key: "insumos",        label: `Catálogo (${insumos.length})` },
     { key: "depositos",      label: "Depósitos" },
+    { key: "locais",          label: "Locais" },
   ];
 
   return (
@@ -762,6 +764,11 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
             {depositos.length} depósitos
           </div>
         </div>
+      )}
+
+      {/* TAB: Locais */}
+      {tab === "locais" && (
+        <LocaisEstoqueTab canEdit={["admin", "desenvolvedor"].includes(role ?? "")} />
       )}
 
       <LancamentoAvulsoModal
