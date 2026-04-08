@@ -90,7 +90,7 @@ const isVencido = (d: string | null, situacao: string) => {
   return venc < hoje;
 };
 
-const SITUACAO: Record<string, { label: string; color: string; icon: React.ElementType }> = {
+const SITUACAO: Record<string, { label: string; color: string; icon: any }> = {
   pendente:   { label: "Pendente",   color: "#DB9864", icon: Clock },
   pago:       { label: "Pago",       color: "#4A9F73", icon: CheckCircle },
   recebido:   { label: "Recebido",   color: "#4A9F73", icon: CheckCircle },
@@ -939,7 +939,7 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
   const totalPagar = pagar.filter((p) => p.situacao === "pendente").reduce((s, p) => s + Number(p.valor), 0);
   const totalReceber = receber.filter((r) => r.situacao === "pendente").reduce((s, r) => s + Number(r.valor), 0);
 
-  const tabs: { key: Tab; label: string; icon: React.ElementType; badge?: string }[] = [
+  const tabs: { key: Tab; label: string; icon: any; badge?: string }[] = [
     { key: "pagar",       label: "Contas a Pagar",   icon: ArrowUpCircle,   badge: pagar.filter((p) => p.situacao === "pendente").length > 0 ? String(pagar.filter((p) => p.situacao === "pendente").length) : undefined },
     { key: "receber",     label: "Contas a Receber", icon: ArrowDownCircle, badge: receber.filter((r) => r.situacao === "pendente").length > 0 ? String(receber.filter((r) => r.situacao === "pendente").length) : undefined },
     { key: "conciliacao", label: "Conciliação OFX",  icon: RefreshCw },

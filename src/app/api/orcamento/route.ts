@@ -62,11 +62,11 @@ export async function POST(req: NextRequest) {
   const {
     nome_cliente, nome_modelo, peso, valor, markup, desconto_pct,
     cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
-    tipo, ficha, observacoes,
+    tipo, ficha, observacoes, cliente_id,
   } = body;
 
-  if (!nome_cliente?.trim()) {
-    return NextResponse.json({ error: "nome_cliente obrigatorio" }, { status: 400 });
+  if (!nome_cliente?.trim() && !cliente_id) {
+    return NextResponse.json({ error: "nome_cliente ou cliente_id obrigatorio" }, { status: 400 });
   }
 
   // Gerar número do orçamento
@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
       numero_orcamento, tipo, vendedor_id, usuario_id,
       nome_cliente, nome_modelo, peso, valor, markup,
       desconto_pct, cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
-      ficha_tecnica_id, observacoes
+      ficha_tecnica_id, observacoes, cliente_id
     ) VALUES (
       ${numero}, ${tipo ?? "alianca"},
       ${caller.id_vendedor ? Number(caller.id_vendedor) : null},
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
       ${peso ?? null}, ${valor ?? null}, ${markup ?? null},
       ${desconto_pct ?? 0}, ${cotacao_ouro ?? null},
       ${cotacao_dolar ?? null}, ${valor_ouro ?? null}, ${valor_pedras ?? null},
-      ${fichaId}, ${observacoes ?? null}
+      ${fichaId}, ${observacoes ?? null}, ${cliente_id ?? null}
     ) RETURNING *
   `;
 

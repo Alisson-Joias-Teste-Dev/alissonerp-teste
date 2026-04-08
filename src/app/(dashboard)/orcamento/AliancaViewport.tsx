@@ -2,7 +2,7 @@
 
 import React, { useMemo, useRef, useEffect, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, PerspectiveCamera, Environment, ContactShadows } from "@react-three/drei";
+import { OrbitControls, PerspectiveCamera, Environment, ContactShadows, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { ProfileType } from "./types";
 import type { RingParams } from "./types";
@@ -184,7 +184,7 @@ function Ring({
       pts.push(new THREE.Vector2(rIn, -wH));
     }
 
-    let geo: THREE.BufferGeometry = new THREE.LatheGeometry(pts, 720);
+    let geo: THREE.BufferGeometry = new THREE.LatheGeometry(pts, 360);
     geo = geo.toNonIndexed();
     geo.computeVertexNormals();
     return geo;
@@ -208,9 +208,62 @@ function Ring({
   );
 }
 
+// ── Engraving Text (inside ring) ─────────────────────────────────────────────
+
+function EngravingText({
+  text,
+  fontType,
+  diameter,
+  width,
+  height,
+}: {
+  text: string;
+  fontType: 1 | 2;
+  diameter: number;
+  width: number;
+  height: number;
+}) {
+  // Place text on the inner surface of the ring
+  const rInner = diameter / 2;
+  const rOuter = rInner + height;
+  const fontSize = Math.min(width * 0.3, 1.0);
+  const charCount = text.length;
+  const spacing = fontSize * 0.55;
+  const totalWidth = charCount * spacing;
+  const r = rInner + 0.02; // on inner surface
+  const totalAngle = totalWidth / r;
+  const startAngle = Math.PI / 2 - totalAngle / 2; // start from front
+
+  return (
+    <group rotation={[Math.PI / 2, 0, 0]}>
+      {text.split("").map((char, i) => {
+        const a = startAngle + (i + 0.5) * (totalAngle / charCount);
+        const px = Math.cos(a) * r;
+        const pz = Math.sin(a) * r;
+        // Face outward from center (readable from inside the ring)
+        return (
+          <Text
+            key={`${i}-${char}`}
+            position={[px, 0, pz]}
+            rotation={[0, -(a - Math.PI / 2), 0]}
+            fontSize={fontSize}
+            anchorX="center"
+            anchorY="middle"
+            fontStyle={fontType === 2 ? "italic" : "normal"}
+            renderOrder={999}
+          >
+            {char}
+            <meshBasicMaterial color="#111111" side={THREE.DoubleSide} depthTest={false} transparent opacity={0.85} />
+          </Text>
+        );
+      })}
+    </group>
+  );
+}
+
 // ── Viewport ─────────────────────────────────────────────────────────────────
 
-export default function AliancaViewport({
+function AliancaViewportInner({
   params,
   profile,
   cameraDistance,
@@ -225,20 +278,51 @@ export default function AliancaViewport({
     onMeshReady?.(m);
   }, [onMeshReady]);
 
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Restore context if lost
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handleLost = (e: Event) => { e.preventDefault(); };
+    const handleRestored = () => { /* R3F auto-restores */ };
+    canvas.addEventListener("webglcontextlost", handleLost);
+    canvas.addEventListener("webglcontextrestored", handleRestored);
+    return () => {
+      canvas.removeEventListener("webglcontextlost", handleLost);
+      canvas.removeEventListener("webglcontextrestored", handleRestored);
+    };
+  }, []);
+
   return (
     <div className="w-full h-full rounded-2xl overflow-hidden border" style={{ borderColor: "#E8DCC8", background: "#f1f5f9" }}>
-      <Canvas shadows dpr={[2, 3]} gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}>
+      <Canvas
+        dpr={[1, 1.5]}
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, powerPreference: "high-performance", alpha: false }}
+        onCreated={({ gl }) => { canvasRef.current = gl.domElement; }}
+      >
         <PerspectiveCamera makeDefault position={[0, -cameraDistance, cameraDistance]} fov={35} />
         <color attach="background" args={["#f1f5f9"]} />
         <ambientLight intensity={0.7} />
         <hemisphereLight intensity={0.5} color="#ffffff" groundColor="#cbd5e1" />
-        <spotLight position={[30, 40, 20]} angle={0.25} penumbra={1} intensity={3} castShadow />
+        <spotLight position={[30, 40, 20]} angle={0.25} penumbra={1} intensity={3} />
         <spotLight position={[-30, 20, 10]} angle={0.3} penumbra={1} intensity={2} color="#ffffff" />
         <Ring params={params} profileType={profile} onSetMesh={handleMesh} />
-        <Environment preset="warehouse" resolution={1024} />
-        <ContactShadows position={[0, -12, 0]} opacity={0.4} scale={40} blur={2.5} far={10} color="#0f172a" />
+        {params.textEnabled && params.textContent.trim() && (
+          <EngravingText
+            text={params.textContent.trim()}
+            fontType={params.textFontType}
+            diameter={params.diameter}
+            width={params.width}
+            height={params.height}
+          />
+        )}
+        <Environment preset="warehouse" resolution={512} />
         <OrbitControls enableDamping minDistance={10} maxDistance={60} rotateSpeed={0.6} />
       </Canvas>
     </div>
   );
 }
+
+// React.memo previne re-mount do Canvas quando referências mudam mas valores são iguais
+export default React.memo(AliancaViewportInner);

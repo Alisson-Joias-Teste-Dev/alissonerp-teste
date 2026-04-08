@@ -111,7 +111,7 @@ const PAG_STATUS_COLOR: Record<string, { bg: string; text: string }> = {
 };
 
 // Transições de situação permitidas
-const PROXIMA_SITUACAO: Record<string, { label: string; value: string; icon: React.ElementType }[]> = {
+const PROXIMA_SITUACAO: Record<string, { label: string; value: string; icon: any }[]> = {
   rascunho:  [{ label: "Aprovar", value: "aprovado",  icon: CheckCircle }],
   aprovado:  [{ label: "Marcar Enviado", value: "enviado", icon: Truck }, { label: "Concluir", value: "concluido", icon: CheckCircle }],
   enviado:   [{ label: "Concluir", value: "concluido", icon: CheckCircle }],
@@ -129,7 +129,7 @@ interface Props {
 
 // ─── Section card ─────────────────────────────────────────────────────────────
 function Section({ icon: Icon, title, children }: {
-  icon: React.ElementType; title: string; children: React.ReactNode;
+  icon: any; title: string; children: React.ReactNode;
 }) {
   return (
     <div className="rounded-xl border" style={{ borderColor: C.cremeBorder }}>
