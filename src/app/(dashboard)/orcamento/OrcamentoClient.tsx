@@ -233,7 +233,7 @@ export default function OrcamentoClient({
       };
       const res = await fetch("/api/orcamento", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!res.ok) throw new Error();
-      setSaveMsg({ text: "Orcamento salvo!", type: "success" }); setClientName(""); fetchOrcamentos();
+      setSaveMsg({ text: "Orçamento salvo!", type: "success" }); setClientName(""); fetchOrcamentos();
     } catch { setSaveMsg({ text: "Erro ao salvar", type: "error" }); }
     finally { setIsSaving(false); }
   };
@@ -298,8 +298,8 @@ export default function OrcamentoClient({
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-xl font-bold" style={{ color: C.esmeralda }}>Orcamentos</h1>
-            <p className="text-xs text-gray-400">{totalOrc} orcamentos</p>
+            <h1 className="text-xl font-bold" style={{ color: C.esmeralda }}>Orçamentos</h1>
+            <p className="text-xs text-gray-400">{totalOrc} orçamentos</p>
           </div>
           <div className="flex items-center gap-2">
             {canManageConfig && (
@@ -312,18 +312,18 @@ export default function OrcamentoClient({
               <button onClick={() => setShowNovoMenu(!showNovoMenu)}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white"
                 style={{ backgroundColor: C.esmeralda }}>
-                <Plus size={15} />Novo Orcamento
+                <Plus size={15} />Novo Orçamento
                 <ChevronDown size={13} />
               </button>
               {showNovoMenu && (
                 <div className="absolute right-0 mt-1 bg-white rounded-xl border shadow-lg py-1 z-20 w-56" style={{ borderColor: C.cremeBorder }}>
                   <button onClick={() => { setOrcamentoTipo("alianca"); setShowNovoMenu(false); }}
                     className="w-full text-left px-4 py-3 hover:bg-gray-50 text-sm">
-                    <CircleDot size={14} className="inline mr-2" style={{ color: C.gold }} />Alianca Personalizada
+                    <CircleDot size={14} className="inline mr-2" style={{ color: C.gold }} />Aliança Personalizada
                   </button>
                   <button onClick={() => { setOrcamentoTipo("peca"); setShowNovoMenu(false); }}
                     className="w-full text-left px-4 py-3 hover:bg-gray-50 text-sm">
-                    <Gem size={14} className="inline mr-2" style={{ color: "#A855F7" }} />Peca Personalizada
+                    <Gem size={14} className="inline mr-2" style={{ color: "#A855F7" }} />Peça Personalizada
                   </button>
                 </div>
               )}
@@ -349,7 +349,7 @@ export default function OrcamentoClient({
 
         {/* Busca + Filtros */}
         <div className="flex flex-wrap items-center gap-3 mb-4">
-          <input type="text" placeholder="Buscar por numero ou cliente..."
+          <input type="text" placeholder="Buscar por número ou cliente..."
             value={buscaOrc} onChange={(e) => setBuscaOrc(e.target.value)}
             className="border rounded-lg px-3 py-2 text-sm outline-none flex-1 min-w-[200px]"
             style={{ borderColor: C.cremeBorder }} />
@@ -389,7 +389,7 @@ export default function OrcamentoClient({
                 </thead>
                 <tbody>
                   {searched.length === 0 ? (
-                    <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-400">Nenhum orcamento encontrado</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-400">Nenhum orçamento encontrado</td></tr>
                   ) : searched.map((o, i) => (
                     <tr key={o.id} className="border-b" style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.cremeBg }}>
                       <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: C.esmeralda }}>{o.numero_orcamento}</td>
@@ -430,7 +430,7 @@ export default function OrcamentoClient({
           {/* Header */}
           <div className="flex items-center justify-between">
             <button onClick={() => setOrcamentoTipo(null)} className="text-xs text-gray-400 hover:text-gray-600">← Voltar</button>
-            <h1 className="text-lg font-bold" style={{ color: C.esmeralda }}>Peca Personalizada</h1>
+            <h1 className="text-lg font-bold" style={{ color: C.esmeralda }}>Peça Personalizada</h1>
             <div className="w-16" />
           </div>
 
@@ -575,7 +575,7 @@ export default function OrcamentoClient({
                 };
                 const res = await fetch("/api/orcamento", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
                 if (!res.ok) throw new Error();
-                setSaveMsg({ text: "Orcamento salvo!", type: "success" }); setClientName(""); setStoneEntries([]);
+                setSaveMsg({ text: "Orçamento salvo!", type: "success" }); setClientName(""); setStoneEntries([]);
               } catch { setSaveMsg({ text: "Erro ao salvar", type: "error" }); }
               finally { setIsSaving(false); }
             }}
@@ -598,7 +598,7 @@ export default function OrcamentoClient({
     return (
       <div className="p-6 space-y-5 max-w-3xl mx-auto" style={{ backgroundColor: C.cremeBg, minHeight: "100vh" }}>
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-bold text-gray-800">Configuracoes do Orcamento</h1>
+          <h1 className="text-lg font-bold text-gray-800">Configurações do Orçamento</h1>
           <button onClick={() => setTab("design")} className="text-xs font-semibold px-4 py-2 rounded-lg text-white" style={{ background: C.esmeralda }}>Voltar ao Design</button>
         </div>
         {/* Faixas */}
@@ -671,7 +671,7 @@ export default function OrcamentoClient({
             <CircleDot size={16} color="#fff" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-base font-bold text-gray-800 leading-tight">Orcamento de Aliancas</h1>
+            <h1 className="text-base font-bold text-gray-800 leading-tight">Orçamento de Alianças</h1>
             <p className="text-[11px] text-gray-400">Ouro: R$ {params.goldPrice.toFixed(2)}/g</p>
           </div>
         </div>
@@ -696,7 +696,7 @@ export default function OrcamentoClient({
             <Download size={14} className="text-gray-500" />
           </button>
           {canManageConfig && (
-            <button onClick={() => setTab("config")} className="p-2 rounded-lg border" style={{ borderColor: C.cremeBorder }} title="Configuracoes">
+            <button onClick={() => setTab("config")} className="p-2 rounded-lg border" style={{ borderColor: C.cremeBorder }} title="Configurações">
               <Settings2 size={14} className="text-gray-500" />
             </button>
           )}
