@@ -144,9 +144,16 @@ export async function PATCH(
         RETURNING id, numero_ordem
       `;
 
+      // Mapa perfil enum → nome formatado
+      const perfilNomes: Record<string, string> = {
+        Anatomica: "Anatômica", Boleada: "Boleada", BoleadaDouble: "Boleada Dupla",
+        Chanfrada: "Chanfrada", Concava: "Côncava", FrisoUnico: "Friso Único",
+        FrisoLateral: "Friso Lateral", QuadradoCanal: "Quadrado Canal", Simples: "Reta",
+      };
+
       // 4. Criar item da ordem (produto genérico "Personalizado")
       const nomeItem = orc.tipo === "alianca"
-        ? `Aliança ${orc.modelo ?? orc.perfil ?? "Personalizada"}`
+        ? `Aliança ${perfilNomes[orc.perfil as string] ?? orc.modelo ?? "Personalizada"}`
         : `Peça Personalizada`;
       await tx`
         INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
@@ -160,8 +167,8 @@ export async function PATCH(
       if (orc.tipo === "alianca") {
         if (orc.largura) dadosFicha.milimetragem = String(orc.largura);
         if (orc.aro_numeracao) dadosFicha.numeracao = orc.aro_numeracao.replace("Aro ", "");
-        if (orc.perfil || orc.modelo) dadosFicha.modelo = orc.perfil ?? orc.modelo;
-        if (orc.perfil) dadosFicha.modelo_interno = orc.perfil;
+        const perfilFormatado = perfilNomes[orc.perfil as string] ?? orc.modelo ?? orc.perfil;
+        if (perfilFormatado) dadosFicha.modelo = perfilFormatado;
         if (orc.tipo_fonte) dadosFicha.tipo_fonte = orc.tipo_fonte;
         if (orc.texto) dadosFicha.texto_gravacao = orc.texto;
         if (orc.cor_metal) dadosFicha.cor_metal = orc.cor_metal;
