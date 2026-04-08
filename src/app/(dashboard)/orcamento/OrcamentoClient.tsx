@@ -332,12 +332,13 @@ export default function OrcamentoClient({
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
           {[
             { label: "Total", value: String(totalOrc), color: C.esmeralda },
             { label: "Aprovados", value: String(aprovados.length), color: "#059669" },
             { label: "Rejeitados", value: String(rejeitados.length), color: "#DC2626" },
             { label: "Valor Aprovado", value: `R$ ${valorAprovado.toLocaleString("pt-BR")}`, color: C.gold },
+            { label: "Valor Rejeitado", value: `R$ ${rejeitados.reduce((s, o) => s + Number(o.valor ?? 0), 0).toLocaleString("pt-BR")}`, color: "#DC2626" },
           ].map((s) => (
             <div key={s.label} className="bg-white rounded-xl border px-4 py-3" style={{ borderColor: C.cremeBorder }}>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">{s.label}</p>
