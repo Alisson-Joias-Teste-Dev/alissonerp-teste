@@ -184,7 +184,7 @@ function Ring({
       pts.push(new THREE.Vector2(rIn, -wH));
     }
 
-    let geo: THREE.BufferGeometry = new THREE.LatheGeometry(pts, 720);
+    let geo: THREE.BufferGeometry = new THREE.LatheGeometry(pts, 360);
     geo = geo.toNonIndexed();
     geo.computeVertexNormals();
     return geo;
@@ -274,7 +274,7 @@ export default function AliancaViewport({
 
   return (
     <div className="w-full h-full rounded-2xl overflow-hidden border" style={{ borderColor: "#E8DCC8", background: "#f1f5f9" }}>
-      <Canvas shadows dpr={[2, 3]} gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}>
+      <Canvas shadows dpr={[1, 2]} gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true, powerPreference: "high-performance" }}>
         <PerspectiveCamera makeDefault position={[0, -cameraDistance, cameraDistance]} fov={35} />
         <color attach="background" args={["#f1f5f9"]} />
         <ambientLight intensity={0.7} />
