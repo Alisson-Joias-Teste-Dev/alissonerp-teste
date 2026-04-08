@@ -139,6 +139,73 @@ export default function OrcamentoClient({
   });
   const [currentMesh, setCurrentMesh] = useState<THREE.Mesh | null>(null);
   const [clientName, setClientName] = useState("");
+  const [clienteId, setClienteId] = useState<number | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [clienteResults, setClienteResults] = useState<any[]>([]);
+  const [showClienteDropdown, setShowClienteDropdown] = useState(false);
+  const [buscaCpf, setBuscaCpf] = useState("");
+  const [showCpfSearch, setShowCpfSearch] = useState(false);
+  const [showCadastro, setShowCadastro] = useState(false);
+  const [cadastroNome, setCadastroNome] = useState("");
+  const [cadastroCpf, setCadastroCpf] = useState("");
+  const [cadastroTel, setCadastroTel] = useState("");
+  const [cadastroEmail, setCadastroEmail] = useState("");
+  const clienteDropdownRef = useRef<HTMLDivElement>(null);
+
+  const buscarClientes = useCallback(async (termo: string) => {
+    if (termo.length < 2) { setClienteResults([]); return; }
+    const res = await fetch(`/api/ordens/contatos?busca=${encodeURIComponent(termo)}`).catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => []) : [];
+    setClienteResults(Array.isArray(data) ? data : []);
+    setShowClienteDropdown(true);
+  }, []);
+
+  const buscarPorCpf = useCallback(async (cpf: string) => {
+    if (cpf.replace(/\D/g, "").length < 6) return;
+    const res = await fetch(`/api/ordens/contatos?cpf=${encodeURIComponent(cpf)}`).catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => []) : [];
+    if (Array.isArray(data) && data.length > 0) {
+      selecionarCliente(data[0]);
+      setShowCpfSearch(false);
+    } else {
+      setShowCadastro(true);
+      setCadastroCpf(cpf.replace(/\D/g, ""));
+      setShowCpfSearch(false);
+    }
+  }, []);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function selecionarCliente(c: any) {
+    setClienteId(c.id_contato);
+    setClientName(c.nome);
+    setShowClienteDropdown(false);
+    setClienteResults([]);
+  }
+
+  async function cadastrarCliente() {
+    if (!cadastroNome.trim()) return;
+    const res = await fetch("/api/contatos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome: cadastroNome.trim(), cpf_cnpj: cadastroCpf, telefone: cadastroTel, email: cadastroEmail }),
+    });
+    if (res.ok) {
+      const contato = await res.json();
+      selecionarCliente(contato);
+      setShowCadastro(false);
+      setCadastroNome(""); setCadastroCpf(""); setCadastroTel(""); setCadastroEmail("");
+    }
+  }
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (clienteDropdownRef.current && !clienteDropdownRef.current.contains(e.target as Node)) {
+        setShowClienteDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [tab, setTab] = useState<"design" | "config">("design");
@@ -206,11 +273,12 @@ export default function OrcamentoClient({
   const handleSizeChange = (s: RingSize) => { setRingSize(s); updateParam("diameter", s.diameter); };
 
   const handleSaveOrder = async () => {
-    if (!clientName.trim()) { setSaveMsg({ text: "Preencha o nome do cliente", type: "error" }); return; }
+    if (!clientName.trim() && !clienteId) { setSaveMsg({ text: "Selecione ou cadastre um cliente", type: "error" }); return; }
     setIsSaving(true); setSaveMsg(null);
     try {
       const body = {
         nome_cliente: clientName.trim(),
+        cliente_id: clienteId,
         nome_modelo: PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile,
         peso: pricing.weight, valor: pricing.discountPrice, markup: pricing.mkp,
         desconto_pct: params.discountPercent, cotacao_ouro: params.goldPrice, tipo: "alianca",
@@ -382,14 +450,14 @@ export default function OrcamentoClient({
               <table className="w-full">
                 <thead>
                   <tr style={{ backgroundColor: C.esmeralda }}>
-                    {["Numero", "Status", "Tipo", "Cliente", "Peso", "Valor", "Data"].map((h) => (
+                    {["Numero", "Status", "Tipo", "Cliente", "Peso", "Valor", "Data", "Ações"].map((h) => (
                       <th key={h} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#80A795" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {searched.length === 0 ? (
-                    <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-400">Nenhum orçamento encontrado</td></tr>
+                    <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-gray-400">Nenhum orçamento encontrado</td></tr>
                   ) : searched.map((o, i) => (
                     <tr key={o.id} className="border-b" style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.cremeBg }}>
                       <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: C.esmeralda }}>{o.numero_orcamento}</td>
@@ -407,12 +475,86 @@ export default function OrcamentoClient({
                       <td className="px-4 py-2.5 text-xs font-mono text-gray-500">{o.peso ? `${Number(o.peso).toFixed(1)}g` : "—"}</td>
                       <td className="px-4 py-2.5 text-sm font-bold" style={{ color: C.esmeralda }}>R$ {Number(o.valor ?? 0).toLocaleString("pt-BR")}</td>
                       <td className="px-4 py-2.5 text-xs text-gray-400">{new Date(o.created_at).toLocaleDateString("pt-BR")}</td>
+                      <td className="px-4 py-2.5">
+                        {o.status === "rascunho" || o.status === "enviado" ? (
+                          <div className="flex gap-1">
+                            <button onClick={async () => {
+                              if (!confirm(`Aprovar ${o.numero_orcamento}? Será criada uma ordem de fabricação.`)) return;
+                              const res = await fetch(`/api/orcamento/${o.id}`, {
+                                method: "PATCH", headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ status: "aprovado" }),
+                              });
+                              const data = await res.json().catch(() => ({}));
+                              if (!res.ok) { alert(data.error ?? "Erro ao aprovar"); return; }
+                              alert(`Aprovado! Ordem ${data.numero_ordem} criada.`);
+                              fetchOrcamentos();
+                            }}
+                              className="text-[10px] px-2 py-1 rounded font-semibold bg-green-50 text-green-700 hover:bg-green-100">
+                              Aprovar
+                            </button>
+                            <button onClick={async () => {
+                              const motivo = prompt("Motivo da rejeição:");
+                              if (motivo === null) return;
+                              await fetch(`/api/orcamento/${o.id}`, {
+                                method: "PATCH", headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ status: "rejeitado", motivo_rejeicao: motivo }),
+                              });
+                              fetchOrcamentos();
+                            }}
+                              className="text-[10px] px-2 py-1 rounded font-semibold bg-red-50 text-red-700 hover:bg-red-100">
+                              Rejeitar
+                            </button>
+                          </div>
+                        ) : o.status === "convertido" && o.ordem_gerada_id ? (
+                          <span className="text-[10px] text-blue-600 font-semibold">Ordem #{o.ordem_gerada_id}</span>
+                        ) : (
+                          <span className="text-[10px] text-gray-300">—</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <div className="px-4 py-3 border-t text-[11px] text-gray-400" style={{ borderColor: C.creme }}>{searched.length} registros</div>
+          </div>
+        )}
+
+        {/* Modal: Busca CPF */}
+        {showCpfSearch && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCpfSearch(false)}>
+            <div className="bg-white rounded-2xl p-6 w-80 space-y-4" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-sm font-bold" style={{ color: C.esmeralda }}>Buscar por CPF</h3>
+              <input type="text" value={buscaCpf} onChange={(e) => setBuscaCpf(e.target.value)}
+                placeholder="Digite o CPF..." className="w-full border rounded-lg px-3 py-2 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
+              <div className="flex gap-2">
+                <button onClick={() => buscarPorCpf(buscaCpf)}
+                  className="flex-1 py-2 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: C.esmeralda }}>Buscar</button>
+                <button onClick={() => setShowCpfSearch(false)} className="px-4 py-2 text-sm text-gray-500">Cancelar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Cadastro novo cliente */}
+        {showCadastro && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCadastro(false)}>
+            <div className="bg-white rounded-2xl p-6 w-96 space-y-3" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-sm font-bold" style={{ color: C.esmeralda }}>Cadastrar Novo Cliente</h3>
+              <input type="text" value={cadastroNome} onChange={(e) => setCadastroNome(e.target.value)}
+                placeholder="Nome completo *" className="w-full border rounded-lg px-3 py-2 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
+              <input type="text" value={cadastroCpf} onChange={(e) => setCadastroCpf(e.target.value)}
+                placeholder="CPF" className="w-full border rounded-lg px-3 py-2 text-sm outline-none font-mono" style={{ borderColor: C.cremeBorder }} />
+              <input type="text" value={cadastroTel} onChange={(e) => setCadastroTel(e.target.value)}
+                placeholder="Telefone" className="w-full border rounded-lg px-3 py-2 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
+              <input type="text" value={cadastroEmail} onChange={(e) => setCadastroEmail(e.target.value)}
+                placeholder="Email" className="w-full border rounded-lg px-3 py-2 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
+              <div className="flex gap-2 pt-1">
+                <button onClick={cadastrarCliente} disabled={!cadastroNome.trim()}
+                  className="flex-1 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ backgroundColor: C.esmeralda }}>Cadastrar</button>
+                <button onClick={() => setShowCadastro(false)} className="px-4 py-2 text-sm text-gray-500">Cancelar</button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -434,15 +576,30 @@ export default function OrcamentoClient({
             <div className="w-16" />
           </div>
 
-          {/* Cliente */}
-          <div className="bg-white rounded-xl border p-4" style={{ borderColor: C.cremeBorder }}>
+          {/* Cliente autocomplete */}
+          <div className="bg-white rounded-xl border p-4 relative" style={{ borderColor: clienteId ? "#059669" : C.cremeBorder }}>
             <div className="flex items-center gap-2">
-              <User size={14} className="text-gray-400" />
-              <input
-                type="text" value={clientName} onChange={(e) => setClientName(e.target.value)}
-                placeholder="Nome do cliente" className="flex-1 text-sm outline-none"
-              />
+              <User size={14} className={clienteId ? "text-green-600" : "text-gray-400"} />
+              <input type="text" value={clientName}
+                onChange={(e) => { setClientName(e.target.value); setClienteId(null); buscarClientes(e.target.value); }}
+                onFocus={() => { if (clienteResults.length > 0) setShowClienteDropdown(true); }}
+                placeholder="Buscar cliente..." className="flex-1 text-sm outline-none" />
+              {clienteId && <span className="text-[9px] text-green-600 font-semibold">Vinculado</span>}
+              {!clienteId && clientName.length >= 2 && clienteResults.length === 0 && (
+                <button onClick={() => setShowCpfSearch(true)} className="text-[9px] text-blue-600 font-semibold hover:underline">Buscar CPF</button>
+              )}
             </div>
+            {showClienteDropdown && clienteResults.length > 0 && (
+              <div className="absolute z-20 left-0 right-0 mt-2 bg-white rounded-xl border shadow-lg max-h-48 overflow-y-auto" style={{ borderColor: C.cremeBorder }}>
+                {clienteResults.map((c) => (
+                  <button key={c.id_contato} onClick={() => selecionarCliente(c)}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                    <span className="font-medium">{c.nome}</span>
+                    {c.cpf_cnpj && <span className="ml-2 text-[10px] text-gray-400">{c.cpf_cnpj}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Peso + Metal */}
@@ -566,7 +723,7 @@ export default function OrcamentoClient({
               setIsSaving(true); setSaveMsg(null);
               try {
                 const body = {
-                  nome_cliente: clientName.trim(), tipo: "peca",
+                  nome_cliente: clientName.trim(), cliente_id: clienteId, tipo: "peca",
                   peso: pecaPeso, valor: pecaTotal, markup: pecaPricing.mkp,
                   desconto_pct: params.discountPercent, cotacao_ouro: cotacaoOuro,
                   cotacao_dolar: cotacaoDolar, valor_ouro: pecaPricing.discountPrice,
@@ -675,12 +832,31 @@ export default function OrcamentoClient({
             <p className="text-[11px] text-gray-400">Ouro: R$ {params.goldPrice.toFixed(2)}/g</p>
           </div>
         </div>
-        {/* Nome do cliente */}
-        <div className="flex items-center gap-2 bg-white rounded-xl border px-3 py-2 min-w-[220px]" style={{ borderColor: C.cremeBorder }}>
-          <User size={14} className="text-gray-400 shrink-0" />
-          <input type="text" value={clientName} onChange={(e) => setClientName(e.target.value)}
-            placeholder="Nome do cliente"
-            className="flex-1 text-sm outline-none bg-transparent text-gray-700 placeholder:text-gray-300" />
+        {/* Cliente autocomplete */}
+        <div className="relative min-w-[260px]" ref={clienteDropdownRef}>
+          <div className="flex items-center gap-2 bg-white rounded-xl border px-3 py-2" style={{ borderColor: clienteId ? "#059669" : C.cremeBorder }}>
+            <User size={14} className={clienteId ? "text-green-600" : "text-gray-400"} />
+            <input type="text" value={clientName}
+              onChange={(e) => { setClientName(e.target.value); setClienteId(null); buscarClientes(e.target.value); }}
+              onFocus={() => { if (clienteResults.length > 0) setShowClienteDropdown(true); }}
+              placeholder="Buscar cliente..."
+              className="flex-1 text-sm outline-none bg-transparent text-gray-700 placeholder:text-gray-300" />
+            {clienteId && <span className="text-[9px] text-green-600 font-semibold shrink-0">Vinculado</span>}
+            {!clienteId && clientName.length >= 2 && clienteResults.length === 0 && (
+              <button onClick={() => setShowCpfSearch(true)} className="text-[9px] text-blue-600 font-semibold shrink-0 hover:underline">CPF?</button>
+            )}
+          </div>
+          {showClienteDropdown && clienteResults.length > 0 && (
+            <div className="absolute z-20 mt-1 w-full bg-white rounded-xl border shadow-lg max-h-48 overflow-y-auto" style={{ borderColor: C.cremeBorder }}>
+              {clienteResults.map((c) => (
+                <button key={c.id_contato} onClick={() => selecionarCliente(c)}
+                  className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                  <span className="font-medium">{c.nome}</span>
+                  {c.cpf_cnpj && <span className="ml-2 text-[10px] text-gray-400">{c.cpf_cnpj}</span>}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         {/* Botoes */}
         <div className="flex items-center gap-1.5">
