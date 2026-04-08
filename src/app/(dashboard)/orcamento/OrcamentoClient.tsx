@@ -110,6 +110,20 @@ export default function OrcamentoClient({
     }));
   };
 
+  // Lista de orçamentos
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [orcamentos, setOrcamentos] = useState<any[]>([]);
+  const [loadingOrc, setLoadingOrc] = useState(false);
+  const [filtroStatus, setFiltroStatus] = useState<string>("todos");
+  const fetchOrcamentos = useCallback(async () => {
+    setLoadingOrc(true);
+    const res = await fetch("/api/orcamento?limit=100").catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => ({})) : {};
+    setOrcamentos(data.orcamentos ?? []);
+    setLoadingOrc(false);
+  }, []);
+  useEffect(() => { fetchOrcamentos(); }, [fetchOrcamentos]);
+
   // Peça personalizada
   const [pecaPeso, setPecaPeso] = useState(5.0);
   const [pecaMetalColor, setPecaMetalColor] = useState("#FFD700");
@@ -217,7 +231,7 @@ export default function OrcamentoClient({
       };
       const res = await fetch("/api/orcamento", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!res.ok) throw new Error();
-      setSaveMsg({ text: "Orcamento salvo!", type: "success" }); setClientName("");
+      setSaveMsg({ text: "Orcamento salvo!", type: "success" }); setClientName(""); fetchOrcamentos();
     } catch { setSaveMsg({ text: "Erro ao salvar", type: "error" }); }
     finally { setIsSaving(false); }
   };
@@ -258,11 +272,11 @@ export default function OrcamentoClient({
   // ═══════════════════════════════════════════════════════════════════════════
   if (orcamentoTipo === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: C.cremeBg }}>
-        <div className="max-w-2xl w-full space-y-6">
-          <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold" style={{ color: C.esmeralda }}>Novo Orcamento</h1>
-            <p className="text-sm text-gray-500 mt-1">Escolha o tipo de orcamento personalizado</p>
+      <div className="min-h-screen px-4 py-8" style={{ backgroundColor: C.cremeBg }}>
+        <div className="max-w-3xl mx-auto space-y-6">
+          <div className="text-center mb-4">
+            <h1 className="text-2xl font-bold" style={{ color: C.esmeralda }}>Orcamento</h1>
+            <p className="text-sm text-gray-500 mt-1">Escolha o tipo ou veja os orcamentos salvos</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <button
@@ -288,6 +302,68 @@ export default function OrcamentoClient({
               <p className="text-xs text-gray-500">Anel, brinco, pingente, pulseira — peso manual, pedras opcionais</p>
             </button>
           </div>
+          {/* Lista de orçamentos */}
+          <div className="bg-white rounded-2xl border p-5 space-y-3" style={{ borderColor: C.cremeBorder }}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold" style={{ color: C.esmeralda }}>Orcamentos</h3>
+              <div className="flex gap-1">
+                {["todos", "rascunho", "enviado", "aprovado", "rejeitado"].map((s) => (
+                  <button key={s} onClick={() => setFiltroStatus(s)}
+                    className="text-[10px] px-2 py-1 rounded-full font-medium transition-colors"
+                    style={{
+                      backgroundColor: filtroStatus === s ? C.esmeralda : "transparent",
+                      color: filtroStatus === s ? "#fff" : "#9CA3AF",
+                    }}>
+                    {s === "todos" ? "Todos" : s.charAt(0).toUpperCase() + s.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {loadingOrc ? (
+              <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-gray-300" /></div>
+            ) : (() => {
+              const filtered = filtroStatus === "todos" ? orcamentos : orcamentos.filter((o) => o.status === filtroStatus);
+              return filtered.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-6">Nenhum orcamento encontrado</p>
+              ) : (
+                <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                  {filtered.map((o) => (
+                    <div key={o.id} className="flex items-center justify-between rounded-xl border px-4 py-3" style={{ borderColor: C.cremeBorder }}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold" style={{ color: C.esmeralda }}>{o.numero_orcamento}</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
+                            style={{
+                              backgroundColor: o.tipo === "alianca" ? "rgba(212,175,55,0.1)" : "rgba(168,85,247,0.1)",
+                              color: o.tipo === "alianca" ? C.gold : "#A855F7",
+                            }}>
+                            {o.tipo === "alianca" ? "Alianca" : "Peca"}
+                          </span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
+                            style={{
+                              backgroundColor: o.status === "aprovado" ? "#D1FAE5" : o.status === "rejeitado" ? "#FEE2E2" : o.status === "enviado" ? "#DBEAFE" : "#F3F4F6",
+                              color: o.status === "aprovado" ? "#065F46" : o.status === "rejeitado" ? "#991B1B" : o.status === "enviado" ? "#1D4ED8" : "#6B7280",
+                            }}>
+                            {o.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5 truncate">{o.nome_cliente}</p>
+                      </div>
+                      <div className="text-right shrink-0 ml-3">
+                        <p className="text-sm font-bold" style={{ color: C.esmeralda }}>
+                          R$ {Number(o.valor ?? 0).toLocaleString("pt-BR")}
+                        </p>
+                        <p className="text-[10px] text-gray-400">
+                          {o.peso ? `${Number(o.peso).toFixed(1)}g` : ""} · {new Date(o.created_at).toLocaleDateString("pt-BR")}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+
           {canManageConfig && (
             <div className="text-center">
               <button onClick={() => { setOrcamentoTipo("alianca"); setTab("config"); }}
