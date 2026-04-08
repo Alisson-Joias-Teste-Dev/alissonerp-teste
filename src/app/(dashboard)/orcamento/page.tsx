@@ -27,9 +27,9 @@ export default async function OrcamentoPage() {
   if (!hasAccess) redirect("/");
 
   // Buscar cotações
-  const [params] = await sql`SELECT ouro, dolar FROM public.parametros LIMIT 1`;
+  const [params] = await sql`SELECT ouro, dollar FROM public.parametros LIMIT 1`;
   const cotacaoOuro = Number(params?.ouro ?? 0);
-  const cotacaoDolar = Number(params?.dolar ?? 5.80);
+  const cotacaoDolar = Number(params?.dollar ?? 5.80);
 
   // Buscar config de orçamento (tabela pode não existir se migration não rodou)
   let configRow = null;
