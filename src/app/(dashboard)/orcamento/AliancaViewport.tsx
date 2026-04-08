@@ -2,7 +2,7 @@
 
 import React, { useMemo, useRef, useEffect, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, PerspectiveCamera, ContactShadows } from "@react-three/drei";
+import { OrbitControls, PerspectiveCamera, ContactShadows, Environment } from "@react-three/drei";
 import * as THREE from "three";
 import { ProfileType } from "./types";
 import type { RingParams } from "./types";
@@ -201,7 +201,7 @@ function Ring({
           color={params.metalColor}
           roughness={0.0}
           metalness={1.0}
-          envMapIntensity={1.0}
+          envMapIntensity={4.5}
         />
       </mesh>
     </group>
@@ -230,13 +230,13 @@ export default function AliancaViewport({
       <Canvas shadows dpr={[1, 2]} gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}>
         <PerspectiveCamera makeDefault position={[0, -cameraDistance, cameraDistance]} fov={35} />
         <color attach="background" args={["#f1f5f9"]} />
-        <ambientLight intensity={1.0} />
-        <hemisphereLight intensity={0.8} color="#ffffff" groundColor="#cbd5e1" />
-        <directionalLight position={[30, 40, 20]} intensity={2.5} castShadow color="#fff5e6" />
-        <directionalLight position={[-20, 15, -10]} intensity={1.5} color="#ffffff" />
-        <pointLight position={[0, 30, 0]} intensity={1.0} color="#ffe4b5" />
+        <ambientLight intensity={0.7} />
+        <hemisphereLight intensity={0.5} color="#ffffff" groundColor="#cbd5e1" />
+        <spotLight position={[30, 40, 20]} angle={0.25} penumbra={1} intensity={3} castShadow />
+        <spotLight position={[-30, 20, 10]} angle={0.3} penumbra={1} intensity={2} color="#ffffff" />
         <Ring params={params} profileType={profile} onSetMesh={handleMesh} />
-        <ContactShadows position={[0, -12, 0]} opacity={0.3} scale={40} blur={2.5} far={10} color="#0f172a" />
+        <Environment preset="studio" />
+        <ContactShadows position={[0, -12, 0]} opacity={0.4} scale={40} blur={2.5} far={10} color="#0f172a" />
         <OrbitControls enableDamping minDistance={10} maxDistance={60} rotateSpeed={0.6} />
       </Canvas>
     </div>
