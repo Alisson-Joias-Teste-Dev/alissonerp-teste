@@ -247,11 +247,7 @@ function EngravingText({
             fontStyle={fontType === 2 ? "italic" : "normal"}
           >
             {char}
-            <meshStandardMaterial
-              color="#5C4A32"
-              roughness={1.0}
-              metalness={0.0}
-            />
+            <meshBasicMaterial color="#000000" />
           </Text>
         );
       })}
