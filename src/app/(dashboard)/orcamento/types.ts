@@ -1,0 +1,151 @@
+// ── Tipos do Módulo de Orçamento ─────────────────────────────────────────────
+
+export enum ProfileType {
+  Concava = "Concava",
+  FrisoUnico = "FrisoUnico",
+  FrisoLateral = "FrisoLateral",
+  QuadradoCanal = "QuadradoCanal",
+  Boleada = "Boleada",
+  BoleadaDouble = "BoleadaDouble",
+  Simples = "Simples",
+  Chanfrada = "Chanfrada",
+  Anatomica = "Anatomica",
+}
+
+export interface PricingCategory {
+  id: number;
+  name: string;
+  maxWeight: number;
+  variation: number;
+  step?: number;
+  color: string;
+  targetMkp?: number;
+}
+
+export interface GrooveRule {
+  id: number;
+  ringWidth: number;
+  grooveWidth: number;
+  grooveDepth: number;
+  grooveOffset: number;
+}
+
+export interface RingParams {
+  diameter: number;
+  width: number;
+  height: number;
+  concaveDepth: number;
+  grooveSide: "UPPER" | "LOWER";
+  grooveWidth: number;
+  grooveDepth: number;
+  grooveOffset: number;
+  canalWidth: number;
+  canalBorderHeight: number;
+  chamferSize: number;
+  domePercentage: number;
+  metalColor: string;
+  goldDensity: number;
+  goldPrice: number;
+  startMkp: number;
+  discountPercent: number;
+  hasStones: boolean;
+  stoneSize: number;
+  stoneRows: number;
+  stoneCount: number;
+  stoneDrill: boolean;
+  stoneHalfMoon: boolean;
+  stoneFull: boolean;
+  textEnabled: boolean;
+  textFontType: 1 | 2;
+  textContent: string;
+}
+
+export interface RingSize {
+  size: number;
+  diameter: number;
+}
+
+export interface PricingResult {
+  weight: number;
+  category: string;
+  mkp: number;
+  cost: number;
+  price: number;
+  discountPrice: number;
+}
+
+export interface ProfileOption {
+  id: ProfileType;
+  label: string;
+}
+
+export interface ConfigOrcamento {
+  id: number;
+  name: string;
+  start_mkp: number;
+  discount_percent: number;
+  gold_price: number;
+  camera_override: number | null;
+  profile: string;
+  pricing_categories: PricingCategory[];
+  groove_rules: GrooveRule[];
+  stone_markup: number;
+  stone_prices: StonePrice[];
+}
+
+export interface Orcamento {
+  id: number;
+  created_at: string;
+  numero_orcamento: string;
+  tipo: "alianca" | "peca";
+  vendedor_id: number | null;
+  usuario_id: string | null;
+  nome_cliente: string;
+  nome_modelo: string | null;
+  peso: number | null;
+  valor: number | null;
+  markup: number | null;
+  desconto_pct: number;
+  cotacao_ouro: number | null;
+  cotacao_dolar: number | null;
+  valor_ouro: number | null;
+  valor_pedras: number | null;
+  ficha_tecnica_id: number | null;
+  status: string;
+  observacoes: string | null;
+}
+
+// ── Pedras Preciosas ────────────────────────────────────────────────────────
+
+export type StoneType = "diamante" | "moissanita" | "rubi" | "esmeralda" | "safira";
+
+export type StoneCut = "brilhante" | "gota" | "oval" | "princesa" | "esmeralda_cut" | "marques";
+
+export interface StoneEntry {
+  id: number;
+  tipo: StoneType;
+  corte: StoneCut;
+  tamanho_mm: number;
+  qtd: number;
+  ct_unitario: number;
+  ct_total: number;
+  pt_total: number;
+  preco_unitario_rs: number;
+  preco_total_rs: number;
+}
+
+export interface StonePrice {
+  tipo: StoneType;
+  preco_usd_ct: number;
+}
+
+// ── Peça Personalizada ──────────────────────────────────────────────────────
+
+export interface PecaParams {
+  peso: number;
+  metalColor: string;
+  goldDensity: number;
+  goldPrice: number;
+  startMkp: number;
+  discountPercent: number;
+}
