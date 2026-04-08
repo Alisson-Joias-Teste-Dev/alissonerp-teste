@@ -57,7 +57,7 @@ export default function OrcamentoView({ token }: { token: string }) {
   const [error,   setError]   = useState("");
 
   useEffect(() => {
-    fetch(`/api/orcamento/${token}`)
+    fetch(`/api/orcamento/compartilhado?token=${token}`)
       .then(async r => {
         if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? `HTTP ${r.status}`);
         return r.json() as Promise<Orcamento>;
