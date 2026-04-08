@@ -272,14 +272,34 @@ function AliancaViewportInner({
     onMeshReady?.(m);
   }, [onMeshReady]);
 
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Restore context if lost
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handleLost = (e: Event) => { e.preventDefault(); };
+    const handleRestored = () => { /* R3F auto-restores */ };
+    canvas.addEventListener("webglcontextlost", handleLost);
+    canvas.addEventListener("webglcontextrestored", handleRestored);
+    return () => {
+      canvas.removeEventListener("webglcontextlost", handleLost);
+      canvas.removeEventListener("webglcontextrestored", handleRestored);
+    };
+  }, []);
+
   return (
     <div className="w-full h-full rounded-2xl overflow-hidden border" style={{ borderColor: "#E8DCC8", background: "#f1f5f9" }}>
-      <Canvas shadows dpr={[1, 2]} gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, powerPreference: "high-performance" }}>
+      <Canvas
+        dpr={[1, 1.5]}
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, powerPreference: "high-performance", alpha: false }}
+        onCreated={({ gl }) => { canvasRef.current = gl.domElement; }}
+      >
         <PerspectiveCamera makeDefault position={[0, -cameraDistance, cameraDistance]} fov={35} />
         <color attach="background" args={["#f1f5f9"]} />
         <ambientLight intensity={0.7} />
         <hemisphereLight intensity={0.5} color="#ffffff" groundColor="#cbd5e1" />
-        <spotLight position={[30, 40, 20]} angle={0.25} penumbra={1} intensity={3} castShadow />
+        <spotLight position={[30, 40, 20]} angle={0.25} penumbra={1} intensity={3} />
         <spotLight position={[-30, 20, 10]} angle={0.3} penumbra={1} intensity={2} color="#ffffff" />
         <Ring params={params} profileType={profile} onSetMesh={handleMesh} />
         {params.textEnabled && params.textContent.trim() && (
@@ -290,8 +310,7 @@ function AliancaViewportInner({
             width={params.width}
           />
         )}
-        <Environment preset="warehouse" resolution={1024} />
-        <ContactShadows position={[0, -12, 0]} opacity={0.4} scale={40} blur={2.5} far={10} color="#0f172a" />
+        <Environment preset="warehouse" resolution={512} />
         <OrbitControls enableDamping minDistance={10} maxDistance={60} rotateSpeed={0.6} />
       </Canvas>
     </div>
