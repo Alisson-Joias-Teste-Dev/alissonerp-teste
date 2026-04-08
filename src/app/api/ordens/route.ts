@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     venda_id,            // integer — referência à venda (garantia)
     venda_item_ids,      // integer[] — itens da venda em garantia
     rota_override,       // "pcp" | "protocolo" — para fabricação (escolha do usuário)
+    ficha_tecnica_dados, // { tipo_item, ...dados } — ficha técnica (fabricação)
     itens = [],
   } = body;
 
@@ -275,6 +276,19 @@ export async function POST(req: NextRequest) {
         })}::jsonb
       )
     `;
+
+    // 4. Criar ficha técnica (se houver dados)
+    if (ficha_tecnica_dados && ficha_tecnica_dados.tipo_item) {
+      await tx`
+        INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
+        VALUES (
+          ${ordem.id},
+          ${ficha_tecnica_dados.tipo_item},
+          ${JSON.stringify(ficha_tecnica_dados)}::jsonb,
+          ${user.id}::uuid
+        )
+      `;
+    }
 
     return ordem;
   });

@@ -18,6 +18,47 @@ const C = {
   success: "#10B981",
 };
 
+// Labels legíveis para campos JSONB de fichas técnicas ERP
+const FICHA_LABELS: Record<string, string> = {
+  tipo_item: "Tipo de Item",
+  milimetragem: "Milimetragem",
+  numeracao: "Numeração",
+  modelo: "Modelo",
+  modelo_interno: "Modelo Interno",
+  modelo_externo: "Modelo Externo",
+  tipo_fonte: "Tipo de Fonte",
+  texto_gravacao: "Gravação",
+  comprimento: "Comprimento",
+  tipo_elo: "Tipo de Elo",
+  tipo_fecho: "Tipo de Fecho",
+  modelo_anel: "Modelo do Anel",
+  milimetragem_base_mm: "Milim. Base",
+  milimetragem_aro_mm: "Milim. Aro",
+  modelo_pingente: "Modelo Pingente",
+  modelo_bracelete: "Modelo Bracelete",
+  altura_placa: "Altura Placa",
+  largura_placa: "Largura Placa",
+  espessura_chapa: "Espessura Chapa",
+  nome_chapa: "Nome Chapa",
+  tipo_tarraxa: "Tipo Tarraxa",
+};
+const TIPO_ITEM_LABELS: Record<string, string> = {
+  alianca: "Aliança", par_alianca: "Par de Alianças", corrente: "Corrente",
+  anel: "Anel", pingente: "Pingente", bracelete: "Bracelete",
+  escapulario: "Escapulário", brinco: "Brinco", tornozeleira: "Tornozeleira",
+  pulseira: "Pulseira", colar_nome: "Colar com Nome", monograma: "Monograma",
+};
+function fichaErpLabel(key: string): string {
+  // Remove prefixo "1_" ou "2_" e busca label
+  const prefixMatch = key.match(/^(\d+)_(.+)$/);
+  if (prefixMatch) {
+    const [, num, campo] = prefixMatch;
+    const base = FICHA_LABELS[campo] ?? campo.replace(/_/g, " ");
+    return `${base} (${num})`;
+  }
+  return FICHA_LABELS[key] ?? key.replace(/_/g, " ");
+}
+
 const STATUS_MAP: Record<string, { bg: string; color: string }> = {
   "Aguardando":   { bg: "#FEF3C7", color: "#92400E" },
   "Em Andamento": { bg: "#DBEAFE", color: "#1E40AF" },
@@ -468,7 +509,32 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                   <p className="text-sm" style={{ color: "#9CA3AF" }}>Nenhuma ficha técnica vinculada a esta ordem.</p>
                   <p className="text-[11px] mt-1" style={{ color: "#C4B5A0" }}>A ficha é criada pelo PDV no Directus ao lançar a ordem.</p>
                 </div>
+              ) : fichaTecnica._origem === "erp" ? (
+                /* ── Ficha ERP (JSONB dinâmico) ── */
+                (() => {
+                  const dados = typeof fichaTecnica.dados === "string" ? JSON.parse(fichaTecnica.dados) : fichaTecnica.dados;
+                  const tipoItem = dados?.tipo_item;
+                  const entries = Object.entries(dados ?? {}).filter(
+                    ([k, v]) => k !== "tipo_item" && v != null && v !== ""
+                  ) as [string, string][];
+                  return (
+                    <div className="space-y-5">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#9CA3AF" }}>
+                          {TIPO_ITEM_LABELS[tipoItem] ?? tipoItem ?? "Ficha Técnica"}
+                        </p>
+                        <div className="grid grid-cols-2 gap-x-8">
+                          {entries.map(([key, value]) => (
+                            <InfoRow key={key} label={fichaErpLabel(key)} value={String(value)} />
+                          ))}
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-right" style={{ color: "#C4B5A0" }}>Ficha #{fichaTecnica.ficha_id}</p>
+                    </div>
+                  );
+                })()
               ) : (
+                /* ── Ficha Directus (legado, colunas fixas) ── */
                 <div className="space-y-5">
                   {[
                     {
