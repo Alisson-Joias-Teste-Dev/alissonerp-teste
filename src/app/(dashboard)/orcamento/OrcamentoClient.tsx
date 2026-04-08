@@ -219,7 +219,10 @@ export default function OrcamentoClient({
   const [configMsg, setConfigMsg] = useState<string | null>(null);
 
   const updateParam = <K extends keyof RingParams>(key: K, value: RingParams[K]) => {
-    setParams((prev) => ({ ...prev, [key]: value }));
+    setParams((prev) => {
+      if (prev[key] === value) return prev; // evita re-render se valor não mudou
+      return { ...prev, [key]: value };
+    });
   };
 
   useEffect(() => {

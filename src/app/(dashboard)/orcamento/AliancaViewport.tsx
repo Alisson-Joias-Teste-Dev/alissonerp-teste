@@ -257,7 +257,7 @@ function EngravingText({
 
 // ── Viewport ─────────────────────────────────────────────────────────────────
 
-export default function AliancaViewport({
+function AliancaViewportInner({
   params,
   profile,
   cameraDistance,
@@ -274,7 +274,7 @@ export default function AliancaViewport({
 
   return (
     <div className="w-full h-full rounded-2xl overflow-hidden border" style={{ borderColor: "#E8DCC8", background: "#f1f5f9" }}>
-      <Canvas shadows dpr={[1, 2]} gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true, powerPreference: "high-performance" }}>
+      <Canvas shadows dpr={[1, 2]} gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, powerPreference: "high-performance" }}>
         <PerspectiveCamera makeDefault position={[0, -cameraDistance, cameraDistance]} fov={35} />
         <color attach="background" args={["#f1f5f9"]} />
         <ambientLight intensity={0.7} />
@@ -297,3 +297,6 @@ export default function AliancaViewport({
     </div>
   );
 }
+
+// React.memo previne re-mount do Canvas quando referências mudam mas valores são iguais
+export default React.memo(AliancaViewportInner);
