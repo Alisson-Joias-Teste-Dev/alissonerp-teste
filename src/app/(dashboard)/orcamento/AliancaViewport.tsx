@@ -222,32 +222,39 @@ function EngravingText({
   width: number;
 }) {
   const rInner = diameter / 2;
-  const fontSize = Math.min(width * 0.3, 1.0);
-
-  // Single curved text on inner surface
-  const curveRadius = rInner - 0.02;
+  const fontSize = Math.min(width * 0.28, 0.9);
+  const charCount = text.length;
+  const spacing = fontSize * 0.65;
+  const totalWidth = charCount * spacing;
+  const totalAngle = totalWidth / rInner;
+  const startAngle = -totalAngle / 2;
 
   return (
     <group rotation={[Math.PI / 2, 0, 0]}>
-      <Text
-        position={[0, 0, 0]}
-        fontSize={fontSize}
-        anchorX="center"
-        anchorY="middle"
-        fontStyle={fontType === 2 ? "italic" : "normal"}
-        curveRadius={-curveRadius}
-        maxWidth={curveRadius * Math.PI * 0.6}
-        depthOffset={-1}
-      >
-        {text}
-        <meshStandardMaterial
-          color="#8B7355"
-          roughness={0.9}
-          metalness={0.1}
-          transparent
-          opacity={0.7}
-        />
-      </Text>
+      {text.split("").map((char, i) => {
+        const angle = startAngle + (i + 0.5) * (totalAngle / charCount);
+        // Position on inner surface, facing inward
+        const x = Math.cos(angle) * (rInner + 0.01);
+        const z = Math.sin(angle) * (rInner + 0.01);
+        return (
+          <Text
+            key={`${i}-${char}`}
+            position={[x, 0, z]}
+            rotation={[0, -angle + Math.PI / 2, 0]}
+            fontSize={fontSize}
+            anchorX="center"
+            anchorY="middle"
+            fontStyle={fontType === 2 ? "italic" : "normal"}
+          >
+            {char}
+            <meshStandardMaterial
+              color="#5C4A32"
+              roughness={1.0}
+              metalness={0.0}
+            />
+          </Text>
+        );
+      })}
     </group>
   );
 }
