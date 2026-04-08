@@ -144,5 +144,104 @@ export async function PATCH(
 
   // Auto-baixa estoque comercial removida — trigger 111 (trg_estoque_comercial_baixa_venda) já cuida disso.
 
+  // ── Auto-criar ordem de fabricação se venda veio de orçamento e foi concluída ──
+  if (body.situacao === "concluido") {
+    const [vendaOrc] = await sql`
+      SELECT v.orcamento_id, v.cliente_id, v.vendedor_id, v.data_entrega,
+             o.id AS orc_id, o.tipo, o.peso, o.numero_orcamento, o.nome_modelo,
+             o.foto_3d, o.ficha_tecnica_id,
+             ft.perfil, ft.modelo, ft.aro_numeracao, ft.largura, ft.espessura,
+             ft.peso_estimado, ft.densidade_ouro, ft.cor_metal,
+             ft.tipo_fonte, ft.texto, ft.qtd_pedras, ft.tamanho_pedra,
+             ft.tipo_aplicacao_pedra, ft.pedras_detalhadas
+      FROM alissonerp.vendas_erp v
+      LEFT JOIN alissonerp.orcamentos o ON o.id = v.orcamento_id
+      LEFT JOIN alissonerp.orcamento_fichas_tecnicas ft ON ft.id = o.ficha_tecnica_id
+      WHERE v.id = ${vendaId} AND v.orcamento_id IS NOT NULL
+    `;
+
+    if (vendaOrc?.orc_id) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (sql as any).begin(async (tx: typeof sql) => {
+        const perfilNomes: Record<string, string> = {
+          Anatomica: "Anatômica", Boleada: "Boleada", BoleadaDouble: "Boleada Dupla",
+          Chanfrada: "Chanfrada", Concava: "Côncava", FrisoUnico: "Friso Único",
+          FrisoLateral: "Friso Lateral", QuadradoCanal: "Quadrado Canal", Simples: "Reta",
+        };
+
+        const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
+        const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
+        const nextNum = Math.max(Number(max_id_ali), Number(max_id_dir)) + 1;
+        const numeroOrdem = "C-" + String(nextNum).padStart(4, "0");
+        const pesoNeg = Number(vendaOrc.peso ?? vendaOrc.peso_estimado ?? 0);
+
+        // Criar ordem
+        const [ordem] = await tx`
+          INSERT INTO alissonerp.ordens (
+            numero_ordem, tipo_ordem, situacao, status, rota,
+            cliente_id, vendedor_id, peso_metal_negociado,
+            data_entrega, detalhes_ordem, foto_peca_servico, venda_id, created_at
+          ) VALUES (
+            ${numeroOrdem}, 'fabricacao'::alissonerp.enum_tipo_ordem,
+            'criado', 'aguardando', 'pcp',
+            ${vendaOrc.cliente_id}, ${vendaOrc.vendedor_id},
+            ${pesoNeg}, ${vendaOrc.data_entrega},
+            ${'Venda V-' + String(vendaId).padStart(5, '0') + ' / Orçamento ' + vendaOrc.numero_orcamento},
+            ${vendaOrc.foto_3d ?? null}, ${vendaId}, NOW()
+          ) RETURNING id, numero_ordem
+        `;
+
+        // Item da ordem
+        const nomeItem = vendaOrc.tipo === "alianca"
+          ? `Aliança ${perfilNomes[vendaOrc.perfil as string] ?? vendaOrc.modelo ?? "Personalizada"}`
+          : `Peça Personalizada`;
+        await tx`
+          INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
+          VALUES (${ordem.id}, ${nomeItem}, 1, ${pesoNeg})
+        `;
+
+        // Ficha técnica
+        const tipoItem = vendaOrc.tipo === "alianca" ? "alianca" : "peca_personalizada";
+        const dadosFicha: Record<string, unknown> = {};
+        if (vendaOrc.tipo === "alianca") {
+          if (vendaOrc.largura) dadosFicha.milimetragem = String(vendaOrc.largura);
+          if (vendaOrc.aro_numeracao) dadosFicha.numeracao = String(vendaOrc.aro_numeracao).replace("Aro ", "");
+          const pf = perfilNomes[vendaOrc.perfil as string] ?? vendaOrc.modelo ?? vendaOrc.perfil;
+          if (pf) dadosFicha.modelo = pf;
+          if (vendaOrc.tipo_fonte) dadosFicha.tipo_fonte = vendaOrc.tipo_fonte;
+          if (vendaOrc.texto) dadosFicha.texto_gravacao = vendaOrc.texto;
+          if (vendaOrc.cor_metal) dadosFicha.cor_metal = vendaOrc.cor_metal;
+          if (vendaOrc.peso_estimado) dadosFicha.peso_estimado = vendaOrc.peso_estimado;
+          if (vendaOrc.espessura) dadosFicha.espessura = vendaOrc.espessura;
+          if (vendaOrc.qtd_pedras) dadosFicha.qtd_pedras = vendaOrc.qtd_pedras;
+          if (vendaOrc.tamanho_pedra) dadosFicha.tamanho_pedra = vendaOrc.tamanho_pedra;
+          if (vendaOrc.tipo_aplicacao_pedra) dadosFicha.tipo_aplicacao_pedra = vendaOrc.tipo_aplicacao_pedra;
+        } else {
+          if (vendaOrc.peso_estimado) dadosFicha.peso_estimado = vendaOrc.peso_estimado;
+          if (vendaOrc.cor_metal) dadosFicha.cor_metal = vendaOrc.cor_metal;
+          if (vendaOrc.pedras_detalhadas) dadosFicha.pedras_detalhadas = vendaOrc.pedras_detalhadas;
+        }
+        await tx`
+          INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
+          VALUES (${ordem.id}, ${tipoItem}, ${JSON.stringify(dadosFicha)}::jsonb, ${user.id}::uuid)
+        `;
+
+        // Auditoria loja pendente
+        await tx`
+          INSERT INTO alissonerp.auditorias (situacao, tipo_auditoria, rota_processo, ordem_id, peso_negociado, parecer, dados_ordem)
+          VALUES ('pendente', 'loja', 'entrada_ordem', ${ordem.id}, ${pesoNeg}, NULL,
+            ${JSON.stringify({ numero_ordem: numeroOrdem, tipo_ordem: "fabricacao", rota: "pcp", peso_negociado: pesoNeg, origem: "orcamento_venda", orcamento_id: vendaOrc.orc_id })}::jsonb)
+        `;
+
+        // Atualizar orçamento com ordem gerada
+        await tx`
+          UPDATE alissonerp.orcamentos
+          SET ordem_gerada_id = ${ordem.id}, updated_at = NOW()
+          WHERE id = ${vendaOrc.orc_id}
+        `;
+      });
+    }
+  }
+
   return NextResponse.json({ ok: true });
 }

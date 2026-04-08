@@ -275,21 +275,32 @@ export default function OrcamentoClient({
 
   const handleSizeChange = (s: RingSize) => { setRingSize(s); updateParam("diameter", s.diameter); };
 
+  // Captura screenshot do Canvas 3D
+  const capture3DScreenshot = useCallback((): string | null => {
+    try {
+      const canvas = document.querySelector('canvas[data-engine]') as HTMLCanvasElement | null;
+      if (!canvas) return null;
+      return canvas.toDataURL("image/jpeg", 0.85);
+    } catch { return null; }
+  }, []);
+
   const handleSaveOrder = async () => {
     if (!clientName.trim() && !clienteId) { setSaveMsg({ text: "Selecione ou cadastre um cliente", type: "error" }); return; }
     setIsSaving(true); setSaveMsg(null);
     try {
+      const foto3d = capture3DScreenshot();
       const body = {
         nome_cliente: clientName.trim(),
         cliente_id: clienteId,
         nome_modelo: PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile,
         peso: pricing.weight, valor: pricing.discountPrice, markup: pricing.mkp,
         desconto_pct: params.discountPercent, cotacao_ouro: params.goldPrice, tipo: "alianca",
+        foto_3d_base64: foto3d,
         ficha: {
           modelo: PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile,
           aro_numeracao: `Aro ${ringSize.size}`, largura: params.width, espessura: params.height,
           peso_estimado: pricing.weight, perfil: profile, diametro: params.diameter,
-          densidade_ouro: params.goldDensity, cor_metal: params.metalColor,
+          densidade_ouro: params.goldDensity, cor_metal: METAL_COLORS.find(m => m.value === params.metalColor)?.label ?? params.metalColor,
           tipo_fonte: params.textEnabled && params.textContent.trim() ? (params.textFontType === 2 ? "Cursiva" : "Forma") : null,
           texto: params.textEnabled && params.textContent.trim() ? params.textContent.trim() : null,
           qtd_pedras: params.hasStones ? derivedStoneCount : null, tamanho_pedra: params.hasStones ? params.stoneSize : null,
@@ -430,6 +441,7 @@ export default function OrcamentoClient({
               { key: "rascunho", label: `Rascunho (${orcamentos.filter(o => o.status === "rascunho").length})` },
               { key: "enviado", label: `Enviado (${orcamentos.filter(o => o.status === "enviado").length})` },
               { key: "aprovado", label: `Aprovado (${aprovados.length})` },
+              { key: "convertido", label: `Convertido (${orcamentos.filter(o => o.status === "convertido").length})` },
               { key: "rejeitado", label: `Rejeitado (${rejeitados.length})` },
             ].map(({ key, label }) => (
               <button key={key} onClick={() => setFiltroStatus(key)}
@@ -462,7 +474,12 @@ export default function OrcamentoClient({
                   {searched.length === 0 ? (
                     <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-gray-400">Nenhum orçamento encontrado</td></tr>
                   ) : searched.map((o, i) => (
-                    <tr key={o.id} className="border-b" style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.cremeBg }}>
+                    <tr key={o.id} className="border-b cursor-pointer hover:bg-amber-50/30 transition-colors"
+                      style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.cremeBg }}
+                      onClick={() => {
+                        if (o.venda_gerada_id) window.open(`/vendas/${o.venda_gerada_id}`, "_blank");
+                        else if (o.ordem_gerada_id) window.open(`/ordens/${o.ordem_gerada_id}`, "_blank");
+                      }}>
                       <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: C.esmeralda }}>{o.numero_orcamento}</td>
                       <td className="px-4 py-2.5">{statusBadge(o.status)}</td>
                       <td className="px-4 py-2.5">
@@ -508,8 +525,11 @@ export default function OrcamentoClient({
                               Rejeitar
                             </button>
                           </div>
-                        ) : o.status === "convertido" && o.ordem_gerada_id ? (
-                          <span className="text-[10px] text-blue-600 font-semibold">Ordem #{o.ordem_gerada_id}</span>
+                        ) : o.status === "convertido" && o.venda_gerada_id ? (
+                          <span className="text-[10px] text-blue-600 font-semibold">
+                            Venda #{o.venda_gerada_id}
+                            {o.ordem_gerada_id && <span className="text-green-600 ml-1">· Ordem #{o.ordem_gerada_id}</span>}
+                          </span>
                         ) : (
                           <span className="text-[10px] text-gray-300">—</span>
                         )}

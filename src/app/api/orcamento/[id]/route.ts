@@ -99,22 +99,22 @@ export async function PATCH(
     return NextResponse.json({ ok: true, status: "rejeitado" });
   }
 
-  // ── APROVAR → CRIAR ORDEM DE FABRICAÇÃO ───────────────────────────────────
+  // ── APROVAR → CRIAR VENDA PRÉ-PREENCHIDA ──────────────────────────────────
   if (body.status === "aprovado") {
     const clienteId = orc.cliente_id as number | null;
     if (!clienteId) {
       return NextResponse.json({ error: "Vincule um cliente antes de aprovar" }, { status: 422 });
     }
 
+    const perfilNomes: Record<string, string> = {
+      Anatomica: "Anatômica", Boleada: "Boleada", BoleadaDouble: "Boleada Dupla",
+      Chanfrada: "Chanfrada", Concava: "Côncava", FrisoUnico: "Friso Único",
+      FrisoLateral: "Friso Lateral", QuadradoCanal: "Quadrado Canal", Simples: "Reta",
+    };
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const resultado = await (sql as any).begin(async (tx: typeof sql) => {
-      // 1. Gerar número da ordem
-      const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
-      const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
-      const nextNum = Math.max(Number(max_id_ali), Number(max_id_dir)) + 1;
-      const numeroOrdem = "C-" + String(nextNum).padStart(4, "0");
-
-      // 2. Data entrega: +10 dias úteis
+      // 1. Data entrega: +10 dias úteis
       const dataEntrega = new Date();
       let diasUteis = 0;
       while (diasUteis < 10) {
@@ -123,97 +123,61 @@ export async function PATCH(
         if (dow !== 0 && dow !== 6) diasUteis++;
       }
 
-      // 3. Criar ordem
-      const pesoNeg = Number(orc.peso ?? orc.peso_estimado ?? 0);
-      const [ordem] = await tx`
-        INSERT INTO alissonerp.ordens (
-          numero_ordem, tipo_ordem, situacao, status, rota,
-          cliente_id, vendedor_id, peso_metal_negociado,
-          data_entrega, detalhes_ordem, created_at
+      // 2. Criar venda (rascunho) pré-preenchida
+      const vendedorId = orc.vendedor_id ?? (caller.id_vendedor ? Number(caller.id_vendedor) : null);
+      const [venda] = await tx`
+        INSERT INTO alissonerp.vendas_erp (
+          numero_venda, cliente_id, vendedor_id, data_venda, data_entrega,
+          situacao, observacoes, orcamento_id, created_by
         ) VALUES (
-          ${numeroOrdem},
-          'fabricacao'::alissonerp.enum_tipo_ordem,
-          'criado', 'aguardando', 'pcp',
-          ${clienteId}, ${orc.vendedor_id ?? (caller.id_vendedor ? Number(caller.id_vendedor) : null)},
-          ${pesoNeg},
-          ${dataEntrega.toISOString().split("T")[0]},
+          'V-TEMP', ${clienteId}, ${vendedorId},
+          CURRENT_DATE, ${dataEntrega.toISOString().split("T")[0]},
+          'rascunho',
           ${'Orçamento ' + orc.numero_orcamento + (orc.nome_modelo ? ' - ' + orc.nome_modelo : '')},
-          NOW()
+          ${orcId}, ${user.id}::uuid
         )
-        RETURNING id, numero_ordem
+        RETURNING id
       `;
+      // Atualizar numero_venda com ID real
+      await tx`
+        UPDATE alissonerp.vendas_erp
+        SET numero_venda = 'V-' || LPAD(${venda.id}::text, 5, '0')
+        WHERE id = ${venda.id}
+      `;
+      const [vendaFinal] = await tx`SELECT numero_venda FROM alissonerp.vendas_erp WHERE id = ${venda.id}`;
 
-      // 4. Criar item da ordem (produto genérico "Personalizado")
+      // 3. Criar item da venda
       const nomeItem = orc.tipo === "alianca"
-        ? `Aliança ${orc.modelo ?? orc.perfil ?? "Personalizada"}`
+        ? `Aliança ${perfilNomes[orc.perfil as string] ?? orc.modelo ?? "Personalizada"}`
         : `Peça Personalizada`;
+      const valorItem = Number(orc.valor ?? 0);
+      const pesoItem = Number(orc.peso ?? orc.peso_estimado ?? 0);
       await tx`
-        INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
-        VALUES (${ordem.id}, ${nomeItem}, 1, ${pesoNeg})
-      `;
-
-      // 5. Criar ficha técnica vinculada à ordem
-      const tipoItem = orc.tipo === "alianca" ? "alianca" : "peca_personalizada";
-      const dadosFicha: Record<string, unknown> = {};
-
-      if (orc.tipo === "alianca") {
-        if (orc.largura) dadosFicha.milimetragem = String(orc.largura);
-        if (orc.aro_numeracao) dadosFicha.numeracao = orc.aro_numeracao.replace("Aro ", "");
-        if (orc.perfil || orc.modelo) dadosFicha.modelo = orc.perfil ?? orc.modelo;
-        if (orc.perfil) dadosFicha.modelo_interno = orc.perfil;
-        if (orc.tipo_fonte) dadosFicha.tipo_fonte = orc.tipo_fonte;
-        if (orc.texto) dadosFicha.texto_gravacao = orc.texto;
-        if (orc.cor_metal) dadosFicha.cor_metal = orc.cor_metal;
-        if (orc.peso_estimado) dadosFicha.peso_estimado = orc.peso_estimado;
-        if (orc.espessura) dadosFicha.espessura = orc.espessura;
-        if (orc.qtd_pedras) dadosFicha.qtd_pedras = orc.qtd_pedras;
-        if (orc.tamanho_pedra) dadosFicha.tamanho_pedra = orc.tamanho_pedra;
-        if (orc.tipo_aplicacao_pedra) dadosFicha.tipo_aplicacao_pedra = orc.tipo_aplicacao_pedra;
-      } else {
-        if (orc.peso_estimado) dadosFicha.peso_estimado = orc.peso_estimado;
-        if (orc.cor_metal) dadosFicha.cor_metal = orc.cor_metal;
-        if (orc.pedras_detalhadas) dadosFicha.pedras_detalhadas = orc.pedras_detalhadas;
-      }
-
-      await tx`
-        INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
-        VALUES (${ordem.id}, ${tipoItem}, ${JSON.stringify(dadosFicha)}::jsonb, ${user.id}::uuid)
-      `;
-
-      // 6. Criar auditoria loja pendente
-      await tx`
-        INSERT INTO alissonerp.auditorias (
-          situacao, tipo_auditoria, rota_processo, ordem_id,
-          peso_negociado, parecer, dados_ordem
+        INSERT INTO alissonerp.itens_venda_erp (
+          venda_id, nome_produto, quantidade, preco_lista,
+          pct_desconto, preco_unitario, total_item, peso_estimado, observacao
         ) VALUES (
-          'pendente', 'loja', 'entrada_ordem', ${ordem.id},
-          ${pesoNeg}, NULL,
-          ${JSON.stringify({
-            numero_ordem: numeroOrdem,
-            tipo_ordem: "fabricacao",
-            rota: "pcp",
-            peso_negociado: pesoNeg,
-            origem: "orcamento",
-            orcamento_id: orcId,
-          })}::jsonb
+          ${venda.id}, ${nomeItem}, 1, ${valorItem},
+          0, ${valorItem}, ${valorItem}, ${pesoItem},
+          ${'Orçamento ' + orc.numero_orcamento}
         )
       `;
 
-      // 7. Marcar orçamento como convertido
+      // 4. Marcar orçamento como convertido com venda vinculada
       await tx`
         UPDATE alissonerp.orcamentos
-        SET status = 'convertido', ordem_gerada_id = ${ordem.id}, updated_at = NOW()
+        SET status = 'convertido', venda_gerada_id = ${venda.id}, updated_at = NOW()
         WHERE id = ${orcId}
       `;
 
-      return { ordem_id: ordem.id, numero_ordem: ordem.numero_ordem };
+      return { venda_id: venda.id, numero_venda: vendaFinal.numero_venda as string };
     });
 
     return NextResponse.json({
       ok: true,
       status: "convertido",
-      ordem_id: resultado.ordem_id,
-      numero_ordem: resultado.numero_ordem,
+      venda_id: resultado.venda_id,
+      numero_venda: resultado.numero_venda,
     });
   }
 

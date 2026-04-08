@@ -298,7 +298,7 @@ function AliancaViewportInner({
     <div className="w-full h-full rounded-2xl overflow-hidden border" style={{ borderColor: "#E8DCC8", background: "#f1f5f9" }}>
       <Canvas
         dpr={[1, 1.5]}
-        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, powerPreference: "high-performance", alpha: false }}
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, powerPreference: "high-performance", alpha: false, preserveDrawingBuffer: true }}
         onCreated={({ gl }) => { canvasRef.current = gl.domElement; }}
       >
         <PerspectiveCamera makeDefault position={[0, -cameraDistance, cameraDistance]} fov={35} />

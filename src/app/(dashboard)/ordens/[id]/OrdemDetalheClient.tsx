@@ -297,9 +297,8 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
             </div>
           )}
 
-          {/* Peça do Cliente — servico_venda e garantia quando há dados */}
-          {(ordem.tipo_ordem_cod === "servico_venda" || ordem.tipo_ordem_cod === "garantia") &&
-            (ordem.foto_peca_servico || ordem.peso_peca_servico != null || ordem.video_observacao) && (
+          {/* Peça do Cliente / Foto 3D — quando há foto, peso ou video */}
+          {(ordem.foto_peca_servico || ordem.peso_peca_servico != null || ordem.video_observacao) && (
             <PecaClienteCard
               fotoPeca={ordem.foto_peca_servico}
               pesoPeca={ordem.peso_peca_servico}
