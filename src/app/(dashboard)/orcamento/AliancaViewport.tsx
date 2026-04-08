@@ -199,8 +199,8 @@ function Ring({
       <mesh ref={meshRef} geometry={geometry} rotation={[Math.PI / 2, 0, 0]}>
         <meshStandardMaterial
           color={params.metalColor}
-          roughness={0.15}
-          metalness={0.95}
+          roughness={0.0}
+          metalness={1.0}
           envMapIntensity={1.0}
         />
       </mesh>
