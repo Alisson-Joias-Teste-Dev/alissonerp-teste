@@ -714,21 +714,7 @@ export default function OrcamentoClient({
             )}
           </Card>
 
-          {/* Preco */}
-          <Card title="Precificacao">
-            <div className="space-y-2">
-              <Slider label="Markup" value={params.startMkp} min={1} max={8} step={0.1} onChange={(v) => updateParam("startMkp", v)} />
-              <Slider label="Desconto" value={params.discountPercent} min={0} max={50} step={1} unit="%" onChange={(v) => updateParam("discountPercent", v)} />
-              <div className="pt-1 space-y-0.5">
-                {calcCategories.map((cat) => (
-                  <div key={cat.id} className="flex justify-between text-[10px]">
-                    <span className="text-gray-400">{cat.name} (ate {cat.maxWeight}g)</span>
-                    <span className="font-semibold text-gray-500">{cat.targetMkp?.toFixed(2)}x</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Card>
+          {/* Precificacao removida — controlada via Configurações */}
         </div>
 
         {/* ── 3D + Resultado (DIREITA — flex:1, sem scroll) ────────── */}
