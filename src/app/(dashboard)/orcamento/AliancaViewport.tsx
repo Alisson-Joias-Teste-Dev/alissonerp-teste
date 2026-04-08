@@ -244,7 +244,7 @@ function EngravingText({
             color="#222222"
             anchorX="center"
             anchorY="middle"
-            font={fontType === 2 ? "/fonts/cursive.woff" : undefined}
+            fontStyle={fontType === 2 ? "italic" : "normal"}
           >
             {char}
             <meshStandardMaterial color="#333" roughness={0.6} metalness={0.3} />
