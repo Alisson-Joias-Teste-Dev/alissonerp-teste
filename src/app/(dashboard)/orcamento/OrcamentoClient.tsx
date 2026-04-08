@@ -477,7 +477,8 @@ export default function OrcamentoClient({
                     <tr key={o.id} className="border-b cursor-pointer hover:bg-amber-50/30 transition-colors"
                       style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.cremeBg }}
                       onClick={() => {
-                        if (o.ordem_gerada_id) window.open(`/ordens/${o.ordem_gerada_id}`, "_blank");
+                        if (o.venda_gerada_id) window.open(`/vendas/${o.venda_gerada_id}`, "_blank");
+                        else if (o.ordem_gerada_id) window.open(`/ordens/${o.ordem_gerada_id}`, "_blank");
                       }}>
                       <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: C.esmeralda }}>{o.numero_orcamento}</td>
                       <td className="px-4 py-2.5">{statusBadge(o.status)}</td>
@@ -524,8 +525,11 @@ export default function OrcamentoClient({
                               Rejeitar
                             </button>
                           </div>
-                        ) : o.status === "convertido" && o.ordem_gerada_id ? (
-                          <span className="text-[10px] text-blue-600 font-semibold">Ordem #{o.ordem_gerada_id}</span>
+                        ) : o.status === "convertido" && o.venda_gerada_id ? (
+                          <span className="text-[10px] text-blue-600 font-semibold">
+                            Venda #{o.venda_gerada_id}
+                            {o.ordem_gerada_id && <span className="text-green-600 ml-1">· Ordem #{o.ordem_gerada_id}</span>}
+                          </span>
                         ) : (
                           <span className="text-[10px] text-gray-300">—</span>
                         )}
