@@ -300,7 +300,7 @@ export default function OrcamentoClient({
           modelo: PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile,
           aro_numeracao: `Aro ${ringSize.size}`, largura: params.width, espessura: params.height,
           peso_estimado: pricing.weight, perfil: profile, diametro: params.diameter,
-          densidade_ouro: params.goldDensity, cor_metal: params.metalColor,
+          densidade_ouro: params.goldDensity, cor_metal: METAL_COLORS.find(m => m.value === params.metalColor)?.label ?? params.metalColor,
           tipo_fonte: params.textEnabled && params.textContent.trim() ? (params.textFontType === 2 ? "Cursiva" : "Forma") : null,
           texto: params.textEnabled && params.textContent.trim() ? params.textContent.trim() : null,
           qtd_pedras: params.hasStones ? derivedStoneCount : null, tamanho_pedra: params.hasStones ? params.stoneSize : null,
@@ -441,6 +441,7 @@ export default function OrcamentoClient({
               { key: "rascunho", label: `Rascunho (${orcamentos.filter(o => o.status === "rascunho").length})` },
               { key: "enviado", label: `Enviado (${orcamentos.filter(o => o.status === "enviado").length})` },
               { key: "aprovado", label: `Aprovado (${aprovados.length})` },
+              { key: "convertido", label: `Convertido (${orcamentos.filter(o => o.status === "convertido").length})` },
               { key: "rejeitado", label: `Rejeitado (${rejeitados.length})` },
             ].map(({ key, label }) => (
               <button key={key} onClick={() => setFiltroStatus(key)}
@@ -473,7 +474,11 @@ export default function OrcamentoClient({
                   {searched.length === 0 ? (
                     <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-gray-400">Nenhum orçamento encontrado</td></tr>
                   ) : searched.map((o, i) => (
-                    <tr key={o.id} className="border-b" style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.cremeBg }}>
+                    <tr key={o.id} className="border-b cursor-pointer hover:bg-amber-50/30 transition-colors"
+                      style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.cremeBg }}
+                      onClick={() => {
+                        if (o.ordem_gerada_id) window.open(`/ordens/${o.ordem_gerada_id}`, "_blank");
+                      }}>
                       <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: C.esmeralda }}>{o.numero_orcamento}</td>
                       <td className="px-4 py-2.5">{statusBadge(o.status)}</td>
                       <td className="px-4 py-2.5">
