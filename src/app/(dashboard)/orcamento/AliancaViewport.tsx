@@ -2,7 +2,7 @@
 
 import React, { useMemo, useRef, useEffect, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, PerspectiveCamera, Environment, ContactShadows } from "@react-three/drei";
+import { OrbitControls, PerspectiveCamera, Environment, ContactShadows, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { ProfileType } from "./types";
 import type { RingParams } from "./types";
@@ -208,6 +208,53 @@ function Ring({
   );
 }
 
+// ── Engraving Text (inside ring) ─────────────────────────────────────────────
+
+function EngravingText({
+  text,
+  fontType,
+  diameter,
+  width,
+}: {
+  text: string;
+  fontType: 1 | 2;
+  diameter: number;
+  width: number;
+}) {
+  const rInner = diameter / 2;
+  const fontSize = Math.min(width * 0.35, 1.2);
+  const charCount = text.length;
+
+  // Distribute characters around inner circumference
+  const totalArc = Math.min(charCount * 0.12, Math.PI * 0.8);
+  const startAngle = -totalArc / 2;
+
+  return (
+    <group rotation={[Math.PI / 2, 0, 0]}>
+      {text.split("").map((char, i) => {
+        const angle = startAngle + (i / Math.max(charCount - 1, 1)) * totalArc;
+        const x = Math.cos(angle) * (rInner - 0.05);
+        const z = Math.sin(angle) * (rInner - 0.05);
+        return (
+          <Text
+            key={i}
+            position={[x, 0, z]}
+            rotation={[0, -angle + Math.PI, 0]}
+            fontSize={fontSize}
+            color="#222222"
+            anchorX="center"
+            anchorY="middle"
+            font={fontType === 2 ? "/fonts/cursive.woff" : undefined}
+          >
+            {char}
+            <meshStandardMaterial color="#333" roughness={0.6} metalness={0.3} />
+          </Text>
+        );
+      })}
+    </group>
+  );
+}
+
 // ── Viewport ─────────────────────────────────────────────────────────────────
 
 export default function AliancaViewport({
@@ -235,6 +282,14 @@ export default function AliancaViewport({
         <spotLight position={[30, 40, 20]} angle={0.25} penumbra={1} intensity={3} castShadow />
         <spotLight position={[-30, 20, 10]} angle={0.3} penumbra={1} intensity={2} color="#ffffff" />
         <Ring params={params} profileType={profile} onSetMesh={handleMesh} />
+        {params.textEnabled && params.textContent.trim() && (
+          <EngravingText
+            text={params.textContent.trim()}
+            fontType={params.textFontType}
+            diameter={params.diameter}
+            width={params.width}
+          />
+        )}
         <Environment preset="warehouse" resolution={1024} />
         <ContactShadows position={[0, -12, 0]} opacity={0.4} scale={40} blur={2.5} far={10} color="#0f172a" />
         <OrbitControls enableDamping minDistance={10} maxDistance={60} rotateSpeed={0.6} />
