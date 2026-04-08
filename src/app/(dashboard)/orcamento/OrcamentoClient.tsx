@@ -115,6 +115,8 @@ export default function OrcamentoClient({
   const [orcamentos, setOrcamentos] = useState<any[]>([]);
   const [loadingOrc, setLoadingOrc] = useState(false);
   const [filtroStatus, setFiltroStatus] = useState<string>("todos");
+  const [buscaOrc, setBuscaOrc] = useState("");
+  const [showNovoMenu, setShowNovoMenu] = useState(false);
   const fetchOrcamentos = useCallback(async () => {
     setLoadingOrc(true);
     const res = await fetch("/api/orcamento?limit=100").catch(() => null);
@@ -271,108 +273,147 @@ export default function OrcamentoClient({
   // TELA DE SELEÇÃO DE TIPO
   // ═══════════════════════════════════════════════════════════════════════════
   if (orcamentoTipo === null) {
-    return (
-      <div className="min-h-screen px-4 py-8" style={{ backgroundColor: C.cremeBg }}>
-        <div className="max-w-3xl mx-auto space-y-6">
-          <div className="text-center mb-4">
-            <h1 className="text-2xl font-bold" style={{ color: C.esmeralda }}>Orcamento</h1>
-            <p className="text-sm text-gray-500 mt-1">Escolha o tipo ou veja os orcamentos salvos</p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <button
-              onClick={() => setOrcamentoTipo("alianca")}
-              className="bg-white rounded-2xl border-2 p-8 text-left transition-all hover:shadow-lg hover:border-[#D4AF37] active:scale-[0.98]"
-              style={{ borderColor: C.cremeBorder }}
-            >
-              <div className="w-14 h-14 rounded-full flex items-center justify-center mb-4" style={{ backgroundColor: "rgba(212,175,55,0.1)" }}>
-                <CircleDot size={28} style={{ color: C.gold }} />
-              </div>
-              <h2 className="text-lg font-bold mb-1" style={{ color: C.esmeralda }}>Alianca Personalizada</h2>
-              <p className="text-xs text-gray-500">Editor 3D com perfis, medidas, pedras, gravacao e precificacao automatica</p>
-            </button>
-            <button
-              onClick={() => setOrcamentoTipo("peca")}
-              className="bg-white rounded-2xl border-2 p-8 text-left transition-all hover:shadow-lg hover:border-[#D4AF37] active:scale-[0.98]"
-              style={{ borderColor: C.cremeBorder }}
-            >
-              <div className="w-14 h-14 rounded-full flex items-center justify-center mb-4" style={{ backgroundColor: "rgba(212,175,55,0.1)" }}>
-                <Gem size={28} style={{ color: C.gold }} />
-              </div>
-              <h2 className="text-lg font-bold mb-1" style={{ color: C.esmeralda }}>Peca Personalizada</h2>
-              <p className="text-xs text-gray-500">Anel, brinco, pingente, pulseira — peso manual, pedras opcionais</p>
-            </button>
-          </div>
-          {/* Lista de orçamentos */}
-          <div className="bg-white rounded-2xl border p-5 space-y-3" style={{ borderColor: C.cremeBorder }}>
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold" style={{ color: C.esmeralda }}>Orcamentos</h3>
-              <div className="flex gap-1">
-                {["todos", "rascunho", "enviado", "aprovado", "rejeitado"].map((s) => (
-                  <button key={s} onClick={() => setFiltroStatus(s)}
-                    className="text-[10px] px-2 py-1 rounded-full font-medium transition-colors"
-                    style={{
-                      backgroundColor: filtroStatus === s ? C.esmeralda : "transparent",
-                      color: filtroStatus === s ? "#fff" : "#9CA3AF",
-                    }}>
-                    {s === "todos" ? "Todos" : s.charAt(0).toUpperCase() + s.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {loadingOrc ? (
-              <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-gray-300" /></div>
-            ) : (() => {
-              const filtered = filtroStatus === "todos" ? orcamentos : orcamentos.filter((o) => o.status === filtroStatus);
-              return filtered.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-6">Nenhum orcamento encontrado</p>
-              ) : (
-                <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                  {filtered.map((o) => (
-                    <div key={o.id} className="flex items-center justify-between rounded-xl border px-4 py-3" style={{ borderColor: C.cremeBorder }}>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold" style={{ color: C.esmeralda }}>{o.numero_orcamento}</span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
-                            style={{
-                              backgroundColor: o.tipo === "alianca" ? "rgba(212,175,55,0.1)" : "rgba(168,85,247,0.1)",
-                              color: o.tipo === "alianca" ? C.gold : "#A855F7",
-                            }}>
-                            {o.tipo === "alianca" ? "Alianca" : "Peca"}
-                          </span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
-                            style={{
-                              backgroundColor: o.status === "aprovado" ? "#D1FAE5" : o.status === "rejeitado" ? "#FEE2E2" : o.status === "enviado" ? "#DBEAFE" : "#F3F4F6",
-                              color: o.status === "aprovado" ? "#065F46" : o.status === "rejeitado" ? "#991B1B" : o.status === "enviado" ? "#1D4ED8" : "#6B7280",
-                            }}>
-                            {o.status}
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-0.5 truncate">{o.nome_cliente}</p>
-                      </div>
-                      <div className="text-right shrink-0 ml-3">
-                        <p className="text-sm font-bold" style={{ color: C.esmeralda }}>
-                          R$ {Number(o.valor ?? 0).toLocaleString("pt-BR")}
-                        </p>
-                        <p className="text-[10px] text-gray-400">
-                          {o.peso ? `${Number(o.peso).toFixed(1)}g` : ""} · {new Date(o.created_at).toLocaleDateString("pt-BR")}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
-          </div>
+    const totalOrc = orcamentos.length;
+    const aprovados = orcamentos.filter((o) => o.status === "aprovado");
+    const rejeitados = orcamentos.filter((o) => o.status === "rejeitado");
+    const valorAprovado = aprovados.reduce((s, o) => s + Number(o.valor ?? 0), 0);
+    const filtered = filtroStatus === "todos" ? orcamentos : orcamentos.filter((o) => o.status === filtroStatus);
+    const searched = buscaOrc ? filtered.filter((o) =>
+      o.numero_orcamento?.toLowerCase().includes(buscaOrc.toLowerCase()) ||
+      o.nome_cliente?.toLowerCase().includes(buscaOrc.toLowerCase())
+    ) : filtered;
 
-          {canManageConfig && (
-            <div className="text-center">
+    const statusBadge = (status: string) => {
+      const map: Record<string, { bg: string; color: string }> = {
+        rascunho: { bg: "#F3F4F6", color: "#6B7280" }, enviado: { bg: "#DBEAFE", color: "#1D4ED8" },
+        aprovado: { bg: "#D1FAE5", color: "#065F46" }, rejeitado: { bg: "#FEE2E2", color: "#991B1B" },
+        convertido: { bg: "#E0E7FF", color: "#4338CA" },
+      };
+      const s = map[status] ?? map.rascunho;
+      return <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>{status}</span>;
+    };
+
+    return (
+      <div className="px-3 md:px-6 py-4 md:py-8 max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-xl font-bold" style={{ color: C.esmeralda }}>Orcamentos</h1>
+            <p className="text-xs text-gray-400">{totalOrc} orcamentos</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {canManageConfig && (
               <button onClick={() => { setOrcamentoTipo("alianca"); setTab("config"); }}
-                className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
-                <Settings2 size={12} className="inline mr-1" />Configuracoes
+                className="px-3 py-2 rounded-lg border text-xs font-medium text-gray-500 hover:bg-gray-50" style={{ borderColor: C.cremeBorder }}>
+                <Settings2 size={13} className="inline mr-1" />Config
               </button>
+            )}
+            <div className="relative">
+              <button onClick={() => setShowNovoMenu(!showNovoMenu)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white"
+                style={{ backgroundColor: C.esmeralda }}>
+                <Plus size={15} />Novo Orcamento
+                <ChevronDown size={13} />
+              </button>
+              {showNovoMenu && (
+                <div className="absolute right-0 mt-1 bg-white rounded-xl border shadow-lg py-1 z-20 w-56" style={{ borderColor: C.cremeBorder }}>
+                  <button onClick={() => { setOrcamentoTipo("alianca"); setShowNovoMenu(false); }}
+                    className="w-full text-left px-4 py-3 hover:bg-gray-50 text-sm">
+                    <CircleDot size={14} className="inline mr-2" style={{ color: C.gold }} />Alianca Personalizada
+                  </button>
+                  <button onClick={() => { setOrcamentoTipo("peca"); setShowNovoMenu(false); }}
+                    className="w-full text-left px-4 py-3 hover:bg-gray-50 text-sm">
+                    <Gem size={14} className="inline mr-2" style={{ color: "#A855F7" }} />Peca Personalizada
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          {[
+            { label: "Total", value: String(totalOrc), color: C.esmeralda },
+            { label: "Aprovados", value: String(aprovados.length), color: "#059669" },
+            { label: "Rejeitados", value: String(rejeitados.length), color: "#DC2626" },
+            { label: "Valor Aprovado", value: `R$ ${valorAprovado.toLocaleString("pt-BR")}`, color: C.gold },
+          ].map((s) => (
+            <div key={s.label} className="bg-white rounded-xl border px-4 py-3" style={{ borderColor: C.cremeBorder }}>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">{s.label}</p>
+              <p className="text-2xl font-black mt-1" style={{ color: s.color }}>{s.value}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Busca + Filtros */}
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <input type="text" placeholder="Buscar por numero ou cliente..."
+            value={buscaOrc} onChange={(e) => setBuscaOrc(e.target.value)}
+            className="border rounded-lg px-3 py-2 text-sm outline-none flex-1 min-w-[200px]"
+            style={{ borderColor: C.cremeBorder }} />
+          <div className="flex gap-1 rounded-lg p-0.5" style={{ backgroundColor: C.creme }}>
+            {[
+              { key: "todos", label: `Todos (${totalOrc})` },
+              { key: "rascunho", label: `Rascunho (${orcamentos.filter(o => o.status === "rascunho").length})` },
+              { key: "enviado", label: `Enviado (${orcamentos.filter(o => o.status === "enviado").length})` },
+              { key: "aprovado", label: `Aprovado (${aprovados.length})` },
+              { key: "rejeitado", label: `Rejeitado (${rejeitados.length})` },
+            ].map(({ key, label }) => (
+              <button key={key} onClick={() => setFiltroStatus(key)}
+                className="px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors"
+                style={{
+                  backgroundColor: filtroStatus === key ? C.esmeralda : "transparent",
+                  color: filtroStatus === key ? "#F3EADA" : "#6B7280",
+                }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Tabela */}
+        {loadingOrc ? (
+          <div className="flex justify-center py-16"><Loader2 size={24} className="animate-spin text-gray-300" /></div>
+        ) : (
+          <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr style={{ backgroundColor: C.esmeralda }}>
+                    {["Numero", "Status", "Tipo", "Cliente", "Peso", "Valor", "Data"].map((h) => (
+                      <th key={h} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#80A795" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {searched.length === 0 ? (
+                    <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-400">Nenhum orcamento encontrado</td></tr>
+                  ) : searched.map((o, i) => (
+                    <tr key={o.id} className="border-b" style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.cremeBg }}>
+                      <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: C.esmeralda }}>{o.numero_orcamento}</td>
+                      <td className="px-4 py-2.5">{statusBadge(o.status)}</td>
+                      <td className="px-4 py-2.5">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                          style={{
+                            backgroundColor: o.tipo === "alianca" ? "rgba(212,175,55,0.1)" : "rgba(168,85,247,0.1)",
+                            color: o.tipo === "alianca" ? C.gold : "#A855F7",
+                          }}>
+                          {o.tipo === "alianca" ? "Alianca" : "Peca"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-sm text-gray-700">{o.nome_cliente}</td>
+                      <td className="px-4 py-2.5 text-xs font-mono text-gray-500">{o.peso ? `${Number(o.peso).toFixed(1)}g` : "—"}</td>
+                      <td className="px-4 py-2.5 text-sm font-bold" style={{ color: C.esmeralda }}>R$ {Number(o.valor ?? 0).toLocaleString("pt-BR")}</td>
+                      <td className="px-4 py-2.5 text-xs text-gray-400">{new Date(o.created_at).toLocaleDateString("pt-BR")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-3 border-t text-[11px] text-gray-400" style={{ borderColor: C.creme }}>{searched.length} registros</div>
+          </div>
+        )}
       </div>
     );
   }
