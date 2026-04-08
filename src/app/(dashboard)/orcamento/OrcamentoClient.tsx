@@ -45,6 +45,7 @@ interface Props {
   userName: string;
   userId: string;
   vendedorId: number | null;
+  maxDesconto: number;
 }
 
 type OrcamentoTipo = "alianca" | "peca" | null;
@@ -79,7 +80,7 @@ function Slider({ label, value, min, max, step, unit, onChange }: {
 
 // ══════════════════════════════════════════════════════════════════════════════
 export default function OrcamentoClient({
-  cotacaoOuro, cotacaoDolar, config, canManageConfig, userName, userId, vendedorId,
+  cotacaoOuro, cotacaoDolar, config, canManageConfig, userName, userId, vendedorId, maxDesconto,
 }: Props) {
   const [orcamentoTipo, setOrcamentoTipo] = useState<OrcamentoTipo>(null);
 
@@ -727,8 +728,30 @@ export default function OrcamentoClient({
           <div className="rounded-xl border px-4 py-2.5 shrink-0" style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}>
             <div className="flex items-center justify-between gap-4">
               <Pill label="Peso" value={`${pricing.weight.toFixed(1)}g`} />
+              <div className="flex items-center gap-3">
+                <div className="text-center">
+                  <p className="text-[9px] uppercase tracking-wider text-gray-400">Desconto</p>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => updateParam("discountPercent", Math.max(0, params.discountPercent - 1))}
+                      className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs">-</button>
+                    <span className="text-sm font-bold w-8 text-center" style={{ color: params.discountPercent > 0 ? "#DC2626" : C.esmeralda }}>
+                      {params.discountPercent}%
+                    </span>
+                    <button onClick={() => {
+                      const limit = canManageConfig ? 50 : (maxDesconto || 0);
+                      updateParam("discountPercent", Math.min(limit, params.discountPercent + 1));
+                    }}
+                      className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs">+</button>
+                  </div>
+                  {!canManageConfig && maxDesconto > 0 && (
+                    <p className="text-[8px] text-gray-300">max {maxDesconto}%</p>
+                  )}
+                </div>
+              </div>
               <div className="text-right shrink-0">
-                <p className="text-[9px] uppercase tracking-wide" style={{ color: C.gold }}>Preco Final</p>
+                <p className="text-[9px] uppercase tracking-wide" style={{ color: C.gold }}>
+                  Preco Final{params.discountPercent > 0 && ` (-${params.discountPercent}%)`}
+                </p>
                 <p className="text-2xl font-black tracking-tight" style={{ color: C.esmeralda }}>
                   R$ {pricing.discountPrice.toLocaleString("pt-BR")}
                 </p>

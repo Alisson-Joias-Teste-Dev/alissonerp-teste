@@ -14,7 +14,7 @@ export default async function OrcamentoPage() {
   if (!user) redirect("/login");
 
   const [caller] = await sql`
-    SELECT u.role, u.nome, u.deposito_id,
+    SELECT u.role, u.nome, u.deposito_id, u.mx_desconto_permitido,
            v.id_vendedor
     FROM alissonerp.usuarios u
     LEFT JOIN public.vendedores v ON v.email = u.email
@@ -72,6 +72,7 @@ export default async function OrcamentoPage() {
       userName={String(caller.nome ?? "")}
       userId={user.id}
       vendedorId={caller.id_vendedor ? Number(caller.id_vendedor) : null}
+      maxDesconto={Number(caller.mx_desconto_permitido ?? 0)}
     />
   );
 }
