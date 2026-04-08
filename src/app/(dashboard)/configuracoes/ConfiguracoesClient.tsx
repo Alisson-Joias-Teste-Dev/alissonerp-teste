@@ -2155,7 +2155,7 @@ function TabPermissoes() {
                       const level = getLevel(cur.pode_ler, cur.pode_escrever);
                       const dirty = isDirty(role, modulo);
 
-                      const levelColors: Record<number, { bg: string; color: string; Icon: React.ElementType }> = {
+                      const levelColors: { [k: number]: { bg: string; color: string; Icon: React.ComponentType<{ size?: number; strokeWidth?: number }> } } = {
                         0: { bg: "#f3f4f6",     color: P.muted,  Icon: Lock    },
                         1: { bg: "#e0f2fe",     color: "#0284c7", Icon: Eye    },
                         2: { bg: "#dcfce7",     color: "#16a34a", Icon: PenLine},
@@ -3447,7 +3447,8 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "tipos_servico", label: "Tipos Serviço",  icon: Wrench },
     { key: "comissoes",     label: "Comissões",       icon: PenLine },
   ];
-  const tabs = isSuperAdmin
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tabs: { key: Tab; label: string; icon: any }[] = isSuperAdmin
     ? [...baseTabs, { key: "permissoes" as Tab, label: "Permissões", icon: Shield }]
     : baseTabs;
 

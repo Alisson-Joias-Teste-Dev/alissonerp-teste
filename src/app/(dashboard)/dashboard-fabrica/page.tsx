@@ -131,7 +131,8 @@ function KpiCard({
   sub,
   color,
 }: {
-  icon: React.ElementType;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  icon: any;
   label: string;
   value: string | number;
   sub?: string;
