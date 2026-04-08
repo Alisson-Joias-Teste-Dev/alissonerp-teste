@@ -6,7 +6,7 @@ import { apiFetch } from "@/lib/apiFetch";
 import { useGlobalError } from "@/stores/errorStore";
 import {
   X, Search, Loader2, Hammer, CheckSquare, Square,
-  ShoppingBag, Package, ChevronRight, Calendar,
+  ShoppingBag, Package, ChevronRight, Calendar, Camera, Trash2,
 } from "lucide-react";
 import FichaTecnicaForm, {
   type FichaTecnicaDados, type TipoItem, TIPOS_ITEM, validarFichaTecnica,
@@ -42,6 +42,35 @@ function useDebounce<T>(value: T, ms: number): T {
 }
 function fmtData(d: string) { return new Date(d).toLocaleDateString("pt-BR"); }
 function fmtBRL(v: number) { return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
+
+/** Comprime imagem via canvas (máx 1920px, JPEG 0.85) e retorna base64 */
+async function compressImage(file: File): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      const max = 1920;
+      let { width, height } = img;
+      if (width > max || height > max) {
+        if (width > height) { height = Math.round((height * max) / width); width = max; }
+        else { width = Math.round((width * max) / height); height = max; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(objectUrl);
+      canvas.toBlob((blob) => {
+        if (!blob) { resolve(""); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      }, "image/jpeg", 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(""); };
+    img.src = objectUrl;
+  });
+}
 
 const SITUACAO_LABEL: Record<string, string> = {
   rascunho: "Rascunho", aprovado: "Aprovado",
@@ -111,6 +140,9 @@ export default function NovaOrdemFabricacaoModal({
   const [prioridade, setPrioridade] = useState("");
   const [rota, setRota] = useState("pcp");
   const [pesoNegociado, setPesoNegociado] = useState("");
+  const [fotos, setFotos] = useState<File[]>([]);
+  const [fotoPreviews, setFotoPreviews] = useState<string[]>([]);
+  const fotoInputRef = useRef<HTMLInputElement>(null);
 
   // Step 4: Ficha Técnica
   const [fichaDados, setFichaDados] = useState<FichaTecnicaDados>({ tipo_item: "" as TipoItem });
@@ -129,6 +161,7 @@ export default function NovaOrdemFabricacaoModal({
       setStep(0); setClienteBusca(""); setClienteResultados([]); setClienteSelecionado(null);
       setVendas([]); setVendaSelecionada(null); setItensVenda([]); setItensSelecionados([]);
       setDataEntrega(""); setPrioridade(""); setRota("pcp"); setPesoNegociado("");
+      setFotos([]); setFotoPreviews(prev => { prev.forEach(u => URL.revokeObjectURL(u)); return []; });
       setFichaDados({ tipo_item: "" as TipoItem });
       setProximoNumero(null); setSalvando(false); setErro(null); setClienteDropOpen(false);
     }
@@ -223,6 +256,13 @@ export default function NovaOrdemFabricacaoModal({
 
     setSalvando(true); setErro(null);
     try {
+      // Comprimir fotos (se houver)
+      const fotosBase64: string[] = [];
+      for (const f of fotos) {
+        const b64 = await compressImage(f);
+        if (b64) fotosBase64.push(b64);
+      }
+
       const itensSelecionadosData = itensVenda.filter(i => itensSelecionados.includes(i.id));
       const body = {
         tipo_ordem:          "fabricacao",
@@ -234,6 +274,7 @@ export default function NovaOrdemFabricacaoModal({
         venda_id:            vendaSelecionada.id,
         venda_item_ids:      itensSelecionados,
         ficha_tecnica_dados: fichaDados,
+        fotos_base64:        fotosBase64.length > 0 ? fotosBase64 : undefined,
         itens: itensSelecionadosData.map(i => ({
           produto_id:    i.produto_id,
           quantidade:    i.quantidade,
@@ -241,17 +282,10 @@ export default function NovaOrdemFabricacaoModal({
         })),
       };
 
-      const { numero_ordem, id: ordemId } = await apiFetch<{ id: number; numero_ordem: string }>(
+      const { numero_ordem } = await apiFetch<{ id: number; numero_ordem: string }>(
         "/api/ordens",
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
       );
-
-      // Salvar ficha técnica vinculada à ordem
-      await apiFetch("/api/fichas-tecnicas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ordem_id: ordemId, tipo_item: fichaDados.tipo_item, dados: fichaDados }),
-      });
 
       onSuccess?.(numero_ordem);
       onClose();
@@ -262,7 +296,7 @@ export default function NovaOrdemFabricacaoModal({
     } finally {
       setSalvando(false);
     }
-  }, [clienteSelecionado, vendaSelecionada, itensSelecionados, itensVenda, prioridade, pesoNegociado, dataEntrega, rota, fichaDados, onSuccess, onClose, pushError]);
+  }, [clienteSelecionado, vendaSelecionada, itensSelecionados, itensVenda, prioridade, pesoNegociado, dataEntrega, rota, fichaDados, fotos, onSuccess, onClose, pushError]);
 
   if (!isOpen) return null;
 
@@ -426,6 +460,60 @@ export default function NovaOrdemFabricacaoModal({
                 <label className="block text-xs font-semibold text-gray-500 mb-1">Peso do Metal Negociado (g) *</label>
                 <input type="text" inputMode="decimal" className="w-full border rounded-xl px-3 py-2 text-sm outline-none" style={{ borderColor: C.cremeBorder }} placeholder="Ex: 5.5" value={pesoNegociado} onChange={e => setPesoNegociado(e.target.value)} />
               </div>
+
+              {/* Fotos de referência */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">
+                  <Camera size={12} className="inline mr-1" />Fotos de Referência (opcional)
+                </label>
+                <input
+                  ref={fotoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/jpg,image/png,image/webp,image/heic"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    if (files.length === 0) return;
+                    const total = fotos.length + files.length;
+                    if (total > 10) { setErro("Máximo 10 fotos por ordem."); e.target.value = ""; return; }
+                    const newPreviews = files.map(f => URL.createObjectURL(f));
+                    setFotos(prev => [...prev, ...files]);
+                    setFotoPreviews(prev => [...prev, ...newPreviews]);
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  className="w-full border-2 border-dashed rounded-xl py-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors hover:bg-gray-50"
+                  style={{ borderColor: C.cremeBorder, color: "#6B7280" }}
+                  onClick={() => fotoInputRef.current?.click()}
+                >
+                  <Camera size={16} />
+                  {fotos.length === 0 ? "Adicionar fotos" : `${fotos.length}/10 foto${fotos.length > 1 ? "s" : ""}`}
+                </button>
+                {fotoPreviews.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {fotoPreviews.map((src, i) => (
+                      <div key={i} className="relative group">
+                        <img src={src} alt={`Foto ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border" style={{ borderColor: C.cremeBorder }} />
+                        <button
+                          type="button"
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => {
+                            URL.revokeObjectURL(fotoPreviews[i]);
+                            setFotos(prev => prev.filter((_, j) => j !== i));
+                            setFotoPreviews(prev => prev.filter((_, j) => j !== i));
+                          }}
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[10px] text-gray-400 mt-1">Até 10 fotos. JPG, PNG, WebP ou HEIC.</p>
+              </div>
             </div>
           )}
 
@@ -496,6 +584,16 @@ export default function NovaOrdemFabricacaoModal({
                   <span className="text-xs text-gray-400">Ficha Técnica</span>
                   <span className="font-medium text-xs" style={{ color: C.esmeralda }}>{tipoItemLabel}</span>
                 </div>
+                {fotos.length > 0 && (
+                  <div className="px-4 py-2.5">
+                    <p className="text-xs text-gray-400 mb-1.5">Fotos ({fotos.length})</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {fotoPreviews.map((src, i) => (
+                        <img key={i} src={src} alt={`Foto ${i + 1}`} className="w-12 h-12 object-cover rounded-lg border" style={{ borderColor: C.cremeBorder }} />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -74,13 +74,27 @@ export default async function OrdemDetalhePage({
     }
   }
 
+  // Ficha técnica: tentar view legada (Directus) primeiro, senão tabela ERP nova
+  let fichaTecnica = (fichas[0] as any) ?? null;
+  if (!fichaTecnica) {
+    const [fichaErp] = await sql`
+      SELECT id AS ficha_id, ordem_id, tipo_item, dados, created_at
+      FROM alissonerp.fichas_tecnicas
+      WHERE ordem_id = ${ordemId}
+      LIMIT 1
+    `;
+    if (fichaErp) {
+      fichaTecnica = { ...fichaErp, _origem: "erp" };
+    }
+  }
+
   return (
     <OrdemDetalheClient
       ordem={ordens[0]}
       apontamentos={apontamentos}
       movEstoque={movEstoque}
       transferencias={transferencias}
-      fichaTecnica={(fichas[0] as any) ?? null}
+      fichaTecnica={fichaTecnica}
       timeline={timeline as any[]}
     />
   );
