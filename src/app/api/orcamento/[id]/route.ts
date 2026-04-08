@@ -129,7 +129,7 @@ export async function PATCH(
         INSERT INTO alissonerp.ordens (
           numero_ordem, tipo_ordem, situacao, status, rota,
           cliente_id, vendedor_id, peso_metal_negociado,
-          data_entrega, detalhes_ordem, created_at
+          data_entrega, detalhes_ordem, foto_peca_servico, created_at
         ) VALUES (
           ${numeroOrdem},
           'fabricacao'::alissonerp.enum_tipo_ordem,
@@ -138,6 +138,7 @@ export async function PATCH(
           ${pesoNeg},
           ${dataEntrega.toISOString().split("T")[0]},
           ${'Orçamento ' + orc.numero_orcamento + (orc.nome_modelo ? ' - ' + orc.nome_modelo : '')},
+          ${orc.foto_3d ?? null},
           NOW()
         )
         RETURNING id, numero_ordem

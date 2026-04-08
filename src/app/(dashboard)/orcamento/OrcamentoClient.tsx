@@ -275,16 +275,27 @@ export default function OrcamentoClient({
 
   const handleSizeChange = (s: RingSize) => { setRingSize(s); updateParam("diameter", s.diameter); };
 
+  // Captura screenshot do Canvas 3D
+  const capture3DScreenshot = useCallback((): string | null => {
+    try {
+      const canvas = document.querySelector('canvas[data-engine]') as HTMLCanvasElement | null;
+      if (!canvas) return null;
+      return canvas.toDataURL("image/jpeg", 0.85);
+    } catch { return null; }
+  }, []);
+
   const handleSaveOrder = async () => {
     if (!clientName.trim() && !clienteId) { setSaveMsg({ text: "Selecione ou cadastre um cliente", type: "error" }); return; }
     setIsSaving(true); setSaveMsg(null);
     try {
+      const foto3d = capture3DScreenshot();
       const body = {
         nome_cliente: clientName.trim(),
         cliente_id: clienteId,
         nome_modelo: PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile,
         peso: pricing.weight, valor: pricing.discountPrice, markup: pricing.mkp,
         desconto_pct: params.discountPercent, cotacao_ouro: params.goldPrice, tipo: "alianca",
+        foto_3d_base64: foto3d,
         ficha: {
           modelo: PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile,
           aro_numeracao: `Aro ${ringSize.size}`, largura: params.width, espessura: params.height,

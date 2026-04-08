@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest) {
   const {
     nome_cliente, nome_modelo, peso, valor, markup, desconto_pct,
     cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
-    tipo, ficha, observacoes, cliente_id,
+    tipo, ficha, observacoes, cliente_id, foto_3d_base64,
   } = body;
 
   if (!nome_cliente?.trim() && !cliente_id) {
@@ -72,6 +73,14 @@ export async function POST(req: NextRequest) {
   // Gerar número do orçamento
   const [seqRow] = await sql`SELECT nextval('alissonerp.orcamento_seq') AS seq`;
   const numero = `ORC-${String(seqRow.seq).padStart(6, "0")}`;
+
+  // Upload foto 3D se enviada
+  let foto3dUrl: string | null = null;
+  if (foto_3d_base64 && typeof foto_3d_base64 === "string" && foto_3d_base64.startsWith("data:")) {
+    const path = `orcamento/${numero}/3d-${Date.now()}.jpg`;
+    const result = await uploadFile("ordem-fotos", path, foto_3d_base64, "image/jpeg");
+    if (!("error" in result)) foto3dUrl = result.url;
+  }
 
   let fichaId: number | null = null;
 
@@ -112,7 +121,7 @@ export async function POST(req: NextRequest) {
       numero_orcamento, tipo, vendedor_id, usuario_id,
       nome_cliente, nome_modelo, peso, valor, markup,
       desconto_pct, cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
-      ficha_tecnica_id, observacoes, cliente_id
+      ficha_tecnica_id, observacoes, cliente_id, foto_3d
     ) VALUES (
       ${numero}, ${tipo ?? "alianca"},
       ${caller.id_vendedor ? Number(caller.id_vendedor) : null},
@@ -121,7 +130,7 @@ export async function POST(req: NextRequest) {
       ${peso ?? null}, ${valor ?? null}, ${markup ?? null},
       ${desconto_pct ?? 0}, ${cotacao_ouro ?? null},
       ${cotacao_dolar ?? null}, ${valor_ouro ?? null}, ${valor_pedras ?? null},
-      ${fichaId}, ${observacoes ?? null}, ${cliente_id ?? null}
+      ${fichaId}, ${observacoes ?? null}, ${cliente_id ?? null}, ${foto3dUrl}
     ) RETURNING *
   `;
 
