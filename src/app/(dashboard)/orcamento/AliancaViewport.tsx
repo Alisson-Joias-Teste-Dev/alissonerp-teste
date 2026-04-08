@@ -215,39 +215,45 @@ function EngravingText({
   fontType,
   diameter,
   width,
+  height,
 }: {
   text: string;
   fontType: 1 | 2;
   diameter: number;
   width: number;
+  height: number;
 }) {
+  // Place text on the inner surface of the ring
   const rInner = diameter / 2;
-  const fontSize = Math.min(width * 0.28, 0.9);
+  const rOuter = rInner + height;
+  const fontSize = Math.min(width * 0.3, 1.0);
   const charCount = text.length;
-  const spacing = fontSize * 0.65;
+  const spacing = fontSize * 0.55;
   const totalWidth = charCount * spacing;
-  const totalAngle = totalWidth / rInner;
-  const startAngle = -totalAngle / 2;
+  const r = rInner + 0.02; // on inner surface
+  const totalAngle = totalWidth / r;
+  const startAngle = Math.PI / 2 - totalAngle / 2; // start from front
 
   return (
     <group rotation={[Math.PI / 2, 0, 0]}>
       {text.split("").map((char, i) => {
-        const angle = startAngle + (i + 0.5) * (totalAngle / charCount);
-        // Position on inner surface, facing inward
-        const x = Math.cos(angle) * (rInner + 0.01);
-        const z = Math.sin(angle) * (rInner + 0.01);
+        const a = startAngle + (i + 0.5) * (totalAngle / charCount);
+        const px = Math.cos(a) * r;
+        const pz = Math.sin(a) * r;
+        // Face outward from center (readable from inside the ring)
         return (
           <Text
             key={`${i}-${char}`}
-            position={[x, 0, z]}
-            rotation={[0, -angle + Math.PI / 2, 0]}
+            position={[px, 0, pz]}
+            rotation={[0, -(a - Math.PI / 2), 0]}
             fontSize={fontSize}
             anchorX="center"
             anchorY="middle"
             fontStyle={fontType === 2 ? "italic" : "normal"}
+            renderOrder={999}
           >
             {char}
-            <meshBasicMaterial color="#000000" />
+            <meshBasicMaterial color="#111111" side={THREE.DoubleSide} depthTest={false} transparent opacity={0.85} />
           </Text>
         );
       })}
@@ -308,6 +314,7 @@ function AliancaViewportInner({
             fontType={params.textFontType}
             diameter={params.diameter}
             width={params.width}
+            height={params.height}
           />
         )}
         <Environment preset="warehouse" resolution={512} />
