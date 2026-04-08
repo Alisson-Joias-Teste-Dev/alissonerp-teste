@@ -726,17 +726,9 @@ export default function OrcamentoClient({
           {/* Resultado compacto */}
           <div className="rounded-xl border px-4 py-2.5 shrink-0" style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}>
             <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <Pill label="Peso" value={`${pricing.weight.toFixed(1)}g`} />
-                <Pill label="Cat." value={pricing.category} />
-                <Pill label="Mkp" value={`${pricing.mkp.toFixed(2)}x`} />
-                <Pill label="Custo" value={`R$${pricing.cost.toFixed(0)}`} />
-                <span className="text-xs text-gray-300 line-through">R$ {pricing.price.toFixed(0)}</span>
-              </div>
+              <Pill label="Peso" value={`${pricing.weight.toFixed(1)}g`} />
               <div className="text-right shrink-0">
-                <p className="text-[9px] uppercase tracking-wide" style={{ color: C.esmeralda }}>
-                  Preco final {params.discountPercent > 0 && `(-${params.discountPercent}%)`}
-                </p>
+                <p className="text-[9px] uppercase tracking-wide" style={{ color: C.gold }}>Preco Final</p>
                 <p className="text-2xl font-black tracking-tight" style={{ color: C.esmeralda }}>
                   R$ {pricing.discountPrice.toLocaleString("pt-BR")}
                 </p>
