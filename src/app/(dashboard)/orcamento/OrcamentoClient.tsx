@@ -499,14 +499,14 @@ export default function OrcamentoClient({
                         {o.status === "rascunho" || o.status === "enviado" ? (
                           <div className="flex gap-1">
                             <button onClick={async () => {
-                              if (!confirm(`Aprovar ${o.numero_orcamento}? Será criada uma ordem de fabricação.`)) return;
+                              if (!confirm(`Aprovar ${o.numero_orcamento}? Será criada uma venda pré-preenchida no PDV.`)) return;
                               const res = await fetch(`/api/orcamento/${o.id}`, {
                                 method: "PATCH", headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({ status: "aprovado" }),
                               });
                               const data = await res.json().catch(() => ({}));
                               if (!res.ok) { alert(data.error ?? "Erro ao aprovar"); return; }
-                              alert(`Aprovado! Ordem ${data.numero_ordem} criada.`);
+                              alert(`Aprovado! Venda ${data.numero_venda} criada no PDV.`);
                               fetchOrcamentos();
                             }}
                               className="text-[10px] px-2 py-1 rounded font-semibold bg-green-50 text-green-700 hover:bg-green-100">

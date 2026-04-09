@@ -54,16 +54,17 @@ const ALL_MENUS: MenuItem[] = [
   { label: "Configurações",      href: "/configuracoes",      icon: "Settings"        },
   { label: "Service",            href: "/service",            icon: "Smartphone"      },
   { label: "Painel Service",     href: "/service-painel",     icon: "Wrench"          },
+  { label: "Orcamento",          href: "/orcamento",          icon: "FileSpreadsheet" },
 ];
 
 const ROLE_MENUS: Record<Role, string[]> = {
-  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel"],
-  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel"],
-  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/tarefas", "/relatorios", "/service-painel"],
-  gerente_loja:       ["/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel"],
+  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento"],
+  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento"],
+  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/tarefas", "/relatorios", "/service-painel", "/orcamento"],
+  gerente_loja:       ["/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento"],
   ourives:            ["/ordens", "/pcp"],
   motoboy:            ["/protocolo"],
-  consultora:         ["/ordens", "/estoque", "/conferencia"],
+  consultora:         ["/ordens", "/estoque", "/conferencia", "/orcamento"],
   estoquista_fabrica: ["/estoque", "/quebra", "/compras", "/insumos"],
   estoquista_loja:    ["/estoque"],
   pcp:                ["/ordens", "/pcp", "/distribuicao", "/purificacao", "/quebra"],
@@ -76,7 +77,7 @@ const MENU_GROUPS: MenuGroup[] = [
   { type: "group", label: "Logística",   icon: "Truck",       items: ["/protocolo", "/conferencia", "/entrega"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Qualidade",   icon: "ShieldCheck", items: ["/auditoria"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Gestão",     icon: "ListTodo",    items: ["/tarefas", "/relatorios"].map(h => ALL_MENUS.find(m => m.href === h)!) },
-  { type: "group", label: "Comercial",   icon: "Briefcase",   items: ["/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao"].map(h => ALL_MENUS.find(m => m.href === h)!) },
+  { type: "group", label: "Comercial",   icon: "Briefcase",   items: ["/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/orcamento"].map(h => ALL_MENUS.find(m => m.href === h)!) },
 ];
 
 export function getMenusForRole(role: Role | null | undefined): MenuItem[] {
@@ -132,6 +133,7 @@ const HREF_TO_MODULO: Record<string, string> = {
   "/relatorios":        "relatorios",
   "/service":           "service",
   "/service-painel":    "service_painel",
+  "/orcamento":         "orcamento",
 };
 
 // Constrói o menu lateral a partir da lista de módulos do banco (role_permissoes)

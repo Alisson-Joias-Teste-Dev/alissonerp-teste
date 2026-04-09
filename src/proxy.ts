@@ -26,6 +26,7 @@ const MODULO_TO_PREFIX: Record<string, string> = {
   purificacao:       "/purificacao",
   service:           "/service",
   service_painel:    "/service-painel",
+  orcamento:         "/orcamento",
 };
 
 const PREFIXOS_PROTEGIDOS = new Set(Object.values(MODULO_TO_PREFIX));
