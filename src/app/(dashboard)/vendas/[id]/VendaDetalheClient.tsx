@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle,
-  Truck, Video, RefreshCw, Share2, Download, Send,
+  Truck, Video, RefreshCw, Share2, Download,
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
 } from "lucide-react";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
@@ -59,11 +59,15 @@ interface Venda {
   situacao: string; forma_envio: string | null; forma_frete: string | null;
   observacoes: string | null; observacoes_internas: string | null;
   video_obs_interna: string | null; tiny_sync_status: string | null;
-  bloqueado: boolean; qtd_itens: number;
+  tiny_pedido_id: string | null; bloqueado: boolean; qtd_itens: number;
+  created_at?: string | null;
   endereco_entrega?: string | null; endereco_entrega_numero?: string | null;
   endereco_entrega_complemento?: string | null; endereco_entrega_bairro?: string | null;
   endereco_entrega_cidade?: string | null; endereco_entrega_cep?: string | null;
   endereco_entrega_uf?: string | null;
+  cliente_endereco?: string | null; cliente_numero?: string | null;
+  cliente_complemento?: string | null; cliente_bairro?: string | null;
+  cliente_municipio?: string | null; cliente_cep?: string | null; cliente_uf?: string | null;
   itens: Array<{
     id: number; produto_id: number; nome_produto: string; sku: string | null;
     quantidade: number; preco_lista: number; pct_desconto: number;
@@ -71,14 +75,29 @@ interface Venda {
     valor_comissao: number; observacao: string | null; peso_estimado?: number | null;
   }>;
   pagamentos: PagamentoServer[];
+  ordens?: Array<{
+    id: number; numero_ordem: string; tipo_ordem: string;
+    situacao: string; status: string; created_at: string;
+  }>;
 }
 
 const FORMAS_PAGAMENTO = [
   "Dinheiro", "Cartão de Crédito", "Cartão de Débito",
-  "Vale-Troca", "Pix", "Ouro", "A Receber",
+  "Vale-Troca", "Pix", "Ouro", "A Receber", "Múltiplas",
 ];
 const GATEWAYS   = ["Mercado Pago", "PagSeguro", "Cielo", "Stone", "Getnet", "Rede", "Outro"];
 const BANDEIRAS  = ["Visa", "Mastercard", "Elo", "Amex", "Hipercard", "Outro"];
+const CONDICOES  = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
+const COM_PARCELAS = ["Cartão de Crédito", "Vale-Troca"];
+const COM_CARTAO   = ["Cartão de Crédito", "Cartão de Débito", "Pix"];
+
+function hoje() { return new Date().toISOString().slice(0, 10); }
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T12:00:00");
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+interface ParcelaRow { num: number; dias: number; data: string; valor: number; }
 
 const SITUACAO_LABEL: Record<string, string> = {
   rascunho: "Rascunho", aprovado: "Aprovado", enviado: "Enviado",
@@ -246,6 +265,12 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const [newPagValor, setNewPagValor] = useState("");
   const [newPagGateway, setNewPagGateway] = useState("Mercado Pago");
   const [newPagBandeira, setNewPagBandeira] = useState("Outro");
+  const [newPagParcelas, setNewPagParcelas] = useState(1);
+  const [newPagCondicao, setNewPagCondicao] = useState("À vista");
+  const [parcelasRows, setParcelasRows] = useState<ParcelaRow[]>([]);
+  const [multPagForma, setMultPagForma] = useState("Dinheiro");
+  const [multPagValor, setMultPagValor] = useState("");
+  const [multPagamentos, setMultPagamentos] = useState<Array<{ _key: string; forma: string; valor: number }>>([]);
 
   // ── Modals & delivery address ────────────────────────────────────────────────
   const [showDadosCliente, setShowDadosCliente] = useState(false);
@@ -256,6 +281,8 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const [novoClienteForm, setNovoClienteForm] = useState({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
   const [savingCliente, setSavingCliente] = useState(false);
   const [clienteErr, setClienteErr] = useState("");
+  const [cpfExistente, setCpfExistente] = useState<string | null>(null);
+  const cpfTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editingCliente, setEditingCliente] = useState(false);
   const [editClienteForm, setEditClienteForm] = useState({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
 
@@ -267,8 +294,6 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
-  const [enviandoTiny, setEnviandoTiny] = useState(false);
-  const [tinyMsg, setTinyMsg] = useState<{ type: "ok" | "erro"; text: string } | null>(null);
 
   // ── Load venda ──────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -333,17 +358,20 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   }, [venda, formaEnvioOpts, formaFreteAll]);
 
   // ── Editability ─────────────────────────────────────────────────────────────
+  const ROLES_EDITAR_APROVADO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "financeiro"];
+  const podeEditarAprovado = ROLES_EDITAR_APROVADO.includes(role);
+
   const edit = useMemo(() => {
     if (!venda || venda.bloqueado || venda.situacao === "cancelado")
       return { full: false, limited: false, metadata: false, readOnly: true };
     if (venda.situacao === "rascunho")
       return { full: true, limited: true, metadata: true, readOnly: false };
     if (venda.situacao === "aprovado")
-      return { full: false, limited: true, metadata: true, readOnly: false };
+      return { full: false, limited: podeEditarAprovado, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
     if (venda.situacao === "enviado")
-      return { full: false, limited: false, metadata: true, readOnly: false };
-    return { full: false, limited: false, metadata: true, readOnly: false };
-  }, [venda]);
+      return { full: false, limited: false, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
+    return { full: false, limited: false, metadata: false, readOnly: true };
+  }, [venda, podeEditarAprovado]);
 
   // ── Derived data ────────────────────────────────────────────────────────────
   const itens: ItemVenda[] = useMemo(() =>
@@ -361,6 +389,49 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const totalDesconto = itens.reduce((s, i) => s + (i.preco_lista - i.preco_unitario) * i.quantidade, 0);
   const totalComissao = itens.reduce((s, i) => s + i.valor_comissao, 0);
   const totalVenda = totalProdutos + totalFrete;
+
+  // ── Parcelas (geradas quando condição ou total mudam, apenas se sem pagamentos) ──
+  useEffect(() => {
+    if (!venda || venda.pagamentos.length > 0) return;
+    const n = newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao);
+    const tv = totalVenda;
+    const base = tv > 0 ? +(tv / n).toFixed(2) : 0;
+    const rows: ParcelaRow[] = Array.from({ length: n }, (_, i) => ({
+      num: i + 1, dias: 30 * (i + 1), data: addDays(hoje(), 30 * (i + 1)),
+      valor: i === n - 1 ? +(tv - base * (n - 1)).toFixed(2) : base,
+    }));
+    setParcelasRows(rows);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newPagCondicao, totalVenda, venda?.pagamentos?.length]);
+
+  function equalizarParcelas() {
+    const n = parcelasRows.length; if (!n) return;
+    const tv = totalVenda;
+    const base = +(tv / n).toFixed(2);
+    setParcelasRows(prev => prev.map((r, i) => ({
+      ...r, valor: i === n - 1 ? +(tv - base * (n - 1)).toFixed(2) : base,
+    })));
+  }
+  function updateParcelaRow(i: number, field: "dias" | "data" | "valor", raw: string) {
+    const tv = totalVenda;
+    setParcelasRows(prev => {
+      const updated = prev.map((r, idx) => {
+        if (idx !== i) return r;
+        if (field === "dias") { const d = parseInt(raw) || 0; return { ...r, dias: d, data: addDays(hoje(), d) }; }
+        if (field === "data") {
+          if (raw.length !== 10) return { ...r, data: raw };
+          const dias = Math.round((new Date(raw + "T12:00:00").getTime() - new Date(hoje() + "T12:00:00").getTime()) / 86400000);
+          return { ...r, data: raw, dias };
+        }
+        return { ...r, valor: parseFloat(raw.replace(",", ".")) || 0 };
+      });
+      if (field === "valor" && i < updated.length - 1) {
+        const sumOthers = updated.slice(0, -1).reduce((s, r) => s + r.valor, 0);
+        updated[updated.length - 1] = { ...updated[updated.length - 1], valor: Math.max(0, +(tv - sumOthers).toFixed(2)) };
+      }
+      return updated;
+    });
+  }
 
   const formaFreteOpts = formaFreteAll.filter(f => {
     const envio = formaEnvioOpts.find(e => e.id === formaEnvioId);
@@ -457,7 +528,8 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
     if (!v || v <= 0) return;
     setUpdating(true);
     try {
-      const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas: 1 };
+      const parcelas = newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao) || newPagParcelas;
+      const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas };
       if (["Cartão de Crédito", "Cartão de Débito"].includes(newPagForma)) {
         body.gateway = newPagGateway;
       }
@@ -541,9 +613,26 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
     finally { setSavingCliente(false); }
   }
 
+  // ── Verificar CPF duplicado ─────────────────────────────────────────────────
+  function checkCpfDuplicado(cpf: string) {
+    setCpfExistente(null);
+    const limpo = cpf.replace(/\D/g, "");
+    if (limpo.length < 11) return;
+    if (cpfTimer.current) clearTimeout(cpfTimer.current);
+    cpfTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/vendas/clientes/busca?q=${encodeURIComponent(limpo)}&limit=1`);
+        const data = await res.json() as Cliente[];
+        const found = data.find(c => c.cpf_cnpj?.replace(/\D/g, "") === limpo);
+        setCpfExistente(found ? found.nome : null);
+      } catch { /* silent */ }
+    }, 400);
+  }
+
   // ── Create new client ──────────────────────────────────────────────────────
   async function handleCriarCliente() {
     if (!novoClienteForm.nome.trim()) { setClienteErr("Nome é obrigatório"); return; }
+    if (cpfExistente) { setClienteErr(`CPF/CNPJ já cadastrado para: ${cpfExistente}`); return; }
     setSavingCliente(true); setClienteErr("");
     try {
       const res = await fetch("/api/contatos", {
@@ -615,7 +704,11 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ situacao: s }),
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      if (d.ordem_criada) {
+        alert(`Ordem ${d.ordem_criada} aberta automaticamente!`);
+      }
       await load();
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao atualizar status"); }
     finally { setUpdating(false); }
@@ -637,14 +730,27 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
     if (!venda) return;
     setGerandoPdf(true);
     try {
+      // Montar endereço de entrega (preferir entrega, fallback cliente)
+      const endEntrega = venda.endereco_entrega
+        ? [venda.endereco_entrega, venda.endereco_entrega_numero ? `nº ${venda.endereco_entrega_numero}` : null,
+           venda.endereco_entrega_complemento, venda.endereco_entrega_bairro,
+           venda.endereco_entrega_cidade, venda.endereco_entrega_uf,
+           venda.endereco_entrega_cep ? `CEP: ${venda.endereco_entrega_cep}` : null].filter(Boolean).join(", ")
+        : [venda.cliente_endereco, venda.cliente_numero ? `nº ${venda.cliente_numero}` : null,
+           venda.cliente_complemento, venda.cliente_bairro, venda.cliente_municipio, venda.cliente_uf,
+           venda.cliente_cep ? `CEP: ${venda.cliente_cep}` : null].filter(Boolean).join(", ") || undefined;
+
       const dados: OrcamentoPDF = {
         numero_venda: venda.numero_venda,
         cliente_nome: venda.cliente_nome ?? "Sem cliente",
         cliente_email: venda.cliente_email ?? undefined,
         cliente_telefone: venda.cliente_telefone ?? undefined,
         cliente_cpf_cnpj: venda.cliente_cpf_cnpj ?? undefined,
+        vendedor_nome: venda.vendedor_nome ?? undefined,
+        endereco_entrega: endEntrega,
         data_venda: venda.data_venda,
         data_entrega: venda.data_entrega ?? undefined,
+        created_at: venda.created_at ?? undefined,
         total_produtos: venda.total_produtos, total_desconto: venda.total_desconto,
         total_frete: venda.total_frete, total_venda: venda.total_venda,
         forma_envio: venda.forma_envio ?? undefined, observacoes: venda.observacoes ?? undefined,
@@ -653,24 +759,14 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
           preco_lista: i.preco_lista, desconto_pct: i.pct_desconto,
           preco_unitario: i.preco_unitario, total: i.total_item,
         })),
+        pagamentos: venda.pagamentos.map(p => ({
+          forma: p.forma, gateway: p.gateway ?? null,
+          parcelas: p.parcelas, valor: Number(p.valor),
+        })),
       };
-      gerarPDFOrcamento(dados).save(`orcamento-${venda.numero_venda}.pdf`);
+      gerarPDFOrcamento(dados).save(`pedido-${venda.numero_venda}.pdf`);
     } catch { /* silent */ }
     finally { setGerandoPdf(false); }
-  }
-
-  // ── Tiny ────────────────────────────────────────────────────────────────────
-  async function enviarTiny() {
-    if (!venda) return;
-    setEnviandoTiny(true); setTinyMsg(null);
-    try {
-      const res = await fetch(`/api/vendas/${venda.id}/enviar-tiny`, { method: "POST" });
-      const data = await res.json() as { message?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setTinyMsg({ type: "ok", text: data.message ?? "Enviado com sucesso" });
-      await load();
-    } catch (e) { setTinyMsg({ type: "erro", text: e instanceof Error ? e.message : "Erro" }); }
-    finally { setEnviandoTiny(false); setTimeout(() => setTinyMsg(null), 6000); }
   }
 
   // ── Share ───────────────────────────────────────────────────────────────────
@@ -739,13 +835,11 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
   const podeCancelar = isFullAccess && !["cancelado", "concluido"].includes(venda.situacao);
 
-  // Validação para aprovar: cliente + itens + pagamento + envio/frete obrigatórios
+  // Validação para aprovar: cliente + itens + pagamento obrigatórios
   const podeAprovar = !!(
     venda.cliente_id &&
     itens.length > 0 &&
-    venda.pagamentos.length > 0 &&
-    venda.forma_envio &&
-    venda.forma_frete
+    venda.pagamentos.length > 0
   );
 
   return (
@@ -766,6 +860,11 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
               style={{ backgroundColor: situacaoStyle.bg, color: situacaoStyle.text }}>
               {SITUACAO_LABEL[venda.situacao] ?? venda.situacao}
             </span>
+            {venda.tiny_pedido_id && (
+              <span className="text-xs px-2.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: "#DBEAFE", color: "#1E40AF" }}>
+                Tiny #{venda.tiny_pedido_id}
+              </span>
+            )}
             {venda.bloqueado && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Bloqueada</span>
             )}
@@ -777,14 +876,6 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
             style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
             {gerandoPdf ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} PDF
           </button>
-          {isFullAccess && (
-            <button onClick={enviarTiny} disabled={enviandoTiny}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 hover:bg-gray-50"
-              style={{ borderColor: venda.tiny_sync_status === "sincronizado" ? "#86EFAC" : C.cremeBorder, color: venda.tiny_sync_status === "erro" ? "#EF4444" : C.esmeralda }}>
-              {enviandoTiny ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-              {venda.tiny_sync_status === "sincronizado" ? "Reenviar Tiny" : "Enviar Tiny"}
-            </button>
-          )}
           <button onClick={compartilhar} disabled={sharing}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 hover:bg-gray-50"
             style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
@@ -798,11 +889,18 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
         </div>
       </div>
 
-      {/* Tiny toast */}
-      {tinyMsg && (
-        <div className="mb-3 px-3 py-2 rounded-lg text-xs font-medium text-center"
-          style={{ backgroundColor: tinyMsg.type === "ok" ? "#D1FAE5" : "#FEE2E2", color: tinyMsg.type === "ok" ? "#065F46" : "#991B1B" }}>
-          {tinyMsg.text}
+      {/* ── Banner de erro (Tiny, status, etc.) ── */}
+      {saveErr && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-start gap-2"
+          style={{ backgroundColor: "#FEF2F2", borderColor: "#FECACA", color: "#991B1B" }}>
+          <XCircle size={16} className="shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium">Erro ao processar</p>
+            <p className="text-xs mt-0.5">{saveErr}</p>
+          </div>
+          <button onClick={() => setSaveErr("")} className="shrink-0 p-0.5 hover:opacity-70">
+            <X size={14} />
+          </button>
         </div>
       )}
 
@@ -1016,7 +1114,12 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
               <div className="px-5 py-4 space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div><Label required>Nome</Label><Input value={novoClienteForm.nome} onChange={e => setNovoClienteForm(p => ({ ...p, nome: e.target.value }))} /></div>
-                  <div><Label>CPF/CNPJ</Label><Input value={novoClienteForm.cpf_cnpj} onChange={e => setNovoClienteForm(p => ({ ...p, cpf_cnpj: e.target.value }))} /></div>
+                  <div>
+                    <Label>CPF/CNPJ</Label>
+                    <Input value={novoClienteForm.cpf_cnpj} onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cpf_cnpj: v })); checkCpfDuplicado(v); }}
+                      style={{ borderColor: cpfExistente ? "#EF4444" : C.cremeBorder }} />
+                    {cpfExistente && <p className="text-xs text-red-500 mt-1">Já cadastrado: {cpfExistente}</p>}
+                  </div>
                   <div><Label>Email</Label><Input type="email" value={novoClienteForm.email} onChange={e => setNovoClienteForm(p => ({ ...p, email: e.target.value }))} /></div>
                   <div><Label>Telefone</Label><Input value={novoClienteForm.telefone} onChange={e => setNovoClienteForm(p => ({ ...p, telefone: e.target.value }))} /></div>
                   <div><Label>Celular</Label><Input value={novoClienteForm.celular} onChange={e => setNovoClienteForm(p => ({ ...p, celular: e.target.value }))} /></div>
@@ -1099,7 +1202,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                 <table className="w-full text-sm">
                   <thead style={{ backgroundColor: C.cremeBg }}>
                     <tr>
-                      {["Nº", "Descrição", "Código (SKU)", "Qtde", "UN", "Preço lista", "% Desc", "Preço un", "Preço total", ...(edit.limited ? [""] : [])].map(h => (
+                      {["Nº", "Descrição", "Código (SKU)", "Qtde", "UN", "Preço lista", "% Desc", ...(edit.limited ? ["R$ Desc"] : []), "Preço un", "Preço total", ...(edit.limited ? [""] : [])].map(h => (
                         <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>{h}</th>
                       ))}
                     </tr>
@@ -1126,9 +1229,22 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                           {edit.limited && item.id ? (
                             <input type="number" min={0} max={maxDesconto} step={1} defaultValue={item.pct_desconto}
                               onBlur={e => handleUpdateItem(item.id!, "pct_desconto", e.target.value || "0")}
-                              className="w-14 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                              className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
                           ) : (item.pct_desconto > 0 ? `${item.pct_desconto}%` : "—")}
                         </td>
+                        {edit.limited && (
+                          <td className="px-3 py-2.5">
+                            <input type="text"
+                              defaultValue={item.pct_desconto > 0 ? (item.preco_lista * item.pct_desconto / 100).toFixed(2).replace(".", ",") : ""}
+                              onBlur={e => {
+                                const valorDesc = parseFloat((e.target.value || "0").replace(",", ".")) || 0;
+                                const pct = item.preco_lista > 0 ? Math.min(maxDesconto, (valorDesc / item.preco_lista) * 100) : 0;
+                                handleUpdateItem(item.id!, "pct_desconto", String(Math.round(pct * 100) / 100));
+                              }}
+                              placeholder="0,00"
+                              className="w-20 border rounded px-1.5 py-1 text-sm text-right outline-none" style={{ borderColor: C.cremeBorder }} />
+                          </td>
+                        )}
                         <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</td>
                         <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
                         {edit.limited && (
@@ -1252,9 +1368,9 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
 
         {/* ── 4. Pagamentos ── */}
         <Secao>
-          <STitle>Pagamentos</STitle>
+          <STitle>Pagamento</STitle>
 
-          {/* Existing payments */}
+          {/* Pagamentos já registrados */}
           {venda.pagamentos.length > 0 && (
             <div className="space-y-2 mb-4">
               {venda.pagamentos.map(pag => {
@@ -1287,7 +1403,6 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                   </div>
                 );
               })}
-              {/* Payment summary */}
               <div className="pt-2 space-y-1 border-t" style={{ borderColor: C.cremeBorder }}>
                 <div className="flex items-center justify-between text-sm">
                   <span style={{ color: "#6B7280" }}>Pago (confirmado)</span>
@@ -1303,11 +1418,233 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
             </div>
           )}
 
-          {/* Add new payment */}
-          {edit.limited && (
+          {/* Formulário de pagamento (mesmo layout da nova venda) */}
+          {edit.limited && venda.pagamentos.length === 0 && (
+            <>
+              <p className="text-sm mb-4" style={{ color: "#6B7280" }}>Selecione a forma de recebimento do valor total</p>
+
+              <div className="mb-4">
+                <Label>Forma de recebimento</Label>
+                <Select value={newPagForma} onChange={e => { setNewPagForma(e.target.value); setNewPagParcelas(1); }}>
+                  <optgroup label="Métodos de Pagamento">
+                    {FORMAS_PAGAMENTO.map(f => <option key={f} value={f}>{f}</option>)}
+                  </optgroup>
+                </Select>
+              </div>
+
+              {/* Dinheiro */}
+              {["Dinheiro", "Ouro", "A Receber"].includes(newPagForma) && (
+                <div className="rounded-lg border px-4 py-3 text-sm mb-4" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
+                  Pagamento em {newPagForma.toLowerCase()}. Não há campos adicionais necessários.
+                </div>
+              )}
+
+              {/* Cartão Crédito / Débito — gateway + bandeira + condição */}
+              {COM_CARTAO.includes(newPagForma) && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <Label>Gateway</Label>
+                    <Select value={newPagGateway} onChange={e => setNewPagGateway(e.target.value)}>
+                      {GATEWAYS.map(g => <option key={g} value={g}>{g}</option>)}
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Bandeira</Label>
+                    <Select value={newPagBandeira} onChange={e => setNewPagBandeira(e.target.value)}>
+                      {BANDEIRAS.map(b => <option key={b} value={b}>{b}</option>)}
+                    </Select>
+                  </div>
+                  {newPagForma === "Cartão de Crédito" && (
+                    <div>
+                      <Label>Condição de Pagamento</Label>
+                      <Select value={newPagCondicao} onChange={e => setNewPagCondicao(e.target.value)}>
+                        {CONDICOES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Ouro / A Receber / Pix / Vale-Troca — só condição */}
+              {COM_PARCELAS.includes(newPagForma) && !COM_CARTAO.includes(newPagForma) && newPagForma !== "Dinheiro" && (
+                <div className="mb-4 w-56">
+                  <Label>Condição de Pagamento</Label>
+                  <Select value={newPagCondicao} onChange={e => setNewPagCondicao(e.target.value)}>
+                    {CONDICOES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </Select>
+                </div>
+              )}
+
+              {/* Tabela de parcelas */}
+              {COM_PARCELAS.includes(newPagForma) && parcelasRows.length > 0 && (
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: "#374151" }}>Detalhamento das parcelas</p>
+                      <p className="text-xs" style={{ color: "#9CA3AF" }}>Configure o valor e data de cada parcela. Valores editados não serão redistribuídos automaticamente.</p>
+                    </div>
+                    <button onClick={equalizarParcelas}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium"
+                      style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
+                      ↺ Equalizar
+                    </button>
+                  </div>
+                  <div className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+                    <table className="w-full text-sm">
+                      <thead style={{ backgroundColor: C.cremeBg }}>
+                        <tr>
+                          {["Nº", "Dias", "Data", "Valor"].map(h => (
+                            <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280" }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {parcelasRows.map((row, i) => (
+                          <tr key={i} className="border-t" style={{ borderColor: C.cremeBorder }}>
+                            <td className="px-3 py-2.5 text-xs w-8" style={{ color: "#9CA3AF" }}>{row.num}</td>
+                            <td className="px-3 py-2.5 w-24">
+                              <input type="number" value={row.dias} min={0} onChange={e => updateParcelaRow(i, "dias", e.target.value)}
+                                className="w-16 border rounded px-2 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                            </td>
+                            <td className="px-3 py-2.5 w-40">
+                              <input type="date" value={row.data} onChange={e => updateParcelaRow(i, "data", e.target.value)}
+                                className="border rounded px-2 py-1 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <input type="text" value={row.valor.toFixed(2).replace(".", ",")} onChange={e => updateParcelaRow(i, "valor", e.target.value)}
+                                className="w-full border rounded px-2 py-1 text-sm outline-none text-right tabular-nums" style={{ borderColor: C.cremeBorder }} />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div className="grid grid-cols-2 border-t px-4 py-3 text-sm" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                      <div>
+                        <p className="text-xs mb-0.5" style={{ color: "#9CA3AF" }}>Total da venda</p>
+                        <p className="font-bold tabular-nums" style={{ color: "#374151" }}>{fmt(totalVenda)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs mb-0.5" style={{ color: "#9CA3AF" }}>Total das parcelas</p>
+                        {(() => {
+                          const soma = parcelasRows.reduce((s, r) => s + r.valor, 0);
+                          const ok = Math.abs(soma - totalVenda) < 0.02;
+                          return <p className="font-bold tabular-nums" style={{ color: ok ? "#059669" : "#D97706" }}>{fmt(soma)}</p>;
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Múltiplas */}
+              {newPagForma === "Múltiplas" && (() => {
+                const totalMult = multPagamentos.reduce((s, p) => s + p.valor, 0);
+                const restante = +(totalVenda - totalMult).toFixed(2);
+                return (
+                  <div className="mb-4">
+                    <div className="flex flex-wrap items-end gap-2 mb-3">
+                      <div className="flex-1 min-w-36">
+                        <Label>Forma</Label>
+                        <Select value={multPagForma} onChange={e => setMultPagForma(e.target.value)}>
+                          <optgroup label="Métodos de Pagamento">
+                            {FORMAS_PAGAMENTO.filter(f => f !== "Múltiplas").map(f => <option key={f} value={f}>{f}</option>)}
+                          </optgroup>
+                        </Select>
+                      </div>
+                      <div className="flex-1 min-w-28">
+                        <Label>Valor{restante > 0 && <span className="ml-1 font-normal text-xs" style={{ color: "#9CA3AF" }}>(restante: {fmt(restante)})</span>}</Label>
+                        <input type="text" value={multPagValor} onChange={e => setMultPagValor(e.target.value)}
+                          placeholder={restante > 0 ? restante.toFixed(2).replace(".", ",") : "0,00"}
+                          onKeyDown={e => {
+                            if (e.key === "Enter") {
+                              const v = parseFloat(multPagValor.replace(",", ".")) || 0;
+                              if (v > 0 && restante > 0) {
+                                setMultPagamentos(prev => [...prev, { _key: Math.random().toString(36).slice(2), forma: multPagForma, valor: Math.min(v, restante) }]);
+                                setMultPagValor("");
+                              }
+                            }
+                          }}
+                          className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                      </div>
+                      <button onClick={() => {
+                          const v = parseFloat(multPagValor.replace(",", ".")) || 0;
+                          if (v > 0 && restante > 0) {
+                            setMultPagamentos(prev => [...prev, { _key: Math.random().toString(36).slice(2), forma: multPagForma, valor: Math.min(v, restante) }]);
+                            setMultPagValor("");
+                          }
+                        }} disabled={restante <= 0}
+                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
+                        style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                        <Plus size={13} /> Adicionar
+                      </button>
+                    </div>
+                    {multPagamentos.length > 0 && (
+                      <div className="space-y-1.5">
+                        {multPagamentos.map(p => (
+                          <div key={p._key} className="flex items-center justify-between px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }}>
+                            <span style={{ color: "#374151" }}>{p.forma}</span>
+                            <div className="flex items-center gap-3">
+                              <span className="tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(p.valor)}</span>
+                              <button onClick={() => setMultPagamentos(prev => prev.filter(x => x._key !== p._key))} className="text-gray-300 hover:text-red-400"><X size={13} /></button>
+                            </div>
+                          </div>
+                        ))}
+                        <div className="flex justify-between text-sm pt-1 border-t" style={{ borderColor: C.cremeBorder }}>
+                          <span style={{ color: "#6B7280" }}>Restante a pagar</span>
+                          <span className="tabular-nums font-semibold" style={{ color: restante > 0.01 ? "#D97706" : "#059669" }}>{fmt(restante)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Categoria */}
+              <div className="rounded-lg border px-4 py-3 text-sm mb-4" style={{ borderColor: C.cremeBorder }}>
+                <span className="font-medium" style={{ color: "#374151" }}>Categoria:</span>
+                <span className="ml-1" style={{ color: "#6B7280" }}>01.01 - Vendas de Produtos e serviço</span>
+              </div>
+
+              {/* Botão registrar pagamento */}
+              {newPagForma !== "Múltiplas" ? (
+                <button onClick={() => {
+                    setNewPagValor(totalVenda.toFixed(2).replace(".", ","));
+                    handleAddPagamento();
+                  }} disabled={updating || totalVenda <= 0}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                  {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamento
+                </button>
+              ) : (
+                <button onClick={async () => {
+                    if (multPagamentos.length === 0) return;
+                    setUpdating(true);
+                    try {
+                      for (const p of multPagamentos) {
+                        const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
+                          method: "POST", headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ forma: p.forma, valor: p.valor, parcelas: 1 }),
+                        });
+                        if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Erro"); }
+                      }
+                      await load();
+                      setMultPagamentos([]);
+                    } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao registrar pagamentos"); }
+                    finally { setUpdating(false); }
+                  }} disabled={updating || multPagamentos.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                  {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamentos ({multPagamentos.length})
+                </button>
+              )}
+            </>
+          )}
+
+          {/* Botão adicionar mais quando já tem pagamentos */}
+          {edit.limited && venda.pagamentos.length > 0 && (
             <>
               {addingPag ? (
-                <div className="p-4 rounded-xl border mb-3" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                <div className="p-4 rounded-xl border mb-3 mt-3" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-medium" style={{ color: "#374151" }}>Adicionar pagamento</p>
                     <button onClick={() => setAddingPag(false)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
@@ -1341,6 +1678,12 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                         placeholder="0,00" onKeyDown={e => e.key === "Enter" && handleAddPagamento()}
                         className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
                     </div>
+                    <div>
+                      <Label>Parcelas</Label>
+                      <Select value={newPagParcelas} onChange={e => setNewPagParcelas(Number(e.target.value))}>
+                        {[1,2,3,4,5,6,7,8,9,10,11,12].map(n => <option key={n} value={n}>{n}x</option>)}
+                      </Select>
+                    </div>
                   </div>
                   <div className="flex justify-end mt-3">
                     <button onClick={handleAddPagamento} disabled={updating}
@@ -1351,8 +1694,13 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                   </div>
                 </div>
               ) : (
-                <button onClick={() => setAddingPag(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-opacity hover:opacity-80"
+                <button onClick={() => {
+                    const totalPago = venda.pagamentos.reduce((s, p) => s + Number(p.valor), 0);
+                    const pendente = totalVenda - totalPago;
+                    setNewPagValor(pendente > 0 ? pendente.toFixed(2).replace(".", ",") : "");
+                    setAddingPag(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-opacity hover:opacity-80 mt-3"
                   style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
                   <Plus size={14} /> adicionar pagamento
                 </button>
@@ -1462,6 +1810,47 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
           </div>
         </Secao>
 
+        {/* ── 7. Ordens vinculadas ── */}
+        {venda.ordens && venda.ordens.length > 0 && (
+          <Secao>
+            <STitle>Ordens Vinculadas</STitle>
+            <div className="space-y-2">
+              {venda.ordens.map(ord => {
+                const statusColor: Record<string, { bg: string; text: string }> = {
+                  aguardando: { bg: "#FEF3C7", text: "#92400E" },
+                  em_andamento: { bg: "#DBEAFE", text: "#1E40AF" },
+                  concluido: { bg: "#D1FAE5", text: "#065F46" },
+                  cancelado: { bg: "#FEE2E2", text: "#991B1B" },
+                };
+                const sc = statusColor[ord.status] ?? { bg: "#F3F4F6", text: "#6B7280" };
+                const tipoLabel: Record<string, string> = {
+                  fabricacao: "Fabricação", garantia: "Garantia", servico_venda: "Serviço",
+                  reposicao_venda: "Reposição Venda", reposicao_loja: "Reposição Loja",
+                  compra_fornecedor: "Compra", servico_interno: "Serviço Interno",
+                };
+                return (
+                  <Link key={ord.id} href={`/ordens/${ord.id}`}
+                    className="flex items-center justify-between p-3 rounded-lg border hover:bg-stone-50 transition-colors no-underline"
+                    style={{ borderColor: C.cremeBorder }}>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-semibold" style={{ color: C.esmeralda }}>{ord.numero_ordem}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: "#F3F4F6", color: "#6B7280" }}>
+                        {tipoLabel[ord.tipo_ordem] ?? ord.tipo_ordem}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: sc.bg, color: sc.text }}>
+                        {ord.status}
+                      </span>
+                      <ArrowLeft size={14} style={{ color: "#9CA3AF", transform: "rotate(180deg)" }} />
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </Secao>
+        )}
+
         {/* ── Footer ── */}
         <div className="px-6 py-5 flex items-center justify-between gap-3">
           {saveErr && <p className="text-sm text-red-600 flex-1">{saveErr}</p>}
@@ -1502,8 +1891,6 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                       {!venda.cliente_id && <p className="text-red-500">• Cliente</p>}
                       {itens.length === 0 && <p className="text-red-500">• Produtos</p>}
                       {venda.pagamentos.length === 0 && <p className="text-red-500">• Pagamento</p>}
-                      {!venda.forma_envio && <p className="text-red-500">• Forma de Envio</p>}
-                      {!venda.forma_frete && <p className="text-red-500">• Forma de Frete</p>}
                     </div>
                   )}
                 </div>

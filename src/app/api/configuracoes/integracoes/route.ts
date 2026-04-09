@@ -5,7 +5,8 @@ import { isFullAccess } from "@/lib/roles";
 
 const KEYS_WOO = ["woo_url", "woo_consumer_key", "woo_consumer_secret"] as const;
 const KEYS_KOMMO = ["kommo_url", "kommo_token"] as const;
-const ALL_KEYS = [...KEYS_WOO, ...KEYS_KOMMO] as const;
+const KEYS_TINY = ["tiny_client_id", "tiny_client_secret", "tiny_bearer_token"] as const;
+const ALL_KEYS = [...KEYS_WOO, ...KEYS_KOMMO, ...KEYS_TINY] as const;
 
 // ─── GET /api/configuracoes/integracoes ──────────────────────────────────────
 // Retorna status de configuração (não retorna valores sensíveis)
@@ -24,9 +25,9 @@ export async function GET() {
     rows = await sql`
       SELECT chave FROM alissonerp.configuracoes_secrets
       WHERE chave = ANY(${[...ALL_KEYS]}::text[])
-        AND valor IS NOT NULL
-        AND valor != '""'
-        AND valor != ''
+        AND valor_encrypted IS NOT NULL
+        AND valor_encrypted != '""'
+        AND valor_encrypted != ''
     `;
   } catch { /* tabela pode não existir ainda */ }
 
@@ -35,6 +36,8 @@ export async function GET() {
   return NextResponse.json({
     woo_configured: KEYS_WOO.every((k) => chaves.has(k)),
     kommo_configured: KEYS_KOMMO.every((k) => chaves.has(k)),
+    tiny_configured: chaves.has("tiny_bearer_token"),
+    tiny_has_credentials: chaves.has("tiny_client_id") && chaves.has("tiny_client_secret"),
   });
 }
 
@@ -55,9 +58,9 @@ export async function PATCH(req: NextRequest) {
   for (const key of ALL_KEYS) {
     if (body[key] !== undefined) {
       await sql`
-        INSERT INTO alissonerp.configuracoes_secrets (chave, valor)
+        INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted)
         VALUES (${key}, ${JSON.stringify(body[key])})
-        ON CONFLICT (chave) DO UPDATE SET valor = ${JSON.stringify(body[key])}
+        ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(body[key])}
       `;
     }
   }

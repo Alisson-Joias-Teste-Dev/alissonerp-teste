@@ -28,9 +28,12 @@ export async function GET(
       v.bloqueado, v.created_by, v.created_at, v.updated_at,
       v.qtd_itens, v.total_pago,
       ve.endereco_entrega, ve.endereco_entrega_numero, ve.endereco_entrega_complemento,
-      ve.endereco_entrega_bairro, ve.endereco_entrega_cidade, ve.endereco_entrega_cep, ve.endereco_entrega_uf
+      ve.endereco_entrega_bairro, ve.endereco_entrega_cidade, ve.endereco_entrega_cep, ve.endereco_entrega_uf,
+      c.endereco AS cliente_endereco, c.numero AS cliente_numero, c.complemento AS cliente_complemento,
+      c.bairro AS cliente_bairro, c.municipio AS cliente_municipio, c.cep AS cliente_cep, c.uf AS cliente_uf
     FROM alissonerp.vw_vendas_erp_completa v
     LEFT JOIN alissonerp.vendas_erp ve ON ve.id = v.id
+    LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
     WHERE v.id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
@@ -52,6 +55,13 @@ export async function GET(
       id, forma, gateway, valor, parcelas,
       status, gateway_id, data_confirmacao, created_at
     FROM alissonerp.pagamentos_venda
+    WHERE venda_id = ${vendaId}
+    ORDER BY id
+  `;
+
+  const ordens = await sql`
+    SELECT id, numero_ordem, tipo_ordem, situacao, status, created_at
+    FROM alissonerp.ordens
     WHERE venda_id = ${vendaId}
     ORDER BY id
   `;
@@ -79,6 +89,7 @@ export async function GET(
       ...p,
       valor: Number(p.valor),
     })),
+    ordens,
   });
 }
 
@@ -142,6 +153,254 @@ export async function PATCH(
     }
   }
 
+  // ── Envio automático para Tiny ao aprovar ──────────────────────────────────
+  if (body.situacao === "aprovado") {
+    // Mapa situacao ERP → situacao Tiny v3
+    const SITUACAO_TINY: Record<string, number> = {
+      rascunho: 0, aprovado: 3, confirmado: 3, concluido: 6, cancelado: 2,
+    };
+
+    // Buscar venda completa + cliente
+    const [vendaFull] = await sql`
+      SELECT v.id, v.numero_venda, v.cliente_id, v.vendedor_id, v.orcamento_id,
+        v.data_venda, v.data_entrega, v.total_desconto, v.total_frete,
+        v.observacoes, v.observacoes_internas,
+        c.nome AS cliente_nome, c.cpf_cnpj AS cliente_cpf_cnpj,
+        c.id_api_contato AS cliente_id_tiny,
+        vd.id_api_vendedor AS vendedor_id_tiny
+      FROM alissonerp.vendas_erp v
+      LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
+      LEFT JOIN public.vendedores vd ON vd.id_vendedor = v.vendedor_id
+      WHERE v.id = ${vendaId}
+    `;
+
+    // Buscar Bearer token OAuth2 do Tiny
+    const [tokenRow] = await sql`
+      SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_bearer_token'
+    `;
+    const [tokenRowLegacy] = !tokenRow ? await sql`
+      SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_api_token'
+    ` : [tokenRow];
+    const rawToken = tokenRowLegacy?.valor_encrypted ?? tokenRow?.valor_encrypted;
+    if (!rawToken) {
+      return NextResponse.json({ error: "Token do Tiny não configurado. Vá em Configurações > Integrações." }, { status: 400 });
+    }
+    let tinyToken: string;
+    try { tinyToken = JSON.parse(rawToken); } catch { tinyToken = String(rawToken); }
+    tinyToken = tinyToken.replace(/"/g, "").trim();
+    if (!tinyToken) return NextResponse.json({ error: "Token do Tiny inválido" }, { status: 400 });
+
+    // Buscar itens + pagamentos
+    const itens = await sql`
+      SELECT produto_id, nome_produto, sku, quantidade, preco_unitario, observacao
+      FROM alissonerp.itens_venda_erp WHERE venda_id = ${vendaId} ORDER BY id
+    `;
+    const pagamentos = await sql`
+      SELECT forma, valor, parcelas, gateway FROM alissonerp.pagamentos_venda WHERE venda_id = ${vendaId} ORDER BY id
+    `;
+
+    // Montar objeto pagamento para o Tiny usando IDs de public.forma_pagamento e public.meio_pagamento
+    let tinyPagamento: Record<string, unknown> | null = null;
+    if (pagamentos.length > 0) {
+      const formaPag = pagamentos[0].forma;
+      const [fpRow] = await sql`
+        SELECT id_api_tiny FROM public.forma_pagamento WHERE descricao = ${formaPag} AND status = true LIMIT 1
+      `;
+      if (fpRow?.id_api_tiny) {
+        tinyPagamento = { formaRecebimento: { id: Number(fpRow.id_api_tiny) } };
+        // Buscar meio de pagamento (gateway) se aplicável
+        const gateway = pagamentos[0].gateway;
+        if (gateway) {
+          const [mpRow] = await sql`
+            SELECT mp.id_api_tiny FROM public.meio_pagamento mp
+            JOIN public.forma_pagamento fp ON fp.id = mp.forma_pagamento_id
+            WHERE fp.descricao = ${formaPag} AND mp.descricao = ${gateway} AND mp.status = true
+            LIMIT 1
+          `;
+          if (mpRow?.id_api_tiny) {
+            tinyPagamento.meioPagamento = { id: Number(mpRow.id_api_tiny) };
+          }
+        }
+      }
+    }
+    const produtoIds = itens.map(i => i.produto_id).filter(Boolean);
+    const produtosTiny = produtoIds.length > 0 ? await sql`
+      SELECT id_produto, id_api_produto FROM public.produtos WHERE id_produto = ANY(${produtoIds}) AND id_api_produto IS NOT NULL
+    ` : [];
+    const tinyIdMap = new Map(
+      produtosTiny
+        .filter(p => p.id_api_produto)
+        .map(p => [Number(p.id_produto), Number(p.id_api_produto)])
+    );
+
+    // Montar payload API v3
+    const dataVenda = vendaFull.data_venda
+      ? new Date(vendaFull.data_venda).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    const pedidoV3: Record<string, unknown> = {
+      numeroPedido: vendaFull.numero_venda,
+      idContato: Number(vendaFull.cliente_id_tiny) || undefined,
+      situacao: SITUACAO_TINY["aprovado"],
+      data: dataVenda,
+      // NÃO enviar valorDesconto — o desconto já está aplicado no valorUnitario de cada item
+      ...(Number(vendaFull.total_frete) > 0 ? { valorFrete: Number(vendaFull.total_frete) } : {}),
+      ...(vendaFull.observacoes ? { observacoes: vendaFull.observacoes } : {}),
+      ...(vendaFull.observacoes_internas ? { observacoesInternas: vendaFull.observacoes_internas } : {}),
+      ...(vendaFull.vendedor_id_tiny ? { vendedor: { id: Number(vendaFull.vendedor_id_tiny) } } : {}),
+      // Pagamento — buscar IDs reais de public.forma_pagamento e public.meio_pagamento
+      ...(tinyPagamento ? { pagamento: tinyPagamento } : {}),
+      itens: (() => {
+        // Verificar se venda veio de orçamento
+        const isOrcamento = !!vendaFull.orcamento_id;
+        const TINY_PRODUTO_GENERICO = 746056974; // Aliança Personalizada
+
+        // Se NÃO é orçamento, todos os itens DEVEM ter produto no Tiny
+        if (!isOrcamento) {
+          const semProduto = itens.filter(i => !i.produto_id || !tinyIdMap.has(Number(i.produto_id)));
+          if (semProduto.length > 0) {
+            throw new Error(`Produto "${semProduto[0].nome_produto}" não está cadastrado no Tiny. Vincule o produto antes de aprovar.`);
+          }
+        }
+
+        return itens.map((item) => {
+          const tinyProdId = tinyIdMap.get(Number(item.produto_id));
+          // Orçamento sem produto: usa produto genérico. Venda normal: obrigatório ter ID.
+          const prodId = tinyProdId || (isOrcamento ? TINY_PRODUTO_GENERICO : 0);
+          return {
+            produto: {
+              id: prodId,
+              ...(item.sku ? { codigo: item.sku } : {}),
+              descricao: item.nome_produto || "Produto",
+              tipo: "P",
+            },
+            quantidade: Number(item.quantidade),
+            valorUnitario: Number(item.preco_unitario),
+            ...(item.observacao ? { infoAdicional: item.observacao } : {}),
+          };
+        });
+      })(),
+    };
+
+    // Função para renovar token OAuth2 (refresh_token ou re-auth com client_credentials)
+    async function refreshTinyToken(): Promise<string | null> {
+      const [ciRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_client_id'`;
+      const [csRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_client_secret'`;
+      if (!ciRow?.valor_encrypted || !csRow?.valor_encrypted) return null;
+      let clientId: string, clientSecret: string;
+      try { clientId = JSON.parse(ciRow.valor_encrypted); } catch { clientId = String(ciRow.valor_encrypted); }
+      try { clientSecret = JSON.parse(csRow.valor_encrypted); } catch { clientSecret = String(csRow.valor_encrypted); }
+      clientId = clientId.replace(/"/g, "").trim();
+      clientSecret = clientSecret.replace(/"/g, "").trim();
+
+      // Tentar refresh_token primeiro
+      const [rtRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_refresh_token'`;
+      const attempts: URLSearchParams[] = [];
+      if (rtRow?.valor_encrypted) {
+        let rt: string;
+        try { rt = JSON.parse(rtRow.valor_encrypted); } catch { rt = String(rtRow.valor_encrypted); }
+        rt = rt.replace(/"/g, "").trim();
+        if (rt) attempts.push(new URLSearchParams({ grant_type: "refresh_token", refresh_token: rt, client_id: clientId, client_secret: clientSecret }));
+      }
+      // Fallback: client_credentials
+      attempts.push(new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }));
+
+      for (const body of attempts) {
+        try {
+          const res = await fetch("https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token", {
+            method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body, signal: AbortSignal.timeout(10000),
+          });
+          if (!res.ok) continue;
+          const tokens = await res.json() as { access_token: string; refresh_token?: string };
+          await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_bearer_token', ${JSON.stringify(tokens.access_token)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(tokens.access_token)}`;
+          if (tokens.refresh_token) {
+            await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_refresh_token', ${JSON.stringify(tokens.refresh_token)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(tokens.refresh_token)}`;
+          }
+          return tokens.access_token;
+        } catch { continue; }
+      }
+      return null;
+    }
+
+    // Enviar para Tiny (com retry após refresh se 401)
+    async function enviarParaTiny(token: string): Promise<Response> {
+      return fetch("https://api.tiny.com.br/public-api/v3/pedidos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify(pedidoV3),
+        signal: AbortSignal.timeout(15000),
+      });
+    }
+
+    try {
+      let tinyRes = await enviarParaTiny(tinyToken);
+
+      // Se 401 (token expirado), tentar refresh e reenviar
+      if (tinyRes.status === 401) {
+        const newToken = await refreshTinyToken();
+        if (newToken) {
+          tinyToken = newToken;
+          tinyRes = await enviarParaTiny(tinyToken);
+        }
+      }
+
+      if (!tinyRes.ok) {
+        const errBody = await tinyRes.text();
+        let erroMsg = "";
+        if (tinyRes.status === 401) {
+          erroMsg = "Token do Tiny expirado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.";
+        } else {
+          erroMsg = `Tiny API ${tinyRes.status}`;
+          try {
+            const errJson = JSON.parse(errBody);
+            const msg = errJson.message || errJson.error || errJson.descricao || errJson.mensagem || "";
+            const erros = Array.isArray(errJson.erros)
+              ? errJson.erros.map((e: Record<string, string>) => e.mensagem || e.campo || JSON.stringify(e)).join("; ")
+              : Array.isArray(errJson.detalhes)
+              ? errJson.detalhes.map((e: Record<string, string>) => `${e.campo}: ${e.mensagem}`).join("; ")
+              : "";
+            erroMsg = [msg, erros].filter(Boolean).join(" — ") || `${erroMsg}: ${JSON.stringify(errJson).slice(0, 300)}`;
+          }
+          catch { erroMsg += errBody ? `: ${errBody.slice(0, 300)}` : ""; }
+        }
+        console.error("[Tiny] Erro ao enviar pedido:", erroMsg, "| Body enviado:", JSON.stringify(pedidoV3).slice(0, 500));
+        await sql`
+          UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${erroMsg}
+          WHERE id = ${vendaId}
+        `;
+        return NextResponse.json({ error: `Erro Tiny: ${erroMsg}` }, { status: 502 });
+      }
+
+      const tinyData = await tinyRes.json() as { id?: number; numeroPedido?: string };
+      // Sucesso: atualizar situação + dados Tiny numa única query
+      await sql`
+        UPDATE alissonerp.vendas_erp SET
+          situacao = 'aprovado',
+          tiny_pedido_id = ${String(tinyData.id ?? "")},
+          tiny_sync_status = 'sincronizado',
+          tiny_sync_at = NOW(),
+          tiny_sync_erro = NULL
+        WHERE id = ${vendaId}
+      `;
+
+      // Recalcular total se frete mudou
+      if (body.total_frete !== undefined) {
+        await sql`UPDATE alissonerp.vendas_erp SET total_venda = total_produtos - total_desconto + ${body.total_frete} WHERE id = ${vendaId}`;
+      }
+
+      // NÃO retornar aqui — continuar para criação de ordem se for orçamento
+
+    } catch (e) {
+      const erroMsg = e instanceof Error ? e.message : "Falha na comunicação com o Tiny";
+      await sql`
+        UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${erroMsg}
+        WHERE id = ${vendaId}
+      `;
+      return NextResponse.json({ error: `Erro Tiny: ${erroMsg}` }, { status: 502 });
+    }
+  }
+
   await sql`
     UPDATE alissonerp.vendas_erp SET
       situacao             = COALESCE(${body.situacao ?? null},             situacao),
@@ -174,10 +433,49 @@ export async function PATCH(
     `;
   }
 
+  // ── Sync alterações com Tiny se venda já aprovada e tem pedido Tiny ─────────
+  if (!body.situacao && venda.situacao === "aprovado") {
+    const [vendaSync] = await sql`
+      SELECT v.tiny_pedido_id, v.numero_venda, v.total_desconto, v.total_frete,
+        v.observacoes, v.observacoes_internas,
+        c.id_api_contato AS cliente_id_tiny,
+        vd.id_api_vendedor AS vendedor_id_tiny
+      FROM alissonerp.vendas_erp v
+      LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
+      LEFT JOIN public.vendedores vd ON vd.id_vendedor = v.vendedor_id
+      WHERE v.id = ${vendaId}
+    `;
+    if (vendaSync?.tiny_pedido_id) {
+      try {
+        const [tokenRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_bearer_token'`;
+        const rawToken = tokenRow?.valor_encrypted;
+        if (rawToken) {
+          let tinyToken: string;
+          try { tinyToken = JSON.parse(rawToken); } catch { tinyToken = String(rawToken); }
+          tinyToken = tinyToken.replace(/"/g, "").trim();
+          const updatePayload: Record<string, unknown> = {};
+          if (body.total_frete !== undefined) updatePayload.valorFrete = Number(body.total_frete);
+          if (body.observacoes !== undefined) updatePayload.observacoes = body.observacoes ?? "";
+          if (body.observacoes_internas !== undefined) updatePayload.observacoesInternas = body.observacoes_internas ?? "";
+          if (Object.keys(updatePayload).length > 0) {
+            await fetch(`https://api.tiny.com.br/public-api/v3/pedidos/${vendaSync.tiny_pedido_id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tinyToken}` },
+              body: JSON.stringify(updatePayload),
+              signal: AbortSignal.timeout(15000),
+            });
+          }
+        }
+      } catch { /* sync Tiny não bloqueia edição local */ }
+    }
+  }
+
   // Auto-baixa estoque comercial removida — trigger 111 (trg_estoque_comercial_baixa_venda) já cuida disso.
 
-  // ── Auto-criar ordem de fabricação se venda veio de orçamento e foi concluída ──
-  if (body.situacao === "concluido") {
+  // ── Auto-criar ordem de fabricação se venda veio de orçamento (ao aprovar ou concluir) ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let ordemCriada: any = null;
+  if (body.situacao === "aprovado" || body.situacao === "concluido") {
     const [vendaOrc] = await sql`
       SELECT v.orcamento_id, v.cliente_id, v.vendedor_id, v.data_entrega,
              o.id AS orc_id, o.tipo, o.peso, o.numero_orcamento, o.nome_modelo,
@@ -222,6 +520,7 @@ export async function PATCH(
             ${vendaOrc.foto_3d ?? null}, ${vendaId}, NOW()
           ) RETURNING id, numero_ordem
         `;
+        ordemCriada = { id: ordem.id, numero_ordem: ordem.numero_ordem };
 
         // Item da ordem
         const nomeItem = vendaOrc.tipo === "alianca"
@@ -275,5 +574,8 @@ export async function PATCH(
     }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    ...(ordemCriada ? { ordem_criada: ordemCriada.numero_ordem } : {}),
+  });
 }

@@ -87,7 +87,8 @@ export default function OrcamentoClient({
   // Pedras (compartilhado aliança + peça)
   const [stoneEntries, setStoneEntries] = useState<StoneEntry[]>([]);
   const stonePrices = config?.stone_prices?.length ? config.stone_prices : DEFAULT_STONE_PRICES;
-  const stoneMarkup = config?.stone_markup ?? 2.5;
+  const [stoneMarkupLocal, setStoneMarkupLocal] = useState(config?.stone_markup ?? 2.5);
+  const stoneMarkup = stoneMarkupLocal;
   const stoneTotalRS = useMemo(() => computeStonesTotalRS(stoneEntries), [stoneEntries]);
 
   let nextStoneId = useRef(1);
@@ -325,7 +326,7 @@ export default function OrcamentoClient({
     try {
       const res = await fetch("/api/orcamento/config", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ start_mkp: params.startMkp, discount_percent: params.discountPercent, profile, pricing_categories: pricingCategories, groove_rules: grooveRules }),
+        body: JSON.stringify({ start_mkp: params.startMkp, discount_percent: params.discountPercent, profile, pricing_categories: pricingCategories, groove_rules: grooveRules, stone_markup: stoneMarkupLocal }),
       });
       if (!res.ok) throw new Error();
       setConfigMsg("Salvo!");
@@ -504,9 +505,9 @@ export default function OrcamentoClient({
                                 method: "PATCH", headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({ status: "aprovado" }),
                               });
-                              const data = await res.json().catch(() => ({}));
+                              const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string; venda_id?: number };
                               if (!res.ok) { alert(data.error ?? "Erro ao aprovar"); return; }
-                              alert(`Aprovado! Venda ${data.numero_venda} criada no PDV.`);
+                              alert(`Orçamento aprovado! Venda #${data.numero_venda} criada como rascunho. Abra a venda para preencher pagamento e aprovar.`);
                               fetchOrcamentos();
                             }}
                               className="text-[10px] px-2 py-1 rounded font-semibold bg-green-50 text-green-700 hover:bg-green-100">
@@ -780,6 +781,37 @@ export default function OrcamentoClient({
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-gray-800">Configurações do Orçamento</h1>
           <button onClick={() => setTab("design")} className="text-xs font-semibold px-4 py-2 rounded-lg text-white" style={{ background: C.esmeralda }}>Voltar ao Design</button>
+        </div>
+        {/* Markup e Desconto */}
+        <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
+          <h3 className="text-sm font-bold text-gray-800">Markup e Desconto</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Markup base (multiplicador)</label>
+              <input type="number" min={1} step={0.1} value={params.startMkp}
+                onChange={e => setParams(p => ({ ...p, startMkp: parseFloat(e.target.value) || 1 }))}
+                className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none" style={{ borderColor: C.cremeBorder }} />
+              <p className="text-[10px] text-gray-400 mt-1">Ex: 3.5 = preço do ouro × 3.5</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Markup pedras (multiplicador)</label>
+              <input type="number" min={1} step={0.1} value={stoneMarkup}
+                onChange={e => {
+                  const v = parseFloat(e.target.value) || 1;
+                  // Atualizar stone_markup no config local (será salvo junto)
+                  setStoneMarkupLocal(v);
+                }}
+                className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none" style={{ borderColor: C.cremeBorder }} />
+              <p className="text-[10px] text-gray-400 mt-1">Ex: 2.5 = custo pedra × 2.5</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Desconto padrão (%)</label>
+              <input type="number" min={0} max={50} step={1} value={params.discountPercent}
+                onChange={e => setParams(p => ({ ...p, discountPercent: parseFloat(e.target.value) || 0 }))}
+                className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none" style={{ borderColor: C.cremeBorder }} />
+              <p className="text-[10px] text-gray-400 mt-1">Desconto padrão aplicado no orçamento</p>
+            </div>
+          </div>
         </div>
         {/* Faixas */}
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
