@@ -1,8 +1,114 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 30/03/2026 — Versão: v2.15.0 <!-- Revisado 30/03/2026 -->
+> 📋 Última atualização automática: 09/04/2026 — Versão: v2.19.62 <!-- Revisado 09/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.19.62 (09/04/2026)
+### Merge + Integração
+- Merge branch claude/pensive-borg + mudanças locais
+- Orçamento, sidebar, permissions, migrations 120/130
+
+## v2.19.58–v2.19.61 (08/04/2026)
+### Features — Vendas Detalhe Redesign
+- Redesign vendas/[id] com layout editável igual a vendas/nova
+- Edição inline itens, validação aprovar, desconto padrão 0
+- 3 botões cliente + endereço entrega na venda (migration 130)
+- Botão editar cadastro do cliente no modal de dados
+
+## v2.19.39–v2.19.57 (05-07/04/2026)
+### Features — Módulo Orçamento 3D
+- Cliente no orçamento + aprovação → ordem de fabricação
+- Tela de orçamentos estilo PDV — stats, filtros, tabela, dropdown novo
+- Orçamento peças personalizadas + precificação de pedras preciosas
+- 3D aliança com THREE.js — perfis, gravação interna, screenshot
+- Orçamento aprovado → venda pré-preenchida → venda concluída → ordem automática
+- Ficha técnica formatada (Boleada Dupla), sem modelo_interno
+- Captura screenshot 3D da aliança e salva no orçamento + ordem
+- Migrations 120-129: config_orcamento, orcamento_fichas_tecnicas, orcamentos, pedras_config, cliente+ordem, foto_3d, venda+ordem
+
+### Fixes (3D/Orçamento)
+- WebGL Context Lost — React.memo, DPR limiter, preserveDrawingBuffer
+- Gravação curvada na superfície interna da aliança
+- Conflito slug [id] vs [token] — rota pública /compartilhado
+
+## v2.19.25–v2.19.28 (04/04/2026)
+### Features — PCP→Service Transfer
+- PCP Novas Ordens permite transferir para service
+- Pedras na service — só mostra estoque do local Service + baixa correta
+
+### Fixes
+- Baixa de pedras/solda no service usa local correto
+- Timeline duplicava linhas de protocolo ida/volta (migration 125)
+
+## v2.19.1–v2.19.24 (02-03/04/2026)
+### Features — Estoque Multi-Local + Service Workflow
+- Tab Locais de Estoque na página de estoque
+- Autocomplete insumo na transferência + tab Depósitos no estoque
+- Separar saldos e movimentações por local de estoque
+- Lançamento avulso permite escolher local de estoque (migration 123)
+- Seleção de transportador na transferência PCP→Service + toggle configurações (migration 124)
+- Operador service vê detalhes da ordem sem sair do painel
+- Transferir serviço de volta para fábrica com protocolo automático
+- Foto da peça miniatura 80x80 — clica pra abrir zoom
+
+### Fixes
+- Corrigir saldo_ct pedras (gramas/0.2) + exibir quantidade e peso (migration 121)
+- Views local_estoque_id display (migration 122)
+- Transferência entre locais gravava ct como gramas para pedras
+- Receber transferência service cria servico manualmente
+- Hydration error MobileCard
+- Protocolos transferência service apareciam vazios
+
+## v2.19.0 (01/04/2026)
+### Features — Vendas Redesign + Tarefas
+- Vendas redesign completo com comissões dinâmicas
+- Tarefas avançadas: kanban drag-drop, aprovações, automações (migration 119)
+- Análise de comissões, frete, resultado (3 subpáginas)
+- Metas por vendedora + ranking mensal
+- Fix proxy service-painel
+
+## v2.18.0–v2.18.4 (31/03/2026)
+### Features
+- PDF orçamento + enviar Tiny API v3 + sync estoque comercial
+- Módulo Relatórios (4 tipos: produção, comercial, financeiro, estoque)
+
+### Fixes
+- Sync triggers bypass blindagem via session variable (migration 118)
+- Proxy não bloqueia /service por módulo
+- SW ignora chrome-extension://
+- Trigger sync re-sincroniza itens faltantes na UPDATE
+
+## v2.17.0–v2.17.1 (31/03/2026)
+### Features — Migração 360°
+- Módulo Comercial: vendas_erp, itens_venda_erp, pagamentos_venda, metas_vendedoras (migration 104)
+- Estoque Comercial: config, movimentações, alertas, sync Tiny (migration 107)
+- Módulo Tarefas (substitui Asana) — kanban, comentários (migration 112)
+- Financeiro automático: venda→conta_receber, compra→conta_pagar (migration 113)
+- Blindagem vendas fechadas: protege preços/comissões (migrations 114-118)
+- Sync public.vendas → vendas_erp com 14.301 vendas históricas (migration 109)
+- Integrações: Kommo CRM, WooCommerce, cotações automáticas
+- Fichas técnicas ERP editáveis (migration 111)
+- Ordem fabricação com ficha técnica dinâmica — 12 tipos de item
+- Ordem reposição venda — modal simplificado 4 steps
+- Sistema de erros global (Zustand errorStore + GlobalErrorToast)
+- Renomear solda→aditivo, filtro PCP, auto-aprovar auditoria
+
+### Fixes
+- QA médios/baixos — error handling, validação, status API key
+
+## v2.16.0–v2.16.3 (30/03/2026)
+### Features
+- Módulo comercial vendas, estoque comercial, orçamento público
+- Ordens garantia + serviço venda, sync vendas
+- Gravador de vídeo nativo com câmera + countdown 30s
+- Vendedor_id auto-preenchido, vídeo 30s, fallback nome criador
+
+## v2.15.1 (30/03/2026)
+### Features
+- Transferência service + devolver + CLAUDE.md multi-agentes (migration 103)
+- Service devolver: retorno com protocolo automático
+- Service transferir-fabrica: volta para Almoxarifado Central
 
 ## v2.14.2 (30/03/2026)
 ### Fixes — Bug critico: dupla-contagem de ouro em buscarOuroRecebido

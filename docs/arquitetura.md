@@ -1,9 +1,9 @@
 # Arquitetura — fabricaAJ ERP
 
-> 📋 Última atualização automática: 30/03/2026 — Versão: v2.15.0 <!-- Revisado 30/03/2026 -->
+> 📋 Última atualização automática: 09/04/2026 — Versão: v2.19.62 <!-- Revisado 09/04/2026 -->
 
 Sistema ERP para a Joalheria ALISSON. Stack: Next.js 16.1.6 + PostgreSQL 15 (Supabase self-hosted).
-**Versão atual: v2.15.0 | Atualizado: 30/03/2026 — Serviço Interno: tipos_servico CRUD, modal foto+vídeo (MediaRecorder), migration 100**
+**Versão atual: v2.19.62 | Atualizado: 09/04/2026 — Orçamento 3D, Vendas redesign, Tarefas, Estoque Comercial, Integrações**
 
 ---
 
@@ -151,6 +151,38 @@ O cliente Supabase (`src/lib/supabase/client.ts` e `server.ts`) esta configurado
 | `098_triggers_pedras_ct_compras.sql` | Sprint 2 v2.14.0. UPDATE `fn_criar_par_movimentacao` (add `p_local_id` 10º param). UPDATE `fn_processar_apontamento_pcp` (tipos 3/6 com ct; acumula `pcp.total_pedras_ct`; local=1). UPDATE `fn_processar_saida_ordem` (SP pedras ÷0.2; local=1). UPDATE `fn_calcular_item_compra` (pedras: peso_ct×custo_por_ct). UPDATE `fn_concluir_compra` (CE por categoria + local_destino_id + guard status). UPDATE `fn_processar_apontamento_dist` (tipos 3/6 ct; `distribuicoes.total_pedras_ct`; local=1). UPDATE `fn_processar_fechamento_dist` (acumula `pcp.total_pedras_ct`; TEDD local=1). ADD `distribuicoes.total_pedras_ct`, `apontamentos_distribuicao.peso_ct`. |
 | `099_data_entrega_fabricacao.sql` | Função utilitária `fn_adicionar_dias_uteis` + trigger ponte calcula data_entrega=+10 dias úteis para ordens fabricacao. |
 | `100_tipos_servico.sql` | v2.15.0. CREATE `alissonerp.tipos_servico` (id SERIAL, nome TEXT, ativo BOOLEAN, created_at). SEED 5 tipos: Solda Laser, Cravação Manual, Acabamento e polimento, Ajuste Manual, Solda e Limpeza. ADD `alissonerp.ordens.tipos_servico_ids INTEGER[]`. GRANTS authenticated/anon. |
+| `101_fix_triggers_pedras_local.sql` | v2.14.1. Fix peso pedras (p_peso_gramas param), local_estoque_id em fn_processar_transferencia e fn_processar_lancamento_avulso. |
+| `102_fix_local_estoque_functions.sql` | v2.14.1. COALESCE(p_local_id, 1) em fn_criar_par_movimentacao. local_estoque_id=1 em fn_processar_outros_insumos. |
+| `103_transferencia_service.sql` | v2.15.1. ADD tipo_transferencia, protocolo_id, deposito_origem_id em transferencias_ordem. ADD transferencia_service_id FK em servicos. |
+| `104_modulo_comercial_base.sql` | v2.16.0. CREATE faixas_comissao (31 faixas), vendas_erp, itens_venda_erp, pagamentos_venda, metas_vendedoras. Triggers totais + blindagem. |
+| `105_comercial_view_video.sql` | v2.16.0. ADD video_obs_interna em vendas_erp. Recria vw_vendas_erp_completa. |
+| `106_vendas_token_compartilhamento.sql` | v2.16.0. ADD token_compartilhamento UUID em vendas_erp (UNIQUE). |
+| `107_estoque_comercial.sql` | v2.17.0. CREATE estoque_comercial_config, movimentacoes_estoque_comercial, vw_saldo_estoque_comercial, vw_estoque_comercial_com_alerta. |
+| `108_ordens_garantia.sql` | v2.17.0. ADD venda_id e venda_item_ids em ordens. INSERT "Outros" em tipos_servico. |
+| `109_sync_public_vendas.sql` | v2.17.0. ADD public_venda_id FK. Migra 14.301 vendas históricas + 75.956 itens. 3 triggers sync cross-schema. |
+| `110_fix_trigger_sync_exception.sql` | v2.17.0. EXCEPTION WHEN OTHERS em sync functions (nunca bloqueia sistema externo). |
+| `111_estoque_comercial_auto_venda.sql` | v2.17.0. 4 triggers: baixa automática na venda, reversão no delete, estorno no cancelamento, ajuste na atualização. |
+| `111_fichas_tecnicas_erp.sql` | v2.17.0. CREATE fichas_tecnicas (ordem_id, tipo_item, dados JSONB). Fichas editáveis no ERP. |
+| `112_modulo_tarefas.sql` | v2.17.0. CREATE tarefas + comentarios_tarefa. Status: pendente/em_andamento/concluida/cancelada. |
+| `113_financeiro_auto.sql` | v2.17.0. 3 triggers: venda→conta_receber, cancelar venda→cancelar CR, compra→conta_pagar. ADD venda_erp_id/fornecedor_nome/cliente_nome. |
+| `114_blindar_vendas_fechadas.sql` | v2.17.0. fn_proteger_itens_venda_fechada + fn_proteger_venda_fechada (bloqueia edição após confirmado/concluido). |
+| `115_fix_sync_triggers.sql` | v2.18.1. Fix UPDATE trigger para não zerar total_venda. Respeita vendas fechadas. |
+| `116_blindar_itens_venda_public.sql` | v2.17.0. fn_proteger_preco_itens_venda + fn_proteger_delete_itens_venda (bloqueia cascata de repricing). |
+| `117_fix_sync_itens_faltantes.sql` | v2.18.1. fn_sync_venda_update_from_public re-sincroniza itens faltantes (race condition). |
+| `118_sync_bypass_blindagem.sql` | v2.18.4. current_setting('app.sync_ativo') bypass para sync functions. |
+| `119_tarefas_avancadas.sql` | v2.19.0. ADD posicao (kanban). CREATE aprovacoes_tarefa, automacoes_tarefa, automacoes_execucoes. |
+| `120_modulo_orcamento.sql` | v2.19.35. CREATE config_orcamento, orcamento_fichas_tecnicas, orcamentos. |
+| `121_fix_saldo_ct_formula.sql` | v2.19.1. Fix saldo_ct = gramas/0.2. ADD quantidade em views. |
+| `122_views_local_estoque_display.sql` | v2.19.4. ADD local_estoque_id/nome em vw_movimentacoes_directus e vw_estoque_directus_saldo. |
+| `123_lancamento_avulso_local_estoque.sql` | v2.19.7. ADD local_estoque_id em lancamentos_avulso. Update fn_processar_lancamento_avulso. |
+| `124_is_transportador.sql` | v2.19.8. ADD is_transportador BOOLEAN em usuarios. Backfill motoboys existentes. |
+| `125_fix_timeline_proto_duplicado.sql` | v2.19.29. Recria vw_timeline_ordem com LATERAL LIMIT 1 (evita duplicatas protocolo). |
+| `126_orcamento_pedras_config.sql` | v2.19.30. ADD stone_markup, stone_prices JSONB em config_orcamento. ADD pedras_detalhadas em orcamento_fichas_tecnicas. |
+| `127_orcamento_cliente_ordem.sql` | v2.19.39. ADD cliente_id FK e ordem_gerada_id FK em orcamentos. |
+| `128_orcamento_foto_3d.sql` | v2.19.54. ADD foto_3d TEXT em orcamentos. |
+| `129_orcamento_venda_ordem.sql` | v2.19.57. ADD venda_gerada_id em orcamentos. ADD orcamento_id em vendas_erp. |
+| `130_endereco_entrega_venda.sql` | v2.19.60. ADD 7 colunas endereço entrega em vendas_erp. |
+| `130_itens_venda_produto_nullable.sql` | v2.19.62. produto_id NULLABLE em itens_venda_erp (itens customizados). |
 
 ---
 
@@ -520,7 +552,21 @@ Estrutura com Route Groups (Next.js 16):
 | `/entrega`          | `app/(dashboard)/entrega/page.tsx`                    | Server+Client | Controle de entregas                               |
 | `/service`          | `app/(dashboard)/service/page.tsx`                    | Client        | App operador service (dark theme, mobile-first) — requer is_operador_service=true |
 | `/service-painel`   | `app/(dashboard)/service-painel/page.tsx`             | Server+Client | Painel gerente service (KPIs, lista serviços) — grupo PRODUÇÃO na sidebar |
-<!-- Revisado 27/03/2026 -->
+| `/vendas/nova`          | `app/(dashboard)/vendas/nova/page.tsx`                   | Client        | Nova venda completa (cliente+itens+pgto+frete)     |
+| `/vendas/[id]`          | `app/(dashboard)/vendas/[id]/page.tsx`                   | Client        | Detalhe venda editável + PDF + Tiny + compartilhar |
+| `/vendas/analise-comissoes` | `app/(dashboard)/vendas/analise-comissoes/page.tsx`  | Client        | KPIs comissão por período e vendedora              |
+| `/vendas/analise-frete` | `app/(dashboard)/vendas/analise-frete/page.tsx`          | Client        | Resumo frete + entregas pendentes                  |
+| `/vendas/analise-resultado` | `app/(dashboard)/vendas/analise-resultado/page.tsx`  | Client        | Faturamento, ranking, meta achievement             |
+| `/vendas/metas`         | `app/(dashboard)/vendas/metas/page.tsx`                  | Client        | Metas por vendedora com progresso                  |
+| `/vendas/metas/registrar` | `app/(dashboard)/vendas/metas/registrar/page.tsx`      | Client        | Registrar nova meta                                |
+| `/vendas/ranking`       | `app/(dashboard)/vendas/ranking/page.tsx`                | Client        | Ranking mensal vendedoras                          |
+| `/estoque-comercial`    | `app/(dashboard)/estoque-comercial/page.tsx`             | Server+Client | Estoque comercial com alertas                      |
+| `/estoque-comercial/[produtoId]` | `app/(dashboard)/estoque-comercial/[produtoId]/page.tsx` | Server+Client | Detalhe estoque produto + movimentos       |
+| `/orcamento`            | `app/(dashboard)/orcamento/page.tsx`                     | Client        | Orçamento 3D alianças + peças                      |
+| `/orcamento/[token]`    | `app/orcamento/[token]/page.tsx`                         | Client        | Orçamento público compartilhado (sem auth)         |
+| `/relatorios`           | `app/(dashboard)/relatorios/page.tsx`                    | Client        | Relatórios (produção/comercial/financeiro/estoque) |
+| `/tarefas`              | `app/(dashboard)/tarefas/page.tsx`                       | Client        | Tarefas kanban + automações (substitui Asana)      |
+<!-- Revisado 09/04/2026 -->
 
 ---
 

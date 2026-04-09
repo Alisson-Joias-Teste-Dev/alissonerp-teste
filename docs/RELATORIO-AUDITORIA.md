@@ -1,5 +1,5 @@
 # Relatório de Auditoria — fabricaAJ ERP
-**Data:** 2026-03-17 | **Tipo:** Leitura e Documentação (ZERO alterações de código)
+**Data:** 2026-04-09 | **Tipo:** Leitura e Documentação (ZERO alterações de código)
 
 ---
 
@@ -9,13 +9,14 @@
 
 | Tipo | Quantidade |
 |------|-----------|
-| API routes (`route.ts`) | 88 |
-| Componentes (`.tsx`) | 32 |
-| Libs (`.ts`) | 11 |
+| API routes (`route.ts`) | 190 |
+| Componentes (`.tsx`) | 57 |
+| Libs (`.ts`) | 16 |
 | Hooks | 1 (`useAuth.ts`) |
-| Páginas (`page.tsx`) | 18 |
-| Migrations SQL | 72 (001–072) |
-| Buckets Storage | 5 |
+| Stores | 1 (`errorStore.ts`) |
+| Páginas (`page.tsx`) | 30 |
+| Migrations SQL | 132 (001–130) |
+| Buckets Storage | 8 |
 
 ---
 
@@ -173,11 +174,115 @@
 | GET | `/api/produtos/insumos?categoria_id=N` | Insumos para autocomplete BOM |
 | GET | `/api/produtos/setup` | nextSku, categorias, cotacao |
 
-### VENDAS
+### VENDAS (expandido)
 | Método | Path | O que faz |
 |--------|------|-----------|
-| GET | `/api/vendas` | Lista vendas de public.vendas |
-| GET | `/api/vendedores` | Lista vendedores |
+| GET/POST | `/api/vendas` | Lista vendas com filtros / Cria venda ERP atômica |
+| GET/PATCH | `/api/vendas/[id]` | Detalhe venda / Atualiza campos (situação, frete, obs) |
+| POST | `/api/vendas/[id]/cancelar` | Cancela venda (valida pagamentos) |
+| POST | `/api/vendas/[id]/compartilhar` | Gera/regenera token público de compartilhamento |
+| POST | `/api/vendas/[id]/enviar-tiny` | Envia pedido para Tiny ERP API v3 |
+| GET | `/api/vendas/[id]/pdf` | Gera PDF da venda/orçamento |
+| GET/POST | `/api/vendas/[id]/itens` | Lista / Adiciona item à venda |
+| PATCH/DELETE | `/api/vendas/[id]/itens/[itemId]` | Edita / Remove item da venda |
+| GET/POST | `/api/vendas/[id]/pagamentos` | Lista / Adiciona pagamento |
+| PATCH/DELETE | `/api/vendas/[id]/pagamentos/[pagId]` | Edita status / Remove pagamento |
+| GET | `/api/vendas/analise-comissoes` | KPIs comissão por período |
+| GET | `/api/vendas/analise-frete` | Resumo frete + entregas pendentes |
+| GET | `/api/vendas/analise-resultado` | Faturamento, ranking, meta |
+| GET | `/api/vendas/clientes/busca` | Autocomplete clientes (public.contatos) |
+| GET/POST/PATCH | `/api/vendas/faixas-comissao` | CRUD faixas de comissão |
+| GET | `/api/vendas/forma-envio` | Formas envio + frete |
+| GET/POST | `/api/vendas/metas` | Lista / Cria meta vendedora (upsert) |
+| GET | `/api/vendas/por-cliente/[clienteId]` | Últimas 50 vendas do cliente |
+| GET | `/api/vendas/produtos/busca` | Autocomplete produtos com variações |
+| GET | `/api/vendas/ranking` | Ranking mensal vendedoras |
+| POST | `/api/vendas/upload-video` | Upload vídeo para bucket vendas-videos |
+
+### ORÇAMENTO
+| Método | Path | O que faz |
+|--------|------|-----------|
+| GET/POST | `/api/orcamento` | Lista / Cria orçamento com 3D foto |
+| GET/PATCH | `/api/orcamento/[id]` | Detalhe / Atualiza status (aprovação→venda) |
+| GET | `/api/orcamento/compartilhado` | Orçamento público por token (sem auth) |
+| GET/POST | `/api/orcamento/config` | Config global de precificação orçamentos |
+
+### TAREFAS
+| Método | Path | O que faz |
+|--------|------|-----------|
+| GET/POST | `/api/tarefas` | Lista / Cria tarefa com notificação |
+| GET/PATCH/DELETE | `/api/tarefas/[id]` | Detalhe / Atualiza / Remove tarefa |
+| GET/POST/PATCH | `/api/tarefas/[id]/aprovacao` | Workflow aprovação de tarefa |
+| POST | `/api/tarefas/[id]/comentarios` | Adiciona comentário à tarefa |
+| GET/POST | `/api/automacoes-tarefa` | Lista / Cria automação recorrente |
+| PATCH/DELETE | `/api/automacoes-tarefa/[id]` | Edita / Remove automação |
+| POST | `/api/automacoes-tarefa/[id]/executar` | Executa automação manualmente |
+
+### ESTOQUE COMERCIAL
+| Método | Path | O que faz |
+|--------|------|-----------|
+| GET | `/api/estoque-comercial` | Lista produtos com alertas (zerado/abaixo/ok) |
+| GET | `/api/estoque-comercial/[produtoId]` | Saldo + últimos 50 movimentos |
+| GET/PATCH | `/api/estoque-comercial/config/[produtoId]` | Config mínimo estoque |
+| POST | `/api/estoque-comercial/movimentos` | Registro manual entrada/saída |
+| POST | `/api/estoque-comercial/sync-tiny` | Sync estoque → Tiny API v3 (batch) |
+
+### RELATÓRIOS
+| Método | Path | O que faz |
+|--------|------|-----------|
+| GET | `/api/relatorios` | Relatório por tipo (produção/comercial/financeiro/estoque) |
+
+### INTEGRAÇÕES
+| Método | Path | O que faz |
+|--------|------|-----------|
+| POST | `/api/integracoes/kommo` | Sync contato/lead para Kommo CRM v4 |
+| POST | `/api/integracoes/woocommerce` | Sync produto para WooCommerce REST API |
+| GET/PATCH | `/api/configuracoes/integracoes` | Check / Save credenciais integração |
+| GET/POST/PATCH | `/api/configuracoes/cotacoes` | Cotações + automação openexchangerates |
+
+### FINANCEIRO (expandido)
+| Método | Path | O que faz |
+|--------|------|-----------|
+| GET/POST | `/api/financeiro/contas-pagar` | Lista / Cria conta a pagar |
+| PATCH | `/api/financeiro/contas-pagar/[id]` | Atualiza status/valor conta pagar |
+| GET/POST | `/api/financeiro/contas-receber` | Lista / Cria conta a receber |
+| PATCH | `/api/financeiro/contas-receber/[id]` | Atualiza status/valor conta receber |
+
+### SERVICE (expandido)
+| Método | Path | O que faz |
+|--------|------|-----------|
+| POST | `/api/service/[id]/devolver` | Devolve peça ao almoxarifado (peso+foto+solda) |
+| POST | `/api/service/[id]/transferir-fabrica` | Transfere de volta para fábrica |
+| GET | `/api/service/aditivo-saldo` | Saldo de aditivo do operador |
+| POST | `/api/service/carregar-aditivo` | Carrega aditivo do almoxarifado → operador |
+| GET | `/api/service/pedras-estoque` | Pedras disponíveis por local |
+| POST | `/api/service/reprovar` | Reprova serviço na inspeção |
+
+### PCP (expandido)
+| Método | Path | O que faz |
+|--------|------|-----------|
+| POST | `/api/pcp/transferir-service` | Transfere PCP para operador service |
+| POST | `/api/pcp/transferir-service/receber` | Operador recebe peça transferida |
+
+### ORDENS (expandido)
+| Método | Path | O que faz |
+|--------|------|-----------|
+| GET | `/api/ordens/contatos` | Autocomplete contatos para criação de ordem |
+| GET | `/api/ordens/produtos-busca` | Autocomplete produtos para ordem |
+| GET | `/api/ordens/proximo-numero` | Preview próximo número C-XXXX |
+| GET | `/api/ordens/vendedores` | Vendedores ativos para dropdown |
+| POST | `/api/ordens/route.ts` | Cria ordem completa (fabricação/garantia/serviço/reposição) |
+
+### CONTATOS
+| Método | Path | O que faz |
+|--------|------|-----------|
+| POST/PATCH | `/api/contatos` | Cria / Atualiza contato com validação CPF |
+
+### USUÁRIOS (expandido)
+| Método | Path | O que faz |
+|--------|------|-----------|
+| POST | `/api/user` | Cria novo usuário (auth + alissonerp) |
+| GET | `/api/usuarios/transportadores` | Lista transportadores (is_transportador=true) |
 
 ---
 
