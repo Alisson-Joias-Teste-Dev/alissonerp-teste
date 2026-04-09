@@ -138,10 +138,19 @@ export async function PATCH(
         )
         RETURNING id
       `;
-      // Atualizar numero_venda com ID real
+      // Gerar numero_venda seguindo a sequência do public.vendas
+      const [{ proximo }] = await tx`
+        SELECT COALESCE(
+          GREATEST(
+            (SELECT MAX(numero_pedido) + 1 FROM public.vendas),
+            (SELECT MAX(numero_venda::bigint) + 1 FROM alissonerp.vendas_erp WHERE numero_venda ~ '^[0-9]+$')
+          ),
+          1
+        ) AS proximo
+      `;
       await tx`
         UPDATE alissonerp.vendas_erp
-        SET numero_venda = 'V-' || LPAD(${venda.id}::text, 5, '0')
+        SET numero_venda = ${String(proximo)}
         WHERE id = ${venda.id}
       `;
       const [vendaFinal] = await tx`SELECT numero_venda FROM alissonerp.vendas_erp WHERE id = ${venda.id}`;
@@ -150,8 +159,10 @@ export async function PATCH(
       const nomeItem = orc.tipo === "alianca"
         ? `Aliança ${perfilNomes[orc.perfil as string] ?? orc.modelo ?? "Personalizada"}`
         : `Peça Personalizada`;
-      const valorItem = Number(orc.valor ?? 0);
-      const pesoItem = Number(orc.peso ?? orc.peso_estimado ?? 0);
+      // Buscar valor e peso diretamente do orçamento (evitar conflito de colunas com ft.*)
+      const [orcValores] = await tx`SELECT valor, peso FROM alissonerp.orcamentos WHERE id = ${orcId}`;
+      const valorItem = Number(orcValores?.valor ?? 0);
+      const pesoItem = Number(orcValores?.peso ?? orc.peso_estimado ?? 0);
       await tx`
         INSERT INTO alissonerp.itens_venda_erp (
           venda_id, nome_produto, quantidade, preco_lista,
@@ -172,6 +183,8 @@ export async function PATCH(
 
       return { venda_id: venda.id, numero_venda: vendaFinal.numero_venda as string };
     });
+
+    // Venda criada como rascunho — usuário preenche pagamento/frete e aprova manualmente
 
     return NextResponse.json({
       ok: true,

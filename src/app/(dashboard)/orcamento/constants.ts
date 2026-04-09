@@ -199,10 +199,10 @@ export function computePricing(
   goldPrice: number,
   startMkp: number,
   discountPercent: number,
-  categories: PricingCategory[]
+  _categories: PricingCategory[]
 ): PricingResult {
-  const { activeCategory } = computeCalculatedCategories(startMkp, categories, weight);
-  const mkp = activeCategory?.targetMkp ?? startMkp;
+  // Fórmula: peso × cotação do ouro × markup
+  const mkp = startMkp;
   const cost = weight * goldPrice;
   const price = cost * mkp;
   const discountPriceRaw = price * (1 - discountPercent / 100);
@@ -211,7 +211,7 @@ export function computePricing(
   const discountPrice = remainder < 5 ? discountInt - remainder : discountInt + (10 - remainder);
   return {
     weight,
-    category: activeCategory?.name ?? "N/D",
+    category: "—",
     mkp,
     cost,
     price,

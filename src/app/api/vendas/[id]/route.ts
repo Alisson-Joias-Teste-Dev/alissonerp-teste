@@ -59,6 +59,13 @@ export async function GET(
     ORDER BY id
   `;
 
+  const ordens = await sql`
+    SELECT id, numero_ordem, tipo_ordem, situacao, status, created_at
+    FROM alissonerp.ordens
+    WHERE venda_id = ${vendaId}
+    ORDER BY id
+  `;
+
   return NextResponse.json({
     ...venda,
     total_produtos: Number(venda.total_produtos),
@@ -82,6 +89,7 @@ export async function GET(
       ...p,
       valor: Number(p.valor),
     })),
+    ordens,
   });
 }
 
@@ -154,7 +162,7 @@ export async function PATCH(
 
     // Buscar venda completa + cliente
     const [vendaFull] = await sql`
-      SELECT v.id, v.numero_venda, v.cliente_id, v.vendedor_id,
+      SELECT v.id, v.numero_venda, v.cliente_id, v.vendedor_id, v.orcamento_id,
         v.data_venda, v.data_entrega, v.total_desconto, v.total_frete,
         v.observacoes, v.observacoes_internas,
         c.nome AS cliente_nome, c.cpf_cnpj AS cliente_cpf_cnpj,
@@ -225,16 +233,6 @@ export async function PATCH(
         .map(p => [Number(p.id_produto), Number(p.id_api_produto)])
     );
 
-    // Se algum item não tem id_api_produto (ex: produto de orçamento), aprovar sem enviar ao Tiny
-    const todosTemTinyId = itens.length > 0 && tinyIdMap.size > 0 && itens.every(i => i.produto_id && tinyIdMap.has(Number(i.produto_id)));
-    if (!todosTemTinyId) {
-      await sql`UPDATE alissonerp.vendas_erp SET situacao = 'aprovado' WHERE id = ${vendaId}`;
-      if (body.total_frete !== undefined) {
-        await sql`UPDATE alissonerp.vendas_erp SET total_venda = total_produtos - total_desconto + ${body.total_frete} WHERE id = ${vendaId}`;
-      }
-      return NextResponse.json({ ok: true, tiny_skipped: true });
-    }
-
     // Montar payload API v3
     const dataVenda = vendaFull.data_venda
       ? new Date(vendaFull.data_venda).toISOString().slice(0, 10)
@@ -252,44 +250,120 @@ export async function PATCH(
       ...(vendaFull.vendedor_id_tiny ? { vendedor: { id: Number(vendaFull.vendedor_id_tiny) } } : {}),
       // Pagamento — buscar IDs reais de public.forma_pagamento e public.meio_pagamento
       ...(tinyPagamento ? { pagamento: tinyPagamento } : {}),
-      itens: itens.map((item) => {
-        const tinyProdId = tinyIdMap.get(Number(item.produto_id));
-        return {
-          produto: {
-            ...(tinyProdId ? { id: tinyProdId } : {}),
-            ...(item.sku ? { codigo: item.sku } : {}),
-            descricao: item.nome_produto || "Produto",
-            tipo: "P",
-          },
-          quantidade: Number(item.quantidade),
-          valorUnitario: Number(item.preco_unitario),
-          ...(item.observacao ? { infoAdicional: item.observacao } : {}),
-        };
-      }),
+      itens: (() => {
+        // Verificar se venda veio de orçamento
+        const isOrcamento = !!vendaFull.orcamento_id;
+        const TINY_PRODUTO_GENERICO = 746056974; // Aliança Personalizada
+
+        // Se NÃO é orçamento, todos os itens DEVEM ter produto no Tiny
+        if (!isOrcamento) {
+          const semProduto = itens.filter(i => !i.produto_id || !tinyIdMap.has(Number(i.produto_id)));
+          if (semProduto.length > 0) {
+            throw new Error(`Produto "${semProduto[0].nome_produto}" não está cadastrado no Tiny. Vincule o produto antes de aprovar.`);
+          }
+        }
+
+        return itens.map((item) => {
+          const tinyProdId = tinyIdMap.get(Number(item.produto_id));
+          // Orçamento sem produto: usa produto genérico. Venda normal: obrigatório ter ID.
+          const prodId = tinyProdId || (isOrcamento ? TINY_PRODUTO_GENERICO : 0);
+          return {
+            produto: {
+              id: prodId,
+              ...(item.sku ? { codigo: item.sku } : {}),
+              descricao: item.nome_produto || "Produto",
+              tipo: "P",
+            },
+            quantidade: Number(item.quantidade),
+            valorUnitario: Number(item.preco_unitario),
+            ...(item.observacao ? { infoAdicional: item.observacao } : {}),
+          };
+        });
+      })(),
     };
 
-    // Enviar para Tiny
-    try {
-      const tinyRes = await fetch("https://api.tiny.com.br/public-api/v3/pedidos", {
+    // Função para renovar token OAuth2 (refresh_token ou re-auth com client_credentials)
+    async function refreshTinyToken(): Promise<string | null> {
+      const [ciRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_client_id'`;
+      const [csRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_client_secret'`;
+      if (!ciRow?.valor_encrypted || !csRow?.valor_encrypted) return null;
+      let clientId: string, clientSecret: string;
+      try { clientId = JSON.parse(ciRow.valor_encrypted); } catch { clientId = String(ciRow.valor_encrypted); }
+      try { clientSecret = JSON.parse(csRow.valor_encrypted); } catch { clientSecret = String(csRow.valor_encrypted); }
+      clientId = clientId.replace(/"/g, "").trim();
+      clientSecret = clientSecret.replace(/"/g, "").trim();
+
+      // Tentar refresh_token primeiro
+      const [rtRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_refresh_token'`;
+      const attempts: URLSearchParams[] = [];
+      if (rtRow?.valor_encrypted) {
+        let rt: string;
+        try { rt = JSON.parse(rtRow.valor_encrypted); } catch { rt = String(rtRow.valor_encrypted); }
+        rt = rt.replace(/"/g, "").trim();
+        if (rt) attempts.push(new URLSearchParams({ grant_type: "refresh_token", refresh_token: rt, client_id: clientId, client_secret: clientSecret }));
+      }
+      // Fallback: client_credentials
+      attempts.push(new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }));
+
+      for (const body of attempts) {
+        try {
+          const res = await fetch("https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token", {
+            method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body, signal: AbortSignal.timeout(10000),
+          });
+          if (!res.ok) continue;
+          const tokens = await res.json() as { access_token: string; refresh_token?: string };
+          await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_bearer_token', ${JSON.stringify(tokens.access_token)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(tokens.access_token)}`;
+          if (tokens.refresh_token) {
+            await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_refresh_token', ${JSON.stringify(tokens.refresh_token)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(tokens.refresh_token)}`;
+          }
+          return tokens.access_token;
+        } catch { continue; }
+      }
+      return null;
+    }
+
+    // Enviar para Tiny (com retry após refresh se 401)
+    async function enviarParaTiny(token: string): Promise<Response> {
+      return fetch("https://api.tiny.com.br/public-api/v3/pedidos", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tinyToken}` },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify(pedidoV3),
         signal: AbortSignal.timeout(15000),
       });
+    }
+
+    try {
+      let tinyRes = await enviarParaTiny(tinyToken);
+
+      // Se 401 (token expirado), tentar refresh e reenviar
+      if (tinyRes.status === 401) {
+        const newToken = await refreshTinyToken();
+        if (newToken) {
+          tinyToken = newToken;
+          tinyRes = await enviarParaTiny(tinyToken);
+        }
+      }
 
       if (!tinyRes.ok) {
         const errBody = await tinyRes.text();
-        let erroMsg = `Tiny API ${tinyRes.status}`;
-        try {
-          const errJson = JSON.parse(errBody);
-          // Tiny v3 pode retornar: { message, error, descricao, erros: [...] }
-          const msg = errJson.message || errJson.error || errJson.descricao || "";
-          const erros = Array.isArray(errJson.erros)
-            ? errJson.erros.map((e: Record<string, string>) => e.mensagem || e.campo || JSON.stringify(e)).join("; ")
-            : "";
-          erroMsg = [msg, erros].filter(Boolean).join(" — ") || `${erroMsg}: ${JSON.stringify(errJson).slice(0, 300)}`;
+        let erroMsg = "";
+        if (tinyRes.status === 401) {
+          erroMsg = "Token do Tiny expirado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.";
+        } else {
+          erroMsg = `Tiny API ${tinyRes.status}`;
+          try {
+            const errJson = JSON.parse(errBody);
+            const msg = errJson.message || errJson.error || errJson.descricao || errJson.mensagem || "";
+            const erros = Array.isArray(errJson.erros)
+              ? errJson.erros.map((e: Record<string, string>) => e.mensagem || e.campo || JSON.stringify(e)).join("; ")
+              : Array.isArray(errJson.detalhes)
+              ? errJson.detalhes.map((e: Record<string, string>) => `${e.campo}: ${e.mensagem}`).join("; ")
+              : "";
+            erroMsg = [msg, erros].filter(Boolean).join(" — ") || `${erroMsg}: ${JSON.stringify(errJson).slice(0, 300)}`;
+          }
+          catch { erroMsg += errBody ? `: ${errBody.slice(0, 300)}` : ""; }
         }
-        catch { erroMsg += `: ${errBody.slice(0, 300)}`; }
         console.error("[Tiny] Erro ao enviar pedido:", erroMsg, "| Body enviado:", JSON.stringify(pedidoV3).slice(0, 500));
         await sql`
           UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${erroMsg}
@@ -315,7 +389,7 @@ export async function PATCH(
         await sql`UPDATE alissonerp.vendas_erp SET total_venda = total_produtos - total_desconto + ${body.total_frete} WHERE id = ${vendaId}`;
       }
 
-      return NextResponse.json({ ok: true, tiny_pedido_id: tinyData.id });
+      // NÃO retornar aqui — continuar para criação de ordem se for orçamento
 
     } catch (e) {
       const erroMsg = e instanceof Error ? e.message : "Falha na comunicação com o Tiny";
@@ -398,8 +472,10 @@ export async function PATCH(
 
   // Auto-baixa estoque comercial removida — trigger 111 (trg_estoque_comercial_baixa_venda) já cuida disso.
 
-  // ── Auto-criar ordem de fabricação se venda veio de orçamento e foi concluída ──
-  if (body.situacao === "concluido") {
+  // ── Auto-criar ordem de fabricação se venda veio de orçamento (ao aprovar ou concluir) ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let ordemCriada: any = null;
+  if (body.situacao === "aprovado" || body.situacao === "concluido") {
     const [vendaOrc] = await sql`
       SELECT v.orcamento_id, v.cliente_id, v.vendedor_id, v.data_entrega,
              o.id AS orc_id, o.tipo, o.peso, o.numero_orcamento, o.nome_modelo,
@@ -444,6 +520,7 @@ export async function PATCH(
             ${vendaOrc.foto_3d ?? null}, ${vendaId}, NOW()
           ) RETURNING id, numero_ordem
         `;
+        ordemCriada = { id: ordem.id, numero_ordem: ordem.numero_ordem };
 
         // Item da ordem
         const nomeItem = vendaOrc.tipo === "alianca"
@@ -497,5 +574,8 @@ export async function PATCH(
     }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    ...(ordemCriada ? { ordem_criada: ordemCriada.numero_ordem } : {}),
+  });
 }

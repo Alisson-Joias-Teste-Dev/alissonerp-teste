@@ -51,9 +51,9 @@ const BANDEIRAS  = ["Visa", "Mastercard", "Elo", "Amex", "Hipercard", "Outro"];
 const CONDICOES  = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
 
 // formas que exibem tabela de parcelas
-const COM_PARCELAS = ["Cartão de Crédito", "Ouro", "A Receber", "Pix", "Vale-Troca"];
+const COM_PARCELAS = ["Cartão de Crédito", "Vale-Troca"];
 // formas que exibem gateway/bandeira
-const COM_CARTAO   = ["Cartão de Crédito", "Cartão de Débito"];
+const COM_CARTAO   = ["Cartão de Crédito", "Cartão de Débito", "Pix"];
 
 function fmt(v: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
@@ -221,6 +221,8 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   const [novoClienteForm, setNovoClienteForm] = useState({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
   const [savingCliente, setSavingCliente] = useState(false);
   const [clienteErr, setClienteErr] = useState("");
+  const [cpfExistente, setCpfExistente] = useState<string | null>(null);
+  const cpfTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editingCliente, setEditingCliente] = useState(false);
   const [editClienteForm, setEditClienteForm] = useState({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
 
@@ -453,9 +455,26 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
     finally { setSavingCliente(false); }
   }
 
+  // ── Verificar CPF duplicado ─────────────────────────────────────────────────
+  function checkCpfDuplicado(cpf: string) {
+    setCpfExistente(null);
+    const limpo = cpf.replace(/\D/g, "");
+    if (limpo.length < 11) return;
+    if (cpfTimer.current) clearTimeout(cpfTimer.current);
+    cpfTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/vendas/clientes/busca?q=${encodeURIComponent(limpo)}&limit=1`);
+        const data = await res.json() as Cliente[];
+        const found = data.find(c => c.cpf_cnpj?.replace(/\D/g, "") === limpo);
+        setCpfExistente(found ? found.nome : null);
+      } catch { /* silent */ }
+    }, 400);
+  }
+
   // ── Create new client ──────────────────────────────────────────────────────
   async function handleCriarCliente() {
     if (!novoClienteForm.nome.trim()) { setClienteErr("Nome é obrigatório"); return; }
+    if (cpfExistente) { setClienteErr(`CPF/CNPJ já cadastrado para: ${cpfExistente}`); return; }
     setSavingCliente(true); setClienteErr("");
     try {
       const res = await fetch("/api/contatos", {
@@ -730,7 +749,12 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               <div className="px-5 py-4 space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div><Label required>Nome</Label><Input value={novoClienteForm.nome} onChange={e => setNovoClienteForm(p => ({ ...p, nome: e.target.value }))} /></div>
-                  <div><Label>CPF/CNPJ</Label><Input value={novoClienteForm.cpf_cnpj} onChange={e => setNovoClienteForm(p => ({ ...p, cpf_cnpj: e.target.value }))} /></div>
+                  <div>
+                    <Label>CPF/CNPJ</Label>
+                    <Input value={novoClienteForm.cpf_cnpj} onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cpf_cnpj: v })); checkCpfDuplicado(v); }}
+                      style={{ borderColor: cpfExistente ? "#EF4444" : C.cremeBorder }} />
+                    {cpfExistente && <p className="text-xs text-red-500 mt-1">Já cadastrado: {cpfExistente}</p>}
+                  </div>
                   <div><Label>Email</Label><Input type="email" value={novoClienteForm.email} onChange={e => setNovoClienteForm(p => ({ ...p, email: e.target.value }))} /></div>
                   <div><Label>Telefone</Label><Input value={novoClienteForm.telefone} onChange={e => setNovoClienteForm(p => ({ ...p, telefone: e.target.value }))} /></div>
                   <div><Label>Celular</Label><Input value={novoClienteForm.celular} onChange={e => setNovoClienteForm(p => ({ ...p, celular: e.target.value }))} /></div>
@@ -978,9 +1002,9 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
           </div>
 
           {/* Dinheiro */}
-          {pagForma === "Dinheiro" && (
+          {["Dinheiro", "Ouro", "A Receber"].includes(pagForma) && (
             <div className="rounded-lg border px-4 py-3 text-sm mb-4" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
-              Pagamento em dinheiro. Não há campos adicionais necessários.
+              Pagamento em {pagForma.toLowerCase()}. Não há campos adicionais necessários.
             </div>
           )}
 
