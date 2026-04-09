@@ -388,6 +388,39 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
     finally { setUpdating(false); }
   }
 
+  async function handleUpdateItem(itemId: number, field: "quantidade" | "pct_desconto", raw: string) {
+    if (!venda) return;
+    const val = Number(raw);
+    if (isNaN(val) || val < 0) return;
+    if (field === "pct_desconto" && val > maxDesconto) return;
+    if (field === "quantidade" && val < 1) return;
+
+    const item = venda.itens.find(i => i.id === itemId);
+    if (!item) return;
+
+    const newQtd = field === "quantidade" ? val : item.quantidade;
+    const newDesc = field === "pct_desconto" ? val : item.pct_desconto;
+    const precoUnit = item.preco_lista * (1 - newDesc / 100);
+    const totalItem = precoUnit * newQtd;
+    const pctComissao = getComissao(newDesc);
+    const valorComissao = totalItem * pctComissao / 100;
+
+    setUpdating(true);
+    try {
+      const res = await fetch(`/api/vendas/${venda.id}/itens/${itemId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quantidade: newQtd, pct_desconto: newDesc,
+          preco_unitario: precoUnit, total_item: totalItem,
+          pct_comissao: pctComissao, valor_comissao: valorComissao,
+        }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+      await load();
+    } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao atualizar item"); }
+    finally { setUpdating(false); }
+  }
+
   // ── Payment actions (immediate save) ────────────────────────────────────────
   async function handleAddPagamento() {
     if (!venda) return;
@@ -604,6 +637,15 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
   const podeCancelar = isFullAccess && !["cancelado", "concluido"].includes(venda.situacao);
 
+  // Validação para aprovar: cliente + itens + pagamento + envio/frete obrigatórios
+  const podeAprovar = !!(
+    venda.cliente_id &&
+    itens.length > 0 &&
+    venda.pagamentos.length > 0 &&
+    venda.forma_envio &&
+    venda.forma_frete
+  );
+
   return (
     <div className="px-3 md:px-6 py-4 md:py-6 max-w-5xl mx-auto">
 
@@ -715,7 +757,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                 onChange={e => { setDataVenda(e.target.value); markDirty(); }} />
             </div>
             <div>
-              <Label>Data de Entrega</Label>
+              <Label required>Data de Entrega</Label>
               <Input type="date" value={dataEntrega} disabled={!edit.limited}
                 onChange={e => { setDataEntrega(e.target.value); markDirty(); }} />
             </div>
@@ -767,11 +809,21 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                         <td className="px-3 py-2.5 text-xs tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
                         <td className="px-3 py-2.5 max-w-[180px] truncate font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
                         <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku}</td>
-                        <td className="px-3 py-2.5 text-center tabular-nums" style={{ color: "#374151" }}>{item.quantidade}</td>
+                        <td className="px-3 py-2.5 text-center tabular-nums" style={{ color: "#374151" }}>
+                          {edit.limited && item.id ? (
+                            <input type="number" min={1} defaultValue={item.quantidade}
+                              onBlur={e => handleUpdateItem(item.id!, "quantidade", e.target.value)}
+                              className="w-14 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                          ) : item.quantidade}
+                        </td>
                         <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{item.unidade ?? "un"}</td>
                         <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
                         <td className="px-3 py-2.5 tabular-nums text-center" style={{ color: item.pct_desconto > 0 ? "#D97706" : "#9CA3AF" }}>
-                          {item.pct_desconto > 0 ? `${item.pct_desconto}%` : "—"}
+                          {edit.limited && item.id ? (
+                            <input type="number" min={0} max={maxDesconto} step={1} defaultValue={item.pct_desconto}
+                              onBlur={e => handleUpdateItem(item.id!, "pct_desconto", e.target.value || "0")}
+                              className="w-14 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                          ) : (item.pct_desconto > 0 ? `${item.pct_desconto}%` : "—")}
                         </td>
                         <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</td>
                         <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
@@ -819,7 +871,8 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                       <div>
                         <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>% Desconto <span style={{ color: "#9CA3AF" }}>(máx {maxDesconto}%)</span></label>
                         <input type="number" min={0} max={maxDesconto} step={1} value={pctDesconto}
-                          onChange={e => { const v = Number(e.target.value); setPctDesconto(v); setDescontoErr(v > maxDesconto ? `Máximo: ${maxDesconto}%` : ""); }}
+                          onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(v > maxDesconto ? `Máximo: ${maxDesconto}%` : ""); }}
+                          onBlur={e => { if (e.target.value === "") setPctDesconto(0); }}
                           className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
                           style={{ borderColor: descontoErr ? "#EF4444" : C.cremeBorder }} />
                         {descontoErr && <p className="text-[11px] text-red-500 mt-0.5">{descontoErr}</p>}
@@ -1031,7 +1084,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <Label>Forma de Envio</Label>
+              <Label required>Forma de Envio</Label>
               <Select value={formaEnvioId} disabled={!edit.limited}
                 onChange={e => { setFormaEnvioId(e.target.value === "" ? "" : Number(e.target.value)); setFormaFreteId(""); markDirty(); }}>
                 <option value="">Selecione a forma de envio</option>
@@ -1039,7 +1092,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
               </Select>
             </div>
             <div>
-              <Label>Forma de Frete</Label>
+              <Label required>Forma de Frete</Label>
               <Select value={formaFreteId} disabled={!edit.limited || !formaEnvioId || formaFreteOpts.length === 0}
                 onChange={e => { setFormaFreteId(e.target.value === "" ? "" : Number(e.target.value)); markDirty(); }}
                 style={{ opacity: (!edit.limited || !formaEnvioId || formaFreteOpts.length === 0) ? 0.5 : 1 }}>
@@ -1128,14 +1181,30 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                 Salvar Alterações
               </button>
             )}
-            {proximasAcoes.map(acao => (
-              <button key={acao.value} onClick={() => changeSituacao(acao.value)} disabled={updating || saving}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
-                style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                {updating ? <Loader2 size={14} className="animate-spin" /> : <acao.icon size={14} />}
-                {acao.label}
-              </button>
-            ))}
+            {proximasAcoes.map(acao => {
+              const needsValidation = acao.value === "aprovado" || acao.value === "concluido";
+              const isDisabled = updating || saving || (needsValidation && !podeAprovar);
+              return (
+                <div key={acao.value} className="relative group">
+                  <button onClick={() => changeSituacao(acao.value)} disabled={isDisabled}
+                    className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                    style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                    {updating ? <Loader2 size={14} className="animate-spin" /> : <acao.icon size={14} />}
+                    {acao.label}
+                  </button>
+                  {needsValidation && !podeAprovar && (
+                    <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block w-52 p-2 rounded-lg border bg-white shadow-lg text-xs" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
+                      Preencha antes:
+                      {!venda.cliente_id && <p className="text-red-500">• Cliente</p>}
+                      {itens.length === 0 && <p className="text-red-500">• Produtos</p>}
+                      {venda.pagamentos.length === 0 && <p className="text-red-500">• Pagamento</p>}
+                      {!venda.forma_envio && <p className="text-red-500">• Forma de Envio</p>}
+                      {!venda.forma_frete && <p className="text-red-500">• Forma de Frete</p>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
