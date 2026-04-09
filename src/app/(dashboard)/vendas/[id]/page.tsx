@@ -14,12 +14,13 @@ export default async function VendaDetalhePage({ params }: Props) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
 
-  let role      = "consultora";
+  let role        = "consultora";
   let vendedorId: number | null = null;
+  let maxDesconto = 15;
 
   if (user) {
     const [u] = await sql`
-      SELECT role, vendedor_id
+      SELECT role, vendedor_id, mx_desconto_permitido
       FROM alissonerp.usuarios
       WHERE id = ${user.id}::uuid
       LIMIT 1
@@ -27,6 +28,16 @@ export default async function VendaDetalhePage({ params }: Props) {
     if (u) {
       role       = u.role as string;
       vendedorId = u.vendedor_id ? Number(u.vendedor_id) : null;
+
+      const SUPER = ["desenvolvedor", "admin"];
+      if (SUPER.includes(role)) {
+        maxDesconto = 100;
+      } else if (u.mx_desconto_permitido != null && Number(u.mx_desconto_permitido) > 0) {
+        maxDesconto = Number(u.mx_desconto_permitido);
+      } else {
+        const FULL_ROLES = ["gerente_fabrica", "gerente_loja", "financeiro"];
+        maxDesconto = FULL_ROLES.includes(role) ? 30 : 15;
+      }
     }
   }
 
@@ -36,6 +47,7 @@ export default async function VendaDetalhePage({ params }: Props) {
       role={role}
       vendedorId={vendedorId}
       isFullAccess={FULL_ACCESS.includes(role)}
+      maxDesconto={maxDesconto}
     />
   );
 }
