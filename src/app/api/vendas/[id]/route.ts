@@ -108,12 +108,16 @@ export async function PATCH(
 
   const body = await req.json() as {
     situacao?:             string;
+    cliente_id?:           number | null;
+    vendedor_id?:          number | null;
+    data_venda?:           string;
     data_entrega?:         string | null;
     total_frete?:          number;
     forma_envio?:          string | null;
     forma_frete?:          string | null;
     observacoes?:          string | null;
     observacoes_internas?: string | null;
+    video_obs_interna?:    string | null;
   };
 
   const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "cancelado", "concluido"];
@@ -121,15 +125,26 @@ export async function PATCH(
     return NextResponse.json({ error: "Situação inválida" }, { status: 400 });
   }
 
+  // Campos restritos a rascunho
+  if (body.cliente_id !== undefined || body.vendedor_id !== undefined || body.data_venda !== undefined) {
+    if (venda.situacao !== "rascunho") {
+      return NextResponse.json({ error: "Estes campos só podem ser alterados em rascunho" }, { status: 409 });
+    }
+  }
+
   await sql`
     UPDATE alissonerp.vendas_erp SET
       situacao             = COALESCE(${body.situacao ?? null},             situacao),
+      cliente_id           = COALESCE(${body.cliente_id ?? null},           cliente_id),
+      vendedor_id          = COALESCE(${body.vendedor_id ?? null},          vendedor_id),
+      data_venda           = COALESCE(${body.data_venda ?? null},           data_venda),
       data_entrega         = COALESCE(${body.data_entrega ?? null},         data_entrega),
       total_frete          = COALESCE(${body.total_frete ?? null},          total_frete),
       forma_envio          = COALESCE(${body.forma_envio ?? null},          forma_envio),
       forma_frete          = COALESCE(${body.forma_frete ?? null},          forma_frete),
       observacoes          = COALESCE(${body.observacoes ?? null},          observacoes),
-      observacoes_internas = COALESCE(${body.observacoes_internas ?? null}, observacoes_internas)
+      observacoes_internas = COALESCE(${body.observacoes_internas ?? null}, observacoes_internas),
+      video_obs_interna    = COALESCE(${body.video_obs_interna ?? null},    video_obs_interna)
     WHERE id = ${vendaId}
   `;
 
