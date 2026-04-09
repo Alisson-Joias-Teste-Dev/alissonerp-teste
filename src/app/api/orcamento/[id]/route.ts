@@ -196,3 +196,120 @@ export async function PATCH(
 
   return NextResponse.json({ error: "Status inválido" }, { status: 400 });
 }
+
+// PUT /api/orcamento/[id] — atualizar orçamento existente
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const orcId = parseInt(id);
+  if (isNaN(orcId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  const body = await req.json();
+  const {
+    nome_cliente, nome_modelo, peso, valor, markup, desconto_pct,
+    cotacao_ouro, tipo, ficha, ficha2, quantidade, cliente_id, foto_3d_base64,
+  } = body;
+
+  // Upload foto 3D se enviada
+  let foto3dUrl: string | undefined;
+  if (foto_3d_base64 && typeof foto_3d_base64 === "string" && foto_3d_base64.startsWith("data:")) {
+    const { uploadFile } = await import("@/lib/storage");
+    const path = `orcamento/ORC-${orcId}/3d-${Date.now()}.jpg`;
+    const result = await uploadFile("ordem-fotos", path, foto_3d_base64, "image/jpeg");
+    if (!("error" in result)) foto3dUrl = result.url;
+  }
+
+  // Atualizar ficha técnica 1
+  let fichaId: number | undefined;
+  if (ficha && typeof ficha === "object") {
+    const [existing] = await sql`SELECT ficha_tecnica_id FROM alissonerp.orcamentos WHERE id = ${orcId}`;
+    if (existing?.ficha_tecnica_id) {
+      await sql`
+        UPDATE alissonerp.orcamento_fichas_tecnicas SET
+          modelo = ${ficha.modelo ?? null}, aro_numeracao = ${ficha.aro_numeracao ?? null},
+          largura = ${ficha.largura ?? null}, espessura = ${ficha.espessura ?? null},
+          peso_estimado = ${ficha.peso_estimado ?? null}, perfil = ${ficha.perfil ?? null},
+          diametro = ${ficha.diametro ?? null}, densidade_ouro = ${ficha.densidade_ouro ?? null},
+          cor_metal = ${ficha.cor_metal ?? null}, tipo_fonte = ${ficha.tipo_fonte ?? null},
+          texto = ${ficha.texto ?? null}, qtd_pedras = ${ficha.qtd_pedras ?? null},
+          tamanho_pedra = ${ficha.tamanho_pedra ?? null}, tipo_aplicacao_pedra = ${ficha.tipo_aplicacao_pedra ?? null},
+          profundidade_concava = ${ficha.profundidade_concava ?? null},
+          dome_porcentagem = ${ficha.dome_porcentagem ?? null},
+          pedra_drill = ${ficha.pedra_drill ?? false}, pedra_meia_lua = ${ficha.pedra_meia_lua ?? false},
+          pedra_volta_completa = ${ficha.pedra_volta_completa ?? false}
+        WHERE id = ${existing.ficha_tecnica_id}
+      `;
+      fichaId = existing.ficha_tecnica_id;
+    }
+  }
+
+  // Atualizar ficha técnica 2 (par)
+  let ficha2Id: number | undefined;
+  if (ficha2 && typeof ficha2 === "object" && quantidade === 2) {
+    const [existing] = await sql`SELECT ficha_tecnica_2_id FROM alissonerp.orcamentos WHERE id = ${orcId}`;
+    if (existing?.ficha_tecnica_2_id) {
+      await sql`
+        UPDATE alissonerp.orcamento_fichas_tecnicas SET
+          modelo = ${ficha2.modelo ?? null}, aro_numeracao = ${ficha2.aro_numeracao ?? null},
+          largura = ${ficha2.largura ?? null}, espessura = ${ficha2.espessura ?? null},
+          peso_estimado = ${ficha2.peso_estimado ?? null}, perfil = ${ficha2.perfil ?? null},
+          diametro = ${ficha2.diametro ?? null}, densidade_ouro = ${ficha2.densidade_ouro ?? null},
+          cor_metal = ${ficha2.cor_metal ?? null}, tipo_fonte = ${ficha2.tipo_fonte ?? null},
+          texto = ${ficha2.texto ?? null}, qtd_pedras = ${ficha2.qtd_pedras ?? null},
+          tamanho_pedra = ${ficha2.tamanho_pedra ?? null}, tipo_aplicacao_pedra = ${ficha2.tipo_aplicacao_pedra ?? null},
+          dome_porcentagem = ${ficha2.dome_porcentagem ?? null},
+          pedra_drill = ${ficha2.pedra_drill ?? false}, pedra_meia_lua = ${ficha2.pedra_meia_lua ?? false},
+          pedra_volta_completa = ${ficha2.pedra_volta_completa ?? false}
+        WHERE id = ${existing.ficha_tecnica_2_id}
+      `;
+      ficha2Id = existing.ficha_tecnica_2_id;
+    } else {
+      // Criar ficha 2 se não existe
+      const [newFicha] = await sql`
+        INSERT INTO alissonerp.orcamento_fichas_tecnicas (
+          modelo, aro_numeracao, largura, espessura, peso_estimado, perfil, diametro,
+          densidade_ouro, cor_metal, tipo_fonte, texto, qtd_pedras, tamanho_pedra,
+          tipo_aplicacao_pedra, dome_porcentagem, pedra_drill, pedra_meia_lua, pedra_volta_completa,
+          pedras_detalhadas
+        ) VALUES (
+          ${ficha2.modelo ?? null}, ${ficha2.aro_numeracao ?? null}, ${ficha2.largura ?? null},
+          ${ficha2.espessura ?? null}, ${ficha2.peso_estimado ?? null}, ${ficha2.perfil ?? null},
+          ${ficha2.diametro ?? null}, ${ficha2.densidade_ouro ?? null}, ${ficha2.cor_metal ?? null},
+          ${ficha2.tipo_fonte ?? null}, ${ficha2.texto ?? null}, ${ficha2.qtd_pedras ?? null},
+          ${ficha2.tamanho_pedra ?? null}, ${ficha2.tipo_aplicacao_pedra ?? null},
+          ${ficha2.dome_porcentagem ?? null}, ${ficha2.pedra_drill ?? false},
+          ${ficha2.pedra_meia_lua ?? false}, ${ficha2.pedra_volta_completa ?? false},
+          '[]'::jsonb
+        ) RETURNING id
+      `;
+      ficha2Id = newFicha.id as number;
+    }
+  }
+
+  // Atualizar orçamento
+  await sql`
+    UPDATE alissonerp.orcamentos SET
+      nome_cliente = COALESCE(${nome_cliente ?? null}, nome_cliente),
+      nome_modelo = COALESCE(${nome_modelo ?? null}, nome_modelo),
+      peso = COALESCE(${peso ?? null}, peso),
+      valor = COALESCE(${valor ?? null}, valor),
+      markup = COALESCE(${markup ?? null}, markup),
+      desconto_pct = COALESCE(${desconto_pct ?? null}, desconto_pct),
+      cotacao_ouro = COALESCE(${cotacao_ouro ?? null}, cotacao_ouro),
+      tipo = COALESCE(${tipo ?? null}, tipo),
+      quantidade = COALESCE(${quantidade ?? null}, quantidade),
+      cliente_id = COALESCE(${cliente_id ?? null}, cliente_id),
+      foto_3d = COALESCE(${foto3dUrl ?? null}, foto_3d),
+      ficha_tecnica_2_id = COALESCE(${ficha2Id ?? null}, ficha_tecnica_2_id),
+      updated_at = NOW()
+    WHERE id = ${orcId}
+  `;
+
+  return NextResponse.json({ ok: true });
+}

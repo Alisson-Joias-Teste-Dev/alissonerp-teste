@@ -77,14 +77,17 @@ export default async function OrdemDetalhePage({
   // Ficha técnica: tentar view legada (Directus) primeiro, senão tabela ERP nova
   let fichaTecnica = (fichas[0] as any) ?? null;
   if (!fichaTecnica) {
-    const [fichaErp] = await sql`
+    const fichasErp = await sql`
       SELECT id AS ficha_id, ordem_id, tipo_item, dados, created_at
       FROM alissonerp.fichas_tecnicas
       WHERE ordem_id = ${ordemId}
-      LIMIT 1
+      ORDER BY id
     `;
-    if (fichaErp) {
-      fichaTecnica = { ...fichaErp, _origem: "erp" };
+    if (fichasErp.length === 1) {
+      fichaTecnica = { ...fichasErp[0], _origem: "erp" };
+    } else if (fichasErp.length > 1) {
+      // Par de alianças — múltiplas fichas
+      fichaTecnica = { _origem: "erp_multi", fichas: fichasErp.map((f, i) => ({ ...f, _origem: "erp", _label: `Aliança ${i + 1}` })) };
     }
   }
 

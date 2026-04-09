@@ -49,6 +49,7 @@ interface Props {
 }
 
 type OrcamentoTipo = "alianca" | "peca" | null;
+type AllianceMode = "unidade" | "par";
 
 // ── Pill helper ──────────────────────────────────────────────────────────────
 function Pill({ label, value }: { label: string; value: string }) {
@@ -118,6 +119,9 @@ export default function OrcamentoClient({
   const [filtroStatus, setFiltroStatus] = useState<string>("todos");
   const [buscaOrc, setBuscaOrc] = useState("");
   const [showNovoMenu, setShowNovoMenu] = useState(false);
+  const [rejectId, setRejectId] = useState<number | null>(null);
+  const [rejectMotivo, setRejectMotivo] = useState("");
+  const [editingOrcId, setEditingOrcId] = useState<number | null>(null);
   const fetchOrcamentos = useCallback(async () => {
     setLoadingOrc(true);
     const res = await fetch("/api/orcamento?limit=100").catch(() => null);
@@ -139,6 +143,30 @@ export default function OrcamentoClient({
     startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0,
   });
   const [currentMesh, setCurrentMesh] = useState<THREE.Mesh | null>(null);
+
+  // ── Par de alianças ───────────────────────────────────────────────────────
+  const [allianceMode, setAllianceMode] = useState<AllianceMode>("unidade");
+  const [activeRing, setActiveRing] = useState<1 | 2>(1);
+  const [profile2, setProfile2] = useState<ProfileType>((config?.profile as ProfileType) ?? ProfileType.Anatomica);
+  const [ringSize2, setRingSize2] = useState<RingSize>(RING_SIZES[14]);
+  const [params2, setParams2] = useState<RingParams>({
+    ...DEFAULT_PARAMS, goldPrice: cotacaoOuro,
+    startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0,
+  });
+  const [currentMesh2, setCurrentMesh2] = useState<THREE.Mesh | null>(null);
+  const [stoneEntries2, setStoneEntries2] = useState<StoneEntry[]>([]);
+  const stoneTotalRS2 = useMemo(() => computeStonesTotalRS(stoneEntries2), [stoneEntries2]);
+
+  // Helpers para par — retorna params/setters do anel ativo
+  const activeProfile = activeRing === 1 ? profile : profile2;
+  const setActiveProfile = activeRing === 1 ? setProfile : setProfile2;
+  const activeParams = activeRing === 1 ? params : params2;
+  const setActiveParams = activeRing === 1 ? setParams : setParams2;
+  const activeRingSize = activeRing === 1 ? ringSize : ringSize2;
+  const setActiveRingSize = activeRing === 1 ? setRingSize : setRingSize2;
+  const activeStoneEntries = activeRing === 1 ? stoneEntries : stoneEntries2;
+  const setActiveStoneEntries = activeRing === 1 ? setStoneEntries : setStoneEntries2;
+
   const [clientName, setClientName] = useState("");
   const [clienteId, setClienteId] = useState<number | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -220,8 +248,9 @@ export default function OrcamentoClient({
   const [configMsg, setConfigMsg] = useState<string | null>(null);
 
   const updateParam = <K extends keyof RingParams>(key: K, value: RingParams[K]) => {
-    setParams((prev) => {
-      if (prev[key] === value) return prev; // evita re-render se valor não mudou
+    const setter = activeRing === 1 ? setParams : setParams2;
+    setter((prev) => {
+      if (prev[key] === value) return prev;
       return { ...prev, [key]: value };
     });
   };
@@ -274,7 +303,24 @@ export default function OrcamentoClient({
   }, [params.diameter, params.height, params.width]);
   const { calc: calcCategories } = computeCalculatedCategories(params.startMkp, pricingCategories, weightEst.weight);
 
+  // Pricing aliança 2 (par)
+  const weightEst2 = useMemo(() => computeWeight(params2, profile2), [params2, profile2]);
+  const pricing2: PricingResult = useMemo(
+    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, params2.discountPercent, pricingCategories),
+    [weightEst2.weight, params2.goldPrice, params2.startMkp, params2.discountPercent, pricingCategories]
+  );
+  const cameraDistance2 = useMemo(() => {
+    const radius = params2.diameter / 2 + params2.height + params2.width * 0.6;
+    return radius * 8;
+  }, [params2.diameter, params2.height, params2.width]);
+
+  // Totais do par
+  const pricingTotal = allianceMode === "par"
+    ? { weight: pricing.weight + pricing2.weight, price: pricing.discountPrice + pricing2.discountPrice + stoneTotalRS + stoneTotalRS2 }
+    : { weight: pricing.weight, price: pricing.discountPrice + stoneTotalRS };
+
   const handleSizeChange = (s: RingSize) => { setRingSize(s); updateParam("diameter", s.diameter); };
+  const handleSizeChange2 = (s: RingSize) => { setRingSize2(s); setParams2(p => ({ ...p, diameter: s.diameter })); };
 
   // Captura screenshot do Canvas 3D
   const capture3DScreenshot = useCallback((): string | null => {
@@ -285,38 +331,76 @@ export default function OrcamentoClient({
     } catch { return null; }
   }, []);
 
+  const resetEditor = () => {
+    setEditingOrcId(null);
+    setClientName(""); setClienteId(null);
+    setProfile((config?.profile as ProfileType) ?? ProfileType.Anatomica);
+    setRingSize(RING_SIZES[14]);
+    setParams({ ...DEFAULT_PARAMS, goldPrice: cotacaoOuro, startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0 });
+    setProfile2((config?.profile as ProfileType) ?? ProfileType.Anatomica);
+    setRingSize2(RING_SIZES[14]);
+    setParams2({ ...DEFAULT_PARAMS, goldPrice: cotacaoOuro, startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0 });
+    setStoneEntries([]); setStoneEntries2([]);
+    setActiveRing(1);
+    setPecaPeso(5.0);
+  };
+
+  function buildFicha(p: RingParams, pf: ProfileType, rs: RingSize, w: number, sc: number) {
+    return {
+      modelo: PROFILE_OPTIONS.find((o) => o.id === pf)?.label ?? pf,
+      aro_numeracao: `Aro ${rs.size}`, largura: p.width, espessura: p.height,
+      peso_estimado: w, perfil: pf, diametro: p.diameter,
+      densidade_ouro: p.goldDensity, cor_metal: METAL_COLORS.find(m => m.value === p.metalColor)?.label ?? p.metalColor,
+      tipo_fonte: p.textEnabled && p.textContent.trim() ? (p.textFontType === 2 ? "Cursiva" : "Forma") : null,
+      texto: p.textEnabled && p.textContent.trim() ? p.textContent.trim() : null,
+      qtd_pedras: p.hasStones ? sc : null, tamanho_pedra: p.hasStones ? p.stoneSize : null,
+      tipo_aplicacao_pedra: p.hasStones ? (p.stoneFull ? "Volta Completa" : p.stoneHalfMoon ? "Meia Alianca" : "Pontual") : null,
+      profundidade_concava: p.concaveDepth, friso_lado: p.grooveSide,
+      friso_largura: p.grooveWidth, friso_profundidade: p.grooveDepth, friso_offset: p.grooveOffset,
+      canal_largura: p.canalWidth, canal_borda_altura: p.canalBorderHeight,
+      chanfro_tamanho: p.chamferSize, dome_porcentagem: p.domePercentage,
+      pedra_fileiras: p.stoneRows, pedra_drill: p.stoneDrill,
+      pedra_meia_lua: p.stoneHalfMoon, pedra_volta_completa: p.stoneFull,
+    };
+  }
+
   const handleSaveOrder = async () => {
     if (!clientName.trim() && !clienteId) { setSaveMsg({ text: "Selecione ou cadastre um cliente", type: "error" }); return; }
     setIsSaving(true); setSaveMsg(null);
     try {
       const foto3d = capture3DScreenshot();
-      const body = {
+      const isPar = allianceMode === "par";
+      const nomeModelo = isPar
+        ? `Par: ${PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile} + ${PROFILE_OPTIONS.find((p) => p.id === profile2)?.label ?? profile2}`
+        : PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile;
+
+      const body: Record<string, unknown> = {
         nome_cliente: clientName.trim(),
         cliente_id: clienteId,
-        nome_modelo: PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile,
-        peso: pricing.weight, valor: pricing.discountPrice, markup: pricing.mkp,
-        desconto_pct: params.discountPercent, cotacao_ouro: params.goldPrice, tipo: "alianca",
+        nome_modelo: nomeModelo,
+        peso: pricingTotal.weight,
+        valor: pricingTotal.price,
+        markup: pricing.mkp,
+        desconto_pct: params.discountPercent,
+        cotacao_ouro: params.goldPrice,
+        tipo: "alianca",
+        quantidade: isPar ? 2 : 1,
         foto_3d_base64: foto3d,
-        ficha: {
-          modelo: PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile,
-          aro_numeracao: `Aro ${ringSize.size}`, largura: params.width, espessura: params.height,
-          peso_estimado: pricing.weight, perfil: profile, diametro: params.diameter,
-          densidade_ouro: params.goldDensity, cor_metal: METAL_COLORS.find(m => m.value === params.metalColor)?.label ?? params.metalColor,
-          tipo_fonte: params.textEnabled && params.textContent.trim() ? (params.textFontType === 2 ? "Cursiva" : "Forma") : null,
-          texto: params.textEnabled && params.textContent.trim() ? params.textContent.trim() : null,
-          qtd_pedras: params.hasStones ? derivedStoneCount : null, tamanho_pedra: params.hasStones ? params.stoneSize : null,
-          tipo_aplicacao_pedra: params.hasStones ? (params.stoneFull ? "Volta Completa" : params.stoneHalfMoon ? "Meia Alianca" : "Pontual") : null,
-          profundidade_concava: params.concaveDepth, friso_lado: params.grooveSide,
-          friso_largura: params.grooveWidth, friso_profundidade: params.grooveDepth, friso_offset: params.grooveOffset,
-          canal_largura: params.canalWidth, canal_borda_altura: params.canalBorderHeight,
-          chanfro_tamanho: params.chamferSize, dome_porcentagem: params.domePercentage,
-          pedra_fileiras: params.stoneRows, pedra_drill: params.stoneDrill,
-          pedra_meia_lua: params.stoneHalfMoon, pedra_volta_completa: params.stoneFull,
-        },
+        ficha: buildFicha(params, profile, ringSize, pricing.weight, derivedStoneCount),
       };
-      const res = await fetch("/api/orcamento", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (isPar) {
+        const sc2 = computeStoneCapacity(params2.diameter, params2.height, params2.canalBorderHeight, params2.stoneSize, params2.stoneRows, profile2);
+        body.ficha2 = buildFicha(params2, profile2, ringSize2, pricing2.weight, sc2);
+      }
+
+      const url = editingOrcId ? `/api/orcamento/${editingOrcId}` : "/api/orcamento";
+      const method = editingOrcId ? "PUT" : "POST";
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!res.ok) throw new Error();
-      setSaveMsg({ text: "Orçamento salvo!", type: "success" }); setClientName(""); fetchOrcamentos();
+      setSaveMsg({ text: editingOrcId ? "Orçamento atualizado!" : "Orçamento salvo!", type: "success" });
+      setEditingOrcId(null); setClientName(""); setClienteId(null);
+      fetchOrcamentos();
+      setOrcamentoTipo(null);
     } catch { setSaveMsg({ text: "Erro ao salvar", type: "error" }); }
     finally { setIsSaving(false); }
   };
@@ -400,9 +484,13 @@ export default function OrcamentoClient({
               </button>
               {showNovoMenu && (
                 <div className="absolute right-0 mt-1 bg-white rounded-xl border shadow-lg py-1 z-20 w-56" style={{ borderColor: C.cremeBorder }}>
-                  <button onClick={() => { setOrcamentoTipo("alianca"); setShowNovoMenu(false); }}
+                  <button onClick={() => { resetEditor(); setAllianceMode("unidade"); setOrcamentoTipo("alianca"); setShowNovoMenu(false); }}
                     className="w-full text-left px-4 py-3 hover:bg-gray-50 text-sm">
-                    <CircleDot size={14} className="inline mr-2" style={{ color: C.gold }} />Aliança Personalizada
+                    <CircleDot size={14} className="inline mr-2" style={{ color: C.gold }} />Aliança Unidade
+                  </button>
+                  <button onClick={() => { resetEditor(); setAllianceMode("par"); setOrcamentoTipo("alianca"); setShowNovoMenu(false); }}
+                    className="w-full text-left px-4 py-3 hover:bg-gray-50 text-sm">
+                    <CircleDot size={14} className="inline mr-2" style={{ color: C.gold }} />Par de Alianças
                   </button>
                   <button onClick={() => { setOrcamentoTipo("peca"); setShowNovoMenu(false); }}
                     className="w-full text-left px-4 py-3 hover:bg-gray-50 text-sm">
@@ -477,9 +565,63 @@ export default function OrcamentoClient({
                   ) : searched.map((o, i) => (
                     <tr key={o.id} className="border-b cursor-pointer hover:bg-amber-50/30 transition-colors"
                       style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.cremeBg }}
-                      onClick={() => {
-                        if (o.venda_gerada_id) window.open(`/vendas/${o.venda_gerada_id}`, "_blank");
-                        else if (o.ordem_gerada_id) window.open(`/ordens/${o.ordem_gerada_id}`, "_blank");
+                      onClick={async () => {
+                        // Carregar orçamento para edição
+                        try {
+                          setEditingOrcId(o.id);
+                          const res = await fetch(`/api/orcamento/${o.id}`);
+                          if (!res.ok) { setEditingOrcId(null); return; }
+                          const data = await res.json();
+                          const orc = data.orcamento;
+                          if (!orc) return;
+                          // Preencher dados do editor
+                          setClientName(orc.cliente_nome_contato || orc.nome_cliente || "");
+                          setClienteId(orc.cliente_id || null);
+                          if (orc.tipo === "alianca") {
+                            setOrcamentoTipo("alianca");
+                            setAllianceMode(orc.quantidade === 2 ? "par" : "unidade");
+                            if (orc.perfil) setProfile(orc.perfil as ProfileType);
+                            // Aro
+                            const aroNum = orc.aro_numeracao ? Number(String(orc.aro_numeracao).replace("Aro ", "")) : null;
+                            const aroSize = aroNum ? RING_SIZES.find(r => r.size === aroNum) : null;
+                            if (aroSize) setRingSize(aroSize);
+                            // Cor do metal — banco salva label ("Ouro Amarelo"), converter para hex
+                            const metalMatch = METAL_COLORS.find(m => m.label === orc.cor_metal || m.value === orc.cor_metal);
+                            const metalHex = metalMatch?.value ?? "#FFD700";
+                            const metalDensity = metalMatch?.density ?? 14.69;
+                            // Setar todos os params de uma vez
+                            setParams(p => ({
+                              ...p,
+                              diameter: aroSize?.diameter ?? p.diameter,
+                              width: orc.largura ? Number(orc.largura) : p.width,
+                              height: orc.espessura ? Number(orc.espessura) : p.height,
+                              metalColor: metalHex,
+                              goldDensity: metalDensity,
+                              concaveDepth: orc.profundidade_concava ? Number(orc.profundidade_concava) : p.concaveDepth,
+                              grooveWidth: orc.friso_largura ? Number(orc.friso_largura) : p.grooveWidth,
+                              grooveDepth: orc.friso_profundidade ? Number(orc.friso_profundidade) : p.grooveDepth,
+                              grooveOffset: orc.friso_offset ? Number(orc.friso_offset) : p.grooveOffset,
+                              canalWidth: orc.canal_largura ? Number(orc.canal_largura) : p.canalWidth,
+                              canalBorderHeight: orc.canal_borda_altura ? Number(orc.canal_borda_altura) : p.canalBorderHeight,
+                              chamferSize: orc.chanfro_tamanho ? Number(orc.chanfro_tamanho) : p.chamferSize,
+                              domePercentage: orc.dome_porcentagem != null ? Number(orc.dome_porcentagem) : p.domePercentage,
+                              hasStones: !!orc.qtd_pedras,
+                              stoneSize: orc.tamanho_pedra ? Number(orc.tamanho_pedra) : p.stoneSize,
+                              stoneCount: orc.qtd_pedras ? Number(orc.qtd_pedras) : p.stoneCount,
+                              stoneDrill: !!orc.pedra_drill,
+                              stoneHalfMoon: !!orc.pedra_meia_lua,
+                              stoneFull: !!orc.pedra_volta_completa,
+                              stoneRows: orc.pedra_fileiras ? Number(orc.pedra_fileiras) : p.stoneRows,
+                              textEnabled: !!orc.texto,
+                              textContent: orc.texto || "",
+                              textFontType: orc.tipo_fonte === "Cursiva" ? 2 : 1,
+                            }));
+                          } else {
+                            setOrcamentoTipo("peca");
+                            if (orc.peso) setPecaPeso(Number(orc.peso));
+                          }
+                          setTab("design");
+                        } catch { /* silent */ }
                       }}>
                       <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: C.esmeralda }}>{o.numero_orcamento}</td>
                       <td className="px-4 py-2.5">{statusBadge(o.status)}</td>
@@ -499,7 +641,8 @@ export default function OrcamentoClient({
                       <td className="px-4 py-2.5">
                         {o.status === "rascunho" || o.status === "enviado" ? (
                           <div className="flex gap-1">
-                            <button onClick={async () => {
+                            <button onClick={async (e) => {
+                              e.stopPropagation();
                               if (!confirm(`Aprovar ${o.numero_orcamento}? Será criada uma venda pré-preenchida no PDV.`)) return;
                               const res = await fetch(`/api/orcamento/${o.id}`, {
                                 method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -513,15 +656,7 @@ export default function OrcamentoClient({
                               className="text-[10px] px-2 py-1 rounded font-semibold bg-green-50 text-green-700 hover:bg-green-100">
                               Aprovar
                             </button>
-                            <button onClick={async () => {
-                              const motivo = prompt("Motivo da rejeição:");
-                              if (motivo === null) return;
-                              await fetch(`/api/orcamento/${o.id}`, {
-                                method: "PATCH", headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ status: "rejeitado", motivo_rejeicao: motivo }),
-                              });
-                              fetchOrcamentos();
-                            }}
+                            <button onClick={(e) => { e.stopPropagation(); setRejectId(o.id); setRejectMotivo(""); }}
                               className="text-[10px] px-2 py-1 rounded font-semibold bg-red-50 text-red-700 hover:bg-red-100">
                               Rejeitar
                             </button>
@@ -577,6 +712,31 @@ export default function OrcamentoClient({
                 <button onClick={cadastrarCliente} disabled={!cadastroNome.trim()}
                   className="flex-1 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ backgroundColor: C.esmeralda }}>Cadastrar</button>
                 <button onClick={() => setShowCadastro(false)} className="px-4 py-2 text-sm text-gray-500">Cancelar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal rejeição */}
+        {rejectId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setRejectId(null)}>
+            <div className="bg-white rounded-xl border shadow-xl w-full max-w-sm mx-4 p-5" style={{ borderColor: C.cremeBorder }} onClick={e => e.stopPropagation()}>
+              <h3 className="text-base font-semibold mb-3" style={{ color: "#1A1A1A" }}>Rejeitar Orçamento</h3>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Motivo da rejeição</label>
+              <textarea rows={3} value={rejectMotivo} onChange={e => setRejectMotivo(e.target.value)}
+                placeholder="Informe o motivo..."
+                className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none resize-none mb-3"
+                style={{ borderColor: C.cremeBorder, color: "#374151" }} autoFocus />
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setRejectId(null)} className="px-4 py-2 rounded-lg text-sm font-medium border" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
+                <button onClick={async () => {
+                  await fetch(`/api/orcamento/${rejectId}`, {
+                    method: "PATCH", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ status: "rejeitado", motivo_rejeicao: rejectMotivo }),
+                  });
+                  setRejectId(null); setRejectMotivo("");
+                  fetchOrcamentos();
+                }} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: "#EF4444" }}>Rejeitar</button>
               </div>
             </div>
           </div>
@@ -883,7 +1043,9 @@ export default function OrcamentoClient({
             <CircleDot size={16} color="#fff" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-base font-bold text-gray-800 leading-tight">Orçamento de Alianças</h1>
+            <h1 className="text-base font-bold text-gray-800 leading-tight">
+              {allianceMode === "par" ? "Par de Alianças" : "Orçamento de Alianças"}
+            </h1>
             <p className="text-[11px] text-gray-400">Ouro: R$ {params.goldPrice.toFixed(2)}/g</p>
           </div>
         </div>
@@ -941,13 +1103,30 @@ export default function OrcamentoClient({
         {/* ── Painel de controles (ESQUERDA — 320px fixo, scroll) ─────── */}
         <div style={{ width: "320px", minWidth: "320px", overflowY: "auto", scrollbarWidth: "thin" }} className="space-y-2 pr-1">
 
+          {/* Tabs Aliança 1 / Aliança 2 (quando par) */}
+          {allianceMode === "par" && (
+            <div className="flex gap-1 p-1 rounded-lg" style={{ backgroundColor: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}>
+              {([1, 2] as const).map(n => (
+                <button key={n} onClick={() => setActiveRing(n)}
+                  className="flex-1 px-3 py-2 rounded-md text-xs font-semibold transition-colors"
+                  style={{
+                    backgroundColor: activeRing === n ? "#fff" : "transparent",
+                    color: activeRing === n ? C.esmeralda : "#9CA3AF",
+                    boxShadow: activeRing === n ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                  }}>
+                  Aliança {n}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Perfil */}
           <Card title="Perfil">
             <div className="grid grid-cols-3 gap-1.5">
               {PROFILE_OPTIONS.map((p) => (
-                <button key={p.id} onClick={() => setProfile(p.id)}
+                <button key={p.id} onClick={() => (activeRing === 1 ? setProfile : setProfile2)(p.id)}
                   className="py-2 text-[10px] font-semibold rounded-lg border transition-all text-center"
-                  style={profile === p.id
+                  style={(activeRing === 1 ? profile : profile2) === p.id
                     ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
                     : { backgroundColor: "#fff", color: "#6b7280", borderColor: C.cremeBorder }
                   }>{p.label}</button>
@@ -961,8 +1140,8 @@ export default function OrcamentoClient({
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-gray-500 w-[90px] shrink-0">Aro</span>
                 <div className="relative flex-1">
-                  <select value={ringSize.size}
-                    onChange={(e) => { const s = RING_SIZES.find((r) => r.size === Number(e.target.value)); if (s) handleSizeChange(s); }}
+                  <select value={(activeRing === 1 ? ringSize : ringSize2).size}
+                    onChange={(e) => { const s = RING_SIZES.find((r) => r.size === Number(e.target.value)); if (s) (activeRing === 1 ? handleSizeChange : handleSizeChange2)(s); }}
                     className="w-full appearance-none pl-3 pr-7 py-1.5 text-[11px] rounded-lg border bg-white text-gray-700 outline-none"
                     style={{ borderColor: C.cremeBorder }}>
                     {RING_SIZES.map((s) => <option key={s.size} value={s.size}>Aro {s.size} — {s.diameter.toFixed(2)}mm</option>)}
@@ -970,14 +1149,14 @@ export default function OrcamentoClient({
                   <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                 </div>
               </div>
-              <Slider label="Largura" value={params.width} min={1} max={15} step={0.5} unit="mm" onChange={(v) => updateParam("width", v)} />
-              <Slider label="Espessura" value={params.height} min={0.5} max={4} step={0.1} unit="mm" onChange={(v) => updateParam("height", v)} />
-              {profile === ProfileType.Concava && <Slider label="Prof. concava" value={params.concaveDepth} min={0.1} max={1.5} step={0.1} unit="mm" onChange={(v) => updateParam("concaveDepth", v)} />}
-              {(profile === ProfileType.Boleada || profile === ProfileType.BoleadaDouble || profile === ProfileType.Anatomica) && <Slider label="Curvatura" value={params.domePercentage} min={0} max={100} step={5} unit="%" onChange={(v) => updateParam("domePercentage", v)} />}
-              {profile === ProfileType.Chanfrada && <Slider label="Chanfro" value={params.chamferSize} min={0.1} max={2} step={0.1} unit="mm" onChange={(v) => updateParam("chamferSize", v)} />}
-              {profile === ProfileType.QuadradoCanal && <>
-                <Slider label="Larg. canal" value={params.canalWidth} min={1} max={10} step={0.5} unit="mm" onChange={(v) => updateParam("canalWidth", v)} />
-                <Slider label="Alt. borda" value={params.canalBorderHeight} min={0.3} max={3} step={0.1} unit="mm" onChange={(v) => updateParam("canalBorderHeight", v)} />
+              <Slider label="Largura" value={activeParams.width} min={1} max={15} step={0.5} unit="mm" onChange={(v) => updateParam("width", v)} />
+              <Slider label="Espessura" value={activeParams.height} min={0.5} max={4} step={0.1} unit="mm" onChange={(v) => updateParam("height", v)} />
+              {activeProfile === ProfileType.Concava && <Slider label="Prof. concava" value={activeParams.concaveDepth} min={0.1} max={1.5} step={0.1} unit="mm" onChange={(v) => updateParam("concaveDepth", v)} />}
+              {(profile === ProfileType.Boleada || profile === ProfileType.BoleadaDouble || profile === ProfileType.Anatomica) && <Slider label="Curvatura" value={activeParams.domePercentage} min={0} max={100} step={5} unit="%" onChange={(v) => updateParam("domePercentage", v)} />}
+              {activeProfile === ProfileType.Chanfrada && <Slider label="Chanfro" value={activeParams.chamferSize} min={0.1} max={2} step={0.1} unit="mm" onChange={(v) => updateParam("chamferSize", v)} />}
+              {activeProfile === ProfileType.QuadradoCanal && <>
+                <Slider label="Larg. canal" value={activeParams.canalWidth} min={1} max={10} step={0.5} unit="mm" onChange={(v) => updateParam("canalWidth", v)} />
+                <Slider label="Alt. borda" value={activeParams.canalBorderHeight} min={0.3} max={3} step={0.1} unit="mm" onChange={(v) => updateParam("canalBorderHeight", v)} />
               </>}
             </div>
           </Card>
@@ -988,7 +1167,7 @@ export default function OrcamentoClient({
               {METAL_COLORS.map((mc) => (
                 <button key={mc.value} onClick={() => { updateParam("metalColor", mc.value); updateParam("goldDensity", mc.density); }}
                   className="flex-1 py-2 text-[10px] font-semibold rounded-lg border transition-all text-center"
-                  style={params.metalColor === mc.value
+                  style={activeParams.metalColor === mc.value
                     ? { backgroundColor: mc.value, color: mc.value === "#E8E8E8" ? "#333" : "#fff", borderColor: C.esmeralda, boxShadow: `0 0 0 2px ${C.esmeralda}` }
                     : { backgroundColor: "#fff", color: "#6b7280", borderColor: C.cremeBorder }
                   }>{mc.label}</button>
@@ -999,15 +1178,15 @@ export default function OrcamentoClient({
           {/* Pedras */}
           <Card title="Pedras">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={params.hasStones} onChange={(e) => updateParam("hasStones", e.target.checked)} style={{ accentColor: C.esmeralda }} className="rounded" />
+              <input type="checkbox" checked={activeParams.hasStones} onChange={(e) => updateParam("hasStones", e.target.checked)} style={{ accentColor: C.esmeralda }} className="rounded" />
               <span className="text-[11px] text-gray-600">Incluir pedras</span>
             </label>
-            {params.hasStones && (
+            {activeParams.hasStones && (
               <div className="space-y-2 mt-2">
-                <Slider label="Tamanho" value={params.stoneSize} min={0.8} max={3} step={0.1} unit="mm" onChange={(v) => updateParam("stoneSize", v)} />
+                <Slider label="Tamanho" value={activeParams.stoneSize} min={0.8} max={3} step={0.1} unit="mm" onChange={(v) => updateParam("stoneSize", v)} />
                 <div className="flex gap-1.5">
                   {(["Pontual", "Meia Alianca", "Volta Completa"] as const).map((tipo, i) => {
-                    const active = i === 2 ? params.stoneFull : i === 1 ? params.stoneHalfMoon : !params.stoneFull && !params.stoneHalfMoon;
+                    const active = i === 2 ? activeParams.stoneFull : i === 1 ? activeParams.stoneHalfMoon : !activeParams.stoneFull && !activeParams.stoneHalfMoon;
                     return (
                       <button key={tipo} onClick={() => {
                         if (i === 2) { updateParam("stoneFull", true); updateParam("stoneHalfMoon", false); }
@@ -1022,20 +1201,20 @@ export default function OrcamentoClient({
                     );
                   })}
                 </div>
-                {!params.stoneFull && !params.stoneHalfMoon && (
+                {!activeParams.stoneFull && !activeParams.stoneHalfMoon && (
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-gray-500">Qtd:</span>
-                    <button onClick={() => updateParam("stoneCount", Math.max(1, params.stoneCount - 1))} className="w-6 h-6 rounded-lg border flex items-center justify-center" style={{ borderColor: C.cremeBorder }}><Minus size={10} className="text-gray-500" /></button>
-                    <span className="text-sm font-bold w-5 text-center" style={{ color: C.esmeralda }}>{params.stoneCount}</span>
-                    <button onClick={() => updateParam("stoneCount", Math.min(stoneCapacity, params.stoneCount + 1))} className="w-6 h-6 rounded-lg border flex items-center justify-center" style={{ borderColor: C.cremeBorder }}><Plus size={10} className="text-gray-500" /></button>
+                    <button onClick={() => updateParam("stoneCount", Math.max(1, activeParams.stoneCount - 1))} className="w-6 h-6 rounded-lg border flex items-center justify-center" style={{ borderColor: C.cremeBorder }}><Minus size={10} className="text-gray-500" /></button>
+                    <span className="text-sm font-bold w-5 text-center" style={{ color: C.esmeralda }}>{activeParams.stoneCount}</span>
+                    <button onClick={() => updateParam("stoneCount", Math.min(stoneCapacity, activeParams.stoneCount + 1))} className="w-6 h-6 rounded-lg border flex items-center justify-center" style={{ borderColor: C.cremeBorder }}><Plus size={10} className="text-gray-500" /></button>
                     <span className="text-[10px] text-gray-400">max {stoneCapacity}</span>
                   </div>
                 )}
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={params.stoneDrill} onChange={(e) => updateParam("stoneDrill", e.target.checked)} style={{ accentColor: C.esmeralda }} className="rounded" />
+                  <input type="checkbox" checked={activeParams.stoneDrill} onChange={(e) => updateParam("stoneDrill", e.target.checked)} style={{ accentColor: C.esmeralda }} className="rounded" />
                   <span className="text-[10px] text-gray-500">Cravacao por broca</span>
                 </label>
-                <p className="text-[10px] text-gray-400">{derivedStoneCount} pedra(s) de {params.stoneSize}mm</p>
+                <p className="text-[10px] text-gray-400">{derivedStoneCount} pedra(s) de {activeParams.stoneSize}mm</p>
               </div>
             )}
           </Card>
@@ -1043,18 +1222,18 @@ export default function OrcamentoClient({
           {/* Gravação */}
           <Card title="Gravacao">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={params.textEnabled} onChange={(e) => updateParam("textEnabled", e.target.checked)} style={{ accentColor: C.esmeralda }} className="rounded" />
+              <input type="checkbox" checked={activeParams.textEnabled} onChange={(e) => updateParam("textEnabled", e.target.checked)} style={{ accentColor: C.esmeralda }} className="rounded" />
               <span className="text-[11px] text-gray-600">Gravar texto</span>
             </label>
-            {params.textEnabled && (
+            {activeParams.textEnabled && (
               <div className="space-y-2 mt-2">
-                <input type="text" maxLength={30} value={params.textContent} onChange={(e) => updateParam("textContent", e.target.value)} placeholder="Texto a gravar..."
+                <input type="text" maxLength={30} value={activeParams.textContent} onChange={(e) => updateParam("textContent", e.target.value)} placeholder="Texto a gravar..."
                   className="w-full px-3 py-1.5 text-[11px] rounded-lg border outline-none bg-white" style={{ borderColor: C.cremeBorder }} />
                 <div className="flex gap-1.5">
                   {([{ v: 1 as const, l: "Forma" }, { v: 2 as const, l: "Cursiva" }]).map(({ v, l }) => (
                     <button key={v} onClick={() => updateParam("textFontType", v)}
                       className="flex-1 py-1.5 text-[10px] font-semibold rounded-lg border transition-all text-center"
-                      style={params.textFontType === v
+                      style={activeParams.textFontType === v
                         ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
                         : { backgroundColor: "#fff", color: "#6b7280", borderColor: C.cremeBorder }
                       }>{l}</button>
@@ -1069,26 +1248,46 @@ export default function OrcamentoClient({
 
         {/* ── 3D + Resultado (DIREITA — flex:1, sem scroll) ────────── */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "8px", minWidth: 0, overflow: "hidden" }}>
-          {/* Viewport 3D */}
-          <div className="rounded-2xl overflow-hidden border relative" style={{ borderColor: C.cremeBorder, flex: 1 }}>
-            <AliancaViewport params={params} profile={profile} cameraDistance={cameraDistance} onMeshReady={setCurrentMesh} />
+          {/* Viewport(s) 3D */}
+          <div style={{ flex: 1, display: "flex", gap: "8px" }}>
+            <div className="rounded-2xl overflow-hidden border relative" style={{ borderColor: activeRing === 1 && allianceMode === "par" ? C.esmeralda : C.cremeBorder, flex: 1, borderWidth: activeRing === 1 && allianceMode === "par" ? 2 : 1 }}>
+              {allianceMode === "par" && (
+                <div className="absolute top-2 left-2 z-10 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: C.esmeralda, color: "#fff" }}>Aliança 1</div>
+              )}
+              <AliancaViewport params={params} profile={profile} cameraDistance={cameraDistance} onMeshReady={setCurrentMesh} />
+            </div>
+            {allianceMode === "par" && (
+              <div className="rounded-2xl overflow-hidden border relative" style={{ borderColor: activeRing === 2 ? C.esmeralda : C.cremeBorder, flex: 1, borderWidth: activeRing === 2 ? 2 : 1 }}>
+                <div className="absolute top-2 left-2 z-10 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: C.esmeralda, color: "#fff" }}>Aliança 2</div>
+                <AliancaViewport params={params2} profile={profile2} cameraDistance={cameraDistance2} onMeshReady={setCurrentMesh2} />
+              </div>
+            )}
           </div>
           {/* Resultado compacto */}
           <div className="rounded-xl border px-4 py-2.5 shrink-0" style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}>
             <div className="flex items-center justify-between gap-4">
-              <Pill label="Peso" value={`${pricing.weight.toFixed(1)}g`} />
+              {allianceMode === "par" ? (
+                <>
+                  <Pill label="Peso 1" value={`${pricing.weight.toFixed(1)}g`} />
+                  <Pill label="Peso 2" value={`${pricing2.weight.toFixed(1)}g`} />
+                  <Pill label="Total" value={`${pricingTotal.weight.toFixed(1)}g`} />
+                </>
+              ) : (
+                <Pill label="Peso" value={`${pricing.weight.toFixed(1)}g`} />
+              )}
               <div className="flex items-center gap-3">
                 <div className="text-center">
                   <p className="text-[9px] uppercase tracking-wider text-gray-400">Desconto</p>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => updateParam("discountPercent", Math.max(0, params.discountPercent - 1))}
+                    <button onClick={() => updateParam("discountPercent", Math.max(0, (activeRing === 1 ? params : params2).discountPercent - 1))}
                       className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs">-</button>
-                    <span className="text-sm font-bold w-8 text-center" style={{ color: params.discountPercent > 0 ? "#DC2626" : C.esmeralda }}>
-                      {params.discountPercent}%
+                    <span className="text-sm font-bold w-8 text-center" style={{ color: (activeRing === 1 ? params : params2).discountPercent > 0 ? "#DC2626" : C.esmeralda }}>
+                      {(activeRing === 1 ? params : params2).discountPercent}%
                     </span>
                     <button onClick={() => {
                       const limit = canManageConfig ? 50 : (maxDesconto || 0);
-                      updateParam("discountPercent", Math.min(limit, params.discountPercent + 1));
+                      const curr = (activeRing === 1 ? params : params2).discountPercent;
+                      updateParam("discountPercent", Math.min(limit, curr + 1));
                     }}
                       className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs">+</button>
                   </div>
@@ -1099,11 +1298,16 @@ export default function OrcamentoClient({
               </div>
               <div className="text-right shrink-0">
                 <p className="text-[9px] uppercase tracking-wide" style={{ color: C.gold }}>
-                  Preco Final{params.discountPercent > 0 && ` (-${params.discountPercent}%)`}
+                  {allianceMode === "par" ? "Preço Total Par" : "Preco Final"}
                 </p>
                 <p className="text-2xl font-black tracking-tight" style={{ color: C.esmeralda }}>
-                  R$ {pricing.discountPrice.toLocaleString("pt-BR")}
+                  R$ {pricingTotal.price.toLocaleString("pt-BR")}
                 </p>
+                {allianceMode === "par" && (
+                  <p className="text-[9px] text-gray-400">
+                    A1: R$ {pricing.discountPrice.toLocaleString("pt-BR")} | A2: R$ {pricing2.discountPrice.toLocaleString("pt-BR")}
+                  </p>
+                )}
               </div>
             </div>
           </div>
