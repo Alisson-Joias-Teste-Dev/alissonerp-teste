@@ -64,3 +64,49 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(contato, { status: 201 });
 }
+
+// PATCH /api/contatos — atualizar contato existente
+export async function PATCH(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  const body = await req.json() as {
+    id: number;
+    nome?: string;
+    cpf_cnpj?: string;
+    telefone?: string;
+    celular?: string;
+    email?: string;
+    endereco?: string;
+    numero?: string;
+    complemento?: string;
+    bairro?: string;
+    municipio?: string;
+    cep?: string;
+    uf?: string;
+  };
+
+  if (!body.id) return NextResponse.json({ error: "ID obrigatório" }, { status: 400 });
+
+  const [contato] = await sql`
+    UPDATE public.contatos SET
+      nome         = COALESCE(${body.nome?.trim() ?? null}, nome),
+      cpf_cnpj     = COALESCE(${body.cpf_cnpj ? body.cpf_cnpj.replace(/\D/g, "") : null}, cpf_cnpj),
+      telefone     = COALESCE(${body.telefone?.trim() ?? null}, telefone),
+      celular      = COALESCE(${body.celular?.trim() ?? null}, celular),
+      email        = COALESCE(${body.email?.trim() ?? null}, email),
+      endereco     = COALESCE(${body.endereco?.trim() ?? null}, endereco),
+      numero       = COALESCE(${body.numero?.trim() ?? null}, numero),
+      complemento  = COALESCE(${body.complemento?.trim() ?? null}, complemento),
+      bairro       = COALESCE(${body.bairro?.trim() ?? null}, bairro),
+      municipio    = COALESCE(${body.municipio?.trim() ?? null}, municipio),
+      cep          = COALESCE(${body.cep ? body.cep.replace(/\D/g, "") : null}, cep),
+      uf           = COALESCE(${body.uf?.trim().toUpperCase() ?? null}, uf)
+    WHERE id_contato = ${body.id}
+    RETURNING id_contato AS id, nome, cpf_cnpj, telefone, celular, email, endereco, numero, complemento, bairro, municipio, cep, uf
+  `;
+
+  if (!contato) return NextResponse.json({ error: "Contato não encontrado" }, { status: 404 });
+  return NextResponse.json(contato);
+}

@@ -6,7 +6,7 @@ import Link from "next/link";
 import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle,
   Truck, Video, RefreshCw, Share2, Download, Send,
-  Check as CheckIcon, FileText, UserPlus, MapPin,
+  Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
 } from "lucide-react";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
@@ -256,6 +256,8 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const [novoClienteForm, setNovoClienteForm] = useState({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
   const [savingCliente, setSavingCliente] = useState(false);
   const [clienteErr, setClienteErr] = useState("");
+  const [editingCliente, setEditingCliente] = useState(false);
+  const [editClienteForm, setEditClienteForm] = useState({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
 
   // ── Action states ───────────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
@@ -509,6 +511,34 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
         setNovoClienteForm(prev => ({ ...prev, endereco: data.logradouro ?? "", bairro: data.bairro ?? "", municipio: data.localidade ?? "", uf: data.uf ?? "" }));
       }
     } catch { /* silent */ }
+  }
+
+  // ── Edit existing client ────────────────────────────────────────────────────
+  function startEditCliente() {
+    if (!cliente) return;
+    setEditClienteForm({
+      nome: cliente.nome ?? "", cpf_cnpj: cliente.cpf_cnpj ?? "", email: cliente.email ?? "",
+      telefone: cliente.telefone ?? "", celular: cliente.celular ?? "", cep: cliente.cep ?? "",
+      endereco: cliente.endereco ?? "", numero: cliente.numero ?? "", complemento: cliente.complemento ?? "",
+      bairro: cliente.bairro ?? "", municipio: cliente.municipio ?? "", uf: cliente.uf ?? "",
+    });
+    setEditingCliente(true);
+  }
+
+  async function handleSalvarCliente() {
+    if (!cliente) return;
+    setSavingCliente(true); setClienteErr("");
+    try {
+      const res = await fetch("/api/contatos", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: cliente.id, ...editClienteForm }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setCliente({ ...cliente, ...data });
+      setEditingCliente(false);
+    } catch (e) { setClienteErr(e instanceof Error ? e.message : "Erro ao salvar"); }
+    finally { setSavingCliente(false); }
   }
 
   // ── Create new client ──────────────────────────────────────────────────────
@@ -900,36 +930,76 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
 
         {/* ── Modal: Dados do Cliente ── */}
         {showDadosCliente && cliente && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowDadosCliente(false)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setShowDadosCliente(false); setEditingCliente(false); }}>
             <div className="bg-white rounded-xl border shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto" style={{ borderColor: C.cremeBorder }} onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: C.cremeBorder }}>
-                <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>Dados do Cliente</h3>
-                <button onClick={() => setShowDadosCliente(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+                <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>{editingCliente ? "Editar Cliente" : "Dados do Cliente"}</h3>
+                <button onClick={() => { setShowDadosCliente(false); setEditingCliente(false); }} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
               </div>
-              <div className="px-5 py-4 space-y-3 text-sm">
-                <div className="grid grid-cols-2 gap-3">
-                  <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Nome</span><p style={{ color: "#1A1A1A" }}>{cliente.nome}</p></div>
-                  <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CPF/CNPJ</span><p style={{ color: "#1A1A1A" }}>{cliente.cpf_cnpj || "—"}</p></div>
-                  <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Email</span><p style={{ color: "#1A1A1A" }}>{cliente.email || "—"}</p></div>
-                  <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Telefone</span><p style={{ color: "#1A1A1A" }}>{cliente.telefone || "—"}</p></div>
-                  {cliente.celular && <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Celular</span><p style={{ color: "#1A1A1A" }}>{cliente.celular}</p></div>}
-                </div>
-                <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
-                  <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço de Cobrança</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Logradouro</span><p style={{ color: "#1A1A1A" }}>{cliente.endereco || "—"}</p></div>
-                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Número</span><p style={{ color: "#1A1A1A" }}>{cliente.numero || "—"}</p></div>
-                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Complemento</span><p style={{ color: "#1A1A1A" }}>{cliente.complemento || "—"}</p></div>
-                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Bairro</span><p style={{ color: "#1A1A1A" }}>{cliente.bairro || "—"}</p></div>
-                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Cidade</span><p style={{ color: "#1A1A1A" }}>{cliente.municipio || "—"}</p></div>
-                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CEP</span><p style={{ color: "#1A1A1A" }}>{cliente.cep || "—"}</p></div>
-                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>UF</span><p style={{ color: "#1A1A1A" }}>{cliente.uf || "—"}</p></div>
+              <div className="px-5 py-4 space-y-3">
+                {editingCliente ? (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div><Label required>Nome</Label><Input value={editClienteForm.nome} onChange={e => setEditClienteForm(p => ({ ...p, nome: e.target.value }))} /></div>
+                      <div><Label>CPF/CNPJ</Label><Input value={editClienteForm.cpf_cnpj} onChange={e => setEditClienteForm(p => ({ ...p, cpf_cnpj: e.target.value }))} /></div>
+                      <div><Label>Email</Label><Input type="email" value={editClienteForm.email} onChange={e => setEditClienteForm(p => ({ ...p, email: e.target.value }))} /></div>
+                      <div><Label>Telefone</Label><Input value={editClienteForm.telefone} onChange={e => setEditClienteForm(p => ({ ...p, telefone: e.target.value }))} /></div>
+                      <div><Label>Celular</Label><Input value={editClienteForm.celular} onChange={e => setEditClienteForm(p => ({ ...p, celular: e.target.value }))} /></div>
+                    </div>
+                    <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                      <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço de Cobrança</p>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <div><Label>CEP</Label><Input value={editClienteForm.cep} placeholder="00000-000" onChange={e => { const v = e.target.value; setEditClienteForm(p => ({ ...p, cep: v })); if (v.replace(/\D/g, "").length === 8) buscaCEP(v, "novoCliente").then(() => { setEditClienteForm(prev => ({ ...prev, endereco: novoClienteForm.endereco || prev.endereco, bairro: novoClienteForm.bairro || prev.bairro, municipio: novoClienteForm.municipio || prev.municipio, uf: novoClienteForm.uf || prev.uf })); }); }} /></div>
+                        <div className="md:col-span-2"><Label>Logradouro</Label><Input value={editClienteForm.endereco} onChange={e => setEditClienteForm(p => ({ ...p, endereco: e.target.value }))} /></div>
+                        <div><Label>Número</Label><Input value={editClienteForm.numero} onChange={e => setEditClienteForm(p => ({ ...p, numero: e.target.value }))} /></div>
+                        <div><Label>Complemento</Label><Input value={editClienteForm.complemento} onChange={e => setEditClienteForm(p => ({ ...p, complemento: e.target.value }))} /></div>
+                        <div><Label>Bairro</Label><Input value={editClienteForm.bairro} onChange={e => setEditClienteForm(p => ({ ...p, bairro: e.target.value }))} /></div>
+                        <div><Label>Cidade</Label><Input value={editClienteForm.municipio} onChange={e => setEditClienteForm(p => ({ ...p, municipio: e.target.value }))} /></div>
+                        <div><Label>UF</Label><Input value={editClienteForm.uf} maxLength={2} onChange={e => setEditClienteForm(p => ({ ...p, uf: e.target.value.toUpperCase() }))} /></div>
+                      </div>
+                    </div>
+                    {clienteErr && <p className="text-sm text-red-600">{clienteErr}</p>}
+                  </>
+                ) : (
+                  <div className="text-sm space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Nome</span><p style={{ color: "#1A1A1A" }}>{cliente.nome}</p></div>
+                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CPF/CNPJ</span><p style={{ color: "#1A1A1A" }}>{cliente.cpf_cnpj || "—"}</p></div>
+                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Email</span><p style={{ color: "#1A1A1A" }}>{cliente.email || "—"}</p></div>
+                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Telefone</span><p style={{ color: "#1A1A1A" }}>{cliente.telefone || "—"}</p></div>
+                      {cliente.celular && <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Celular</span><p style={{ color: "#1A1A1A" }}>{cliente.celular}</p></div>}
+                    </div>
+                    <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                      <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço de Cobrança</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Logradouro</span><p style={{ color: "#1A1A1A" }}>{cliente.endereco || "—"}</p></div>
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Número</span><p style={{ color: "#1A1A1A" }}>{cliente.numero || "—"}</p></div>
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Complemento</span><p style={{ color: "#1A1A1A" }}>{cliente.complemento || "—"}</p></div>
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Bairro</span><p style={{ color: "#1A1A1A" }}>{cliente.bairro || "—"}</p></div>
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Cidade</span><p style={{ color: "#1A1A1A" }}>{cliente.municipio || "—"}</p></div>
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CEP</span><p style={{ color: "#1A1A1A" }}>{cliente.cep || "—"}</p></div>
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>UF</span><p style={{ color: "#1A1A1A" }}>{cliente.uf || "—"}</p></div>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
-              <div className="px-5 py-3 border-t flex justify-end" style={{ borderColor: C.cremeBorder }}>
-                <button onClick={() => setShowDadosCliente(false)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium" style={{ backgroundColor: C.esmeralda, color: C.creme }}>Fechar</button>
+              <div className="px-5 py-3 border-t flex justify-end gap-2" style={{ borderColor: C.cremeBorder }}>
+                {editingCliente ? (
+                  <>
+                    <button onClick={() => setEditingCliente(false)} className="px-4 py-2 rounded-lg text-sm font-medium border" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
+                    <button onClick={handleSalvarCliente} disabled={savingCliente} className="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40" style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                      {savingCliente ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null} Salvar
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={startEditCliente} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border" style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
+                      <Pencil size={13} /> Editar
+                    </button>
+                    <button onClick={() => setShowDadosCliente(false)} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ backgroundColor: C.esmeralda, color: C.creme }}>Fechar</button>
+                  </>
+                )}
               </div>
             </div>
           </div>
