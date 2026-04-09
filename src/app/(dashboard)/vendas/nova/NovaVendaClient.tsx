@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle,
-  Truck, Video,
+  Truck, Video, FileText, UserPlus, MapPin,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -20,7 +20,9 @@ const C = {
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Cliente {
   id: number; nome: string; cpf_cnpj: string | null;
-  email: string | null; telefone: string | null;
+  email: string | null; telefone: string | null; celular?: string | null;
+  endereco?: string | null; numero?: string | null; complemento?: string | null;
+  bairro?: string | null; municipio?: string | null; cep?: string | null; uf?: string | null;
 }
 interface Produto {
   id: number; sku: string; nome: string;
@@ -173,6 +175,16 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   const [videoObsInterna, setVideoObsInterna] = useState<string | null>(null);
   const [uploadingVideo,  setUploadingVideo]  = useState(false);
   const [videoUploadErr,  setVideoUploadErr]  = useState("");
+
+  // Modals & delivery address
+  const [showDadosCliente, setShowDadosCliente] = useState(false);
+  const [showNovoCliente, setShowNovoCliente] = useState(false);
+  const [showEndEntrega, setShowEndEntrega] = useState(false);
+  const [mesmoEndereco, setMesmoEndereco] = useState(true);
+  const [endEntrega, setEndEntrega] = useState({ cep: "", logradouro: "", numero: "", complemento: "", bairro: "", cidade: "", uf: "" });
+  const [novoClienteForm, setNovoClienteForm] = useState({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
+  const [savingCliente, setSavingCliente] = useState(false);
+  const [clienteErr, setClienteErr] = useState("");
 
   // Itens
   const [itens,       setItens]       = useState<ItemVenda[]>([]);
@@ -340,6 +352,40 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   const totalPago     = pagamentos.reduce((s, p) => s + p.valor, 0);
   void totalPago; // usado em modo Múltiplas
 
+  // ── CEP lookup ──────────────────────────────────────────────────────────────
+  async function buscaCEP(cep: string, target: "entrega" | "novoCliente") {
+    const limpo = cep.replace(/\D/g, "");
+    if (limpo.length !== 8) return;
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${limpo}/json/`);
+      const data = await res.json();
+      if (data.erro) return;
+      if (target === "entrega") {
+        setEndEntrega(prev => ({ ...prev, logradouro: data.logradouro ?? "", bairro: data.bairro ?? "", cidade: data.localidade ?? "", uf: data.uf ?? "" }));
+      } else {
+        setNovoClienteForm(prev => ({ ...prev, endereco: data.logradouro ?? "", bairro: data.bairro ?? "", municipio: data.localidade ?? "", uf: data.uf ?? "" }));
+      }
+    } catch { /* silent */ }
+  }
+
+  // ── Create new client ──────────────────────────────────────────────────────
+  async function handleCriarCliente() {
+    if (!novoClienteForm.nome.trim()) { setClienteErr("Nome é obrigatório"); return; }
+    setSavingCliente(true); setClienteErr("");
+    try {
+      const res = await fetch("/api/contatos", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(novoClienteForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setCliente({ id: data.id, nome: data.nome, cpf_cnpj: data.cpf_cnpj, email: data.email, telefone: data.telefone, celular: data.celular, endereco: data.endereco, numero: data.numero, complemento: data.complemento, bairro: data.bairro, municipio: data.municipio, cep: data.cep, uf: data.uf });
+      setShowNovoCliente(false);
+      setNovoClienteForm({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
+    } catch (e) { setClienteErr(e instanceof Error ? e.message : "Erro ao criar cliente"); }
+    finally { setSavingCliente(false); }
+  }
+
   // ── Submit ─────────────────────────────────────────────────────────────────
   async function submit(situacao: "rascunho" | "aprovado") {
     setSaving(true); setSaveErr("");
@@ -356,6 +402,15 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
         observacoes: observacoes || null,
         observacoes_internas: obsInternas || null,
         video_obs_interna: videoObsInterna,
+        ...(!mesmoEndereco && showEndEntrega ? {
+          endereco_entrega: endEntrega.logradouro || null,
+          endereco_entrega_numero: endEntrega.numero || null,
+          endereco_entrega_complemento: endEntrega.complemento || null,
+          endereco_entrega_bairro: endEntrega.bairro || null,
+          endereco_entrega_cidade: endEntrega.cidade || null,
+          endereco_entrega_cep: endEntrega.cep || null,
+          endereco_entrega_uf: endEntrega.uf || null,
+        } : {}),
         itens: itens.map(i => ({
           produto_id: i.produto_id, nome_produto: i.nome_produto, sku: i.sku,
           quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
@@ -422,9 +477,37 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                 onClear={() => setCliente(null)}
               />
               {cliente && (
-                <p className="text-xs mt-1.5" style={{ color: "#9CA3AF" }}>
-                  {[cliente.email, cliente.telefone].filter(Boolean).join(" · ")}
-                </p>
+                <>
+                  <p className="text-xs mt-1.5" style={{ color: "#9CA3AF" }}>
+                    {[cliente.email, cliente.telefone].filter(Boolean).join(" · ")}
+                  </p>
+                  <div className="flex gap-2 mt-2">
+                    <button type="button" onClick={() => setShowDadosCliente(true)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border hover:bg-gray-50"
+                      style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
+                      <FileText size={12} /> Dados
+                    </button>
+                    <button type="button" onClick={() => setShowNovoCliente(true)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border hover:bg-gray-50"
+                      style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
+                      <UserPlus size={12} /> Novo Cliente
+                    </button>
+                    <button type="button" onClick={() => setShowEndEntrega(!showEndEntrega)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border hover:bg-gray-50"
+                      style={{ borderColor: showEndEntrega ? C.esmeralda : C.cremeBorder, color: C.esmeralda, backgroundColor: showEndEntrega ? C.esmeraldaLt : "transparent" }}>
+                      <MapPin size={12} /> End. Entrega
+                    </button>
+                  </div>
+                </>
+              )}
+              {!cliente && (
+                <div className="flex gap-2 mt-2">
+                  <button type="button" onClick={() => setShowNovoCliente(true)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border hover:bg-gray-50"
+                    style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
+                    <UserPlus size={12} /> Novo Cliente
+                  </button>
+                </div>
               )}
             </div>
             <div>
@@ -442,6 +525,108 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
             </div>
           </div>
         </Secao>
+
+        {/* ── Endereço de Entrega (expandível) ── */}
+        {showEndEntrega && (
+          <Secao>
+            <div className="flex items-center justify-between mb-4">
+              <STitle>Endereço de Entrega</STitle>
+              <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: "#374151" }}>
+                <input type="checkbox" checked={mesmoEndereco} onChange={e => setMesmoEndereco(e.target.checked)} className="rounded border-gray-300" />
+                Mesmo do cliente
+              </label>
+            </div>
+            {mesmoEndereco && cliente ? (
+              <div className="rounded-lg border px-4 py-3 text-sm" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
+                {[cliente.endereco, cliente.numero, cliente.complemento, cliente.bairro, cliente.municipio, cliente.uf, cliente.cep].filter(Boolean).join(", ") || "Endereço não cadastrado no cliente"}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div><Label required>CEP</Label><Input value={endEntrega.cep} placeholder="00000-000" onChange={e => { const v = e.target.value; setEndEntrega(p => ({ ...p, cep: v })); if (v.replace(/\D/g, "").length === 8) buscaCEP(v, "entrega"); }} /></div>
+                <div className="md:col-span-2"><Label required>Logradouro</Label><Input value={endEntrega.logradouro} onChange={e => setEndEntrega(p => ({ ...p, logradouro: e.target.value }))} /></div>
+                <div><Label required>Número</Label><Input value={endEntrega.numero} onChange={e => setEndEntrega(p => ({ ...p, numero: e.target.value }))} /></div>
+                <div><Label>Complemento</Label><Input value={endEntrega.complemento} onChange={e => setEndEntrega(p => ({ ...p, complemento: e.target.value }))} /></div>
+                <div><Label required>Bairro</Label><Input value={endEntrega.bairro} onChange={e => setEndEntrega(p => ({ ...p, bairro: e.target.value }))} /></div>
+                <div><Label required>Cidade</Label><Input value={endEntrega.cidade} onChange={e => setEndEntrega(p => ({ ...p, cidade: e.target.value }))} /></div>
+                <div><Label required>UF</Label><Input value={endEntrega.uf} maxLength={2} onChange={e => setEndEntrega(p => ({ ...p, uf: e.target.value.toUpperCase() }))} /></div>
+              </div>
+            )}
+          </Secao>
+        )}
+
+        {/* ── Modal: Dados do Cliente ── */}
+        {showDadosCliente && cliente && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowDadosCliente(false)}>
+            <div className="bg-white rounded-xl border shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto" style={{ borderColor: C.cremeBorder }} onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: C.cremeBorder }}>
+                <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>Dados do Cliente</h3>
+                <button onClick={() => setShowDadosCliente(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+              </div>
+              <div className="px-5 py-4 space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Nome</span><p style={{ color: "#1A1A1A" }}>{cliente.nome}</p></div>
+                  <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CPF/CNPJ</span><p style={{ color: "#1A1A1A" }}>{cliente.cpf_cnpj || "—"}</p></div>
+                  <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Email</span><p style={{ color: "#1A1A1A" }}>{cliente.email || "—"}</p></div>
+                  <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Telefone</span><p style={{ color: "#1A1A1A" }}>{cliente.telefone || "—"}</p></div>
+                </div>
+                <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                  <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço de Cobrança</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Logradouro</span><p style={{ color: "#1A1A1A" }}>{cliente.endereco || "—"}</p></div>
+                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Número</span><p style={{ color: "#1A1A1A" }}>{cliente.numero || "—"}</p></div>
+                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Bairro</span><p style={{ color: "#1A1A1A" }}>{cliente.bairro || "—"}</p></div>
+                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Cidade</span><p style={{ color: "#1A1A1A" }}>{cliente.municipio || "—"}</p></div>
+                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CEP</span><p style={{ color: "#1A1A1A" }}>{cliente.cep || "—"}</p></div>
+                    <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>UF</span><p style={{ color: "#1A1A1A" }}>{cliente.uf || "—"}</p></div>
+                  </div>
+                </div>
+              </div>
+              <div className="px-5 py-3 border-t flex justify-end" style={{ borderColor: C.cremeBorder }}>
+                <button onClick={() => setShowDadosCliente(false)} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ backgroundColor: C.esmeralda, color: C.creme }}>Fechar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Modal: Novo Cliente ── */}
+        {showNovoCliente && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowNovoCliente(false)}>
+            <div className="bg-white rounded-xl border shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto" style={{ borderColor: C.cremeBorder }} onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: C.cremeBorder }}>
+                <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>Novo Cliente</h3>
+                <button onClick={() => setShowNovoCliente(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+              </div>
+              <div className="px-5 py-4 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div><Label required>Nome</Label><Input value={novoClienteForm.nome} onChange={e => setNovoClienteForm(p => ({ ...p, nome: e.target.value }))} /></div>
+                  <div><Label>CPF/CNPJ</Label><Input value={novoClienteForm.cpf_cnpj} onChange={e => setNovoClienteForm(p => ({ ...p, cpf_cnpj: e.target.value }))} /></div>
+                  <div><Label>Email</Label><Input type="email" value={novoClienteForm.email} onChange={e => setNovoClienteForm(p => ({ ...p, email: e.target.value }))} /></div>
+                  <div><Label>Telefone</Label><Input value={novoClienteForm.telefone} onChange={e => setNovoClienteForm(p => ({ ...p, telefone: e.target.value }))} /></div>
+                  <div><Label>Celular</Label><Input value={novoClienteForm.celular} onChange={e => setNovoClienteForm(p => ({ ...p, celular: e.target.value }))} /></div>
+                </div>
+                <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                  <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço</p>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div><Label>CEP</Label><Input value={novoClienteForm.cep} placeholder="00000-000" onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cep: v })); if (v.replace(/\D/g, "").length === 8) buscaCEP(v, "novoCliente"); }} /></div>
+                    <div className="md:col-span-2"><Label>Logradouro</Label><Input value={novoClienteForm.endereco} onChange={e => setNovoClienteForm(p => ({ ...p, endereco: e.target.value }))} /></div>
+                    <div><Label>Número</Label><Input value={novoClienteForm.numero} onChange={e => setNovoClienteForm(p => ({ ...p, numero: e.target.value }))} /></div>
+                    <div><Label>Complemento</Label><Input value={novoClienteForm.complemento} onChange={e => setNovoClienteForm(p => ({ ...p, complemento: e.target.value }))} /></div>
+                    <div><Label>Bairro</Label><Input value={novoClienteForm.bairro} onChange={e => setNovoClienteForm(p => ({ ...p, bairro: e.target.value }))} /></div>
+                    <div><Label>Cidade</Label><Input value={novoClienteForm.municipio} onChange={e => setNovoClienteForm(p => ({ ...p, municipio: e.target.value }))} /></div>
+                    <div><Label>UF</Label><Input value={novoClienteForm.uf} maxLength={2} onChange={e => setNovoClienteForm(p => ({ ...p, uf: e.target.value.toUpperCase() }))} /></div>
+                  </div>
+                </div>
+                {clienteErr && <p className="text-sm text-red-600">{clienteErr}</p>}
+              </div>
+              <div className="px-5 py-3 border-t flex justify-end gap-2" style={{ borderColor: C.cremeBorder }}>
+                <button onClick={() => setShowNovoCliente(false)} className="px-4 py-2 rounded-lg text-sm font-medium border" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
+                <button onClick={handleCriarCliente} disabled={savingCliente} className="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40" style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                  {savingCliente ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null} Salvar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── 2. Detalhes da Venda ── */}
         <Secao>

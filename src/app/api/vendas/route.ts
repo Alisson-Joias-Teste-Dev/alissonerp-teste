@@ -107,6 +107,13 @@ export async function POST(req: NextRequest) {
     observacoes?:         string | null;
     observacoes_internas?: string | null;
     video_obs_interna?:   string | null;
+    endereco_entrega?:             string | null;
+    endereco_entrega_numero?:      string | null;
+    endereco_entrega_complemento?: string | null;
+    endereco_entrega_bairro?:      string | null;
+    endereco_entrega_cidade?:      string | null;
+    endereco_entrega_cep?:         string | null;
+    endereco_entrega_uf?:          string | null;
     itens?:               ItemInput[];
     pagamentos?:          PagamentoInput[];
   };
@@ -124,6 +131,8 @@ export async function POST(req: NextRequest) {
         forma_envio, forma_frete,
         observacoes, observacoes_internas,
         video_obs_interna,
+        endereco_entrega, endereco_entrega_numero, endereco_entrega_complemento,
+        endereco_entrega_bairro, endereco_entrega_cidade, endereco_entrega_cep, endereco_entrega_uf,
         situacao,
         created_by
       ) VALUES (
@@ -137,6 +146,13 @@ export async function POST(req: NextRequest) {
         ${body.observacoes ?? null},
         ${body.observacoes_internas ?? null},
         ${body.video_obs_interna ?? null},
+        ${body.endereco_entrega ?? null},
+        ${body.endereco_entrega_numero ?? null},
+        ${body.endereco_entrega_complemento ?? null},
+        ${body.endereco_entrega_bairro ?? null},
+        ${body.endereco_entrega_cidade ?? null},
+        ${body.endereco_entrega_cep ?? null},
+        ${body.endereco_entrega_uf ?? null},
         'rascunho',
         ${user.id}::uuid
       )

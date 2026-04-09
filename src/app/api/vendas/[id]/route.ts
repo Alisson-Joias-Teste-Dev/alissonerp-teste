@@ -26,8 +26,11 @@ export async function GET(
       v.observacoes, v.observacoes_internas, v.video_obs_interna,
       v.tiny_pedido_id, v.tiny_sync_status, v.tiny_sync_at, v.tiny_sync_erro,
       v.bloqueado, v.created_by, v.created_at, v.updated_at,
-      v.qtd_itens, v.total_pago
+      v.qtd_itens, v.total_pago,
+      ve.endereco_entrega, ve.endereco_entrega_numero, ve.endereco_entrega_complemento,
+      ve.endereco_entrega_bairro, ve.endereco_entrega_cidade, ve.endereco_entrega_cep, ve.endereco_entrega_uf
     FROM alissonerp.vw_vendas_erp_completa v
+    LEFT JOIN alissonerp.vendas_erp ve ON ve.id = v.id
     WHERE v.id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
@@ -118,6 +121,13 @@ export async function PATCH(
     observacoes?:          string | null;
     observacoes_internas?: string | null;
     video_obs_interna?:    string | null;
+    endereco_entrega?:             string | null;
+    endereco_entrega_numero?:      string | null;
+    endereco_entrega_complemento?: string | null;
+    endereco_entrega_bairro?:      string | null;
+    endereco_entrega_cidade?:      string | null;
+    endereco_entrega_cep?:         string | null;
+    endereco_entrega_uf?:          string | null;
   };
 
   const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "cancelado", "concluido"];
@@ -144,7 +154,14 @@ export async function PATCH(
       forma_frete          = COALESCE(${body.forma_frete ?? null},          forma_frete),
       observacoes          = COALESCE(${body.observacoes ?? null},          observacoes),
       observacoes_internas = COALESCE(${body.observacoes_internas ?? null}, observacoes_internas),
-      video_obs_interna    = COALESCE(${body.video_obs_interna ?? null},    video_obs_interna)
+      video_obs_interna    = COALESCE(${body.video_obs_interna ?? null},    video_obs_interna),
+      endereco_entrega             = COALESCE(${body.endereco_entrega ?? null},             endereco_entrega),
+      endereco_entrega_numero      = COALESCE(${body.endereco_entrega_numero ?? null},      endereco_entrega_numero),
+      endereco_entrega_complemento = COALESCE(${body.endereco_entrega_complemento ?? null}, endereco_entrega_complemento),
+      endereco_entrega_bairro      = COALESCE(${body.endereco_entrega_bairro ?? null},      endereco_entrega_bairro),
+      endereco_entrega_cidade      = COALESCE(${body.endereco_entrega_cidade ?? null},      endereco_entrega_cidade),
+      endereco_entrega_cep         = COALESCE(${body.endereco_entrega_cep ?? null},         endereco_entrega_cep),
+      endereco_entrega_uf          = COALESCE(${body.endereco_entrega_uf ?? null},          endereco_entrega_uf)
     WHERE id = ${vendaId}
   `;
 
