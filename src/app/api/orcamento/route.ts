@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   const {
     nome_cliente, nome_modelo, peso, valor, markup, desconto_pct,
     cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
-    tipo, ficha, observacoes, cliente_id, foto_3d_base64,
+    tipo, ficha, ficha2, quantidade, observacoes, cliente_id, foto_3d_base64,
   } = body;
 
   if (!nome_cliente?.trim() && !cliente_id) {
@@ -116,12 +116,45 @@ export async function POST(req: NextRequest) {
     fichaId = fichaRow.id as number;
   }
 
+  // Ficha técnica 2 (par de alianças)
+  let ficha2Id: number | null = null;
+  if (ficha2 && typeof ficha2 === "object" && quantidade === 2) {
+    const [fichaRow2] = await sql`
+      INSERT INTO alissonerp.orcamento_fichas_tecnicas (
+        modelo, aro_numeracao, largura, espessura, peso_estimado,
+        perfil, diametro, densidade_ouro, cor_metal,
+        tipo_fonte, texto, qtd_pedras, tamanho_pedra, tipo_aplicacao_pedra,
+        profundidade_concava, friso_lado, friso_largura, friso_profundidade, friso_offset,
+        canal_largura, canal_borda_altura, chanfro_tamanho, dome_porcentagem,
+        pedra_fileiras, pedra_drill, pedra_meia_lua, pedra_volta_completa,
+        pedras_detalhadas
+      ) VALUES (
+        ${ficha2.modelo ?? null}, ${ficha2.aro_numeracao ?? null},
+        ${ficha2.largura ?? null}, ${ficha2.espessura ?? null}, ${ficha2.peso_estimado ?? null},
+        ${ficha2.perfil ?? null}, ${ficha2.diametro ?? null},
+        ${ficha2.densidade_ouro ?? null}, ${ficha2.cor_metal ?? null},
+        ${ficha2.tipo_fonte ?? null}, ${ficha2.texto ?? null},
+        ${ficha2.qtd_pedras ?? null}, ${ficha2.tamanho_pedra ?? null},
+        ${ficha2.tipo_aplicacao_pedra ?? null},
+        ${ficha2.profundidade_concava ?? null}, ${ficha2.friso_lado ?? null},
+        ${ficha2.friso_largura ?? null}, ${ficha2.friso_profundidade ?? null},
+        ${ficha2.friso_offset ?? null},
+        ${ficha2.canal_largura ?? null}, ${ficha2.canal_borda_altura ?? null},
+        ${ficha2.chanfro_tamanho ?? null}, ${ficha2.dome_porcentagem ?? null},
+        ${ficha2.pedra_fileiras ?? null}, ${ficha2.pedra_drill ?? false},
+        ${ficha2.pedra_meia_lua ?? false}, ${ficha2.pedra_volta_completa ?? false},
+        ${JSON.stringify(ficha2.pedras_detalhadas ?? [])}::jsonb
+      ) RETURNING id
+    `;
+    ficha2Id = fichaRow2.id as number;
+  }
+
   const [orcamento] = await sql`
     INSERT INTO alissonerp.orcamentos (
       numero_orcamento, tipo, vendedor_id, usuario_id,
       nome_cliente, nome_modelo, peso, valor, markup,
       desconto_pct, cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
-      ficha_tecnica_id, observacoes, cliente_id, foto_3d
+      ficha_tecnica_id, ficha_tecnica_2_id, quantidade, observacoes, cliente_id, foto_3d
     ) VALUES (
       ${numero}, ${tipo ?? "alianca"},
       ${caller.id_vendedor ? Number(caller.id_vendedor) : null},
@@ -130,7 +163,7 @@ export async function POST(req: NextRequest) {
       ${peso ?? null}, ${valor ?? null}, ${markup ?? null},
       ${desconto_pct ?? 0}, ${cotacao_ouro ?? null},
       ${cotacao_dolar ?? null}, ${valor_ouro ?? null}, ${valor_pedras ?? null},
-      ${fichaId}, ${observacoes ?? null}, ${cliente_id ?? null}, ${foto3dUrl}
+      ${fichaId}, ${ficha2Id}, ${quantidade ?? 1}, ${observacoes ?? null}, ${cliente_id ?? null}, ${foto3dUrl}
     ) RETURNING *
   `;
 

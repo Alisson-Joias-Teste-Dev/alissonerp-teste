@@ -479,7 +479,7 @@ export async function PATCH(
     const [vendaOrc] = await sql`
       SELECT v.orcamento_id, v.cliente_id, v.vendedor_id, v.data_entrega,
              o.id AS orc_id, o.tipo, o.peso, o.numero_orcamento, o.nome_modelo,
-             o.foto_3d, o.ficha_tecnica_id,
+             o.foto_3d, o.ficha_tecnica_id, o.ficha_tecnica_2_id, o.quantidade,
              ft.perfil, ft.modelo, ft.aro_numeracao, ft.largura, ft.espessura,
              ft.peso_estimado, ft.densidade_ouro, ft.cor_metal,
              ft.tipo_fonte, ft.texto, ft.qtd_pedras, ft.tamanho_pedra,
@@ -503,6 +503,8 @@ export async function PATCH(
         const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
         const nextNum = Math.max(Number(max_id_ali), Number(max_id_dir)) + 1;
         const numeroOrdem = "C-" + String(nextNum).padStart(4, "0");
+        const isPar = Number(vendaOrc.quantidade) === 2;
+        const pesoItem1 = Number(vendaOrc.peso_estimado ?? vendaOrc.peso ?? 0);
         const pesoNeg = Number(vendaOrc.peso ?? vendaOrc.peso_estimado ?? 0);
 
         // Criar ordem
@@ -516,19 +518,19 @@ export async function PATCH(
             'criado', 'aguardando', 'pcp',
             ${vendaOrc.cliente_id}, ${vendaOrc.vendedor_id},
             ${pesoNeg}, ${vendaOrc.data_entrega},
-            ${'Venda V-' + String(vendaId).padStart(5, '0') + ' / Orçamento ' + vendaOrc.numero_orcamento},
+            ${'Venda V-' + String(vendaId).padStart(5, '0') + ' / Orçamento ' + vendaOrc.numero_orcamento + (isPar ? ' (Par)' : '')},
             ${vendaOrc.foto_3d ?? null}, ${vendaId}, NOW()
           ) RETURNING id, numero_ordem
         `;
         ordemCriada = { id: ordem.id, numero_ordem: ordem.numero_ordem };
 
-        // Item da ordem
+        // Item 1 da ordem
         const nomeItem = vendaOrc.tipo === "alianca"
-          ? `Aliança ${perfilNomes[vendaOrc.perfil as string] ?? vendaOrc.modelo ?? "Personalizada"}`
+          ? `${isPar ? "Aliança 1 - " : "Aliança "}${perfilNomes[vendaOrc.perfil as string] ?? vendaOrc.modelo ?? "Personalizada"}`
           : `Peça Personalizada`;
         await tx`
           INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
-          VALUES (${ordem.id}, ${nomeItem}, 1, ${pesoNeg})
+          VALUES (${ordem.id}, ${nomeItem}, 1, ${pesoItem1})
         `;
 
         // Ficha técnica
@@ -556,6 +558,41 @@ export async function PATCH(
           INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
           VALUES (${ordem.id}, ${tipoItem}, ${JSON.stringify(dadosFicha)}::jsonb, ${user.id}::uuid)
         `;
+
+        // Aliança 2 (se par)
+        if (Number(vendaOrc.quantidade) === 2 && vendaOrc.ficha_tecnica_2_id) {
+          const [ft2] = await tx`
+            SELECT perfil, modelo, aro_numeracao, largura, espessura, peso_estimado,
+                   densidade_ouro, cor_metal, tipo_fonte, texto, qtd_pedras, tamanho_pedra,
+                   tipo_aplicacao_pedra, pedras_detalhadas
+            FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${vendaOrc.ficha_tecnica_2_id}
+          `;
+          if (ft2) {
+            const nomeItem2 = `Aliança 2 - ${perfilNomes[ft2.perfil as string] ?? ft2.modelo ?? "Personalizada"}`;
+            const peso2 = Number(ft2.peso_estimado ?? 0);
+            await tx`
+              INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
+              VALUES (${ordem.id}, ${nomeItem2}, 1, ${peso2})
+            `;
+            const dadosFicha2: Record<string, unknown> = {};
+            if (ft2.largura) dadosFicha2.milimetragem = String(ft2.largura);
+            if (ft2.aro_numeracao) dadosFicha2.numeracao = String(ft2.aro_numeracao).replace("Aro ", "");
+            const pf2 = perfilNomes[ft2.perfil as string] ?? ft2.modelo ?? ft2.perfil;
+            if (pf2) dadosFicha2.modelo = pf2;
+            if (ft2.tipo_fonte) dadosFicha2.tipo_fonte = ft2.tipo_fonte;
+            if (ft2.texto) dadosFicha2.texto_gravacao = ft2.texto;
+            if (ft2.cor_metal) dadosFicha2.cor_metal = ft2.cor_metal;
+            if (ft2.peso_estimado) dadosFicha2.peso_estimado = ft2.peso_estimado;
+            if (ft2.espessura) dadosFicha2.espessura = ft2.espessura;
+            if (ft2.qtd_pedras) dadosFicha2.qtd_pedras = ft2.qtd_pedras;
+            if (ft2.tamanho_pedra) dadosFicha2.tamanho_pedra = ft2.tamanho_pedra;
+            if (ft2.tipo_aplicacao_pedra) dadosFicha2.tipo_aplicacao_pedra = ft2.tipo_aplicacao_pedra;
+            await tx`
+              INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
+              VALUES (${ordem.id}, 'alianca', ${JSON.stringify(dadosFicha2)}::jsonb, ${user.id}::uuid)
+            `;
+          }
+        }
 
         // Auditoria loja pendente
         await tx`
