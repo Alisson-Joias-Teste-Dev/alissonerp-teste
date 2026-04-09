@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle,
-  Truck, Video,
+  Truck, Video, FileText, UserPlus, MapPin, Pencil, User, Package, CreditCard, XCircle,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -20,7 +20,9 @@ const C = {
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Cliente {
   id: number; nome: string; cpf_cnpj: string | null;
-  email: string | null; telefone: string | null;
+  email: string | null; telefone: string | null; celular?: string | null;
+  endereco?: string | null; numero?: string | null; complemento?: string | null;
+  bairro?: string | null; municipio?: string | null; cep?: string | null; uf?: string | null;
 }
 interface Produto {
   id: number; sku: string; nome: string;
@@ -124,12 +126,24 @@ function Autocomplete<T>({ placeholder, onSearch, renderItem, onSelect, selected
   );
 }
 
-// ─── Divider section ──────────────────────────────────────────────────────────
-function Secao({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <div className={`px-6 py-6 border-b ${className}`} style={{ borderColor: C.cremeBorder }}>{children}</div>;
-}
-function STitle({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-base font-semibold mb-4" style={{ color: "#1A1A1A" }}>{children}</h3>;
+// ─── Section card (mesmo padrão da tela de detalhe) ──────────────────────────
+function Section({ icon: Icon, title, children }: {
+  icon: any; title: string; children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border" style={{ borderColor: C.cremeBorder }}>
+      <div
+        className="flex items-center gap-2 px-4 py-3 border-b rounded-t-xl"
+        style={{ backgroundColor: C.cremeBg, borderColor: C.cremeBorder }}
+      >
+        <Icon size={14} style={{ color: C.esmeralda }} />
+        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: C.esmeralda }}>
+          {title}
+        </span>
+      </div>
+      <div className="p-4 bg-white rounded-b-xl">{children}</div>
+    </div>
+  );
 }
 function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
@@ -143,6 +157,12 @@ function Input({ className = "", ...props }: React.InputHTMLAttributes<HTMLInput
 }
 function Select({ className = "", ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select className={`w-full border rounded-lg px-3 py-2.5 text-sm outline-none ${className}`} style={{ borderColor: C.cremeBorder, color: "#374151" }} {...props} />;
+}
+function Secao({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return <div className={`px-6 py-6 border-b ${className}`} style={{ borderColor: C.cremeBorder }}>{children}</div>;
+}
+function STitle({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-base font-semibold mb-4" style={{ color: "#1A1A1A" }}>{children}</h3>;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -174,6 +194,18 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   const [uploadingVideo,  setUploadingVideo]  = useState(false);
   const [videoUploadErr,  setVideoUploadErr]  = useState("");
 
+  // Modals & delivery address
+  const [showDadosCliente, setShowDadosCliente] = useState(false);
+  const [showNovoCliente, setShowNovoCliente] = useState(false);
+  const [showEndEntrega, setShowEndEntrega] = useState(false);
+  const [mesmoEndereco, setMesmoEndereco] = useState(true);
+  const [endEntrega, setEndEntrega] = useState({ cep: "", logradouro: "", numero: "", complemento: "", bairro: "", cidade: "", uf: "" });
+  const [novoClienteForm, setNovoClienteForm] = useState({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
+  const [savingCliente, setSavingCliente] = useState(false);
+  const [clienteErr, setClienteErr] = useState("");
+  const [editingCliente, setEditingCliente] = useState(false);
+  const [editClienteForm, setEditClienteForm] = useState({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
+
   // Itens
   const [itens,       setItens]       = useState<ItemVenda[]>([]);
   const [produtoSel,  setProdutoSel]  = useState<Produto | null>(null);
@@ -181,7 +213,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   const [pctDesconto, setPctDesconto] = useState(0);
   const [descontoErr, setDescontoErr] = useState("");
   const [addingItem,  setAddingItem]  = useState(false);
-  const [prodTab,     setProdTab]     = useState<"produtos" | "comissoes">("produtos");
+  void 0; // prodTab removido — itens exibidos em cards
 
   // Pagamentos
   const [pagForma,       setPagForma]       = useState("Dinheiro");
@@ -340,6 +372,68 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   const totalPago     = pagamentos.reduce((s, p) => s + p.valor, 0);
   void totalPago; // usado em modo Múltiplas
 
+  // ── CEP lookup ──────────────────────────────────────────────────────────────
+  async function buscaCEP(cep: string, target: "entrega" | "novoCliente") {
+    const limpo = cep.replace(/\D/g, "");
+    if (limpo.length !== 8) return;
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${limpo}/json/`);
+      const data = await res.json();
+      if (data.erro) return;
+      if (target === "entrega") {
+        setEndEntrega(prev => ({ ...prev, logradouro: data.logradouro ?? "", bairro: data.bairro ?? "", cidade: data.localidade ?? "", uf: data.uf ?? "" }));
+      } else {
+        setNovoClienteForm(prev => ({ ...prev, endereco: data.logradouro ?? "", bairro: data.bairro ?? "", municipio: data.localidade ?? "", uf: data.uf ?? "" }));
+      }
+    } catch { /* silent */ }
+  }
+
+  // ── Edit existing client ────────────────────────────────────────────────────
+  function startEditCliente() {
+    if (!cliente) return;
+    setEditClienteForm({
+      nome: cliente.nome ?? "", cpf_cnpj: cliente.cpf_cnpj ?? "", email: cliente.email ?? "",
+      telefone: cliente.telefone ?? "", celular: cliente.celular ?? "", cep: cliente.cep ?? "",
+      endereco: cliente.endereco ?? "", numero: cliente.numero ?? "", complemento: cliente.complemento ?? "",
+      bairro: cliente.bairro ?? "", municipio: cliente.municipio ?? "", uf: cliente.uf ?? "",
+    });
+    setEditingCliente(true);
+  }
+
+  async function handleSalvarCliente() {
+    if (!cliente) return;
+    setSavingCliente(true); setClienteErr("");
+    try {
+      const res = await fetch("/api/contatos", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: cliente.id, ...editClienteForm }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setCliente({ ...cliente, ...data });
+      setEditingCliente(false);
+    } catch (e) { setClienteErr(e instanceof Error ? e.message : "Erro ao salvar"); }
+    finally { setSavingCliente(false); }
+  }
+
+  // ── Create new client ──────────────────────────────────────────────────────
+  async function handleCriarCliente() {
+    if (!novoClienteForm.nome.trim()) { setClienteErr("Nome é obrigatório"); return; }
+    setSavingCliente(true); setClienteErr("");
+    try {
+      const res = await fetch("/api/contatos", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(novoClienteForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setCliente({ id: data.id, nome: data.nome, cpf_cnpj: data.cpf_cnpj, email: data.email, telefone: data.telefone, celular: data.celular, endereco: data.endereco, numero: data.numero, complemento: data.complemento, bairro: data.bairro, municipio: data.municipio, cep: data.cep, uf: data.uf });
+      setShowNovoCliente(false);
+      setNovoClienteForm({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
+    } catch (e) { setClienteErr(e instanceof Error ? e.message : "Erro ao criar cliente"); }
+    finally { setSavingCliente(false); }
+  }
+
   // ── Submit ─────────────────────────────────────────────────────────────────
   async function submit(situacao: "rascunho" | "aprovado") {
     setSaving(true); setSaveErr("");
@@ -356,6 +450,15 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
         observacoes: observacoes || null,
         observacoes_internas: obsInternas || null,
         video_obs_interna: videoObsInterna,
+        ...(!mesmoEndereco && showEndEntrega ? {
+          endereco_entrega: endEntrega.logradouro || null,
+          endereco_entrega_numero: endEntrega.numero || null,
+          endereco_entrega_complemento: endEntrega.complemento || null,
+          endereco_entrega_bairro: endEntrega.bairro || null,
+          endereco_entrega_cidade: endEntrega.cidade || null,
+          endereco_entrega_cep: endEntrega.cep || null,
+          endereco_entrega_uf: endEntrega.uf || null,
+        } : {}),
         itens: itens.map(i => ({
           produto_id: i.produto_id, nome_produto: i.nome_produto, sku: i.sku,
           quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
@@ -386,25 +489,25 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
 
   // ─── JSX ───────────────────────────────────────────────────────────────────
   return (
-    <div className="px-3 md:px-6 py-4 md:py-6 max-w-5xl mx-auto">
+    <div className="px-3 md:px-6 py-4 md:py-8 max-w-3xl mx-auto pb-24">
 
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <Link href="/vendas" className="p-2 rounded-lg hover:bg-gray-100 transition-colors" style={{ color: "#6B7280" }}>
           <ArrowLeft size={18} />
         </Link>
-        <div className="flex items-center gap-3">
-          <div className="w-1 h-7 rounded-full" style={{ backgroundColor: C.esmeralda }} />
-          <h2 className="text-2xl font-bold" style={{ fontFamily: "var(--font-playfair)", color: "#1A1A1A" }}>
-            Pedido de Venda
+        <div>
+          <h2 className="text-xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
+            Novo Pedido de Venda
           </h2>
+          <p className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>Preencha os dados abaixo</p>
         </div>
       </div>
 
-      <div className="rounded-xl border overflow-hidden bg-white" style={{ borderColor: C.cremeBorder }}>
+      <div className="flex flex-col gap-4">
 
         {/* ── 1. Cliente + Vendedor ── */}
-        <Secao>
+        <Section icon={User} title="Cliente">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <Label required>Cliente</Label>
@@ -422,9 +525,37 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                 onClear={() => setCliente(null)}
               />
               {cliente && (
-                <p className="text-xs mt-1.5" style={{ color: "#9CA3AF" }}>
-                  {[cliente.email, cliente.telefone].filter(Boolean).join(" · ")}
-                </p>
+                <>
+                  <p className="text-xs mt-1.5" style={{ color: "#9CA3AF" }}>
+                    {[cliente.email, cliente.telefone].filter(Boolean).join(" · ")}
+                  </p>
+                  <div className="flex gap-2 mt-2">
+                    <button type="button" onClick={() => setShowDadosCliente(true)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border hover:bg-gray-50"
+                      style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
+                      <FileText size={12} /> Dados
+                    </button>
+                    <button type="button" onClick={() => setShowNovoCliente(true)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border hover:bg-gray-50"
+                      style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
+                      <UserPlus size={12} /> Novo Cliente
+                    </button>
+                    <button type="button" onClick={() => setShowEndEntrega(!showEndEntrega)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border hover:bg-gray-50"
+                      style={{ borderColor: showEndEntrega ? C.esmeralda : C.cremeBorder, color: C.esmeralda, backgroundColor: showEndEntrega ? C.esmeraldaLt : "transparent" }}>
+                      <MapPin size={12} /> End. Entrega
+                    </button>
+                  </div>
+                </>
+              )}
+              {!cliente && (
+                <div className="flex gap-2 mt-2">
+                  <button type="button" onClick={() => setShowNovoCliente(true)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border hover:bg-gray-50"
+                    style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
+                    <UserPlus size={12} /> Novo Cliente
+                  </button>
+                </div>
               )}
             </div>
             <div>
@@ -441,11 +572,153 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               )}
             </div>
           </div>
-        </Secao>
+        </Section>
+
+        {/* ── Endereço de Entrega (expandível) ── */}
+        {showEndEntrega && (
+          <Secao>
+            <div className="flex items-center justify-between mb-4">
+              <STitle>Endereço de Entrega</STitle>
+              <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: "#374151" }}>
+                <input type="checkbox" checked={mesmoEndereco} onChange={e => setMesmoEndereco(e.target.checked)} className="rounded border-gray-300" />
+                Mesmo do cliente
+              </label>
+            </div>
+            {mesmoEndereco && cliente ? (
+              <div className="rounded-lg border px-4 py-3 text-sm" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
+                {[cliente.endereco, cliente.numero, cliente.complemento, cliente.bairro, cliente.municipio, cliente.uf, cliente.cep].filter(Boolean).join(", ") || "Endereço não cadastrado no cliente"}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div><Label required>CEP</Label><Input value={endEntrega.cep} placeholder="00000-000" onChange={e => { const v = e.target.value; setEndEntrega(p => ({ ...p, cep: v })); if (v.replace(/\D/g, "").length === 8) buscaCEP(v, "entrega"); }} /></div>
+                <div className="md:col-span-2"><Label required>Logradouro</Label><Input value={endEntrega.logradouro} onChange={e => setEndEntrega(p => ({ ...p, logradouro: e.target.value }))} /></div>
+                <div><Label required>Número</Label><Input value={endEntrega.numero} onChange={e => setEndEntrega(p => ({ ...p, numero: e.target.value }))} /></div>
+                <div><Label>Complemento</Label><Input value={endEntrega.complemento} onChange={e => setEndEntrega(p => ({ ...p, complemento: e.target.value }))} /></div>
+                <div><Label required>Bairro</Label><Input value={endEntrega.bairro} onChange={e => setEndEntrega(p => ({ ...p, bairro: e.target.value }))} /></div>
+                <div><Label required>Cidade</Label><Input value={endEntrega.cidade} onChange={e => setEndEntrega(p => ({ ...p, cidade: e.target.value }))} /></div>
+                <div><Label required>UF</Label><Input value={endEntrega.uf} maxLength={2} onChange={e => setEndEntrega(p => ({ ...p, uf: e.target.value.toUpperCase() }))} /></div>
+              </div>
+            )}
+          </Secao>
+        )}
+
+        {/* ── Modal: Dados do Cliente ── */}
+        {showDadosCliente && cliente && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setShowDadosCliente(false); setEditingCliente(false); }}>
+            <div className="bg-white rounded-xl border shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto" style={{ borderColor: C.cremeBorder }} onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: C.cremeBorder }}>
+                <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>{editingCliente ? "Editar Cliente" : "Dados do Cliente"}</h3>
+                <button onClick={() => { setShowDadosCliente(false); setEditingCliente(false); }} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+              </div>
+              <div className="px-5 py-4 space-y-3">
+                {editingCliente ? (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div><Label required>Nome</Label><Input value={editClienteForm.nome} onChange={e => setEditClienteForm(p => ({ ...p, nome: e.target.value }))} /></div>
+                      <div><Label>CPF/CNPJ</Label><Input value={editClienteForm.cpf_cnpj} onChange={e => setEditClienteForm(p => ({ ...p, cpf_cnpj: e.target.value }))} /></div>
+                      <div><Label>Email</Label><Input type="email" value={editClienteForm.email} onChange={e => setEditClienteForm(p => ({ ...p, email: e.target.value }))} /></div>
+                      <div><Label>Telefone</Label><Input value={editClienteForm.telefone} onChange={e => setEditClienteForm(p => ({ ...p, telefone: e.target.value }))} /></div>
+                      <div><Label>Celular</Label><Input value={editClienteForm.celular} onChange={e => setEditClienteForm(p => ({ ...p, celular: e.target.value }))} /></div>
+                    </div>
+                    <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                      <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço de Cobrança</p>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <div><Label>CEP</Label><Input value={editClienteForm.cep} placeholder="00000-000" onChange={e => { const v = e.target.value; setEditClienteForm(p => ({ ...p, cep: v })); if (v.replace(/\D/g, "").length === 8) buscaCEP(v, "novoCliente"); }} /></div>
+                        <div className="md:col-span-2"><Label>Logradouro</Label><Input value={editClienteForm.endereco} onChange={e => setEditClienteForm(p => ({ ...p, endereco: e.target.value }))} /></div>
+                        <div><Label>Número</Label><Input value={editClienteForm.numero} onChange={e => setEditClienteForm(p => ({ ...p, numero: e.target.value }))} /></div>
+                        <div><Label>Complemento</Label><Input value={editClienteForm.complemento} onChange={e => setEditClienteForm(p => ({ ...p, complemento: e.target.value }))} /></div>
+                        <div><Label>Bairro</Label><Input value={editClienteForm.bairro} onChange={e => setEditClienteForm(p => ({ ...p, bairro: e.target.value }))} /></div>
+                        <div><Label>Cidade</Label><Input value={editClienteForm.municipio} onChange={e => setEditClienteForm(p => ({ ...p, municipio: e.target.value }))} /></div>
+                        <div><Label>UF</Label><Input value={editClienteForm.uf} maxLength={2} onChange={e => setEditClienteForm(p => ({ ...p, uf: e.target.value.toUpperCase() }))} /></div>
+                      </div>
+                    </div>
+                    {clienteErr && <p className="text-sm text-red-600">{clienteErr}</p>}
+                  </>
+                ) : (
+                  <div className="text-sm space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Nome</span><p style={{ color: "#1A1A1A" }}>{cliente.nome}</p></div>
+                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CPF/CNPJ</span><p style={{ color: "#1A1A1A" }}>{cliente.cpf_cnpj || "—"}</p></div>
+                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Email</span><p style={{ color: "#1A1A1A" }}>{cliente.email || "—"}</p></div>
+                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Telefone</span><p style={{ color: "#1A1A1A" }}>{cliente.telefone || "—"}</p></div>
+                    </div>
+                    <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                      <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço de Cobrança</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Logradouro</span><p style={{ color: "#1A1A1A" }}>{cliente.endereco || "—"}</p></div>
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Número</span><p style={{ color: "#1A1A1A" }}>{cliente.numero || "—"}</p></div>
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Bairro</span><p style={{ color: "#1A1A1A" }}>{cliente.bairro || "—"}</p></div>
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Cidade</span><p style={{ color: "#1A1A1A" }}>{cliente.municipio || "—"}</p></div>
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CEP</span><p style={{ color: "#1A1A1A" }}>{cliente.cep || "—"}</p></div>
+                        <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>UF</span><p style={{ color: "#1A1A1A" }}>{cliente.uf || "—"}</p></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="px-5 py-3 border-t flex justify-end gap-2" style={{ borderColor: C.cremeBorder }}>
+                {editingCliente ? (
+                  <>
+                    <button onClick={() => setEditingCliente(false)} className="px-4 py-2 rounded-lg text-sm font-medium border" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
+                    <button onClick={handleSalvarCliente} disabled={savingCliente} className="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40" style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                      {savingCliente ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null} Salvar
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={startEditCliente} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border" style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
+                      <Pencil size={13} /> Editar
+                    </button>
+                    <button onClick={() => setShowDadosCliente(false)} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ backgroundColor: C.esmeralda, color: C.creme }}>Fechar</button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Modal: Novo Cliente ── */}
+        {showNovoCliente && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowNovoCliente(false)}>
+            <div className="bg-white rounded-xl border shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto" style={{ borderColor: C.cremeBorder }} onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: C.cremeBorder }}>
+                <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>Novo Cliente</h3>
+                <button onClick={() => setShowNovoCliente(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+              </div>
+              <div className="px-5 py-4 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div><Label required>Nome</Label><Input value={novoClienteForm.nome} onChange={e => setNovoClienteForm(p => ({ ...p, nome: e.target.value }))} /></div>
+                  <div><Label>CPF/CNPJ</Label><Input value={novoClienteForm.cpf_cnpj} onChange={e => setNovoClienteForm(p => ({ ...p, cpf_cnpj: e.target.value }))} /></div>
+                  <div><Label>Email</Label><Input type="email" value={novoClienteForm.email} onChange={e => setNovoClienteForm(p => ({ ...p, email: e.target.value }))} /></div>
+                  <div><Label>Telefone</Label><Input value={novoClienteForm.telefone} onChange={e => setNovoClienteForm(p => ({ ...p, telefone: e.target.value }))} /></div>
+                  <div><Label>Celular</Label><Input value={novoClienteForm.celular} onChange={e => setNovoClienteForm(p => ({ ...p, celular: e.target.value }))} /></div>
+                </div>
+                <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                  <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço</p>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div><Label>CEP</Label><Input value={novoClienteForm.cep} placeholder="00000-000" onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cep: v })); if (v.replace(/\D/g, "").length === 8) buscaCEP(v, "novoCliente"); }} /></div>
+                    <div className="md:col-span-2"><Label>Logradouro</Label><Input value={novoClienteForm.endereco} onChange={e => setNovoClienteForm(p => ({ ...p, endereco: e.target.value }))} /></div>
+                    <div><Label>Número</Label><Input value={novoClienteForm.numero} onChange={e => setNovoClienteForm(p => ({ ...p, numero: e.target.value }))} /></div>
+                    <div><Label>Complemento</Label><Input value={novoClienteForm.complemento} onChange={e => setNovoClienteForm(p => ({ ...p, complemento: e.target.value }))} /></div>
+                    <div><Label>Bairro</Label><Input value={novoClienteForm.bairro} onChange={e => setNovoClienteForm(p => ({ ...p, bairro: e.target.value }))} /></div>
+                    <div><Label>Cidade</Label><Input value={novoClienteForm.municipio} onChange={e => setNovoClienteForm(p => ({ ...p, municipio: e.target.value }))} /></div>
+                    <div><Label>UF</Label><Input value={novoClienteForm.uf} maxLength={2} onChange={e => setNovoClienteForm(p => ({ ...p, uf: e.target.value.toUpperCase() }))} /></div>
+                  </div>
+                </div>
+                {clienteErr && <p className="text-sm text-red-600">{clienteErr}</p>}
+              </div>
+              <div className="px-5 py-3 border-t flex justify-end gap-2" style={{ borderColor: C.cremeBorder }}>
+                <button onClick={() => setShowNovoCliente(false)} className="px-4 py-2 rounded-lg text-sm font-medium border" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
+                <button onClick={handleCriarCliente} disabled={savingCliente} className="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40" style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                  {savingCliente ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null} Salvar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── 2. Detalhes da Venda ── */}
-        <Secao>
-          <STitle>Detalhes da Venda</STitle>
+        <Section icon={Truck} title="Envio">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <Label required>Data da Venda</Label>
@@ -456,7 +729,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               <Input type="date" value={dataEntrega} onChange={e => setDataEntrega(e.target.value)} />
             </div>
             <div>
-              <Label>Frete Pago pelo Cliente</Label>
+              <Label>Frete (R$)</Label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: "#9CA3AF" }}>R$</span>
                 <input type="number" min={0} step={0.01} value={totalFrete || ""}
@@ -467,173 +740,130 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               </div>
             </div>
           </div>
-        </Secao>
+        </Section>
 
         {/* ── 3. Produtos / Comissões ── */}
-        <Secao>
-          {/* Tabs */}
-          <div className="flex gap-1 mb-4 p-1 rounded-lg w-fit" style={{ backgroundColor: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}>
-            {(["produtos", "comissoes"] as const).map(tab => (
-              <button key={tab} onClick={() => setProdTab(tab)}
-                className="px-4 py-1.5 rounded-md text-sm font-medium transition-colors"
-                style={{ backgroundColor: prodTab === tab ? "#fff" : "transparent", color: prodTab === tab ? C.esmeralda : "#6B7280",
-                  boxShadow: prodTab === tab ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }}>
-                {tab === "produtos" ? "Produtos" : "Comissões"}
-              </button>
-            ))}
-          </div>
+        <Section icon={Package} title={`Produtos (${itens.length})`}>
+          <div className="space-y-2">
+            {itens.length === 0 && !addingItem && (
+              <p className="text-sm text-center py-3" style={{ color: "#9CA3AF" }}>Nenhum produto</p>
+            )}
 
-          {prodTab === "produtos" && (
-            <>
-              {/* Tabela de itens */}
-              <div className="rounded-lg border overflow-hidden mb-3" style={{ borderColor: C.cremeBorder }}>
-                <table className="w-full text-sm">
-                  <thead style={{ backgroundColor: C.cremeBg }}>
-                    <tr>
-                      {["Nº", "Descrição", "Código (SKU)", "Qtde", "UN", "Preço lista", "% Desc", "Preço un", "Preço total", ""].map(h => (
-                        <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {itens.length === 0 && !addingItem && (
-                      <tr>
-                        <td colSpan={10} className="px-3 py-8 text-center text-sm" style={{ color: "#9CA3AF" }}>
-                          Nenhum produto adicionado
-                        </td>
-                      </tr>
+            {/* Item cards — mesmo layout da tela de detalhe */}
+            {itens.map(item => (
+              <div key={item._key} className="flex items-start gap-3 p-3 rounded-lg border" style={{ borderColor: C.cremeBorder }}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</p>
+                  <p className="text-xs" style={{ color: "#9CA3AF" }}>
+                    {item.sku && `${item.sku} · `}
+                    {item.quantidade}× {fmt(item.preco_lista)}
+                    {item.pct_desconto > 0 && ` −${item.pct_desconto}%`}
+                  </p>
+                  <div className="flex items-center gap-3 mt-1 flex-wrap">
+                    <span className="text-xs font-semibold tabular-nums" style={{ color: C.esmeralda }}>
+                      {fmt(item.total_item)}
+                    </span>
+                    {item.pct_comissao > 0 && (
+                      <span className="text-[11px]" style={{ color: "#9CA3AF" }}>
+                        Comissão: {item.pct_comissao}% = {fmt(item.valor_comissao)}
+                      </span>
                     )}
-                    {itens.map((item, idx) => (
-                      <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
-                        <td className="px-3 py-2.5 text-xs tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
-                        <td className="px-3 py-2.5 max-w-[180px] truncate font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
-                        <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku}</td>
-                        <td className="px-3 py-2.5 text-center tabular-nums" style={{ color: "#374151" }}>{item.quantidade}</td>
-                        <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{item.unidade ?? "un"}</td>
-                        <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
-                        <td className="px-3 py-2.5 tabular-nums text-center" style={{ color: item.pct_desconto > 0 ? "#D97706" : "#9CA3AF" }}>
-                          {item.pct_desconto > 0 ? `${item.pct_desconto}%` : "—"}
-                        </td>
-                        <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</td>
-                        <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
-                        <td className="px-3 py-2.5">
-                          <button onClick={() => setItens(prev => prev.filter(i => i._key !== item._key))}
-                            className="text-gray-300 hover:text-red-400 transition-colors">
-                            <X size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Painel adicionar item */}
-              {addingItem && (
-                <div className="mb-3 p-4 rounded-xl border" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-sm font-medium" style={{ color: "#374151" }}>Adicionar produto</p>
-                    <button onClick={() => { setAddingItem(false); setProdutoSel(null); setDescontoErr(""); }} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
                   </div>
-                  <Autocomplete<Produto>
-                    placeholder="Buscar por nome ou SKU..."
-                    onSearch={async q => { const r = await fetch(`/api/vendas/produtos/busca?q=${encodeURIComponent(q)}&limit=15`); return r.json(); }}
-                    renderItem={p => (
-                      <div>
-                        <p className="font-medium text-sm" style={{ color: "#1A1A1A" }}>{p.nome}</p>
-                        <p className="text-xs" style={{ color: "#9CA3AF" }}>{p.sku} · {p.preco_venda != null ? fmt(p.preco_venda) : "sem preço"}</p>
-                      </div>
-                    )}
-                    onSelect={p => { setProdutoSel(p); setPctDesconto(0); setDescontoErr(""); }}
-                    selectedLabel={produtoSel ? `${produtoSel.nome} · ${fmt(produtoSel.preco_venda ?? 0)}` : null}
-                    onClear={() => { setProdutoSel(null); setDescontoErr(""); }}
-                  />
-                  {produtoSel && (
-                    <div className="mt-3 grid grid-cols-4 gap-2 items-end">
-                      <div>
-                        <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Qtd</label>
-                        <input type="number" min={1} value={qtd} onChange={e => setQtd(Math.max(1, Number(e.target.value)))}
-                          className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center" style={{ borderColor: C.cremeBorder }} />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>% Desconto <span style={{ color: "#9CA3AF" }}>(máx {maxDesconto}%)</span></label>
-                        <input type="number" min={0} max={maxDesconto} step={1} value={pctDesconto}
-                          onChange={e => { const v = Number(e.target.value); setPctDesconto(v); setDescontoErr(v > maxDesconto ? `Máximo: ${maxDesconto}%` : ""); }}
-                          className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
-                          style={{ borderColor: descontoErr ? "#EF4444" : C.cremeBorder }} />
-                        {descontoErr && <p className="text-[11px] text-red-500 mt-0.5">{descontoErr}</p>}
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Preço un</label>
-                        <div className="border rounded-lg px-2 py-1.5 text-sm text-center tabular-nums" style={{ borderColor: C.cremeBorder, backgroundColor: "#fff", color: C.esmeralda }}>
-                          {fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario)}
-                        </div>
-                      </div>
-                      <button onClick={handleAddItem} disabled={!!descontoErr || pctDesconto > maxDesconto}
-                        className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium disabled:opacity-40 transition-opacity"
-                        style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                        <Plus size={14} /> Confirmar
-                      </button>
+                </div>
+                <button onClick={() => setItens(prev => prev.filter(i => i._key !== item._key))}
+                  className="p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0" style={{ color: "#EF4444" }}>
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+
+            {/* Painel adicionar item */}
+            {addingItem && (
+              <div className="p-3 rounded-lg border space-y-2" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium" style={{ color: "#6B7280" }}>Adicionar produto</p>
+                  <button onClick={() => { setAddingItem(false); setProdutoSel(null); setDescontoErr(""); }} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+                </div>
+                <Autocomplete<Produto>
+                  placeholder="Buscar por nome ou SKU..."
+                  onSearch={async q => { const r = await fetch(`/api/vendas/produtos/busca?q=${encodeURIComponent(q)}&limit=15`); return r.json(); }}
+                  renderItem={p => (
+                    <div>
+                      <p className="font-medium text-sm" style={{ color: "#1A1A1A" }}>{p.nome}</p>
+                      <p className="text-xs" style={{ color: "#9CA3AF" }}>{p.sku} · {p.preco_venda != null ? fmt(p.preco_venda) : "sem preço"}</p>
                     </div>
                   )}
-                </div>
-              )}
+                  onSelect={p => { setProdutoSel(p); setPctDesconto(0); setDescontoErr(""); }}
+                  selectedLabel={produtoSel ? `${produtoSel.nome} · ${fmt(produtoSel.preco_venda ?? 0)}` : null}
+                  onClear={() => { setProdutoSel(null); setDescontoErr(""); }}
+                />
+                {produtoSel && (
+                  <div className="grid grid-cols-4 gap-2 items-end">
+                    <div>
+                      <label className="text-[10px] font-medium" style={{ color: "#6B7280" }}>Qtd</label>
+                      <input type="number" min={1} value={qtd} onChange={e => setQtd(Math.max(1, Number(e.target.value)))}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center" style={{ borderColor: C.cremeBorder }} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium" style={{ color: "#6B7280" }}>% Desc (máx {maxDesconto}%)</label>
+                      <input type="number" min={0} max={maxDesconto} step={1} value={pctDesconto}
+                        onChange={e => { const v = Number(e.target.value); setPctDesconto(v); setDescontoErr(v > maxDesconto ? `Máx: ${maxDesconto}%` : ""); }}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
+                        style={{ borderColor: descontoErr ? "#EF4444" : C.cremeBorder }} />
+                      {descontoErr && <p className="text-[10px] text-red-500 mt-0.5">{descontoErr}</p>}
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium" style={{ color: "#6B7280" }}>Preço un</label>
+                      <div className="border rounded-lg px-2 py-1.5 text-sm text-center tabular-nums" style={{ borderColor: C.cremeBorder, backgroundColor: "#fff", color: C.esmeralda }}>
+                        {fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario)}
+                      </div>
+                    </div>
+                    <button onClick={handleAddItem} disabled={!!descontoErr || pctDesconto > maxDesconto}
+                      className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium disabled:opacity-40"
+                      style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                      <Plus size={14} /> Confirmar
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
-              <button onClick={() => setAddingItem(true)} disabled={addingItem}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-opacity hover:opacity-80 disabled:opacity-40"
+            {/* Botão adicionar */}
+            {!addingItem && (
+              <button onClick={() => setAddingItem(true)}
+                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed text-xs font-medium transition-colors hover:bg-gray-50"
                 style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
-                <Plus size={14} /> adicionar outro item
+                <Plus size={13} /> Adicionar produto
               </button>
+            )}
 
-              {/* Sub-total */}
-              {itens.length > 0 && (
-                <div className="mt-4 pt-4 border-t flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
-                  <span className="text-sm" style={{ color: "#6B7280" }}>{itens.length} produto{itens.length > 1 ? "s" : ""}</span>
-                  <span className="text-sm font-semibold tabular-nums" style={{ color: C.esmeralda }}>{fmt(totalProdutos)}</span>
-                </div>
-              )}
-            </>
-          )}
-
-          {prodTab === "comissoes" && (
-            <div className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-              <table className="w-full text-sm">
-                <thead style={{ backgroundColor: C.cremeBg }}>
-                  <tr>
-                    {["Nº", "Produto", "SKU", "Qtde", "Preço Total", "% Comissão", "Valor Comissão"].map(h => (
-                      <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {itens.length === 0 ? (
-                    <tr><td colSpan={7} className="px-3 py-8 text-center text-sm" style={{ color: "#9CA3AF" }}>Nenhum produto</td></tr>
-                  ) : itens.map((item, idx) => (
-                    <tr key={item._key} className="border-t" style={{ borderColor: C.cremeBorder }}>
-                      <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
-                      <td className="px-3 py-2.5 max-w-[180px] truncate" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
-                      <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku}</td>
-                      <td className="px-3 py-2.5 text-center" style={{ color: "#374151" }}>{item.quantidade}</td>
-                      <td className="px-3 py-2.5 tabular-nums font-medium" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
-                      <td className="px-3 py-2.5 tabular-nums" style={{ color: "#059669" }}>{item.pct_comissao.toFixed(2)}%</td>
-                      <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: "#059669" }}>{fmt(item.valor_comissao)}</td>
-                    </tr>
-                  ))}
-                  {itens.length > 0 && (
-                    <tr className="border-t" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
-                      <td colSpan={6} className="px-3 py-2.5 text-sm font-semibold text-right" style={{ color: "#374151" }}>Total comissão:</td>
-                      <td className="px-3 py-2.5 tabular-nums font-bold" style={{ color: "#059669" }}>{fmt(totalComissao)}</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Secao>
+            {/* Totais */}
+            {itens.length > 0 && (
+              <div className="pt-2 space-y-1 border-t" style={{ borderColor: C.cremeBorder }}>
+                {[
+                  { label: "Produtos",  value: totalProdutos, show: true },
+                  { label: "Desconto",  value: -totalDesconto, show: totalDesconto > 0 },
+                  { label: "Frete",     value: totalFrete,     show: totalFrete > 0 },
+                  { label: "Total",     value: totalVenda,     show: true, bold: true },
+                ].filter(r => r.show).map(r => (
+                  <div key={r.label} className={`flex items-center justify-between text-sm ${r.bold ? "font-semibold" : ""}`}>
+                    <span style={{ color: r.bold ? C.esmeralda : "#6B7280" }}>{r.label}</span>
+                    <span className="tabular-nums" style={{ color: r.bold ? C.esmeralda : "#374151" }}>{fmt(r.value ?? 0)}</span>
+                  </div>
+                ))}
+                {totalComissao > 0 && (
+                  <div className="flex items-center justify-between text-xs pt-1 border-t" style={{ borderColor: C.cremeBorder, color: "#9CA3AF" }}>
+                    <span>Comissão total</span>
+                    <span className="tabular-nums">{fmt(totalComissao)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Section>
 
         {/* ── 4. Pagamento ── */}
-        <Secao>
-          <STitle>Pagamento</STitle>
+        <Section icon={CreditCard} title="Pagamento">
           <p className="text-sm mb-4" style={{ color: "#6B7280" }}>Selecione a forma de recebimento do valor total</p>
 
           {itens.length === 0 ? (
@@ -830,19 +1060,10 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
           </div>
 
           </>)}
-        </Secao>
+        </Section>
 
         {/* ── 5. Transportador e Frete ── */}
-        <Secao>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}>
-              <Truck size={18} style={{ color: C.esmeralda }} />
-            </div>
-            <div>
-              <p className="font-semibold text-base" style={{ color: "#1A1A1A" }}>Transportador e Frete</p>
-              <p className="text-xs" style={{ color: "#6B7280" }}>Forma de Envio</p>
-            </div>
-          </div>
+        <Section icon={Truck} title="Transportador">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <Label>Forma de Envio</Label>
@@ -864,11 +1085,10 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               )}
             </div>
           </div>
-        </Secao>
+        </Section>
 
         {/* ── 6. Dados Adicionais ── */}
-        <Secao>
-          <STitle>Dados Adicionais</STitle>
+        <Section icon={FileText} title="Observações">
           <div className="space-y-4">
             <div>
               <Label>Observações</Label>
@@ -911,32 +1131,35 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               </div>
             )}
           </div>
-        </Secao>
+        </Section>
 
-        {/* ── 7. Footer ── */}
-        <div className="px-6 py-5 flex items-center justify-between gap-3">
-          {saveErr && <p className="text-sm text-red-600">{saveErr}</p>}
+      </div>
+
+      {/* ── Footer fixo (mesmo padrão da tela de detalhe) ── */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-40 px-4 py-3 border-t"
+        style={{ backgroundColor: "#fff", borderColor: C.cremeBorder }}
+      >
+        {saveErr && <p className="text-xs text-red-600 text-center mb-2">{saveErr}</p>}
+        <div className="flex gap-2 max-w-3xl mx-auto">
           <Link href="/vendas"
-            className="px-5 py-2.5 rounded-lg text-sm font-medium border transition-opacity hover:opacity-80"
-            style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
-            Cancelar
+            className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium border"
+            style={{ borderColor: "#FCA5A5", color: "#EF4444" }}>
+            <XCircle size={14} /> Cancelar
           </Link>
-          <div className="flex items-center gap-3">
-            <button onClick={() => submit("rascunho")} disabled={saving}
-              className="px-5 py-2.5 rounded-lg text-sm font-medium border disabled:opacity-40 transition-opacity hover:opacity-80"
-              style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
-              {saving ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null}
-              Salvar
-            </button>
-            <button onClick={() => submit("aprovado")} disabled={saving || itens.length === 0}
-              className="px-6 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
-              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-              {saving ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null}
-              Concluir Venda
-            </button>
-          </div>
+          <button onClick={() => submit("rascunho")} disabled={saving}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium border disabled:opacity-40"
+            style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
+            {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+            Salvar Rascunho
+          </button>
+          <button onClick={() => submit("aprovado")} disabled={saving || itens.length === 0}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium disabled:opacity-50"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+            Concluir Venda
+          </button>
         </div>
-
       </div>
     </div>
   );

@@ -19,7 +19,14 @@ export async function GET(req: NextRequest) {
       cpf_cnpj,
       email,
       telefone,
-      celular
+      celular,
+      endereco,
+      numero,
+      complemento,
+      bairro,
+      municipio,
+      cep,
+      uf
     FROM public.contatos
     WHERE
       nome     ILIKE ${'%' + q + '%'}
