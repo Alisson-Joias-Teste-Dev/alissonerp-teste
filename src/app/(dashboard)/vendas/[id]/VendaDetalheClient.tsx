@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle,
-  Truck, Video, RefreshCw, Share2, Download, Send,
+  Truck, Video, RefreshCw, Share2, Download,
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
 } from "lucide-react";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
@@ -59,11 +59,15 @@ interface Venda {
   situacao: string; forma_envio: string | null; forma_frete: string | null;
   observacoes: string | null; observacoes_internas: string | null;
   video_obs_interna: string | null; tiny_sync_status: string | null;
-  bloqueado: boolean; qtd_itens: number;
+  tiny_pedido_id: string | null; bloqueado: boolean; qtd_itens: number;
+  created_at?: string | null;
   endereco_entrega?: string | null; endereco_entrega_numero?: string | null;
   endereco_entrega_complemento?: string | null; endereco_entrega_bairro?: string | null;
   endereco_entrega_cidade?: string | null; endereco_entrega_cep?: string | null;
   endereco_entrega_uf?: string | null;
+  cliente_endereco?: string | null; cliente_numero?: string | null;
+  cliente_complemento?: string | null; cliente_bairro?: string | null;
+  cliente_municipio?: string | null; cliente_cep?: string | null; cliente_uf?: string | null;
   itens: Array<{
     id: number; produto_id: number; nome_produto: string; sku: string | null;
     quantidade: number; preco_lista: number; pct_desconto: number;
@@ -267,8 +271,6 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
-  const [enviandoTiny, setEnviandoTiny] = useState(false);
-  const [tinyMsg, setTinyMsg] = useState<{ type: "ok" | "erro"; text: string } | null>(null);
 
   // ── Load venda ──────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -333,17 +335,20 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   }, [venda, formaEnvioOpts, formaFreteAll]);
 
   // ── Editability ─────────────────────────────────────────────────────────────
+  const ROLES_EDITAR_APROVADO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "financeiro"];
+  const podeEditarAprovado = ROLES_EDITAR_APROVADO.includes(role);
+
   const edit = useMemo(() => {
     if (!venda || venda.bloqueado || venda.situacao === "cancelado")
       return { full: false, limited: false, metadata: false, readOnly: true };
     if (venda.situacao === "rascunho")
       return { full: true, limited: true, metadata: true, readOnly: false };
     if (venda.situacao === "aprovado")
-      return { full: false, limited: true, metadata: true, readOnly: false };
+      return { full: false, limited: podeEditarAprovado, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
     if (venda.situacao === "enviado")
-      return { full: false, limited: false, metadata: true, readOnly: false };
-    return { full: false, limited: false, metadata: true, readOnly: false };
-  }, [venda]);
+      return { full: false, limited: false, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
+    return { full: false, limited: false, metadata: false, readOnly: true };
+  }, [venda, podeEditarAprovado]);
 
   // ── Derived data ────────────────────────────────────────────────────────────
   const itens: ItemVenda[] = useMemo(() =>
@@ -637,14 +642,27 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
     if (!venda) return;
     setGerandoPdf(true);
     try {
+      // Montar endereço de entrega (preferir entrega, fallback cliente)
+      const endEntrega = venda.endereco_entrega
+        ? [venda.endereco_entrega, venda.endereco_entrega_numero ? `nº ${venda.endereco_entrega_numero}` : null,
+           venda.endereco_entrega_complemento, venda.endereco_entrega_bairro,
+           venda.endereco_entrega_cidade, venda.endereco_entrega_uf,
+           venda.endereco_entrega_cep ? `CEP: ${venda.endereco_entrega_cep}` : null].filter(Boolean).join(", ")
+        : [venda.cliente_endereco, venda.cliente_numero ? `nº ${venda.cliente_numero}` : null,
+           venda.cliente_complemento, venda.cliente_bairro, venda.cliente_municipio, venda.cliente_uf,
+           venda.cliente_cep ? `CEP: ${venda.cliente_cep}` : null].filter(Boolean).join(", ") || undefined;
+
       const dados: OrcamentoPDF = {
         numero_venda: venda.numero_venda,
         cliente_nome: venda.cliente_nome ?? "Sem cliente",
         cliente_email: venda.cliente_email ?? undefined,
         cliente_telefone: venda.cliente_telefone ?? undefined,
         cliente_cpf_cnpj: venda.cliente_cpf_cnpj ?? undefined,
+        vendedor_nome: venda.vendedor_nome ?? undefined,
+        endereco_entrega: endEntrega,
         data_venda: venda.data_venda,
         data_entrega: venda.data_entrega ?? undefined,
+        created_at: venda.created_at ?? undefined,
         total_produtos: venda.total_produtos, total_desconto: venda.total_desconto,
         total_frete: venda.total_frete, total_venda: venda.total_venda,
         forma_envio: venda.forma_envio ?? undefined, observacoes: venda.observacoes ?? undefined,
@@ -653,24 +671,14 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
           preco_lista: i.preco_lista, desconto_pct: i.pct_desconto,
           preco_unitario: i.preco_unitario, total: i.total_item,
         })),
+        pagamentos: venda.pagamentos.map(p => ({
+          forma: p.forma, gateway: p.gateway ?? null,
+          parcelas: p.parcelas, valor: Number(p.valor),
+        })),
       };
-      gerarPDFOrcamento(dados).save(`orcamento-${venda.numero_venda}.pdf`);
+      gerarPDFOrcamento(dados).save(`pedido-${venda.numero_venda}.pdf`);
     } catch { /* silent */ }
     finally { setGerandoPdf(false); }
-  }
-
-  // ── Tiny ────────────────────────────────────────────────────────────────────
-  async function enviarTiny() {
-    if (!venda) return;
-    setEnviandoTiny(true); setTinyMsg(null);
-    try {
-      const res = await fetch(`/api/vendas/${venda.id}/enviar-tiny`, { method: "POST" });
-      const data = await res.json() as { message?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setTinyMsg({ type: "ok", text: data.message ?? "Enviado com sucesso" });
-      await load();
-    } catch (e) { setTinyMsg({ type: "erro", text: e instanceof Error ? e.message : "Erro" }); }
-    finally { setEnviandoTiny(false); setTimeout(() => setTinyMsg(null), 6000); }
   }
 
   // ── Share ───────────────────────────────────────────────────────────────────
@@ -739,13 +747,11 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
   const podeCancelar = isFullAccess && !["cancelado", "concluido"].includes(venda.situacao);
 
-  // Validação para aprovar: cliente + itens + pagamento + envio/frete obrigatórios
+  // Validação para aprovar: cliente + itens + pagamento obrigatórios
   const podeAprovar = !!(
     venda.cliente_id &&
     itens.length > 0 &&
-    venda.pagamentos.length > 0 &&
-    venda.forma_envio &&
-    venda.forma_frete
+    venda.pagamentos.length > 0
   );
 
   return (
@@ -766,6 +772,11 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
               style={{ backgroundColor: situacaoStyle.bg, color: situacaoStyle.text }}>
               {SITUACAO_LABEL[venda.situacao] ?? venda.situacao}
             </span>
+            {venda.tiny_pedido_id && (
+              <span className="text-xs px-2.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: "#DBEAFE", color: "#1E40AF" }}>
+                Tiny #{venda.tiny_pedido_id}
+              </span>
+            )}
             {venda.bloqueado && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Bloqueada</span>
             )}
@@ -777,14 +788,6 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
             style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
             {gerandoPdf ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} PDF
           </button>
-          {isFullAccess && (
-            <button onClick={enviarTiny} disabled={enviandoTiny}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 hover:bg-gray-50"
-              style={{ borderColor: venda.tiny_sync_status === "sincronizado" ? "#86EFAC" : C.cremeBorder, color: venda.tiny_sync_status === "erro" ? "#EF4444" : C.esmeralda }}>
-              {enviandoTiny ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-              {venda.tiny_sync_status === "sincronizado" ? "Reenviar Tiny" : "Enviar Tiny"}
-            </button>
-          )}
           <button onClick={compartilhar} disabled={sharing}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 hover:bg-gray-50"
             style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
@@ -798,11 +801,18 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
         </div>
       </div>
 
-      {/* Tiny toast */}
-      {tinyMsg && (
-        <div className="mb-3 px-3 py-2 rounded-lg text-xs font-medium text-center"
-          style={{ backgroundColor: tinyMsg.type === "ok" ? "#D1FAE5" : "#FEE2E2", color: tinyMsg.type === "ok" ? "#065F46" : "#991B1B" }}>
-          {tinyMsg.text}
+      {/* ── Banner de erro (Tiny, status, etc.) ── */}
+      {saveErr && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-start gap-2"
+          style={{ backgroundColor: "#FEF2F2", borderColor: "#FECACA", color: "#991B1B" }}>
+          <XCircle size={16} className="shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium">Erro ao processar</p>
+            <p className="text-xs mt-0.5">{saveErr}</p>
+          </div>
+          <button onClick={() => setSaveErr("")} className="shrink-0 p-0.5 hover:opacity-70">
+            <X size={14} />
+          </button>
         </div>
       )}
 
@@ -1502,8 +1512,6 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                       {!venda.cliente_id && <p className="text-red-500">• Cliente</p>}
                       {itens.length === 0 && <p className="text-red-500">• Produtos</p>}
                       {venda.pagamentos.length === 0 && <p className="text-red-500">• Pagamento</p>}
-                      {!venda.forma_envio && <p className="text-red-500">• Forma de Envio</p>}
-                      {!venda.forma_frete && <p className="text-red-500">• Forma de Frete</p>}
                     </div>
                   )}
                 </div>

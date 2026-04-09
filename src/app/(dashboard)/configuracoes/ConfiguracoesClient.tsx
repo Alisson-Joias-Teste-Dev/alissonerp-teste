@@ -3014,6 +3014,8 @@ function TabIntegracoes() {
   const [loading, setLoading] = useState(true);
   const [wooConfigured, setWooConfigured] = useState(false);
   const [kommoConfigured, setKommoConfigured] = useState(false);
+  const [tinyConfigured, setTinyConfigured] = useState(false);
+  const [tinyHasCredentials, setTinyHasCredentials] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
 
@@ -3029,6 +3031,11 @@ function TabIntegracoes() {
   const [kommoToken, setKommoToken] = useState("");
   const [showKommoToken, setShowKommoToken] = useState(false);
 
+  // Tiny ERP fields
+  const [tinyClientId, setTinyClientId] = useState("");
+  const [tinyClientSecret, setTinyClientSecret] = useState("");
+  const [showTinySecret, setShowTinySecret] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
@@ -3037,6 +3044,7 @@ function TabIntegracoes() {
           const data = await res.json();
           setWooConfigured(data.woo_configured);
           setKommoConfigured(data.kommo_configured);
+          setTinyConfigured(data.tiny_configured);
         }
       } catch { /* silenciar */ }
       setLoading(false);
@@ -3064,7 +3072,7 @@ function TabIntegracoes() {
       setMsg({ tipo: "ok", texto: "WooCommerce salvo com sucesso" });
       // Re-fetch status real do servidor (não usar optimistic update)
       fetch("/api/configuracoes/integracoes").then(r => r.ok ? r.json() : null).then(d => {
-        if (d) { setWooConfigured(d.woo_configured); setKommoConfigured(d.kommo_configured); }
+        if (d) { setWooConfigured(d.woo_configured); setKommoConfigured(d.kommo_configured); setTinyConfigured(d.tiny_configured); setTinyHasCredentials(d.tiny_has_credentials ?? false); }
       }).catch(() => {});
     } else {
       const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
@@ -3092,7 +3100,7 @@ function TabIntegracoes() {
       setMsg({ tipo: "ok", texto: "Kommo salvo com sucesso" });
       // Re-fetch status real
       fetch("/api/configuracoes/integracoes").then(r => r.ok ? r.json() : null).then(d => {
-        if (d) { setWooConfigured(d.woo_configured); setKommoConfigured(d.kommo_configured); }
+        if (d) { setWooConfigured(d.woo_configured); setKommoConfigured(d.kommo_configured); setTinyConfigured(d.tiny_configured); setTinyHasCredentials(d.tiny_has_credentials ?? false); }
       }).catch(() => {});
     } else {
       const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
@@ -3230,6 +3238,109 @@ function TabIntegracoes() {
         >
           <Save size={13} /> Salvar Kommo
         </button>
+      </div>
+
+      {/* Tiny ERP (Olist) — OAuth2 */}
+      <div
+        className="rounded-xl p-5 space-y-4"
+        style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: P.creme }}>Tiny ERP (Olist)</p>
+            <p className="text-xs" style={{ color: P.muted }}>Envio automático de pedidos ao aprovar venda</p>
+          </div>
+          <StatusBadge ok={tinyConfigured} />
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>URL de Redirecionamento (copie e cadastre no Tiny)</label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              readOnly
+              value={`${typeof window !== "undefined" ? window.location.origin : "https://erp.alisson.api.br"}/api/integracoes/tiny/callback`}
+              className="flex-1 bg-transparent px-3 py-2.5 text-xs outline-none select-all"
+              style={{ color: P.sage }}
+              onClick={e => (e.target as HTMLInputElement).select()}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>Client ID</label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              type="text"
+              value={tinyClientId}
+              onChange={(e) => setTinyClientId(e.target.value)}
+              placeholder="Client ID do app Tiny"
+              className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+              style={{ color: P.creme }}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>Client Secret</label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              type={showTinySecret ? "text" : "password"}
+              value={tinyClientSecret}
+              onChange={(e) => setTinyClientSecret(e.target.value)}
+              placeholder="Client Secret do app Tiny"
+              className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+              style={{ color: P.creme }}
+            />
+            <button onClick={() => setShowTinySecret(!showTinySecret)} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+              {showTinySecret ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={async () => {
+              if (!tinyClientId.trim() || !tinyClientSecret.trim()) return;
+              setSaving(true); setMsg(null);
+              const res = await fetch("/api/configuracoes/integracoes", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ tiny_client_id: tinyClientId.trim(), tiny_client_secret: tinyClientSecret.trim() }),
+              });
+              setSaving(false);
+              if (res.ok) {
+                setTinyClientId(""); setTinyClientSecret("");
+                setTinyHasCredentials(true);
+                setMsg({ tipo: "ok", texto: "Credenciais Tiny salvas. Clique em 'Conectar ao Tiny' para autorizar." });
+              } else {
+                const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+                setMsg({ tipo: "erro", texto: d.error ?? "Erro ao salvar" });
+              }
+              setTimeout(() => setMsg(null), 6000);
+            }}
+            disabled={saving || !tinyClientId.trim() || !tinyClientSecret.trim()}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+            style={{ backgroundColor: P.verde, color: "#fff" }}
+          >
+            <Save size={13} /> Salvar Credenciais
+          </button>
+
+          {tinyHasCredentials && (
+            <a
+              href="/api/integracoes/tiny/auth"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90 no-underline"
+              style={{ backgroundColor: tinyConfigured ? P.sage : "#2563EB", color: "#fff" }}
+            >
+              {tinyConfigured ? "Reconectar Tiny" : "Conectar ao Tiny"}
+            </a>
+          )}
+        </div>
+
+        {tinyConfigured && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
+            <CheckCircle size={12} /> Conexão ativa com o Tiny ERP
+          </p>
+        )}
       </div>
     </div>
   );

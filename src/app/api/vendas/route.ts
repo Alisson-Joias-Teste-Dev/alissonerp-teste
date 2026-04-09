@@ -159,11 +159,19 @@ export async function POST(req: NextRequest) {
       RETURNING id
     `;
 
-    // 2. Atualizar numero_venda com o id gerado: V-00001
-    // NOTA: LPAD(5) suporta até 99999 vendas. Após isso, o formato V-XXXXX será V-XXXXXX (sem truncar).
+    // 2. Gerar numero_venda seguindo a sequência do public.vendas (ex: 14791)
+    const [{ proximo }] = await tx`
+      SELECT COALESCE(
+        GREATEST(
+          (SELECT MAX(numero_pedido) + 1 FROM public.vendas),
+          (SELECT MAX(numero_venda::bigint) + 1 FROM alissonerp.vendas_erp WHERE numero_venda ~ '^[0-9]+$')
+        ),
+        1
+      ) AS proximo
+    `;
     await tx`
       UPDATE alissonerp.vendas_erp
-      SET numero_venda = 'V-' || LPAD(${venda.id}::text, 5, '0')
+      SET numero_venda = ${String(proximo)}
       WHERE id = ${venda.id}
     `;
 
