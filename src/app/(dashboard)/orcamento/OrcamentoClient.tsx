@@ -95,8 +95,21 @@ export default function OrcamentoClient({
   // Preços de pedras editáveis na tela de config (USD/ct por tipo).
   // Mescla defaults com valores persistidos em config_orcamento.stone_prices
   // pra garantir que todos os tipos (incluindo zircônia nova) apareçam no editor.
+  // Blindagem: stone_prices pode vir como string (JSONB escalar legado) ou
+  // como array/objeto quebrado — filtramos entries invalidas.
   const [stonePricesLocal, setStonePricesLocal] = useState<StonePrice[]>(() => {
-    const persisted = config?.stone_prices ?? [];
+    let persisted: StonePrice[] = [];
+    const raw = config?.stone_prices as unknown;
+    if (Array.isArray(raw)) {
+      persisted = raw.filter((p): p is StonePrice => !!p && typeof p === "object" && "tipo" in p && "preco_usd_ct" in p);
+    } else if (typeof raw === "string") {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          persisted = parsed.filter((p): p is StonePrice => !!p && typeof p === "object" && "tipo" in p && "preco_usd_ct" in p);
+        }
+      } catch { /* ignora, cai nos defaults */ }
+    }
     return DEFAULT_STONE_PRICES.map((def) => {
       const found = persisted.find((p) => p.tipo === def.tipo);
       return found ?? def;
@@ -334,7 +347,21 @@ export default function OrcamentoClient({
   }, [params.width, grooveRules]);
 
   // Calibracao vinda do config (com fallback para defaults conservadores)
-  const calibracao = config?.calibracao ?? CALIBRACAO_DEFAULTS;
+  // Calibracao pode vir como objeto ou como string (caso legado do bug JSONB
+  // escalar). Se for string, parseia; se for invalido, cai nos defaults.
+  const calibracao = useMemo(() => {
+    const raw = config?.calibracao;
+    if (!raw) return CALIBRACAO_DEFAULTS;
+    if (typeof raw === "string") {
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" && parsed.espessura_min ? parsed : CALIBRACAO_DEFAULTS;
+      } catch {
+        return CALIBRACAO_DEFAULTS;
+      }
+    }
+    return raw.espessura_min ? raw : CALIBRACAO_DEFAULTS;
+  }, [config?.calibracao]);
 
   // Auto-ajusta espessura/altura do canal pra respeitar a espessura mínima
   // obrigatória quando há pedras (anel 1)

@@ -39,16 +39,20 @@ export async function POST(req: NextRequest) {
     calibracao,
   } = body;
 
+  // IMPORTANTE: usar sql.json() em vez de JSON.stringify+::jsonb.
+  // O padrao antigo salvava JSONB como escalar string ("[\"...\"]") em vez de
+  // array nativo, quebrando operacoes @>, ||, jsonb_array_length. Com sql.json()
+  // o postgres.js serializa como JSONB nativo.
   const [updated] = await sql`
     UPDATE alissonerp.config_orcamento SET
       start_mkp = COALESCE(${start_mkp ?? null}::numeric, start_mkp),
       discount_percent = COALESCE(${discount_percent ?? null}::numeric, discount_percent),
       profile = COALESCE(${profile ?? null}, profile),
-      pricing_categories = COALESCE(${JSON.stringify(pricing_categories ?? null)}::jsonb, pricing_categories),
-      groove_rules = COALESCE(${JSON.stringify(groove_rules ?? null)}::jsonb, groove_rules),
+      pricing_categories = COALESCE(${pricing_categories != null ? sql.json(pricing_categories) : null}, pricing_categories),
+      groove_rules = COALESCE(${groove_rules != null ? sql.json(groove_rules) : null}, groove_rules),
       stone_markup = COALESCE(${stone_markup ?? null}::numeric, stone_markup),
-      stone_prices = COALESCE(${JSON.stringify(stone_prices ?? null)}::jsonb, stone_prices),
-      calibracao = COALESCE(${calibracao ? JSON.stringify(calibracao) : null}::jsonb, calibracao),
+      stone_prices = COALESCE(${stone_prices != null ? sql.json(stone_prices) : null}, stone_prices),
+      calibracao = COALESCE(${calibracao != null ? sql.json(calibracao) : null}, calibracao),
       updated_at = now(),
       updated_by = ${user.id}::uuid
     WHERE name = 'default'
