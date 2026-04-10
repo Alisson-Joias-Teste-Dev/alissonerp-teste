@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { validateFichaTecnica, CALIBRACAO_DEFAULTS, type CalibracaoDefaults } from "@/app/(dashboard)/orcamento/validations";
+import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
+import { ProfileType } from "@/app/(dashboard)/orcamento/types";
 
 const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "consultora"] as const;
 
@@ -215,6 +218,38 @@ export async function PUT(
     nome_cliente, nome_modelo, peso, valor, markup, desconto_pct,
     cotacao_ouro, tipo, ficha, ficha2, quantidade, cliente_id, foto_3d_base64,
   } = body;
+
+  // ── Validação de travas (bilateral: frontend + backend) ─────────────────
+  // Re-valida ficha técnica no PUT também. O PATCH (aprovação) é intocado.
+  if ((tipo ?? "alianca") === "alianca") {
+    const [configRow] = await sql`
+      SELECT calibracao FROM alissonerp.config_orcamento WHERE name = 'default' LIMIT 1
+    `;
+    const calib: CalibracaoDefaults = (configRow?.calibracao as CalibracaoDefaults) ?? CALIBRACAO_DEFAULTS;
+
+    const fichasParaValidar: Array<{ f: Record<string, unknown>; label: string }> = [];
+    if (ficha && typeof ficha === "object") fichasParaValidar.push({ f: ficha, label: "alianca" });
+    if (ficha2 && typeof ficha2 === "object" && quantidade === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
+
+    for (const { f, label } of fichasParaValidar) {
+      const profile = (f.perfil as ProfileType) ?? ProfileType.Simples;
+      const capacity = computeStoneCapacity(
+        Number(f.diametro ?? 0),
+        Number(f.espessura ?? 0),
+        Number(f.canal_borda_altura ?? 1.0),
+        Number(f.tamanho_pedra ?? 0),
+        Number(f.pedra_fileiras ?? 1),
+        profile,
+      );
+      const errors = validateFichaTecnica(f, capacity, calib);
+      if (errors.length > 0) {
+        return NextResponse.json(
+          { error: `Validacao falhou (${label}): ${errors[0].message}`, errors },
+          { status: 400 },
+        );
+      }
+    }
+  }
 
   // Upload foto 3D se enviada
   let foto3dUrl: string | undefined;

@@ -1,5 +1,7 @@
 // ── Tipos do Módulo de Orçamento ─────────────────────────────────────────────
 
+import type { CalibracaoDefaults } from "./validations";
+
 export enum ProfileType {
   Concava = "Concava",
   FrisoUnico = "FrisoUnico",
@@ -91,6 +93,8 @@ export interface ConfigOrcamento {
   groove_rules: GrooveRule[];
   stone_markup: number;
   stone_prices: StonePrice[];
+  /** Parâmetros de validação configuráveis (migration 132). Opcional pra compat. */
+  calibracao?: CalibracaoDefaults;
 }
 
 export interface Orcamento {
@@ -117,7 +121,7 @@ export interface Orcamento {
 
 // ── Pedras Preciosas ────────────────────────────────────────────────────────
 
-export type StoneType = "diamante" | "moissanita" | "rubi" | "esmeralda" | "safira";
+export type StoneType = "diamante" | "moissanita" | "rubi" | "esmeralda" | "safira" | "zirconia";
 
 export type StoneCut = "brilhante" | "gota" | "oval" | "princesa" | "esmeralda_cut" | "marques";
 

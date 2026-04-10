@@ -1,8 +1,32 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 09/04/2026 — Versão: v2.19.62 <!-- Revisado 09/04/2026 -->
+> 📋 Última atualização automática: 10/04/2026 — Versão: v2.19.66 <!-- Revisado 10/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.19.66 (10/04/2026)
+### Features — Orçamento: travas de validação + zircônia + preços de pedras configuráveis
+- **Travas físicas** no editor de aliança baseadas na pedra escolhida:
+  - Espessura mínima automática = `pedra × 0.60 + 0.50` (sliders travados)
+  - Largura mínima por tipo de cravação (canaleta/grão/pavê)
+  - Fileiras máximas no QuadradoCanal calculadas pelo canalWidth/pedra
+  - Capacidade total de pedras validada contra circunferência da aliança
+- **Zircônia** como novo tipo de pedra (não preciosa, preço = 0): `STONE_TYPES` ganha flag `is_preciosa`; `computeStoneEntryPrice` zera o valor quando não é preciosa; default ao adicionar entry = zircônia (opção segura, não cobra por engano)
+- **Card "Detalhamento (Preciosa/Zircônia)"** no modo aliança permite misturar tipos (ex: 4 diamantes + 10 zircônias) respeitando a capacidade
+- **Card "Preços de Pedras (USD/ct)"** na tela de Configurações — editor completo com preview ao vivo (exemplos 1,5mm e 3mm), botão Padrão restaura valores de mercado 2025 ($600 diamante, $80 moissanita, $350 rubi, $450 esmeralda, $300 safira, $0 zircônia)
+- **Validação bilateral frontend + backend** (POST e PUT) — não dá pra burlar nem via cURL
+- **Calibração configurável** via `config_orcamento.calibracao` (JSONB): espessura mínima, largura por cravação, folga entre pedras — editável via SQL direto se necessário
+- Barra de resultado inferior exibe **Pills "Ouro" e "Pedras"** quando há pedras preciosas, com breakdown visível
+- Correção de formatação BRL (antes `R$ 23.215,081` com 3 casas erradas, agora `R$ 23.215,08` sempre 2 casas)
+- Eliminação da duplicidade do `PROFILE_CORRECTION_FACTOR` (antes divergia entre switch inline e Record exportado — agora fonte única)
+
+### Migrations
+- `132_orcamento_validacao_zirconia.sql` — coluna `calibracao` JSONB em `config_orcamento` com defaults conservadores + inclusão de zircônia em `stone_prices` com preco_usd_ct = 0
+
+### O que NÃO foi tocado (garantia anti-quebra)
+- ✋ Editor 3D (`AliancaViewport.tsx`) — zero alteração
+- ✋ PATCH de aprovação de orçamento → venda → ordem
+- ✋ Densidades do ouro, tabela `RING_SIZES`, fórmula base de `computeWeight`
 
 ## v2.19.62 (09/04/2026)
 ### Merge + Integração

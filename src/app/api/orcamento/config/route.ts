@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
     start_mkp, discount_percent, profile,
     pricing_categories, groove_rules,
     stone_markup, stone_prices,
+    calibracao,
   } = body;
 
   const [updated] = await sql`
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
       groove_rules = COALESCE(${JSON.stringify(groove_rules ?? null)}::jsonb, groove_rules),
       stone_markup = COALESCE(${stone_markup ?? null}::numeric, stone_markup),
       stone_prices = COALESCE(${JSON.stringify(stone_prices ?? null)}::jsonb, stone_prices),
+      calibracao = COALESCE(${calibracao ? JSON.stringify(calibracao) : null}::jsonb, calibracao),
       updated_at = now(),
       updated_by = ${user.id}::uuid
     WHERE name = 'default'
