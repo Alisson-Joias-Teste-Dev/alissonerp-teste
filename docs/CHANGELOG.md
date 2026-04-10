@@ -1,8 +1,15 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 10/04/2026 — Versão: v2.19.68 <!-- Revisado 10/04/2026 -->
+> 📋 Última atualização automática: 10/04/2026 — Versão: v2.19.69 <!-- Revisado 10/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.19.69 (10/04/2026)
+### Fix — Coluna "PEDIDO PDV" vazia na listagem de ordens
+- **Bug raiz:** os INSERTs em `alissonerp.ordens` gravavam `venda_id` (FK) mas **esqueciam** de copiar o `numero_venda` pra coluna `numero_pedido`. Consequência: coluna "PEDIDO PDV" na listagem de ordens aparecia `—` pra todas as ordens criadas, dificultando rastreabilidade.
+- **Fix 1 (`api/vendas/[id]/route.ts`):** quando venda aprovada vira ordem, agora busca `v.numero_venda` no SELECT e passa como `numero_pedido` no INSERT.
+- **Fix 2 (`api/ordens/route.ts`):** endpoint POST de criação manual de ordens agora busca o `numero_venda` da `vendas_erp` quando `venda_id` é informado e grava em `numero_pedido`.
+- **Backfill:** script `scripts/backfill_ordens_numero_pedido.mjs` executado no banco — preencheu **64 ordens** existentes com seus respectivos `numero_venda`. Restante (0) ordens com `venda_id` sem `numero_pedido`.
 
 ## v2.19.68 (10/04/2026)
 ### Fix crítico — Tiny OAuth2: refresh_token nunca era salvo

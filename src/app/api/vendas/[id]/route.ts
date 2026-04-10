@@ -509,6 +509,7 @@ export async function PATCH(
   if (body.situacao === "aprovado" || body.situacao === "concluido") {
     const [vendaOrc] = await sql`
       SELECT v.orcamento_id, v.cliente_id, v.vendedor_id, v.data_entrega,
+             v.numero_venda,
              o.id AS orc_id, o.tipo, o.peso, o.numero_orcamento, o.nome_modelo,
              o.foto_3d, o.ficha_tecnica_id, o.ficha_tecnica_2_id, o.quantidade,
              ft.perfil, ft.modelo, ft.aro_numeracao, ft.largura, ft.espessura,
@@ -538,19 +539,21 @@ export async function PATCH(
         const pesoItem1 = Number(vendaOrc.peso_estimado ?? vendaOrc.peso ?? 0);
         const pesoNeg = Number(vendaOrc.peso ?? vendaOrc.peso_estimado ?? 0);
 
-        // Criar ordem
+        // Criar ordem — inclui numero_pedido pra aparecer na coluna "PEDIDO PDV"
         const [ordem] = await tx`
           INSERT INTO alissonerp.ordens (
             numero_ordem, tipo_ordem, situacao, status, rota,
             cliente_id, vendedor_id, peso_metal_negociado,
-            data_entrega, detalhes_ordem, foto_peca_servico, venda_id, created_at
+            data_entrega, detalhes_ordem, foto_peca_servico, venda_id,
+            numero_pedido, created_at
           ) VALUES (
             ${numeroOrdem}, 'fabricacao'::alissonerp.enum_tipo_ordem,
             'criado', 'aguardando', 'pcp',
             ${vendaOrc.cliente_id}, ${vendaOrc.vendedor_id},
             ${pesoNeg}, ${vendaOrc.data_entrega},
             ${'Venda V-' + String(vendaId).padStart(5, '0') + ' / Orçamento ' + vendaOrc.numero_orcamento + (isPar ? ' (Par)' : '')},
-            ${vendaOrc.foto_3d ?? null}, ${vendaId}, NOW()
+            ${vendaOrc.foto_3d ?? null}, ${vendaId},
+            ${vendaOrc.numero_venda ?? null}, NOW()
           ) RETURNING id, numero_ordem
         `;
         ordemCriada = { id: ordem.id, numero_ordem: ordem.numero_ordem };
