@@ -1,8 +1,26 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 10/04/2026 — Versão: v2.19.66 <!-- Revisado 10/04/2026 -->
+> 📋 Última atualização automática: 10/04/2026 — Versão: v2.19.68 <!-- Revisado 10/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.19.68 (10/04/2026)
+### Fix crítico — Tiny OAuth2: refresh_token nunca era salvo
+- **Bug raiz:** `api/integracoes/tiny/callback/route.ts` tentava `INSERT INTO configuracoes_secrets (chave, valor)` mas a coluna chama `valor_encrypted`. Erro capturado silenciosamente no try/catch. Consequência: `tiny_refresh_token` e `tiny_token_expires_at` **nunca ficavam no banco** — só o `tiny_bearer_token` (que usa a coluna correta). Por isso o token expirava em 1h e o sistema caía no fallback `client_credentials`, mostrando "Token do Tiny expirado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'" em loop.
+- **Fix 1:** corrigido callback (2 ocorrências) pra usar `valor_encrypted`.
+- **Fix 2:** adicionada **validação proativa de expiração** em `api/vendas/[id]/route.ts`: antes de enviar pro Tiny, checa se o token expira em < 2 minutos e renova preventivamente — evita o ciclo reativo de 401.
+- **Fix 3:** `refreshTinyToken()` agora também persiste `expires_in` como `tiny_token_expires_at` após renovar, pra alimentar a validação proativa.
+- **Fix 4:** logs de erro detalhados em `refreshTinyToken()` pra facilitar debug futuro (antes engolia erros silenciosamente).
+- **Ação necessária:** depois do deploy, reconectar o Tiny **1 vez** em Configurações > Integrações > "Conectar ao Tiny". A partir daí o refresh automático funciona sozinho indefinidamente.
+
+## v2.19.67 (10/04/2026)
+### Fix crítico — JSONB escalar em config_orcamento
+- **Hotfix do v2.19.66:** padrão `${JSON.stringify(obj)}::jsonb` no postgres.js estava salvando arrays como JSONB escalar string (double-encoded) em vez de array nativo, quebrando operações `@>`, `||`, `jsonb_array_length`. Corrigido em `api/orcamento/config/route.ts` (pricing_categories, groove_rules, stone_prices, calibracao) e `api/orcamento/route.ts` (pedras_detalhadas × 2) usando `sql.json()` — serializa JSONB nativo corretamente
+- **Blindagem de leitura no frontend:** `OrcamentoClient.tsx` agora aceita `config.calibracao` e `config.stone_prices` como objeto OU string (fallback resiliente para dados legados do bug)
+- **Migration 132 executada no banco:** script `scripts/apply_132.mjs` adicionou coluna `calibracao` JSONB + inseriu zircônia em `stone_prices`. Script `scripts/fix_132_stone_prices_v2.mjs` corrigiu `stone_prices` corrompido (elemento `"null"` lixo + double-encoding), reescrevendo com valores de mercado 2025 via `sql.json()`
+
+### Conhecido (bug sistêmico pré-existente)
+- Outros endpoints ainda usam o padrão bugado `${JSON.stringify(x)}::jsonb`: `api/vendas/[id]/route.ts` (3 pontos), `api/user/[id]/route.ts` (2), `api/service/[id]/concluir/route.ts`, `api/fichas-tecnicas/route.ts`, `api/purificacao/route.ts`, `api/ordens/route.ts`. Funcionam parcialmente graças ao helper `normalizeRow` que parseia strings na leitura, mas operações JSONB nativas nesses campos vão falhar. **Não corrigido neste hotfix** (fora de escopo — requer revisão de cada feature afetada).
 
 ## v2.19.66 (10/04/2026)
 ### Features — Orçamento: travas de validação + zircônia + preços de pedras configuráveis

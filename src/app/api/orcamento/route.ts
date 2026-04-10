@@ -147,7 +147,7 @@ export async function POST(req: NextRequest) {
         ${ficha.chanfro_tamanho ?? null}, ${ficha.dome_porcentagem ?? null},
         ${ficha.pedra_fileiras ?? null}, ${ficha.pedra_drill ?? false},
         ${ficha.pedra_meia_lua ?? false}, ${ficha.pedra_volta_completa ?? false},
-        ${JSON.stringify(ficha.pedras_detalhadas ?? [])}::jsonb
+        ${sql.json(ficha.pedras_detalhadas ?? [])}
       ) RETURNING id
     `;
     fichaId = fichaRow.id as number;
@@ -180,7 +180,7 @@ export async function POST(req: NextRequest) {
         ${ficha2.chanfro_tamanho ?? null}, ${ficha2.dome_porcentagem ?? null},
         ${ficha2.pedra_fileiras ?? null}, ${ficha2.pedra_drill ?? false},
         ${ficha2.pedra_meia_lua ?? false}, ${ficha2.pedra_volta_completa ?? false},
-        ${JSON.stringify(ficha2.pedras_detalhadas ?? [])}::jsonb
+        ${sql.json(ficha2.pedras_detalhadas ?? [])}
       ) RETURNING id
     `;
     ficha2Id = fichaRow2.id as number;

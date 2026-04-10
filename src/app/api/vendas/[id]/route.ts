@@ -311,16 +311,47 @@ export async function PATCH(
             method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body, signal: AbortSignal.timeout(10000),
           });
-          if (!res.ok) continue;
-          const tokens = await res.json() as { access_token: string; refresh_token?: string };
+          if (!res.ok) {
+            const errText = await res.text().catch(() => "");
+            console.error(`[Tiny refresh] ${body.get("grant_type")} falhou: ${res.status} ${errText.slice(0, 200)}`);
+            continue;
+          }
+          const tokens = await res.json() as { access_token: string; refresh_token?: string; expires_in?: number };
           await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_bearer_token', ${JSON.stringify(tokens.access_token)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(tokens.access_token)}`;
           if (tokens.refresh_token) {
             await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_refresh_token', ${JSON.stringify(tokens.refresh_token)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(tokens.refresh_token)}`;
           }
+          // Persiste expires_at pra validacao proativa futura
+          if (tokens.expires_in) {
+            const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+            await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_token_expires_at', ${JSON.stringify(expiresAt)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(expiresAt)}`;
+          }
+          console.log(`[Tiny refresh] sucesso via ${body.get("grant_type")}`);
           return tokens.access_token;
-        } catch { continue; }
+        } catch (e) {
+          console.error(`[Tiny refresh] erro de rede: ${e instanceof Error ? e.message : String(e)}`);
+          continue;
+        }
       }
       return null;
+    }
+
+    // Verificacao proativa: se o token ja expirou (ou expira em < 2 minutos),
+    // renova ANTES de enviar, evitando o 401 reativo.
+    const [expiresRow] = await sql`
+      SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_token_expires_at'
+    `;
+    if (expiresRow?.valor_encrypted) {
+      let expiresAtIso: string;
+      try { expiresAtIso = JSON.parse(expiresRow.valor_encrypted); } catch { expiresAtIso = String(expiresRow.valor_encrypted); }
+      expiresAtIso = expiresAtIso.replace(/"/g, "").trim();
+      const expiresAt = new Date(expiresAtIso);
+      const bufferMs = 2 * 60 * 1000; // 2 minutos de folga
+      if (!isNaN(expiresAt.getTime()) && expiresAt.getTime() - Date.now() < bufferMs) {
+        console.log(`[Tiny] Token expira em ${Math.round((expiresAt.getTime() - Date.now()) / 1000)}s — renovando proativamente`);
+        const newToken = await refreshTinyToken();
+        if (newToken) tinyToken = newToken;
+      }
     }
 
     // Enviar para Tiny (com retry após refresh se 401)
