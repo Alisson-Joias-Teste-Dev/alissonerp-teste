@@ -75,9 +75,11 @@ export async function GET(req: NextRequest) {
       ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(tokens.access_token)}
     `;
 
+    // BUG FIX: antes usava coluna (chave, valor) que nao existe, fazendo o
+    // refresh_token nunca ser salvo. Agora usa (chave, valor_encrypted).
     if (tokens.refresh_token) {
       await sql`
-        INSERT INTO alissonerp.configuracoes_secrets (chave, valor)
+        INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted)
         VALUES ('tiny_refresh_token', ${JSON.stringify(tokens.refresh_token)})
         ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(tokens.refresh_token)}
       `;
@@ -85,7 +87,7 @@ export async function GET(req: NextRequest) {
 
     if (expiresAt) {
       await sql`
-        INSERT INTO alissonerp.configuracoes_secrets (chave, valor)
+        INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted)
         VALUES ('tiny_token_expires_at', ${JSON.stringify(expiresAt)})
         ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(expiresAt)}
       `;
