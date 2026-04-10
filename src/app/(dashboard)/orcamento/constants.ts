@@ -25,17 +25,20 @@ export const RING_SIZES: RingSize[] = [
 ];
 
 // ── Fator de correção por perfil ────────────────────────────────────────────
+// ⚠️ FONTE ÚNICA DA VERDADE — consumido por computeWeight().
+// Valores alinhados com o switch empírico que era usado historicamente.
+// NÃO duplicar em switches isolados — sempre ler deste Record.
 
 export const PROFILE_CORRECTION_FACTOR: Record<ProfileType, number> = {
-  [ProfileType.Concava]: 0.82,
-  [ProfileType.FrisoUnico]: 0.88,
-  [ProfileType.FrisoLateral]: 0.9,
+  [ProfileType.Concava]:       0.82,
+  [ProfileType.FrisoUnico]:    0.88,
+  [ProfileType.FrisoLateral]:  0.90,
   [ProfileType.QuadradoCanal]: 0.95,
-  [ProfileType.Boleada]: 0.85,
-  [ProfileType.BoleadaDouble]: 0.87,
-  [ProfileType.Simples]: 0.92,
-  [ProfileType.Chanfrada]: 0.9,
-  [ProfileType.Anatomica]: 0.93,
+  [ProfileType.Boleada]:       0.85,
+  [ProfileType.BoleadaDouble]: 0.78,
+  [ProfileType.Simples]:       1.00,
+  [ProfileType.Chanfrada]:     0.88,
+  [ProfileType.Anatomica]:     0.88,
 };
 
 // ── Categorias de preço (default) ───────────────────────────────────────────
@@ -147,19 +150,8 @@ export function computeWeight(
   const rOut = rIn + params.height;
   const baseVolume = Math.PI * (rOut ** 2 - rIn ** 2) * params.width;
 
-  const factor = (() => {
-    switch (profile) {
-      case ProfileType.Concava: return 0.82;
-      case ProfileType.Chanfrada: return 0.88;
-      case ProfileType.Boleada: return 0.85;
-      case ProfileType.Anatomica: return 0.88;
-      case ProfileType.BoleadaDouble: return 0.78;
-      case ProfileType.FrisoLateral: return 0.9;
-      case ProfileType.FrisoUnico: return 0.88;
-      case ProfileType.Simples: return 1.0;
-      default: return PROFILE_CORRECTION_FACTOR[profile] ?? 1.0;
-    }
-  })();
+  // Fonte única da verdade: PROFILE_CORRECTION_FACTOR
+  const factor = PROFILE_CORRECTION_FACTOR[profile] ?? 1.0;
 
   const grooveLoss = params.grooveDepth * params.grooveWidth * params.width * 0.7;
   const canalLoss =
@@ -221,13 +213,19 @@ export function computePricing(
 
 // ── Pedras Preciosas ────────────────────────────────────────────────────────
 
-export const STONE_TYPES: { value: StoneType; label: string }[] = [
-  { value: "diamante", label: "Diamante Natural" },
-  { value: "moissanita", label: "Moissanita" },
-  { value: "rubi", label: "Rubi" },
-  { value: "esmeralda", label: "Esmeralda" },
-  { value: "safira", label: "Safira" },
+export const STONE_TYPES: { value: StoneType; label: string; is_preciosa: boolean }[] = [
+  { value: "diamante",   label: "Diamante Natural", is_preciosa: true  },
+  { value: "moissanita", label: "Moissanita",        is_preciosa: true  },
+  { value: "rubi",       label: "Rubi",              is_preciosa: true  },
+  { value: "esmeralda",  label: "Esmeralda",         is_preciosa: true  },
+  { value: "safira",     label: "Safira",            is_preciosa: true  },
+  { value: "zirconia",   label: "Zirconia",          is_preciosa: false },
 ];
+
+/** Retorna true se o tipo de pedra entra no cálculo de preço (preciosa). */
+export function isPedraPreciosa(tipo: StoneType): boolean {
+  return STONE_TYPES.find((t) => t.value === tipo)?.is_preciosa ?? false;
+}
 
 export const STONE_CUTS: { value: StoneCut; label: string }[] = [
   { value: "brilhante", label: "Brilhante" },
@@ -261,12 +259,15 @@ export const STONE_CT_TABLE: { mm: number; ct: number }[] = [
 
 export const STONE_SIZES_MM = STONE_CT_TABLE.map((s) => s.mm);
 
+// Valores de mercado (atacado de pedras comerciais p/ joalheria, 2025).
+// Editaveis via tela de Configuracoes (persistem em config_orcamento.stone_prices).
 export const DEFAULT_STONE_PRICES: StonePrice[] = [
-  { tipo: "diamante", preco_usd_ct: 80 },
-  { tipo: "moissanita", preco_usd_ct: 15 },
-  { tipo: "rubi", preco_usd_ct: 50 },
-  { tipo: "esmeralda", preco_usd_ct: 60 },
-  { tipo: "safira", preco_usd_ct: 45 },
+  { tipo: "diamante",   preco_usd_ct: 600 }, // melee VS-SI G-H padrao joia
+  { tipo: "moissanita", preco_usd_ct: 80  }, // ~1/7 do diamante
+  { tipo: "rubi",       preco_usd_ct: 350 }, // rubi tratado comercial
+  { tipo: "esmeralda",  preco_usd_ct: 450 }, // esmeralda comercial
+  { tipo: "safira",     preco_usd_ct: 300 }, // safira azul comercial
+  { tipo: "zirconia",   preco_usd_ct: 0   }, // zirconia nao cobra: so ouro
 ];
 
 /** Busca ct unitário por tamanho (mm) — interpolação linear */
@@ -283,7 +284,16 @@ export function stoneMmToCt(mm: number): number {
   return table[0].ct;
 }
 
-/** Calcula preço de uma entrada de pedra */
+/**
+ * Calcula preço de uma entrada de pedra.
+ *
+ * REGRA DE NEGÓCIO:
+ *   • Pedras preciosas (diamante, moissanita, rubi, esmeralda, safira):
+ *     preço = ct × USD/ct × cotação_dolar × markup_pedra
+ *   • Pedras não-preciosas (zircônia): preço = 0 (só cobra o ouro)
+ *
+ * Metadados continuam sendo calculados (ct, gramas) pra mostrar na UI.
+ */
 export function computeStoneEntryPrice(
   entry: { tipo: StoneType; tamanho_mm: number; qtd: number },
   stonePrices: StonePrice[],
@@ -293,6 +303,12 @@ export function computeStoneEntryPrice(
   const ct_unitario = stoneMmToCt(entry.tamanho_mm);
   const ct_total = ct_unitario * entry.qtd;
   const pt_total = ct_total * 0.2;
+
+  // Zirconia (e qualquer outra nao-preciosa) nao cobra
+  if (!isPedraPreciosa(entry.tipo)) {
+    return { ct_unitario, ct_total, pt_total, preco_unitario_rs: 0, preco_total_rs: 0 };
+  }
+
   const priceRow = stonePrices.find((p) => p.tipo === entry.tipo);
   const usdPerCt = priceRow?.preco_usd_ct ?? 0;
   const preco_unitario_rs = ct_unitario * usdPerCt * dollarRate * stoneMarkup;

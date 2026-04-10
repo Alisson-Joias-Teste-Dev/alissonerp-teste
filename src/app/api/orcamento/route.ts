@@ -3,6 +3,9 @@ import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { validateFichaTecnica, CALIBRACAO_DEFAULTS, type CalibracaoDefaults } from "@/app/(dashboard)/orcamento/validations";
+import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
+import { ProfileType } from "@/app/(dashboard)/orcamento/types";
 
 const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "consultora"] as const;
 
@@ -68,6 +71,40 @@ export async function POST(req: NextRequest) {
 
   if (!nome_cliente?.trim() && !cliente_id) {
     return NextResponse.json({ error: "nome_cliente ou cliente_id obrigatorio" }, { status: 400 });
+  }
+
+  // ── Validação de travas (bilateral: frontend + backend) ─────────────────
+  // Para alianças, re-valida a ficha técnica contra as travas de espessura,
+  // largura e capacidade de pedras usando calibracao persistida no config.
+  if ((tipo ?? "alianca") === "alianca") {
+    // Lê calibracao do config (fallback para defaults conservadores)
+    const [configRow] = await sql`
+      SELECT calibracao FROM alissonerp.config_orcamento WHERE name = 'default' LIMIT 1
+    `;
+    const calib: CalibracaoDefaults = (configRow?.calibracao as CalibracaoDefaults) ?? CALIBRACAO_DEFAULTS;
+
+    const fichasParaValidar: Array<{ f: Record<string, unknown>; label: string }> = [];
+    if (ficha && typeof ficha === "object") fichasParaValidar.push({ f: ficha, label: "alianca" });
+    if (ficha2 && typeof ficha2 === "object" && quantidade === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
+
+    for (const { f, label } of fichasParaValidar) {
+      const profile = (f.perfil as ProfileType) ?? ProfileType.Simples;
+      const capacity = computeStoneCapacity(
+        Number(f.diametro ?? 0),
+        Number(f.espessura ?? 0),
+        Number(f.canal_borda_altura ?? 1.0),
+        Number(f.tamanho_pedra ?? 0),
+        Number(f.pedra_fileiras ?? 1),
+        profile,
+      );
+      const errors = validateFichaTecnica(f, capacity, calib);
+      if (errors.length > 0) {
+        return NextResponse.json(
+          { error: `Validacao falhou (${label}): ${errors[0].message}`, errors },
+          { status: 400 },
+        );
+      }
+    }
   }
 
   // Gerar número do orçamento
