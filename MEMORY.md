@@ -1,9 +1,9 @@
 # MEMORY.md — Alisson ERP (Joalheria de Alto Padrão)
 
-> 📋 Última atualização automática: 30/03/2026 — Versão: v2.15.0 <!-- Revisado 30/03/2026 -->
+> 📋 Última atualização automática: 11/04/2026 — Versão: v2.19.87 <!-- Revisado 11/04/2026 -->
 
 > **LEITURA OBRIGATÓRIA antes de qualquer sessão.**
-> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 30/03/2026 — v2.15.0 — Serviço Interno: tipos_servico, modal com foto+vídeo, migration 100**
+> **Local: fabricaAJ/MEMORY.md** | **Atualizado: 11/04/2026 — v2.19.87 — Integração Mercado Pago completa (Preference + PIX nativo + Point Smart) + valor líquido + estorno automático + fix Tiny offline_access + commit-then-sync**
 
 ---
 
@@ -1237,6 +1237,59 @@ REGRA: trigger só atualiza produto_composicao — NÃO toca public.produtos (s�
    [] vazio → usuário NÃO pode criar ordens
    admin/desenvolvedor ignoram (fullAccess)
    Verificar SEMPRE ao implementar qualquer criação de ordem
+⚠️ ${JSON.stringify(obj)}::jsonb BUG: o driver `postgres` npm encoda como
+   string JSON literal (double-encoded). jsonb_typeof retorna 'string'
+   em vez de 'object'. Webhook depois fazia { ...payloadAntigo } onde
+   payloadAntigo era string → spread pegava caracteres como chaves.
+   FIX: usar ${JSON.stringify(obj)}::text::jsonb ou ${sql.json(obj)}.
+   Aplicado em todos arquivos MP (v2.19.85). Outros endpoints legados
+   (ordens, user, service, fichas-tecnicas, purificacao) ainda têm o
+   padrão bugado — funcionam parcialmente via normalizeRow que parseia
+   na leitura, mas operações JSONB nativas (@>, ||, jsonb_set) falham.
+⚠️ Tiny OAuth2 scope: PRECISA ser "openid offline_access".
+   Só "openid" emite refresh_token session-bound que expira em horas
+   junto com a sessão SSO Keycloak. Com offline_access, vira "offline
+   token" que dura semanas/meses. Fix em v2.19.84.
+⚠️ redirect_uri atrás de proxy: NÃO usar req.nextUrl.origin em OAuth2
+   flows (Tiny, webhooks externos). Pode retornar host interno do
+   container ($http://localhost:3000) em vez do domínio público, e
+   Keycloak rejeita a troca authorization_code → token com "redirect_uri
+   doesn't match". SEMPRE usar getPublicOrigin(req) de src/lib/public-origin.ts
+   que respeita X-Forwarded-Proto + X-Forwarded-Host.
+⚠️ Mercado Pago aplicação tipo "QR Code" é RESTRITA: não permite
+   Payment API direta. Precisa tipo "Checkout Transparente + API de
+   Pagamentos" pra ter acesso a /v1/payments (PIX nativo, cartão
+   direto) + /checkout/preferences (link) + /point/integration-api
+   (maquininha). Erro 401 "Unauthorized use of live credentials" =
+   tipo de app errado.
+⚠️ MP rejeita http://localhost como notification_url: configurar
+   mp_webhook_base_url em configuracoes_secrets apontando pra domínio
+   público ou ngrok. Sem essa config, criar-link/criar-pix retorna 502.
+⚠️ Commit-then-sync no webhook MP: UPDATE situacao='concluido' PRIMEIRO,
+   sendToTiny() DEPOIS (best-effort). Pagamento confirmado pelo banco
+   NÃO pode ficar refém de integração downstream. Se Tiny falhar, venda
+   continua concluída e tiny_sync_erro guarda pra reenvio manual.
+⚠️ contas_receber.situacao backend usa 'pago' (trigger 113 +
+   fn_cr_marcar_pago_mp), NÃO 'recebido'. UI antiga usava 'recebido' e
+   CRs pagas pelo webhook MP ficavam sumidas no filtro. v2.19.83 alinhou
+   tudo pra 'pago' com helper isRecebido(s) = s === 'pago' || 'recebido'
+   pra compatibilidade.
+⚠️ contas_receber.data_recebimento (NÃO data_pagamento — fix retroativo
+   de nomenclatura da migration 024).
+⚠️ Server Component passando DATE pro Client Component: Next serializa
+   preservando tipo Date. Funções como isVencido(d).slice() crasham.
+   Fix: ::text em todos os SELECTs da page.tsx que passa dados pro
+   client. Vale pra contas_receber, contas_pagar, lancamentos_bancarios.
+⚠️ MP net_received_amount vs fee_details: NÃO somar fee_details[] pra
+   calcular taxa — MP deduz outras taxas de adquirência que não aparecem
+   em fee_details. Fórmula correta:
+     taxas_mp = transaction_amount - net_received_amount
+   Exemplos reais: cartão R$1,00 → líquido R$0,97 (fee_details mostra
+   só R$0,01 mas na real foi R$0,03); pix R$1,00 → líquido R$0,99.
+⚠️ pagamentos_venda.gateway, valores válidos cuidado com string exata:
+   'Mercado Pago Online' (Preference/link), 'Mercado Pago Pix' (Payment
+   API nativa), 'Mercado Pago Point' (maquininha). LIKE 'Mercado Pago%'
+   pega todos.
 ```
 
 ---
@@ -2008,3 +2061,152 @@ FORMATTERS:
   Comparação: Math.abs(ctBalanca - ctEsperado) <= ctEsperado × (ia_margem_pedra_pct/100)
   Fallback modelo Gemini corrigido: "gemini-2.5-flash" (era "gemini-2.0-flash")
   ia_margem_pedra_pct = 10 (configurável via /configuracoes > IA)
+
+---
+
+## 33. MÓDULO MERCADO PAGO (v2.19.72 → v2.19.87)
+
+Integração completa do MP para fechar o loop **"cliente paga → venda vira concluído automaticamente"**. Três canais: link online, PIX nativo escaneável, maquininha Point.
+
+### Tabelas e colunas novas
+
+```
+alissonerp.mp_point_devices (migration 135):
+  id             SERIAL PRIMARY KEY
+  device_id      TEXT NOT NULL UNIQUE  -- id do device na MP (ex: "PAX_A920__SMARTPOS...")
+  nome_legivel   TEXT NOT NULL          -- ex: "Caixa Balcão", "Móvel"
+  store_id       TEXT
+  pos_id         TEXT
+  operating_mode TEXT                   -- "PDV" | "STANDALONE"
+  ativo          BOOLEAN NOT NULL DEFAULT true
+  loja           TEXT                   -- rótulo interno
+  last_sync_at   TIMESTAMPTZ
+  created_at     TIMESTAMPTZ
+  updated_at     TIMESTAMPTZ
+
+alissonerp.pagamentos_venda (ADD em migration 137):
+  valor_liquido  NUMERIC(12,2)          -- o que realmente caiu na conta MP
+  taxas_mp       NUMERIC(12,2)          -- total deduzido (bruto - líquido)
+
+Funções SQL novas:
+  alissonerp.fn_cr_marcar_pago_mp(p_venda_id INTEGER) RETURNS INTEGER
+    → marca contas_receber pendentes da venda como 'pago' + data_recebimento=CURRENT_DATE
+  alissonerp.fn_resumo_recebido_mp(p_inicio DATE, p_fim DATE)
+    RETURNS (qtd, total_bruto, total_taxas, total_liquido)
+    → resumo pra relatórios financeiros
+```
+
+### Secrets em configuracoes_secrets
+
+```
+mp_access_token       — APP_USR-... (Checkout Transparente + API Pagamentos)
+mp_webhook_secret     — chave HMAC do painel MP > Webhooks
+mp_user_id            — user_id da conta MP (opcional)
+mp_webhook_base_url   — URL pública prefixo do notification_url
+                        (dev: ngrok, prod: https://erp.alissonjoias.com.br)
+```
+
+### Endpoints API
+
+```
+POST /api/vendas/[id]/mercado-pago/criar-link          — Preference (PIX + cartão via checkout MP)
+POST /api/vendas/[id]/mercado-pago/criar-pix           — Payment API (PIX nativo escaneável no banco)
+POST /api/vendas/[id]/mercado-pago/criar-intent-point  — Point Smart (maquininha física)
+DELETE ...                                             — cancela intent ativa
+
+GET  /api/mercado-pago/devices    — lista maquininhas cadastradas
+POST /api/mercado-pago/devices    — sincroniza via MP API (upsert)
+PATCH /api/mercado-pago/devices   — renomear / ativar / desativar
+
+POST /api/webhooks/mercado-pago   — receiver (HMAC + idempotência + commit-then-sync)
+GET  /api/webhooks/mercado-pago   — healthcheck
+```
+
+### Helpers TypeScript
+
+```
+src/lib/mercado-pago.ts         — getAccessToken, getWebhookSecret, createPreference,
+                                  fetchPayment, createPixPayment, listPointDevices,
+                                  createPointIntent, cancelPointIntent
+src/lib/vendas-aprovar.ts       — approveVenda, concluirVenda, sendToTiny,
+                                  criarOrdemDoOrcamento, estornarVenda
+src/lib/public-origin.ts        — getPublicOrigin(req) [proxy-aware com X-Forwarded]
+```
+
+### Componentes UI
+
+```
+src/components/vendas/PixQrInline.tsx        — inline no form quando forma=Pix
+                                                (usa /criar-pix, QR nativo EMV)
+src/components/vendas/CartaoInline.tsx       — inline no form quando forma=Cartão
+                                                (2 botões: link + maquininha)
+src/components/vendas/MercadoPagoCobranca.tsx — seção separada no detalhe, com modais overlay
+src/app/pagamento/[token]/[status]/page.tsx  — páginas públicas de back_urls
+                                                lookup por vendas_erp.token_compartilhamento
+```
+
+### Idempotência (4 camadas)
+
+```
+1. tiny_pedido_id IS NOT NULL → sendToTiny() vira noop
+2. vendas_erp.situacao IN ('aprovado','concluido') → approveVenda() retorna ja_aprovada
+3. orcamentos.ordem_gerada_id IS NOT NULL → criarOrdemDoOrcamento() retorna ordem existente
+4. payment_ids_processados[] no gateway_payload → webhook detecta reentrega e retorna 200
+```
+
+### Webhook — regras de estorno (v2.19.81)
+
+```
+refunded / cancelled / charged_back (quando pag.status era 'confirmado'):
+  → estornarVenda() em transação atômica com FOR UPDATE
+  → UPDATE pagamentos_venda.status='estornado'
+  → Se OUTROS pagamentos confirmados > 0: venda vira 'rascunho' (recobrar)
+  → Se ÚNICO pagamento: venda vira 'cancelado'
+     (trigger 111 reverte estoque comercial automaticamente)
+  → UPDATE contas_receber.situacao='cancelado' (manual, trigger 113 só pega 'pendente')
+
+rejected: tentativa negada, NUNCA foi confirmada — só marca pagamento como cancelado
+cancelled (antes de confirmar): idem rejected
+
+Estorno parcial: não suportado ainda. MP permite refund de parte via
+transaction_amount_refunded vs transaction_amount.
+```
+
+### Payload completo armazenado em gateway_payload (JSONB)
+
+```json
+{
+  "ultimo_payment_id": "154344233150",
+  "ultimo_status": "approved",
+  "ultimo_update": "2026-04-11T20:17:59Z",
+  "point_of_interaction_type": "PAYMENT_LINK|INTEGRATED_POS",
+  "payment_method_id": "master",
+  "payment_type_id": "credit_card",
+  "transaction_amount": 1.00,
+  "net_received_amount": 0.97,
+  "taxas_mp_total": 0.03,
+  "fee_details": [{...}],
+  "money_release_date": "...",
+  "payment_ids_processados": ["154344233150"]
+}
+```
+
+### Setup inicial (checklist do gerente)
+
+```
+1. Painel MP developers — CRIAR aplicação TIPO CORRETO:
+   - Tipo de solução: Pagamentos online
+   - Produto: Checkout Transparente
+   - Modelo: API de Pagamentos (NÃO "API de Orders")
+   → qualquer outro tipo (QR Code, Checkout Pro, Bricks) RESTRINGE o Payment API
+2. Painel MP > Webhooks: cadastrar URL https://erp.alissonjoias.com.br/api/webhooks/mercado-pago
+   - Marcar APENAS evento "Pagamentos"
+   - Copiar a chave secreta gerada
+3. ERP > Configurações > Integrações > Mercado Pago:
+   - Cola Access Token (produção, APP_USR-...)
+   - Cola Webhook Secret
+   - URL base p/ webhook: https://erp.alissonjoias.com.br
+4. Sub-seção "Maquininhas Point" → clicar "Sincronizar com MP"
+   → popula alissonerp.mp_point_devices automaticamente
+   → editar nome legível de cada device
+```
