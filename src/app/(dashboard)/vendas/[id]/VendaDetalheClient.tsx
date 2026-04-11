@@ -12,6 +12,7 @@ import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
 import MercadoPagoCobranca from "@/components/vendas/MercadoPagoCobranca";
 import PixQrInline from "@/components/vendas/PixQrInline";
+import CartaoInline from "@/components/vendas/CartaoInline";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -1518,6 +1519,17 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                   vendaId={venda.id}
                   numeroVenda={venda.numero_venda}
                   valor={Math.max(0, venda.total_venda - venda.total_pago)}
+                  onPagamentoConfirmado={() => load()}
+                />
+              )}
+
+              {/* Cartão de Crédito via Mercado Pago (link ou maquininha) */}
+              {newPagForma === "Cartão de Crédito" && (
+                <CartaoInline
+                  vendaId={venda.id}
+                  numeroVenda={venda.numero_venda}
+                  valor={Math.max(0, venda.total_venda - venda.total_pago)}
+                  installments={newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao) || 1}
                   onPagamentoConfirmado={() => load()}
                 />
               )}

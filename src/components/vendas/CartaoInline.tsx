@@ -1,0 +1,539 @@
+"use client";
+
+import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  CreditCard, Smartphone, Link as LinkIcon, Copy, Check, Loader2,
+  MessageCircle, CheckCircle, AlertTriangle, X, RefreshCw,
+} from "lucide-react";
+import QRCode from "qrcode";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CartaoInline — Cobrança via Cartão de Crédito no Mercado Pago
+//
+// Inline no form de pagamento (NovaVendaClient + VendaDetalheClient), aparece
+// quando a vendedora seleciona "Cartão de Crédito". Oferece dois caminhos:
+//
+//   1. Link de Pagamento (Preference API)
+//      - Gera init_point → QR Code local (biblioteca qrcode) + link copiável
+//      - Cliente paga remoto via checkout MP (aceita crédito + débito + PIX)
+//      - Ideal pra venda online, WhatsApp, email
+//
+//   2. Maquininha Point (Point Integration API)
+//      - Seleciona device + tipo + parcelas
+//      - Dispara intent no terminal físico
+//      - Countdown 3 min, botão cancelar
+//      - Ideal pra venda presencial na loja
+//
+// Suporta vendaId=null (obterVendaId cria rascunho primeiro) igual PixQrInline.
+// Polling a cada 4s detecta pagamento confirmado via webhook.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const C = {
+  esmeralda:   "#184036",
+  esmeraldaLt: "#18403612",
+  creme:       "#F3EADA",
+  cremeBorder: "#E8DCC8",
+  cremeBg:     "#FAFAF7",
+};
+
+function fmt(v: number) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+}
+
+interface PointDevice {
+  id: number;
+  device_id: string;
+  nome_legivel: string;
+  loja: string | null;
+}
+
+interface Props {
+  /** vendaId da venda se já existe. Se null, usa obterVendaId para criar rascunho primeiro. */
+  vendaId: number | null;
+  numeroVenda: string;
+  valor: number;
+  /** Parcelas sugeridas (1-12). Pré-preenche o seletor do Point. */
+  installments?: number;
+  obterVendaId?: () => Promise<{ id: number; numero_venda: string }>;
+  onPagamentoConfirmado: (vendaId: number) => void;
+  ocultar?: boolean;
+}
+
+type Modo = "idle" | "link" | "maquininha";
+
+export default function CartaoInline({
+  vendaId: vendaIdProp,
+  numeroVenda: numeroVendaProp,
+  valor,
+  installments: installmentsProp,
+  obterVendaId,
+  onPagamentoConfirmado,
+  ocultar,
+}: Props) {
+  const [vendaIdEfetivo, setVendaIdEfetivo] = useState<number | null>(vendaIdProp);
+  const [numeroVenda, setNumeroVenda] = useState(numeroVendaProp);
+
+  useEffect(() => { setVendaIdEfetivo(vendaIdProp); }, [vendaIdProp]);
+  useEffect(() => { setNumeroVenda(numeroVendaProp); }, [numeroVendaProp]);
+
+  const [modo, setModo] = useState<Modo>("idle");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pago, setPago] = useState(false);
+
+  // Link state
+  const [initPoint, setInitPoint] = useState<string | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [copiado, setCopiado] = useState(false);
+
+  // Maquininha state
+  const [devices, setDevices] = useState<PointDevice[]>([]);
+  const [deviceSelected, setDeviceSelected] = useState("");
+  const [parcelasPoint, setParcelasPoint] = useState(installmentsProp ?? 1);
+  const [intentAtiva, setIntentAtiva] = useState<{
+    pagamento_id: number;
+    intent_id: string;
+    device_id: string;
+    device_nome: string;
+  } | null>(null);
+  const [countdown, setCountdown] = useState(0);
+
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ─── Gera QR do init_point via biblioteca qrcode ─────────────────────────
+  useEffect(() => {
+    if (!initPoint) { setQrDataUrl(null); return; }
+    QRCode.toDataURL(initPoint, {
+      width: 220,
+      margin: 1,
+      color: { dark: C.esmeralda, light: "#ffffff" },
+    }).then(setQrDataUrl).catch(() => setQrDataUrl(null));
+  }, [initPoint]);
+
+  // ─── Atualiza parcelasPoint se prop mudar ────────────────────────────────
+  useEffect(() => {
+    if (installmentsProp != null) setParcelasPoint(installmentsProp);
+  }, [installmentsProp]);
+
+  // ─── Fetch devices quando entra em modo maquininha ───────────────────────
+  const carregarDevices = useCallback(async () => {
+    try {
+      const res = await fetch("/api/mercado-pago/devices");
+      if (res.ok) {
+        const data = await res.json() as PointDevice[];
+        setDevices(data);
+        if (data.length === 1) setDeviceSelected(data[0].device_id);
+      }
+    } catch { /* ignora erro temporário */ }
+  }, []);
+
+  useEffect(() => {
+    if (modo === "maquininha" && devices.length === 0) carregarDevices();
+  }, [modo, devices.length, carregarDevices]);
+
+  // ─── Polling de confirmação ──────────────────────────────────────────────
+  const iniciarPolling = useCallback((idParaMonitorar: number) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/vendas/${idParaMonitorar}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const temMpConfirmado = (data.pagamentos ?? []).some(
+          (p: { gateway?: string; status: string }) =>
+            (p.gateway === "Mercado Pago Online" || p.gateway === "Mercado Pago Point")
+            && p.status === "confirmado"
+        );
+        if (data.situacao === "concluido" || temMpConfirmado) {
+          setPago(true);
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+          setTimeout(() => onPagamentoConfirmado(idParaMonitorar), 2500);
+        }
+      } catch { /* ignora */ }
+    }, 4000);
+  }, [onPagamentoConfirmado]);
+
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  // ─── Countdown Point (3 min) ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!intentAtiva || pago) return;
+    setCountdown(180);
+    const t = setInterval(() => {
+      setCountdown(c => {
+        if (c <= 1) { clearInterval(t); return 0; }
+        return c - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [intentAtiva, pago]);
+
+  // ─── Helper: garante vendaId (cria rascunho se necessário) ──────────────
+  async function ensureVendaId(): Promise<number> {
+    if (vendaIdEfetivo != null) return vendaIdEfetivo;
+    if (!obterVendaId) throw new Error("Venda ainda não foi salva e não há callback de criação");
+    const vendaCriada = await obterVendaId();
+    setVendaIdEfetivo(vendaCriada.id);
+    setNumeroVenda(vendaCriada.numero_venda);
+    return vendaCriada.id;
+  }
+
+  // ─── Ações — Link de pagamento ──────────────────────────────────────────
+  async function gerarLink() {
+    setLoading(true);
+    setError(null);
+    try {
+      const id = await ensureVendaId();
+      const res = await fetch(`/api/vendas/${id}/mercado-pago/criar-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("application/json")) {
+        throw new Error(`Servidor retornou ${res.status}. Pode ser que o deploy ainda não esteja publicado.`);
+      }
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Erro ao gerar link");
+      setInitPoint(body.init_point);
+      iniciarPolling(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ─── Ações — Maquininha Point ───────────────────────────────────────────
+  async function enviarMaquininha() {
+    if (!deviceSelected) { setError("Selecione uma maquininha"); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      const id = await ensureVendaId();
+      const res = await fetch(`/api/vendas/${id}/mercado-pago/criar-intent-point`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          device_id: deviceSelected,
+          installments: parcelasPoint,
+          payment_type: "credit_card",
+        }),
+      });
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("application/json")) {
+        throw new Error(`Servidor retornou ${res.status}. Verifique o deploy.`);
+      }
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Erro ao enviar pra maquininha");
+      setIntentAtiva({
+        pagamento_id: body.pagamento_id,
+        intent_id: body.intent_id,
+        device_id: body.device_id,
+        device_nome: body.device_nome,
+      });
+      iniciarPolling(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function cancelarIntent() {
+    if (!intentAtiva) return;
+    const id = vendaIdEfetivo;
+    if (id == null) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/vendas/${id}/mercado-pago/criar-intent-point?pagamento_id=${intentAtiva.pagamento_id}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "Erro ao cancelar");
+      }
+      setIntentAtiva(null);
+      setModo("idle");
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function copiarLink() {
+    if (!initPoint) return;
+    navigator.clipboard.writeText(initPoint);
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 2000);
+  }
+
+  function abrirWhats() {
+    if (!initPoint) return;
+    const msg = `Olá! Segue o link de pagamento da sua compra na Alisson Joias (Venda ${numeroVenda}, ${fmt(valor)}).\n\nAcesse o link pra pagar com cartão de crédito ou PIX:\n\n${initPoint}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+  }
+
+  function voltarIdle() {
+    setModo("idle");
+    setError(null);
+    setInitPoint(null);
+    setQrDataUrl(null);
+    setIntentAtiva(null);
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  }
+
+  if (ocultar) return null;
+
+  return (
+    <div
+      className="rounded-xl border p-4 mb-4"
+      style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <CreditCard size={14} style={{ color: C.esmeralda }} />
+          <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: C.esmeralda }}>
+            Cartão de Crédito — Mercado Pago
+          </p>
+        </div>
+        {modo !== "idle" && !pago && (
+          <button
+            onClick={voltarIdle}
+            className="text-[11px] underline"
+            style={{ color: "#6B7280" }}
+          >
+            Voltar
+          </button>
+        )}
+      </div>
+
+      {/* Erro */}
+      {error && (
+        <div
+          className="flex items-start gap-2 p-3 mb-3 rounded-lg text-xs"
+          style={{ backgroundColor: "#FEF2F2", color: "#DC2626" }}
+        >
+          <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* ═══ Estado idle — escolher canal ═══ */}
+      {modo === "idle" && !pago && (
+        <>
+          <p className="text-xs mb-3" style={{ color: "#6B7280" }}>
+            Escolha como cobrar o cartão do cliente. Quando o pagamento cair,
+            a venda é <b>concluída automaticamente</b>.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <button
+              onClick={() => setModo("link")}
+              className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90"
+              style={{ backgroundColor: C.esmeralda, color: C.creme }}
+            >
+              <LinkIcon size={13} /> Link de Pagamento
+            </button>
+            <button
+              onClick={() => setModo("maquininha")}
+              className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90"
+              style={{ backgroundColor: "#fff", color: C.esmeralda, border: `1px solid ${C.esmeralda}` }}
+            >
+              <Smartphone size={13} /> Maquininha Point
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ═══ Estado link — gerando ou gerado ═══ */}
+      {modo === "link" && !pago && (
+        <div>
+          {!initPoint && !loading && (
+            <button
+              onClick={gerarLink}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90"
+              style={{ backgroundColor: C.esmeralda, color: C.creme }}
+            >
+              <LinkIcon size={13} /> Gerar Link ({fmt(valor)})
+            </button>
+          )}
+
+          {loading && !initPoint && (
+            <div className="flex items-center justify-center py-6 gap-2 text-sm" style={{ color: "#6B7280" }}>
+              <Loader2 size={15} className="animate-spin" /> Gerando link...
+            </div>
+          )}
+
+          {initPoint && (
+            <div className="space-y-3">
+              <div className="flex flex-col md:flex-row gap-4">
+                {qrDataUrl && (
+                  <div
+                    className="flex-shrink-0 self-center p-2 rounded-lg"
+                    style={{ backgroundColor: "#fff", border: `1px solid ${C.cremeBorder}` }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={qrDataUrl} alt="QR Link Pagamento" width={200} height={200} />
+                  </div>
+                )}
+                <div className="flex-1 flex flex-col gap-2 justify-center">
+                  <p className="text-xs mb-1" style={{ color: "#6B7280" }}>
+                    Escaneie o QR ou copie o link:
+                  </p>
+                  <div
+                    className="flex items-center gap-2 p-2 rounded-lg border text-xs break-all"
+                    style={{ borderColor: C.cremeBorder, color: "#374151", backgroundColor: "#fff" }}
+                  >
+                    <span className="flex-1 font-mono">{initPoint.slice(0, 36)}...</span>
+                    <button
+                      onClick={copiarLink}
+                      className="p-1.5 rounded hover:bg-stone-100"
+                      style={{ color: C.esmeralda }}
+                      title="Copiar link"
+                    >
+                      {copiado ? <Check size={13} /> : <Copy size={13} />}
+                    </button>
+                  </div>
+                  <button
+                    onClick={abrirWhats}
+                    className="flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90"
+                    style={{ backgroundColor: "#25D366", color: "#fff" }}
+                  >
+                    <MessageCircle size={13} /> Enviar pelo WhatsApp
+                  </button>
+                  <button
+                    onClick={() => { setInitPoint(null); setQrDataUrl(null); gerarLink(); }}
+                    className="flex items-center justify-center gap-1.5 py-1.5 text-[11px]"
+                    style={{ color: "#6B7280" }}
+                  >
+                    <RefreshCw size={11} /> Regenerar link
+                  </button>
+                </div>
+              </div>
+              <div
+                className="flex items-center justify-center gap-2 py-2 text-xs border-t"
+                style={{ color: "#6B7280", borderColor: C.cremeBorder }}
+              >
+                <Loader2 size={12} className="animate-spin" />
+                Aguardando pagamento...
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ Estado maquininha — escolher + enviar + countdown ═══ */}
+      {modo === "maquininha" && !pago && (
+        <div className="space-y-3">
+          {!intentAtiva && (
+            <>
+              {devices.length === 0 && (
+                <div className="text-xs py-3 text-center" style={{ color: "#9CA3AF" }}>
+                  Nenhuma maquininha cadastrada.<br />
+                  Vá em Configurações &gt; Integrações e sincronize.
+                </div>
+              )}
+
+              {devices.length > 0 && (
+                <>
+                  <div>
+                    <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                      Maquininha
+                    </label>
+                    <select
+                      value={deviceSelected}
+                      onChange={e => setDeviceSelected(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none bg-white"
+                      style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
+                    >
+                      <option value="">Selecione...</option>
+                      {devices.map(d => (
+                        <option key={d.device_id} value={d.device_id}>
+                          {d.nome_legivel}{d.loja ? ` — ${d.loja}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                      Parcelas
+                    </label>
+                    <select
+                      value={parcelasPoint}
+                      onChange={e => setParcelasPoint(Number(e.target.value))}
+                      className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none bg-white"
+                      style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
+                    >
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
+                        <option key={n} value={n}>{n}x de {fmt(valor / n)}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    onClick={enviarMaquininha}
+                    disabled={loading || !deviceSelected}
+                    className="w-full py-2.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity hover:opacity-90"
+                    style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                  >
+                    {loading
+                      ? <span className="inline-flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Enviando...</span>
+                      : <>Enviar pra maquininha ({fmt(valor)})</>}
+                  </button>
+                </>
+              )}
+            </>
+          )}
+
+          {intentAtiva && (
+            <div className="space-y-3 text-center">
+              <div className="flex justify-center">
+                <div
+                  className="w-16 h-16 rounded-full flex items-center justify-center"
+                  style={{ backgroundColor: C.esmeraldaLt }}
+                >
+                  <Smartphone size={28} style={{ color: C.esmeralda }} className="animate-pulse" />
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>
+                  Aguardando cartão no terminal
+                </p>
+                <p className="text-xs mt-1" style={{ color: "#6B7280" }}>
+                  {intentAtiva.device_nome}
+                </p>
+                {countdown > 0 && (
+                  <p className="text-xs mt-2 tabular-nums" style={{ color: "#9CA3AF" }}>
+                    Expira em {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={cancelarIntent}
+                disabled={loading}
+                className="text-xs underline disabled:opacity-50"
+                style={{ color: "#DC2626" }}
+              >
+                {loading ? "Cancelando..." : "Cancelar envio"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ Estado pago ═══ */}
+      {pago && (
+        <div className="flex items-center justify-center gap-2 py-6 text-sm font-semibold" style={{ color: "#059669" }}>
+          <CheckCircle size={18} /> Pagamento confirmado! Atualizando venda...
+        </div>
+      )}
+    </div>
+  );
+}
