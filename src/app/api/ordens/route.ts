@@ -185,13 +185,21 @@ export async function POST(req: NextRequest) {
       ? venda_item_ids.map(Number).filter((n: number) => !isNaN(n))
       : [];
 
+    // Buscar numero_venda se venda_id foi informado — alimenta numero_pedido
+    // na ordem pra aparecer na coluna "PEDIDO PDV" da listagem de ordens.
+    let numeroVendaLigada: string | null = null;
+    if (venda_id) {
+      const [vRow] = await tx`SELECT numero_venda FROM alissonerp.vendas_erp WHERE id = ${venda_id}`;
+      numeroVendaLigada = vRow?.numero_venda ?? null;
+    }
+
     const [ordem] = await tx`
       INSERT INTO alissonerp.ordens (
         numero_ordem, tipo_ordem, cliente_id, vendedor_id,
         data_entrega, peso_metal_negociado, peso_metal_externo,
         foto_peca_servico, peso_peca_servico, video_observacao,
         detalhes_ordem, fotos_paths, tipos_servico_ids,
-        venda_id, venda_item_ids,
+        venda_id, venda_item_ids, numero_pedido,
         situacao, status, rota, origem, created_by
       ) VALUES (
         ${numeroOrdem},
@@ -209,6 +217,7 @@ export async function POST(req: NextRequest) {
         ${tiposIdsVal},
         ${venda_id ?? null},
         ${vendaItemIdsVal.length > 0 ? vendaItemIdsVal : null},
+        ${numeroVendaLigada},
         'criado',
         'aguardando',
         ${rota}::alissonerp.enum_rota_ordem,
