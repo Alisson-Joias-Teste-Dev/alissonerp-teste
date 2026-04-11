@@ -1,8 +1,157 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 11/04/2026 — Versão: v2.19.71 <!-- Revisado 11/04/2026 -->
+> 📋 Última atualização automática: 11/04/2026 — Versão: v2.19.87 <!-- Revisado 11/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.19.87 (11/04/2026)
+### Chore — limpa do working dir
+- Atualizado `.gitignore`: `/.claude/`, `/gerar_relatorio.{js,py}`, `/relatorio_*.xlsx` (arquivos locais que ficavam poluindo `git status`).
+- Commit de trabalho em andamento do Jonathan que estava pendente no working dir: `OrcamentoClient.tsx` (+47), `api/ordens/[id]/comentarios/route.ts` (+24), `DashboardShell.tsx`, `GlobalErrorToast.tsx`, `PixQrInline.tsx`.
+- Módulo de notificações (novo em progresso): `api/notificacoes/adiar`, `api/notificacoes/pendentes-resposta`, `components/MencaoAlarme.tsx`, migrations `133_notif_aguardando_resposta.sql` + `134_notif_alarme_snooze.sql`.
+- 33 scripts operacionais em `scripts/` (apply/check/diagnose/fix/inspect/query/setup/sync/test) acumulados nas sessões recentes.
+
+## v2.19.86 (11/04/2026)
+### Feature — /financeiro Contas a Receber mostra valor líquido
+- Novo card **"Líquido na Conta"** no grid de stats do Contas a Receber (grid passou de 3 pra 4 colunas): soma `valor_liquido` de todos os pagamentos MP confirmados das CRs pagas. Usa fallback `COALESCE(valor_liquido, valor)` pra CRs não-MP contarem 100% como líquido. Mostra subtexto `-R$ X,XX de taxas` quando `totalTaxas > 0`.
+- Cada linha da tabela ganhou subtexto verde embaixo do valor: `líquido R$ 0,97 (−R$ 0,03)` quando há MP vinculado e valor líquido é diferente do bruto. CRs sem MP não mostram o subtexto.
+- `page.tsx` SQL: SELECT ganhou duas subqueries agregadas `(SELECT SUM(p.valor_liquido) FROM pagamentos_venda p WHERE p.venda_id = cr.venda_erp_id AND p.status='confirmado')` e análogo pra `taxas_mp`. `ContaReceber` interface + `ContaRow` aceita `valorLiquido?` e `taxasMp?`.
+
+## v2.19.85 (11/04/2026)
+### Feature — valor líquido MP (net_received_amount) + fix encoding JSONB
+- **Migration 137 (`137_pagamentos_valor_liquido.sql`)**: `ADD COLUMN valor_liquido NUMERIC(12,2)` e `taxas_mp NUMERIC(12,2)` em `alissonerp.pagamentos_venda`. Nova função `fn_resumo_recebido_mp(p_inicio DATE, p_fim DATE)` que retorna `qtd`, `total_bruto`, `total_taxas`, `total_liquido` pra relatórios. Fix retroativo: `UPDATE (gateway_payload #>> '{}')::jsonb WHERE jsonb_typeof='string'` consertou 15 payloads corrompidos por double-encoding.
+- **Webhook MP captura líquido**: `POST /api/webhooks/mercado-pago` lê `transaction_details.net_received_amount` do payment retornado pela MP API e grava `pagamentos_venda.valor_liquido` + `taxas_mp` no UPDATE de confirmação. Fórmula: `taxas_mp = transaction_amount - net_received_amount` (mais preciso que somar `fee_details[]` porque o MP deduz outras taxas de adquirência que não aparecem em fee_details).
+- **Exemplos reais em produção:** Cartão crédito R$ 1,00 → líquido R$ 0,97 (~3% taxa). Pix R$ 1,00 → líquido R$ 0,99 (~1% taxa).
+- **Bug encoding JSONB double-string (corrigido em 5 arquivos MP)**: descoberto investigando o `gateway_payload`: todos os pagamentos MP tinham `jsonb_typeof='string'` em vez de `'object'`. Causa raiz: o driver `postgres` npm com `${JSON.stringify(obj)}::jsonb` encoda a string como literal JSON ao invés de parsear como objeto. Pior: o webhook fazia `{ ...payloadAntigo }` onde `payloadAntigo` era a string — o spread pegava cada caractere como chave, gerando `{"0":"{","1":"\"",...}`. Fix: trocado `::jsonb` por `::text::jsonb` em `src/app/api/webhooks/mercado-pago/route.ts`, `src/lib/vendas-aprovar.ts`, `criar-link/route.ts`, `criar-pix/route.ts`, `criar-intent-point/route.ts`. O `::text` força passagem como text e o `::jsonb` final faz o parse correto.
+- **UI do detalhe da venda**: `VendaDetalheClient` mostra subtexto verde na linha do pagamento: `Líquido recebido: R$ X,XX (taxa MP R$ Y,YY)` quando `valor_liquido != null && > 0`. GET `/api/vendas/[id]` retorna `valor_liquido` e `taxas_mp` serializados como `Number | null`.
+- **Backfill retroativo**: `scripts/backfill_mp_valor_liquido.mjs` busca cada pagamento MP existente na API e preenche `valor_liquido`/`taxas_mp`. Rodou: 2 de 6 backfilled (os outros 4 deram 404 porque eram da aplicação MP antiga `alissonerphomolog` — QR Code tipo — que a gente abandonou ao criar `Alisson Ranyel` tipo Checkout Transparente).
+
+## v2.19.84 (11/04/2026)
+### Fix crítico — Tiny expirando toda hora (offline_access + proxy-aware)
+- **Diagnóstico em produção:** `tiny_token_expires_at = "2026-04-10T20:39:57.118Z"` — token expirava horas depois de reconectado, forçando reconexão manual constante. Dois problemas combinados no fluxo OAuth2.
+- **Problema 1 — scope `openid` sem `offline_access`:** o Tiny usa Keycloak. Sem `offline_access` no scope, o refresh_token emitido é "session-bound" e expira junto com a sessão SSO (30min a 8h dependendo do realm config). Com `offline_access`, o token vira "offline token" e dura semanas/meses.
+- **Fix 1:** `src/app/api/integracoes/tiny/auth/route.ts` agora pede `scope=openid offline_access`. Quando o Jonathan reconectar, o Keycloak vai pedir consentimento explícito pra "acesso offline" — aceitar.
+- **Problema 2 — redirect_uri inconsistente atrás de proxy:** o código usava `req.headers.get("origin") ?? req.nextUrl.origin`. `req.headers.get("origin")` só é setado em requests cross-origin (NÃO em navegação direta via click). `req.nextUrl.origin` atrás do Easypanel/Traefik pode retornar o host interno do container (`http://localhost:3000`) em vez do domínio público. Keycloak rejeita a troca `authorization_code → token` se `redirect_uri` não bate EXATAMENTE entre `auth` e `callback`.
+- **Fix 2:** novo helper `src/lib/public-origin.ts` com `getPublicOrigin(req)` que monta origin a partir de `X-Forwarded-Proto` + `X-Forwarded-Host` (headers setados pelo reverse proxy). Ordem: 1) `x-forwarded-proto + x-forwarded-host`, 2) `host` header com detecção http/https por nome, 3) `req.nextUrl.origin` fallback. Aplicado nos dois endpoints (`auth` e `callback`) pra garantir redirect_uri idêntico.
+
+## v2.19.83 (11/04/2026)
+### Fix — /financeiro crash no Contas a Receber + alinha status 'pago'
+- **Bug 1 (crash):** clicar na aba "Contas a Receber" disparava `Uncaught TypeError: d.slice is not a function`. Causa: `page.tsx` (Server Component) passava resultados do postgres direto pro client component. O driver `postgres` npm converte `DATE`/`TIMESTAMPTZ` em objetos `Date`, e o Next serializa Server→Client preservando esse tipo. Funções do client como `isVencido(d)` chamavam `d.slice(0,10)` assumindo string e quebravam. Começou a acontecer agora porque as CRs antigas tinham `data_vencimento = null` (curto-circuitava em `!d`), e as CRs novas do webhook MP têm data preenchida pelo trigger 113. **Fix:** `SELECT data_vencimento::text AS data_vencimento, ...` em todos os 4 SELECTs da `page.tsx`. Datas chegam no client como string ISO.
+- **Bug 2 (semântico):** o backend (trigger 113 `fn_venda_gerar_conta_receber` e `fn_cr_marcar_pago_mp`) grava `contas_receber.situacao='pago'`. A UI antiga de `TabReceber` filtrava e marcava como `'recebido'`. Resultado: CRs pagas automaticamente pelo webhook MP ficavam sumidas no filtro "Recebido" (card mostrava R$ 0,00). **Fix:** novo helper `isRecebido(s) = s === 'pago' || s === 'recebido'`. `totalRecebido`, filtro "recebido" e `marcarRecebido()` manual agora usam/gravam `'pago'` (alinha com o backend). `SITUACAO` map já tinha `'pago'` registrado com badge verde "Pago".
+
+## v2.19.82 (11/04/2026)
+### Feature — cobrança por cartão de crédito inline (link + maquininha)
+- Novo componente `src/components/vendas/CartaoInline.tsx` (~450 linhas) — espelho do `PixQrInline` dedicado ao Cartão de Crédito. Quando a vendedora seleciona "Cartão de Crédito" no form de pagamento (NovaVendaClient OU VendaDetalheClient), aparece um card inline com dois botões:
+  - **"Link de Pagamento"** → Preference API (`/criar-link`): gera QR local (lib qrcode) do `init_point` + link copiável + botão WhatsApp. Aceita crédito, débito e PIX no checkout MP.
+  - **"Maquininha Point"** → Point Integration API (`/criar-intent-point`): selector de device, selector de parcelas (1-12x, pré-preenchido pela condição escolhida no form), countdown de 3 min + botão "Cancelar envio".
+- Polling a cada 4s detecta pagamento confirmado via webhook. Suporta `vendaId=null` com callback `obterVendaId` igual ao `PixQrInline` — na Nova Venda a venda é salva como rascunho silenciosamente antes do endpoint MP ser chamado.
+- Backend não precisou mudar — endpoints `/criar-link` e `/criar-intent-point` já existem e já suportam `installments`. Webhook processa ambos os canais via `external_reference`.
+
+## v2.19.81 (11/04/2026)
+### Feature — webhook MP processa estorno/chargeback automaticamente
+- Antes: webhook recebia notificações de `refunded`/`cancelled`/`charged_back` mas só atualizava `gateway_payload`. Estornos precisavam ser tratados manualmente.
+- **Novo helper `estornarVenda(vendaId, pagamentoId, motivoPayload)` em `src/lib/vendas-aprovar.ts`**. Transação atômica que:
+  - `SELECT ... FOR UPDATE` no pagamento (anti-race).
+  - Idempotência: se `status='estornado'`, retorna `{acao: 'ja_estornado'}`.
+  - Conta outros pagamentos confirmados da venda (exclui o estornado).
+  - `UPDATE pagamentos_venda SET status='estornado'`.
+  - Decide ação: se `outros_confirmados > 0` → `vendas_erp.situacao='rascunho'` (vendedora recobra o valor); se `= 0` → `vendas_erp.situacao='cancelado'` (trigger 111 reverte estoque comercial automático).
+  - `UPDATE contas_receber SET situacao='cancelado' WHERE venda_erp_id=X AND situacao IN ('pago','pendente')` (manual porque trigger 113 só cancela CR pendente).
+- **Webhook receiver** agora separa `rejected` (tentativa negada, nunca foi confirmada) de `refunded`/`cancelled`/`charged_back` (que podem ser estornos reais após confirmação). Só chama `estornarVenda` se `pag.status === 'confirmado'` — senão só marca o pagamento como cancelado e retorna.
+- **Chargeback** é tratado igual a refund (decisão Jonathan). `webhook_log` registra `acao`, `outros_confirmados` e `cr_canceladas` pra auditoria.
+- **Não suporta estorno parcial** ainda (MP permite refund de parte do valor) — adicionar depois checando `transaction_amount_refunded` vs `transaction_amount`.
+
+## v2.19.80 (11/04/2026)
+### Feature — exibir data + hora na confirmação do pagamento
+- Linha "Confirmado em DD/MM/AAAA" na seção Pagamento do `VendaDetalheClient` agora mostra também a hora: `Confirmado em 11/04/2026 às 15:14`.
+- Nova função `fmtDateTime(d)` usa o timezone **local** do navegador (diferente do `fmtDate` existente que força UTC). Isso é correto porque `pagamentos_venda.data_confirmacao` é `TIMESTAMPTZ` e queremos mostrar no horário de Brasília, não em UTC.
+- `fmtDate` (só data, UTC) continua sendo usado pras outras datas da tela (`data_venda`, `data_entrega`) que são `DATE` puro.
+
+## v2.19.79 (11/04/2026)
+### Refactor — concluirVenda usa ordem commit-then-sync
+- **Diagnóstico:** o fluxo da v2.19.78 ainda estava errado semanticamente. `concluirVenda` chamava `approveVenda` primeiro, que tentava Tiny antes de fechar a venda. Mesmo com `tinyBestEffort=true` evitando throw, a ORDEM de operações ainda era "Tiny-first". Se o webhook MP crashava entre o Tiny OK e o UPDATE de situação, a venda ficava em limbo.
+- **Nova ordem (local-first, commit-then-sync)** em `concluirVenda`:
+  1. `UPDATE vendas_erp.situacao = 'concluido'` → trigger 113 cria `contas_receber` automaticamente
+  2. `fn_cr_marcar_pago_mp(vendaId)` → marca CR como recebida
+  3. `criarOrdemDoOrcamento()` → cria ordem de fabricação se veio de orçamento (best-effort)
+  4. `sendToTiny()` → sincroniza com Tiny (best-effort, erro salvo em `tiny_sync_erro`)
+- **`concluirVenda` NÃO chama mais `approveVenda`**. Mesmo com venda em rascunho, pula direto pra `concluido` (trigger 114 só dispara blindagem quando `OLD.situacao IN ('confirmado','concluido')`, então rascunho→concluido passa limpo).
+- **Filosofia:** pagamento confirmado pelo banco é inegociável. O "fechamento" da venda no ERP não pode ser bloqueado por uma integração downstream.
+
+## v2.19.78 (11/04/2026)
+### Fix — webhook MP conclui venda mesmo com Tiny fora do ar (tinyBestEffort)
+- **Bug descoberto em produção:** venda com Pix pago pelo cliente ficou em rascunho porque o token Tiny expirou no momento do webhook. Cadeia `concluirVenda → approveVenda → sendToTiny` lançou exception no Tiny, webhook abortou antes de transicionar a venda, cliente pagou mas a venda nunca virou `concluido`.
+- **Fix parcial (depois revisto na v2.19.79):** `ApproveVendaOpts.tinyBestEffort: boolean`. Quando `true`, erro do Tiny é capturado, logado em `tiny_sync_erro`, e o fluxo continua. Webhook MP passa `tinyBestEffort: true`; PATCH manual `/api/vendas/[id]` mantém comportamento all-or-nothing legacy.
+- **Fix manual da venda #28724**: via `scripts/fix_venda_28724.mjs` — `situacao=concluido`, CR#74=pago, `tiny_sync_erro` marcado pra reenvio manual depois.
+
+## v2.19.77 (11/04/2026)
+### Fix crítico — PIX agora usa Payment API e gera QR EMV escaneável
+- **Bug descoberto em teste real:** vendedora gerava QR pelo botão "PIX", cliente tentava escanear no app do banco e recebia **"esse QR não é Pix"**. Causa: o endpoint `/criar-link` usa a Preference API do MP que retorna um `init_point` (URL tipo `mpago.la/xxxx`). O QR gerado a partir dessa URL não é um QR Pix do Banco Central — é só um link pro checkout MP. App bancário não reconhece.
+- **Novo endpoint `POST /api/vendas/[id]/mercado-pago/criar-pix`** usa a **Payment API** diretamente (`POST /v1/payments` com `payment_method_id='pix'`). MP retorna:
+  - `qr_code`: string EMV/BR Code (`00020101021...`) no padrão Banco Central — copia-e-cola
+  - `qr_code_base64`: imagem PNG do QR pronta — escaneável em qualquer app bancário
+  - `ticket_url`, `expiration_date`, `payment_id`
+- **Novo helper `createPixPayment()` em `src/lib/mercado-pago.ts`**: POST `/v1/payments` com Idempotency-Key (evita duplicação em retry), expiração configurável (default 30min), tratamento CPF vs CNPJ (Payment API PIX só aceita CPF em `identification.number` — se for CNPJ, omite).
+- **Email obrigatório**: Payment API exige `payer.email`. Fallback pra `venda-${vendaId}@alissonjoias.com.br` quando cliente não tem email cadastrado.
+- **`PixQrInline.tsx` atualizado**: removeu dependência de `qrcode` (lib local) — agora exibe `data:image/png;base64,${pixQrBase64}` direto do MP. Botão "Copiar" agora copia o código Pix EMV (não link MP). Mensagem do WhatsApp manda o código Pix, não link.
+- **Endpoint `/criar-link` continua existindo** pro botão "Gerar Link Online" do `MercadoPagoCobranca` que oferece PIX + cartão no mesmo link (checkout MP). `PixQrInline` é especializado em PIX nativo escaneável.
+- **Webhook sem mudanças**: o fluxo atual via `external_reference` já funciona pra pagamentos criados pela Payment API (mesmo topic `payment`).
+
+## v2.19.76 (11/04/2026)
+### Feature — QR Code Pix inline também na Nova Venda
+- Antes, `PixQrInline` só funcionava em `VendaDetalheClient` porque dependia de um `vendaId` já existente. Na Nova Venda, quando a vendedora escolhia Pix, nada acontecia.
+- Agora `PixQrInline` aceita `vendaId: number | null` + callback opcional `obterVendaId?: () => Promise<{id, numero_venda}>`. Quando `vendaId=null`, clica em "Gerar QR" → chama `obterVendaId()` pra salvar venda como rascunho silenciosamente → usa o id retornado pra criar o link MP.
+- `NovaVendaClient`: novo helper `montarBodyVenda()` + `salvarRascunhoParaPix()` que valida `itens.length > 0` e `totalVenda > 0` antes de criar rascunho via `POST /api/vendas`. Renderiza `<PixQrInline>` quando `pagForma === "Pix" && totalVenda > 0` e redireciona pra `/vendas/[id]` quando o polling detecta pagamento.
+
+## v2.19.75 (11/04/2026)
+### Feature — busca de produtos ordena por relevância
+- `GET /api/vendas/produtos/busca` ordenava só por `nome` alfabético, o que com `LIMIT 20` empurrava produtos completos (com preço) pra fora quando havia muitos produtos incompletos com o mesmo termo no nome. Produto de teste `TESTE-2026-A` não aparecia no top 20 ao buscar "teste".
+- Nova ordenação por relevância:
+  1. Produtos ATIVOS (`situacao='A'`) antes de inativos
+  2. Produtos **COM preço preenchido** (`preco_sync > 0`) antes de sem preço
+  3. Produtos SIMPLES (`tipo='S'`) antes de pais com variação (`tipo='V'`)
+  4. Match EXATO no SKU vem primeiro
+  5. Match no COMEÇO do nome antes de match no meio
+  6. Desempate: nome alfabético
+- Efeito colateral positivo: vendedoras sempre veem produtos vendáveis no topo da busca, não só os de teste.
+
+## v2.19.74 (11/04/2026)
+### Feature — QR Code Pix inline no form de pagamento da venda (primeira versão)
+- Novo componente `src/components/vendas/PixQrInline.tsx` (260 linhas) — card inline no form de pagamento do `VendaDetalheClient` quando a vendedora seleciona "Pix". Botão "Gerar QR Code Pix" → chama `/criar-link` → exibe QR (240px cor esmeralda, gerado via lib `qrcode`) + link copiável + botão WhatsApp + botão "Regenerar".
+- Polling a cada 4s checando `/api/vendas/[id]` pra detectar `pagamentos_venda.status='confirmado'` OU `vendas_erp.situacao='concluido'`. Quando confirma, mostra "✓ Pagamento confirmado! Atualizando venda..." por 2.5s e chama `onPagamentoConfirmado(vendaId)` → `load()` recarrega a venda.
+- **Obs:** substituído na v2.19.77 pelo endpoint `/criar-pix` (Payment API) porque o QR gerado localmente a partir do init_point **não é** PIX nativo escaneável.
+
+## v2.19.73 (11/04/2026)
+### Feature — webhook MP detecta simulação do painel e retorna OK limpo
+- O botão "Simular notificação" do painel de Webhooks MP envia payload com `live_mode: false` e `data.id: "123456"` (fake). Antes, o webhook tentava buscar esse payment na MP API e recebia erro, logando 502 em `webhook_log` e retornando `{ok: false}`. No painel MP aparecia erro.
+- Agora, quando `body.live_mode === false`:
+  - Log 200 em `webhook_log` marcado como `"simulacao_validada"`
+  - Retorna 200 `{ok: true, simulation: true, message: "Webhook MP recebido e HMAC validado. Simulação OK."}` limpo
+  - Painel MP mostra "Resposta: 200 - OK" sem ruído
+- Permite ao Jonathan validar visualmente no painel MP que o endpoint está recebendo, HMAC validou e payload parseou, sem depender de payment real.
+- Comportamento em produção (`live_mode: true`) permanece idêntico: busca o payment real via `fetchPayment()`, processa `external_reference`, aprova/conclui venda, marca `contas_receber` como pago.
+
+## v2.19.72 (11/04/2026)
+### Feature — Integração Mercado Pago: Payment Link + Point Smart com auto-conclusão
+- **Migration 135 (`135_mercado_pago_integracao.sql`)**:
+  - Nova tabela `alissonerp.mp_point_devices` (cadastro de maquininhas Point Smart com `device_id`, `nome_legivel`, `store_id`, `pos_id`, `operating_mode`, `ativo`, `loja`, `last_sync_at`) com trigger `updated_at` e índice parcial `ativo=true`.
+  - Nova função `fn_cr_marcar_pago_mp(p_venda_id INTEGER)` que marca `contas_receber.situacao='pago'` + `data_recebimento=CURRENT_DATE` das CRs pendentes da venda e retorna contagem.
+  - Índice `idx_pagamentos_venda_gateway_id` em `pagamentos_venda(gateway_id) WHERE gateway_id IS NOT NULL` pra lookup rápido no webhook.
+  - Entry `mercado-pago-payment` em `webhook_config` pra rastreio.
+- **Dependências novas:** `mercadopago@^2.9.0` (SDK oficial Node v2) + `qrcode@^1.5.4` (gerar QR local pro link).
+- **Helper compartilhado `src/lib/mercado-pago.ts`**: `getAccessToken()`, `getWebhookSecret()`, `getWebhookBaseUrl()`, `createPreference()`, `fetchPayment()`, `listPointDevices()`, `createPointIntent()`, `cancelPointIntent()`. Secrets lidos de `alissonerp.configuracoes_secrets` (padrão Tiny, zero env vars).
+- **Helper `src/lib/vendas-aprovar.ts`**: extraído do PATCH `/api/vendas/[id]` pra poder ser chamado do webhook MP sem passar por HTTP interno. `sendToTiny()`, `approveVenda()`, `concluirVenda()`, `criarOrdemDoOrcamento()` com idempotência em 4 camadas (`tiny_pedido_id`, `vendas_erp.situacao`, `orcamentos.ordem_gerada_id`, `payment_ids_processados` no gateway_payload).
+- **POST `/api/vendas/[id]/mercado-pago/criar-link`**: cria Preference MP com PIX + cartão crédito excluídos `[debit_card, atm, ticket, prepaid_card]`, `external_reference = venda:X:pag:Y`, `notification_url`, `back_urls`, `expires_in=24h`. Salva `preference_id` em `pagamentos_venda.gateway_id`. Retorna `{init_point, preference_id, pagamento_id}`.
+- **POST/DELETE `/api/vendas/[id]/mercado-pago/criar-intent-point`**: dispara Payment Intent na maquininha escolhida via `POST /point/integration-api/devices/{device_id}/payment-intents` (amount em centavos, installments, payment.type='credit_card', additional_info com external_reference). DELETE cancela intent ativa antes do cliente passar o cartão.
+- **GET/POST/PATCH `/api/mercado-pago/devices`**: lista devices cadastrados (com guard `try/catch` pra retornar `[]` quando tabela ainda não existe), sincroniza via `listPointDevices()` da MP API (upsert em `mp_point_devices`), permite renomear/ativar/desativar manualmente.
+- **POST `/api/webhooks/mercado-pago`**: receiver com validação HMAC (formato header `x-signature: ts=...,v1=hash` + manifesto `id:${dataId};request-id:${x-request-id};ts:${ts};`), log bruto imediato em `webhook_log`, busca detalhes via `GET /v1/payments/{id}`, parse `external_reference`, idempotência (via `payment_ids_processados[]` no gateway_payload), transição automática aprovado→concluido via `concluirVenda()`. Retorna sempre 2xx em cenários tratados pra evitar reentrega MP.
+- **Componentes UI:**
+  - `src/components/vendas/MercadoPagoCobranca.tsx` (520 linhas): seção separada no `VendaDetalheClient` com dois botões ("Gerar Link Online", "Enviar pra Maquininha") que abrem modais overlay com QR code, link, WhatsApp, select de device, countdown, cancelar intent.
+  - `src/components/vendas/MercadoPagoCobranca.tsx` integrado após a lista de pagamentos do detalhe da venda.
+- **Configurações > Integrações > Mercado Pago**: nova seção com campos `Access Token`, `Webhook Secret`, `User ID`, `URL base p/ webhook`. Sub-seção "Maquininhas Point" com botão "Sincronizar com MP" e tabela editável (nome legível, loja, ativo, toggle). `/api/configuracoes/integracoes/route.ts` aceita `KEYS_MP = [mp_access_token, mp_webhook_secret, mp_user_id, mp_webhook_base_url]`.
+- **Páginas públicas de retorno (`back_urls`)**: `/pagamento/[token]/[status]/page.tsx` — 3 estados (`sucesso`, `pendente`, `erro`) lookup por `vendas_erp.token_compartilhamento` UUID, sem expor ID interno.
+- **Princípio-chave 1:** lógica de transição de estado de venda extraída pra `src/lib/vendas-aprovar.ts`. PATCH manual e webhook MP **ambos** chamam esses helpers — webhook não faz HTTP interno, chama TypeScript direto.
+- **Princípio-chave 2:** webhook é **agnóstico ao canal**. MP envia `topic=payment` com o mesmo formato pra Preference (online) e Point (maquininha). `external_reference` carrega `venda_id:pagamento_id` em ambos os casos. A diferença entre os canais mora apenas na criação do pagamento (endpoints separados), não no fechamento.
 
 ## v2.19.71 (11/04/2026)
 ### Fix — Busca insensível a acentos em /ordens e /pcp
