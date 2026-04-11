@@ -379,16 +379,22 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
   const [actionId, setActionId] = useState<number | null>(null);
   const [form, setForm] = useState({ descricao: "", valor: "", data_vencimento: "", categoria: "", obs: "" });
 
+  // Backend usa 'pago' como status de CR quitada (via trigger 113 e
+  // fn_cr_marcar_pago_mp). A UI antiga usava 'recebido' como sinônimo,
+  // então tratamos ambos como equivalentes pra compatibilidade.
+  const isRecebido = (s: string) => s === "pago" || s === "recebido";
+
   const totalPendente = lista
     .filter((r) => r.situacao === "pendente")
     .reduce((s, r) => s + Number(r.valor), 0);
   const totalRecebido = lista
-    .filter((r) => r.situacao === "recebido")
+    .filter((r) => isRecebido(r.situacao))
     .reduce((s, r) => s + Number(r.valor), 0);
 
   const filtradas = useMemo(() => {
     if (filtro === "vencido") return lista.filter((r) => isVencido(r.data_vencimento, r.situacao));
     if (filtro === "todos") return lista;
+    if (filtro === "recebido") return lista.filter((r) => isRecebido(r.situacao));
     return lista.filter((r) => r.situacao === filtro);
   }, [lista, filtro]);
 
@@ -429,13 +435,16 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
 
   async function marcarRecebido(id: number) {
     setActionId(id);
+    // Usa 'pago' porque é o valor que o backend (trigger 113 e
+    // fn_cr_marcar_pago_mp) grava. Antes era 'recebido' mas criava
+    // inconsistência com CRs pagas automaticamente pelo webhook MP.
     const res = await fetch(`/api/financeiro/contas-receber/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ situacao: "recebido", data_recebimento: new Date().toISOString().slice(0, 10) }),
+      body: JSON.stringify({ situacao: "pago", data_recebimento: new Date().toISOString().slice(0, 10) }),
     });
     if (res.ok) {
-      setLista((prev) => prev.map((r) => r.id === id ? { ...r, situacao: "recebido", data_recebimento: new Date().toISOString().slice(0, 10) } : r));
+      setLista((prev) => prev.map((r) => r.id === id ? { ...r, situacao: "pago", data_recebimento: new Date().toISOString().slice(0, 10) } : r));
     } else {
       const data = await res.json().catch(() => ({ error: "Erro" }));
       alert(data.error || "Erro ao marcar como recebido");
