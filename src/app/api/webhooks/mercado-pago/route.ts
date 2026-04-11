@@ -106,7 +106,13 @@ export async function POST(req: NextRequest) {
   const url = new URL(req.url);
 
   // ─── 1. Log bruto imediato (antes de qualquer validação) ─────────────────
-  let body: { type?: string; action?: string; data?: { id?: string | number } } = {};
+  let body: {
+    type?: string;
+    action?: string;
+    data?: { id?: string | number };
+    live_mode?: boolean;
+    user_id?: number | string;
+  } = {};
   try { body = JSON.parse(rawBody); } catch { /* keep empty */ }
 
   await sql`
@@ -147,6 +153,31 @@ export async function POST(req: NextRequest) {
       VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ raw_body: rawBody.slice(0, 500) })}::jsonb, 401, ${sig.erro ?? "HMAC inválido"})
     `;
     return NextResponse.json({ error: sig.erro }, { status: 401 });
+  }
+
+  // ─── 3.5. Detecta simulação do painel MP ─────────────────────────────────
+  // O botão "Simular notificação" do painel de Webhooks envia:
+  //   { live_mode: false, data.id: "123456", ... }
+  // O payment_id "123456" é fake e fetchPayment() retornaria 404/401 real.
+  // Tratamos explicitamente pra retornar 200 OK limpo no painel MP, provando
+  // que o endpoint está recebendo, HMAC validou e parseou o payload.
+  if (body.live_mode === false) {
+    await sql`
+      INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status)
+      VALUES (${WEBHOOK_NOME}, ${JSON.stringify({
+        simulation: true,
+        data_id: dataId,
+        type,
+        user_id: body.user_id,
+        action: body.action,
+        resultado: "simulacao_validada",
+      })}::jsonb, 200)
+    `;
+    return NextResponse.json({
+      ok: true,
+      simulation: true,
+      message: "Webhook MP recebido e HMAC validado. Simulação OK.",
+    });
   }
 
   // ─── 4. Busca pagamento detalhado na MP ──────────────────────────────────
