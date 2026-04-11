@@ -11,6 +11,7 @@ import {
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
 import MercadoPagoCobranca from "@/components/vendas/MercadoPagoCobranca";
+import PixQrInline from "@/components/vendas/PixQrInline";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -1499,6 +1500,16 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                     {CONDICOES.map(c => <option key={c} value={c}>{c}</option>)}
                   </Select>
                 </div>
+              )}
+
+              {/* QR Code Pix via Mercado Pago (quando forma=Pix) */}
+              {newPagForma === "Pix" && (
+                <PixQrInline
+                  vendaId={venda.id}
+                  numeroVenda={venda.numero_venda}
+                  valor={Math.max(0, venda.total_venda - venda.total_pago)}
+                  onPagamentoConfirmado={load}
+                />
               )}
 
               {/* Tabela de parcelas */}
