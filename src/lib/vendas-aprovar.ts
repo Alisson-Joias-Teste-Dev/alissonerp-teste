@@ -469,12 +469,22 @@ export async function criarOrdemDoOrcamento(
 
 // ═══════════════════════════════════════════════════════════════════════════
 // approveVenda — rascunho → aprovado (dispara Tiny)
+//
+// opts.tinyBestEffort: se true, falha do Tiny NÃO impede a aprovação. Erro
+// é salvo em tiny_sync_erro e a venda segue pra aprovado normalmente. Usado
+// pelo webhook MP — pagamento confirmado pelo banco não deve ficar refém
+// do estado da integração Tiny (que pode ter token expirado, etc).
 // ═══════════════════════════════════════════════════════════════════════════
+
+export interface ApproveVendaOpts {
+  tinyBestEffort?: boolean;
+}
 
 export async function approveVenda(
   vendaId: number,
-  userId: string
-): Promise<{ ok: true; ordem_criada?: string; ja_aprovada?: boolean }> {
+  userId: string,
+  opts: ApproveVendaOpts = {}
+): Promise<{ ok: true; ordem_criada?: string; ja_aprovada?: boolean; tiny_erro?: string }> {
   const [venda] = await sql`
     SELECT id, situacao, bloqueado, tiny_pedido_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
@@ -487,7 +497,19 @@ export async function approveVenda(
   }
 
   // 1. Envia pro Tiny (noop se tiny_pedido_id já existe)
-  await sendToTiny(vendaId);
+  let tinyErro: string | undefined;
+  try {
+    await sendToTiny(vendaId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (opts.tinyBestEffort) {
+      console.error(`[approveVenda] Tiny falhou mas tinyBestEffort=true, continuando: ${msg}`);
+      tinyErro = msg;
+      // sendToTiny já grava tiny_sync_erro no banco antes do throw
+    } else {
+      throw err;
+    }
+  }
 
   // 2. Atualiza situação para aprovado
   await sql`
@@ -506,17 +528,25 @@ export async function approveVenda(
     console.error(`[approveVenda] Erro ao criar ordem p/ venda ${vendaId}:`, err);
   }
 
-  return { ok: true, ...(ordemCriada ? { ordem_criada: ordemCriada } : {}) };
+  return {
+    ok: true,
+    ...(ordemCriada ? { ordem_criada: ordemCriada } : {}),
+    ...(tinyErro ? { tiny_erro: tinyErro } : {}),
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // concluirVenda — aprovado/rascunho → concluido + marca CR como pago
+//
+// opts.tinyBestEffort: propagado pra approveVenda quando a venda estiver em
+// rascunho. Usado pelo webhook MP — ver approveVenda.
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function concluirVenda(
   vendaId: number,
-  userId: string
-): Promise<{ ok: true; ordem_criada?: string; ja_concluida?: boolean; cr_quitadas?: number }> {
+  userId: string,
+  opts: ApproveVendaOpts = {}
+): Promise<{ ok: true; ordem_criada?: string; ja_concluida?: boolean; cr_quitadas?: number; tiny_erro?: string }> {
   const [venda] = await sql`
     SELECT id, situacao, bloqueado FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
@@ -532,9 +562,11 @@ export async function concluirVenda(
 
   // Se ainda não está aprovada, aprovar primeiro (vai enviar pro Tiny)
   let ordemCriada: string | undefined;
+  let tinyErro: string | undefined;
   if (venda.situacao === "rascunho") {
-    const aprovada = await approveVenda(vendaId, userId);
+    const aprovada = await approveVenda(vendaId, userId, opts);
     if (aprovada.ordem_criada) ordemCriada = aprovada.ordem_criada;
+    if (aprovada.tiny_erro) tinyErro = aprovada.tiny_erro;
   }
 
   // Transição para concluido — trigger 113 (fn_venda_gerar_conta_receber)
@@ -564,6 +596,7 @@ export async function concluirVenda(
   return {
     ok: true,
     ...(ordemCriada ? { ordem_criada: ordemCriada } : {}),
+    ...(tinyErro ? { tiny_erro: tinyErro } : {}),
     cr_quitadas: Number(crQuitadas ?? 0),
   };
 }

@@ -280,8 +280,14 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: "system_user_id não configurado" });
       }
 
+      let resultadoConclusao;
       try {
-        await concluirVenda(vendaId, systemUserId);
+        // tinyBestEffort=true: se Tiny estiver fora (token expirado, etc),
+        // a venda AINDA é concluída. O webhook de pagamento MP nunca pode
+        // ficar refém do estado da integração Tiny — cliente já pagou.
+        resultadoConclusao = await concluirVenda(vendaId, systemUserId, {
+          tinyBestEffort: true,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Erro ao concluir venda";
         await sql`
@@ -298,7 +304,7 @@ export async function POST(req: NextRequest) {
       }
 
       await sql`
-        INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status)
+        INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
         VALUES (${WEBHOOK_NOME}, ${JSON.stringify({
           venda_id: vendaId,
           pagamento_id: pagamentoId,
@@ -306,7 +312,9 @@ export async function POST(req: NextRequest) {
           resultado: "venda_concluida",
           pago: result.pago,
           total: result.total,
-        })}::jsonb, 200)
+          ...(resultadoConclusao.tiny_erro ? { tiny_erro: resultadoConclusao.tiny_erro } : {}),
+          cr_quitadas: resultadoConclusao.cr_quitadas,
+        })}::jsonb, 200, ${resultadoConclusao.tiny_erro ?? null})
       `;
 
       return NextResponse.json({
@@ -314,6 +322,7 @@ export async function POST(req: NextRequest) {
         venda_id: vendaId,
         pagamento_id: pagamentoId,
         venda_concluida: true,
+        ...(resultadoConclusao.tiny_erro ? { tiny_sync_pendente: true } : {}),
       });
     } else {
       // Pagamento parcial — só confirma esse pagamento, não fecha venda
