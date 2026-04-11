@@ -4,14 +4,19 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   QrCode, Copy, Check, Loader2, MessageCircle, CheckCircle, AlertTriangle, RefreshCw,
 } from "lucide-react";
-import QRCode from "qrcode";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PixQrInline — QR Code Pix via Mercado Pago, inline no form de pagamento
+// PixQrInline — QR Code PIX NATIVO via Mercado Pago Payment API
 //
-// Usado dentro do VendaDetalheClient quando a vendedora seleciona "Pix"
-// como forma de recebimento. Gera Preference MP, exibe QR + link, faz
-// polling pra detectar confirmação automática via webhook.
+// Usa o endpoint /criar-pix (não /criar-link) que gera um PIX verdadeiro
+// no formato EMV/BR Code do Banco Central, escaneável em qualquer app
+// bancário (diferente do QR da Preference que vai pro checkout MP).
+//
+// Exibe:
+//   - Imagem do QR Code (PNG base64 retornado direto do MP)
+//   - Código copia-e-cola (string EMV)
+//   - Botões copiar e WhatsApp
+//   - Polling pra detectar confirmação automática via webhook
 // ═══════════════════════════════════════════════════════════════════════════
 
 const C = {
@@ -62,22 +67,14 @@ export default function PixQrInline({
   useEffect(() => { setNumeroVenda(numeroVendaProp); }, [numeroVendaProp]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [initPoint, setInitPoint] = useState<string | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  // pixCode = string EMV "copia e cola" (ex: "00020101021...")
+  const [pixCode, setPixCode] = useState<string | null>(null);
+  // pixQrBase64 = imagem PNG direto do MP (sem precisar gerar local)
+  const [pixQrBase64, setPixQrBase64] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
   const [pago, setPago] = useState(false);
 
   const pollRef = useRef<NodeJS.Timeout | null>(null);
-
-  // ─── Gera QR code do init_point quando criado ────────────────────────────
-  useEffect(() => {
-    if (!initPoint) { setQrDataUrl(null); return; }
-    QRCode.toDataURL(initPoint, {
-      width: 240,
-      margin: 1,
-      color: { dark: C.esmeralda, light: "#ffffff" },
-    }).then(setQrDataUrl).catch(() => setQrDataUrl(null));
-  }, [initPoint]);
 
   // ─── Polling de confirmação ──────────────────────────────────────────────
   const iniciarPolling = useCallback((idParaMonitorar: number) => {
@@ -122,14 +119,17 @@ export default function PixQrInline({
         setNumeroVenda(vendaCriada.numero_venda);
       }
 
-      const res = await fetch(`/api/vendas/${idParaUsar}/mercado-pago/criar-link`, {
+      // Usa o endpoint criar-pix (Payment API, PIX nativo) em vez do
+      // criar-link (Preference, checkout MP).
+      const res = await fetch(`/api/vendas/${idParaUsar}/mercado-pago/criar-pix`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Erro ao gerar QR Code");
-      setInitPoint(body.init_point);
+      if (!res.ok) throw new Error(body.error ?? "Erro ao gerar QR Code Pix");
+      setPixCode(body.qr_code);
+      setPixQrBase64(body.qr_code_base64);
       iniciarPolling(idParaUsar);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro");
@@ -139,23 +139,23 @@ export default function PixQrInline({
   }
 
   async function regenerar() {
-    setInitPoint(null);
-    setQrDataUrl(null);
+    setPixCode(null);
+    setPixQrBase64(null);
     setPago(false);
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     await gerarQr();
   }
 
-  function copiarLink() {
-    if (!initPoint) return;
-    navigator.clipboard.writeText(initPoint);
+  function copiarPix() {
+    if (!pixCode) return;
+    navigator.clipboard.writeText(pixCode);
     setCopiado(true);
     setTimeout(() => setCopiado(false), 2000);
   }
 
   function abrirWhats() {
-    if (!initPoint) return;
-    const msg = `Olá! Segue o link de pagamento da sua compra na Alisson Joias (Venda ${numeroVenda}, ${fmt(valor)}):\n\n${initPoint}\n\nAceita PIX ou cartão de crédito.`;
+    if (!pixCode) return;
+    const msg = `Olá! Segue o código Pix da sua compra na Alisson Joias (Venda ${numeroVenda}, ${fmt(valor)}).\n\nCopie e cole no seu app bancário:\n\n${pixCode}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
@@ -185,10 +185,10 @@ export default function PixQrInline({
       )}
 
       {/* Estado: ainda não gerou */}
-      {!initPoint && !loading && !pago && (
+      {!pixCode && !loading && !pago && (
         <>
           <p className="text-xs mb-3" style={{ color: "#6B7280" }}>
-            Gera um QR Code Pix do Mercado Pago para o cliente pagar via aplicativo bancário.
+            Gera um QR Code Pix do Mercado Pago pra cliente pagar no app bancário.
             Quando o pagamento cair, a venda é <b>concluída automaticamente</b>.
           </p>
           <button
@@ -209,36 +209,41 @@ export default function PixQrInline({
       )}
 
       {/* Estado: gerado e esperando pagamento */}
-      {initPoint && !pago && !loading && (
+      {pixCode && !pago && !loading && (
         <div className="space-y-3">
           <div className="flex flex-col md:flex-row gap-4">
-            {/* QR Code */}
-            {qrDataUrl && (
+            {/* QR Code (PNG base64 direto do Mercado Pago) */}
+            {pixQrBase64 && (
               <div
                 className="flex-shrink-0 self-center p-2 rounded-lg"
                 style={{ backgroundColor: "#fff", border: `1px solid ${C.cremeBorder}` }}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={qrDataUrl} alt="QR Code Pix" width={200} height={200} />
+                <img
+                  src={`data:image/png;base64,${pixQrBase64}`}
+                  alt="QR Code Pix"
+                  width={220}
+                  height={220}
+                />
               </div>
             )}
 
             {/* Ações */}
             <div className="flex-1 flex flex-col gap-2 justify-center">
               <p className="text-xs mb-1" style={{ color: "#6B7280" }}>
-                Cliente pode pagar escaneando o QR Code ou pelo link:
+                Escaneie o QR Code no app do banco <b>ou</b> copie o código Pix:
               </p>
 
               <div
                 className="flex items-center gap-2 p-2 rounded-lg border text-xs break-all"
                 style={{ borderColor: C.cremeBorder, color: "#374151", backgroundColor: "#fff" }}
               >
-                <span className="flex-1 font-mono">{initPoint.slice(0, 42)}...</span>
+                <span className="flex-1 font-mono">{pixCode.slice(0, 36)}...</span>
                 <button
-                  onClick={copiarLink}
+                  onClick={copiarPix}
                   className="p-1.5 rounded hover:bg-stone-100"
                   style={{ color: C.esmeralda }}
-                  title="Copiar link"
+                  title="Copiar código Pix"
                 >
                   {copiado ? <Check size={13} /> : <Copy size={13} />}
                 </button>
@@ -249,7 +254,7 @@ export default function PixQrInline({
                 className="flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90"
                 style={{ backgroundColor: "#25D366", color: "#fff" }}
               >
-                <MessageCircle size={13} /> Enviar pelo WhatsApp
+                <MessageCircle size={13} /> Enviar Pix pelo WhatsApp
               </button>
 
               <button
