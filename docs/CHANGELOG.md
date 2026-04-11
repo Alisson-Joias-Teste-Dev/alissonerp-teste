@@ -1,8 +1,17 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 10/04/2026 — Versão: v2.19.69 <!-- Revisado 10/04/2026 -->
+> 📋 Última atualização automática: 11/04/2026 — Versão: v2.19.70 <!-- Revisado 11/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.19.70 (11/04/2026)
+### Feature — PCP: busca server-side no histórico completo + janela de 30 dias
+- **Bug raiz:** a busca do kanban era 100% client-side, filtrando só nos ~105 PCPs carregados pelo SSR. Ordens concluídas fora desse top ou "no limbo" dos filtros de service/transferência simplesmente sumiam ao pesquisar — mesmo existindo no banco.
+- **Fix 1 — janela temporal em `pcp/page.tsx`:** SSR passa a carregar só etapas ativas (`novas_ordens`, `em_andamento`, `pendencia`, `aguardando`, `cancelado`) + concluídas dos últimos **30 dias**. Reduz a carga inicial e deixa o kanban focado no que precisa de ação.
+- **Fix 2 — novo endpoint `GET /api/pcp/buscar?q=termo`:** busca server-side em **todo o histórico** (sem filtro de etapa, sem filtro de service/transferência), em `numero_ordem`, `cliente_nome`, `vendedor_nome`, `setor_nome`, `deposito_nome` e `ordens.numero_pedido`. Respeita filtro de depósito pra ourives. Retorna top 100, ordenado por match por prefixo + `id DESC`.
+- **Fix 3 — `KanbanClient.tsx` com debounce 300ms:** busca agora dispara o endpoint após 300ms parado. Estado visual rico: loader spinner, botão X pra limpar, borda verde esmeralda no modo busca, badge *"🔍 N resultado(s) da busca em todo o histórico"*, texto explicativo *"Buscando em todo o histórico (sem limite de data)"*, mensagem de erro visível se a API falhar.
+- **Permissões:** ourives continua só vendo/buscando ordens do seu `deposito_id`.
+- **Validação completa:** TypeScript 0 erros, queries testadas direto no banco (C-1707 retornou 2 linhas — antes sumia), fluxo end-to-end testado no preview (modo normal → buscar "C-1707" → buscar "Gigi" → limpar → volta ao modo normal).
 
 ## v2.19.69 (10/04/2026)
 ### Fix — Coluna "PEDIDO PDV" vazia na listagem de ordens
