@@ -21,13 +21,31 @@ export default async function FinanceiroPage() {
     `,
     sql`
       SELECT
-        id, descricao, valor,
-        data_vencimento::text  AS data_vencimento,
-        data_recebimento::text AS data_recebimento,
-        situacao, categoria, obs,
-        created_at::text AS created_at
-      FROM alissonerp.contas_receber
-      ORDER BY data_vencimento ASC NULLS LAST, id DESC
+        cr.id, cr.descricao, cr.valor,
+        cr.data_vencimento::text  AS data_vencimento,
+        cr.data_recebimento::text AS data_recebimento,
+        cr.situacao, cr.categoria, cr.obs,
+        cr.created_at::text AS created_at,
+        cr.venda_erp_id,
+        -- Soma de valor_liquido dos pagamentos MP confirmados da venda
+        -- (NULL quando não há pagamento MP — ex: CRs de dinheiro, pix
+        --  manual). Fallback pra valor bruto quando líquido não disponível.
+        (
+          SELECT SUM(p.valor_liquido)
+          FROM alissonerp.pagamentos_venda p
+          WHERE p.venda_id = cr.venda_erp_id
+            AND p.status = 'confirmado'
+            AND p.valor_liquido IS NOT NULL
+        ) AS valor_liquido,
+        (
+          SELECT SUM(p.taxas_mp)
+          FROM alissonerp.pagamentos_venda p
+          WHERE p.venda_id = cr.venda_erp_id
+            AND p.status = 'confirmado'
+            AND p.taxas_mp IS NOT NULL
+        ) AS taxas_mp
+      FROM alissonerp.contas_receber cr
+      ORDER BY cr.data_vencimento ASC NULLS LAST, cr.id DESC
       LIMIT 200
     `,
     sql`
