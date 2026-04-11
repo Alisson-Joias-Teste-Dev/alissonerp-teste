@@ -134,6 +134,16 @@ function fmtDate(d: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("pt-BR", { timeZone: "UTC" });
 }
+// fmtDateTime usa o timezone local do navegador (não UTC) porque
+// data_confirmacao é TIMESTAMPTZ e queremos mostrar no horário de Brasília
+function fmtDateTime(d: string | null) {
+  if (!d) return "—";
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return "—";
+  const data = date.toLocaleDateString("pt-BR");
+  const hora = date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return `${data} às ${hora}`;
+}
 function uid() { return Math.random().toString(36).slice(2); }
 
 const FULL_ACCESS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
@@ -1385,7 +1395,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                         {pag.gateway && <span className="text-xs ml-1" style={{ color: "#9CA3AF" }}>via {pag.gateway}</span>}
                       </p>
                       <p className="text-xs" style={{ color: "#9CA3AF" }}>
-                        {pag.data_confirmacao ? `Confirmado em ${fmtDate(pag.data_confirmacao)}` : "Sem confirmação"}
+                        {pag.data_confirmacao ? `Confirmado em ${fmtDateTime(pag.data_confirmacao)}` : "Sem confirmação"}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
