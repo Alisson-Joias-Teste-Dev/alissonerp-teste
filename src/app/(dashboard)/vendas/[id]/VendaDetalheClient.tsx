@@ -46,6 +46,8 @@ interface ItemVenda {
 interface PagamentoServer {
   id: number; forma: string; gateway: string | null; valor: number;
   parcelas: number; status: string; data_confirmacao: string | null;
+  valor_liquido?: number | null;  // valor que cai na conta MP (bruto - taxas)
+  taxas_mp?: number | null;        // total deduzido (MP fee + adquirência)
 }
 interface Vendedor { id_vendedor: number; nome: string; }
 interface FormaEnvio { id: number; nome: string; id_api: string; }
@@ -1388,9 +1390,10 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
             <div className="space-y-2 mb-4">
               {venda.pagamentos.map(pag => {
                 const sc = PAG_STATUS_COLOR[pag.status] ?? PAG_STATUS_COLOR.pendente;
+                const temLiquido = pag.valor_liquido != null && pag.valor_liquido > 0;
                 return (
                   <div key={pag.id} className="flex items-center justify-between p-3 rounded-lg border" style={{ borderColor: C.cremeBorder }}>
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium" style={{ color: "#1A1A1A" }}>
                         {pag.forma}{pag.parcelas > 1 ? ` ${pag.parcelas}×` : ""}
                         {pag.gateway && <span className="text-xs ml-1" style={{ color: "#9CA3AF" }}>via {pag.gateway}</span>}
@@ -1398,6 +1401,14 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                       <p className="text-xs" style={{ color: "#9CA3AF" }}>
                         {pag.data_confirmacao ? `Confirmado em ${fmtDateTime(pag.data_confirmacao)}` : "Sem confirmação"}
                       </p>
+                      {temLiquido && (
+                        <p className="text-[11px] mt-0.5 tabular-nums" style={{ color: "#059669" }}>
+                          Líquido recebido: <b>{fmt(Number(pag.valor_liquido))}</b>
+                          {pag.taxas_mp != null && pag.taxas_mp > 0 && (
+                            <span style={{ color: "#D97706" }}> (taxa MP {fmt(Number(pag.taxas_mp))})</span>
+                          )}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-full"

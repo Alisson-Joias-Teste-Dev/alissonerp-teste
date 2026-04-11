@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
         },
         query: Object.fromEntries(url.searchParams.entries()),
         body,
-      })}::jsonb,
+      })}::text::jsonb,
       NULL
     )
   `;
@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
   if (!sig.ok) {
     await sql`
       INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-      VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ raw_body: rawBody.slice(0, 500) })}::jsonb, 401, ${sig.erro ?? "HMAC inválido"})
+      VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ raw_body: rawBody.slice(0, 500) })}::text::jsonb, 401, ${sig.erro ?? "HMAC inválido"})
     `;
     return NextResponse.json({ error: sig.erro }, { status: 401 });
   }
@@ -171,7 +171,7 @@ export async function POST(req: NextRequest) {
         user_id: body.user_id,
         action: body.action,
         resultado: "simulacao_validada",
-      })}::jsonb, 200)
+      })}::text::jsonb, 200)
     `;
     return NextResponse.json({
       ok: true,
@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
     const msg = err instanceof Error ? err.message : "Erro ao buscar payment";
     await sql`
       INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-      VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ data_id: dataId })}::jsonb, 502, ${msg})
+      VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ data_id: dataId })}::text::jsonb, 502, ${msg})
     `;
     // Retorna 200 pra não fazer MP reentregar (já está logado)
     return NextResponse.json({ ok: false, error: msg });
@@ -199,6 +199,24 @@ export async function POST(req: NextRequest) {
   const transactionAmount = Number(payment.transaction_amount ?? 0);
   const paymentId = String(payment.id ?? dataId);
   const pointOfInteraction = (payment.point_of_interaction as Record<string, unknown> | undefined)?.type;
+
+  // ─── Valor líquido + taxas MP ────────────────────────────────────────────
+  // transaction_details.net_received_amount = o que realmente cai na conta MP
+  // (source of truth — inclui TODAS as taxas: MP fee, adquirência, etc).
+  //
+  // fee_details[] mostra só a parte do MP fee explícito. Pro valor real de
+  // "taxas cobradas" calculamos transaction_amount - net_received_amount,
+  // que captura tudo que foi deduzido.
+  const txDetails = payment.transaction_details as
+    | { net_received_amount?: number | string; total_paid_amount?: number | string }
+    | undefined;
+  const netReceivedAmount = txDetails?.net_received_amount != null
+    ? Number(txDetails.net_received_amount)
+    : null;
+  const feeDetailsRaw = (payment.fee_details as Array<{ amount?: number | string }> | undefined) ?? [];
+  const valorLiquido = netReceivedAmount != null ? netReceivedAmount : transactionAmount;
+  // taxas = o que foi retido (bruto - líquido), mais preciso que somar fee_details
+  const taxasMP = Math.max(0, Number((transactionAmount - valorLiquido).toFixed(2)));
 
   if (!externalReference) {
     // Pagamento não vinculado a venda ERP — ignora
@@ -238,20 +256,29 @@ export async function POST(req: NextRequest) {
     ultimo_status: status,
     ultimo_update: new Date().toISOString(),
     point_of_interaction_type: pointOfInteraction ?? null,
+    payment_method_id: payment.payment_method_id ?? null,
+    payment_type_id: payment.payment_type_id ?? null,
+    transaction_amount: transactionAmount,
+    net_received_amount: netReceivedAmount,
+    taxas_mp_total: taxasMP,
+    fee_details: feeDetailsRaw,
+    money_release_date: payment.money_release_date ?? null,
     payment_ids_processados: [...new Set([...paymentIdsProcessados, paymentId])],
   };
 
   if (status === "approved") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await (sql as any).begin(async (tx: typeof sql) => {
-      // 7a. Marca pagamento como confirmado
+      // 7a. Marca pagamento como confirmado + grava valor líquido e taxas
       await tx`
         UPDATE alissonerp.pagamentos_venda
         SET
           status           = 'confirmado',
           data_confirmacao = NOW(),
           gateway_id       = ${paymentId},
-          gateway_payload  = ${JSON.stringify(novoPayload)}::jsonb
+          valor_liquido    = ${valorLiquido},
+          taxas_mp         = ${taxasMP},
+          gateway_payload  = ${JSON.stringify(novoPayload)}::text::jsonb
         WHERE id = ${pagamentoId}
       `;
 
@@ -275,7 +302,7 @@ export async function POST(req: NextRequest) {
       if (!systemUserId) {
         await sql`
           INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-          VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ venda_id: vendaId })}::jsonb, 500, 'system_user_id não configurado')
+          VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ venda_id: vendaId })}::text::jsonb, 500, 'system_user_id não configurado')
         `;
         return NextResponse.json({ ok: false, error: "system_user_id não configurado" });
       }
@@ -292,7 +319,7 @@ export async function POST(req: NextRequest) {
         const msg = err instanceof Error ? err.message : "Erro ao concluir venda";
         await sql`
           INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-          VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ venda_id: vendaId, payment_id: paymentId })}::jsonb, 500, ${msg})
+          VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ venda_id: vendaId, payment_id: paymentId })}::text::jsonb, 500, ${msg})
         `;
         // Retorna 200 mesmo assim — pagamento já está registrado como confirmado
         return NextResponse.json({
@@ -314,7 +341,7 @@ export async function POST(req: NextRequest) {
           total: result.total,
           ...(resultadoConclusao.tiny_erro ? { tiny_erro: resultadoConclusao.tiny_erro } : {}),
           cr_quitadas: resultadoConclusao.cr_quitadas,
-        })}::jsonb, 200, ${resultadoConclusao.tiny_erro ?? null})
+        })}::text::jsonb, 200, ${resultadoConclusao.tiny_erro ?? null})
       `;
 
       return NextResponse.json({
@@ -339,7 +366,7 @@ export async function POST(req: NextRequest) {
     // Apenas atualiza payload, mantém status=pendente
     await sql`
       UPDATE alissonerp.pagamentos_venda
-      SET gateway_payload = ${JSON.stringify(novoPayload)}::jsonb
+      SET gateway_payload = ${JSON.stringify(novoPayload)}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
     return NextResponse.json({ ok: true, pending: true, status });
@@ -348,7 +375,7 @@ export async function POST(req: NextRequest) {
     // Nunca foi confirmado — só atualiza payload, mantém pagamento pendente.
     await sql`
       UPDATE alissonerp.pagamentos_venda
-      SET gateway_payload = ${JSON.stringify(novoPayload)}::jsonb
+      SET gateway_payload = ${JSON.stringify(novoPayload)}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
     return NextResponse.json({ ok: true, rejected: true, status });
@@ -369,7 +396,7 @@ export async function POST(req: NextRequest) {
         UPDATE alissonerp.pagamentos_venda
         SET
           status          = 'cancelado',
-          gateway_payload = ${JSON.stringify(novoPayload)}::jsonb
+          gateway_payload = ${JSON.stringify(novoPayload)}::text::jsonb
         WHERE id = ${pagamentoId}
       `;
       return NextResponse.json({ ok: true, cancelled_before_confirm: true, status });
@@ -391,7 +418,7 @@ export async function POST(req: NextRequest) {
           pagamento_id: pagamentoId,
           payment_id: paymentId,
           status,
-        })}::jsonb, 500, ${msg})
+        })}::text::jsonb, 500, ${msg})
       `;
       // Retorna 200 pra não fazer MP reentregar infinitamente
       return NextResponse.json({ ok: false, estorno_failed: true, error: msg });
@@ -408,7 +435,7 @@ export async function POST(req: NextRequest) {
         acao: estornoResult.acao,
         outros_confirmados: estornoResult.outros_confirmados,
         cr_canceladas: estornoResult.cr_canceladas,
-      })}::jsonb, 200)
+      })}::text::jsonb, 200)
     `;
 
     return NextResponse.json({
@@ -424,7 +451,7 @@ export async function POST(req: NextRequest) {
   // Status desconhecido — log e 200
   await sql`
     INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-    VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ venda_id: vendaId, payment_id: paymentId, status })}::jsonb, 200, 'status desconhecido')
+    VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ venda_id: vendaId, payment_id: paymentId, status })}::text::jsonb, 200, 'status desconhecido')
   `;
   return NextResponse.json({ ok: true, unknown_status: status });
 }

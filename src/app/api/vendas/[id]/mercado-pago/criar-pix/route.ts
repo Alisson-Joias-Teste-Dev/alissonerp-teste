@@ -155,7 +155,7 @@ export async function POST(
     const msg = err instanceof Error ? err.message : "Erro ao criar Pix MP";
     await sql`
       UPDATE alissonerp.pagamentos_venda
-      SET gateway_payload = ${JSON.stringify({ erro: msg, quando: new Date().toISOString() })}::jsonb
+      SET gateway_payload = ${JSON.stringify({ erro: msg, quando: new Date().toISOString() })}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
     return NextResponse.json({ error: msg }, { status: 502 });
@@ -174,7 +174,7 @@ export async function POST(
         expiration_date: pix.expiration_date,
         criado_em: new Date().toISOString(),
         criado_por: user.id,
-      })}::jsonb
+      })}::text::jsonb
     WHERE id = ${pagamentoId}
   `;
 

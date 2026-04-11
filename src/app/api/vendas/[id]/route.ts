@@ -53,7 +53,8 @@ export async function GET(
   const pagamentos = await sql`
     SELECT
       id, forma, gateway, valor, parcelas,
-      status, gateway_id, data_confirmacao, created_at
+      status, gateway_id, data_confirmacao, created_at,
+      valor_liquido, taxas_mp
     FROM alissonerp.pagamentos_venda
     WHERE venda_id = ${vendaId}
     ORDER BY id
@@ -87,7 +88,9 @@ export async function GET(
     })),
     pagamentos: pagamentos.map((p) => ({
       ...p,
-      valor: Number(p.valor),
+      valor:         Number(p.valor),
+      valor_liquido: p.valor_liquido != null ? Number(p.valor_liquido) : null,
+      taxas_mp:      p.taxas_mp      != null ? Number(p.taxas_mp)      : null,
     })),
     ordens,
   });

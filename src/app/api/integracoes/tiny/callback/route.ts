@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { getPublicOrigin } from "@/lib/public-origin";
 
 // ─── GET /api/integracoes/tiny/callback ──────────────────────────────────────
-// Callback OAuth2 do Tiny ERP: recebe o authorization code, troca por tokens
+// Callback OAuth2 do Tiny ERP: recebe o authorization code, troca por tokens.
+// O redirect_uri usado aqui PRECISA ser exatamente igual ao usado no /auth
+// senão o Keycloak recusa com "redirect_uri doesn't match". Por isso ambos
+// usam getPublicOrigin() que respeita X-Forwarded-Host atrás de proxy.
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   if (!code) {
@@ -27,7 +31,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const origin = req.nextUrl.origin;
+  const origin = getPublicOrigin(req);
   const redirectUri = `${origin}/api/integracoes/tiny/callback`;
 
   try {
