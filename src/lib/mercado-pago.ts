@@ -135,6 +135,103 @@ export async function fetchPayment(paymentId: string) {
   return payment.get({ id: paymentId });
 }
 
+// ─── PIX nativo via Payment API ─────────────────────────────────────────────
+// Cria um pagamento PIX de verdade (formato EMV/BR Code do Banco Central)
+// que pode ser escaneado em qualquer app bancário, diferente do QR da
+// Preference que aponta pro checkout MP.
+
+export interface CreatePixParams {
+  vendaId: number;
+  pagamentoId: number;
+  numeroVenda: string;
+  valor: number; // em reais (não centavos)
+  descricao?: string;
+  payer: {
+    email: string;       // obrigatório pro Payment API
+    first_name?: string;
+    last_name?: string;
+    cpf?: string;
+  };
+  notificationUrl: string;
+  /** Tempo de expiração em minutos. Default 30. */
+  expiraEmMinutos?: number;
+}
+
+export interface PixPaymentResponse {
+  payment_id: string;
+  qr_code: string;           // string EMV (copia e cola)
+  qr_code_base64: string;    // imagem PNG base64 pra exibir como <img>
+  ticket_url?: string;       // URL do "ticket" do MP (comprovante)
+  expiration_date?: string;  // ISO timestamp
+  status: string;
+}
+
+export async function createPixPayment(params: CreatePixParams): Promise<PixPaymentResponse> {
+  const accessToken = await getAccessToken();
+
+  // Idempotency-Key pra evitar duplicação em retries de rede
+  const idempotencyKey = `venda-${params.vendaId}-pag-${params.pagamentoId}-${Date.now()}`;
+
+  const expirationMin = params.expiraEmMinutos ?? 30;
+  const expiresAt = new Date(Date.now() + expirationMin * 60 * 1000);
+  // MP exige formato específico com offset: "2024-01-01T12:00:00.000-03:00"
+  const expiresAtStr = expiresAt.toISOString().replace("Z", "-00:00");
+
+  const body = {
+    transaction_amount: Math.round(params.valor * 100) / 100,
+    description: params.descricao ?? `Venda ${params.numeroVenda}`,
+    payment_method_id: "pix",
+    payer: {
+      email: params.payer.email,
+      ...(params.payer.first_name ? { first_name: params.payer.first_name } : {}),
+      ...(params.payer.last_name ? { last_name: params.payer.last_name } : {}),
+      ...(params.payer.cpf ? {
+        identification: { type: "CPF", number: params.payer.cpf },
+      } : {}),
+    },
+    external_reference: `venda:${params.vendaId}:pag:${params.pagamentoId}`,
+    notification_url: params.notificationUrl,
+    date_of_expiration: expiresAtStr,
+    statement_descriptor: "ALISSON JOIAS",
+  };
+
+  const res = await fetch(`${MP_BASE}/v1/payments`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "X-Idempotency-Key": idempotencyKey,
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
+  });
+
+  const text = await res.text();
+  let payload: Record<string, unknown>;
+  try { payload = text ? JSON.parse(text) : {}; } catch { payload = {}; }
+
+  if (!res.ok) {
+    const msg = (payload.message as string) || (payload.error as string) || text.slice(0, 300);
+    throw new Error(`Mercado Pago ${res.status}: ${msg}`);
+  }
+
+  const poi = (payload.point_of_interaction as Record<string, unknown> | undefined)?.transaction_data as
+    | Record<string, unknown>
+    | undefined;
+  if (!poi?.qr_code || !poi?.qr_code_base64) {
+    throw new Error("Resposta MP não contém QR Code Pix (payment criado mas sem transaction_data)");
+  }
+
+  return {
+    payment_id: String(payload.id ?? ""),
+    qr_code: String(poi.qr_code),
+    qr_code_base64: String(poi.qr_code_base64),
+    ticket_url: poi.ticket_url ? String(poi.ticket_url) : undefined,
+    expiration_date: payload.date_of_expiration ? String(payload.date_of_expiration) : undefined,
+    status: String(payload.status ?? ""),
+  };
+}
+
 // ─── Point Integration API (maquininhas) ────────────────────────────────────
 // Usamos fetch direto em vez do SDK Point nativo porque a tipagem do SDK
 // 2.12 tem campos incompletos (ex: devices[].id não aparece no .d.ts), e
