@@ -62,6 +62,22 @@ export async function POST(
       { status: 404 }
     );
 
+  // ── Fecha menções pendentes do autor nesta ordem ─────────────────────────
+  // Regra: qualquer comentário do usuário na ordem silencia TODAS as menções
+  // tipo='mencao' que estavam aguardando resposta dele naquela ordem.
+  // Rodamos ANTES do INSERT do novo comentário para não fechar menções que
+  // possam vir a ser criadas no mesmo POST (edge case de auto-menção, já
+  // ignorado no loop abaixo).
+  await sql`
+    UPDATE alissonerp.notificacoes
+    SET aguardando_resposta = false,
+        respondida_em = NOW()
+    WHERE usuario_id = ${user.id}::uuid
+      AND ordem_id   = ${ordemId}
+      AND tipo       = 'mencao'
+      AND aguardando_resposta = true
+  `;
+
   const [comentario] = await sql`
     INSERT INTO alissonerp.comentarios_ordem (ordem_id, autor_id, texto, mencoes, foto_path)
     VALUES (${ordemId}, ${user.id}::uuid, ${texto}, ${mencoes}::uuid[], ${foto_path ?? null})
@@ -75,7 +91,10 @@ export async function POST(
   for (const mencionadoId of mencoes) {
     if (mencionadoId === user.id) continue;
     await sql`
-      INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, link, ordem_id, comentario_id, remetente_id)
+      INSERT INTO alissonerp.notificacoes (
+        usuario_id, tipo, titulo, mensagem, link, ordem_id, comentario_id, remetente_id,
+        aguardando_resposta
+      )
       VALUES (
         ${mencionadoId}::uuid,
         'mencao',
@@ -84,7 +103,8 @@ export async function POST(
         ${`/ordens/${ordemId}`},
         ${ordemId},
         ${comentario.id},
-        ${user.id}::uuid
+        ${user.id}::uuid,
+        true
       )
     `;
   }

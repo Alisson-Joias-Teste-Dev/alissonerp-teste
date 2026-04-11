@@ -126,6 +126,19 @@ export default function PixQrInline({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
+
+      // Detecta se resposta é HTML (404/500 do Next) antes de tentar parsear JSON
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        if (res.status === 404) {
+          throw new Error(
+            "Endpoint /criar-pix não encontrado no servidor. O deploy dessa versão ainda não foi publicado. Aguarde ou faça o merge da branch."
+          );
+        }
+        const raw = await res.text();
+        throw new Error(`Servidor retornou ${res.status} com HTML: ${raw.slice(0, 120)}`);
+      }
+
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Erro ao gerar QR Code Pix");
       setPixCode(body.qr_code);

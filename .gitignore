@@ -47,3 +47,11 @@ next-env.d.ts
 
 # arquivos acidentais
 /0
+
+# config local do Claude Code (permissões do usuário, paths absolutos)
+/.claude/
+
+# relatórios locais gerados (scripts hardcoded + binários)
+/gerar_relatorio.js
+/gerar_relatorio.py
+/relatorio_*.xlsx
