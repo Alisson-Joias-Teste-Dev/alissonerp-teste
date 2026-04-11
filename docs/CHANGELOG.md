@@ -1,8 +1,17 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 11/04/2026 — Versão: v2.19.70 <!-- Revisado 11/04/2026 -->
+> 📋 Última atualização automática: 11/04/2026 — Versão: v2.19.71 <!-- Revisado 11/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.19.71 (11/04/2026)
+### Fix — Busca insensível a acentos em /ordens e /pcp
+- **Bug raiz:** `ILIKE` do PostgreSQL não ignora acentos — buscar "Joao" retornava `0 resultados` mesmo o banco tendo "João Diogo", "João Gabriel", "João Vitor", etc. Qualquer usuário que digitasse um nome sem acentuar (comportamento natural) não conseguia encontrar a ordem.
+- **Fix 1 — Migration 136:** `CREATE EXTENSION IF NOT EXISTS unaccent` (extensão oficial PostgreSQL contrib, sem efeito colateral). Instalada via `scripts/apply_136.mjs`.
+- **Fix 2 — `/ordens/page.tsx`:** query `whereBusca` agora usa `unaccent(numero_ordem) ILIKE unaccent(...)` em `numero_ordem`, `cliente_nome` e `vendedor_nome`. `numero_pedido` não precisa (só dígitos).
+- **Fix 3 — `/api/pcp/buscar/route.ts`:** todas as comparações do endpoint server-side (incluindo `ORDER BY` de relevância por prefixo) usam `unaccent()` em ambos os lados.
+- **Bônus:** o fix também normaliza `ç → c`, `ñ → n`, `ü → u`, etc. "Goncalves" acha "Gonçalves", "Acai" acha "Açaí".
+- **Validação:** preview end-to-end em `/ordens?busca=Joao` retornou 4 clientes "João"; `/pcp` com busca "Joao" retornou 1 match.
 
 ## v2.19.70 (11/04/2026)
 ### Feature — PCP: busca server-side no histórico completo + janela de 30 dias

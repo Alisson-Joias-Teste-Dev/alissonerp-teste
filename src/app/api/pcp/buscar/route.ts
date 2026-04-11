@@ -60,6 +60,9 @@ export async function GET(req: NextRequest) {
   //
   // NOTA: não aplica os filtros de service/transferência. Quem busca quer
   // achar a ordem mesmo se ela estiver num fluxo ambíguo.
+  // unaccent() torna a busca insensível a acentos (ex: "Joao" encontra
+  // "João"). Requer extensão unaccent (migration 136).
+  // numero_pedido é TEXT de dígitos, não precisa unaccent.
   const rows = restrictDeposito != null
     ? await sql`
         SELECT
@@ -80,15 +83,15 @@ export async function GET(req: NextRequest) {
         LEFT JOIN alissonerp.ordens o ON o.id = v.ordem_id
         WHERE v.deposito_id = ${restrictDeposito}
           AND (
-            v.numero_ordem ILIKE ${pattern}
-            OR v.cliente_nome ILIKE ${pattern}
-            OR v.vendedor_nome ILIKE ${pattern}
-            OR v.setor_nome ILIKE ${pattern}
-            OR v.deposito_nome ILIKE ${pattern}
+            unaccent(v.numero_ordem)   ILIKE unaccent(${pattern})
+            OR unaccent(v.cliente_nome)  ILIKE unaccent(${pattern})
+            OR unaccent(v.vendedor_nome) ILIKE unaccent(${pattern})
+            OR unaccent(v.setor_nome)    ILIKE unaccent(${pattern})
+            OR unaccent(v.deposito_nome) ILIKE unaccent(${pattern})
             OR o.numero_pedido ILIKE ${pattern}
           )
         ORDER BY
-          CASE WHEN v.numero_ordem ILIKE ${q + '%'} THEN 0 ELSE 1 END,
+          CASE WHEN unaccent(v.numero_ordem) ILIKE unaccent(${q + '%'}) THEN 0 ELSE 1 END,
           v.id DESC
         LIMIT ${MAX_RESULTADOS}
       `
@@ -110,14 +113,14 @@ export async function GET(req: NextRequest) {
         FROM alissonerp.vw_pcp_erp v
         LEFT JOIN alissonerp.ordens o ON o.id = v.ordem_id
         WHERE
-          v.numero_ordem ILIKE ${pattern}
-          OR v.cliente_nome ILIKE ${pattern}
-          OR v.vendedor_nome ILIKE ${pattern}
-          OR v.setor_nome ILIKE ${pattern}
-          OR v.deposito_nome ILIKE ${pattern}
+          unaccent(v.numero_ordem)   ILIKE unaccent(${pattern})
+          OR unaccent(v.cliente_nome)  ILIKE unaccent(${pattern})
+          OR unaccent(v.vendedor_nome) ILIKE unaccent(${pattern})
+          OR unaccent(v.setor_nome)    ILIKE unaccent(${pattern})
+          OR unaccent(v.deposito_nome) ILIKE unaccent(${pattern})
           OR o.numero_pedido ILIKE ${pattern}
         ORDER BY
-          CASE WHEN v.numero_ordem ILIKE ${q + '%'} THEN 0 ELSE 1 END,
+          CASE WHEN unaccent(v.numero_ordem) ILIKE unaccent(${q + '%'}) THEN 0 ELSE 1 END,
           v.id DESC
         LIMIT ${MAX_RESULTADOS}
       `;
