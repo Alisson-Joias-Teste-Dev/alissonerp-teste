@@ -126,7 +126,7 @@ export async function POST(
     const msg = err instanceof Error ? err.message : "Erro ao criar intent MP";
     await sql`
       UPDATE alissonerp.pagamentos_venda
-      SET gateway_payload = ${JSON.stringify({ erro: msg, device_id: body.device_id, quando: new Date().toISOString() })}::jsonb
+      SET gateway_payload = ${JSON.stringify({ erro: msg, device_id: body.device_id, quando: new Date().toISOString() })}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
     return NextResponse.json({ error: msg }, { status: 502 });
@@ -144,7 +144,7 @@ export async function POST(
         state: intent.state,
         criado_em: new Date().toISOString(),
         criado_por: user.id,
-      })}::jsonb
+      })}::text::jsonb
     WHERE id = ${pagamentoId}
   `;
 
@@ -205,7 +205,7 @@ export async function DELETE(
         ...(payload ?? {}),
         cancel_error: msg,
         cancelado_em: new Date().toISOString(),
-      })}::jsonb
+      })}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
     return NextResponse.json({ error: msg, pagamento_id: pagamentoId }, { status: 502 });
@@ -220,7 +220,7 @@ export async function DELETE(
         ...(payload ?? {}),
         cancelado_em: new Date().toISOString(),
         cancelado_por: user.id,
-      })}::jsonb
+      })}::text::jsonb
     WHERE id = ${pagamentoId}
   `;
 
