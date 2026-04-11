@@ -469,12 +469,22 @@ export async function criarOrdemDoOrcamento(
 
 // ═══════════════════════════════════════════════════════════════════════════
 // approveVenda — rascunho → aprovado (dispara Tiny)
+//
+// opts.tinyBestEffort: se true, falha do Tiny NÃO impede a aprovação. Erro
+// é salvo em tiny_sync_erro e a venda segue pra aprovado normalmente. Usado
+// pelo webhook MP — pagamento confirmado pelo banco não deve ficar refém
+// do estado da integração Tiny (que pode ter token expirado, etc).
 // ═══════════════════════════════════════════════════════════════════════════
+
+export interface ApproveVendaOpts {
+  tinyBestEffort?: boolean;
+}
 
 export async function approveVenda(
   vendaId: number,
-  userId: string
-): Promise<{ ok: true; ordem_criada?: string; ja_aprovada?: boolean }> {
+  userId: string,
+  opts: ApproveVendaOpts = {}
+): Promise<{ ok: true; ordem_criada?: string; ja_aprovada?: boolean; tiny_erro?: string }> {
   const [venda] = await sql`
     SELECT id, situacao, bloqueado, tiny_pedido_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
@@ -487,7 +497,19 @@ export async function approveVenda(
   }
 
   // 1. Envia pro Tiny (noop se tiny_pedido_id já existe)
-  await sendToTiny(vendaId);
+  let tinyErro: string | undefined;
+  try {
+    await sendToTiny(vendaId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (opts.tinyBestEffort) {
+      console.error(`[approveVenda] Tiny falhou mas tinyBestEffort=true, continuando: ${msg}`);
+      tinyErro = msg;
+      // sendToTiny já grava tiny_sync_erro no banco antes do throw
+    } else {
+      throw err;
+    }
+  }
 
   // 2. Atualiza situação para aprovado
   await sql`
@@ -506,17 +528,55 @@ export async function approveVenda(
     console.error(`[approveVenda] Erro ao criar ordem p/ venda ${vendaId}:`, err);
   }
 
-  return { ok: true, ...(ordemCriada ? { ordem_criada: ordemCriada } : {}) };
+  return {
+    ok: true,
+    ...(ordemCriada ? { ordem_criada: ordemCriada } : {}),
+    ...(tinyErro ? { tiny_erro: tinyErro } : {}),
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// concluirVenda — aprovado/rascunho → concluido + marca CR como pago
+// concluirVenda — {rascunho, aprovado} → concluido
+//
+// ORDEM CRÍTICA (local-first, commit-then-sync):
+//
+//   1. UPDATE vendas_erp.situacao = 'concluido'
+//      → trigger 113 cria contas_receber automaticamente
+//   2. fn_cr_marcar_pago_mp → marca CR como recebida
+//   3. criarOrdemDoOrcamento → cria ordem de fabricação se orçamento (best-effort)
+//   4. sendToTiny → sincroniza com Tiny ERP (best-effort)
+//
+// Filosofia: o pagamento já foi confirmado pelo banco/Mercado Pago. O
+// "fechamento" da venda no nosso sistema é inegociável — não pode ser
+// bloqueado por uma integração downstream como o Tiny. Se o Tiny estiver
+// fora (token expirado, rede, etc), a venda permanece concluída e o erro
+// é salvo em tiny_sync_erro pra ser reenviado manualmente depois.
+//
+// Esse helper NÃO chama approveVenda. Mesmo quando venda está em rascunho,
+// pula direto pra 'concluido' (o trigger 114 de blindagem só dispara
+// quando OLD.situacao IN ('confirmado','concluido'), então rascunho→concluido
+// passa limpo).
+//
+// opts.tinyBestEffort:
+//   - true (webhook MP): erro Tiny NÃO propaga. Retorna tiny_erro no result.
+//   - false/undefined (fluxo manual futuro): retorna tiny_erro mas também
+//     não propaga, porque a venda JÁ está concluída e reverter seria pior.
+//     O caller vê o tiny_erro no retorno e decide mostrar pro usuário.
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function concluirVenda(
   vendaId: number,
-  userId: string
-): Promise<{ ok: true; ordem_criada?: string; ja_concluida?: boolean; cr_quitadas?: number }> {
+  userId: string,
+  opts: ApproveVendaOpts = {}
+): Promise<{
+  ok: true;
+  ordem_criada?: string;
+  ja_concluida?: boolean;
+  cr_quitadas?: number;
+  tiny_erro?: string;
+}> {
+  void opts; // reservado pra extensões futuras; hoje Tiny sempre é best-effort
+
   const [venda] = await sql`
     SELECT id, situacao, bloqueado FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
@@ -530,14 +590,8 @@ export async function concluirVenda(
     throw new Error("Venda cancelada não pode ser concluída");
   }
 
-  // Se ainda não está aprovada, aprovar primeiro (vai enviar pro Tiny)
-  let ordemCriada: string | undefined;
-  if (venda.situacao === "rascunho") {
-    const aprovada = await approveVenda(vendaId, userId);
-    if (aprovada.ordem_criada) ordemCriada = aprovada.ordem_criada;
-  }
-
-  // Transição para concluido — trigger 113 (fn_venda_gerar_conta_receber)
+  // ── 1. FECHAMENTO FINANCEIRO ─────────────────────────────────────────────
+  // Transição pra concluido. Trigger 113 (fn_venda_gerar_conta_receber)
   // cria contas_receber automaticamente.
   await sql`
     UPDATE alissonerp.vendas_erp
@@ -545,25 +599,36 @@ export async function concluirVenda(
     WHERE id = ${vendaId} AND situacao NOT IN ('concluido', 'cancelado')
   `;
 
-  // Marcar CR como pago (CR recém criada está 'pendente')
+  // ── 2. MARCAR CONTAS_RECEBER COMO RECEBIDAS ──────────────────────────────
   const [{ fn_cr_marcar_pago_mp: crQuitadas }] = await sql`
     SELECT alissonerp.fn_cr_marcar_pago_mp(${vendaId}) AS fn_cr_marcar_pago_mp
   `;
 
-  // Se concluirVenda foi chamada direto (sem passar por approveVenda), pode
-  // não ter criado ordem ainda. Garantir aqui também.
-  if (!ordemCriada) {
-    try {
-      const ordem = await criarOrdemDoOrcamento(vendaId, userId);
-      if (ordem) ordemCriada = ordem.numero_ordem;
-    } catch (err) {
-      console.error(`[concluirVenda] Erro ao criar ordem p/ venda ${vendaId}:`, err);
-    }
+  // ── 3. CRIAR ORDEM DE FABRICAÇÃO (se vier de orçamento) — best-effort ────
+  let ordemCriada: string | undefined;
+  try {
+    const ordem = await criarOrdemDoOrcamento(vendaId, userId);
+    if (ordem) ordemCriada = ordem.numero_ordem;
+  } catch (err) {
+    console.error(`[concluirVenda] Erro ao criar ordem p/ venda ${vendaId}:`, err);
+  }
+
+  // ── 4. SINCRONIZAR COM TINY (best-effort, DEPOIS do fechamento) ──────────
+  let tinyErro: string | undefined;
+  try {
+    await sendToTiny(vendaId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    tinyErro = msg;
+    console.error(`[concluirVenda] Tiny falhou p/ venda ${vendaId}, venda continua concluída: ${msg}`);
+    // sendToTiny já gravou tiny_sync_erro no banco antes do throw.
+    // A venda está fechada e a CR paga; o Tiny pode ser reenviado manualmente.
   }
 
   return {
     ok: true,
     ...(ordemCriada ? { ordem_criada: ordemCriada } : {}),
+    ...(tinyErro ? { tiny_erro: tinyErro } : {}),
     cr_quitadas: Number(crQuitadas ?? 0),
   };
 }
