@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import sql from "@/lib/db";
 import { fetchPayment, getWebhookSecret } from "@/lib/mercado-pago";
-import { approveVenda, concluirVenda } from "@/lib/vendas-aprovar";
+import { concluirVenda, estornarVenda } from "@/lib/vendas-aprovar";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /api/webhooks/mercado-pago
@@ -343,14 +343,82 @@ export async function POST(req: NextRequest) {
       WHERE id = ${pagamentoId}
     `;
     return NextResponse.json({ ok: true, pending: true, status });
-  } else if (status === "rejected" || status === "cancelled" || status === "refunded" || status === "charged_back") {
-    // Pagamento falhou: atualiza payload. NÃO cancela venda — vendedora decide.
+  } else if (status === "rejected") {
+    // Rejected = tentativa de pagamento negada (cartão recusado, etc).
+    // Nunca foi confirmado — só atualiza payload, mantém pagamento pendente.
     await sql`
       UPDATE alissonerp.pagamentos_venda
       SET gateway_payload = ${JSON.stringify(novoPayload)}::jsonb
       WHERE id = ${pagamentoId}
     `;
-    return NextResponse.json({ ok: true, failed: true, status });
+    return NextResponse.json({ ok: true, rejected: true, status });
+  } else if (status === "refunded" || status === "cancelled" || status === "charged_back") {
+    // ESTORNO / CANCELAMENTO / CHARGEBACK
+    //
+    // Se o pagamento já estava 'confirmado' antes, é um estorno REAL que
+    // afeta uma venda fechada. Chama estornarVenda que:
+    //   - pagamentos_venda.status → 'estornado'
+    //   - Se havia outros pagamentos confirmados: venda → 'rascunho'
+    //   - Se era o único: venda → 'cancelado' (trigger 111 reverte estoque)
+    //   - contas_receber → 'cancelado'
+    //
+    // Se o pagamento NÃO estava confirmado (pending que foi cancelado),
+    // só atualiza o payload (comportamento igual ao 'rejected').
+    if (pag.status !== "confirmado") {
+      await sql`
+        UPDATE alissonerp.pagamentos_venda
+        SET
+          status          = 'cancelado',
+          gateway_payload = ${JSON.stringify(novoPayload)}::jsonb
+        WHERE id = ${pagamentoId}
+      `;
+      return NextResponse.json({ ok: true, cancelled_before_confirm: true, status });
+    }
+
+    // Pagamento estava confirmado → estorno de verdade
+    let estornoResult;
+    try {
+      estornoResult = await estornarVenda(vendaId, pagamentoId, {
+        ...novoPayload,
+        status_mp: status,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro ao estornar venda";
+      await sql`
+        INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
+        VALUES (${WEBHOOK_NOME}, ${JSON.stringify({
+          venda_id: vendaId,
+          pagamento_id: pagamentoId,
+          payment_id: paymentId,
+          status,
+        })}::jsonb, 500, ${msg})
+      `;
+      // Retorna 200 pra não fazer MP reentregar infinitamente
+      return NextResponse.json({ ok: false, estorno_failed: true, error: msg });
+    }
+
+    await sql`
+      INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status)
+      VALUES (${WEBHOOK_NOME}, ${JSON.stringify({
+        venda_id: vendaId,
+        pagamento_id: pagamentoId,
+        payment_id: paymentId,
+        status,
+        resultado: "estornado",
+        acao: estornoResult.acao,
+        outros_confirmados: estornoResult.outros_confirmados,
+        cr_canceladas: estornoResult.cr_canceladas,
+      })}::jsonb, 200)
+    `;
+
+    return NextResponse.json({
+      ok: true,
+      venda_id: vendaId,
+      pagamento_id: pagamentoId,
+      estornado: true,
+      acao: estornoResult.acao,
+      status,
+    });
   }
 
   // Status desconhecido — log e 200

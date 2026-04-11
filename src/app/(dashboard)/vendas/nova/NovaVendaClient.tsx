@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import PixQrInline from "@/components/vendas/PixQrInline";
+import CartaoInline from "@/components/vendas/CartaoInline";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -1100,6 +1101,20 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               vendaId={null}
               numeroVenda="Nova"
               valor={totalVenda}
+              obterVendaId={salvarRascunhoParaPix}
+              onPagamentoConfirmado={(vendaIdConfirmado) => {
+                router.push(`/vendas/${vendaIdConfirmado}`);
+              }}
+            />
+          )}
+
+          {/* Cartão de Crédito via Mercado Pago (link ou maquininha) */}
+          {pagForma === "Cartão de Crédito" && totalVenda > 0 && (
+            <CartaoInline
+              vendaId={null}
+              numeroVenda="Nova"
+              valor={totalVenda}
+              installments={pagCondicao === "À vista" ? 1 : parseInt(pagCondicao) || 1}
               obterVendaId={salvarRascunhoParaPix}
               onPagamentoConfirmado={(vendaIdConfirmado) => {
                 router.push(`/vendas/${vendaIdConfirmado}`);

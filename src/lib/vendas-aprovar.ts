@@ -632,3 +632,124 @@ export async function concluirVenda(
     cr_quitadas: Number(crQuitadas ?? 0),
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// estornarVenda — reverte pagamento confirmado (refund / cancelamento / chargeback)
+//
+// Regras de negócio (definidas pelo Jonathan):
+//   - Se a venda TINHA outros pagamentos confirmados além do que foi estornado:
+//       → venda volta pra 'rascunho' (vendedora recobra o valor estornado)
+//   - Se esse era o ÚNICO pagamento confirmado:
+//       → venda vai pra 'cancelado' (trigger 111 reverte estoque comercial
+//          automaticamente)
+//
+// Em ambos os casos:
+//   - pagamentos_venda.status → 'estornado' (o pagamento estornado)
+//   - contas_receber em 'pago' ou 'pendente' → 'cancelado' (manual, porque
+//     trigger 113 só cancela CR pendente via situacao, e nossa CR foi marcada
+//     como 'pago' pelo fn_cr_marcar_pago_mp)
+//
+// Idempotente: se pagamento já está 'estornado', retorna { ja_estornado: true }.
+//
+// Usado pelo webhook MP quando o status do payment MP vira refunded, cancelled
+// (após confirmado) ou charged_back.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type EstornoAcao = "cancelada" | "revertida_rascunho" | "ja_estornado";
+
+export interface EstornarVendaResult {
+  ok: true;
+  acao: EstornoAcao;
+  outros_confirmados: number;
+  cr_canceladas: number;
+}
+
+export async function estornarVenda(
+  vendaId: number,
+  pagamentoId: number,
+  motivoPayload: Record<string, unknown>
+): Promise<EstornarVendaResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return await (sql as any).begin(async (tx: typeof sql): Promise<EstornarVendaResult> => {
+    // 1. Bloqueia o pagamento pra evitar race com webhook simultâneo
+    const [pag] = await tx`
+      SELECT id, venda_id, status, gateway_payload
+      FROM alissonerp.pagamentos_venda
+      WHERE id = ${pagamentoId} AND venda_id = ${vendaId}
+      FOR UPDATE
+    `;
+    if (!pag) throw new Error(`Pagamento ${pagamentoId} não encontrado na venda ${vendaId}`);
+
+    // Idempotência: já estornado anteriormente
+    if (pag.status === "estornado") {
+      return { ok: true, acao: "ja_estornado", outros_confirmados: 0, cr_canceladas: 0 };
+    }
+
+    // 2. Conta outros pagamentos confirmados (excluindo esse)
+    const [{ outros_confirmados }] = await tx`
+      SELECT COUNT(*)::int AS outros_confirmados
+      FROM alissonerp.pagamentos_venda
+      WHERE venda_id = ${vendaId}
+        AND id != ${pagamentoId}
+        AND status = 'confirmado'
+    `;
+    const nOutros = Number(outros_confirmados);
+
+    // 3. Marca o pagamento como estornado + guarda motivo
+    const payloadAntigo = (pag.gateway_payload as Record<string, unknown> | null) ?? {};
+    const novoPayload = {
+      ...payloadAntigo,
+      ...motivoPayload,
+      estornado_em: new Date().toISOString(),
+    };
+    await tx`
+      UPDATE alissonerp.pagamentos_venda
+      SET
+        status          = 'estornado',
+        gateway_payload = ${JSON.stringify(novoPayload)}::jsonb
+      WHERE id = ${pagamentoId}
+    `;
+
+    // 4. Decide ação sobre a venda
+    let acao: EstornoAcao;
+    if (nOutros > 0) {
+      // Ainda há outros pagamentos confirmados → volta pra rascunho
+      // pra vendedora recobrar o valor estornado (ou cancelar manualmente)
+      await tx`
+        UPDATE alissonerp.vendas_erp
+        SET situacao = 'rascunho', updated_at = NOW()
+        WHERE id = ${vendaId} AND situacao NOT IN ('cancelado')
+      `;
+      acao = "revertida_rascunho";
+    } else {
+      // Era a única forma de pagamento → cancela venda totalmente.
+      // Trigger 111 (fn_estoque_comercial_cancelamento_venda) reverte o
+      // estoque comercial automaticamente em BEFORE UPDATE.
+      await tx`
+        UPDATE alissonerp.vendas_erp
+        SET situacao = 'cancelado', updated_at = NOW()
+        WHERE id = ${vendaId} AND situacao NOT IN ('cancelado')
+      `;
+      acao = "cancelada";
+    }
+
+    // 5. Cancela contas_receber dessa venda.
+    // Trigger 113 (fn_venda_cancelar_conta_receber) só age em CR 'pendente',
+    // mas a nossa CR foi marcada como 'pago' pelo fn_cr_marcar_pago_mp. Então
+    // fazemos UPDATE manual abrangendo 'pendente' + 'pago'.
+    const crResult = await tx`
+      UPDATE alissonerp.contas_receber
+      SET situacao = 'cancelado', updated_at = NOW()
+      WHERE venda_erp_id = ${vendaId}
+        AND situacao IN ('pago', 'pendente')
+      RETURNING id
+    `;
+
+    return {
+      ok: true,
+      acao,
+      outros_confirmados: nOutros,
+      cr_canceladas: crResult.length,
+    };
+  });
+}
