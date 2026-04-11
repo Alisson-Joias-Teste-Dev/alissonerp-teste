@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
+import MercadoPagoCobranca from "@/components/vendas/MercadoPagoCobranca";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -1417,6 +1418,31 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
               </div>
             </div>
           )}
+
+          {/* ── Cobrança Mercado Pago (link online + maquininha Point) ── */}
+          <MercadoPagoCobranca
+            vendaId={venda.id}
+            numeroVenda={venda.numero_venda}
+            valorSugerido={Math.max(0, venda.total_venda - venda.total_pago)}
+            situacao={venda.situacao}
+            bloqueado={venda.bloqueado}
+            onPagamentoConfirmado={load}
+            vendaPolling={{
+              pagamentoPendenteId: null,
+              detectarConfirmacao: async () => {
+                const r = await fetch(`/api/vendas/${venda.id}`);
+                if (!r.ok) return false;
+                const d = await r.json() as Venda;
+                // Se a venda foi concluída ou se há novo pagamento MP confirmado
+                if (d.situacao === "concluido") return true;
+                const temMpConfirmado = (d.pagamentos ?? []).some(
+                  p => (p.gateway === "Mercado Pago Online" || p.gateway === "Mercado Pago Point")
+                    && p.status === "confirmado"
+                );
+                return temMpConfirmado;
+              },
+            }}
+          />
 
           {/* Formulário de pagamento (mesmo layout da nova venda) */}
           {edit.limited && venda.pagamentos.length === 0 && (
