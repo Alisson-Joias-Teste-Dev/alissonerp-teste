@@ -27,22 +27,39 @@ function fmt(v: number) {
 }
 
 interface Props {
-  vendaId: number;
+  /** vendaId da venda se já existe. Se null, usa obterVendaId para criar rascunho primeiro. */
+  vendaId: number | null;
+  /** Label legível ("V-00123") ou "Nova" quando ainda não salvou */
   numeroVenda: string;
   valor: number;
-  /** Callback quando webhook MP detecta pagamento confirmado */
-  onPagamentoConfirmado: () => void;
+  /**
+   * Quando vendaId é null, o componente chama essa função no clique do "Gerar QR"
+   * pra salvar a venda como rascunho e obter o vendaId real. Deve retornar o id
+   * criado ou lançar erro se a validação falhar.
+   */
+  obterVendaId?: () => Promise<{ id: number; numero_venda: string }>;
+  /** Callback quando webhook MP detecta pagamento confirmado. Recebe o vendaId efetivo. */
+  onPagamentoConfirmado: (vendaId: number) => void;
   /** Se true, não mostra o componente (quando venda já tem pag MP confirmado) */
   ocultar?: boolean;
 }
 
 export default function PixQrInline({
-  vendaId,
-  numeroVenda,
+  vendaId: vendaIdProp,
+  numeroVenda: numeroVendaProp,
   valor,
+  obterVendaId,
   onPagamentoConfirmado,
   ocultar,
 }: Props) {
+  // vendaId "efetivo" — inicialmente o prop, mas pode ser atualizado quando
+  // o componente salva rascunho via obterVendaId.
+  const [vendaIdEfetivo, setVendaIdEfetivo] = useState<number | null>(vendaIdProp);
+  const [numeroVenda, setNumeroVenda] = useState(numeroVendaProp);
+
+  // Mantém sincronizado se o prop mudar (ex: navegou pra outra venda)
+  useEffect(() => { setVendaIdEfetivo(vendaIdProp); }, [vendaIdProp]);
+  useEffect(() => { setNumeroVenda(numeroVendaProp); }, [numeroVendaProp]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [initPoint, setInitPoint] = useState<string | null>(null);
@@ -63,11 +80,11 @@ export default function PixQrInline({
   }, [initPoint]);
 
   // ─── Polling de confirmação ──────────────────────────────────────────────
-  const iniciarPolling = useCallback(() => {
+  const iniciarPolling = useCallback((idParaMonitorar: number) => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`/api/vendas/${vendaId}`);
+        const res = await fetch(`/api/vendas/${idParaMonitorar}`);
         if (!res.ok) return;
         const data = await res.json();
         const temMpConfirmado = (data.pagamentos ?? []).some(
@@ -78,11 +95,11 @@ export default function PixQrInline({
         if (data.situacao === "concluido" || temMpConfirmado) {
           setPago(true);
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-          setTimeout(() => onPagamentoConfirmado(), 2500);
+          setTimeout(() => onPagamentoConfirmado(idParaMonitorar), 2500);
         }
       } catch { /* ignora erros de rede temporários */ }
     }, 4000);
-  }, [vendaId, onPagamentoConfirmado]);
+  }, [onPagamentoConfirmado]);
 
   useEffect(() => {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
@@ -93,7 +110,19 @@ export default function PixQrInline({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/vendas/${vendaId}/mercado-pago/criar-link`, {
+      // Se ainda não tem vendaId (caso Nova Venda), salva rascunho primeiro
+      let idParaUsar = vendaIdEfetivo;
+      if (idParaUsar == null) {
+        if (!obterVendaId) {
+          throw new Error("Venda ainda não foi salva e não há callback de criação");
+        }
+        const vendaCriada = await obterVendaId();
+        idParaUsar = vendaCriada.id;
+        setVendaIdEfetivo(idParaUsar);
+        setNumeroVenda(vendaCriada.numero_venda);
+      }
+
+      const res = await fetch(`/api/vendas/${idParaUsar}/mercado-pago/criar-link`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -101,7 +130,7 @@ export default function PixQrInline({
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Erro ao gerar QR Code");
       setInitPoint(body.init_point);
-      iniciarPolling();
+      iniciarPolling(idParaUsar);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro");
     } finally {

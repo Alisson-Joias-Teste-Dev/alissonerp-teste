@@ -7,6 +7,7 @@ import {
   Truck, Video, FileText, UserPlus, MapPin, Pencil, User, Package, CreditCard, XCircle,
 } from "lucide-react";
 import Link from "next/link";
+import PixQrInline from "@/components/vendas/PixQrInline";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -488,6 +489,55 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
       setNovoClienteForm({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
     } catch (e) { setClienteErr(e instanceof Error ? e.message : "Erro ao criar cliente"); }
     finally { setSavingCliente(false); }
+  }
+
+  // ── Monta body de criação de venda (compartilhado entre submit e salvar rascunho Pix) ──
+  function montarBodyVenda() {
+    const envioNome = formaEnvioOpts.find(e => e.id === formaEnvioId)?.nome ?? "";
+    const freteNome = formaFreteAll.find(f => f.id === formaFreteId)?.nome ?? "";
+    return {
+      cliente_id: cliente?.id ?? null,
+      vendedor_id: vendedorSel || null,
+      data_entrega: dataEntrega || null,
+      total_frete: totalFrete,
+      forma_envio: envioNome || null,
+      forma_frete: freteNome || null,
+      observacoes: observacoes || null,
+      observacoes_internas: obsInternas || null,
+      video_obs_interna: videoObsInterna,
+      ...(!mesmoEndereco && showEndEntrega ? {
+        endereco_entrega: endEntrega.logradouro || null,
+        endereco_entrega_numero: endEntrega.numero || null,
+        endereco_entrega_complemento: endEntrega.complemento || null,
+        endereco_entrega_bairro: endEntrega.bairro || null,
+        endereco_entrega_cidade: endEntrega.cidade || null,
+        endereco_entrega_cep: endEntrega.cep || null,
+        endereco_entrega_uf: endEntrega.uf || null,
+      } : {}),
+      itens: itens.map(i => ({
+        produto_id: i.produto_id, nome_produto: i.nome_produto, sku: i.sku,
+        quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
+        preco_unitario: i.preco_unitario, total_item: i.total_item,
+        pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao, peso_estimado: i.peso_estimado,
+      })),
+    };
+  }
+
+  // ── Salvar rascunho e retornar id (pro PixQrInline chamar criar-link) ───
+  async function salvarRascunhoParaPix(): Promise<{ id: number; numero_venda: string }> {
+    if (itens.length === 0) throw new Error("Adicione ao menos 1 item antes de gerar o QR Code");
+    if (totalVenda <= 0) throw new Error("Total da venda deve ser maior que zero");
+
+    // NÃO inclui pagamentos — o criar-link vai criar o pagamento MP separadamente
+    const body = montarBodyVenda();
+    const res = await fetch("/api/vendas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json() as { id: number; numero_venda: string; error?: string };
+    if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+    return { id: data.id, numero_venda: data.numero_venda };
   }
 
   // ── Submit ─────────────────────────────────────────────────────────────────
@@ -1042,6 +1092,19 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                 {CONDICOES.map(c => <option key={c} value={c}>{c}</option>)}
               </Select>
             </div>
+          )}
+
+          {/* QR Code Pix via Mercado Pago (quando forma=Pix) */}
+          {pagForma === "Pix" && totalVenda > 0 && (
+            <PixQrInline
+              vendaId={null}
+              numeroVenda="Nova"
+              valor={totalVenda}
+              obterVendaId={salvarRascunhoParaPix}
+              onPagamentoConfirmado={(vendaIdConfirmado) => {
+                router.push(`/vendas/${vendaIdConfirmado}`);
+              }}
+            />
           )}
 
           {/* Tabela de parcelas */}
