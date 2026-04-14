@@ -16,10 +16,7 @@ export async function GET(req: NextRequest) {
   const prioridade = url.searchParams.get("prioridade");
   const ordem_id = url.searchParams.get("ordem_id");
 
-  // Admin/dev/gerente veem tudo; outros só suas tarefas
-  const fullAccess = usuario && isFullAccess(usuario.role);
-  const gerente = usuario && ["gerente_fabrica", "gerente_loja"].includes(usuario.role);
-
+  // Todos os usuários só veem tarefas onde são responsáveis ou criadores
   const tarefas = await sql`
     SELECT
       t.id, t.titulo, t.descricao, t.prioridade, t.status,
@@ -32,12 +29,11 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.usuarios ur ON ur.id = t.responsavel_id
     LEFT JOIN alissonerp.usuarios uc ON uc.id = t.criado_por
     LEFT JOIN alissonerp.ordens o ON o.id = t.ordem_id
-    WHERE 1=1
+    WHERE (t.responsavel_id = ${user.id}::uuid OR t.criado_por = ${user.id}::uuid)
       ${status ? sql`AND t.status = ${status}` : sql``}
       ${prioridade ? sql`AND t.prioridade = ${prioridade}` : sql``}
       ${ordem_id ? sql`AND t.ordem_id = ${Number(ordem_id)}` : sql``}
       ${responsavel ? sql`AND t.responsavel_id = ${responsavel}::uuid` : sql``}
-      ${!fullAccess && !gerente ? sql`AND (t.responsavel_id = ${user.id}::uuid OR t.criado_por = ${user.id}::uuid)` : sql``}
     ORDER BY
       CASE t.prioridade WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'media' THEN 3 ELSE 4 END,
       t.created_at DESC

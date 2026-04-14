@@ -590,6 +590,17 @@ export async function concluirVenda(
     throw new Error("Venda cancelada não pode ser concluída");
   }
 
+  // ── 0. GUARD: verificar se há pagamentos pendentes ──────────────────────
+  const [pendente] = await sql`
+    SELECT COUNT(*) AS cnt FROM alissonerp.pagamentos_venda
+    WHERE venda_id = ${vendaId} AND status = 'pendente'
+  `;
+  if (Number(pendente.cnt) > 0) {
+    throw new Error(
+      "Venda possui pagamentos pendentes. Confirme todos os pagamentos antes de concluir.",
+    );
+  }
+
   // ── 1. FECHAMENTO FINANCEIRO ─────────────────────────────────────────────
   // Transição pra concluido. Trigger 113 (fn_venda_gerar_conta_receber)
   // cria contas_receber automaticamente.

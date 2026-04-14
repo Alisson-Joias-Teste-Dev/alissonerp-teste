@@ -1,5 +1,5 @@
 // Roles com acesso total ao sistema (equivalentes a super-admin)
-export const ROLES_FULL_ACCESS = ["admin", "desenvolvedor"] as const;
+export const ROLES_FULL_ACCESS = ["admin", "desenvolvedor", "diretor"] as const;
 
 // Roles que podem concluir protocolo
 export const ROLES_CONCLUIR_PROTOCOLO = [
@@ -29,6 +29,9 @@ export const ROLES_PRODUTOS = ROLES_PRECIFICACAO;
 export function isProdutosAccess(role: string | null | undefined): boolean {
   return ROLES_PRODUTOS.includes(role as typeof ROLES_PRODUTOS[number]);
 }
+
+// Roles que podem aprovar crédito do gerente (aprovar vendas com A Receber)
+export const ROLES_APROVAR_CREDITO = [...ROLES_FULL_ACCESS, "gerente_loja"] as const;
 
 // Verifica se a role está na lista permitida
 export function hasRole(role: string | null | undefined, permitidas: readonly string[]): boolean {

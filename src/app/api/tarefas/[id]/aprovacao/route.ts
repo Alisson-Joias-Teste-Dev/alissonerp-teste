@@ -101,7 +101,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     WHERE id = ${Number(id)}
   `;
 
-  // Notificar solicitante
+  // ── Hook: aprovação de crédito (venda vinculada à tarefa) ────────────────
+  const [tarefaInfo] = await sql`
+    SELECT venda_id FROM alissonerp.tarefas WHERE id = ${Number(id)}
+  `;
+  if (tarefaInfo?.venda_id) {
+    try {
+      const { processarAprovacaoCredito } = await import("@/lib/vendas-credito-aprovar");
+      const resultado = await processarAprovacaoCredito(
+        Number(id), user.id, body.decisao, body.motivo,
+      );
+      return NextResponse.json({ ok: true, credito: resultado });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[aprovacao] Erro ao processar crédito:`, msg);
+      // Não falha silenciosamente — retorna erro pra UI mostrar
+      return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    }
+  }
+
+  // Notificar solicitante (fluxo normal sem venda)
   await sql`
     INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id)
     VALUES (${String(aprovacao.solicitante_id)}::uuid, 'aprovacao',
