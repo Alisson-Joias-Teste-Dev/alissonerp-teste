@@ -251,6 +251,9 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   // Submit
   const [saving,  setSaving]  = useState(false);
   const [saveErr, setSaveErr] = useState("");
+  // Aprovação crédito (A Receber)
+  const [aprovacaoEnviada, setAprovacaoEnviada] = useState(false);
+  const [vendaIdCriada, setVendaIdCriada] = useState<number | null>(null);
 
   // Carregar dados de referência
   useEffect(() => {
@@ -259,8 +262,16 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
       setFormaEnvioOpts(d.envio ?? []);
       setFormaFreteAll(d.frete ?? []);
     }).catch(() => {});
-    if (isFullAccess) fetch("/api/vendedores").then(r => r.json()).then(setVendedores).catch(() => {});
-  }, [isFullAccess]);
+    if (isFullAccess) {
+      fetch("/api/vendedores").then(r => r.json()).then(setVendedores).catch(() => {});
+    } else if (vendedorId) {
+      // Consultora: buscar só o próprio vendedor pra mostrar o nome
+      fetch("/api/vendedores").then(r => r.json()).then((all: Vendedor[]) => {
+        const proprio = all.filter(v => Number(v.id_vendedor) === vendedorId);
+        if (proprio.length) setVendedores(proprio);
+      }).catch(() => {});
+    }
+  }, [isFullAccess, vendedorId]);
 
   // Formas de frete disponíveis para o envio selecionado
   const formaFreteOpts = formaFreteAll.filter(f => {
@@ -411,7 +422,8 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   }
 
   const totalPago     = pagamentos.reduce((s, p) => s + p.valor, 0);
-  void totalPago; // usado em modo Múltiplas
+  // Pagamento cobre o total? (Múltiplas: soma dos pagamentos; simples: sempre cobre)
+  const pagamentoCobre = pagForma === "Múltiplas" ? Math.abs(totalPago - totalVenda) < 0.01 : true;
 
   // ── CEP lookup ──────────────────────────────────────────────────────────────
   async function buscaCEP(cep: string, target: "entrega" | "novoCliente") {
@@ -542,51 +554,69 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   }
 
   // ── Submit ─────────────────────────────────────────────────────────────────
+  // Detectar se pagamentos incluem "A Receber"
+  const temAReceberNova = pagForma === "A Receber" || (pagForma === "Múltiplas" && pagamentos.some(p => p.forma === "A Receber"));
+
+  function montarBody() {
+    const envioNome  = formaEnvioOpts.find(e => e.id === formaEnvioId)?.nome ?? "";
+    const freteNome  = formaFreteAll.find(f => f.id === formaFreteId)?.nome ?? "";
+    return {
+      cliente_id: cliente?.id ?? null,
+      vendedor_id: vendedorSel || null,
+      data_entrega: dataEntrega || null,
+      total_frete: totalFrete,
+      forma_envio: envioNome || null,
+      forma_frete: freteNome || null,
+      observacoes: observacoes || null,
+      observacoes_internas: obsInternas || null,
+      video_obs_interna: videoObsInterna,
+      ...(!mesmoEndereco && showEndEntrega ? {
+        endereco_entrega: endEntrega.logradouro || null,
+        endereco_entrega_numero: endEntrega.numero || null,
+        endereco_entrega_complemento: endEntrega.complemento || null,
+        endereco_entrega_bairro: endEntrega.bairro || null,
+        endereco_entrega_cidade: endEntrega.cidade || null,
+        endereco_entrega_cep: endEntrega.cep || null,
+        endereco_entrega_uf: endEntrega.uf || null,
+      } : {}),
+      itens: itens.map(i => ({
+        produto_id: i.produto_id, nome_produto: i.nome_produto, sku: i.sku,
+        quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
+        preco_unitario: i.preco_unitario, total_item: i.total_item,
+        pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao, peso_estimado: i.peso_estimado,
+      })),
+      pagamentos: pagForma === "Múltiplas"
+        ? pagamentos.map(p => ({ forma: p.forma, valor: p.valor, parcelas: p.parcelas, status: "pendente" }))
+        : [{
+            forma: pagForma,
+            valor: totalVenda,
+            parcelas: pagCondicao === "À vista" ? 1 : parseInt(pagCondicao),
+            gateway: COM_CARTAO.includes(pagForma) ? pagGateway : null,
+            bandeira: COM_CARTAO.includes(pagForma) ? pagBandeira : null,
+            status: "pendente",
+          }],
+    };
+  }
+
   async function submit(situacao: "rascunho" | "aprovado") {
     setSaving(true); setSaveErr("");
     try {
-      const envioNome  = formaEnvioOpts.find(e => e.id === formaEnvioId)?.nome ?? "";
-      const freteNome  = formaFreteAll.find(f => f.id === formaFreteId)?.nome ?? "";
-      const body = {
-        cliente_id: cliente?.id ?? null,
-        vendedor_id: vendedorSel || null,
-        data_entrega: dataEntrega || null,
-        total_frete: totalFrete,
-        forma_envio: envioNome || null,
-        forma_frete: freteNome || null,
-        observacoes: observacoes || null,
-        observacoes_internas: obsInternas || null,
-        video_obs_interna: videoObsInterna,
-        ...(!mesmoEndereco && showEndEntrega ? {
-          endereco_entrega: endEntrega.logradouro || null,
-          endereco_entrega_numero: endEntrega.numero || null,
-          endereco_entrega_complemento: endEntrega.complemento || null,
-          endereco_entrega_bairro: endEntrega.bairro || null,
-          endereco_entrega_cidade: endEntrega.cidade || null,
-          endereco_entrega_cep: endEntrega.cep || null,
-          endereco_entrega_uf: endEntrega.uf || null,
-        } : {}),
-        itens: itens.map(i => ({
-          produto_id: i.produto_id, nome_produto: i.nome_produto, sku: i.sku,
-          quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
-          preco_unitario: i.preco_unitario, total_item: i.total_item,
-          pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao, peso_estimado: i.peso_estimado,
-        })),
-        pagamentos: pagForma === "Múltiplas"
-          ? pagamentos.map(p => ({ forma: p.forma, valor: p.valor, parcelas: p.parcelas, status: "pendente" }))
-          : [{
-              forma: pagForma,
-              valor: totalVenda,
-              parcelas: pagCondicao === "À vista" ? 1 : parseInt(pagCondicao),
-              gateway: COM_CARTAO.includes(pagForma) ? pagGateway : null,
-              bandeira: COM_CARTAO.includes(pagForma) ? pagBandeira : null,
-              status: "pendente",
-            }],
-      };
+      const body = montarBody();
       const res  = await fetch("/api/vendas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json() as { id: number; numero_venda: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+
       if (situacao === "aprovado") {
+        if (temAReceberNova) {
+          // Tem A Receber → solicitar aprovação de crédito (não aprovar direto)
+          const apRes = await fetch(`/api/vendas/${data.id}/solicitar-aprovacao`, { method: "POST" });
+          const apData = await apRes.json();
+          if (!apRes.ok) throw new Error(apData.error ?? "Erro ao solicitar aprovação");
+          // Redirecionar para detalhe da venda (mostra banner de aguardando aprovação)
+          router.push(`/vendas/${data.id}`);
+          return;
+        }
+        // Sem A Receber → aprovar direto (fluxo normal)
         await fetch(`/api/vendas/${data.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ situacao: "aprovado" }) });
       }
       router.push("/vendas");
@@ -679,7 +709,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                 </Select>
               ) : (
                 <div className="border rounded-lg px-3 py-2.5 text-sm" style={{ borderColor: C.cremeBorder, color: "#374151", backgroundColor: C.cremeBg }}>
-                  {vendedores.find(v => v.id_vendedor === vendedorId)?.nome ?? "—"}
+                  {vendedores.find(v => Number(v.id_vendedor) === vendedorId)?.nome ?? "—"}
                 </div>
               )}
             </div>
@@ -1052,10 +1082,64 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
             </Select>
           </div>
 
-          {/* Dinheiro */}
-          {["Dinheiro", "Ouro", "A Receber"].includes(pagForma) && (
+          {/* Dinheiro / Ouro — simples */}
+          {["Dinheiro", "Ouro"].includes(pagForma) && (
             <div className="rounded-lg border px-4 py-3 text-sm mb-4" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
               Pagamento em {pagForma.toLowerCase()}. Não há campos adicionais necessários.
+            </div>
+          )}
+
+          {/* A Receber simples — botão solicitar aprovação direto */}
+          {pagForma === "A Receber" && totalVenda > 0 && (
+            <div className="rounded-xl border p-4 mb-4 space-y-2" style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB" }}>
+              <p className="text-sm font-medium" style={{ color: "#374151" }}>
+                A Receber — {fmt(totalVenda)}
+              </p>
+              {aprovacaoEnviada ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: "#D1FAE5", color: "#065F46" }}>
+                    Aprovação solicitada
+                  </span>
+                  <button onClick={() => router.push(`/vendas/${vendaIdCriada}`)}
+                    className="text-xs underline" style={{ color: C.esmeralda }}>
+                    Ver venda
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={async () => {
+                    setSaving(true); setSaveErr("");
+                    try {
+                      if (!cliente) throw new Error("Selecione um cliente");
+                      if (itens.length === 0) throw new Error("Adicione ao menos 1 item");
+                      const body = montarBody();
+                      const res = await fetch("/api/vendas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                      const data = await res.json() as { id: number; error?: string };
+                      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+                      const apRes = await fetch(`/api/vendas/${data.id}/solicitar-aprovacao`, { method: "POST" });
+                      const apData = await apRes.json();
+                      if (!apRes.ok) throw new Error(apData.error ?? "Erro ao solicitar aprovação");
+                      setVendaIdCriada(data.id);
+                      setAprovacaoEnviada(true);
+                    } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro"); }
+                    finally { setSaving(false); }
+                  }}
+                  disabled={saving || itens.length === 0 || !cliente}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: "#D97706", color: "#fff" }}>
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                  Solicitar Aprovação
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Aviso crédito gerente quando A Receber */}
+          {(pagForma === "A Receber" || pagForma === "Múltiplas") && (
+            <div className="rounded-lg border px-4 py-3 text-xs mb-4"
+              style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
+              Vendas com &quot;A Receber&quot; requerem aprovação do gerente de loja.
+              Se o valor exceder o saldo disponível, será encaminhado ao diretor e a comissão será zerada.
             </div>
           )}
 
@@ -1232,6 +1316,84 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                     </div>
                   </div>
                 )}
+
+                {/* Pix inline dentro de Múltiplas */}
+                {pagamentos.some(p => p.forma === "Pix") && totalVenda > 0 && (
+                  <div className="mt-3">
+                    <PixQrInline
+                      vendaId={null}
+                      numeroVenda="Nova"
+                      valor={pagamentos.find(p => p.forma === "Pix")!.valor}
+                      obterVendaId={salvarRascunhoParaPix}
+                      onPagamentoConfirmado={(vendaIdConfirmado) => {
+                        router.push(`/vendas/${vendaIdConfirmado}`);
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Cartão inline dentro de Múltiplas */}
+                {pagamentos.some(p => p.forma === "Cartão de Crédito") && totalVenda > 0 && (
+                  <div className="mt-3">
+                    <CartaoInline
+                      vendaId={null}
+                      numeroVenda="Nova"
+                      valor={pagamentos.find(p => p.forma === "Cartão de Crédito")!.valor}
+                      installments={pagamentos.find(p => p.forma === "Cartão de Crédito")!.parcelas || 1}
+                      obterVendaId={salvarRascunhoParaPix}
+                      onPagamentoConfirmado={(vendaIdConfirmado) => {
+                        router.push(`/vendas/${vendaIdConfirmado}`);
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* A Receber inline dentro de Múltiplas — botão solicitar aprovação */}
+                {pagamentos.some(p => p.forma === "A Receber") && restante < 0.01 && totalVenda > 0 && (
+                  <div className="mt-3 rounded-xl border p-4 space-y-2" style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB" }}>
+                    <p className="text-sm font-medium" style={{ color: "#374151" }}>
+                      A Receber — {fmt(pagamentos.find(p => p.forma === "A Receber")!.valor)}
+                    </p>
+                    {aprovacaoEnviada ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: "#D1FAE5", color: "#065F46" }}>
+                          Aprovação solicitada
+                        </span>
+                        <button onClick={() => router.push(`/vendas/${vendaIdCriada}`)}
+                          className="text-xs underline" style={{ color: C.esmeralda }}>
+                          Ver venda
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={async () => {
+                          setSaving(true); setSaveErr("");
+                          try {
+                            if (!cliente) throw new Error("Selecione um cliente");
+                            if (itens.length === 0) throw new Error("Adicione ao menos 1 item");
+                            // 1. Salvar rascunho com pagamentos
+                            const body = montarBody();
+                            const res = await fetch("/api/vendas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                            const data = await res.json() as { id: number; error?: string };
+                            if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+                            // 2. Solicitar aprovação de crédito
+                            const apRes = await fetch(`/api/vendas/${data.id}/solicitar-aprovacao`, { method: "POST" });
+                            const apData = await apRes.json();
+                            if (!apRes.ok) throw new Error(apData.error ?? "Erro ao solicitar aprovação");
+                            setVendaIdCriada(data.id);
+                            setAprovacaoEnviada(true);
+                          } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro"); }
+                          finally { setSaving(false); }
+                        }}
+                        disabled={saving || itens.length === 0 || !cliente}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                        style={{ backgroundColor: "#D97706", color: "#fff" }}>
+                        {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                        Solicitar Aprovação
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -1351,12 +1513,15 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               {saving ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null}
               Salvar Rascunho
             </button>
-            <button onClick={() => submit("aprovado")} disabled={saving || itens.length === 0}
-              className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
-              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-              Concluir Venda
-            </button>
+            {/* Esconde botão principal quando tem A Receber (já tem botão inline na seção de pagamento) */}
+            {!temAReceberNova && (
+              <button onClick={() => submit("aprovado")} disabled={saving || itens.length === 0 || !pagamentoCobre}
+                className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                Concluir Venda
+              </button>
+            )}
           </div>
         </div>
 

@@ -29,6 +29,7 @@ export async function GET(
       v.qtd_itens, v.total_pago,
       ve.endereco_entrega, ve.endereco_entrega_numero, ve.endereco_entrega_complemento,
       ve.endereco_entrega_bairro, ve.endereco_entrega_cidade, ve.endereco_entrega_cep, ve.endereco_entrega_uf,
+      ve.credito_gerente_usado, ve.aprovacao_credito_tipo, ve.aprovacao_credito_tarefa_id,
       c.endereco AS cliente_endereco, c.numero AS cliente_numero, c.complemento AS cliente_complemento,
       c.bairro AS cliente_bairro, c.municipio AS cliente_municipio, c.cep AS cliente_cep, c.uf AS cliente_uf
     FROM alissonerp.vw_vendas_erp_completa v
@@ -76,6 +77,9 @@ export async function GET(
     total_comissao: Number(venda.total_comissao),
     total_pago:     Number(venda.total_pago),
     qtd_itens:      Number(venda.qtd_itens),
+    credito_gerente_usado: Number(venda.credito_gerente_usado ?? 0),
+    aprovacao_credito_tipo: venda.aprovacao_credito_tipo ?? null,
+    aprovacao_credito_tarefa_id: venda.aprovacao_credito_tarefa_id ?? null,
     itens: itens.map((i) => ({
       ...i,
       quantidade:     Number(i.quantidade),
@@ -108,7 +112,7 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-  const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+  const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "diretor", "gerente_fabrica", "gerente_loja"];
   if (!usuario || !ROLES_PERMITIDOS.includes(usuario.role)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }

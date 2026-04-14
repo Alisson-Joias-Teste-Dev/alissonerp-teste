@@ -296,6 +296,31 @@ export async function POST(req: NextRequest) {
       return { quitada, pago, total };
     });
 
+    // 7c-pre. Se não quitada mas crédito aprovado + todos os não-A Receber confirmados → aprovar venda
+    if (!result.quitada) {
+      try {
+        const [vendaCredito] = await sql`
+          SELECT aprovacao_credito_tipo, situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+        `;
+        if (vendaCredito?.aprovacao_credito_tipo && vendaCredito.situacao === "rascunho") {
+          // Verificar se todos os pagamentos não-A Receber estão confirmados
+          const [outrosPend] = await sql`
+            SELECT COUNT(*) AS cnt FROM alissonerp.pagamentos_venda
+            WHERE venda_id = ${vendaId} AND forma != 'A Receber' AND status = 'pendente'
+          `;
+          if (Number(outrosPend.cnt) === 0) {
+            const { approveVenda } = await import("@/lib/vendas-aprovar");
+            const sysUser = await getSystemUserId(vendaId);
+            if (sysUser) {
+              await approveVenda(vendaId, sysUser, { tinyBestEffort: true });
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`[webhook-mp] Erro ao auto-aprovar venda ${vendaId} após pagamento:`, err);
+      }
+    }
+
     if (result.quitada) {
       // 7c. Aprovar + concluir venda (fora da tx porque approveVenda tem seus próprios COMMITs)
       const systemUserId = await getSystemUserId(vendaId);

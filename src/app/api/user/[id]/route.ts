@@ -100,8 +100,8 @@ export async function PATCH(
         nome                  = COALESCE(${nome ?? null}, nome),
         role                  = COALESCE(${role}, role),
         ativo                 = COALESCE(${ativo ?? null}, ativo),
-        deposito_id           = ${deposito_id ?? null},
-        vendedor_id           = ${vendedor_id ?? null},
+        deposito_id           = ${deposito_id !== undefined ? (deposito_id ?? null) : sql`deposito_id`},
+        vendedor_id           = ${vendedor_id !== undefined ? (vendedor_id ?? null) : sql`vendedor_id`},
         mx_desconto_permitido = ${mx_desconto_permitido !== undefined ? (mx_desconto_permitido ?? null) : sql`mx_desconto_permitido`},
         updated_at            = now()
       WHERE id = ${id}::uuid
@@ -112,8 +112,8 @@ export async function PATCH(
       SET
         nome                  = COALESCE(${nome ?? null}, nome),
         ativo                 = COALESCE(${ativo ?? null}, ativo),
-        deposito_id           = ${deposito_id ?? null},
-        vendedor_id           = ${vendedor_id ?? null},
+        deposito_id           = ${deposito_id !== undefined ? (deposito_id ?? null) : sql`deposito_id`},
+        vendedor_id           = ${vendedor_id !== undefined ? (vendedor_id ?? null) : sql`vendedor_id`},
         mx_desconto_permitido = ${mx_desconto_permitido !== undefined ? (mx_desconto_permitido ?? null) : sql`mx_desconto_permitido`},
         updated_at            = now()
       WHERE id = ${id}::uuid
@@ -125,7 +125,7 @@ export async function PATCH(
     const arr = Array.isArray(tipos_ordem_permitidos) ? tipos_ordem_permitidos : [];
     await sql`
       UPDATE alissonerp.usuarios
-      SET tipos_ordem_permitidos = ${JSON.stringify(arr)}::jsonb,
+      SET tipos_ordem_permitidos = ${sql.json(arr)},
           updated_at = now()
       WHERE id = ${id}::uuid
     `;
@@ -136,7 +136,7 @@ export async function PATCH(
     const arr = Array.isArray(tipos_protocolo_permitidos) ? tipos_protocolo_permitidos : [];
     await sql`
       UPDATE alissonerp.usuarios
-      SET tipos_protocolo_permitidos = ${JSON.stringify(arr)}::jsonb,
+      SET tipos_protocolo_permitidos = ${sql.json(arr)},
           updated_at = now()
       WHERE id = ${id}::uuid
     `;

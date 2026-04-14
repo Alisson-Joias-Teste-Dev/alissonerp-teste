@@ -66,6 +66,9 @@ interface Venda {
   video_obs_interna: string | null; tiny_sync_status: string | null;
   tiny_pedido_id: string | null; bloqueado: boolean; qtd_itens: number;
   created_at?: string | null;
+  credito_gerente_usado?: number;
+  aprovacao_credito_tipo?: string | null;
+  aprovacao_credito_tarefa_id?: number | null;
   endereco_entrega?: string | null; endereco_entrega_numero?: string | null;
   endereco_entrega_complemento?: string | null; endereco_entrega_bairro?: string | null;
   endereco_entrega_cidade?: string | null; endereco_entrega_cep?: string | null;
@@ -570,17 +573,43 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
     finally { setUpdating(false); }
   }
 
-  async function confirmarPagamento(pagId: number) {
+  async function confirmarPagamento(pagId: number, forma?: string) {
     if (!venda) return;
     setUpdating(true);
     try {
-      const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${pagId}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "confirmado" }),
-      });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+      // Para pagamentos "A Receber", usar endpoint dedicado que devolve saldo
+      if (forma === "A Receber") {
+        const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${pagId}/confirmar`, { method: "POST" });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+        if (d.venda_concluida) alert("Todos os pagamentos confirmados — venda concluída!");
+      } else {
+        const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${pagId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "confirmado" }),
+        });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+      }
       await load();
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao confirmar pagamento"); }
+    finally { setUpdating(false); }
+  }
+
+  // ── Solicitar aprovação (com suporte a crédito gerente) ────────────────────
+  async function solicitarAprovacao() {
+    if (!venda) return;
+    setUpdating(true); setSaveErr("");
+    try {
+      const res = await fetch(`/api/vendas/${venda.id}/solicitar-aprovacao`, { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      if (d.aguardando_aprovacao_credito) {
+        alert(d.message ?? "Venda enviada para aprovação");
+      } else if (d.ordem_criada) {
+        alert(`Venda aprovada! Ordem ${d.ordem_criada} criada.`);
+      }
+      await load();
+    } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao solicitar aprovação"); }
     finally { setUpdating(false); }
   }
 
@@ -857,6 +886,12 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
     venda.pagamentos.length > 0
   );
 
+  // Crédito gerente
+  const temAReceber = venda.pagamentos.some(p => p.forma === "A Receber" && p.status === "pendente");
+  const aguardandoAprovacaoCredito = !!venda.aprovacao_credito_tarefa_id && venda.situacao === "rascunho";
+  const temPagamentoPendente = venda.pagamentos.some(p => p.status === "pendente");
+  const podeAprovarConcluir = venda.situacao === "aprovado" && temPagamentoPendente;
+
   return (
     <div className="px-3 md:px-6 py-4 md:py-6 max-w-5xl mx-auto">
 
@@ -916,6 +951,41 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
           <button onClick={() => setSaveErr("")} className="shrink-0 p-0.5 hover:opacity-70">
             <X size={14} />
           </button>
+        </div>
+      )}
+
+      {/* ── Banner aprovação de crédito pendente ── */}
+      {aguardandoAprovacaoCredito && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center gap-2"
+          style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
+          <Loader2 size={16} className="animate-spin shrink-0" />
+          <p className="text-sm font-medium">
+            Aguardando aprovação de crédito
+            {venda.aprovacao_credito_tipo === "diretor" ? " (diretor — comissão será zerada)" : " (gerente de loja)"}
+          </p>
+        </div>
+      )}
+
+      {/* ── Badge crédito gerente utilizado ── */}
+      {venda.credito_gerente_usado != null && venda.credito_gerente_usado > 0 && (
+        <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
+          style={{ backgroundColor: "#DBEAFE", borderColor: "#93C5FD", color: "#1E40AF" }}>
+          <CheckCircle size={14} className="shrink-0" />
+          <p className="text-xs font-medium">
+            Crédito gerente: {fmt(venda.credito_gerente_usado)}
+            {venda.aprovacao_credito_tipo === "diretor" && " — Aprovado pelo diretor (comissão zerada)"}
+          </p>
+        </div>
+      )}
+
+      {/* ── Alerta: concluir bloqueado por pagamentos pendentes ── */}
+      {podeAprovarConcluir && (
+        <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
+          style={{ backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#9A3412" }}>
+          <XCircle size={14} className="shrink-0" />
+          <p className="text-xs font-medium">
+            Venda aprovada mas com pagamentos pendentes. Confirme os recebimentos para concluir.
+          </p>
         </div>
       )}
 
@@ -1385,45 +1455,117 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
         <Secao>
           <STitle>Pagamento</STitle>
 
-          {/* Pagamentos já registrados */}
+          {/* Pagamentos já registrados — cada um com ação inline */}
           {venda.pagamentos.length > 0 && (
             <div className="space-y-2 mb-4">
               {venda.pagamentos.map(pag => {
                 const sc = PAG_STATUS_COLOR[pag.status] ?? PAG_STATUS_COLOR.pendente;
                 const temLiquido = pag.valor_liquido != null && pag.valor_liquido > 0;
+                const isAReceber = pag.forma === "A Receber";
+                const isPix = pag.forma === "Pix";
+                const isCartao = pag.forma === "Cartão de Crédito";
+                const creditoAprovado = isAReceber && venda.aprovacao_credito_tipo != null && venda.situacao !== "rascunho";
                 return (
-                  <div key={pag.id} className="flex items-center justify-between p-3 rounded-lg border" style={{ borderColor: C.cremeBorder }}>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium" style={{ color: "#1A1A1A" }}>
-                        {pag.forma}{pag.parcelas > 1 ? ` ${pag.parcelas}×` : ""}
-                        {pag.gateway && <span className="text-xs ml-1" style={{ color: "#9CA3AF" }}>via {pag.gateway}</span>}
-                      </p>
-                      <p className="text-xs" style={{ color: "#9CA3AF" }}>
-                        {pag.data_confirmacao ? `Confirmado em ${fmtDateTime(pag.data_confirmacao)}` : "Sem confirmação"}
-                      </p>
-                      {temLiquido && (
-                        <p className="text-[11px] mt-0.5 tabular-nums" style={{ color: "#059669" }}>
-                          Líquido recebido: <b>{fmt(Number(pag.valor_liquido))}</b>
-                          {pag.taxas_mp != null && pag.taxas_mp > 0 && (
-                            <span style={{ color: "#D97706" }}> (taxa MP {fmt(Number(pag.taxas_mp))})</span>
-                          )}
+                  <div key={pag.id} className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+                    {/* Linha principal do pagamento */}
+                    <div className="flex items-center justify-between p-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium" style={{ color: "#1A1A1A" }}>
+                          {pag.forma}{pag.parcelas > 1 ? ` ${pag.parcelas}×` : ""}
+                          {pag.gateway && <span className="text-xs ml-1" style={{ color: "#9CA3AF" }}>via {pag.gateway}</span>}
                         </p>
-                      )}
+                        <p className="text-xs" style={{ color: "#9CA3AF" }}>
+                          {pag.data_confirmacao ? `Confirmado em ${fmtDateTime(pag.data_confirmacao)}` : "Sem confirmação"}
+                        </p>
+                        {temLiquido && (
+                          <p className="text-[11px] mt-0.5 tabular-nums" style={{ color: "#059669" }}>
+                            Líquido recebido: <b>{fmt(Number(pag.valor_liquido))}</b>
+                            {pag.taxas_mp != null && pag.taxas_mp > 0 && (
+                              <span style={{ color: "#D97706" }}> (taxa MP {fmt(Number(pag.taxas_mp))})</span>
+                            )}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {/* Badge de status */}
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                          style={{ backgroundColor: sc.bg, color: sc.text }}>{pag.status}</span>
+                        {/* Badge crédito aprovado (A Receber) */}
+                        {isAReceber && creditoAprovado && pag.status === "pendente" && (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                            style={{ backgroundColor: "#DBEAFE", color: "#1E40AF" }}>
+                            crédito aprovado
+                          </span>
+                        )}
+                        {/* Badge aguardando aprovação */}
+                        {isAReceber && aguardandoAprovacaoCredito && (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                            style={{ backgroundColor: "#FEF9C3", color: "#713F12" }}>
+                            aguardando aprovação
+                          </span>
+                        )}
+                        <span className="text-sm font-semibold tabular-nums" style={{ color: C.esmeralda }}>{fmt(pag.valor)}</span>
+
+                        {/* A Receber pendente + sem aprovação → botão solicitar aprovação */}
+                        {isAReceber && pag.status === "pendente" && !aguardandoAprovacaoCredito && !creditoAprovado && (
+                          <button onClick={solicitarAprovacao} disabled={updating}
+                            className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
+                            style={{ backgroundColor: "#D97706", color: "#fff" }}>
+                            Solicitar Aprovação
+                          </button>
+                        )}
+
+                        {/* A Receber com crédito aprovado → botão registrar recebimento (quando cliente pagar) */}
+                        {isAReceber && pag.status === "pendente" && creditoAprovado &&
+                          (isFullAccess || ["gerente_loja", "diretor"].includes(role)) && (
+                          <button onClick={() => confirmarPagamento(pag.id, pag.forma)} disabled={updating}
+                            className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
+                            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                            Registrar Recebimento
+                          </button>
+                        )}
+
+                        {/* Outros pagamentos pendentes → confirmar manual */}
+                        {!isAReceber && !isPix && !isCartao && pag.status === "pendente" &&
+                          (isFullAccess || ["gerente_loja", "diretor"].includes(role)) && (
+                          <button onClick={() => confirmarPagamento(pag.id, pag.forma)} disabled={updating}
+                            className="text-xs px-2 py-1 rounded-lg font-medium disabled:opacity-50"
+                            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                            Confirmar
+                          </button>
+                        )}
+
+                        {edit.limited && pag.status === "pendente" && (
+                          <button onClick={() => handleRemovePagamento(pag.id)} disabled={updating}
+                            className="text-gray-300 hover:text-red-400 disabled:opacity-40"><X size={13} /></button>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                        style={{ backgroundColor: sc.bg, color: sc.text }}>{pag.status}</span>
-                      <span className="text-sm font-semibold tabular-nums" style={{ color: C.esmeralda }}>{fmt(pag.valor)}</span>
-                      {isFullAccess && pag.status === "pendente" && (
-                        <button onClick={() => confirmarPagamento(pag.id)} disabled={updating}
-                          className="text-xs px-2 py-1 rounded-lg font-medium disabled:opacity-50"
-                          style={{ backgroundColor: C.esmeralda, color: C.creme }}>Confirmar</button>
-                      )}
-                      {edit.limited && (
-                        <button onClick={() => handleRemovePagamento(pag.id)} disabled={updating}
-                          className="text-gray-300 hover:text-red-400 disabled:opacity-40"><X size={13} /></button>
-                      )}
-                    </div>
+
+                    {/* Pix inline — gerar QR direto nessa linha */}
+                    {isPix && pag.status === "pendente" && (
+                      <div className="px-3 pb-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                        <PixQrInline
+                          vendaId={venda.id}
+                          numeroVenda={venda.numero_venda}
+                          valor={pag.valor}
+                          onPagamentoConfirmado={() => load()}
+                        />
+                      </div>
+                    )}
+
+                    {/* Cartão de Crédito inline */}
+                    {isCartao && pag.status === "pendente" && (
+                      <div className="px-3 pb-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                        <CartaoInline
+                          vendaId={venda.id}
+                          numeroVenda={venda.numero_venda}
+                          valor={pag.valor}
+                          installments={pag.parcelas || 1}
+                          onPagamentoConfirmado={() => load()}
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1946,16 +2088,30 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
             )}
             {proximasAcoes.map(acao => {
               const needsValidation = acao.value === "aprovado" || acao.value === "concluido";
-              const isDisabled = updating || saving || (needsValidation && !podeAprovar);
+              const isConcluirBloqueado = acao.value === "concluido" && temPagamentoPendente;
+              const isDisabled = updating || saving || (needsValidation && !podeAprovar) || isConcluirBloqueado || aguardandoAprovacaoCredito;
+
+              // Quando tem A Receber → usar solicitarAprovacao em vez de changeSituacao
+              const usarSolicitarAprovacao = acao.value === "aprovado" && (temAReceber || !isFullAccess && !["gerente_loja", "gerente_fabrica", "diretor"].includes(role));
+              const btnLabel = aguardandoAprovacaoCredito && acao.value === "aprovado"
+                ? "Aguardando Aprovação..."
+                : usarSolicitarAprovacao ? "Enviar para Aprovação" : acao.label;
+              const btnHandler = usarSolicitarAprovacao ? solicitarAprovacao : () => changeSituacao(acao.value);
+
               return (
                 <div key={acao.value} className="relative group">
-                  <button onClick={() => changeSituacao(acao.value)} disabled={isDisabled}
+                  <button onClick={btnHandler} disabled={isDisabled}
                     className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
                     style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                     {updating ? <Loader2 size={14} className="animate-spin" /> : <acao.icon size={14} />}
-                    {acao.label}
+                    {btnLabel}
                   </button>
-                  {needsValidation && !podeAprovar && (
+                  {isConcluirBloqueado && (
+                    <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block w-52 p-2 rounded-lg border bg-white shadow-lg text-xs" style={{ borderColor: C.cremeBorder, color: "#D97706" }}>
+                      Confirme todos os pagamentos pendentes antes de concluir
+                    </div>
+                  )}
+                  {needsValidation && !podeAprovar && !isConcluirBloqueado && (
                     <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block w-52 p-2 rounded-lg border bg-white shadow-lg text-xs" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
                       Preencha antes:
                       {!venda.cliente_id && <p className="text-red-500">• Cliente</p>}
