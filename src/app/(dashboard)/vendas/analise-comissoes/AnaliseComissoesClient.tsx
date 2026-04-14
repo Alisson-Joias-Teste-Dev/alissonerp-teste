@@ -64,6 +64,8 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
   // Filtros itens
   const [filtroVendedor, setFiltroVendedor] = useState<number | "">("");
   const [filtroPedido,   setFiltroPedido]   = useState("");
+  const [pagina,         setPagina]         = useState(1);
+  const itensPorPagina = 50;
 
   // Sort vendedoras
   const [sortField, setSortField] = useState<SortField>("comissao_ganha");
@@ -114,12 +116,16 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
 
   // Filtro itens
   const itensFiltrados = useMemo(() => {
+    setPagina(1);
     return itens.filter(i => {
       if (filtroVendedor && i.vendedor_id !== filtroVendedor) return false;
       if (filtroPedido && !i.numero_venda.toLowerCase().includes(filtroPedido.toLowerCase())) return false;
       return true;
     });
   }, [itens, filtroVendedor, filtroPedido]);
+
+  const totalPaginas = Math.ceil(itensFiltrados.length / itensPorPagina);
+  const itensPaginados = itensFiltrados.slice((pagina - 1) * itensPorPagina, pagina * itensPorPagina);
 
   // Totais rodapé itens
   const totaisItens = useMemo(() => {
@@ -287,7 +293,7 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
                   </tr>
                 </thead>
                 <tbody>
-                  {itensFiltrados.slice(0, 200).map(i => (
+                  {itensPaginados.map(i => (
                     <tr key={`${i.item_id}`} className="border-t" style={{ borderColor: C.cremeBorder }}>
                       <td className="px-2 py-2 tabular-nums" style={{ color: "#6B7280" }}>{fmtDate(i.data_venda)}</td>
                       <td className="px-2 py-2 font-medium" style={{ color: "#374151" }}>#{i.numero_venda}</td>
@@ -304,6 +310,42 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
                 </tbody>
               </table>
             </div>
+
+            {/* Paginação */}
+            {totalPaginas > 1 && (
+              <div className="flex items-center justify-between px-4 py-2 border-t" style={{ borderColor: C.cremeBorder }}>
+                <span className="text-xs" style={{ color: "#9CA3AF" }}>
+                  {((pagina - 1) * itensPorPagina) + 1}–{Math.min(pagina * itensPorPagina, itensFiltrados.length)} de {itensFiltrados.length}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setPagina(p => Math.max(1, p - 1))} disabled={pagina <= 1}
+                    className="px-2 py-1 rounded text-xs font-medium disabled:opacity-30" style={{ color: C.esmeralda }}>
+                    ← Anterior
+                  </button>
+                  {Array.from({ length: Math.min(totalPaginas, 7) }, (_, i) => {
+                    let p: number;
+                    if (totalPaginas <= 7) p = i + 1;
+                    else if (pagina <= 4) p = i + 1;
+                    else if (pagina >= totalPaginas - 3) p = totalPaginas - 6 + i;
+                    else p = pagina - 3 + i;
+                    return (
+                      <button key={p} onClick={() => setPagina(p)}
+                        className="w-7 h-7 rounded text-xs font-medium"
+                        style={{
+                          backgroundColor: p === pagina ? C.esmeralda : "transparent",
+                          color: p === pagina ? C.creme : "#6B7280",
+                        }}>
+                        {p}
+                      </button>
+                    );
+                  })}
+                  <button onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))} disabled={pagina >= totalPaginas}
+                    className="px-2 py-1 rounded text-xs font-medium disabled:opacity-30" style={{ color: C.esmeralda }}>
+                    Próxima →
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Rodapé totais */}
             <div className="px-4 py-3 border-t grid grid-cols-3 md:grid-cols-6 gap-3" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
