@@ -189,7 +189,7 @@ export default function CartaoInline({
       const res = await fetch(`/api/vendas/${id}/mercado-pago/criar-link`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ valor }),
       });
       const ct = res.headers.get("content-type") ?? "";
       if (!ct.includes("application/json")) {
@@ -220,6 +220,7 @@ export default function CartaoInline({
           device_id: deviceSelected,
           installments: parcelasPoint,
           payment_type: "credit_card",
+          valor,
         }),
       });
       const ct = res.headers.get("content-type") ?? "";
