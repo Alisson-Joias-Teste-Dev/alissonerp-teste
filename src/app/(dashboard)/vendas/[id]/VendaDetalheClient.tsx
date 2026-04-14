@@ -69,6 +69,7 @@ interface Venda {
   credito_gerente_usado?: number;
   aprovacao_credito_tipo?: string | null;
   aprovacao_credito_tarefa_id?: number | null;
+  aprovacao_credito_status?: string | null;
   endereco_entrega?: string | null; endereco_entrega_numero?: string | null;
   endereco_entrega_complemento?: string | null; endereco_entrega_bairro?: string | null;
   endereco_entrega_cidade?: string | null; endereco_entrega_cep?: string | null;
@@ -888,7 +889,9 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
 
   // Crédito gerente
   const temAReceber = venda.pagamentos.some(p => p.forma === "A Receber" && p.status === "pendente");
-  const aguardandoAprovacaoCredito = !!venda.aprovacao_credito_tarefa_id && venda.situacao === "rascunho";
+  const creditoTarefaConcluida = venda.aprovacao_credito_status === "concluida";
+  const aguardandoAprovacaoCredito = !!venda.aprovacao_credito_tarefa_id && venda.aprovacao_credito_status === "aguardando_aprovacao";
+  const creditoFoiAprovado = !!venda.aprovacao_credito_tipo && creditoTarefaConcluida;
   const temPagamentoPendente = venda.pagamentos.some(p => p.status === "pendente");
   const podeAprovarConcluir = venda.situacao === "aprovado" && temPagamentoPendente;
 
@@ -1464,7 +1467,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                 const isAReceber = pag.forma === "A Receber";
                 const isPix = pag.forma === "Pix";
                 const isCartao = pag.forma === "Cartão de Crédito";
-                const creditoAprovado = isAReceber && venda.aprovacao_credito_tipo != null && venda.situacao !== "rascunho";
+                const creditoAprovado = isAReceber && creditoFoiAprovado;
                 return (
                   <div key={pag.id} className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
                     {/* Linha principal do pagamento */}

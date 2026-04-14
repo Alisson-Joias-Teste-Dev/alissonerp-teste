@@ -23,9 +23,9 @@ interface Resposta {
 
 // ─── Constantes ────────────────────────────────────────────────────────────
 const POLL_INTERVAL_MS = 10_000; // 10s — rápido o suficiente p/ sentir "agora"
-const TICK_INTERVAL_MS = 160;    // bip quase contínuo (~6 por segundo)
+const TICK_INTERVAL_MS = 1000;   // 1 bip por segundo (1s bip, 1s silêncio)
 const TICK_FREQUENCY   = 880;    // Hz — A5, bem audível em qualquer speaker
-const TICK_DURATION_S  = 0.11;   // 110ms por bip (curto, cabe no intervalo)
+const TICK_DURATION_S  = 0.15;   // 150ms por bip (curto e claro)
 const TICK_VOLUME      = 0.75;   // 75% — bem audível sem estourar
 const SNOOZE_MINUTOS   = 10;     // minutos que o botão "Adiar" silencia
 

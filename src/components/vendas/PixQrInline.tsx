@@ -124,7 +124,7 @@ export default function PixQrInline({
       const res = await fetch(`/api/vendas/${idParaUsar}/mercado-pago/criar-pix`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ valor }),
       });
 
       // Detecta se resposta é HTML (404/500 do Next) antes de tentar parsear JSON

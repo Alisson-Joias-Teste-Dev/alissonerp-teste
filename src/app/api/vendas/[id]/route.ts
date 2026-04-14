@@ -30,6 +30,7 @@ export async function GET(
       ve.endereco_entrega, ve.endereco_entrega_numero, ve.endereco_entrega_complemento,
       ve.endereco_entrega_bairro, ve.endereco_entrega_cidade, ve.endereco_entrega_cep, ve.endereco_entrega_uf,
       ve.credito_gerente_usado, ve.aprovacao_credito_tipo, ve.aprovacao_credito_tarefa_id,
+      (SELECT t.status FROM alissonerp.tarefas t WHERE t.id = ve.aprovacao_credito_tarefa_id) AS aprovacao_credito_status,
       c.endereco AS cliente_endereco, c.numero AS cliente_numero, c.complemento AS cliente_complemento,
       c.bairro AS cliente_bairro, c.municipio AS cliente_municipio, c.cep AS cliente_cep, c.uf AS cliente_uf
     FROM alissonerp.vw_vendas_erp_completa v
@@ -80,6 +81,7 @@ export async function GET(
     credito_gerente_usado: Number(venda.credito_gerente_usado ?? 0),
     aprovacao_credito_tipo: venda.aprovacao_credito_tipo ?? null,
     aprovacao_credito_tarefa_id: venda.aprovacao_credito_tarefa_id ?? null,
+    aprovacao_credito_status: venda.aprovacao_credito_status ?? null,
     itens: itens.map((i) => ({
       ...i,
       quantidade:     Number(i.quantidade),
