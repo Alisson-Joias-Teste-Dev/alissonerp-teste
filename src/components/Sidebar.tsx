@@ -35,6 +35,8 @@ import {
   Store,
   FileBarChart,
   FileSpreadsheet,
+  Percent,
+  Target,
 } from "lucide-react";
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
@@ -74,6 +76,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?
   Store,
   FileBarChart,
   FileSpreadsheet,
+  Percent,
+  Target,
 };
 
 function isGroup(entry: MenuEntry): entry is MenuGroup {
