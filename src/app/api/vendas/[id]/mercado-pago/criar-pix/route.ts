@@ -100,16 +100,31 @@ export async function POST(
     if (!pag) return NextResponse.json({ error: "Pagamento não encontrado" }, { status: 404 });
     pagamentoId = Number(pag.id);
   } else {
-    const [pag] = await sql`
-      INSERT INTO alissonerp.pagamentos_venda (
-        venda_id, forma, gateway, valor, parcelas, status
-      ) VALUES (
-        ${vendaId}, 'Pix', 'Mercado Pago Pix',
-        ${valorCobranca}, 1, 'pendente'
-      )
-      RETURNING id
+    // Reaproveitar pagamento Pix pendente existente (evita duplicata em Múltiplas)
+    const [existente] = await sql`
+      SELECT id FROM alissonerp.pagamentos_venda
+      WHERE venda_id = ${vendaId} AND forma = 'Pix' AND status = 'pendente' AND gateway IS NULL
+      ORDER BY id LIMIT 1
     `;
-    pagamentoId = Number(pag.id);
+    if (existente) {
+      await sql`
+        UPDATE alissonerp.pagamentos_venda
+        SET gateway = 'Mercado Pago Pix', valor = ${valorCobranca}
+        WHERE id = ${existente.id}
+      `;
+      pagamentoId = Number(existente.id);
+    } else {
+      const [pag] = await sql`
+        INSERT INTO alissonerp.pagamentos_venda (
+          venda_id, forma, gateway, valor, parcelas, status
+        ) VALUES (
+          ${vendaId}, 'Pix', 'Mercado Pago Pix',
+          ${valorCobranca}, 1, 'pendente'
+        )
+        RETURNING id
+      `;
+      pagamentoId = Number(pag.id);
+    }
   }
 
   // ─── Prepara payer (email obrigatório pelo Payment API) ───────────────────
