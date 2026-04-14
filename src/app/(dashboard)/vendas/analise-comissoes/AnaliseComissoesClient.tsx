@@ -65,7 +65,7 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
   const [filtroVendedor, setFiltroVendedor] = useState<number | "">("");
   const [filtroPedido,   setFiltroPedido]   = useState("");
   const [pagina,         setPagina]         = useState(1);
-  const itensPorPagina = 50;
+  const itensPorPagina = 15;
 
   // Sort vendedoras
   const [sortField, setSortField] = useState<SortField>("comissao_ganha");
