@@ -87,6 +87,20 @@ export default function GlobalErrorToast() {
     function handler(event: ErrorEvent) {
       // Ignorar erros de extensões/third-party
       if (event.filename && !event.filename.includes(window.location.origin)) return;
+
+      // Ignorar ruído conhecido do profiler interno de React 19 / Next 16.
+      // Em dev mode, Next às vezes chama performance.measure com delta negativo
+      // durante hot reload ou re-render durante hidratação. Não afeta runtime.
+      const msg = event.message ?? "";
+      if (
+        msg.includes("cannot have a negative time stamp") ||
+        msg.includes("performance.measure") ||
+        msg.includes("Performance.measure") ||
+        msg.includes("Failed to execute 'measure' on 'Performance'")
+      ) {
+        return;
+      }
+
       useErrorStore.getState().push(
         "Erro inesperado na aplicação",
         { level: "critical", detail: event.message },

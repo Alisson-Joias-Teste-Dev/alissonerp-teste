@@ -40,6 +40,11 @@ interface ContaReceber {
   situacao: string;
   categoria: string | null;
   obs: string | null;
+  venda_erp_id?: number | null;
+  /** Soma líquida dos pagamentos MP confirmados da venda. Null se não há MP. */
+  valor_liquido?: number | null;
+  /** Soma das taxas cobradas pelo Mercado Pago. */
+  taxas_mp?: number | null;
 }
 
 interface Extrato {
@@ -103,6 +108,8 @@ const SITUACAO: Record<string, { label: string; color: string; icon: any }> = {
 function ContaRow({
   descricao,
   valor,
+  valorLiquido,
+  taxasMp,
   vencimento,
   liquidacao,
   situacao,
@@ -114,6 +121,8 @@ function ContaRow({
 }: {
   descricao: string;
   valor: number;
+  valorLiquido?: number | null;
+  taxasMp?: number | null;
   vencimento: string | null;
   liquidacao: string | null;
   situacao: string;
@@ -125,6 +134,7 @@ function ContaRow({
 }) {
   const st = vencido ? SITUACAO["vencido"] : (SITUACAO[situacao] ?? { label: situacao, color: "#4A7568", icon: Clock });
   const Icon = st.icon;
+  const temLiquidoDiferente = valorLiquido != null && valorLiquido > 0 && Math.abs(valorLiquido - valor) > 0.001;
   return (
     <tr style={{ borderBottom: "1px solid #0F2922" }} className="hover:bg-[#0F2922]/40 transition-colors">
       <td className="px-4 py-3 max-w-[220px]">
@@ -135,6 +145,14 @@ function ContaRow({
       </td>
       <td className="px-4 py-3 text-right tabular-nums font-medium whitespace-nowrap" style={{ color: "#DB9864" }}>
         {fmt(Number(valor))}
+        {temLiquidoDiferente && (
+          <div className="text-[10px] mt-0.5 font-normal" style={{ color: "#4A9F73" }}>
+            líquido {fmt(Number(valorLiquido))}
+            {taxasMp != null && taxasMp > 0 && (
+              <span style={{ color: "#DB9864" }}> (−{fmt(Number(taxasMp))})</span>
+            )}
+          </div>
+        )}
       </td>
       <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: vencido ? "#E05C5C" : "#80A795" }}>
         {fmtDate(vencimento)}
@@ -379,16 +397,30 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
   const [actionId, setActionId] = useState<number | null>(null);
   const [form, setForm] = useState({ descricao: "", valor: "", data_vencimento: "", categoria: "", obs: "" });
 
+  // Backend usa 'pago' como status de CR quitada (via trigger 113 e
+  // fn_cr_marcar_pago_mp). A UI antiga usava 'recebido' como sinônimo,
+  // então tratamos ambos como equivalentes pra compatibilidade.
+  const isRecebido = (s: string) => s === "pago" || s === "recebido";
+
   const totalPendente = lista
     .filter((r) => r.situacao === "pendente")
     .reduce((s, r) => s + Number(r.valor), 0);
   const totalRecebido = lista
-    .filter((r) => r.situacao === "recebido")
+    .filter((r) => isRecebido(r.situacao))
     .reduce((s, r) => s + Number(r.valor), 0);
+  // Total líquido: soma do valor_liquido das CRs pagas (se MP) OU valor
+  // bruto (se não é MP). CRs pagas manualmente contam como líquido = bruto.
+  const totalLiquido = lista
+    .filter((r) => isRecebido(r.situacao))
+    .reduce((s, r) => s + Number(r.valor_liquido ?? r.valor), 0);
+  const totalTaxas = lista
+    .filter((r) => isRecebido(r.situacao))
+    .reduce((s, r) => s + Number(r.taxas_mp ?? 0), 0);
 
   const filtradas = useMemo(() => {
     if (filtro === "vencido") return lista.filter((r) => isVencido(r.data_vencimento, r.situacao));
     if (filtro === "todos") return lista;
+    if (filtro === "recebido") return lista.filter((r) => isRecebido(r.situacao));
     return lista.filter((r) => r.situacao === filtro);
   }, [lista, filtro]);
 
@@ -429,13 +461,16 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
 
   async function marcarRecebido(id: number) {
     setActionId(id);
+    // Usa 'pago' porque é o valor que o backend (trigger 113 e
+    // fn_cr_marcar_pago_mp) grava. Antes era 'recebido' mas criava
+    // inconsistência com CRs pagas automaticamente pelo webhook MP.
     const res = await fetch(`/api/financeiro/contas-receber/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ situacao: "recebido", data_recebimento: new Date().toISOString().slice(0, 10) }),
+      body: JSON.stringify({ situacao: "pago", data_recebimento: new Date().toISOString().slice(0, 10) }),
     });
     if (res.ok) {
-      setLista((prev) => prev.map((r) => r.id === id ? { ...r, situacao: "recebido", data_recebimento: new Date().toISOString().slice(0, 10) } : r));
+      setLista((prev) => prev.map((r) => r.id === id ? { ...r, situacao: "pago", data_recebimento: new Date().toISOString().slice(0, 10) } : r));
     } else {
       const data = await res.json().catch(() => ({ error: "Erro" }));
       alert(data.error || "Erro ao marcar como recebido");
@@ -445,17 +480,26 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Total Contas", value: lista.length },
-          { label: "A Receber", value: fmt(totalPendente), color: "#DB9864" },
-          { label: "Recebido", value: fmt(totalRecebido), color: "#4A9F73" },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="rounded-lg p-3" style={{ backgroundColor: "#0F2922", border: "1px solid #1C3D32" }}>
-            <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "#4A7568" }}>{label}</p>
-            <p className="text-lg font-semibold" style={{ color: color ?? "#F3EADA" }}>{value}</p>
-          </div>
-        ))}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="rounded-lg p-3" style={{ backgroundColor: "#0F2922", border: "1px solid #1C3D32" }}>
+          <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "#4A7568" }}>Total Contas</p>
+          <p className="text-lg font-semibold" style={{ color: "#F3EADA" }}>{lista.length}</p>
+        </div>
+        <div className="rounded-lg p-3" style={{ backgroundColor: "#0F2922", border: "1px solid #1C3D32" }}>
+          <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "#4A7568" }}>A Receber</p>
+          <p className="text-lg font-semibold" style={{ color: "#DB9864" }}>{fmt(totalPendente)}</p>
+        </div>
+        <div className="rounded-lg p-3" style={{ backgroundColor: "#0F2922", border: "1px solid #1C3D32" }}>
+          <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "#4A7568" }}>Recebido (bruto)</p>
+          <p className="text-lg font-semibold" style={{ color: "#4A9F73" }}>{fmt(totalRecebido)}</p>
+        </div>
+        <div className="rounded-lg p-3" style={{ backgroundColor: "#0F2922", border: "1px solid #1C3D32" }}>
+          <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "#4A7568" }}>Líquido na Conta</p>
+          <p className="text-lg font-semibold" style={{ color: "#4A9F73" }}>{fmt(totalLiquido)}</p>
+          {totalTaxas > 0 && (
+            <p className="text-[10px] mt-0.5" style={{ color: "#DB9864" }}>-{fmt(totalTaxas)} de taxas</p>
+          )}
+        </div>
       </div>
 
       {/* Nova Conta button + form */}
@@ -545,6 +589,8 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
                     key={r.id}
                     descricao={r.descricao}
                     valor={r.valor}
+                    valorLiquido={r.valor_liquido}
+                    taxasMp={r.taxas_mp}
                     vencimento={r.data_vencimento}
                     liquidacao={r.data_recebimento}
                     situacao={r.situacao}

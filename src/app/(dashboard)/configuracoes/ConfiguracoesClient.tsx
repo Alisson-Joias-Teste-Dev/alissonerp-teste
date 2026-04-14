@@ -32,6 +32,7 @@ import {
   Wrench,
   Link2,
   DollarSign,
+  Wallet,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
@@ -88,6 +89,8 @@ interface Usuario {
   ativo: boolean;
   created_at: string;
   avatar_url: string | null;
+  deposito_id?: number | null;
+  vendedor_id?: number | null;
   tipos_ordem_permitidos?: string[];
   tipos_protocolo_permitidos?: string[];
   is_operador_service?: boolean;
@@ -126,7 +129,7 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -514,8 +517,8 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
       role:                       u.role,
       ativo:                      u.ativo,
       avatar_url:                 u.avatar_url ?? null,
-      deposito_id:                null,
-      vendedor_id:                null,
+      deposito_id:                u.deposito_id ?? null,
+      vendedor_id:                u.vendedor_id ?? null,
       tipos_ordem_permitidos:     u.tipos_ordem_permitidos ?? [],
       tipos_protocolo_permitidos: u.tipos_protocolo_permitidos ?? [],
       is_operador_service:        u.is_operador_service ?? false,
@@ -534,10 +537,17 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
         u.id === updated.id
           ? {
               ...u,
-              nome:       updated.nome,
-              role:       updated.role,
-              ativo:      updated.ativo,
-              avatar_url: updated.avatar_url ?? u.avatar_url,
+              nome:                       updated.nome,
+              role:                       updated.role,
+              ativo:                      updated.ativo,
+              avatar_url:                 updated.avatar_url ?? u.avatar_url,
+              deposito_id:                updated.deposito_id ?? u.deposito_id,
+              vendedor_id:                updated.vendedor_id ?? u.vendedor_id,
+              tipos_ordem_permitidos:     updated.tipos_ordem_permitidos ?? u.tipos_ordem_permitidos,
+              tipos_protocolo_permitidos: updated.tipos_protocolo_permitidos ?? u.tipos_protocolo_permitidos,
+              is_operador_service:        updated.is_operador_service ?? u.is_operador_service,
+              is_transportador:           updated.is_transportador ?? u.is_transportador,
+              mx_desconto_permitido:      updated.mx_desconto_permitido !== undefined ? updated.mx_desconto_permitido : u.mx_desconto_permitido,
             }
           : u
       )
@@ -3036,6 +3046,38 @@ function TabIntegracoes() {
   const [tinyClientSecret, setTinyClientSecret] = useState("");
   const [showTinySecret, setShowTinySecret] = useState(false);
 
+  // Mercado Pago fields
+  const [mpConfigured, setMpConfigured] = useState(false);
+  const [mpAccessToken, setMpAccessToken] = useState("");
+  const [mpWebhookSecret, setMpWebhookSecret] = useState("");
+  const [mpUserId, setMpUserId] = useState("");
+  const [mpWebhookBaseUrl, setMpWebhookBaseUrl] = useState("");
+  const [showMpToken, setShowMpToken] = useState(false);
+  const [showMpSecret, setShowMpSecret] = useState(false);
+
+  // Mercado Pago Point devices
+  interface PointDeviceRow {
+    id: number;
+    device_id: string;
+    nome_legivel: string;
+    loja: string | null;
+    operating_mode: string | null;
+    ativo: boolean;
+    last_sync_at: string | null;
+  }
+  const [mpDevices, setMpDevices] = useState<PointDeviceRow[]>([]);
+  const [mpSyncLoading, setMpSyncLoading] = useState(false);
+  const [mpEditDeviceId, setMpEditDeviceId] = useState<number | null>(null);
+  const [mpEditNome, setMpEditNome] = useState("");
+  const [mpEditLoja, setMpEditLoja] = useState("");
+
+  const carregarMpDevices = async () => {
+    try {
+      const res = await fetch("/api/mercado-pago/devices");
+      if (res.ok) setMpDevices(await res.json());
+    } catch { /* silenciar */ }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -3045,11 +3087,62 @@ function TabIntegracoes() {
           setWooConfigured(data.woo_configured);
           setKommoConfigured(data.kommo_configured);
           setTinyConfigured(data.tiny_configured);
+          setMpConfigured(data.mp_configured ?? false);
+          if (data.mp_configured) carregarMpDevices();
         }
       } catch { /* silenciar */ }
       setLoading(false);
     })();
   }, []);
+
+  async function sincronizarMpDevices() {
+    setMpSyncLoading(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/mercado-pago/devices", { method: "POST" });
+      const body = await res.json();
+      if (res.ok) {
+        setMsg({
+          tipo: "ok",
+          texto: `Maquininhas sincronizadas: ${body.inserted} novas, ${body.updated} atualizadas (total ${body.total})`,
+        });
+        await carregarMpDevices();
+      } else {
+        setMsg({ tipo: "erro", texto: body.error ?? "Erro ao sincronizar" });
+      }
+    } catch {
+      setMsg({ tipo: "erro", texto: "Erro de rede" });
+    }
+    setMpSyncLoading(false);
+    setTimeout(() => setMsg(null), 5000);
+  }
+
+  async function salvarDevice(id: number) {
+    const res = await fetch("/api/mercado-pago/devices", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        nome_legivel: mpEditNome.trim() || undefined,
+        loja: mpEditLoja.trim() || null,
+      }),
+    });
+    if (res.ok) {
+      setMpEditDeviceId(null);
+      setMpEditNome("");
+      setMpEditLoja("");
+      await carregarMpDevices();
+    }
+  }
+
+  async function alternarDeviceAtivo(id: number, ativo: boolean) {
+    const res = await fetch("/api/mercado-pago/devices", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ativo: !ativo }),
+    });
+    if (res.ok) await carregarMpDevices();
+  }
 
   async function salvarWoo() {
     if (!wooUrl.trim() && !wooKey.trim() && !wooSecret.trim()) return;
@@ -3101,6 +3194,43 @@ function TabIntegracoes() {
       // Re-fetch status real
       fetch("/api/configuracoes/integracoes").then(r => r.ok ? r.json() : null).then(d => {
         if (d) { setWooConfigured(d.woo_configured); setKommoConfigured(d.kommo_configured); setTinyConfigured(d.tiny_configured); setTinyHasCredentials(d.tiny_has_credentials ?? false); }
+      }).catch(() => {});
+    } else {
+      const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+      setMsg({ tipo: "erro", texto: d.error ?? "Erro ao salvar" });
+    }
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  async function salvarMercadoPago() {
+    if (!mpAccessToken.trim() && !mpWebhookSecret.trim() && !mpUserId.trim() && !mpWebhookBaseUrl.trim()) return;
+    setSaving(true);
+    setMsg(null);
+    const body: Record<string, string> = {};
+    if (mpAccessToken.trim())    body.mp_access_token    = mpAccessToken.trim();
+    if (mpWebhookSecret.trim())  body.mp_webhook_secret  = mpWebhookSecret.trim();
+    if (mpUserId.trim())         body.mp_user_id         = mpUserId.trim();
+    if (mpWebhookBaseUrl.trim()) body.mp_webhook_base_url = mpWebhookBaseUrl.trim();
+    const res = await fetch("/api/configuracoes/integracoes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setMpAccessToken("");
+      setMpWebhookSecret("");
+      setMpUserId("");
+      setMpWebhookBaseUrl("");
+      setMsg({ tipo: "ok", texto: "Mercado Pago salvo com sucesso" });
+      fetch("/api/configuracoes/integracoes").then(r => r.ok ? r.json() : null).then(d => {
+        if (d) {
+          setWooConfigured(d.woo_configured);
+          setKommoConfigured(d.kommo_configured);
+          setTinyConfigured(d.tiny_configured);
+          setTinyHasCredentials(d.tiny_has_credentials ?? false);
+          setMpConfigured(d.mp_configured ?? false);
+        }
       }).catch(() => {});
     } else {
       const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
@@ -3342,6 +3472,248 @@ function TabIntegracoes() {
           </p>
         )}
       </div>
+
+      {/* Mercado Pago (Preference + Point Smart) */}
+      <div
+        className="rounded-xl p-5 space-y-4"
+        style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: P.creme }}>Mercado Pago</p>
+            <p className="text-xs" style={{ color: P.muted }}>
+              Link de pagamento online (PIX + cartão) e maquininhas Point Smart
+            </p>
+          </div>
+          <StatusBadge ok={mpConfigured} />
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+            URL do webhook (cadastre no painel MP)
+          </label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              readOnly
+              value={`${typeof window !== "undefined" ? window.location.origin : "https://erp.alisson.api.br"}/api/webhooks/mercado-pago`}
+              className="flex-1 bg-transparent px-3 py-2.5 text-xs outline-none select-all"
+              style={{ color: P.sage }}
+              onClick={e => (e.target as HTMLInputElement).select()}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+            Access Token (Production)
+          </label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              type={showMpToken ? "text" : "password"}
+              value={mpAccessToken}
+              onChange={(e) => setMpAccessToken(e.target.value)}
+              placeholder="APP_USR-..."
+              className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+              style={{ color: P.creme }}
+            />
+            <button onClick={() => setShowMpToken(!showMpToken)} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+              {showMpToken ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+            Webhook Secret (chave de assinatura HMAC)
+          </label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              type={showMpSecret ? "text" : "password"}
+              value={mpWebhookSecret}
+              onChange={(e) => setMpWebhookSecret(e.target.value)}
+              placeholder="Chave secreta do painel MP"
+              className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+              style={{ color: P.creme }}
+            />
+            <button onClick={() => setShowMpSecret(!showMpSecret)} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+              {showMpSecret ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+            User ID (opcional)
+          </label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              type="text"
+              value={mpUserId}
+              onChange={(e) => setMpUserId(e.target.value)}
+              placeholder="User ID da conta MP"
+              className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+              style={{ color: P.creme }}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+            URL base p/ webhook (dev: ngrok, prod: domínio público)
+          </label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              type="text"
+              value={mpWebhookBaseUrl}
+              onChange={(e) => setMpWebhookBaseUrl(e.target.value)}
+              placeholder="https://abc123.ngrok.io"
+              className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+              style={{ color: P.creme }}
+            />
+          </div>
+          <p className="text-[10px] mt-1" style={{ color: P.muted }}>
+            Usada como prefixo do notification_url nas Preferences. Deixe em branco para usar o origin atual.
+          </p>
+        </div>
+
+        <button
+          onClick={salvarMercadoPago}
+          disabled={saving || (!mpAccessToken.trim() && !mpWebhookSecret.trim() && !mpUserId.trim() && !mpWebhookBaseUrl.trim())}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+          style={{ backgroundColor: P.verde, color: "#fff" }}
+        >
+          <Save size={13} /> Salvar Mercado Pago
+        </button>
+
+        {mpConfigured && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
+            <CheckCircle size={12} /> Integração MP ativa — link online e maquininhas Point disponíveis
+          </p>
+        )}
+
+        {/* ─── Maquininhas Point ─── */}
+        {mpConfigured && (
+          <div className="pt-4 mt-2 border-t space-y-3" style={{ borderColor: P.border }}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: P.sage }}>
+                  Maquininhas Point
+                </p>
+                <p className="text-[11px]" style={{ color: P.muted }}>
+                  {mpDevices.length === 0
+                    ? "Nenhuma maquininha sincronizada ainda"
+                    : `${mpDevices.length} maquininha${mpDevices.length > 1 ? "s" : ""} cadastrada${mpDevices.length > 1 ? "s" : ""}`}
+                </p>
+              </div>
+              <button
+                onClick={sincronizarMpDevices}
+                disabled={mpSyncLoading}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+                style={{ backgroundColor: P.dourado, color: "#fff" }}
+              >
+                {mpSyncLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                {mpSyncLoading ? "Sincronizando..." : "Sincronizar com MP"}
+              </button>
+            </div>
+
+            {mpDevices.length > 0 && (
+              <div className="rounded-lg border overflow-hidden" style={{ borderColor: P.border }}>
+                <table className="w-full text-xs">
+                  <thead style={{ backgroundColor: P.bg }}>
+                    <tr>
+                      <th className="text-left px-3 py-2 font-semibold" style={{ color: P.sage }}>Nome</th>
+                      <th className="text-left px-3 py-2 font-semibold" style={{ color: P.sage }}>Loja</th>
+                      <th className="text-left px-3 py-2 font-semibold" style={{ color: P.sage }}>Modo</th>
+                      <th className="text-center px-3 py-2 font-semibold" style={{ color: P.sage }}>Ativo</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mpDevices.map(d => {
+                      const editando = mpEditDeviceId === d.id;
+                      return (
+                        <tr key={d.id} className="border-t" style={{ borderColor: P.border }}>
+                          <td className="px-3 py-2">
+                            {editando ? (
+                              <input
+                                value={mpEditNome}
+                                onChange={e => setMpEditNome(e.target.value)}
+                                className="w-full px-2 py-1 rounded border text-xs"
+                                style={{ borderColor: P.border, color: P.creme }}
+                              />
+                            ) : (
+                              <>
+                                <div className="font-medium" style={{ color: P.creme }}>{d.nome_legivel}</div>
+                                <div className="text-[10px] font-mono" style={{ color: P.muted }}>
+                                  {d.device_id.slice(0, 32)}...
+                                </div>
+                              </>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            {editando ? (
+                              <input
+                                value={mpEditLoja}
+                                onChange={e => setMpEditLoja(e.target.value)}
+                                placeholder="Matriz / Filial..."
+                                className="w-full px-2 py-1 rounded border text-xs"
+                                style={{ borderColor: P.border, color: P.creme }}
+                              />
+                            ) : (
+                              <span style={{ color: P.muted }}>{d.loja ?? "—"}</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2" style={{ color: P.muted }}>
+                            {d.operating_mode ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <button
+                              onClick={() => alternarDeviceAtivo(d.id, d.ativo)}
+                              style={{ color: d.ativo ? P.verde : P.muted }}
+                            >
+                              {d.ativo ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
+                            </button>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {editando ? (
+                              <div className="flex items-center gap-1 justify-end">
+                                <button
+                                  onClick={() => salvarDevice(d.id)}
+                                  className="px-2 py-1 rounded text-[10px] font-semibold"
+                                  style={{ backgroundColor: P.verde, color: "#fff" }}
+                                >
+                                  Salvar
+                                </button>
+                                <button
+                                  onClick={() => { setMpEditDeviceId(null); setMpEditNome(""); setMpEditLoja(""); }}
+                                  style={{ color: P.muted }}
+                                >
+                                  <X size={13} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setMpEditDeviceId(d.id);
+                                  setMpEditNome(d.nome_legivel);
+                                  setMpEditLoja(d.loja ?? "");
+                                }}
+                                style={{ color: P.sage }}
+                              >
+                                <Pencil size={13} />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -3557,6 +3929,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "locais",        label: "Locais",         icon: MapPin },
     { key: "tipos_servico", label: "Tipos Serviço",  icon: Wrench },
     { key: "comissoes",     label: "Comissões",       icon: PenLine },
+    { key: "credito_loja", label: "Crédito Loja",    icon: Wallet },
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tabs: { key: Tab; label: string; icon: any }[] = isSuperAdmin
@@ -3613,6 +3986,190 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "cotacoes" && <TabCotacoes />}
       {tab === "integracoes" && <TabIntegracoes />}
       {tab === "comissoes"   && <TabComissoes />}
+      {tab === "credito_loja" && <TabCreditoLoja />}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab Crédito Loja — Saldo rotativo do gerente de loja
+// ═══════════════════════════════════════════════════════════════════════════════
+function TabCreditoLoja() {
+  const [saldo, setSaldo] = useState<number | null>(null);
+  const [limite, setLimite] = useState<number | null>(null);
+  const [movimentos, setMovimentos] = useState<Array<{
+    id: number; tipo: string; valor: number; saldo_antes: number; saldo_depois: number;
+    descricao: string | null; usuario_nome: string | null; numero_venda: string | null; created_at: string;
+  }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [ajusteValor, setAjusteValor] = useState("");
+  const [ajusteDesc, setAjusteDesc] = useState("");
+  const [novoLimite, setNovoLimite] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const fmt = (v: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [sRes, mRes] = await Promise.all([
+        fetch("/api/saldo-credito").then(r => r.json()),
+        fetch("/api/saldo-credito/movimentos?limit=30").then(r => r.json()),
+      ]);
+      setSaldo(sRes.saldo_atual);
+      setLimite(sRes.limite);
+      setNovoLimite(String(sRes.limite));
+      setMovimentos(mRes.movimentos ?? []);
+    } catch { /* silencioso */ }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { loadData(); }, []);
+
+  async function handleAjuste() {
+    const valor = parseFloat(ajusteValor.replace(",", "."));
+    if (!valor || !ajusteDesc.trim()) return alert("Valor e descrição obrigatórios");
+    setSaving(true);
+    try {
+      const res = await fetch("/api/saldo-credito", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ valor, descricao: ajusteDesc.trim() }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error);
+      setAjusteValor(""); setAjusteDesc("");
+      await loadData();
+    } catch (e) { alert(e instanceof Error ? e.message : "Erro"); }
+    finally { setSaving(false); }
+  }
+
+  async function handleLimite() {
+    const lim = parseFloat(novoLimite.replace(",", "."));
+    if (isNaN(lim) || lim < 0) return alert("Limite inválido");
+    setSaving(true);
+    try {
+      const res = await fetch("/api/saldo-credito", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limite: lim }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+      await loadData();
+    } catch (e) { alert(e instanceof Error ? e.message : "Erro"); }
+    finally { setSaving(false); }
+  }
+
+  if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin" style={{ color: P.creme }} /></div>;
+
+  const pctUsado = limite && limite > 0 ? ((limite - (saldo ?? 0)) / limite) * 100 : 0;
+  const corBarra = pctUsado > 80 ? "#EF4444" : pctUsado > 50 ? "#D97706" : "#059669";
+
+  return (
+    <div className="space-y-6">
+      {/* Cards resumo */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="rounded-xl border p-5" style={{ borderColor: P.border, backgroundColor: P.card }}>
+          <p className="text-xs uppercase tracking-widest mb-1" style={{ color: P.sage }}>Saldo Disponível</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: "#059669" }}>{fmt(saldo ?? 0)}</p>
+        </div>
+        <div className="rounded-xl border p-5" style={{ borderColor: P.border, backgroundColor: P.card }}>
+          <p className="text-xs uppercase tracking-widest mb-1" style={{ color: P.sage }}>Limite Configurado</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: P.creme }}>{fmt(limite ?? 0)}</p>
+        </div>
+        <div className="rounded-xl border p-5" style={{ borderColor: P.border, backgroundColor: P.card }}>
+          <p className="text-xs uppercase tracking-widest mb-1" style={{ color: P.sage }}>Utilização</p>
+          <div className="flex items-end gap-2">
+            <p className="text-2xl font-bold tabular-nums" style={{ color: corBarra }}>{pctUsado.toFixed(0)}%</p>
+          </div>
+          <div className="mt-2 h-2 rounded-full" style={{ backgroundColor: P.border }}>
+            <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(pctUsado, 100)}%`, backgroundColor: corBarra }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Ajuste manual + alterar limite */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="rounded-xl border p-4" style={{ borderColor: P.border, backgroundColor: P.card }}>
+          <p className="text-sm font-semibold mb-3" style={{ color: P.creme }}>Ajustar Saldo</p>
+          <div className="space-y-2">
+            <input type="text" value={ajusteValor} onChange={e => setAjusteValor(e.target.value)}
+              placeholder="Valor (positivo = crédito, negativo = débito)"
+              className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
+            <input type="text" value={ajusteDesc} onChange={e => setAjusteDesc(e.target.value)}
+              placeholder="Descrição do ajuste"
+              className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
+            <button onClick={handleAjuste} disabled={saving}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+              style={{ backgroundColor: P.creme, color: P.card }}>
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Aplicar Ajuste
+            </button>
+          </div>
+        </div>
+        <div className="rounded-xl border p-4" style={{ borderColor: P.border, backgroundColor: P.card }}>
+          <p className="text-sm font-semibold mb-3" style={{ color: P.creme }}>Alterar Limite</p>
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <input type="text" value={novoLimite} onChange={e => setNovoLimite(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
+            </div>
+            <button onClick={handleLimite} disabled={saving}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+              style={{ backgroundColor: P.creme, color: P.card }}>
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salvar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabela de movimentos */}
+      <div className="rounded-xl border overflow-hidden" style={{ borderColor: P.border }}>
+        <div className="px-4 py-3" style={{ backgroundColor: P.card }}>
+          <p className="text-sm font-semibold" style={{ color: P.creme }}>Movimentações Recentes</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ backgroundColor: P.bg }}>
+                <th className="text-left px-4 py-2 font-medium" style={{ color: P.sage }}>Data</th>
+                <th className="text-left px-4 py-2 font-medium" style={{ color: P.sage }}>Tipo</th>
+                <th className="text-left px-4 py-2 font-medium" style={{ color: P.sage }}>Venda</th>
+                <th className="text-right px-4 py-2 font-medium" style={{ color: P.sage }}>Valor</th>
+                <th className="text-right px-4 py-2 font-medium" style={{ color: P.sage }}>Saldo</th>
+                <th className="text-left px-4 py-2 font-medium" style={{ color: P.sage }}>Descrição</th>
+                <th className="text-left px-4 py-2 font-medium" style={{ color: P.sage }}>Usuário</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movimentos.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-8 text-center" style={{ color: P.sage }}>Nenhuma movimentação registrada</td></tr>
+              )}
+              {movimentos.map(m => (
+                <tr key={m.id} className="border-t" style={{ borderColor: P.border }}>
+                  <td className="px-4 py-2 tabular-nums" style={{ color: P.sage }}>
+                    {new Date(m.created_at).toLocaleDateString("pt-BR")}
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full"
+                      style={{
+                        backgroundColor: m.tipo === "credito" ? "#D1FAE5" : m.tipo === "debito" ? "#FEE2E2" : "#DBEAFE",
+                        color: m.tipo === "credito" ? "#065F46" : m.tipo === "debito" ? "#991B1B" : "#1E40AF",
+                      }}>
+                      {m.tipo}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2" style={{ color: P.creme }}>{m.numero_venda ?? "—"}</td>
+                  <td className="px-4 py-2 text-right tabular-nums font-medium"
+                    style={{ color: m.tipo === "credito" ? "#059669" : m.tipo === "debito" ? "#EF4444" : "#3B82F6" }}>
+                    {m.tipo === "debito" ? "-" : "+"}{fmt(m.valor)}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums" style={{ color: P.sage }}>{fmt(m.saldo_depois)}</td>
+                  <td className="px-4 py-2 text-xs" style={{ color: P.sage }}>{m.descricao ?? "—"}</td>
+                  <td className="px-4 py-2 text-xs" style={{ color: P.sage }}>{m.usuario_nome ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Search, RefreshCw, Loader2, Plus, TrendingUp,
   ShoppingBag, DollarSign, ChevronRight, Trophy,
-  ChevronLeft,
+  ChevronLeft, Wallet,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -116,6 +116,17 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
   const [vendedores, setVendedores] = useState<Vendedor[]>([]);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState<string | null>(null);
+
+  // Saldo crédito (só gerente_loja / diretor)
+  const mostraSaldo = ["gerente_loja", "diretor"].includes(role);
+  const [saldoCredito, setSaldoCredito] = useState<{ saldo: number; limite: number } | null>(null);
+  useEffect(() => {
+    if (!mostraSaldo) return;
+    fetch("/api/saldo-credito")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setSaldoCredito({ saldo: d.saldo_atual, limite: d.limite }); })
+      .catch(() => {});
+  }, [mostraSaldo]);
 
   // Carregar vendedores (apenas acesso total)
   useEffect(() => {
@@ -238,7 +249,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
       </div>
 
       {/* ── Stats ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div className={`grid grid-cols-2 ${mostraSaldo ? "md:grid-cols-5" : "md:grid-cols-4"} gap-3 mb-5`}>
         {[
           { icon: ShoppingBag,  label: "Vendas",    value: String(stats.count),       mono: false },
           { icon: TrendingUp,   label: "Faturado",  value: fmt(stats.faturado),        mono: true  },
@@ -264,6 +275,27 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
             </p>
           </div>
         ))}
+        {/* Card Saldo Crédito — só gerente_loja e diretor */}
+        {mostraSaldo && saldoCredito && (() => {
+          const pct = saldoCredito.limite > 0 ? saldoCredito.saldo / saldoCredito.limite : 1;
+          const cor = pct > 0.2 ? "#059669" : pct > 0.05 ? "#D97706" : "#EF4444";
+          return (
+            <div className="rounded-xl p-3 border" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <Wallet size={12} style={{ color: cor }} />
+                <span className="text-[11px] uppercase tracking-wide font-medium" style={{ color: "#9CA3AF" }}>
+                  Saldo Crédito
+                </span>
+              </div>
+              <p className="text-base font-semibold tabular-nums" style={{ color: cor }}>
+                {fmt(saldoCredito.saldo)}
+              </p>
+              <div className="mt-1.5 h-1 rounded-full" style={{ backgroundColor: "#E5E7EB" }}>
+                <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(pct * 100, 100)}%`, backgroundColor: cor }} />
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── Período ── */}
