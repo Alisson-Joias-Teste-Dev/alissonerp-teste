@@ -46,6 +46,8 @@ const ALL_MENUS: MenuItem[] = [
   { label: "Análise Comissões", href: "/vendas/analise-comissoes", icon: "Percent"      },
   { label: "Metas",             href: "/vendas/metas",             icon: "Target"       },
   { label: "Est. Comercial",     href: "/estoque-comercial",  icon: "Store"           },
+  { label: "Devoluções",         href: "/devolucoes",         icon: "RotateCcw"       },
+  { label: "Vales-Troca",        href: "/vale-troca",         icon: "Ticket"          },
   { label: "Produtos",           href: "/produtos",           icon: "Tag"             },
   { label: "Precificação",       href: "/precificacao",       icon: "TrendingUp"      },
   { label: "Auditoria",          href: "/auditoria",          icon: "ClipboardCheck"  },
@@ -58,10 +60,10 @@ const ALL_MENUS: MenuItem[] = [
 ];
 
 const ROLE_MENUS: Record<Role, string[]> = {
-  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento"],
-  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento"],
+  desenvolvedor:      ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/financeiro", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento"],
+  admin:              ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/financeiro", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento"],
   gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/tarefas", "/relatorios", "/service-painel", "/orcamento"],
-  gerente_loja:       ["/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento"],
+  gerente_loja:       ["/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/vendas/analise-resultado", "/vendas/analise-frete", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento"],
   ourives:            ["/ordens", "/pcp"],
   motoboy:            ["/protocolo"],
   consultora:         ["/ordens", "/estoque", "/conferencia", "/orcamento"],
@@ -77,7 +79,7 @@ const MENU_GROUPS: MenuGroup[] = [
   { type: "group", label: "Logística",   icon: "Truck",       items: ["/protocolo", "/conferencia", "/entrega"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Qualidade",   icon: "ShieldCheck", items: ["/auditoria"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Gestão",     icon: "ListTodo",    items: ["/tarefas", "/relatorios"].map(h => ALL_MENUS.find(m => m.href === h)!) },
-  { type: "group", label: "Comercial",   icon: "Briefcase",   items: ["/vendas", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/financeiro", "/produtos", "/precificacao", "/orcamento"].map(h => ALL_MENUS.find(m => m.href === h)!) },
+  { type: "group", label: "Comercial",   icon: "Briefcase",   items: ["/vendas", "/vendas/analise-comissoes", "/vendas/metas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/financeiro", "/produtos", "/precificacao", "/orcamento"].map(h => ALL_MENUS.find(m => m.href === h)!) },
 ];
 
 export function getMenusForRole(role: Role | null | undefined): MenuItem[] {
@@ -125,6 +127,8 @@ const HREF_TO_MODULO: Record<string, string> = {
   "/vendas/analise-comissoes":    "vendas",
   "/vendas/metas":                "vendas",
   "/estoque-comercial":           "estoque_comercial",
+  "/devolucoes":                  "devolucoes",
+  "/vale-troca":                  "vale_troca",
   "/financeiro":         "financeiro",
   "/produtos":          "produtos",
   "/precificacao":      "precificacao",

@@ -69,8 +69,21 @@ export async function GET(
     ORDER BY id
   `;
 
+  const devolucoes = await sql`
+    SELECT id, numero, tipo, status, tipo_compensacao,
+           valor_total_devolvido, valor_compensacao, created_at
+    FROM alissonerp.devolucoes_venda
+    WHERE venda_id = ${vendaId}
+    ORDER BY id DESC
+  `;
+
   return NextResponse.json({
     ...venda,
+    devolucoes: devolucoes.map((d) => ({
+      ...d,
+      valor_total_devolvido: Number(d.valor_total_devolvido),
+      valor_compensacao: Number(d.valor_compensacao),
+    })),
     total_produtos: Number(venda.total_produtos),
     total_desconto: Number(venda.total_desconto),
     total_frete:    Number(venda.total_frete),
