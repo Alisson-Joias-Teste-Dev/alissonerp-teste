@@ -4,17 +4,19 @@
  * Auth: OAuth2 client_credentials + mTLS (cert + key)
  * Docs: https://developers.bancointer.com.br/
  *
- * Envs obrigatorias:
- *   INTER_CLIENT_ID
- *   INTER_CLIENT_SECRET
- *   INTER_CERT_PATH      (caminho absoluto do .crt)
- *   INTER_KEY_PATH       (caminho absoluto do .key)
- *   INTER_CONTA_CORRENTE (numero da conta corrente Inter)
+ * Credenciais lidas do banco (alissonerp.configuracoes_secrets):
+ *   inter_client_id
+ *   inter_client_secret
+ *   inter_cert_pem        (conteudo PEM completo do .crt)
+ *   inter_key_pem         (conteudo PEM completo do .key)
+ *   inter_conta_corrente  (numero da conta corrente Inter)
+ *   inter_cron_secret     (opcional, secret pro endpoint /sync)
+ *
+ * Configurar em /configuracoes -> Integracoes -> Banco Inter.
  *
  * Todas as chamadas sao logadas em alissonerp.inter_sync_log.
  */
 import https from "node:https";
-import fs from "node:fs";
 import sql from "@/lib/db";
 
 const BASE_URL = "https://cdpj.partners.bancointer.com.br";
@@ -23,28 +25,92 @@ const BASE_URL = "https://cdpj.partners.bancointer.com.br";
 type TokenCache = { token: string; expiresAt: number };
 let tokenCache: TokenCache | null = null;
 
-function ensureEnv(): void {
-  if (!process.env.INTER_CLIENT_ID) {
-    throw new Error("Credenciais Inter nao configuradas — defina INTER_CLIENT_ID no .env.local");
-  }
-  if (!process.env.INTER_CLIENT_SECRET) {
-    throw new Error("Credenciais Inter nao configuradas — defina INTER_CLIENT_SECRET no .env.local");
-  }
-  if (!process.env.INTER_CERT_PATH || !process.env.INTER_KEY_PATH) {
-    throw new Error("Credenciais Inter nao configuradas — defina INTER_CERT_PATH e INTER_KEY_PATH no .env.local");
+// ─── Credenciais (lidas do DB) ────────────────────────────────────────────────
+type InterCreds = {
+  clientId: string;
+  clientSecret: string;
+  certPem: string;
+  keyPem: string;
+  contaCorrente: string;
+};
+
+type CredsCache = { creds: InterCreds; expiresAt: number };
+let credsCache: CredsCache | null = null;
+let cachedAgent: https.Agent | null = null;
+
+function parseSecret(raw: string): string {
+  try {
+    const v = JSON.parse(raw);
+    return typeof v === "string" ? v : String(v);
+  } catch {
+    return String(raw);
   }
 }
 
-let cachedAgent: https.Agent | null = null;
-function getAgent(): https.Agent {
+async function getInterCredentials(): Promise<InterCreds> {
+  if (credsCache && credsCache.expiresAt > Date.now()) {
+    return credsCache.creds;
+  }
+  const keys = [
+    "inter_client_id",
+    "inter_client_secret",
+    "inter_cert_pem",
+    "inter_key_pem",
+    "inter_conta_corrente",
+  ];
+  const rows = await sql<{ chave: string; valor_encrypted: string }[]>`
+    SELECT chave, valor_encrypted
+    FROM alissonerp.configuracoes_secrets
+    WHERE chave = ANY(${keys}::text[])
+  `;
+  const map = new Map<string, string>();
+  for (const r of rows) {
+    if (r.valor_encrypted) map.set(r.chave, parseSecret(r.valor_encrypted));
+  }
+
+  const clientId = map.get("inter_client_id");
+  const clientSecret = map.get("inter_client_secret");
+  const certPem = map.get("inter_cert_pem");
+  const keyPem = map.get("inter_key_pem");
+  const contaCorrente = map.get("inter_conta_corrente");
+
+  if (!clientId || !clientSecret || !certPem || !keyPem || !contaCorrente) {
+    throw new Error(
+      "Credenciais Inter nao configuradas. Configure em /configuracoes -> Integracoes -> Banco Inter.",
+    );
+  }
+
+  const creds: InterCreds = { clientId, clientSecret, certPem, keyPem, contaCorrente };
+  credsCache = { creds, expiresAt: Date.now() + 5 * 60 * 1000 }; // 5 min
+  return creds;
+}
+
+/** Limpa caches (chamar apos salvar novas credenciais) */
+export function clearInterCache(): void {
+  credsCache = null;
+  cachedAgent = null;
+  tokenCache = null;
+}
+
+async function getAgent(creds: InterCreds): Promise<https.Agent> {
   if (cachedAgent) return cachedAgent;
-  ensureEnv();
   cachedAgent = new https.Agent({
-    cert: fs.readFileSync(process.env.INTER_CERT_PATH!),
-    key: fs.readFileSync(process.env.INTER_KEY_PATH!),
+    cert: creds.certPem,
+    key: creds.keyPem,
     keepAlive: true,
   });
   return cachedAgent;
+}
+
+/** Le inter_cron_secret do DB (separado pq sync precisa antes de carregar creds) */
+export async function getInterCronSecret(): Promise<string | null> {
+  const [row] = await sql<{ valor_encrypted: string }[]>`
+    SELECT valor_encrypted FROM alissonerp.configuracoes_secrets
+    WHERE chave = 'inter_cron_secret'
+  `;
+  if (!row?.valor_encrypted) return null;
+  const v = parseSecret(row.valor_encrypted);
+  return v || null;
 }
 
 // ─── HTTP helper com mTLS ─────────────────────────────────────────────────────
@@ -56,13 +122,14 @@ type ReqOpts = {
   contaCorrente?: boolean; // adicionar header x-conta-corrente
 };
 
-function request(opts: ReqOpts): Promise<{ status: number; body: string; json: unknown }> {
-  const agent = getAgent();
+async function request(opts: ReqOpts): Promise<{ status: number; body: string; json: unknown }> {
+  const creds = await getInterCredentials();
+  const agent = await getAgent(creds);
   const url = new URL(opts.path, BASE_URL);
   const headers: Record<string, string> = { ...(opts.headers ?? {}) };
   if (opts.body && !headers["content-type"]) headers["content-type"] = "application/json";
-  if (opts.contaCorrente && process.env.INTER_CONTA_CORRENTE) {
-    headers["x-conta-corrente"] = process.env.INTER_CONTA_CORRENTE;
+  if (opts.contaCorrente) {
+    headers["x-conta-corrente"] = creds.contaCorrente;
   }
 
   return new Promise((resolve, reject) => {
@@ -135,11 +202,11 @@ export async function getToken(): Promise<string> {
   if (tokenCache && tokenCache.expiresAt > Date.now() + 30_000) {
     return tokenCache.token;
   }
-  ensureEnv();
+  const creds = await getInterCredentials();
 
   const body = new URLSearchParams({
-    client_id: process.env.INTER_CLIENT_ID!,
-    client_secret: process.env.INTER_CLIENT_SECRET!,
+    client_id: creds.clientId,
+    client_secret: creds.clientSecret,
     grant_type: "client_credentials",
     scope: SCOPES,
   }).toString();

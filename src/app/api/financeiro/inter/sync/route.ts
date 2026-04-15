@@ -5,9 +5,9 @@ import { isFullAccess } from "@/lib/roles";
 import * as inter from "@/lib/inter";
 
 export async function POST(req: NextRequest) {
-  // Auth: cron secret OU usuario com full access
+  // Auth: cron secret (DB) OU usuario com full access
   const cronSecret = req.headers.get("x-cron-secret");
-  const expected = process.env.INTER_CRON_SECRET;
+  const expected = (await inter.getInterCronSecret()) ?? process.env.INTER_CRON_SECRET ?? null;
   let autorizado = false;
 
   if (cronSecret && expected && cronSecret === expected) {

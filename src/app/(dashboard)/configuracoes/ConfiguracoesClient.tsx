@@ -33,6 +33,10 @@ import {
   Link2,
   DollarSign,
   Wallet,
+  Landmark,
+  ShoppingCart,
+  Package,
+  CreditCard,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
@@ -3055,6 +3059,22 @@ function TabIntegracoes() {
   const [showMpToken, setShowMpToken] = useState(false);
   const [showMpSecret, setShowMpSecret] = useState(false);
 
+  // Banco Inter fields
+  const [interConfigured, setInterConfigured] = useState(false);
+  const [interExpanded, setInterExpanded] = useState(false);
+  const [wooExpanded, setWooExpanded] = useState(false);
+  const [kommoExpanded, setKommoExpanded] = useState(false);
+  const [tinyExpanded, setTinyExpanded] = useState(false);
+  const [mpExpanded, setMpExpanded] = useState(false);
+  const [interClientId, setInterClientId] = useState("");
+  const [interClientSecret, setInterClientSecret] = useState("");
+  const [interCertPem, setInterCertPem] = useState("");
+  const [interKeyPem, setInterKeyPem] = useState("");
+  const [interContaCorrente, setInterContaCorrente] = useState("");
+  const [interCronSecret, setInterCronSecret] = useState("");
+  const [showInterClientSecret, setShowInterClientSecret] = useState(false);
+  const [showInterCronSecret, setShowInterCronSecret] = useState(false);
+
   // Mercado Pago Point devices
   interface PointDeviceRow {
     id: number;
@@ -3088,6 +3108,7 @@ function TabIntegracoes() {
           setKommoConfigured(data.kommo_configured);
           setTinyConfigured(data.tiny_configured);
           setMpConfigured(data.mp_configured ?? false);
+          setInterConfigured(data.inter_configured ?? false);
           if (data.mp_configured) carregarMpDevices();
         }
       } catch { /* silenciar */ }
@@ -3239,6 +3260,79 @@ function TabIntegracoes() {
     setTimeout(() => setMsg(null), 4000);
   }
 
+  function gerarCronSecret() {
+    // 32 chars hex aleatorio (sem dependencias)
+    const arr = new Uint8Array(16);
+    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+      crypto.getRandomValues(arr);
+    } else {
+      for (let i = 0; i < 16; i++) arr[i] = Math.floor(Math.random() * 256);
+    }
+    const hex = Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+    setInterCronSecret(hex);
+  }
+
+  async function salvarInter() {
+    // Validacoes
+    if (!interClientId.trim() || !interClientSecret.trim() || !interCertPem.trim() || !interKeyPem.trim() || !interContaCorrente.trim()) {
+      setMsg({ tipo: "erro", texto: "Preencha todos os campos obrigatórios (Client ID, Secret, Cert, Key, Conta Corrente)" });
+      setTimeout(() => setMsg(null), 5000);
+      return;
+    }
+    if (!interCertPem.trim().startsWith("-----BEGIN ")) {
+      setMsg({ tipo: "erro", texto: "Certificado inválido — deve começar com '-----BEGIN '" });
+      setTimeout(() => setMsg(null), 5000);
+      return;
+    }
+    if (!interKeyPem.trim().startsWith("-----BEGIN ")) {
+      setMsg({ tipo: "erro", texto: "Chave privada inválida — deve começar com '-----BEGIN '" });
+      setTimeout(() => setMsg(null), 5000);
+      return;
+    }
+
+    setSaving(true);
+    setMsg(null);
+    const body: Record<string, string> = {
+      inter_client_id: interClientId.trim(),
+      inter_client_secret: interClientSecret.trim(),
+      inter_cert_pem: interCertPem.trim(),
+      inter_key_pem: interKeyPem.trim(),
+      inter_conta_corrente: interContaCorrente.trim(),
+    };
+    if (interCronSecret.trim()) body.inter_cron_secret = interCronSecret.trim();
+
+    const res = await fetch("/api/configuracoes/integracoes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setInterClientId("");
+      setInterClientSecret("");
+      setInterCertPem("");
+      setInterKeyPem("");
+      setInterContaCorrente("");
+      setInterCronSecret("");
+      setInterExpanded(false);
+      setMsg({ tipo: "ok", texto: "Banco Inter salvo com sucesso" });
+      fetch("/api/configuracoes/integracoes").then(r => r.ok ? r.json() : null).then(d => {
+        if (d) {
+          setWooConfigured(d.woo_configured);
+          setKommoConfigured(d.kommo_configured);
+          setTinyConfigured(d.tiny_configured);
+          setTinyHasCredentials(d.tiny_has_credentials ?? false);
+          setMpConfigured(d.mp_configured ?? false);
+          setInterConfigured(d.inter_configured ?? false);
+        }
+      }).catch(() => {});
+    } else {
+      const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+      setMsg({ tipo: "erro", texto: d.error ?? "Erro ao salvar" });
+    }
+    setTimeout(() => setMsg(null), 5000);
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 py-10 justify-center text-sm" style={{ color: P.muted }}>
@@ -3281,46 +3375,73 @@ function TabIntegracoes() {
         style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
       >
         <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: P.creme }}>WooCommerce</p>
-            <p className="text-xs" style={{ color: P.muted }}>Integração com loja virtual</p>
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-lg p-2 flex items-center justify-center"
+              style={{ backgroundColor: "#96588A" + "22", color: "#96588A" }}
+            >
+              <ShoppingCart size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>WooCommerce</p>
+              <p className="text-xs" style={{ color: P.muted }}>Integração com loja virtual</p>
+            </div>
           </div>
           <StatusBadge ok={wooConfigured} />
         </div>
 
-        {[
-          { label: "URL da Loja", value: wooUrl, set: setWooUrl, masked: false, placeholder: "https://sualoja.com.br" },
-          { label: "Consumer Key", value: wooKey, set: setWooKey, masked: !showWooKey, toggle: () => setShowWooKey(!showWooKey), showState: showWooKey, placeholder: "ck_..." },
-          { label: "Consumer Secret", value: wooSecret, set: setWooSecret, masked: !showWooSecret, toggle: () => setShowWooSecret(!showWooSecret), showState: showWooSecret, placeholder: "cs_..." },
-        ].map(({ label, value, set, masked, toggle, showState, placeholder }) => (
-          <div key={label}>
-            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>{label}</label>
-            <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
-              <input
-                type={masked ? "password" : "text"}
-                value={value}
-                onChange={(e) => set(e.target.value)}
-                placeholder={placeholder}
-                className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
-                style={{ color: P.creme }}
-              />
-              {toggle && (
-                <button onClick={toggle} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
-                  {showState ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-
         <button
-          onClick={salvarWoo}
-          disabled={saving || (!wooUrl.trim() && !wooKey.trim() && !wooSecret.trim())}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
-          style={{ backgroundColor: P.verde, color: "#fff" }}
+          onClick={() => setWooExpanded(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium hover:opacity-80 transition-opacity"
+          style={{ color: P.sage }}
         >
-          <Save size={13} /> Salvar WooCommerce
+          {wooExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {wooExpanded ? "Ocultar credenciais" : (wooConfigured ? "Atualizar credenciais" : "Configurar credenciais")}
         </button>
+
+        {wooExpanded && (
+          <div className="space-y-4 pt-2">
+            {[
+              { label: "URL da Loja", value: wooUrl, set: setWooUrl, masked: false, placeholder: "https://sualoja.com.br" },
+              { label: "Consumer Key", value: wooKey, set: setWooKey, masked: !showWooKey, toggle: () => setShowWooKey(!showWooKey), showState: showWooKey, placeholder: "ck_..." },
+              { label: "Consumer Secret", value: wooSecret, set: setWooSecret, masked: !showWooSecret, toggle: () => setShowWooSecret(!showWooSecret), showState: showWooSecret, placeholder: "cs_..." },
+            ].map(({ label, value, set, masked, toggle, showState, placeholder }) => (
+              <div key={label}>
+                <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>{label}</label>
+                <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                  <input
+                    type={masked ? "password" : "text"}
+                    value={value}
+                    onChange={(e) => set(e.target.value)}
+                    placeholder={placeholder}
+                    className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                    style={{ color: P.creme }}
+                  />
+                  {toggle && (
+                    <button onClick={toggle} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+                      {showState ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            <button
+              onClick={salvarWoo}
+              disabled={saving || (!wooUrl.trim() && !wooKey.trim() && !wooSecret.trim())}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+              style={{ backgroundColor: P.verde, color: "#fff" }}
+            >
+              <Save size={13} /> Salvar WooCommerce
+            </button>
+          </div>
+        )}
+
+        {wooConfigured && !wooExpanded && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
+            <CheckCircle size={12} /> WooCommerce ativo — sincronização de produtos e pedidos
+          </p>
+        )}
       </div>
 
       {/* Kommo */}
@@ -3329,45 +3450,72 @@ function TabIntegracoes() {
         style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
       >
         <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: P.creme }}>Kommo (CRM)</p>
-            <p className="text-xs" style={{ color: P.muted }}>Integração com CRM de vendas</p>
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-lg p-2 flex items-center justify-center"
+              style={{ backgroundColor: "#3E74DB" + "22", color: "#3E74DB" }}
+            >
+              <Users size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>Kommo (CRM)</p>
+              <p className="text-xs" style={{ color: P.muted }}>Integração com CRM de vendas</p>
+            </div>
           </div>
           <StatusBadge ok={kommoConfigured} />
         </div>
 
-        {[
-          { label: "URL do Kommo", value: kommoUrl, set: setKommoUrl, masked: false, placeholder: "https://suaempresa.kommo.com" },
-          { label: "Token", value: kommoToken, set: setKommoToken, masked: !showKommoToken, toggle: () => setShowKommoToken(!showKommoToken), showState: showKommoToken, placeholder: "Token de acesso" },
-        ].map(({ label, value, set, masked, toggle, showState, placeholder }) => (
-          <div key={label}>
-            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>{label}</label>
-            <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
-              <input
-                type={masked ? "password" : "text"}
-                value={value}
-                onChange={(e) => set(e.target.value)}
-                placeholder={placeholder}
-                className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
-                style={{ color: P.creme }}
-              />
-              {toggle && (
-                <button onClick={toggle} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
-                  {showState ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-
         <button
-          onClick={salvarKommo}
-          disabled={saving || (!kommoUrl.trim() && !kommoToken.trim())}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
-          style={{ backgroundColor: P.verde, color: "#fff" }}
+          onClick={() => setKommoExpanded(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium hover:opacity-80 transition-opacity"
+          style={{ color: P.sage }}
         >
-          <Save size={13} /> Salvar Kommo
+          {kommoExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {kommoExpanded ? "Ocultar credenciais" : (kommoConfigured ? "Atualizar credenciais" : "Configurar credenciais")}
         </button>
+
+        {kommoExpanded && (
+          <div className="space-y-4 pt-2">
+            {[
+              { label: "URL do Kommo", value: kommoUrl, set: setKommoUrl, masked: false, placeholder: "https://suaempresa.kommo.com" },
+              { label: "Token", value: kommoToken, set: setKommoToken, masked: !showKommoToken, toggle: () => setShowKommoToken(!showKommoToken), showState: showKommoToken, placeholder: "Token de acesso" },
+            ].map(({ label, value, set, masked, toggle, showState, placeholder }) => (
+              <div key={label}>
+                <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>{label}</label>
+                <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                  <input
+                    type={masked ? "password" : "text"}
+                    value={value}
+                    onChange={(e) => set(e.target.value)}
+                    placeholder={placeholder}
+                    className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                    style={{ color: P.creme }}
+                  />
+                  {toggle && (
+                    <button onClick={toggle} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+                      {showState ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            <button
+              onClick={salvarKommo}
+              disabled={saving || (!kommoUrl.trim() && !kommoToken.trim())}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+              style={{ backgroundColor: P.verde, color: "#fff" }}
+            >
+              <Save size={13} /> Salvar Kommo
+            </button>
+          </div>
+        )}
+
+        {kommoConfigured && !kommoExpanded && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
+            <CheckCircle size={12} /> Kommo ativo — leads sincronizados
+          </p>
+        )}
       </div>
 
       {/* Tiny ERP (Olist) — OAuth2 */}
@@ -3376,13 +3524,32 @@ function TabIntegracoes() {
         style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
       >
         <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: P.creme }}>Tiny ERP (Olist)</p>
-            <p className="text-xs" style={{ color: P.muted }}>Envio automático de pedidos ao aprovar venda</p>
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-lg p-2 flex items-center justify-center"
+              style={{ backgroundColor: "#00B1A3" + "22", color: "#00B1A3" }}
+            >
+              <Package size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>Tiny ERP (Olist)</p>
+              <p className="text-xs" style={{ color: P.muted }}>ERP para estoque e pedidos (OAuth2)</p>
+            </div>
           </div>
           <StatusBadge ok={tinyConfigured} />
         </div>
 
+        <button
+          onClick={() => setTinyExpanded(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium hover:opacity-80 transition-opacity"
+          style={{ color: P.sage }}
+        >
+          {tinyExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {tinyExpanded ? "Ocultar credenciais" : (tinyConfigured ? "Atualizar credenciais" : "Configurar credenciais")}
+        </button>
+
+        {tinyExpanded && (
+          <div className="space-y-4 pt-2">
         <div>
           <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>URL de Redirecionamento (copie e cadastre no Tiny)</label>
           <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
@@ -3471,6 +3638,14 @@ function TabIntegracoes() {
             <CheckCircle size={12} /> Conexão ativa com o Tiny ERP
           </p>
         )}
+          </div>
+        )}
+
+        {tinyConfigured && !tinyExpanded && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
+            <CheckCircle size={12} /> Tiny ERP ativo — pedidos sincronizados automaticamente
+          </p>
+        )}
       </div>
 
       {/* Mercado Pago (Preference + Point Smart) */}
@@ -3479,15 +3654,34 @@ function TabIntegracoes() {
         style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
       >
         <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: P.creme }}>Mercado Pago</p>
-            <p className="text-xs" style={{ color: P.muted }}>
-              Link de pagamento online (PIX + cartão) e maquininhas Point Smart
-            </p>
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-lg p-2 flex items-center justify-center"
+              style={{ backgroundColor: "#00B1EA" + "22", color: "#00B1EA" }}
+            >
+              <CreditCard size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>Mercado Pago</p>
+              <p className="text-xs" style={{ color: P.muted }}>
+                Pagamentos PIX, cartão e link de pagamento
+              </p>
+            </div>
           </div>
           <StatusBadge ok={mpConfigured} />
         </div>
 
+        <button
+          onClick={() => setMpExpanded(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium hover:opacity-80 transition-opacity"
+          style={{ color: P.sage }}
+        >
+          {mpExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {mpExpanded ? "Ocultar credenciais" : (mpConfigured ? "Atualizar credenciais" : "Configurar credenciais")}
+        </button>
+
+        {mpExpanded && (
+          <div className="space-y-4 pt-2">
         <div>
           <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
             URL do webhook (cadastre no painel MP)
@@ -3584,10 +3778,12 @@ function TabIntegracoes() {
         >
           <Save size={13} /> Salvar Mercado Pago
         </button>
+          </div>
+        )}
 
-        {mpConfigured && (
+        {mpConfigured && !mpExpanded && (
           <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
-            <CheckCircle size={12} /> Integração MP ativa — link online e maquininhas Point disponíveis
+            <CheckCircle size={12} /> Mercado Pago ativo — recebimentos automáticos
           </p>
         )}
 
@@ -3712,6 +3908,158 @@ function TabIntegracoes() {
               </div>
             )}
           </div>
+        )}
+      </div>
+
+      {/* Banco Inter */}
+      <div
+        className="rounded-xl p-5 space-y-4"
+        style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-lg p-2 flex items-center justify-center"
+              style={{ backgroundColor: "#FF7A00" + "22", color: "#FF7A00" }}
+            >
+              <Landmark size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>Banco Inter</p>
+              <p className="text-xs" style={{ color: P.muted }}>
+                Pagamentos automáticos via PIX, boleto e TED (mTLS + OAuth2)
+              </p>
+            </div>
+          </div>
+          <StatusBadge ok={interConfigured} />
+        </div>
+
+        <button
+          onClick={() => setInterExpanded(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium hover:opacity-80 transition-opacity"
+          style={{ color: P.sage }}
+        >
+          {interExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {interExpanded ? "Ocultar credenciais" : (interConfigured ? "Atualizar credenciais" : "Configurar credenciais")}
+        </button>
+
+        {interExpanded && (
+          <div className="space-y-4 pt-2">
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>Client ID</label>
+              <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                <input
+                  type="text"
+                  value={interClientId}
+                  onChange={(e) => setInterClientId(e.target.value)}
+                  placeholder="Client ID do app Inter"
+                  className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                  style={{ color: P.creme }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>Client Secret</label>
+              <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                <input
+                  type={showInterClientSecret ? "text" : "password"}
+                  value={interClientSecret}
+                  onChange={(e) => setInterClientSecret(e.target.value)}
+                  placeholder="Client Secret do app Inter"
+                  className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                  style={{ color: P.creme }}
+                />
+                <button onClick={() => setShowInterClientSecret(!showInterClientSecret)} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+                  {showInterClientSecret ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+                Certificado (.crt — cole o conteúdo PEM)
+              </label>
+              <textarea
+                value={interCertPem}
+                onChange={(e) => setInterCertPem(e.target.value)}
+                placeholder={"-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----"}
+                rows={10}
+                className="w-full bg-transparent px-3 py-2.5 text-xs outline-none rounded-lg font-mono"
+                style={{ color: P.creme, border: `1px solid ${P.border}`, resize: "vertical" }}
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+                Chave Privada (.key — cole o conteúdo PEM)
+              </label>
+              <textarea
+                value={interKeyPem}
+                onChange={(e) => setInterKeyPem(e.target.value)}
+                placeholder={"-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----"}
+                rows={10}
+                className="w-full bg-transparent px-3 py-2.5 text-xs outline-none rounded-lg font-mono"
+                style={{ color: P.creme, border: `1px solid ${P.border}`, resize: "vertical" }}
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>Conta Corrente</label>
+              <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                <input
+                  type="text"
+                  value={interContaCorrente}
+                  onChange={(e) => setInterContaCorrente(e.target.value)}
+                  placeholder="Número da conta corrente"
+                  className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                  style={{ color: P.creme }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+                Cron Secret (opcional — protege endpoint /sync)
+              </label>
+              <div className="flex items-center rounded-lg overflow-hidden gap-2" style={{ border: `1px solid ${P.border}` }}>
+                <input
+                  type={showInterCronSecret ? "text" : "password"}
+                  value={interCronSecret}
+                  onChange={(e) => setInterCronSecret(e.target.value)}
+                  placeholder="String aleatória (32+ chars)"
+                  className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                  style={{ color: P.creme }}
+                />
+                <button onClick={() => setShowInterCronSecret(!showInterCronSecret)} className="px-2 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+                  {showInterCronSecret ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={gerarCronSecret}
+                  className="px-3 py-2.5 text-[11px] font-semibold transition-opacity hover:opacity-80"
+                  style={{ color: P.dourado }}
+                >
+                  Gerar
+                </button>
+              </div>
+            </div>
+
+            <button
+              onClick={salvarInter}
+              disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+              style={{ backgroundColor: P.verde, color: "#fff" }}
+            >
+              <Save size={13} /> Salvar credenciais
+            </button>
+          </div>
+        )}
+
+        {interConfigured && !interExpanded && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
+            <CheckCircle size={12} /> Integração Inter ativa — pagamentos automáticos disponíveis
+          </p>
         )}
       </div>
     </div>
