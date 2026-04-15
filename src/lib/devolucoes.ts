@@ -475,6 +475,12 @@ export async function concluirDevolucao(
           ${"Devolucao " + dev.numero}, ${userId}::uuid
         )
       `;
+      // Garantir que produto tem config no estoque comercial (upsert)
+      await sql`
+        INSERT INTO alissonerp.estoque_comercial_config (produto_id, ativo, estoque_minimo)
+        VALUES (${it.produto_id}, true, 0)
+        ON CONFLICT (produto_id) DO UPDATE SET ativo = true
+      `.catch(() => {});
       acoes.push(`entrada estoque produto ${it.produto_id} qtd ${qtd}`);
     } else if (it.condicao === "garantia") {
       acoes.push(`item ${it.id} marcado como garantia (integracao com ordem separada)`);
