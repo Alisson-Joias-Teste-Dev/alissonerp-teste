@@ -5,7 +5,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 interface Params { params: Promise<{ produtoId: string }> }
 
 // GET /api/estoque-comercial/[produtoId]
-// Retorna saldo + últimas movimentações do produto
+// Retorna saldo por local + movimentações + reservas ativas
 export async function GET(
   req: NextRequest,
   { params }: Params
@@ -19,6 +19,93 @@ export async function GET(
   const url = new URL(req.url);
   const limit = Number(url.searchParams.get("limit") ?? "50");
 
+  // Detectar views v2
+  const [v2Exists] = await sql`
+    SELECT 1 FROM information_schema.views
+    WHERE table_schema = 'alissonerp' AND table_name = 'vw_estoque_comercial_alerta_v2'
+    LIMIT 1
+  `;
+
+  if (v2Exists) {
+    // ── V2 ──
+    const [consolidado] = await sql`
+      SELECT * FROM alissonerp.vw_estoque_comercial_alerta_v2
+      WHERE produto_id = ${id}
+    `;
+
+    const saldoPorLocal = await sql`
+      SELECT
+        local_estoque_id, local_nome,
+        saldo_fisico, reservado, disponivel, em_transito
+      FROM alissonerp.vw_saldo_estoque_comercial_v2
+      WHERE produto_id = ${id}
+      ORDER BY local_estoque_id
+    `;
+
+    const movimentos = await sql`
+      SELECT
+        m.id, m.tipo, m.quantidade, m.motivo, m.observacao,
+        m.referencia_tipo, m.referencia_id,
+        m.local_estoque_id, le.nome AS local_nome,
+        m.status, m.estorno_de_id, m.estornado_por_id,
+        m.ordem_id, m.protocolo_id,
+        m.created_at,
+        u.email AS criado_por
+      FROM alissonerp.movimentacoes_estoque_comercial m
+      LEFT JOIN auth.users u ON u.id = m.created_by
+      LEFT JOIN alissonerp.locais_estoque le ON le.id = m.local_estoque_id
+      WHERE m.produto_id = ${id}
+      ORDER BY m.created_at DESC
+      LIMIT ${limit}
+    `;
+
+    const reservas = await sql`
+      SELECT
+        r.id, r.quantidade, r.local_estoque_id, r.status,
+        r.venda_id, r.item_venda_id,
+        v.numero_venda,
+        r.created_at
+      FROM alissonerp.reservas_estoque_comercial r
+      LEFT JOIN alissonerp.vendas_erp v ON v.id = r.venda_id
+      WHERE r.produto_id = ${id} AND r.status = 'ativo'
+      ORDER BY r.created_at DESC
+    `;
+
+    const transferencias = await sql`
+      SELECT
+        t.id, t.quantidade, t.status,
+        t.local_origem_id, lo.nome AS local_origem_nome,
+        t.local_destino_id, ld.nome AS local_destino_nome,
+        t.obs, t.created_at,
+        ue.email AS enviado_por_email,
+        ur.email AS recebido_por_email,
+        t.recebido_em
+      FROM alissonerp.transferencias_estoque_comercial t
+      LEFT JOIN alissonerp.locais_estoque lo ON lo.id = t.local_origem_id
+      LEFT JOIN alissonerp.locais_estoque ld ON ld.id = t.local_destino_id
+      LEFT JOIN auth.users ue ON ue.id = t.enviado_por
+      LEFT JOIN auth.users ur ON ur.id = t.recebido_por
+      WHERE t.produto_id = ${id}
+      ORDER BY t.created_at DESC
+      LIMIT 20
+    `;
+
+    return NextResponse.json({
+      consolidado: consolidado ?? null,
+      saldoPorLocal: saldoPorLocal.map(r => ({
+        ...r,
+        saldo_fisico: Number(r.saldo_fisico ?? 0),
+        reservado: Number(r.reservado ?? 0),
+        disponivel: Number(r.disponivel ?? 0),
+        em_transito: Number(r.em_transito ?? 0),
+      })),
+      movimentos,
+      reservas,
+      transferencias,
+    });
+  }
+
+  // ── Fallback: views antigas ──
   const [saldo] = await sql`
     SELECT * FROM alissonerp.vw_estoque_comercial_com_alerta
     WHERE produto_id = ${id}
@@ -26,13 +113,8 @@ export async function GET(
 
   const movimentos = await sql`
     SELECT
-      m.id,
-      m.tipo,
-      m.quantidade,
-      m.motivo,
-      m.observacao,
-      m.referencia_tipo,
-      m.referencia_id,
+      m.id, m.tipo, m.quantidade, m.motivo, m.observacao,
+      m.referencia_tipo, m.referencia_id,
       m.created_at,
       u.email AS criado_por
     FROM alissonerp.movimentacoes_estoque_comercial m
@@ -42,5 +124,29 @@ export async function GET(
     LIMIT ${limit}
   `;
 
-  return NextResponse.json({ saldo: saldo ?? null, movimentos });
+  // Mapear para formato v2
+  const consolidado = saldo ? {
+    ...saldo,
+    saldo_fisico: Number(saldo.saldo ?? 0),
+    reservado: 0,
+    disponivel: Number(saldo.saldo ?? 0),
+    em_transito: 0,
+  } : null;
+
+  return NextResponse.json({
+    consolidado,
+    saldoPorLocal: [],
+    movimentos: movimentos.map(m => ({
+      ...m,
+      local_estoque_id: null,
+      local_nome: null,
+      status: "efetivado",
+      estorno_de_id: null,
+      estornado_por_id: null,
+      ordem_id: null,
+      protocolo_id: null,
+    })),
+    reservas: [],
+    transferencias: [],
+  });
 }

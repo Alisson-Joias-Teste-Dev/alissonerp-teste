@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle,
   Truck, Video, FileText, UserPlus, MapPin, Pencil, User, Package, CreditCard, XCircle,
+  Ticket, AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
 import PixQrInline from "@/components/vendas/PixQrInline";
@@ -38,7 +39,7 @@ interface ItemVenda {
   preco_unitario: number; total_item: number; pct_comissao: number;
   valor_comissao: number; peso_estimado: number | null; unidade: string | null;
 }
-interface Pagamento { _key: string; forma: string; valor: number; parcelas: number; }
+interface Pagamento { _key: string; forma: string; valor: number; parcelas: number; vale_numero?: string; }
 interface ParcelaRow { num: number; dias: number; data: string; valor: number; }
 interface Vendedor { id_vendedor: number; nome: string; }
 interface FormaEnvio { id: number; nome: string; id_api: string; }
@@ -53,7 +54,7 @@ const BANDEIRAS  = ["Visa", "Mastercard", "Elo", "Amex", "Hipercard", "Outro"];
 const CONDICOES  = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
 
 // formas que exibem tabela de parcelas
-const COM_PARCELAS = ["Cartão de Crédito", "Vale-Troca"];
+const COM_PARCELAS = ["Cartão de Crédito"];
 // formas que exibem gateway/bandeira
 const COM_CARTAO   = ["Cartão de Crédito", "Cartão de Débito", "Pix"];
 
@@ -248,6 +249,17 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   const [pagMultForma,   setPagMultForma]   = useState("Dinheiro");
   const [pagValor,       setPagValor]       = useState("");
 
+  // Vale-Troca
+  const [valeNumero,      setValeNumero]      = useState("");
+  const [valeValidando,   setValeValidando]   = useState(false);
+  const [valeValidacao,   setValeValidacao]   = useState<{
+    ok: boolean;
+    erro?: string;
+    valor_disponivel?: number;
+    cliente_id?: number | null;
+  } | null>(null);
+  const [valeTrocoToast,  setValeTrocoToast]  = useState<{ numero: string; valor: number } | null>(null);
+
   // Submit
   const [saving,  setSaving]  = useState(false);
   const [saveErr, setSaveErr] = useState("");
@@ -383,6 +395,30 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
       }
       return updated;
     });
+  }
+
+  async function validarValeTroca() {
+    if (!valeNumero.trim()) return;
+    setValeValidando(true);
+    setValeValidacao(null);
+    try {
+      const res = await fetch("/api/vale-troca/validar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ numero: valeNumero.trim() }),
+      });
+      const d = await res.json() as {
+        ok: boolean;
+        erro?: string;
+        valor_disponivel?: number;
+        cliente_id?: number | null;
+      };
+      setValeValidacao(d);
+    } catch {
+      setValeValidacao({ ok: false, erro: "Erro ao validar" });
+    } finally {
+      setValeValidando(false);
+    }
   }
 
   function handleAddPagamento() {
@@ -586,7 +622,12 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
         pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao, peso_estimado: i.peso_estimado,
       })),
       pagamentos: pagForma === "Múltiplas"
-        ? pagamentos.map(p => ({ forma: p.forma, valor: p.valor, parcelas: p.parcelas, status: "pendente" }))
+        ? pagamentos
+            // Vale-Troca eh inserido via /pagamentos route (precisa de vale_numero)
+            .filter(p => p.forma !== "Vale-Troca")
+            .map(p => ({ forma: p.forma, valor: p.valor, parcelas: p.parcelas, status: "pendente" }))
+        : pagForma === "Vale-Troca"
+        ? [] // Vale-Troca simples tambem vai via /pagamentos route
         : [{
             forma: pagForma,
             valor: totalVenda,
@@ -598,13 +639,60 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
     };
   }
 
+  // Apos criar venda, aplica Vale-Troca via /api/vendas/[id]/pagamentos
+  async function aplicarValeNaVenda(vendaId: number, valor: number, numero?: string): Promise<void> {
+    const res = await fetch(`/api/vendas/${vendaId}/pagamentos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        forma: "Vale-Troca",
+        valor,
+        vale_numero: (numero ?? valeNumero).trim(),
+      }),
+    });
+    const data = await res.json() as {
+      novo_vale?: { id: number; numero: string; valor_original: number };
+      precisa_complemento?: boolean;
+      error?: string;
+    };
+    if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+    if (data.novo_vale) {
+      setValeTrocoToast({ numero: data.novo_vale.numero, valor: data.novo_vale.valor_original });
+    }
+  }
+
   async function submit(situacao: "rascunho" | "aprovado") {
     setSaving(true); setSaveErr("");
     try {
+      // Se forma = Vale-Troca, exige validacao previa
+      const pagValeItem = pagForma === "Múltiplas" ? pagamentos.find(p => p.forma === "Vale-Troca") : null;
+      const usaVale = pagForma === "Vale-Troca" || !!pagValeItem;
+      // Numero do vale: no modo direto usa estado; no modo Múltiplas usa o salvo no item
+      const valeNumeroFinal = pagForma === "Vale-Troca" ? valeNumero.trim() : (pagValeItem?.vale_numero ?? "");
+      if (usaVale) {
+        if (!valeNumeroFinal) throw new Error("Numero do vale-troca obrigatorio");
+        if (pagForma === "Vale-Troca" && !valeValidacao?.ok) throw new Error("Vale-troca nao validado — clique em Validar antes de salvar");
+      }
+
       const body = montarBody();
       const res  = await fetch("/api/vendas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json() as { id: number; numero_venda: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+
+      // Aplicar Vale-Troca na venda recem-criada
+      if (usaVale) {
+        // Validacao: Vale-Troca direto deve cobrir o total; caso contrário usar Múltiplas
+        if (
+          pagForma === "Vale-Troca" &&
+          valeValidacao?.ok &&
+          valeValidacao.valor_disponivel !== undefined &&
+          valeValidacao.valor_disponivel < totalVenda
+        ) {
+          throw new Error(`Saldo do vale insuficiente (${fmt(valeValidacao.valor_disponivel)}). Use "Múltiplas" para combinar com outro pagamento.`);
+        }
+        const valorVale = pagValeItem ? pagValeItem.valor : totalVenda;
+        await aplicarValeNaVenda(data.id, valorVale, valeNumeroFinal);
+      }
 
       if (situacao === "aprovado") {
         if (temAReceberNova) {
@@ -619,6 +707,14 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
         // Sem A Receber → aprovar direto (fluxo normal)
         await fetch(`/api/vendas/${data.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ situacao: "aprovado" }) });
       }
+
+      // Se houve troco, mostrar toast antes de redirecionar
+      if (valeTrocoToast) {
+        // Aguarda 3s para o usuario ver o toast
+        setTimeout(() => router.push("/vendas"), 3000);
+        return;
+      }
+
       router.push("/vendas");
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao salvar venda"); }
     finally { setSaving(false); }
@@ -1124,7 +1220,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro"); }
                     finally { setSaving(false); }
                   }}
-                  disabled={saving || itens.length === 0 || !cliente}
+                  disabled={saving || itens.length === 0 || !cliente || vendedorSel === "" || formaEnvioId === ""}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
                   style={{ backgroundColor: "#D97706", color: "#fff" }}>
                   {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
@@ -1170,12 +1266,88 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
           )}
 
           {/* Ouro / A Receber / Pix / Vale-Troca — só condição */}
-          {COM_PARCELAS.includes(pagForma) && !COM_CARTAO.includes(pagForma) && pagForma !== "Dinheiro" && (
+          {COM_PARCELAS.includes(pagForma) && !COM_CARTAO.includes(pagForma) && pagForma !== "Dinheiro" && pagForma !== "Vale-Troca" && (
             <div className="mb-4 w-56">
               <Label>Condição de Pagamento</Label>
               <Select value={pagCondicao} onChange={e => setPagCondicao(e.target.value)}>
                 {CONDICOES.map(c => <option key={c} value={c}>{c}</option>)}
               </Select>
+            </div>
+          )}
+
+          {/* Vale-Troca — input + validar */}
+          {pagForma === "Vale-Troca" && totalVenda > 0 && (
+            <div
+              className="rounded-xl border p-4 mb-4 space-y-3"
+              style={{ borderColor: C.cremeBorder, backgroundColor: C.esmeraldaLt }}
+            >
+              <div className="flex items-center gap-2">
+                <Ticket size={16} style={{ color: C.esmeralda }} />
+                <span className="text-sm font-medium" style={{ color: C.esmeralda }}>
+                  Informe o numero do Vale-Troca
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={valeNumero}
+                  onChange={e => {
+                    setValeNumero(e.target.value);
+                    setValeValidacao(null);
+                  }}
+                  placeholder="VT-00001"
+                  className="flex-1 border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                  style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                  onKeyDown={e => e.key === "Enter" && (e.preventDefault(), validarValeTroca())}
+                />
+                <button
+                  type="button"
+                  onClick={validarValeTroca}
+                  disabled={!valeNumero.trim() || valeValidando}
+                  className="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                >
+                  {valeValidando ? <Loader2 size={14} className="animate-spin" /> : "Validar"}
+                </button>
+              </div>
+              {valeValidacao && (
+                <div
+                  className="rounded-lg border p-3 flex items-start gap-2"
+                  style={{
+                    borderColor: valeValidacao.ok ? "#A7F3D0" : "#FECACA",
+                    backgroundColor: valeValidacao.ok ? "#ECFDF5" : "#FEF2F2",
+                  }}
+                >
+                  {valeValidacao.ok ? (
+                    <CheckCircle size={16} className="flex-shrink-0 mt-0.5" style={{ color: "#065F46" }} />
+                  ) : (
+                    <AlertCircle size={16} className="flex-shrink-0 mt-0.5" style={{ color: "#991B1B" }} />
+                  )}
+                  <div className="text-xs flex-1" style={{ color: valeValidacao.ok ? "#065F46" : "#991B1B" }}>
+                    <p className="font-medium">
+                      {valeValidacao.ok ? "Vale-troca valido" : (valeValidacao.erro ?? "Vale invalido")}
+                    </p>
+                    {valeValidacao.ok && valeValidacao.valor_disponivel !== undefined && (
+                      <>
+                        <p className="mt-0.5">
+                          Saldo disponivel: <strong>{fmt(valeValidacao.valor_disponivel)}</strong>
+                          {valeValidacao.valor_disponivel > totalVenda && (
+                            <span className="ml-2">
+                              — troco (vale novo): <strong>{fmt(valeValidacao.valor_disponivel - totalVenda)}</strong>
+                            </span>
+                          )}
+                        </p>
+                        {valeValidacao.valor_disponivel < totalVenda && (
+                          <p className="mt-1.5 font-semibold" style={{ color: "#B45309" }}>
+                            Saldo insuficiente — faltam {fmt(totalVenda - valeValidacao.valor_disponivel)}.
+                            Selecione &quot;Múltiplas&quot; como forma de pagamento para combinar o vale com outro método.
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1280,30 +1452,83 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                 <div className="flex flex-wrap items-end gap-2 mb-3">
                   <div className="flex-1 min-w-36">
                     <Label>Forma</Label>
-                    <Select value={pagMultForma} onChange={e => setPagMultForma(e.target.value)}>
+                    <Select value={pagMultForma} onChange={e => { setPagMultForma(e.target.value); setValeValidacao(null); setValeNumero(""); setPagValor(""); }}>
                       <optgroup label="Métodos de Pagamento">
                         {FORMAS_PAGAMENTO.filter(f => f !== "Múltiplas").map(f => <option key={f} value={f}>{f}</option>)}
                       </optgroup>
                     </Select>
                   </div>
-                  <div className="flex-1 min-w-28">
-                    <Label>Valor{restante > 0 && <span className="ml-1 font-normal text-xs" style={{ color: "#9CA3AF" }}>(restante: {fmt(restante)})</span>}</Label>
-                    <input type="text" value={pagValor} onChange={e => setPagValor(e.target.value)}
-                      placeholder={restante > 0 ? restante.toFixed(2).replace(".", ",") : "0,00"}
-                      onKeyDown={e => e.key === "Enter" && handleAddPagamento()}
-                      className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
-                  </div>
-                  <button onClick={handleAddPagamento} disabled={restante <= 0}
+                  {pagMultForma === "Vale-Troca" ? (
+                    /* Vale-Troca: input do número + Validar substituem o campo de valor */
+                    <div className="flex-1 min-w-48 flex gap-2">
+                      <div className="flex-1">
+                        <Label>Número do Vale</Label>
+                        <input type="text" value={valeNumero}
+                          onChange={e => { setValeNumero(e.target.value); setValeValidacao(null); setPagValor(""); }}
+                          placeholder="VT-00001"
+                          className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none"
+                          style={{ borderColor: valeValidacao?.ok ? "#6EE7B7" : C.cremeBorder, color: "#374151" }}
+                          onKeyDown={e => e.key === "Enter" && (e.preventDefault(), validarValeTroca())}
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <button type="button" onClick={async () => { await validarValeTroca(); }}
+                          disabled={!valeNumero.trim() || valeValidando}
+                          className="px-3 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40 whitespace-nowrap"
+                          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                          {valeValidando ? <Loader2 size={14} className="animate-spin" /> : "Validar"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex-1 min-w-28">
+                      <Label>Valor{restante > 0 && <span className="ml-1 font-normal text-xs" style={{ color: "#9CA3AF" }}>(restante: {fmt(restante)})</span>}</Label>
+                      <input type="text" value={pagValor} onChange={e => setPagValor(e.target.value)}
+                        placeholder={restante > 0 ? restante.toFixed(2).replace(".", ",") : "0,00"}
+                        onKeyDown={e => e.key === "Enter" && handleAddPagamento()}
+                        className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (pagMultForma === "Vale-Troca") {
+                        if (!valeValidacao?.ok || !valeValidacao.valor_disponivel) return;
+                        const valorValeDisp = Math.min(valeValidacao.valor_disponivel, restante);
+                        setPagamentos(prev => [...prev, { _key: uid(), forma: "Vale-Troca", valor: valorValeDisp, parcelas: 1, vale_numero: valeNumero.trim() }]);
+                        setValeNumero(""); setValeValidacao(null); setPagValor("");
+                      } else {
+                        handleAddPagamento();
+                      }
+                    }}
+                    disabled={restante <= 0 || (pagMultForma === "Vale-Troca" ? !valeValidacao?.ok : false)}
                     className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
                     style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                     <Plus size={13} /> Adicionar
                   </button>
                 </div>
+                {/* Feedback validação vale em Múltiplas */}
+                {pagMultForma === "Vale-Troca" && valeValidacao && (
+                  <div className="rounded-lg border p-3 flex items-start gap-2 mb-3"
+                    style={{ borderColor: valeValidacao.ok ? "#A7F3D0" : "#FECACA", backgroundColor: valeValidacao.ok ? "#ECFDF5" : "#FEF2F2" }}>
+                    {valeValidacao.ok
+                      ? <CheckCircle size={16} className="flex-shrink-0 mt-0.5" style={{ color: "#065F46" }} />
+                      : <AlertCircle size={16} className="flex-shrink-0 mt-0.5" style={{ color: "#991B1B" }} />}
+                    <div className="text-xs" style={{ color: valeValidacao.ok ? "#065F46" : "#991B1B" }}>
+                      <p className="font-medium">{valeValidacao.ok ? "Vale-troca válido" : (valeValidacao.erro ?? "Vale inválido")}</p>
+                      {valeValidacao.ok && valeValidacao.valor_disponivel !== undefined && (
+                        <p className="mt-0.5">Saldo disponível: <strong>{fmt(Math.min(valeValidacao.valor_disponivel, restante))}</strong> será adicionado</p>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {pagamentos.length > 0 && (
                   <div className="space-y-1.5">
                     {pagamentos.map(p => (
                       <div key={p._key} className="flex items-center justify-between px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }}>
-                        <span style={{ color: "#374151" }}>{p.forma}</span>
+                        <span style={{ color: "#374151" }}>
+                          {p.forma}
+                          {p.vale_numero && <span className="ml-1.5 text-xs font-mono" style={{ color: "#6B7280" }}>({p.vale_numero})</span>}
+                        </span>
                         <div className="flex items-center gap-3">
                           <span className="tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(p.valor)}</span>
                           <button onClick={() => setPagamentos(prev => prev.filter(x => x._key !== p._key))} className="text-gray-300 hover:text-red-400"><X size={13} /></button>
@@ -1385,7 +1610,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                           } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro"); }
                           finally { setSaving(false); }
                         }}
-                        disabled={saving || itens.length === 0 || !cliente}
+                        disabled={saving || itens.length === 0 || !cliente || vendedorSel === "" || formaEnvioId === ""}
                         className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
                         style={{ backgroundColor: "#D97706", color: "#fff" }}>
                         {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
@@ -1514,18 +1739,61 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               Salvar Rascunho
             </button>
             {/* Esconde botão principal quando tem A Receber (já tem botão inline na seção de pagamento) */}
-            {!temAReceberNova && (
-              <button onClick={() => submit("aprovado")} disabled={saving || itens.length === 0 || !pagamentoCobre}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
-                style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                Concluir Venda
-              </button>
-            )}
+            {!temAReceberNova && (() => {
+              const camposFaltando: string[] = [];
+              if (!cliente) camposFaltando.push("Cliente");
+              if (vendedorSel === "") camposFaltando.push("Vendedor");
+              if (formaEnvioId === "") camposFaltando.push("Forma de envio");
+              const podeConcluir = !saving && itens.length > 0 && pagamentoCobre && camposFaltando.length === 0;
+              return (
+                <div className="relative group">
+                  <button onClick={() => submit("aprovado")} disabled={!podeConcluir}
+                    className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                    style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                    {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                    Concluir Venda
+                  </button>
+                  {camposFaltando.length > 0 && (
+                    <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block w-48 p-2 rounded-lg border bg-white shadow-lg text-xs z-10"
+                      style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
+                      Preencha antes de concluir:
+                      {camposFaltando.map(f => <p key={f} className="text-red-500">• {f}</p>)}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
       </div>
+
+      {/* Toast Vale-Troca: troco gerado */}
+      {valeTrocoToast && (
+        <div
+          className="fixed bottom-4 right-4 z-50 rounded-xl shadow-lg border p-4 max-w-sm animate-in slide-in-from-bottom-4"
+          style={{ borderColor: "#A7F3D0", backgroundColor: "#ECFDF5" }}
+        >
+          <div className="flex items-start gap-2">
+            <Ticket size={18} className="flex-shrink-0 mt-0.5" style={{ color: "#065F46" }} />
+            <div className="flex-1">
+              <p className="text-sm font-semibold" style={{ color: "#065F46" }}>
+                Novo vale-troco gerado!
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: "#065F46" }}>
+                <strong>{valeTrocoToast.numero}</strong> — {fmt(valeTrocoToast.valor)}
+              </p>
+            </div>
+            <button
+              onClick={() => setValeTrocoToast(null)}
+              className="p-1 rounded hover:bg-white/50"
+              style={{ color: "#065F46" }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

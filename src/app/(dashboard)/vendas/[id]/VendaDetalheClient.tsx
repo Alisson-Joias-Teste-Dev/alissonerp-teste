@@ -7,6 +7,7 @@ import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle,
   Truck, Video, RefreshCw, Share2, Download,
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
+  RotateCcw, ArrowRight,
 } from "lucide-react";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
@@ -87,6 +88,16 @@ interface Venda {
   ordens?: Array<{
     id: number; numero_ordem: string; tipo_ordem: string;
     situacao: string; status: string; created_at: string;
+  }>;
+  devolucoes?: Array<{
+    id: number;
+    numero: string;
+    tipo: "parcial" | "total";
+    status: string;
+    tipo_compensacao: "vale_troca" | "reembolso_mp" | "reembolso_manual";
+    valor_total_devolvido: number;
+    valor_compensacao: number;
+    created_at: string;
   }>;
 }
 
@@ -880,9 +891,11 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
   const podeCancelar = isFullAccess && !["cancelado", "concluido"].includes(venda.situacao);
 
-  // Validação para aprovar: cliente + itens + pagamento obrigatórios
+  // Validação para aprovar: cliente + vendedor + forma_envio + itens + pagamento obrigatórios
   const podeAprovar = !!(
     venda.cliente_id &&
+    vendedorSel !== "" &&
+    formaEnvioId !== "" &&
     itens.length > 0 &&
     venda.pagamentos.length > 0
   );
@@ -989,6 +1002,48 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
           <p className="text-xs font-medium">
             Venda aprovada mas com pagamentos pendentes. Confirme os recebimentos para concluir.
           </p>
+        </div>
+      )}
+
+      {/* ── Banner Devolucoes vinculadas a essa venda ── */}
+      {venda.devolucoes && venda.devolucoes.length > 0 && (
+        <div
+          className="mb-3 px-4 py-3 rounded-lg border"
+          style={{ backgroundColor: "#FEF3C7", borderColor: "#FDE68A" }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <RotateCcw size={14} style={{ color: "#92400E" }} />
+            <p className="text-sm font-medium" style={{ color: "#92400E" }}>
+              {venda.devolucoes.length === 1
+                ? "Esta venda possui 1 devolucao"
+                : `Esta venda possui ${venda.devolucoes.length} devolucoes`}
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            {venda.devolucoes.map((d) => (
+              <Link
+                key={d.id}
+                href={`/devolucoes/${d.id}`}
+                className="flex items-center justify-between gap-3 py-1.5 px-2 rounded bg-white/60 hover:bg-white transition-colors"
+              >
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <span className="text-xs font-semibold" style={{ color: C.esmeralda }}>
+                    {d.numero}
+                  </span>
+                  <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ backgroundColor: C.esmeraldaLt, color: C.esmeralda }}>
+                    {d.tipo === "total" ? "Total" : "Parcial"}
+                  </span>
+                  <span className="text-xs" style={{ color: "#6B7280" }}>
+                    {d.status}
+                  </span>
+                </div>
+                <span className="text-xs tabular-nums" style={{ color: "#374151" }}>
+                  {fmt(d.valor_total_devolvido)}
+                </span>
+                <ArrowRight size={13} style={{ color: "#6B7280" }} />
+              </Link>
+            ))}
+          </div>
         </div>
       )}
 
@@ -2118,6 +2173,8 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                     <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block w-52 p-2 rounded-lg border bg-white shadow-lg text-xs" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
                       Preencha antes:
                       {!venda.cliente_id && <p className="text-red-500">• Cliente</p>}
+                      {vendedorSel === "" && <p className="text-red-500">• Vendedor</p>}
+                      {formaEnvioId === "" && <p className="text-red-500">• Forma de envio</p>}
                       {itens.length === 0 && <p className="text-red-500">• Produtos</p>}
                       {venda.pagamentos.length === 0 && <p className="text-red-500">• Pagamento</p>}
                     </div>

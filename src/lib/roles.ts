@@ -33,6 +33,9 @@ export function isProdutosAccess(role: string | null | undefined): boolean {
 // Roles que podem aprovar crédito do gerente (aprovar vendas com A Receber)
 export const ROLES_APROVAR_CREDITO = [...ROLES_FULL_ACCESS, "gerente_loja"] as const;
 
+// Roles que podem abrir/gerenciar devoluções, vale-troca e reembolsos
+export const ROLES_DEVOLUCAO = ["admin", "desenvolvedor", "diretor", "gerente_loja"] as const;
+
 // Verifica se a role está na lista permitida
 export function hasRole(role: string | null | undefined, permitidas: readonly string[]): boolean {
   if (!role) return false;
