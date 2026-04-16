@@ -37,6 +37,9 @@ export async function POST(req: NextRequest) {
     pricing_categories, groove_rules,
     stone_markup, stone_prices,
     calibracao,
+    risco_width, risco_depth,
+    preco_gravacao,
+    stone_markups_table,
   } = body;
 
   // IMPORTANTE: usar sql.json() em vez de JSON.stringify+::jsonb.
@@ -53,6 +56,10 @@ export async function POST(req: NextRequest) {
       stone_markup = COALESCE(${stone_markup ?? null}::numeric, stone_markup),
       stone_prices = COALESCE(${stone_prices != null ? sql.json(stone_prices) : null}, stone_prices),
       calibracao = COALESCE(${calibracao != null ? sql.json(calibracao) : null}, calibracao),
+      risco_width = COALESCE(${risco_width ?? null}::numeric, risco_width),
+      risco_depth = COALESCE(${risco_depth ?? null}::numeric, risco_depth),
+      preco_gravacao = COALESCE(${preco_gravacao ?? null}::numeric, preco_gravacao),
+      stone_markups_table = COALESCE(${stone_markups_table != null ? sql.json(stone_markups_table) : null}, stone_markups_table),
       updated_at = now(),
       updated_by = ${user.id}::uuid
     WHERE name = 'default'

@@ -62,6 +62,54 @@ export async function GET(
        venda.cliente_complemento, venda.cliente_bairro, venda.cliente_municipio, venda.cliente_uf,
        venda.cliente_cep ? `CEP: ${venda.cliente_cep}` : null].filter(Boolean).join(", ") || undefined;
 
+  // Buscar ficha técnica do orçamento vinculado (se existir)
+  let fichaTecnica = undefined;
+  let fichaTecnica2 = undefined;
+  const [orcLink] = await sql`
+    SELECT o.ficha_tecnica_id, o.ficha_tecnica_2_id, o.foto_3d
+    FROM alissonerp.orcamentos o
+    WHERE o.venda_gerada_id = ${vendaId}
+    LIMIT 1
+  `;
+  if (orcLink?.ficha_tecnica_id) {
+    const [ft] = await sql`SELECT * FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${orcLink.ficha_tecnica_id}`;
+    if (ft) fichaTecnica = {
+      modelo: ft.modelo, aro_numeracao: ft.aro_numeracao,
+      largura: ft.largura ? Number(ft.largura) : undefined,
+      espessura: ft.espessura ? Number(ft.espessura) : undefined,
+      peso_estimado: ft.peso_estimado ? Number(ft.peso_estimado) : undefined,
+      cor_metal: ft.cor_metal, perfil: ft.perfil,
+      texto: ft.texto, tipo_fonte: ft.tipo_fonte,
+      qtd_pedras: ft.qtd_pedras ? Number(ft.qtd_pedras) : undefined,
+      tamanho_pedra: ft.tamanho_pedra ? Number(ft.tamanho_pedra) : undefined,
+      tipo_aplicacao_pedra: ft.tipo_aplicacao_pedra,
+      has_friso: !!ft.has_friso, friso_kind: ft.friso_kind ?? "friso", friso_tipo: ft.friso_tipo,
+      friso_largura: ft.friso_largura ? Number(ft.friso_largura) : undefined,
+      friso_profundidade: ft.friso_profundidade ? Number(ft.friso_profundidade) : undefined,
+      friso_offset: ft.friso_offset ? Number(ft.friso_offset) : undefined,
+      friso_lado: ft.friso_lado,
+    };
+  }
+  if (orcLink?.ficha_tecnica_2_id) {
+    const [ft2] = await sql`SELECT * FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${orcLink.ficha_tecnica_2_id}`;
+    if (ft2) fichaTecnica2 = {
+      modelo: ft2.modelo, aro_numeracao: ft2.aro_numeracao,
+      largura: ft2.largura ? Number(ft2.largura) : undefined,
+      espessura: ft2.espessura ? Number(ft2.espessura) : undefined,
+      peso_estimado: ft2.peso_estimado ? Number(ft2.peso_estimado) : undefined,
+      cor_metal: ft2.cor_metal, perfil: ft2.perfil,
+      texto: ft2.texto, tipo_fonte: ft2.tipo_fonte,
+      qtd_pedras: ft2.qtd_pedras ? Number(ft2.qtd_pedras) : undefined,
+      tamanho_pedra: ft2.tamanho_pedra ? Number(ft2.tamanho_pedra) : undefined,
+      tipo_aplicacao_pedra: ft2.tipo_aplicacao_pedra,
+      has_friso: !!ft2.has_friso, friso_tipo: ft2.friso_tipo,
+      friso_largura: ft2.friso_largura ? Number(ft2.friso_largura) : undefined,
+      friso_profundidade: ft2.friso_profundidade ? Number(ft2.friso_profundidade) : undefined,
+      friso_offset: ft2.friso_offset ? Number(ft2.friso_offset) : undefined,
+      friso_lado: ft2.friso_lado,
+    };
+  }
+
   const dados: OrcamentoPDF = {
     numero_venda:    venda.numero_venda,
     cliente_nome:    venda.cliente_nome ?? "Sem cliente",
@@ -94,6 +142,9 @@ export async function GET(
       parcelas: Number(p.parcelas),
       valor: Number(p.valor),
     })),
+    ficha_tecnica: fichaTecnica,
+    ficha_tecnica_2: fichaTecnica2,
+    foto_3d: orcLink?.foto_3d ?? undefined,
   };
 
   const doc = gerarPDFOrcamento(dados);

@@ -5,7 +5,145 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera, Environment, ContactShadows, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { ProfileType } from "./types";
-import type { RingParams } from "./types";
+import type { RingParams, GrooveType } from "./types";
+
+// ── Groove helpers ──────────────────────────────────────────────────────────
+
+/** Calcula as bandas Y onde o groove deve ser aplicado */
+function getGrooveBands(
+  grooveType: GrooveType,
+  grooveSide: "UPPER" | "LOWER",
+  grooveWidth: number,
+  grooveOffset: number,
+  wH: number,
+): Array<[number, number]> {
+  switch (grooveType) {
+    case "lateral": {
+      if (grooveSide === "LOWER") {
+        const y1 = -wH + grooveOffset;
+        return [[y1, y1 + grooveWidth]];
+      }
+      const y2 = wH - grooveOffset;
+      return [[y2 - grooveWidth, y2]];
+    }
+    case "centro": {
+      return [[-grooveWidth / 2, grooveWidth / 2]];
+    }
+    case "duplo": {
+      const y1L = -wH + grooveOffset;
+      const y2U = wH - grooveOffset;
+      return [
+        [y1L, y1L + grooveWidth],
+        [y2U - grooveWidth, y2U],
+      ];
+    }
+  }
+}
+
+/** Verifica se um valor Y está dentro de alguma banda de groove */
+function isInGrooveBand(y: number, bands: Array<[number, number]>): boolean {
+  return bands.some(([y1, y2]) => y >= y1 - 0.001 && y <= y2 + 0.001);
+}
+
+/**
+ * Aplica groove(s) SOMENTE ao contorno externo do perfil.
+ *
+ * Estratégia robusta em 2 fases:
+ *   1. Separa o contorno em "externo" (Y crescendo, indo de -wH a +wH)
+ *      e "interno" (Y decrescendo, voltando de +wH a -wH).
+ *   2. Aplica o groove apenas nos segmentos do contorno externo que
+ *      estão acima do threshold de raio.
+ *
+ * Isso garante que a curva interna (ex: Anatômica, Boleada) NUNCA
+ * receba cortes de groove, mesmo que tenha pontos com raio alto.
+ */
+function applyGroove(
+  pts: THREE.Vector2[],
+  params: RingParams,
+  rIn: number,
+  wH: number,
+): THREE.Vector2[] {
+  if (!params.hasGroove || params.grooveDepth <= 0 || params.grooveWidth <= 0) return pts;
+
+  const bands = getGrooveBands(params.grooveType, params.grooveSide, params.grooveWidth, params.grooveOffset, wH);
+  const depth = Math.min(params.grooveDepth, params.height * 0.4);
+
+  // ── Fase 1: separar contorno externo (0..splitIdx) do interno ────
+  // O contorno externo vai de -wH até +wH (Y crescente).
+  // O ponto de split é onde Y atinge o máximo.
+  let splitIdx = 0;
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].y > pts[splitIdx].y) splitIdx = i;
+    else if (pts[i].y === pts[splitIdx].y && pts[i].x > pts[splitIdx].x) splitIdx = i;
+  }
+
+  const outerPts = pts.slice(0, splitIdx + 1);
+  const innerPts = pts.slice(splitIdx + 1);
+
+  // Threshold: 80% do raio máximo externo (exclui transições e bordas)
+  const maxOuterX = Math.max(...outerPts.map(p => p.x));
+  const threshold = rIn + (maxOuterX - rIn) * 0.7;
+
+  // ── Fase 2: aplicar groove apenas ao contorno externo ────────────
+  const result: THREE.Vector2[] = [];
+
+  for (let i = 0; i < outerPts.length; i++) {
+    const p = outerPts[i];
+    const pNext = i < outerPts.length - 1 ? outerPts[i + 1] : null;
+    const pIsOuter = p.x > threshold;
+    const nIsOuter = pNext ? pNext.x > threshold : false;
+
+    if (pIsOuter && nIsOuter && pNext) {
+      const yA = p.y, yB = pNext.y;
+      const goingUp = yB >= yA;
+      const yMin = Math.min(yA, yB);
+      const yMax = Math.max(yA, yB);
+
+      const crossings: Array<{ y: number; entering: boolean }> = [];
+      for (const [bandStart, bandEnd] of bands) {
+        if (bandStart > yMin + 0.001 && bandStart < yMax - 0.001) {
+          crossings.push({ y: bandStart, entering: goingUp });
+        }
+        if (bandEnd > yMin + 0.001 && bandEnd < yMax - 0.001) {
+          crossings.push({ y: bandEnd, entering: !goingUp });
+        }
+      }
+      crossings.sort((a, b) => goingUp ? a.y - b.y : b.y - a.y);
+
+      if (isInGrooveBand(p.y, bands)) {
+        result.push(new THREE.Vector2(p.x - depth, p.y));
+      } else {
+        result.push(p.clone());
+      }
+
+      for (const cr of crossings) {
+        const t = (cr.y - yA) / (yB - yA);
+        const xAt = p.x + t * (pNext.x - p.x);
+        if (cr.entering) {
+          result.push(new THREE.Vector2(xAt, cr.y));
+          result.push(new THREE.Vector2(xAt - depth, cr.y));
+        } else {
+          result.push(new THREE.Vector2(xAt - depth, cr.y));
+          result.push(new THREE.Vector2(xAt, cr.y));
+        }
+      }
+      continue;
+    }
+
+    if (pIsOuter && isInGrooveBand(p.y, bands)) {
+      result.push(new THREE.Vector2(p.x - depth, p.y));
+    } else {
+      result.push(p.clone());
+    }
+  }
+
+  // ── Contorno interno: copiar sem alteração ───────────────────────
+  for (const p of innerPts) {
+    result.push(p.clone());
+  }
+
+  return result;
+}
 
 // ── Ring Mesh ────────────────────────────────────────────────────────────────
 
@@ -24,7 +162,7 @@ function Ring({
     const rIn = params.diameter / 2;
     const wH = params.width / 2;
     const h = params.height;
-    const pts: THREE.Vector2[] = [];
+    let pts: THREE.Vector2[] = [];
 
     switch (profileType) {
       case ProfileType.Concava: {
@@ -38,51 +176,6 @@ function Ring({
           new THREE.Vector2(rOut, wH)
         );
         pts.push(...curve.getPoints(24));
-        pts.push(new THREE.Vector2(rIn, wH));
-        break;
-      }
-      case ProfileType.FrisoUnico: {
-        const rOut = rIn + h;
-        const rGroove = rOut - params.grooveDepth;
-        pts.push(new THREE.Vector2(rIn, -wH));
-        pts.push(new THREE.Vector2(rOut, -wH));
-        if (params.grooveSide === "LOWER") {
-          const y1 = -wH + params.grooveOffset;
-          const y2 = y1 + params.grooveWidth;
-          pts.push(new THREE.Vector2(rOut, y1));
-          pts.push(new THREE.Vector2(rGroove, y1));
-          pts.push(new THREE.Vector2(rGroove, y2));
-          pts.push(new THREE.Vector2(rOut, y2));
-        } else {
-          const y2 = wH - params.grooveOffset;
-          const y1 = y2 - params.grooveWidth;
-          pts.push(new THREE.Vector2(rOut, y1));
-          pts.push(new THREE.Vector2(rGroove, y1));
-          pts.push(new THREE.Vector2(rGroove, y2));
-          pts.push(new THREE.Vector2(rOut, y2));
-        }
-        pts.push(new THREE.Vector2(rOut, wH));
-        pts.push(new THREE.Vector2(rIn, wH));
-        break;
-      }
-      case ProfileType.FrisoLateral: {
-        const rOut = rIn + h;
-        const rGroove = rOut - params.grooveDepth;
-        const y1L = -wH + params.grooveOffset;
-        const y2L = y1L + params.grooveWidth;
-        const y2U = wH - params.grooveOffset;
-        const y1U = y2U - params.grooveWidth;
-        pts.push(new THREE.Vector2(rIn, -wH));
-        pts.push(new THREE.Vector2(rOut, -wH));
-        pts.push(new THREE.Vector2(rOut, y1L));
-        pts.push(new THREE.Vector2(rGroove, y1L));
-        pts.push(new THREE.Vector2(rGroove, y2L));
-        pts.push(new THREE.Vector2(rOut, y2L));
-        pts.push(new THREE.Vector2(rOut, y1U));
-        pts.push(new THREE.Vector2(rGroove, y1U));
-        pts.push(new THREE.Vector2(rGroove, y2U));
-        pts.push(new THREE.Vector2(rOut, y2U));
-        pts.push(new THREE.Vector2(rOut, wH));
         pts.push(new THREE.Vector2(rIn, wH));
         break;
       }
@@ -177,6 +270,11 @@ function Ring({
       }
     }
 
+    // Aplica groove em qualquer perfil quando habilitado
+    if (params.hasGroove) {
+      pts = applyGroove(pts, params, rIn, wH);
+    }
+
     if (
       profileType !== ProfileType.Anatomica &&
       profileType !== ProfileType.BoleadaDouble
@@ -208,31 +306,296 @@ function Ring({
   );
 }
 
-// ── Engraving Text (inside ring) ─────────────────────────────────────────────
+// ── Geometria de diamante corte brilhante (57 facetas aprox.) ────────────────
+// Baseado nas proporções ideais GIA:
+//   Mesa = 57% do diâmetro, Coroa = 16% da altura total, Pavilhão = 43%
+//   Crown angle ~34°, Pavilion angle ~41°
+// Estrutura: culet → pavilhão inferior → cintura → coroa estrela → mesa
+
+function createDiamondGeometry(radius: number): THREE.BufferGeometry {
+  const n = 8; // 8 lados = 16 facetas pavilhão + 8 estrela + 8 bezel + 16 upper girdle + 8 mesa = ~57
+  const crownH = radius * 0.33;
+  const pavilionH = radius * 0.60;
+  const tableR = radius * 0.56;
+  const girdleR = radius;
+  const starR = radius * 0.72; // raio intermediário da estrela na coroa
+  const lowerGirdleR = radius * 0.65; // anel intermediário do pavilhão
+
+  const verts: number[] = [];
+  const idx: number[] = [];
+  let vi = 0;
+
+  const addV = (x: number, y: number, z: number) => { verts.push(x, y, z); return vi++; };
+
+  // 0: culet
+  const culet = addV(0, -pavilionH, 0);
+
+  // Pavilhão lower girdle (anel intermediário) — offset 1/2 faceta
+  const pavLG: number[] = [];
+  for (let i = 0; i < n * 2; i++) {
+    const a = (i / (n * 2)) * Math.PI * 2;
+    pavLG.push(addV(Math.cos(a) * lowerGirdleR, -pavilionH * 0.35, Math.sin(a) * lowerGirdleR));
+  }
+
+  // Cintura (girdle)
+  const girdle: number[] = [];
+  for (let i = 0; i < n * 2; i++) {
+    const a = (i / (n * 2)) * Math.PI * 2;
+    girdle.push(addV(Math.cos(a) * girdleR, 0, Math.sin(a) * girdleR));
+  }
+
+  // Coroa: estrela (star facets)
+  const star: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = ((i + 0.5) / n) * Math.PI * 2; // offset meio passo
+    star.push(addV(Math.cos(a) * starR, crownH * 0.55, Math.sin(a) * starR));
+  }
+
+  // Mesa
+  const table: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    table.push(addV(Math.cos(a) * tableR, crownH, Math.sin(a) * tableR));
+  }
+
+  // Centro da mesa
+  const tableCenter = addV(0, crownH, 0);
+
+  // ── Pavilhão: culet → lower girdle → girdle ──────────────────────
+  for (let i = 0; i < n * 2; i++) {
+    const next = (i + 1) % (n * 2);
+    // Culet → lower girdle
+    idx.push(culet, pavLG[next], pavLG[i]);
+    // Lower girdle → girdle
+    idx.push(pavLG[i], pavLG[next], girdle[next]);
+    idx.push(pavLG[i], girdle[next], girdle[i]);
+  }
+
+  // ── Coroa: girdle → star → mesa ──────────────────────────────────
+  for (let i = 0; i < n; i++) {
+    const g0 = i * 2;
+    const g1 = i * 2 + 1;
+    const g2 = ((i + 1) * 2) % (n * 2);
+    const si = star[i];
+    const sNext = star[(i + 1) % n];
+    const ti = table[i];
+    const tNext = table[(i + 1) % n];
+
+    // Bezel facets: girdle → star
+    idx.push(girdle[g0], girdle[g1], si);
+    idx.push(girdle[g1], girdle[g2], si);
+
+    // Upper girdle → star → table
+    idx.push(si, girdle[g2], sNext);
+    idx.push(si, sNext, tNext);
+    idx.push(si, tNext, ti);
+  }
+
+  // Mesa
+  for (let i = 0; i < n; i++) {
+    const next = (i + 1) % n;
+    idx.push(tableCenter, table[i], table[next]);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// ── Pedras cravadas na aliança ──────────────────────────────────────────────
+
+function StonesCravadas({
+  params,
+  profile,
+}: {
+  params: RingParams;
+  profile: ProfileType;
+}) {
+  const diamondGeo = useMemo(() => {
+    if (!params.hasStones) return null;
+    return createDiamondGeometry(params.stoneSize / 2);
+  }, [params.hasStones, params.stoneSize]);
+
+  const stones = useMemo(() => {
+    if (!params.hasStones) return [];
+
+    const rIn = params.diameter / 2;
+    const stoneSize = params.stoneSize;
+    const stoneRadius = stoneSize / 2;
+
+    // Raio da superfície externa
+    const rSurface = profile === ProfileType.QuadradoCanal
+      ? rIn + params.canalBorderHeight
+      : rIn + params.height;
+
+    // Pedra fica com a mesa ligeiramente acima da superfície
+    const rStone = rSurface - stoneRadius * 0.20;
+
+    // Quantidade de pedras por fileira
+    const circumference = 2 * Math.PI * rSurface;
+    const stoneSpace = profile === ProfileType.QuadradoCanal ? stoneSize : stoneSize + 0.2;
+    const perRow = Math.floor(circumference / stoneSpace);
+
+    const rows = profile === ProfileType.QuadradoCanal ? params.stoneRows : 1;
+
+    let totalStones: number;
+    if (params.stoneFull) {
+      totalStones = perRow * rows;
+    } else if (params.stoneHalfMoon) {
+      totalStones = Math.floor((perRow * rows) / 2);
+    } else {
+      totalStones = params.stoneCount;
+    }
+
+    // Posições Y das fileiras
+    const rowYPositions: number[] = [];
+    if (profile === ProfileType.QuadradoCanal && rows > 1) {
+      const canalW = params.canalWidth;
+      for (let r = 0; r < rows; r++) {
+        rowYPositions.push(-canalW / 2 + stoneSize / 2 + r * (canalW / rows));
+      }
+    } else {
+      rowYPositions.push(0);
+    }
+
+    const result: Array<{ position: [number, number, number]; rotation: [number, number, number] }> = [];
+    let placed = 0;
+
+    for (const rowY of rowYPositions) {
+      const angleStep = (2 * Math.PI) / perRow;
+      const stonesInThisRow = Math.min(perRow, totalStones - placed);
+      for (let i = 0; i < stonesInThisRow; i++) {
+        const angle = i * angleStep;
+        const x = Math.cos(angle) * rStone;
+        const z = Math.sin(angle) * rStone;
+        result.push({
+          position: [x, rowY, z],
+          // Orientar: pavilhão para dentro, mesa para fora (radial)
+          rotation: [0, -angle, -Math.PI / 2],
+        });
+        placed++;
+        if (placed >= totalStones) break;
+      }
+      if (placed >= totalStones) break;
+    }
+
+    return result;
+  }, [params, profile]);
+
+  // Garras: pequenas esferas douradas entre as pedras
+  const prongs = useMemo(() => {
+    if (stones.length <= 1) return [];
+    const rIn = params.diameter / 2;
+    const rSurface = profile === ProfileType.QuadradoCanal
+      ? rIn + params.canalBorderHeight
+      : rIn + params.height;
+    const rProng = rSurface + params.stoneSize * 0.08; // ligeiramente acima da superfície
+    const prongSize = params.stoneSize * 0.12; // tamanho da garra
+    const stoneSpace = profile === ProfileType.QuadradoCanal ? params.stoneSize : params.stoneSize + 0.2;
+    const circumference = 2 * Math.PI * rSurface;
+    const perRow = Math.floor(circumference / stoneSpace);
+    const rows = profile === ProfileType.QuadradoCanal ? params.stoneRows : 1;
+
+    const rowYPositions: number[] = [];
+    if (profile === ProfileType.QuadradoCanal && rows > 1) {
+      for (let r = 0; r < rows; r++) {
+        rowYPositions.push(-params.canalWidth / 2 + params.stoneSize / 2 + r * (params.canalWidth / rows));
+      }
+    } else {
+      rowYPositions.push(0);
+    }
+
+    const result: Array<{ pos: [number, number, number]; size: number }> = [];
+    for (const rowY of rowYPositions) {
+      const angleStep = (2 * Math.PI) / perRow;
+      for (let i = 0; i < perRow; i++) {
+        // 4 garras por pedra nos cantos
+        const baseAngle = i * angleStep;
+        const halfStep = angleStep * 0.45;
+        for (const offset of [-halfStep, halfStep]) {
+          const a = baseAngle + offset;
+          result.push({
+            pos: [Math.cos(a) * rProng, rowY, Math.sin(a) * rProng],
+            size: prongSize,
+          });
+        }
+      }
+    }
+    return result;
+  }, [params, profile, stones.length]);
+
+  if (!diamondGeo || stones.length === 0) return null;
+
+  return (
+    <group rotation={[Math.PI / 2, 0, 0]}>
+      {/* Diamantes */}
+      {stones.map((s, idx) => (
+        <mesh key={`d${idx}`} geometry={diamondGeo} position={s.position} rotation={s.rotation}>
+          <meshPhysicalMaterial
+            color="#f0f4ff"
+            metalness={0.0}
+            roughness={0.0}
+            transmission={0.15}
+            thickness={3.0}
+            ior={2.42}
+            envMapIntensity={10.0}
+            clearcoat={1.0}
+            clearcoatRoughness={0.0}
+            reflectivity={1.0}
+            specularIntensity={4.0}
+            specularColor={new THREE.Color("#ffffff")}
+          />
+        </mesh>
+      ))}
+      {/* Garras douradas */}
+      {prongs.map((p, idx) => (
+        <mesh key={`p${idx}`} position={p.pos}>
+          <sphereGeometry args={[p.size, 8, 8]} />
+          <meshStandardMaterial
+            color={params.metalColor}
+            roughness={0.1}
+            metalness={1.0}
+            envMapIntensity={4.0}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+// ── Engraving Text (inside ring — groove style) ─────────────────────────────
 
 function EngravingText({
   text,
   fontType,
   diameter,
   width,
-  height,
+  metalColor,
 }: {
   text: string;
   fontType: 1 | 2;
   diameter: number;
   width: number;
-  height: number;
+  metalColor: string;
 }) {
-  // Place text on the inner surface of the ring
   const rInner = diameter / 2;
-  const rOuter = rInner + height;
-  const fontSize = Math.min(width * 0.3, 1.0);
+  const fontSize = Math.min(width * 0.3, 1.2);
   const charCount = text.length;
-  const spacing = fontSize * 0.55;
+  const spacing = fontSize * 0.6;
   const totalWidth = charCount * spacing;
-  const r = rInner + 0.02; // on inner surface
+  // Texto na superfície interna — ligeiramente dentro do raio interno
+  const r = rInner - 0.05;
   const totalAngle = totalWidth / r;
-  const startAngle = Math.PI / 2 - totalAngle / 2; // start from front
+  const startAngle = Math.PI / 2 - totalAngle / 2;
+
+  // Cor escura simulando baixo relevo
+  const grooveColor = useMemo(() => {
+    const c = new THREE.Color(metalColor);
+    c.multiplyScalar(0.25);
+    return c;
+  }, [metalColor]);
 
   return (
     <group rotation={[Math.PI / 2, 0, 0]}>
@@ -240,20 +603,27 @@ function EngravingText({
         const a = startAngle + (i + 0.5) * (totalAngle / charCount);
         const px = Math.cos(a) * r;
         const pz = Math.sin(a) * r;
-        // Face outward from center (readable from inside the ring)
+        // Letra olha para o centro (legível de fora através do anel)
         return (
           <Text
             key={`${i}-${char}`}
             position={[px, 0, pz]}
-            rotation={[0, -(a - Math.PI / 2), 0]}
+            rotation={[0, -(a + Math.PI / 2), 0]}
             fontSize={fontSize}
             anchorX="center"
             anchorY="middle"
             fontStyle={fontType === 2 ? "italic" : "normal"}
-            renderOrder={999}
+            fontWeight={700}
+            renderOrder={10}
           >
             {char}
-            <meshBasicMaterial color="#111111" side={THREE.DoubleSide} depthTest={false} transparent opacity={0.85} />
+            <meshBasicMaterial
+              color={grooveColor}
+              side={THREE.DoubleSide}
+              depthTest={false}
+              transparent
+              opacity={0.9}
+            />
           </Text>
         );
       })}
@@ -301,20 +671,21 @@ function AliancaViewportInner({
         gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, powerPreference: "high-performance", alpha: false, preserveDrawingBuffer: true }}
         onCreated={({ gl }) => { canvasRef.current = gl.domElement; }}
       >
-        <PerspectiveCamera makeDefault position={[0, -cameraDistance, cameraDistance]} fov={35} />
+        <PerspectiveCamera makeDefault position={[0, -35, 35]} fov={35} />
         <color attach="background" args={["#f1f5f9"]} />
         <ambientLight intensity={0.7} />
         <hemisphereLight intensity={0.5} color="#ffffff" groundColor="#cbd5e1" />
         <spotLight position={[30, 40, 20]} angle={0.25} penumbra={1} intensity={3} />
         <spotLight position={[-30, 20, 10]} angle={0.3} penumbra={1} intensity={2} color="#ffffff" />
         <Ring params={params} profileType={profile} onSetMesh={handleMesh} />
+        {/* Pedras 3D desabilitadas — renderização simplificada */}
         {params.textEnabled && params.textContent.trim() && (
           <EngravingText
             text={params.textContent.trim()}
             fontType={params.textFontType}
             diameter={params.diameter}
             width={params.width}
-            height={params.height}
+            metalColor={params.metalColor}
           />
         )}
         <Environment preset="warehouse" resolution={512} />
