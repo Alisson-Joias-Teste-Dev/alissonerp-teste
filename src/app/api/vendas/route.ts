@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { validarDescontos } from "@/lib/validar-desconto";
 
 // ─── GET /api/vendas ───────────────────────────────────────────────────────────
 // Query params: inicio, fim, situacao, vendedor_id, q (busca)
@@ -117,6 +118,25 @@ export async function POST(req: NextRequest) {
     itens?:               ItemInput[];
     pagamentos?:          PagamentoInput[];
   };
+
+  // ── Validação de desconto por produto (bloqueia vendedor comum) ───────────
+  if (Array.isArray(body.itens) && body.itens.length > 0) {
+    const itensValidacao = body.itens
+      .filter((it) => it.produto_id && (it.pct_desconto ?? 0) > 0)
+      .map((it) => ({
+        produto_id: Number(it.produto_id),
+        pct_desconto: Number(it.pct_desconto ?? 0),
+        sku: it.sku ?? undefined,
+        nome: it.nome_produto,
+      }));
+    const val = await validarDescontos(itensValidacao, usuario.role);
+    if (!val.ok) {
+      return NextResponse.json(
+        { error: "Desconto acima do permitido", detalhes: val.erros, violacoes: val.violacoes },
+        { status: 403 },
+      );
+    }
+  }
 
   let novaVenda;
   try {
