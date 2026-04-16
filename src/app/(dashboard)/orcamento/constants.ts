@@ -1,4 +1,4 @@
-import type { GrooveRule, PricingCategory, PricingResult, ProfileOption, RingParams, RingSize, StoneEntry, StonePrice, StoneType, StoneCut } from "./types";
+import type { GrooveRule, GrooveType, PricingCategory, PricingResult, ProfileOption, RingParams, RingSize, StoneEntry, StonePrice, StoneType, StoneCut } from "./types";
 import { ProfileType } from "./types";
 
 // ── Tamanhos de Aro (1–36) ──────────────────────────────────────────────────
@@ -31,8 +31,6 @@ export const RING_SIZES: RingSize[] = [
 
 export const PROFILE_CORRECTION_FACTOR: Record<ProfileType, number> = {
   [ProfileType.Concava]:       0.82,
-  [ProfileType.FrisoUnico]:    0.88,
-  [ProfileType.FrisoLateral]:  0.90,
   [ProfileType.QuadradoCanal]: 0.95,
   [ProfileType.Boleada]:       0.85,
   [ProfileType.BoleadaDouble]: 0.78,
@@ -80,6 +78,9 @@ export const DEFAULT_PARAMS: RingParams = {
   goldPrice: 0,
   startMkp: 3.5,
   discountPercent: 0,
+  hasGroove: false,
+  grooveKind: "friso" as const,
+  grooveType: "lateral" as const,
   hasStones: false,
   stoneSize: 1.5,
   stoneCount: 1,
@@ -100,10 +101,14 @@ export const PROFILE_OPTIONS: ProfileOption[] = [
   { id: ProfileType.BoleadaDouble, label: "Boleada Dupla" },
   { id: ProfileType.Chanfrada, label: "Chanfrada" },
   { id: ProfileType.Concava, label: "Concava" },
-  { id: ProfileType.FrisoUnico, label: "Friso Unico" },
-  { id: ProfileType.FrisoLateral, label: "Friso Lateral" },
-  { id: ProfileType.QuadradoCanal, label: "Quadrado Canal" },
+  { id: ProfileType.QuadradoCanal, label: "Bordas Elevadas" },
   { id: ProfileType.Simples, label: "Reta" },
+];
+
+export const GROOVE_TYPE_OPTIONS: { value: GrooveType; label: string }[] = [
+  { value: "lateral", label: "Lateral" },
+  { value: "centro", label: "Centro" },
+  { value: "duplo", label: "Duplo" },
 ];
 
 // ── Cores de metal ──────────────────────────────────────────────────────────
@@ -153,13 +158,36 @@ export function computeWeight(
   // Fonte única da verdade: PROFILE_CORRECTION_FACTOR
   const factor = PROFILE_CORRECTION_FACTOR[profile] ?? 1.0;
 
-  const grooveLoss = params.grooveDepth * params.grooveWidth * params.width * 0.7;
+  let grooveLoss = 0;
+  if (params.hasGroove) {
+    const singleGrooveLoss = params.grooveDepth * params.grooveWidth * params.width * 0.7;
+    grooveLoss = params.grooveType === "duplo" ? singleGrooveLoss * 2 : singleGrooveLoss;
+  }
   const canalLoss =
     profile === ProfileType.QuadradoCanal
       ? Math.PI * (rOut ** 2 - (rIn + params.canalBorderHeight) ** 2) * params.canalWidth
       : 0;
 
-  const adjustedVolume = Math.max(baseVolume * factor - grooveLoss - canalLoss, 0.1);
+  // Perda de material por cravação de pedras
+  // Sem furo: berço cônico = pedra × 90% diâmetro, profundidade = 60% da pedra
+  // Com furo: cilindro passante = pedra × 90% diâmetro, profundidade = espessura total
+  let stoneLoss = 0;
+  if (params.hasStones) {
+    const holeRadius = (params.stoneSize * 0.90) / 2;
+    const chapaDepth = profile === ProfileType.QuadradoCanal ? params.canalBorderHeight : params.height;
+    const holeDepth = params.stoneDrill
+      ? chapaDepth                       // furo passante: atravessa toda a chapa
+      : params.stoneSize * 0.60;         // sem furo: berço = 60% do tamanho da pedra
+    const holeVolume = Math.PI * holeRadius ** 2 * holeDepth;
+    const stoneCount = params.stoneFull
+      ? computeStoneCapacity(params.diameter, params.height, params.canalBorderHeight, params.stoneSize, params.stoneRows, profile)
+      : params.stoneHalfMoon
+        ? Math.floor(computeStoneCapacity(params.diameter, params.height, params.canalBorderHeight, params.stoneSize, params.stoneRows, profile) / 2)
+        : params.stoneCount;
+    stoneLoss = holeVolume * stoneCount;
+  }
+
+  const adjustedVolume = Math.max(baseVolume * factor - grooveLoss - canalLoss - stoneLoss, 0.1);
   const weightRaw = (adjustedVolume * params.goldDensity) / 1000;
   const weight = Math.round(weightRaw * 2) / 2; // passos de 0,5g
   return { volume: adjustedVolume, weight, weightRaw };
@@ -178,7 +206,8 @@ export function computeStoneCapacity(
       ? diameter / 2 + canalBorderHeight
       : diameter / 2 + height;
   const circumference = 2 * Math.PI * rStones;
-  const stoneSpace = stoneSize + 0.2;
+  // Bordas Elevadas: sem folga entre pedras. Demais: folga 0.2mm
+  const stoneSpace = profile === ProfileType.QuadradoCanal ? stoneSize : stoneSize + 0.2;
   const capacity = Math.floor(circumference / stoneSpace);
   if (profile === ProfileType.QuadradoCanal) {
     return capacity * stoneRows;
@@ -191,10 +220,11 @@ export function computePricing(
   goldPrice: number,
   startMkp: number,
   discountPercent: number,
-  _categories: PricingCategory[]
+  categories: PricingCategory[]
 ): PricingResult {
-  // Fórmula: peso × cotação do ouro × markup
-  const mkp = startMkp;
+  // Busca o markup correto pela faixa de peso
+  const { activeCategory } = computeCalculatedCategories(startMkp, categories, weight);
+  const mkp = activeCategory?.targetMkp ?? startMkp;
   const cost = weight * goldPrice;
   const price = cost * mkp;
   const discountPriceRaw = price * (1 - discountPercent / 100);
@@ -219,7 +249,7 @@ export const STONE_TYPES: { value: StoneType; label: string; is_preciosa: boolea
   { value: "rubi",       label: "Rubi",              is_preciosa: true  },
   { value: "esmeralda",  label: "Esmeralda",         is_preciosa: true  },
   { value: "safira",     label: "Safira",            is_preciosa: true  },
-  { value: "zirconia",   label: "Zirconia",          is_preciosa: false },
+  { value: "zirconia",   label: "Zirconia",          is_preciosa: true  },
 ];
 
 /** Retorna true se o tipo de pedra entra no cálculo de preço (preciosa). */
@@ -238,23 +268,22 @@ export const STONE_CUTS: { value: StoneCut; label: string }[] = [
 
 // Tabela de conversão tamanho (mm) → ct aproximado (corte brilhante)
 export const STONE_CT_TABLE: { mm: number; ct: number }[] = [
-  { mm: 0.8, ct: 0.003 },
   { mm: 1.0, ct: 0.005 },
-  { mm: 1.25, ct: 0.01 },
+  { mm: 1.1, ct: 0.006 },
+  { mm: 1.2, ct: 0.007 },
+  { mm: 1.3, ct: 0.009 },
+  { mm: 1.4, ct: 0.012 },
   { mm: 1.5, ct: 0.015 },
-  { mm: 1.75, ct: 0.02 },
-  { mm: 2.0, ct: 0.03 },
-  { mm: 2.25, ct: 0.04 },
-  { mm: 2.5, ct: 0.06 },
-  { mm: 3.0, ct: 0.10 },
-  { mm: 3.5, ct: 0.17 },
-  { mm: 4.0, ct: 0.25 },
-  { mm: 4.5, ct: 0.35 },
-  { mm: 5.0, ct: 0.50 },
-  { mm: 5.5, ct: 0.65 },
-  { mm: 6.0, ct: 0.80 },
-  { mm: 6.5, ct: 1.00 },
-  { mm: 7.0, ct: 1.25 },
+  { mm: 1.6, ct: 0.017 },
+  { mm: 1.7, ct: 0.019 },
+  { mm: 1.8, ct: 0.022 },
+  { mm: 1.9, ct: 0.026 },
+  { mm: 2.0, ct: 0.030 },
+  { mm: 2.1, ct: 0.035 },
+  { mm: 2.2, ct: 0.040 },
+  { mm: 2.3, ct: 0.046 },
+  { mm: 2.4, ct: 0.053 },
+  { mm: 2.5, ct: 0.060 },
 ];
 
 export const STONE_SIZES_MM = STONE_CT_TABLE.map((s) => s.mm);
@@ -267,7 +296,7 @@ export const DEFAULT_STONE_PRICES: StonePrice[] = [
   { tipo: "rubi",       preco_usd_ct: 350 }, // rubi tratado comercial
   { tipo: "esmeralda",  preco_usd_ct: 450 }, // esmeralda comercial
   { tipo: "safira",     preco_usd_ct: 300 }, // safira azul comercial
-  { tipo: "zirconia",   preco_usd_ct: 0   }, // zirconia nao cobra: so ouro
+  { tipo: "zirconia",   preco_usd_ct: 0, preco_rs_un: 0 }, // zirconia cobrada em R$/unidade
 ];
 
 /** Busca ct unitário por tamanho (mm) — interpolação linear */
@@ -288,30 +317,40 @@ export function stoneMmToCt(mm: number): number {
  * Calcula preço de uma entrada de pedra.
  *
  * REGRA DE NEGÓCIO:
- *   • Pedras preciosas (diamante, moissanita, rubi, esmeralda, safira):
- *     preço = ct × USD/ct × cotação_dolar × markup_pedra
- *   • Pedras não-preciosas (zircônia): preço = 0 (só cobra o ouro)
- *
- * Metadados continuam sendo calculados (ct, gramas) pra mostrar na UI.
+ *   • Zircônia: preço fixo em R$/unidade (sem dólar, sem ct)
+ *   • Demais preciosas: preço = ct × USD/ct × cotação_dolar × markup_pedra
  */
 export function computeStoneEntryPrice(
   entry: { tipo: StoneType; tamanho_mm: number; qtd: number },
   stonePrices: StonePrice[],
   stoneMarkup: number,
   dollarRate: number,
+  stoneMarkupsTable?: Record<string, Record<string, number>>,
 ): { ct_unitario: number; ct_total: number; pt_total: number; preco_unitario_rs: number; preco_total_rs: number } {
   const ct_unitario = stoneMmToCt(entry.tamanho_mm);
   const ct_total = ct_unitario * entry.qtd;
   const pt_total = ct_total * 0.2;
 
-  // Zirconia (e qualquer outra nao-preciosa) nao cobra
-  if (!isPedraPreciosa(entry.tipo)) {
-    return { ct_unitario, ct_total, pt_total, preco_unitario_rs: 0, preco_total_rs: 0 };
+  const priceRow = stonePrices.find((p) => p.tipo === entry.tipo);
+
+  // Zircônia: preço fixo em R$ por unidade
+  if (entry.tipo === "zirconia") {
+    const precoUn = priceRow?.preco_rs_un ?? 0;
+    return { ct_unitario, ct_total, pt_total, preco_unitario_rs: precoUn, preco_total_rs: precoUn * entry.qtd };
   }
 
-  const priceRow = stonePrices.find((p) => p.tipo === entry.tipo);
+  // Markup: busca na tabela salva por pedra+tamanho, fallback para markup global
+  let mkp = stoneMarkup;
+  if (stoneMarkupsTable && stoneMarkupsTable[entry.tipo]) {
+    const pedraTable = stoneMarkupsTable[entry.tipo];
+    const idx = STONE_CT_TABLE.findIndex(r => Math.abs(r.mm - entry.tamanho_mm) < 0.05);
+    if (idx >= 0 && pedraTable[String(idx)] != null) {
+      mkp = pedraTable[String(idx)];
+    }
+  }
+
   const usdPerCt = priceRow?.preco_usd_ct ?? 0;
-  const preco_unitario_rs = ct_unitario * usdPerCt * dollarRate * stoneMarkup;
+  const preco_unitario_rs = ct_unitario * usdPerCt * dollarRate * mkp;
   const preco_total_rs = preco_unitario_rs * entry.qtd;
   return { ct_unitario, ct_total, pt_total, preco_unitario_rs, preco_total_rs };
 }

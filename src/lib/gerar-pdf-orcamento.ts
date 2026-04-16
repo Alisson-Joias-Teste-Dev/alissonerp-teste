@@ -9,6 +9,27 @@ export interface ItemPDF {
 export interface PagamentoPDF {
   forma: string; gateway?: string | null; parcelas: number; valor: number;
 }
+export interface FichaTecnicaPDF {
+  modelo?: string;
+  aro_numeracao?: string;
+  largura?: number;
+  espessura?: number;
+  peso_estimado?: number;
+  cor_metal?: string;
+  perfil?: string;
+  texto?: string;
+  tipo_fonte?: string;
+  qtd_pedras?: number;
+  tamanho_pedra?: number;
+  tipo_aplicacao_pedra?: string;
+  has_friso?: boolean;
+  friso_kind?: string;
+  friso_tipo?: string;
+  friso_largura?: number;
+  friso_profundidade?: number;
+  friso_offset?: number;
+  friso_lado?: string;
+}
 export interface OrcamentoPDF {
   numero_venda: string;
   cliente_nome: string;
@@ -28,6 +49,9 @@ export interface OrcamentoPDF {
   observacoes?: string;
   itens: ItemPDF[];
   pagamentos?: PagamentoPDF[];
+  ficha_tecnica?: FichaTecnicaPDF;
+  ficha_tecnica_2?: FichaTecnicaPDF;
+  foto_3d?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -194,6 +218,77 @@ export function gerarPDFOrcamento(dados: OrcamentoPDF): jsPDF {
   }
 
   y += 4;
+
+  // ── Ficha Técnica (se orçamento de aliança) ───────────────────────────────
+  const fichas = [dados.ficha_tecnica, dados.ficha_tecnica_2].filter((f): f is FichaTecnicaPDF => !!f);
+  if (fichas.length > 0) {
+    if (y > 230) { doc.addPage(); y = 15; }
+    doc.setDrawColor("#E5E7EB");
+    doc.line(mx, y, mx + cw, y);
+    y += 6;
+    doc.setTextColor(PRETO);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text(fichas.length > 1 ? "Fichas Tecnicas das Aliancas" : "Ficha Tecnica da Alianca", mx, y);
+    y += 6;
+
+    for (let fi = 0; fi < fichas.length; fi++) {
+      const ft = fichas[fi];
+      if (fichas.length > 1) {
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(VERDE);
+        doc.text(`Alianca ${fi + 1}`, mx, y);
+        y += 5;
+      }
+
+      // Campos da ficha em grid 2 colunas
+      const campos: Array<{ label: string; value: string }> = [];
+      if (ft.perfil) campos.push({ label: "Perfil", value: ft.perfil });
+      if (ft.aro_numeracao) campos.push({ label: "Aro", value: ft.aro_numeracao });
+      if (ft.largura) campos.push({ label: "Largura", value: `${ft.largura.toFixed(1)}mm` });
+      if (ft.espessura) campos.push({ label: "Espessura", value: `${ft.espessura.toFixed(1)}mm` });
+      if (ft.peso_estimado) campos.push({ label: "Peso est.", value: `${ft.peso_estimado.toFixed(1)}g` });
+      if (ft.cor_metal) campos.push({ label: "Metal", value: ft.cor_metal });
+      if (ft.texto) campos.push({ label: "Gravacao", value: `${ft.texto} (${ft.tipo_fonte ?? "Forma"})` });
+      if (ft.qtd_pedras) {
+        campos.push({ label: "Pedras", value: `${ft.qtd_pedras}x ${ft.tamanho_pedra ?? "?"}mm` });
+        if (ft.tipo_aplicacao_pedra) campos.push({ label: "Aplicacao", value: ft.tipo_aplicacao_pedra });
+      }
+
+      // Friso / Risco
+      if (ft.has_friso) {
+        const kindLabel = ft.friso_kind === "risco" ? "Risco" : "Friso";
+        const tipoLabel = ft.friso_tipo === "duplo" ? "Duplo" : ft.friso_tipo === "centro" ? "Centro" : "Lateral";
+        campos.push({ label: kindLabel, value: tipoLabel });
+        if (ft.friso_largura) campos.push({ label: `${kindLabel} larg.`, value: `${ft.friso_largura.toFixed(2)}mm` });
+        if (ft.friso_profundidade) campos.push({ label: `${kindLabel} prof.`, value: `${ft.friso_profundidade.toFixed(1)}mm` });
+        if (ft.friso_tipo === "lateral") {
+          if (ft.friso_offset) campos.push({ label: `${kindLabel} dist. borda`, value: `${ft.friso_offset.toFixed(1)}mm` });
+          if (ft.friso_lado) campos.push({ label: `${kindLabel} lado`, value: ft.friso_lado === "UPPER" ? "Cima" : "Baixo" });
+        }
+      }
+
+      // Renderizar campos em grid 2 colunas
+      const gridColW = (cw - 4) / 2;
+      for (let i = 0; i < campos.length; i += 2) {
+        if (y > 270) { doc.addPage(); y = 15; }
+        for (let c = 0; c < 2 && i + c < campos.length; c++) {
+          const cx = mx + c * gridColW;
+          doc.setFontSize(7);
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(CINZA);
+          doc.text(campos[i + c].label, cx, y);
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(PRETO);
+          doc.text(campos[i + c].value, cx + 28, y);
+        }
+        y += 5;
+      }
+      y += 3;
+    }
+  }
 
   // ── Resumo do Pedido (card verde claro) ────────────────────────────────────
   if (y > 240) { doc.addPage(); y = 15; }

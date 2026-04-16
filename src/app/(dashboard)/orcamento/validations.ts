@@ -48,8 +48,11 @@ export interface ValidationError {
 
 // ── Defaults conservadores ──────────────────────────────────────────────
 
+// Regra real: espessura mín = pedra × 70% (com furo) ou pedra × 73% (sem furo)
+//   pedra 1.0mm → 0.7mm (furo) / 0.7mm (sem) | 1.5mm → 1.1mm / 1.1mm
+//   2.0mm → 1.4mm / 1.5mm | 3.0mm → 2.1mm / 2.2mm | 5.0mm → 3.5mm / 3.7mm
 export const CALIBRACAO_DEFAULTS: CalibracaoDefaults = {
-  espessura_min: { multiplicador: 0.60, constante: 0.50 },
+  espessura_min: { multiplicador: 0.73, constante: 0 },
   largura_min:   { canaleta: 1.0, grao: 0.8, pave: 1.4 },
   folga_pedras:  0.2,
 };
@@ -70,40 +73,42 @@ export function cravacaoDoPerfil(
   profile: ProfileType
 ): "canaleta" | "grao" | "pave" {
   if (profile === ProfileType.QuadradoCanal) return "canaleta";
-  if (profile === ProfileType.FrisoUnico || profile === ProfileType.FrisoLateral) return "pave";
   return "grao";
+}
+
+/** Mapeia perfis legados (FrisoUnico/FrisoLateral) para perfis válidos */
+export function migrateProfile(perfil: string): ProfileType {
+  if (perfil === "FrisoUnico" || perfil === "FrisoLateral") return ProfileType.Simples;
+  return perfil as ProfileType;
 }
 
 // ── Funções de cálculo mínimo ────────────────────────────────────────────
 
 /**
  * Espessura mínima da chapa pra comportar uma pedra do tamanho indicado.
- * Fórmula default: pedra × 0.60 + 0.50 (conservadora, mercado).
+ * Fórmula: pedra × 70% (com furo passante) ou pedra × 73% (sem furo).
  *
- * Exemplos (defaults):
- *   pedra 1.0mm → 1.1mm
- *   pedra 1.5mm → 1.4mm
- *   pedra 2.0mm → 1.7mm
- *   pedra 2.5mm → 2.0mm
- *   pedra 3.0mm → 2.3mm
+ * Exemplos:
+ *   pedra 1.0mm → 0.7mm (furo) / 0.7mm (sem)
+ *   pedra 2.0mm → 1.4mm / 1.5mm
+ *   pedra 3.0mm → 2.1mm / 2.2mm
  */
 export function computeMinThickness(
   stoneSize: number,
-  calib?: CalibracaoDefaults
+  calib?: CalibracaoDefaults,
+  hasDrill?: boolean,
 ): number {
   const c = getCalib(calib);
   if (!stoneSize || stoneSize <= 0) return 0;
-  return round1(stoneSize * c.espessura_min.multiplicador + c.espessura_min.constante);
+  // Com furo passante: 70%. Sem furo: usa multiplicador da config (default 73%)
+  const mult = hasDrill ? 0.70 : c.espessura_min.multiplicador;
+  return round1(stoneSize * mult + c.espessura_min.constante);
 }
 
 /**
- * Largura mínima da aliança pra comportar a pedra, baseada no tipo de
- * cravação derivado do perfil.
- *
- * Exemplos (pedra 2mm):
- *   QuadradoCanal (canaleta) → 3.0mm
- *   Concava/Boleada (grão)    → 2.8mm
- *   FrisoUnico (pavê)          → 3.4mm
+ * Largura mínima da aliança pra comportar a pedra.
+ * Bordas Elevadas: sem folga (mín = tamanho da pedra).
+ * Demais perfis: pedra + offset por tipo de cravação.
  */
 export function computeMinWidth(
   stoneSize: number,
@@ -112,27 +117,24 @@ export function computeMinWidth(
 ): number {
   const c = getCalib(calib);
   if (!stoneSize || stoneSize <= 0) return 0;
+  // Bordas Elevadas: largura mínima = tamanho da pedra (sem folga)
+  if (profile === ProfileType.QuadradoCanal) return stoneSize;
   const cravacao = cravacaoDoPerfil(profile);
   const offset = c.largura_min[cravacao];
   return round1(stoneSize + offset);
 }
 
 /**
- * Número máximo de fileiras de pedras que cabem dentro do canal (usado
- * somente em QuadradoCanal). Cada fileira consome `pedra + folga` de largura.
- *
- * Mínimo sempre 1, mesmo que o cálculo dê 0 (porque sem fileira não faz
- * sentido habilitar pedra).
+ * Número máximo de fileiras de pedras que cabem dentro do canal (Bordas Elevadas).
+ * Sem folga entre fileiras — ex: canal 6mm, pedra 2mm = 3 fileiras.
  */
 export function computeMaxStoneRows(
   canalWidth: number,
   stoneSize: number,
-  calib?: CalibracaoDefaults
+  _calib?: CalibracaoDefaults
 ): number {
-  const c = getCalib(calib);
   if (!canalWidth || !stoneSize || stoneSize <= 0) return 1;
-  const spacing = stoneSize + c.folga_pedras;
-  const max = Math.floor(canalWidth / spacing);
+  const max = Math.floor(canalWidth / stoneSize);
   return Math.max(1, max);
 }
 
@@ -150,6 +152,7 @@ export interface RingDesignInput {
   stoneCount: number;
   stoneHalfMoon: boolean;
   stoneFull: boolean;
+  stoneDrill: boolean;
 }
 
 /**
@@ -182,7 +185,7 @@ export function validateRingDesign(
   }
 
   // ── Trava de espessura ─────────────────────────────────────────────────
-  const minT = computeMinThickness(input.stoneSize, c);
+  const minT = computeMinThickness(input.stoneSize, c, input.stoneDrill);
   if (input.profile === ProfileType.QuadradoCanal) {
     if (input.canalBorderHeight < minT) {
       errors.push({
@@ -203,7 +206,8 @@ export function validateRingDesign(
   const minW = computeMinWidth(input.stoneSize, input.profile, c);
   if (input.profile === ProfileType.QuadradoCanal) {
     // No canal a "largura da pedra" é a própria canalWidth
-    const minCanal = round1(input.stoneSize + c.largura_min.canaleta);
+    // Bordas Elevadas: largura mínima do canal = tamanho da pedra (sem folga)
+    const minCanal = input.stoneSize;
     if (input.canalWidth < minCanal) {
       errors.push({
         field: "canalWidth",
@@ -287,7 +291,7 @@ export function validateFichaTecnica(
   }
 
   const input: RingDesignInput = {
-    profile: (ficha.perfil as ProfileType) ?? ProfileType.Simples,
+    profile: migrateProfile(String(ficha.perfil ?? "Simples")),
     width: Number(ficha.largura ?? 0),
     height: Number(ficha.espessura ?? 0),
     canalWidth: Number(ficha.canal_largura ?? 0),
@@ -298,6 +302,7 @@ export function validateFichaTecnica(
     stoneCount: Number(ficha.qtd_pedras ?? 0),
     stoneHalfMoon: Boolean(ficha.pedra_meia_lua),
     stoneFull: Boolean(ficha.pedra_volta_completa),
+    stoneDrill: Boolean(ficha.pedra_drill),
   };
 
   return validateRingDesign(input, entries, stoneCapacity, calib);
@@ -323,5 +328,6 @@ export function ringParamsToInput(
     stoneCount: params.stoneCount,
     stoneHalfMoon: params.stoneHalfMoon,
     stoneFull: params.stoneFull,
+    stoneDrill: params.stoneDrill,
   };
 }

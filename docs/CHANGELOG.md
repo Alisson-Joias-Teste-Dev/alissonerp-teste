@@ -1,8 +1,15 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 11/04/2026 — Versão: v2.19.87 <!-- Revisado 11/04/2026 -->
+> 📋 Última atualização automática: 16/04/2026 — Versão: v2.24.0 <!-- Revisado 16/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.24.0 (16/04/2026)
+### Feature — merge feat/orcamento-friso-pedras-v2 (recebida do chefe)
+- Merge da branch `feat/orcamento-friso-pedras-v2` (commit `9a4c86d`) no `homolog`. Traz: desacoplar friso do corpo da aliança, precificador de pedras v2, opções de gravação e risco. Arquivos: `AliancaViewport.tsx`, `OrcamentoClient.tsx`, `constants.ts`, `page.tsx`, `types.ts`, `validations.ts`, `api/orcamento/[id]`, `api/orcamento/config`, `api/orcamento/route`, `api/vendas/[id]/pdf`, `lib/gerar-pdf-orcamento.ts`.
+- **Migration renomeada**: `133_friso_desacoplado.sql` → `140_friso_desacoplado.sql` (colisão com `133_notif_aguardando_resposta.sql` já existente em homolog).
+- Auto-merge limpo em `OrcamentoClient.tsx` (sem conflito manual); nenhuma mudança anterior do homolog foi perdida. Backup salvo em branch local `backup/homolog-pre-merge-orcamento`.
+- ⚠️ **Ação manual:** executar `supabase/migrations/140_friso_desacoplado.sql` no banco antes de usar a feature.
 
 ## v2.19.87 (11/04/2026)
 ### Chore — limpa do working dir

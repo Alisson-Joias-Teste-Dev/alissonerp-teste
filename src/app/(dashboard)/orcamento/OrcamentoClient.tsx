@@ -15,7 +15,7 @@ import type {
 import {
   RING_SIZES, DEFAULT_PARAMS, PROFILE_OPTIONS, METAL_COLORS,
   DEFAULT_PRICING_CATEGORIES, DEFAULT_GROOVE_RULES, DEFAULT_STONE_PRICES,
-  STONE_TYPES, STONE_CUTS, STONE_SIZES_MM,
+  STONE_TYPES, STONE_CUTS, STONE_SIZES_MM, STONE_CT_TABLE, GROOVE_TYPE_OPTIONS,
   findGrooveRule, computeWeight, computeStoneCapacity, computePricing,
   computeCalculatedCategories, computeStoneEntryPrice, computeStonesTotalRS,
 } from "./constants";
@@ -126,8 +126,8 @@ export default function OrcamentoClient({
     });
   });
   const stonePrices = stonePricesLocal;
-  const [stoneMarkupLocal, setStoneMarkupLocal] = useState(config?.stone_markup ?? 2.5);
-  const stoneMarkup = stoneMarkupLocal;
+  const [stoneMarkupLocal, setStoneMarkupLocal] = useState(config?.stone_markup ?? 10);
+  const stoneMarkup = stoneMarkupLocal; // fallback global para computeStoneEntryPrice
   const stoneTotalRS = useMemo(() => computeStonesTotalRS(stoneEntries), [stoneEntries]);
 
   const nextStoneId = useRef(1);
@@ -137,7 +137,7 @@ export default function OrcamentoClient({
       tamanho_mm: 2.0, qtd: 1, ct_unitario: 0, ct_total: 0, pt_total: 0,
       preco_unitario_rs: 0, preco_total_rs: 0,
     };
-    const calc = computeStoneEntryPrice(entry, stonePrices, stoneMarkup, cotacaoDolar);
+    const calc = computeStoneEntryPrice(entry, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
     setStoneEntries((prev) => [...prev, { ...entry, ...calc }]);
   };
   const removeStone = (id: number) => setStoneEntries((prev) => prev.filter((e) => e.id !== id));
@@ -145,7 +145,7 @@ export default function OrcamentoClient({
     setStoneEntries((prev) => prev.map((e) => {
       if (e.id !== id) return e;
       const updated = { ...e, [field]: value };
-      const calc = computeStoneEntryPrice(updated, stonePrices, stoneMarkup, cotacaoDolar);
+      const calc = computeStoneEntryPrice(updated, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
       return { ...updated, ...calc };
     }));
   };
@@ -158,7 +158,7 @@ export default function OrcamentoClient({
       tamanho_mm: stoneSize, qtd: 1, ct_unitario: 0, ct_total: 0, pt_total: 0,
       preco_unitario_rs: 0, preco_total_rs: 0,
     };
-    const calc = computeStoneEntryPrice(entry, stonePrices, stoneMarkup, cotacaoDolar);
+    const calc = computeStoneEntryPrice(entry, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
     const setter = ringIdx === 1 ? setStoneEntries : setStoneEntries2;
     setter((prev) => [...prev, { ...entry, ...calc }]);
   };
@@ -171,7 +171,7 @@ export default function OrcamentoClient({
     setter((prev) => prev.map((e) => {
       if (e.id !== id) return e;
       const updated = { ...e, [field]: value };
-      const calc = computeStoneEntryPrice(updated, stonePrices, stoneMarkup, cotacaoDolar);
+      const calc = computeStoneEntryPrice(updated, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
       return { ...updated, ...calc };
     }));
   };
@@ -242,7 +242,7 @@ export default function OrcamentoClient({
     setStoneEntries((prev) => prev.map((e) => {
       if (e.tamanho_mm === params.stoneSize) return e;
       const updated = { ...e, tamanho_mm: params.stoneSize };
-      const calc = computeStoneEntryPrice(updated, stonePrices, stoneMarkup, cotacaoDolar);
+      const calc = computeStoneEntryPrice(updated, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
       return { ...updated, ...calc };
     }));
   }, [params.stoneSize, params.hasStones]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -250,11 +250,11 @@ export default function OrcamentoClient({
   // Quando muda preco das pedras (USD/ct) ou markup, recalcula entries existentes
   useEffect(() => {
     setStoneEntries((prev) => prev.map((e) => {
-      const calc = computeStoneEntryPrice(e, stonePricesLocal, stoneMarkup, cotacaoDolar);
+      const calc = computeStoneEntryPrice(e, stonePricesLocal, stoneMarkup, cotacaoDolar, allStoneMarkups);
       return { ...e, ...calc };
     }));
     setStoneEntries2((prev) => prev.map((e) => {
-      const calc = computeStoneEntryPrice(e, stonePricesLocal, stoneMarkup, cotacaoDolar);
+      const calc = computeStoneEntryPrice(e, stonePricesLocal, stoneMarkup, cotacaoDolar, allStoneMarkups);
       return { ...e, ...calc };
     }));
   }, [stonePricesLocal, stoneMarkup, cotacaoDolar]);
@@ -263,7 +263,7 @@ export default function OrcamentoClient({
     setStoneEntries2((prev) => prev.map((e) => {
       if (e.tamanho_mm === params2.stoneSize) return e;
       const updated = { ...e, tamanho_mm: params2.stoneSize };
-      const calc = computeStoneEntryPrice(updated, stonePrices, stoneMarkup, cotacaoDolar);
+      const calc = computeStoneEntryPrice(updated, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
       return { ...updated, ...calc };
     }));
   }, [params2.stoneSize, params2.hasStones]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -336,6 +336,29 @@ export default function OrcamentoClient({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+  const [showGrooveAdvanced, setShowGrooveAdvanced] = useState(false);
+  const [textosExtras, setTextosExtras] = useState<string[]>([]);
+  const [textosExtras2, setTextosExtras2] = useState<string[]>([]);
+  const [simPedra, setSimPedra] = useState(0);
+  const [mkpInicial, setMkpInicial] = useState(10);
+  const [mkpFinal, setMkpFinal] = useState(4);
+  const [mkpDecremento, setMkpDecremento] = useState(() => {
+    const steps = STONE_CT_TABLE.length - 1;
+    return steps > 0 ? Math.round((10 - 4) / steps * 10) / 10 : 0;
+  });
+  // Markups por pedra por tamanho — carregado da config
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [allStoneMarkups, setAllStoneMarkups] = useState<Record<string, Record<string, number>>>(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = (config as any)?.stone_markups_table;
+    return (raw && typeof raw === "object") ? raw : {};
+  });
+  const [rowMarkups, setRowMarkups] = useState<Record<number, number>>(() => {
+    const tipo = stonePricesLocal[0]?.tipo;
+    const saved = allStoneMarkups[tipo ?? ""];
+    if (saved) return Object.fromEntries(Object.entries(saved).map(([k, v]) => [Number(k), v]));
+    return {};
+  });
   const [isSaving, setIsSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [tab, setTab] = useState<"design" | "config">("design");
@@ -347,6 +370,23 @@ export default function OrcamentoClient({
   );
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [configMsg, setConfigMsg] = useState<string | null>(null);
+  // Preço da gravação (R$)
+  const [precoGravacao, setPrecoGravacao] = useState<number>(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = (config as any)?.preco_gravacao;
+    return raw ? Number(raw) : 100;
+  });
+  // Padrões do risco (carregados da config ou defaults)
+  const [riscoWidth, setRiscoWidth] = useState<number>(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = (config as any)?.risco_width;
+    return raw ? Number(raw) : 0.1;
+  });
+  const [riscoDepth, setRiscoDepth] = useState<number>(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = (config as any)?.risco_depth;
+    return raw ? Number(raw) : 0.2;
+  });
 
   const updateParam = <K extends keyof RingParams>(key: K, value: RingParams[K]) => {
     const setter = activeRing === 1 ? setParams : setParams2;
@@ -356,10 +396,31 @@ export default function OrcamentoClient({
     });
   };
 
+  // Salva últimos parâmetros do modelo no localStorage sempre que mudam
   useEffect(() => {
-    const rule = findGrooveRule(params.width, grooveRules);
-    setParams((prev) => ({ ...prev, grooveWidth: rule.grooveWidth, grooveDepth: rule.grooveDepth, grooveOffset: rule.grooveOffset }));
-  }, [params.width, grooveRules]);
+    try {
+      localStorage.setItem("orcamento_modelo_defaults", JSON.stringify({
+        profile, ringSize: ringSize.size,
+        width: params.width, height: params.height,
+        metalColor: params.metalColor, goldDensity: params.goldDensity,
+        concaveDepth: params.concaveDepth, domePercentage: params.domePercentage,
+        chamferSize: params.chamferSize, canalWidth: params.canalWidth,
+        canalBorderHeight: params.canalBorderHeight,
+      }));
+    } catch { /* localStorage indisponivel */ }
+  }, [profile, ringSize.size, params.width, params.height, params.metalColor, params.goldDensity,
+      params.concaveDepth, params.domePercentage, params.chamferSize, params.canalWidth, params.canalBorderHeight]);
+
+  // Auto-carrega config quando largura muda (friso usa grooveRules, risco usa defaults)
+  useEffect(() => {
+    if (!params.hasGroove) return;
+    if (params.grooveKind === "risco") {
+      setParams((prev) => ({ ...prev, grooveWidth: riscoWidth, grooveDepth: riscoDepth }));
+    } else {
+      const rule = findGrooveRule(params.width, grooveRules);
+      setParams((prev) => ({ ...prev, grooveWidth: rule.grooveWidth, grooveDepth: rule.grooveDepth, grooveOffset: rule.grooveOffset }));
+    }
+  }, [params.width, params.hasGroove, params.grooveKind, grooveRules, riscoWidth, riscoDepth]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Calibracao vinda do config (com fallback para defaults conservadores)
   // Calibracao pode vir como objeto ou como string (caso legado do bug JSONB
@@ -378,57 +439,48 @@ export default function OrcamentoClient({
     return raw.espessura_min ? raw : CALIBRACAO_DEFAULTS;
   }, [config?.calibracao]);
 
-  // Auto-ajusta espessura/altura do canal pra respeitar a espessura mínima
-  // obrigatória quando há pedras (anel 1)
+  // Auto-ajusta espessura, largura e fileiras em um único batch (anel 1)
+  // Evita cascata de re-renders
   useEffect(() => {
-    if (params.hasStones) {
-      const minT = computeMinThickness(params.stoneSize, calibracao);
-      if (profile === ProfileType.QuadradoCanal) {
-        if (params.canalBorderHeight < minT) updateParam("canalBorderHeight", minT);
-      } else if (params.height < minT) {
-        updateParam("height", minT);
-      }
-      // Auto-ajusta largura mínima também
-      const minW = computeMinWidth(params.stoneSize, profile, calibracao);
-      if (profile === ProfileType.QuadradoCanal) {
-        if (params.canalWidth < minW) updateParam("canalWidth", minW);
-      } else if (params.width < minW) {
-        updateParam("width", minW);
-      }
-    }
-  }, [params.hasStones, params.stoneSize, profile, calibracao]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Mesmo auto-ajuste para anel 2 (par)
-  useEffect(() => {
-    if (params2.hasStones) {
-      const minT = computeMinThickness(params2.stoneSize, calibracao);
-      if (profile2 === ProfileType.QuadradoCanal) {
-        if (params2.canalBorderHeight < minT) setParams2((p) => ({ ...p, canalBorderHeight: minT }));
-      } else if (params2.height < minT) {
-        setParams2((p) => ({ ...p, height: minT }));
-      }
-      const minW = computeMinWidth(params2.stoneSize, profile2, calibracao);
-      if (profile2 === ProfileType.QuadradoCanal) {
-        if (params2.canalWidth < minW) setParams2((p) => ({ ...p, canalWidth: minW }));
-      } else if (params2.width < minW) {
-        setParams2((p) => ({ ...p, width: minW }));
-      }
-    }
-  }, [params2.hasStones, params2.stoneSize, profile2, calibracao]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-ajusta fileiras máximas no QuadradoCanal quando muda pedra/canal
-  useEffect(() => {
-    if (params.hasStones && profile === ProfileType.QuadradoCanal) {
+    if (!params.hasStones) return;
+    const updates: Partial<RingParams> = {};
+    const minT = computeMinThickness(params.stoneSize, calibracao, params.stoneDrill);
+    const minW = computeMinWidth(params.stoneSize, profile, calibracao);
+    if (profile === ProfileType.QuadradoCanal) {
+      if (params.canalBorderHeight < minT) updates.canalBorderHeight = minT;
+      if (params.canalWidth < minW) updates.canalWidth = minW;
       const maxRows = computeMaxStoneRows(params.canalWidth, params.stoneSize, calibracao);
-      if (params.stoneRows > maxRows) updateParam("stoneRows", maxRows);
+      if (params.stoneRows > maxRows) updates.stoneRows = maxRows;
+    } else {
+      if (params.height < minT) updates.height = minT;
+      if (params.width < minW) updates.width = minW;
     }
-  }, [params.canalWidth, params.stoneSize, params.hasStones, profile, calibracao]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (Object.keys(updates).length > 0) {
+      setParams((prev) => ({ ...prev, ...updates }));
+    }
+  }, [params.hasStones, params.stoneSize, params.stoneDrill, profile, calibracao]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-ajusta anel 2 (par)
   useEffect(() => {
-    if (params2.hasStones && profile2 === ProfileType.QuadradoCanal) {
+    if (!params2.hasStones) return;
+    const updates: Partial<RingParams> = {};
+    const minT = computeMinThickness(params2.stoneSize, calibracao, params2.stoneDrill);
+    const minW = computeMinWidth(params2.stoneSize, profile2, calibracao);
+    if (profile2 === ProfileType.QuadradoCanal) {
+      if (params2.canalBorderHeight < minT) updates.canalBorderHeight = minT;
+      if (params2.canalWidth < minW) updates.canalWidth = minW;
       const maxRows = computeMaxStoneRows(params2.canalWidth, params2.stoneSize, calibracao);
-      if (params2.stoneRows > maxRows) setParams2((p) => ({ ...p, stoneRows: maxRows }));
+      if (params2.stoneRows > maxRows) updates.stoneRows = maxRows;
+    } else {
+      if (params2.height < minT) updates.height = minT;
+      if (params2.width < minW) updates.width = minW;
     }
-  }, [params2.canalWidth, params2.stoneSize, params2.hasStones, profile2, calibracao]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (Object.keys(updates).length > 0) {
+      setParams2((prev) => ({ ...prev, ...updates }));
+    }
+  }, [params2.hasStones, params2.stoneSize, params2.stoneDrill, profile2, calibracao]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fileiras anel 2 já ajustadas no batch acima
 
   const stoneCapacity = useMemo(
     () => params.hasStones ? computeStoneCapacity(params.diameter, params.height, params.canalBorderHeight, params.stoneSize, params.stoneRows, profile) : 0,
@@ -441,8 +493,8 @@ export default function OrcamentoClient({
 
   // ── Travas de validação (min espessura, min largura, max fileiras) ─────
   const minThickness = useMemo(
-    () => params.hasStones ? computeMinThickness(params.stoneSize, calibracao) : 0,
-    [params.stoneSize, params.hasStones, calibracao]
+    () => params.hasStones ? computeMinThickness(params.stoneSize, calibracao, params.stoneDrill) : 0,
+    [params.stoneSize, params.hasStones, params.stoneDrill, calibracao]
   );
   const minWidth = useMemo(
     () => params.hasStones ? computeMinWidth(params.stoneSize, profile, calibracao) : 0,
@@ -456,8 +508,8 @@ export default function OrcamentoClient({
   );
 
   const minThickness2 = useMemo(
-    () => params2.hasStones ? computeMinThickness(params2.stoneSize, calibracao) : 0,
-    [params2.stoneSize, params2.hasStones, calibracao]
+    () => params2.hasStones ? computeMinThickness(params2.stoneSize, calibracao, params2.stoneDrill) : 0,
+    [params2.stoneSize, params2.hasStones, params2.stoneDrill, calibracao]
   );
   const minWidth2 = useMemo(
     () => params2.hasStones ? computeMinWidth(params2.stoneSize, profile2, calibracao) : 0,
@@ -528,10 +580,20 @@ export default function OrcamentoClient({
     return radius * 8;
   }, [params2.diameter, params2.height, params2.width]);
 
+  // Gravação: primeiro nome incluso, adicionais cobram R$ precoGravacao cada
+  const gravacaoExtras = params.textEnabled ? textosExtras.filter(t => t.trim()).length : 0;
+  const gravacaoCost = gravacaoExtras * precoGravacao;
+  const gravacaoExtras2 = params2.textEnabled ? textosExtras2.filter(t => t.trim()).length : 0;
+  const gravacaoCost2 = allianceMode === "par" ? gravacaoExtras2 * precoGravacao : 0;
+
+  // Pedras: só cobra se hasStones ativo
+  const pedrasCost = params.hasStones ? stoneTotalRS : 0;
+  const pedrasCost2 = params2.hasStones ? stoneTotalRS2 : 0;
+
   // Totais do par
   const pricingTotal = allianceMode === "par"
-    ? { weight: pricing.weight + pricing2.weight, price: pricing.discountPrice + pricing2.discountPrice + stoneTotalRS + stoneTotalRS2 }
-    : { weight: pricing.weight, price: pricing.discountPrice + stoneTotalRS };
+    ? { weight: pricing.weight + pricing2.weight, price: pricing.discountPrice + pricing2.discountPrice + pedrasCost + pedrasCost2 + gravacaoCost + gravacaoCost2 }
+    : { weight: pricing.weight, price: pricing.discountPrice + pedrasCost + gravacaoCost };
 
   const handleSizeChange = (s: RingSize) => { setRingSize(s); updateParam("diameter", s.diameter); };
   const handleSizeChange2 = (s: RingSize) => { setRingSize2(s); setParams2(p => ({ ...p, diameter: s.diameter })); };
@@ -548,15 +610,46 @@ export default function OrcamentoClient({
   const resetEditor = () => {
     setEditingOrcId(null);
     setClientName(""); setClienteId(null);
-    setProfile((config?.profile as ProfileType) ?? ProfileType.Anatomica);
-    setRingSize(RING_SIZES[14]);
-    setParams({ ...DEFAULT_PARAMS, goldPrice: cotacaoOuro, startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0 });
-    setProfile2((config?.profile as ProfileType) ?? ProfileType.Anatomica);
-    setRingSize2(RING_SIZES[14]);
-    setParams2({ ...DEFAULT_PARAMS, goldPrice: cotacaoOuro, startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0 });
     setStoneEntries([]); setStoneEntries2([]);
     setActiveRing(1);
     setPecaPeso(5.0);
+    setTextosExtras([]); setTextosExtras2([]);
+
+    // Restaura últimos parâmetros do modelo usados (localStorage)
+    const baseParams = { ...DEFAULT_PARAMS, goldPrice: cotacaoOuro, startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0 };
+    let savedProfile = (config?.profile as ProfileType) ?? ProfileType.Anatomica;
+    let savedRingSize = RING_SIZES[14];
+    let restoredParams = baseParams;
+
+    try {
+      const saved = localStorage.getItem("orcamento_modelo_defaults");
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (d.profile && Object.values(ProfileType).includes(d.profile)) savedProfile = d.profile;
+        const sz = RING_SIZES.find(r => r.size === d.ringSize);
+        if (sz) savedRingSize = sz;
+        restoredParams = {
+          ...baseParams,
+          diameter: savedRingSize.diameter,
+          width: d.width ?? baseParams.width,
+          height: d.height ?? baseParams.height,
+          metalColor: d.metalColor ?? baseParams.metalColor,
+          goldDensity: d.goldDensity ?? baseParams.goldDensity,
+          concaveDepth: d.concaveDepth ?? baseParams.concaveDepth,
+          domePercentage: d.domePercentage ?? baseParams.domePercentage,
+          chamferSize: d.chamferSize ?? baseParams.chamferSize,
+          canalWidth: d.canalWidth ?? baseParams.canalWidth,
+          canalBorderHeight: d.canalBorderHeight ?? baseParams.canalBorderHeight,
+        };
+      }
+    } catch { /* localStorage indisponivel */ }
+
+    setProfile(savedProfile);
+    setRingSize(savedRingSize);
+    setParams(restoredParams);
+    setProfile2(savedProfile);
+    setRingSize2(savedRingSize);
+    setParams2(restoredParams);
   };
 
   function buildFicha(p: RingParams, pf: ProfileType, rs: RingSize, w: number, sc: number, entries: StoneEntry[]) {
@@ -569,8 +662,11 @@ export default function OrcamentoClient({
       texto: p.textEnabled && p.textContent.trim() ? p.textContent.trim() : null,
       qtd_pedras: p.hasStones ? sc : null, tamanho_pedra: p.hasStones ? p.stoneSize : null,
       tipo_aplicacao_pedra: p.hasStones ? (p.stoneFull ? "Volta Completa" : p.stoneHalfMoon ? "Meia Alianca" : "Pontual") : null,
-      profundidade_concava: p.concaveDepth, friso_lado: p.grooveSide,
-      friso_largura: p.grooveWidth, friso_profundidade: p.grooveDepth, friso_offset: p.grooveOffset,
+      profundidade_concava: p.concaveDepth,
+      has_friso: p.hasGroove, friso_kind: p.hasGroove ? p.grooveKind : null,
+      friso_tipo: p.hasGroove ? p.grooveType : null,
+      friso_lado: p.grooveSide, friso_largura: p.grooveWidth,
+      friso_profundidade: p.grooveDepth, friso_offset: p.grooveOffset,
       canal_largura: p.canalWidth, canal_borda_altura: p.canalBorderHeight,
       chanfro_tamanho: p.chamferSize, dome_porcentagem: p.domePercentage,
       pedra_fileiras: p.stoneRows, pedra_drill: p.stoneDrill,
@@ -592,14 +688,15 @@ export default function OrcamentoClient({
     try {
       const foto3d = capture3DScreenshot();
       const isPar = allianceMode === "par";
+      const grooveLabel = (p: RingParams) => p.hasGroove ? ` + Friso ${GROOVE_TYPE_OPTIONS.find(g => g.value === p.grooveType)?.label ?? ""}` : "";
       const nomeModelo = isPar
-        ? `Par: ${PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile} + ${PROFILE_OPTIONS.find((p) => p.id === profile2)?.label ?? profile2}`
-        : PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile;
+        ? `Par: ${PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile}${grooveLabel(params)} + ${PROFILE_OPTIONS.find((p) => p.id === profile2)?.label ?? profile2}${grooveLabel(params2)}`
+        : `${PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile}${grooveLabel(params)}`;
 
       // Valor total = ouro (ambas) + pedras preciosas (ambas)
       const valorTotal = isPar
-        ? pricing.discountPrice + pricing2.discountPrice + stoneTotalRS + stoneTotalRS2
-        : pricing.discountPrice + stoneTotalRS;
+        ? pricing.discountPrice + pricing2.discountPrice + pedrasCost + pedrasCost2 + gravacaoCost + gravacaoCost2
+        : pricing.discountPrice + pedrasCost + gravacaoCost;
 
       const body: Record<string, unknown> = {
         nome_cliente: clientName.trim(),
@@ -612,7 +709,7 @@ export default function OrcamentoClient({
         cotacao_ouro: params.goldPrice,
         cotacao_dolar: cotacaoDolar,
         valor_ouro: isPar ? pricing.discountPrice + pricing2.discountPrice : pricing.discountPrice,
-        valor_pedras: isPar ? stoneTotalRS + stoneTotalRS2 : stoneTotalRS,
+        valor_pedras: isPar ? pedrasCost + pedrasCost2 : pedrasCost,
         tipo: "alianca",
         quantidade: isPar ? 2 : 1,
         foto_3d_base64: foto3d,
@@ -648,6 +745,9 @@ export default function OrcamentoClient({
           groove_rules: grooveRules,
           stone_markup: stoneMarkupLocal,
           stone_prices: stonePricesLocal,
+          risco_width: riscoWidth,
+          risco_depth: riscoDepth,
+          preco_gravacao: precoGravacao,
         }),
       });
       if (!res.ok) throw new Error();
@@ -818,7 +918,14 @@ export default function OrcamentoClient({
                           if (orc.tipo === "alianca") {
                             setOrcamentoTipo("alianca");
                             setAllianceMode(orc.quantidade === 2 ? "par" : "unidade");
-                            if (orc.perfil) setProfile(orc.perfil as ProfileType);
+                            // Mapear perfis legados FrisoUnico/FrisoLateral
+                            if (orc.perfil === "FrisoUnico") {
+                              setProfile(ProfileType.Simples);
+                            } else if (orc.perfil === "FrisoLateral") {
+                              setProfile(ProfileType.Simples);
+                            } else if (orc.perfil) {
+                              setProfile(orc.perfil as ProfileType);
+                            }
                             // Aro
                             const aroNum = orc.aro_numeracao ? Number(String(orc.aro_numeracao).replace("Aro ", "")) : null;
                             const aroSize = aroNum ? RING_SIZES.find(r => r.size === aroNum) : null;
@@ -828,6 +935,12 @@ export default function OrcamentoClient({
                             const metalHex = metalMatch?.value ?? "#FFD700";
                             const metalDensity = metalMatch?.density ?? 14.69;
                             // Setar todos os params de uma vez
+                            // Groove — carregar do DB ou inferir de perfis legados
+                            const hasGrooveLoaded = orc.perfil === "FrisoUnico" || orc.perfil === "FrisoLateral" || !!orc.has_friso;
+                            const grooveKindLoaded = (orc.friso_kind || "friso") as "friso" | "risco";
+                            const grooveTypeLoaded = orc.perfil === "FrisoLateral" ? "duplo" as const
+                              : orc.perfil === "FrisoUnico" ? "lateral" as const
+                              : (orc.friso_tipo || "lateral") as "lateral" | "centro" | "duplo";
                             setParams(p => ({
                               ...p,
                               diameter: aroSize?.diameter ?? p.diameter,
@@ -836,6 +949,9 @@ export default function OrcamentoClient({
                               metalColor: metalHex,
                               goldDensity: metalDensity,
                               concaveDepth: orc.profundidade_concava ? Number(orc.profundidade_concava) : p.concaveDepth,
+                              hasGroove: hasGrooveLoaded,
+                              grooveKind: grooveKindLoaded,
+                              grooveType: grooveTypeLoaded,
                               grooveWidth: orc.friso_largura ? Number(orc.friso_largura) : p.grooveWidth,
                               grooveDepth: orc.friso_profundidade ? Number(orc.friso_profundidade) : p.grooveDepth,
                               grooveOffset: orc.friso_offset ? Number(orc.friso_offset) : p.grooveOffset,
@@ -987,7 +1103,7 @@ export default function OrcamentoClient({
   // MODO: PEÇA PERSONALIZADA
   // ═══════════════════════════════════════════════════════════════════════════
   if (orcamentoTipo === "peca") {
-    const pecaTotal = pecaPricing.discountPrice + stoneTotalRS;
+    const pecaTotal = pecaPricing.discountPrice + (stoneEntries.length > 0 ? stoneTotalRS : 0);
     return (
       <div className="min-h-screen" style={{ backgroundColor: C.cremeBg }}>
         <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
@@ -1125,7 +1241,8 @@ export default function OrcamentoClient({
               <Pill label="Cat." value={pecaPricing.category} />
               <Pill label="Mkp" value={`${pecaPricing.mkp.toFixed(2)}x`} />
               <Pill label="Ouro" value={`R$${pecaPricing.discountPrice.toFixed(0)}`} />
-              {stoneTotalRS > 0 && <Pill label="Pedras" value={`R$${stoneTotalRS.toFixed(0)}`} />}
+              {pedrasCost > 0 && <Pill label="Pedras" value={`R$${pedrasCost.toFixed(0)}`} />}
+              {gravacaoCost > 0 && <Pill label="Gravacao" value={`R$${gravacaoCost.toFixed(0)}`} />}
               <div className="text-right">
                 <p className="text-[9px] uppercase tracking-wider" style={{ color: C.gold }}>Preco Final</p>
                 <p className="text-2xl font-black" style={{ color: C.esmeralda }}>
@@ -1191,17 +1308,7 @@ export default function OrcamentoClient({
                 className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none" style={{ borderColor: C.cremeBorder }} />
               <p className="text-[10px] text-gray-400 mt-1">Ex: 3.5 = preço do ouro × 3.5</p>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Markup pedras (multiplicador)</label>
-              <input type="number" min={1} step={0.1} value={stoneMarkup}
-                onChange={e => {
-                  const v = parseFloat(e.target.value) || 1;
-                  // Atualizar stone_markup no config local (será salvo junto)
-                  setStoneMarkupLocal(v);
-                }}
-                className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none" style={{ borderColor: C.cremeBorder }} />
-              <p className="text-[10px] text-gray-400 mt-1">Ex: 2.5 = custo pedra × 2.5</p>
-            </div>
+            {/* Markup pedras removido — precificação feita pelo simulador por pedra */}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Desconto padrão (%)</label>
               <input type="number" min={0} max={50} step={1} value={params.discountPercent}
@@ -1209,29 +1316,50 @@ export default function OrcamentoClient({
                 className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none" style={{ borderColor: C.cremeBorder }} />
               <p className="text-[10px] text-gray-400 mt-1">Desconto padrão aplicado no orçamento</p>
             </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Curvatura padrão (%)</label>
+              <input type="number" min={0} max={100} step={5} value={params.domePercentage}
+                onChange={e => setParams(p => ({ ...p, domePercentage: parseInt(e.target.value) || 100 }))}
+                className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none" style={{ borderColor: C.cremeBorder }} />
+              <p className="text-[10px] text-gray-400 mt-1">Curvatura dos perfis Anatomica, Boleada e Boleada Dupla</p>
+            </div>
           </div>
         </div>
         {/* Faixas */}
+        {(() => {
+          const catCalc = computeCalculatedCategories(params.startMkp, pricingCategories, 0).calc;
+          return (
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
-          <h3 className="text-sm font-bold text-gray-800">Faixas de preco</h3>
+          <h3 className="text-sm font-bold text-gray-800">Faixas de preco do ouro</h3>
+          <p className="text-[10px] text-gray-400">Markup base: <strong>{params.startMkp}×</strong> · Ouro: <strong>R$ {cotacaoOuro.toFixed(2)}/g</strong></p>
           <table className="w-full text-sm">
             <thead><tr className="border-b" style={{ borderColor: C.cremeBorder }}>
               <th className="text-left py-2 text-xs text-gray-500">Nome</th>
               <th className="text-left py-2 text-xs text-gray-500">Peso max</th>
               <th className="text-left py-2 text-xs text-gray-500">Variacao</th>
+              <th className="text-right py-2 text-xs text-gray-500">Mkp</th>
+              <th className="text-right py-2 text-xs text-gray-500">R$/g</th>
               <th className="w-8"></th>
             </tr></thead>
-            <tbody>{pricingCategories.map((cat, i) => (
+            <tbody>{pricingCategories.map((cat, i) => {
+              const mkpFaixa = catCalc[i]?.targetMkp ?? params.startMkp;
+              const valorGrama = cotacaoOuro * mkpFaixa;
+              return (
               <tr key={cat.id} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
                 <td className="py-2 pr-2"><input type="text" value={cat.name} onChange={(e) => { const u = [...pricingCategories]; u[i] = { ...u[i], name: e.target.value }; setPricingCategories(u); }} className="w-full px-2 py-1 text-sm rounded border outline-none" style={{ borderColor: C.cremeBorder }} /></td>
                 <td className="py-2 pr-2"><input type="number" value={cat.maxWeight} step={0.5} onChange={(e) => { const u = [...pricingCategories]; u[i] = { ...u[i], maxWeight: parseFloat(e.target.value) || 0 }; setPricingCategories(u); }} className="w-24 px-2 py-1 text-sm rounded border outline-none" style={{ borderColor: C.cremeBorder }} /></td>
                 <td className="py-2 pr-2"><input type="number" value={cat.variation} step={0.1} onChange={(e) => { const u = [...pricingCategories]; u[i] = { ...u[i], variation: parseFloat(e.target.value) || 0 }; setPricingCategories(u); }} className="w-20 px-2 py-1 text-sm rounded border outline-none" style={{ borderColor: C.cremeBorder }} /></td>
+                <td className="py-2 pr-2 text-right font-mono text-[11px] font-bold" style={{ color: C.esmeralda }}>{mkpFaixa.toFixed(1)}×</td>
+                <td className="py-2 pr-2 text-right font-mono text-[11px] font-bold" style={{ color: C.esmeralda }}>R$ {valorGrama.toFixed(2).replace(".", ",")}</td>
                 <td><button onClick={() => setPricingCategories(pricingCategories.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 text-xs">X</button></td>
               </tr>
-            ))}</tbody>
+              );
+            })}</tbody>
           </table>
           <button onClick={() => setPricingCategories([...pricingCategories, { id: Date.now(), name: "Nova", maxWeight: 10, variation: 0.5, color: "text-slate-600" }])} className="text-xs font-semibold px-3 py-1.5 rounded-lg border" style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>+ Faixa</button>
         </div>
+          );
+        })()}
         {/* Regras friso */}
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
           <h3 className="text-sm font-bold text-gray-800">Regras de friso</h3>
@@ -1240,7 +1368,7 @@ export default function OrcamentoClient({
               <th className="text-left py-2 text-xs text-gray-500">Larg. anel</th>
               <th className="text-left py-2 text-xs text-gray-500">Larg. friso</th>
               <th className="text-left py-2 text-xs text-gray-500">Prof.</th>
-              <th className="text-left py-2 text-xs text-gray-500">Offset</th>
+              <th className="text-left py-2 text-xs text-gray-500">Dist. borda</th>
               <th className="w-8"></th>
             </tr></thead>
             <tbody>{grooveRules.map((rule, i) => (
@@ -1254,88 +1382,327 @@ export default function OrcamentoClient({
           </table>
           <button onClick={() => setGrooveRules([...grooveRules, { id: Date.now(), ringWidth: 6, grooveWidth: 1, grooveDepth: 0.3, grooveOffset: 1 }])} className="text-xs font-semibold px-3 py-1.5 rounded-lg border" style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>+ Regra</button>
         </div>
-        {/* Precos de Pedras (USD/ct) */}
+        {/* Padrão Risco */}
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-gray-800">Precos de Pedras (USD/ct)</h3>
-            <button
-              onClick={() => setStonePricesLocal([...DEFAULT_STONE_PRICES])}
-              className="text-[10px] font-semibold px-2 py-1 rounded border"
-              style={{ borderColor: C.cremeBorder, color: "#6b7280" }}
-              title="Restaurar valores padrao de mercado"
-            >
-              <RotateCcw size={10} className="inline mr-1" /> Padrao
-            </button>
-          </div>
-          <p className="text-[11px] text-gray-500">
-            Preco base por quilate em dolar. Formula: <span className="font-mono">ct × USD/ct × cotacao_dolar × markup_pedras</span>.
-            Cotacao atual: <strong>R$ {cotacaoDolar.toFixed(2)}</strong> · Markup pedras: <strong>{stoneMarkup.toFixed(1)}×</strong>
-          </p>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b" style={{ borderColor: C.cremeBorder }}>
-                <th className="text-left py-2 text-xs text-gray-500">Pedra</th>
-                <th className="text-right py-2 text-xs text-gray-500">USD/ct</th>
-                <th className="text-right py-2 text-xs text-gray-500">Exemplo 1,5mm (0,015ct)</th>
-                <th className="text-right py-2 text-xs text-gray-500">Exemplo 3mm (0,10ct)</th>
-                <th className="text-center py-2 text-xs text-gray-500">Cobra?</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stonePricesLocal.map((sp, i) => {
-                const meta = STONE_TYPES.find((t) => t.value === sp.tipo);
-                const precioExemplo15 = 0.015 * sp.preco_usd_ct * cotacaoDolar * stoneMarkup;
-                const precioExemplo30 = 0.10  * sp.preco_usd_ct * cotacaoDolar * stoneMarkup;
-                return (
-                  <tr key={sp.tipo} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
-                    <td className="py-2 pr-2">
-                      <div className="flex items-center gap-1">
-                        <span className="font-medium">{meta?.label ?? sp.tipo}</span>
-                        {!meta?.is_preciosa && <span className="text-[9px] text-gray-400 italic">(nao preciosa)</span>}
-                      </div>
-                    </td>
-                    <td className="py-2 pr-2 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <span className="text-[11px] text-gray-400">$</span>
-                        <input
-                          type="number"
-                          min={0}
-                          step={10}
-                          value={sp.preco_usd_ct}
-                          disabled={!meta?.is_preciosa}
-                          onChange={(e) => {
-                            const v = parseFloat(e.target.value) || 0;
-                            const updated = [...stonePricesLocal];
-                            updated[i] = { ...updated[i], preco_usd_ct: v };
-                            setStonePricesLocal(updated);
-                          }}
-                          className="w-24 px-2 py-1 text-sm rounded border outline-none text-right font-mono disabled:bg-gray-50 disabled:text-gray-400"
-                          style={{ borderColor: C.cremeBorder }}
-                        />
-                      </div>
-                    </td>
-                    <td className="py-2 pr-2 text-right font-mono text-[11px] text-gray-600">
-                      {meta?.is_preciosa ? `R$ ${precioExemplo15.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-                    </td>
-                    <td className="py-2 pr-2 text-right font-mono text-[11px] text-gray-600">
-                      {meta?.is_preciosa ? `R$ ${precioExemplo30.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-                    </td>
-                    <td className="py-2 text-center">
-                      {meta?.is_preciosa
-                        ? <span className="text-[10px] text-emerald-600 font-semibold">SIM</span>
-                        : <span className="text-[10px] text-gray-400">não</span>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <div className="text-[10px] text-gray-400 space-y-0.5 border-t pt-2" style={{ borderColor: C.cremeBorder }}>
-            <p><strong>USD/ct</strong> = preco de 1 quilate (0,2g) da pedra em dolar, no atacado.</p>
-            <p><strong>Referencia mercado 2025:</strong> Diamante melee 1-3mm: $500-800 · Moissanita: $50-150 · Rubi comercial: $200-600 · Esmeralda comercial: $300-1200 · Safira azul: $200-800</p>
-            <p><strong>Zirconia</strong> tem USD/ct travado em $0 (nao cobra, so o ouro).</p>
+          <h3 className="text-sm font-bold text-gray-800">Padrao do Risco</h3>
+          <p className="text-[11px] text-gray-500">Valores padrao aplicados ao selecionar &quot;Risco&quot; no editor de alianca.</p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Largura (mm)</label>
+              <input type="number" min={0.01} step={0.01} value={riscoWidth}
+                onChange={e => setRiscoWidth(parseFloat(e.target.value) || 0.1)}
+                className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none font-mono" style={{ borderColor: C.cremeBorder }} />
+              <p className="text-[10px] text-gray-400 mt-1">Padrao: 0.10mm (linha fina)</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Profundidade (mm)</label>
+              <input type="number" min={0.05} step={0.05} value={riscoDepth}
+                onChange={e => setRiscoDepth(parseFloat(e.target.value) || 0.2)}
+                className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none font-mono" style={{ borderColor: C.cremeBorder }} />
+              <p className="text-[10px] text-gray-400 mt-1">Padrao: 0.20mm</p>
+            </div>
           </div>
         </div>
+        {/* Gravação */}
+        <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
+          <h3 className="text-sm font-bold text-gray-800">Gravacao (nome/data)</h3>
+          <p className="text-[11px] text-gray-500">Valor cobrado por alianca que tiver gravacao interna (nome ou data).</p>
+          <div className="w-48">
+            <label className="block text-xs font-medium text-gray-500 mb-1">Preco gravacao (R$)</label>
+            <input type="number" min={0} step={10} value={precoGravacao}
+              onChange={e => setPrecoGravacao(parseFloat(e.target.value) || 0)}
+              className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none font-mono" style={{ borderColor: C.cremeBorder }} />
+            <p className="text-[10px] text-gray-400 mt-1">Padrao: R$ 100,00</p>
+          </div>
+        </div>
+        {/* Simulador e Editor de Precos de Pedras */}
+        {(() => {
+          const sp = stonePricesLocal[simPedra];
+          const isZirc = sp?.tipo === "zirconia";
+          const STONE_CT: Array<{ mm: number; ct: number }> = STONE_CT_TABLE;
+          const fmtCusto = (v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          const fmtVenda = (v: number) => `R$ ${Math.ceil(v).toLocaleString("pt-BR")}`;
+
+          return (
+          <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-gray-800">Simulador e Editor de Pedras</h3>
+              <button onClick={() => setStonePricesLocal([...DEFAULT_STONE_PRICES])}
+                className="text-[10px] font-semibold px-2 py-1 rounded border" style={{ borderColor: C.cremeBorder, color: "#6b7280" }}>
+                <RotateCcw size={10} className="inline mr-1" /> Padrao
+              </button>
+            </div>
+
+            {/* Linha de controles */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Pedra</label>
+                <select value={simPedra} onChange={(e) => {
+                    const idx = Number(e.target.value);
+                    setSimPedra(idx);
+                    // Carregar markups salvos dessa pedra
+                    const tipo = stonePricesLocal[idx]?.tipo;
+                    const saved = allStoneMarkups[tipo ?? ""];
+                    if (saved) {
+                      setRowMarkups(Object.fromEntries(Object.entries(saved).map(([k, v]) => [Number(k), v])));
+                    } else {
+                      setRowMarkups({});
+                    }
+                  }}
+                  className="w-full px-2 py-2 text-sm rounded-lg border outline-none bg-white" style={{ borderColor: C.cremeBorder }}>
+                  {stonePricesLocal.map((s, i) => (
+                    <option key={s.tipo} value={i}>{STONE_TYPES.find(t => t.value === s.tipo)?.label ?? s.tipo}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">{isZirc ? "Preco (R$/un)" : "Custo ($)"}</label>
+                <input type="number" min={0} step={isZirc ? 1 : 10}
+                  value={isZirc ? (sp.preco_rs_un ?? 0) : sp.preco_usd_ct}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value) || 0;
+                    const updated = [...stonePricesLocal];
+                    if (isZirc) updated[simPedra] = { ...updated[simPedra], preco_rs_un: v };
+                    else updated[simPedra] = { ...updated[simPedra], preco_usd_ct: v };
+                    setStonePricesLocal(updated);
+                  }}
+                  className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono" style={{ borderColor: C.cremeBorder }} />
+              </div>
+              {!isZirc && (<>
+                <div>
+                  <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Dolar (R$)</label>
+                  <input type="number" disabled value={cotacaoDolar.toFixed(2)}
+                    className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono bg-gray-50 text-gray-400" style={{ borderColor: C.cremeBorder }} />
+                </div>
+              <div>
+                <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Mkp 1mm</label>
+                <input type="number" min={1} step={0.1} value={mkpInicial}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (!isNaN(v) && v >= 1) {
+                      setMkpInicial(v);
+                      const final = Math.max(1, v - mkpDecremento * (STONE_CT_TABLE.length - 1));
+                      setMkpFinal(Math.round(final * 10) / 10);
+                      const newMkps: Record<number, number> = {};
+                      STONE_CT_TABLE.forEach((_, idx) => { newMkps[idx] = Math.round(Math.max(1, v - idx * mkpDecremento) * 10) / 10; });
+                      setRowMarkups(newMkps);
+                    }
+                  }}
+                  className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono" style={{ borderColor: C.cremeBorder }} />
+              </div>
+              <div>
+                <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Decremento</label>
+                <input type="number" min={0} step={0.1} value={mkpDecremento}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (!isNaN(v) && v >= 0) {
+                      setMkpDecremento(v);
+                      // Decrementa a partir do inicial, clampado entre final e inicial
+                      // Inicial e final NÃO mudam
+                      const newMkps: Record<number, number> = {};
+                      const lastIdx = STONE_CT_TABLE.length - 1;
+                      STONE_CT_TABLE.forEach((_, idx) => {
+                        if (idx === 0) { newMkps[idx] = mkpInicial; return; }
+                        if (idx === lastIdx) { newMkps[idx] = mkpFinal; return; }
+                        const val = Math.max(mkpFinal, Math.min(mkpInicial, mkpInicial - idx * v));
+                        newMkps[idx] = Math.round(val * 10) / 10;
+                      });
+                      setRowMarkups(newMkps);
+                    }
+                  }}
+                  className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono" style={{ borderColor: C.cremeBorder }} />
+              </div>
+              <div>
+                <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Mkp 2.5mm</label>
+                <input type="number" min={1} step={0.1} value={mkpFinal}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (!isNaN(v) && v >= 1) {
+                      setMkpFinal(v);
+                      const steps = STONE_CT_TABLE.length - 1;
+                      const dec = steps > 0 ? Math.round((mkpInicial - v) / steps * 10) / 10 : 0;
+                      setMkpDecremento(dec);
+                      const newMkps: Record<number, number> = {};
+                      STONE_CT_TABLE.forEach((_, idx) => { newMkps[idx] = Math.round(Math.max(1, mkpInicial - idx * dec) * 10) / 10; });
+                      setRowMarkups(newMkps);
+                    }
+                  }}
+                  className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono" style={{ borderColor: C.cremeBorder }} />
+              </div>
+              </>)}
+            </div>
+
+            {/* Zircônia: preço fixo, sem tabela */}
+            {isZirc && (
+              <div className="border rounded-lg p-4 space-y-2" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                <p className="text-[11px] text-gray-500">Zirconia tem preco unico por unidade, independente do tamanho.</p>
+                <div className="flex items-center gap-3">
+                  <label className="text-[10px] text-gray-500 font-semibold">Preco por unidade (R$):</label>
+                  <input type="number" min={0} step={1} value={sp.preco_rs_un ?? 0}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value) || 0;
+                      const updated = [...stonePricesLocal];
+                      updated[simPedra] = { ...updated[simPedra], preco_rs_un: v };
+                      setStonePricesLocal(updated);
+                    }}
+                    className="w-28 px-2 py-1.5 text-sm rounded-lg border outline-none font-mono" style={{ borderColor: C.cremeBorder }} />
+                  <span className="text-[11px] font-bold" style={{ color: C.esmeralda }}>R$ {(sp.preco_rs_un ?? 0).toFixed(0)}/un</span>
+                </div>
+              </div>
+            )}
+
+            {/* Tabela de prévia por tamanho (não zircônia) */}
+            {!isZirc && (
+            <div className="border rounded-lg overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+              <div className="flex items-center justify-between px-3 py-2" style={{ backgroundColor: C.cremeBg }}>
+                <h4 className="text-[10px] font-bold uppercase text-gray-500">Previa por tamanho</h4>
+              </div>
+              <div className="max-h-[280px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b" style={{ borderColor: C.cremeBorder, backgroundColor: "#FAFAF7" }}>
+                      <th className="text-left px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Tam</th>
+                      <th className="text-left px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Peso</th>
+                      <th className="text-right px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Custo (R$)</th>
+                      <th className="text-right px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Markup</th>
+                      <th className="text-right px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Venda (R$)</th>
+                      <th className="text-right px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Lucro (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {STONE_CT.map((row, rowIdx) => {
+                      const steps = STONE_CT_TABLE.length - 1;
+                      const autoDecr = steps > 0 ? (mkpInicial - mkpFinal) / steps : 0;
+                      const rowMkp = rowMarkups[rowIdx] ?? Math.round((mkpInicial - rowIdx * autoDecr) * 10) / 10;
+                      const custoRS = row.ct * sp.preco_usd_ct * cotacaoDolar;
+                      const vendaRS = custoRS * rowMkp;
+                      const lucro = custoRS > 0 ? ((vendaRS - custoRS) / vendaRS * 100) : 0;
+                      return (
+                        <tr key={row.mm} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                          <td className="px-3 py-1.5 font-mono font-bold text-[11px]">{row.mm}mm</td>
+                          <td className="px-3 py-1.5 text-[11px] text-gray-500">{row.ct.toFixed(3)} ct</td>
+                          <td className="px-3 py-1.5 text-right font-mono text-[11px] text-gray-500">{fmtCusto(custoRS)}</td>
+                          <td className="px-1 py-0.5 text-right">
+                            <input type="number" min={1} step={0.1} value={rowMkp}
+                              onChange={(e) => {
+                                const v = parseFloat(e.target.value);
+                                if (!isNaN(v) && v >= 1) {
+                                  setRowMarkups(prev => {
+                                    const next = { ...prev, [rowIdx]: Math.round(v * 10) / 10 };
+                                    // Pedra menor nunca mais barata: mkp anterior >= atual
+                                    for (let i = rowIdx - 1; i >= 0; i--) {
+                                      const autoVal = Math.round((mkpInicial - i * autoDecr) * 10) / 10;
+                                      const cur = next[i] ?? autoVal;
+                                      if (cur < v) next[i] = Math.round(v * 10) / 10;
+                                      else break;
+                                    }
+                                    // Pedra maior nunca mais cara: mkp seguinte <= atual
+                                    for (let i = rowIdx + 1; i < STONE_CT_TABLE.length; i++) {
+                                      const autoVal = Math.round((mkpInicial - i * autoDecr) * 10) / 10;
+                                      const cur = next[i] ?? autoVal;
+                                      if (cur > v) next[i] = Math.round(v * 10) / 10;
+                                      else break;
+                                    }
+                                    return next;
+                                  });
+                                }
+                              }}
+                              className="w-14 px-1 py-0.5 text-[11px] font-mono border rounded text-right outline-none"
+                              style={{ borderColor: C.cremeBorder, color: C.esmeralda }} />
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono text-[11px] font-bold" style={{ color: C.esmeralda }}>{fmtVenda(vendaRS)}</td>
+                          <td className="px-3 py-1.5 text-right font-mono text-[11px]" style={{ color: lucro >= 50 ? "#059669" : "#DC2626" }}>{lucro.toFixed(0)}%</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            )}
+
+            {/* Salvar tabela desta pedra */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={async () => {
+                  const tipo = sp?.tipo;
+                  if (!tipo) return;
+                  const updated = { ...allStoneMarkups, [tipo]: { ...rowMarkups } };
+                  setAllStoneMarkups(updated);
+                  try {
+                    const res = await fetch("/api/orcamento/config", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ stone_markups_table: updated, stone_prices: stonePricesLocal }),
+                    });
+                    if (!res.ok) throw new Error();
+                    setConfigMsg(`Tabela ${STONE_TYPES.find(t => t.value === tipo)?.label ?? tipo} salva!`);
+                    setTimeout(() => setConfigMsg(null), 3000);
+                  } catch {
+                    setConfigMsg("Erro ao salvar tabela");
+                  }
+                }}
+                className="flex-1 py-2 text-xs font-bold rounded-lg text-white transition-colors"
+                style={{ backgroundColor: C.esmeralda }}
+              >
+                Salvar Tabela — {STONE_TYPES.find(t => t.value === sp?.tipo)?.label ?? ""}
+              </button>
+              {configMsg && <span className="text-xs font-semibold text-emerald-600">{configMsg}</span>}
+            </div>
+          </div>
+          );
+        })()}
+
+        {/* Tabelas salvas por pedra (expansíveis) */}
+        {Object.keys(allStoneMarkups).length > 0 && (
+          <div className="bg-white rounded-xl border p-5 space-y-2" style={{ borderColor: C.cremeBorder }}>
+            <h3 className="text-sm font-bold text-gray-800">Tabelas Salvas</h3>
+            <p className="text-[10px] text-gray-400">Clique para expandir e ver os markups salvos de cada pedra.</p>
+            {STONE_TYPES.map((st) => {
+              const saved = allStoneMarkups[st.value];
+              if (!saved || Object.keys(saved).length === 0 || st.value === "zirconia") return null;
+              const spRow = stonePricesLocal.find(s => s.tipo === st.value);
+              return (
+                <details key={st.value} className="border rounded-lg" style={{ borderColor: C.cremeBorder }}>
+                  <summary className="px-3 py-2 cursor-pointer text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center justify-between">
+                    <span>{st.label}</span>
+                    <span className="text-[10px] text-gray-400 font-mono">
+                      ${spRow?.preco_usd_ct ?? 0}/ct · {Object.keys(saved).length} tamanhos
+                    </span>
+                  </summary>
+                  <div className="px-3 pb-2">
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="border-b" style={{ borderColor: C.cremeBorder }}>
+                          <th className="text-left py-1 text-gray-400">Tam</th>
+                          <th className="text-right py-1 text-gray-400">Mkp</th>
+                          <th className="text-right py-1 text-gray-400">Custo</th>
+                          <th className="text-right py-1 text-gray-400">Venda</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {STONE_CT_TABLE.map((row, idx) => {
+                          const mkp = saved[String(idx)];
+                          if (mkp == null) return null;
+                          const custo = row.ct * (spRow?.preco_usd_ct ?? 0) * cotacaoDolar;
+                          const venda = custo * mkp;
+                          return (
+                            <tr key={idx} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                              <td className="py-0.5 font-mono">{row.mm}mm</td>
+                              <td className="py-0.5 text-right font-mono" style={{ color: C.esmeralda }}>{mkp.toFixed(1)}</td>
+                              <td className="py-0.5 text-right font-mono text-gray-400">R$ {custo.toFixed(2).replace(".", ",")}</td>
+                              <td className="py-0.5 text-right font-mono font-bold" style={{ color: C.esmeralda }}>R$ {Math.ceil(venda)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+        )}
 
         <div className="flex items-center gap-3">
           <button onClick={handleSaveConfig} disabled={isSavingConfig} className="flex items-center gap-1.5 px-5 py-2 text-xs font-bold rounded-lg text-white disabled:opacity-50" style={{ background: C.esmeralda }}>
@@ -1431,7 +1798,7 @@ export default function OrcamentoClient({
       <div style={{ display: "flex", gap: "12px", height: "calc(100vh - 130px)", overflow: "hidden" }}>
 
         {/* ── Painel de controles (ESQUERDA — 320px fixo, scroll) ─────── */}
-        <div style={{ width: "320px", minWidth: "320px", overflowY: "auto", scrollbarWidth: "thin" }} className="space-y-2 pr-1">
+        <div style={{ width: "300px", minWidth: "300px", overflowY: "hidden" }} className="space-y-1">
 
           {/* Tabs Aliança 1 / Aliança 2 (quando par) */}
           {allianceMode === "par" && (
@@ -1450,112 +1817,277 @@ export default function OrcamentoClient({
             </div>
           )}
 
-          {/* Perfil */}
-          <Card title="Perfil">
-            <div className="grid grid-cols-3 gap-1.5">
+          {/* ── Perfil + Medidas + Metal (compacto, sem scroll) ── */}
+          <div className="bg-white rounded-lg border px-2 py-1.5 space-y-1" style={{ borderColor: C.cremeBorder }}>
+            {/* Perfil — grid 4 colunas */}
+            <h3 className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Perfil</h3>
+            <div className="grid grid-cols-4 gap-0.5">
               {PROFILE_OPTIONS.map((p) => (
                 <button key={p.id} onClick={() => (activeRing === 1 ? setProfile : setProfile2)(p.id)}
-                  className="py-2 text-[10px] font-semibold rounded-lg border transition-all text-center"
+                  className="py-0.5 text-[8px] font-semibold rounded border transition-all text-center leading-tight"
                   style={(activeRing === 1 ? profile : profile2) === p.id
                     ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
                     : { backgroundColor: "#fff", color: "#6b7280", borderColor: C.cremeBorder }
                   }>{p.label}</button>
               ))}
             </div>
-          </Card>
 
-          {/* Aro + Dimensoes */}
-          <Card title="Medidas">
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-gray-500 w-[90px] shrink-0">Aro</span>
-                <div className="relative flex-1">
-                  <select value={(activeRing === 1 ? ringSize : ringSize2).size}
-                    onChange={(e) => { const s = RING_SIZES.find((r) => r.size === Number(e.target.value)); if (s) (activeRing === 1 ? handleSizeChange : handleSizeChange2)(s); }}
-                    className="w-full appearance-none pl-3 pr-7 py-1.5 text-[11px] rounded-lg border bg-white text-gray-700 outline-none"
-                    style={{ borderColor: C.cremeBorder }}>
-                    {RING_SIZES.map((s) => <option key={s.size} value={s.size}>Aro {s.size} — {s.diameter.toFixed(2)}mm</option>)}
-                  </select>
-                  <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                </div>
+            {/* Medidas — grid de campos numéricos */}
+            <h3 className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Medidas</h3>
+            <div className="grid grid-cols-3 gap-1">
+              <div>
+                <label className="text-[8px] text-gray-400 block">Aro</label>
+                <select value={(activeRing === 1 ? ringSize : ringSize2).size}
+                  onChange={(e) => { const s = RING_SIZES.find((r) => r.size === Number(e.target.value)); if (s) (activeRing === 1 ? handleSizeChange : handleSizeChange2)(s); }}
+                  className="w-full appearance-none px-2 py-1.5 text-[10px] rounded-md border bg-white text-gray-700 outline-none"
+                  style={{ borderColor: C.cremeBorder }}>
+                  {RING_SIZES.map((s) => <option key={s.size} value={s.size}>{s.size}</option>)}
+                </select>
               </div>
-              <Slider
-                label="Largura"
-                value={activeParams.width}
-                min={activeParams.hasStones && activeProfile !== ProfileType.QuadradoCanal ? (activeRing === 1 ? minWidth : minWidth2) : 1}
-                max={15}
-                step={0.5}
-                unit="mm"
-                onChange={(v) => updateParam("width", v)}
-              />
-              <Slider
-                label="Espessura"
-                value={activeParams.height}
-                min={activeParams.hasStones && activeProfile !== ProfileType.QuadradoCanal ? (activeRing === 1 ? minThickness : minThickness2) : 0.5}
-                max={4}
-                step={0.1}
-                unit="mm"
-                onChange={(v) => updateParam("height", v)}
-              />
-              {activeParams.hasStones && activeProfile !== ProfileType.QuadradoCanal && (
-                <p className="text-[9px] text-gray-400 -mt-1 ml-[90px]">
-                  Mín. p/ pedra {activeParams.stoneSize}mm: L ≥ {(activeRing === 1 ? minWidth : minWidth2).toFixed(1)}mm, E ≥ {(activeRing === 1 ? minThickness : minThickness2).toFixed(1)}mm
-                </p>
+              {(() => {
+                const mnW = activeParams.hasStones && activeProfile !== ProfileType.QuadradoCanal ? (activeRing === 1 ? minWidth : minWidth2) : 1;
+                const mnH = activeParams.hasStones && activeProfile !== ProfileType.QuadradoCanal ? (activeRing === 1 ? minThickness : minThickness2) : 0.5;
+                return (<>
+              <div>
+                <label className="text-[8px] text-gray-400 block">
+                  Largura (mm){mnW > 1 && <span className="text-red-400 ml-1">min {mnW.toFixed(1)}</span>}
+                </label>
+                <input type="number" step={0.5} min={mnW} max={15}
+                  value={activeParams.width}
+                  onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateParam("width", Math.max(v, mnW)); }}
+                  onBlur={() => { if (activeParams.width < mnW) updateParam("width", mnW); }}
+                  className="w-full px-1.5 py-1 text-[9px] font-mono border rounded outline-none"
+                  style={{ borderColor: C.cremeBorder }} />
+              </div>
+              <div>
+                <label className="text-[8px] text-gray-400 block">
+                  Espessura (mm){mnH > 0.5 && <span className="text-red-400 ml-1">min {mnH.toFixed(1)}</span>}
+                </label>
+                <input type="number" step={0.1} min={mnH} max={4}
+                  value={activeParams.height}
+                  onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateParam("height", Math.max(v, mnH)); }}
+                  onBlur={() => { if (activeParams.height < mnH) updateParam("height", mnH); }}
+                  className="w-full px-1.5 py-1 text-[9px] font-mono border rounded outline-none"
+                  style={{ borderColor: C.cremeBorder }} />
+              </div>
+                </>);
+              })()}
+              {/* Campos condicionais por perfil */}
+              {activeProfile === ProfileType.Concava && (
+                <div>
+                  <label className="text-[8px] text-gray-400 block">Prof. concava</label>
+                  <input type="number" step={0.1} min={0.1} max={1.5}
+                    value={activeParams.concaveDepth}
+                    onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateParam("concaveDepth", v); }}
+                    onBlur={() => { if (activeParams.concaveDepth < 0.1) updateParam("concaveDepth", 0.1); }}
+                    className="w-full px-1.5 py-1 text-[9px] font-mono border rounded outline-none"
+                    style={{ borderColor: C.cremeBorder }} />
+                </div>
               )}
-              {activeProfile === ProfileType.Concava && <Slider label="Prof. concava" value={activeParams.concaveDepth} min={0.1} max={1.5} step={0.1} unit="mm" onChange={(v) => updateParam("concaveDepth", v)} />}
-              {(profile === ProfileType.Boleada || profile === ProfileType.BoleadaDouble || profile === ProfileType.Anatomica) && <Slider label="Curvatura" value={activeParams.domePercentage} min={0} max={100} step={5} unit="%" onChange={(v) => updateParam("domePercentage", v)} />}
-              {activeProfile === ProfileType.Chanfrada && <Slider label="Chanfro" value={activeParams.chamferSize} min={0.1} max={2} step={0.1} unit="mm" onChange={(v) => updateParam("chamferSize", v)} />}
-              {activeProfile === ProfileType.QuadradoCanal && <>
-                <Slider
-                  label="Larg. canal"
-                  value={activeParams.canalWidth}
-                  min={activeParams.hasStones ? Math.round((activeParams.stoneSize + calibracao.largura_min.canaleta) * 10) / 10 : 1}
-                  max={10}
-                  step={0.5}
-                  unit="mm"
-                  onChange={(v) => updateParam("canalWidth", v)}
-                />
-                <Slider
-                  label="Alt. borda"
-                  value={activeParams.canalBorderHeight}
-                  min={activeParams.hasStones ? (activeRing === 1 ? minThickness : minThickness2) : 0.3}
-                  max={3}
-                  step={0.1}
-                  unit="mm"
-                  onChange={(v) => updateParam("canalBorderHeight", v)}
-                />
-                {activeParams.hasStones && (
-                  <p className="text-[9px] text-gray-400 -mt-1 ml-[90px]">
-                    Canal mín. p/ pedra {activeParams.stoneSize}mm: L ≥ {(activeParams.stoneSize + calibracao.largura_min.canaleta).toFixed(1)}mm, Alt. ≥ {(activeRing === 1 ? minThickness : minThickness2).toFixed(1)}mm
-                  </p>
-                )}
-              </>}
+              {/* Curvatura fixo 100% — configurável em Configurações */
+              false && (
+                <div />
+              )}
+              {activeProfile === ProfileType.Chanfrada && (
+                <div>
+                  <label className="text-[8px] text-gray-400 block">Chanfro (mm)</label>
+                  <input type="number" step={0.1} min={0.1} max={2}
+                    value={activeParams.chamferSize}
+                    onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateParam("chamferSize", v); }}
+                    onBlur={() => { if (activeParams.chamferSize < 0.1) updateParam("chamferSize", 0.1); }}
+                    className="w-full px-1.5 py-1 text-[9px] font-mono border rounded outline-none"
+                    style={{ borderColor: C.cremeBorder }} />
+                </div>
+              )}
+              {activeProfile === ProfileType.QuadradoCanal && (<>
+                <div>
+                  <label className="text-[8px] text-gray-400 block">Larg. canal</label>
+                  <input type="number" step={0.5} min={1} max={10}
+                    value={activeParams.canalWidth}
+                    onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateParam("canalWidth", v); }}
+                    onBlur={() => { if (activeParams.canalWidth < 1) updateParam("canalWidth", 1); }}
+                    className="w-full px-1.5 py-1 text-[9px] font-mono border rounded outline-none"
+                    style={{ borderColor: C.cremeBorder }} />
+                </div>
+                <div>
+                  <label className="text-[8px] text-gray-400 block">
+                    Alt. borda{activeParams.hasStones && <span className="text-red-400 ml-1">min {(activeRing === 1 ? minThickness : minThickness2).toFixed(1)}</span>}
+                  </label>
+                  <input type="number" step={0.1}
+                    min={activeParams.hasStones ? (activeRing === 1 ? minThickness : minThickness2) : 0.3}
+                    max={3}
+                    value={activeParams.canalBorderHeight}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      const mn = activeParams.hasStones ? (activeRing === 1 ? minThickness : minThickness2) : 0.3;
+                      if (!isNaN(v)) updateParam("canalBorderHeight", Math.max(v, mn));
+                    }}
+                    onBlur={() => {
+                      const mn = activeParams.hasStones ? (activeRing === 1 ? minThickness : minThickness2) : 0.3;
+                      if (activeParams.canalBorderHeight < mn) updateParam("canalBorderHeight", mn);
+                    }}
+                    className="w-full px-1.5 py-1 text-[9px] font-mono border rounded outline-none"
+                    style={{ borderColor: C.cremeBorder }} />
+                </div>
+              </>)}
             </div>
-          </Card>
 
-          {/* Metal */}
-          <Card title="Metal">
-            <div className="flex gap-1.5">
+            {/* Metal — inline */}
+            <h3 className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Metal</h3>
+            <div className="flex gap-1">
               {METAL_COLORS.map((mc) => (
                 <button key={mc.value} onClick={() => { updateParam("metalColor", mc.value); updateParam("goldDensity", mc.density); }}
-                  className="flex-1 py-2 text-[10px] font-semibold rounded-lg border transition-all text-center"
+                  className="flex-1 py-0.5 text-[8px] font-semibold rounded border transition-all text-center"
                   style={activeParams.metalColor === mc.value
                     ? { backgroundColor: mc.value, color: mc.value === "#E8E8E8" ? "#333" : "#fff", borderColor: C.esmeralda, boxShadow: `0 0 0 2px ${C.esmeralda}` }
                     : { backgroundColor: "#fff", color: "#6b7280", borderColor: C.cremeBorder }
                   }>{mc.label}</button>
               ))}
             </div>
-          </Card>
+
+            {/* ── Detalhes (Friso / Risco) ── */}
+            <div className="flex items-center gap-2 pt-1 border-t" style={{ borderColor: C.cremeBorder }}>
+              <h3 className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Detalhes</h3>
+              <button
+                onClick={() => {
+                  const next = !activeParams.hasGroove;
+                  updateParam("hasGroove", next);
+                  if (next) {
+                    if (activeParams.grooveKind === "risco") {
+                      updateParam("grooveWidth", riscoWidth);
+                      updateParam("grooveDepth", riscoDepth);
+                      const rule = findGrooveRule(activeParams.width, grooveRules);
+                      updateParam("grooveOffset", rule.grooveOffset);
+                    } else {
+                      const rule = findGrooveRule(activeParams.width, grooveRules);
+                      updateParam("grooveWidth", rule.grooveWidth);
+                      updateParam("grooveDepth", rule.grooveDepth);
+                      updateParam("grooveOffset", rule.grooveOffset);
+                    }
+                  }
+                }}
+                className="px-2 py-0.5 rounded-full text-[9px] font-semibold transition-colors"
+                style={{
+                  backgroundColor: activeParams.hasGroove ? C.esmeralda : "#F3F4F6",
+                  color: activeParams.hasGroove ? "#fff" : "#6B7280",
+                }}
+              >
+                {activeParams.hasGroove ? "ON" : "OFF"}
+              </button>
+              {activeParams.hasGroove && (
+                <div className="flex gap-1">
+                  {([["friso", "Friso"], ["risco", "Risco"]] as const).map(([val, lbl]) => (
+                    <button key={val}
+                      onClick={() => {
+                        updateParam("grooveKind", val);
+                        if (val === "risco") {
+                          updateParam("grooveWidth", riscoWidth);
+                          updateParam("grooveDepth", riscoDepth);
+                        } else {
+                          const rule = findGrooveRule(activeParams.width, grooveRules);
+                          updateParam("grooveWidth", rule.grooveWidth);
+                          updateParam("grooveDepth", rule.grooveDepth);
+                        }
+                      }}
+                      className="px-2 py-0.5 text-[9px] font-semibold rounded-md border transition-all text-center"
+                      style={activeParams.grooveKind === val
+                        ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
+                        : { backgroundColor: "#fff", color: "#6b7280", borderColor: C.cremeBorder }
+                      }
+                    >{lbl}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {activeParams.hasGroove && (
+              <div className="space-y-1.5">
+                {/* Posição */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] text-gray-400 w-[50px] shrink-0">Posicao</span>
+                  <div className="flex gap-1 flex-1">
+                    {GROOVE_TYPE_OPTIONS.map((opt) => (
+                      <button key={opt.value}
+                        onClick={() => updateParam("grooveType", opt.value)}
+                        className="flex-1 py-0.5 text-[9px] font-semibold rounded-md border transition-all text-center"
+                        style={activeParams.grooveType === opt.value
+                          ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
+                          : { backgroundColor: "#fff", color: "#6b7280", borderColor: C.cremeBorder }
+                        }
+                      >{opt.label}</button>
+                    ))}
+                  </div>
+                </div>
+                {/* Lado removido — friso lateral sempre usa offset (dist. borda) */}
+                {/* Avançado — campos editáveis (não interferem nos padrões salvos) */}
+                <button
+                  onClick={() => setShowGrooveAdvanced(v => !v)}
+                  className="text-[8px] text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  {showGrooveAdvanced ? "▾ Avancado" : "▸ Avancado"} <span className="font-mono">{activeParams.grooveWidth.toFixed(2)} × {activeParams.grooveDepth.toFixed(1)}mm</span>
+                </button>
+                {showGrooveAdvanced && (
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <div>
+                      <label className="text-[8px] text-gray-400 block">Largura</label>
+                      <input type="number" step={activeParams.grooveKind === "risco" ? 0.05 : 0.1}
+                        min={0.05} max={3.0}
+                        value={activeParams.grooveWidth}
+                        onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateParam("grooveWidth", v); }}
+                        onBlur={() => { if (activeParams.grooveWidth < 0.05) updateParam("grooveWidth", 0.05); }}
+                        className="w-full px-1.5 py-1 text-[10px] font-mono border rounded-md outline-none"
+                        style={{ borderColor: C.cremeBorder }} />
+                    </div>
+                    <div>
+                      <label className="text-[8px] text-gray-400 block">Profund.</label>
+                      <input type="number" step={0.1} min={0.1} max={1.0}
+                        value={activeParams.grooveDepth}
+                        onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateParam("grooveDepth", v); }}
+                        onBlur={() => { if (activeParams.grooveDepth < 0.1) updateParam("grooveDepth", 0.1); }}
+                        className="w-full px-1.5 py-1 text-[10px] font-mono border rounded-md outline-none"
+                        style={{ borderColor: C.cremeBorder }} />
+                    </div>
+                    {activeParams.grooveType === "lateral" && (
+                      <div>
+                        <label className="text-[8px] text-gray-400 block">Dist. borda</label>
+                        <input type="number" step={0.1} min={0.2} max={3.0}
+                          value={activeParams.grooveOffset}
+                          onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateParam("grooveOffset", v); }}
+                          onBlur={() => { if (activeParams.grooveOffset < 0.2) updateParam("grooveOffset", 0.2); }}
+                          className="w-full px-1.5 py-1 text-[10px] font-mono border rounded-md outline-none"
+                          style={{ borderColor: C.cremeBorder }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Pedras */}
           <Card title="Pedras">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={activeParams.hasStones} onChange={(e) => updateParam("hasStones", e.target.checked)} style={{ accentColor: C.esmeralda }} className="rounded" />
+              <input type="checkbox" checked={activeParams.hasStones} onChange={(e) => {
+                updateParam("hasStones", e.target.checked);
+                if (!e.target.checked) {
+                  // Limpa entries ao desativar pedras
+                  if (activeRing === 1) setStoneEntries([]);
+                  else setStoneEntries2([]);
+                }
+              }} style={{ accentColor: C.esmeralda }} className="rounded" />
               <span className="text-[11px] text-gray-600">Incluir pedras</span>
             </label>
             {activeParams.hasStones && (
               <div className="space-y-2 mt-2">
-                <Slider label="Tamanho" value={activeParams.stoneSize} min={0.8} max={3} step={0.1} unit="mm" onChange={(v) => updateParam("stoneSize", v)} />
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-gray-500 w-[90px] shrink-0">Tamanho</span>
+                  <input type="number" step={0.1} min={1} max={2.5}
+                    value={activeParams.stoneSize}
+                    onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateParam("stoneSize", v); }}
+                    onBlur={() => { if (activeParams.stoneSize < 1) updateParam("stoneSize", 1); }}
+                    className="w-20 px-2 py-1 text-[10px] font-mono border rounded-md outline-none"
+                    style={{ borderColor: C.cremeBorder }} />
+                  <span className="text-[10px] text-gray-400">mm</span>
+                </div>
                 {activeProfile === ProfileType.QuadradoCanal && (
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-gray-500 w-[90px] shrink-0">Fileiras</span>
@@ -1577,8 +2109,21 @@ export default function OrcamentoClient({
                     const active = i === 2 ? activeParams.stoneFull : i === 1 ? activeParams.stoneHalfMoon : !activeParams.stoneFull && !activeParams.stoneHalfMoon;
                     return (
                       <button key={tipo} onClick={() => {
-                        if (i === 2) { updateParam("stoneFull", true); updateParam("stoneHalfMoon", false); }
-                        else if (i === 1) { updateParam("stoneFull", false); updateParam("stoneHalfMoon", true); }
+                        if (i === 2) {
+                          updateParam("stoneFull", true); updateParam("stoneHalfMoon", false);
+                          // Auto max fileiras ao ativar volta completa
+                          if (profile === ProfileType.QuadradoCanal) {
+                            const mr = computeMaxStoneRows(activeParams.canalWidth, activeParams.stoneSize, calibracao);
+                            updateParam("stoneRows", mr);
+                          }
+                        }
+                        else if (i === 1) {
+                          updateParam("stoneFull", false); updateParam("stoneHalfMoon", true);
+                          if (profile === ProfileType.QuadradoCanal) {
+                            const mr = computeMaxStoneRows(activeParams.canalWidth, activeParams.stoneSize, calibracao);
+                            updateParam("stoneRows", mr);
+                          }
+                        }
                         else { updateParam("stoneFull", false); updateParam("stoneHalfMoon", false); }
                       }}
                         className="flex-1 py-1.5 text-[9px] font-semibold rounded-lg border transition-all text-center"
@@ -1600,7 +2145,7 @@ export default function OrcamentoClient({
                 )}
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={activeParams.stoneDrill} onChange={(e) => updateParam("stoneDrill", e.target.checked)} style={{ accentColor: C.esmeralda }} className="rounded" />
-                  <span className="text-[10px] text-gray-500">Cravacao por broca</span>
+                  <span className="text-[10px] text-gray-500">Furo passante</span>
                 </label>
                 <p className="text-[10px] text-gray-400">{derivedStoneCount} pedra(s) de {activeParams.stoneSize}mm</p>
               </div>
@@ -1608,97 +2153,205 @@ export default function OrcamentoClient({
           </Card>
 
           {/* Detalhamento de pedras (preciosa vs zirconia) */}
-          {activeParams.hasStones && (
+          {activeParams.hasStones && (() => {
+            const isPontual = !activeParams.stoneFull && !activeParams.stoneHalfMoon;
+            return (
             <Card title="Detalhamento (Preciosa/Zirconia)">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] text-gray-500">
-                  {(activeRing === 1 ? stoneEntriesTotal : stoneEntriesTotal2)} de {derivedStoneCount} pedra(s) detalhada(s)
-                </span>
-                <button
-                  onClick={() => addAllianceStone(activeRing, activeParams.stoneSize)}
-                  className="text-[10px] font-semibold px-2 py-1 rounded-lg transition-colors"
-                  style={{ backgroundColor: "rgba(212,175,55,0.1)", color: C.gold }}
-                >
-                  <Plus size={10} className="inline mr-1" />Adicionar
-                </button>
-              </div>
-              {activeStoneEntries.length === 0 ? (
-                <p className="text-[10px] text-gray-400 text-center py-2">
-                  Sem detalhamento — todas as pedras serão consideradas <strong>zirconia</strong> por padrão (nao cobra a mais, so o ouro).
-                </p>
+              {isPontual ? (
+                <>
+                  {/* PONTUAL: múltiplas entries com quantidade manual */}
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] text-gray-500">
+                      {(activeRing === 1 ? stoneEntriesTotal : stoneEntriesTotal2)} de {derivedStoneCount} pedra(s)
+                    </span>
+                    <button
+                      onClick={() => addAllianceStone(activeRing, activeParams.stoneSize)}
+                      className="text-[10px] font-semibold px-2 py-1 rounded-lg transition-colors"
+                      style={{ backgroundColor: "rgba(212,175,55,0.1)", color: C.gold }}
+                    >
+                      <Plus size={10} className="inline mr-1" />Adicionar
+                    </button>
+                  </div>
+                  {activeStoneEntries.length === 0 ? (
+                    <p className="text-[10px] text-gray-400 text-center py-2">
+                      Sem detalhamento — todas serão <strong>zirconia</strong> (nao cobra).
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {activeStoneEntries.map((se) => {
+                        const typeMeta = STONE_TYPES.find((t) => t.value === se.tipo);
+                        return (
+                          <div key={se.id} className="rounded-lg border p-2 space-y-1" style={{ borderColor: C.cremeBorder }}>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <label className="text-[9px] text-gray-400 block">Tipo</label>
+                                <select value={se.tipo}
+                                  onChange={(e) => updateAllianceStone(activeRing, se.id, "tipo", e.target.value)}
+                                  className="w-full text-[10px] border rounded px-1 py-1" style={{ borderColor: C.cremeBorder }}>
+                                  {STONE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-[9px] text-gray-400 block">Qtd</label>
+                                <input type="number" min={1} max={derivedStoneCount} value={se.qtd}
+                                  onChange={(e) => updateAllianceStone(activeRing, se.id, "qtd", Math.max(1, parseInt(e.target.value) || 1))}
+                                  className="w-full text-[10px] border rounded px-1 py-1 font-mono" style={{ borderColor: C.cremeBorder }} />
+                              </div>
+                              <div className="flex items-end justify-end">
+                                <button onClick={() => removeAllianceStone(activeRing, se.id)} className="text-red-400 hover:text-red-600 p-1"><Minus size={12} /></button>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between text-[9px]">
+                              <span className={typeMeta?.is_preciosa ? "text-gray-500" : "text-gray-400 italic"}>
+                                {typeMeta?.is_preciosa ? "Preciosa" : "Nao cobra (so ouro)"}
+                              </span>
+                              <span className="font-mono font-bold" style={{ color: C.gold }}>R$ {se.preco_total_rs.toFixed(2)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               ) : (
-                <div className="space-y-2">
-                  {activeStoneEntries.map((se) => {
-                    const typeMeta = STONE_TYPES.find((t) => t.value === se.tipo);
-                    return (
-                      <div key={se.id} className="rounded-lg border p-2 space-y-1" style={{ borderColor: C.cremeBorder }}>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <label className="text-[9px] text-gray-400 block">Tipo</label>
-                            <select
-                              value={se.tipo}
-                              onChange={(e) => updateAllianceStone(activeRing, se.id, "tipo", e.target.value)}
-                              className="w-full text-[10px] border rounded px-1 py-1"
-                              style={{ borderColor: C.cremeBorder }}
-                            >
-                              {STONE_TYPES.map((t) => (
-                                <option key={t.value} value={t.value}>{t.label}</option>
-                              ))}
-                            </select>
+                <>
+                  {/* MEIA ALIANÇA / VOLTA COMPLETA: tipo único, qtd automática */}
+                  <p className="text-[10px] text-gray-500 mb-2">
+                    {derivedStoneCount} pedra(s) de {activeParams.stoneSize}mm — selecione o tipo:
+                  </p>
+                  {activeStoneEntries.length === 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-[10px] text-gray-400 text-center py-2">
+                        Padrao: <strong>zirconia</strong> (nao cobra). Clique abaixo para definir o tipo.
+                      </p>
+                      <button
+                        onClick={() => {
+                          // Adiciona entry com qtd = total derivado automaticamente
+                          addAllianceStone(activeRing, activeParams.stoneSize);
+                          // Atualiza a qtd para o total
+                          setTimeout(() => {
+                            const setter = activeRing === 1 ? setStoneEntries : setStoneEntries2;
+                            setter((prev) => prev.map((e, i) => i === prev.length - 1
+                              ? { ...e, qtd: derivedStoneCount, ...computeStoneEntryPrice({ ...e, qtd: derivedStoneCount }, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups) }
+                              : e
+                            ));
+                          }, 0);
+                        }}
+                        className="w-full py-1.5 text-[10px] font-semibold rounded-lg border transition-colors text-center"
+                        style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+                      >
+                        Definir tipo de pedra
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {activeStoneEntries.map((se) => {
+                        const typeMeta = STONE_TYPES.find((t) => t.value === se.tipo);
+                        // Recalcula com qtd = derivedStoneCount
+                        const totalPrice = se.preco_unitario_rs * derivedStoneCount;
+                        return (
+                          <div key={se.id} className="rounded-lg border p-2 space-y-1" style={{ borderColor: C.cremeBorder }}>
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1">
+                                <label className="text-[9px] text-gray-400 block">Tipo</label>
+                                <select value={se.tipo}
+                                  onChange={(e) => {
+                                    updateAllianceStone(activeRing, se.id, "tipo", e.target.value);
+                                    // Atualiza qtd para derivedStoneCount
+                                    setTimeout(() => updateAllianceStone(activeRing, se.id, "qtd", derivedStoneCount), 0);
+                                  }}
+                                  className="w-full text-[10px] border rounded px-1 py-1" style={{ borderColor: C.cremeBorder }}>
+                                  {STONE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                </select>
+                              </div>
+                              <div className="text-center">
+                                <label className="text-[9px] text-gray-400 block">Qtd</label>
+                                <span className="text-[10px] font-mono font-bold" style={{ color: C.esmeralda }}>{derivedStoneCount}</span>
+                              </div>
+                              <div className="flex items-end">
+                                <button onClick={() => removeAllianceStone(activeRing, se.id)} className="text-red-400 hover:text-red-600 p-1"><Minus size={12} /></button>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between text-[9px]">
+                              <span className={typeMeta?.is_preciosa ? "text-gray-500" : "text-gray-400 italic"}>
+                                {typeMeta?.is_preciosa
+                                  ? `${derivedStoneCount} × R$ ${se.preco_unitario_rs.toFixed(2)}/un`
+                                  : "Nao cobra (so ouro)"}
+                              </span>
+                              <span className="font-mono font-bold" style={{ color: C.gold }}>
+                                R$ {(typeMeta?.is_preciosa ? totalPrice : 0).toFixed(2)}
+                              </span>
+                            </div>
                           </div>
-                          <div>
-                            <label className="text-[9px] text-gray-400 block">Qtd</label>
-                            <input
-                              type="number"
-                              min={1}
-                              max={derivedStoneCount}
-                              value={se.qtd}
-                              onChange={(e) => updateAllianceStone(activeRing, se.id, "qtd", Math.max(1, parseInt(e.target.value) || 1))}
-                              className="w-full text-[10px] border rounded px-1 py-1 font-mono"
-                              style={{ borderColor: C.cremeBorder }}
-                            />
-                          </div>
-                          <div className="flex items-end justify-end">
-                            <button
-                              onClick={() => removeAllianceStone(activeRing, se.id)}
-                              className="text-red-400 hover:text-red-600 p-1"
-                              title="Remover"
-                            >
-                              <Minus size={12} />
-                            </button>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between text-[9px]">
-                          <span className={typeMeta?.is_preciosa ? "text-gray-500" : "text-gray-400 italic"}>
-                            {typeMeta?.is_preciosa ? "Preciosa" : "Nao cobra (so ouro)"}
-                          </span>
-                          <span className="font-mono font-bold" style={{ color: C.gold }}>
-                            R$ {se.preco_total_rs.toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {(activeRing === 1 ? stoneEntriesTotal : stoneEntriesTotal2) > derivedStoneCount && (
-                <p className="text-[9px] text-red-500 mt-2 font-semibold">
-                  Total detalhado ({activeRing === 1 ? stoneEntriesTotal : stoneEntriesTotal2}) excede a quantidade da peca ({derivedStoneCount}).
-                </p>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
             </Card>
-          )}
+            );
+          })()}
 
           {/* Gravação */}
           <Card title="Gravacao">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={activeParams.textEnabled} onChange={(e) => updateParam("textEnabled", e.target.checked)} style={{ accentColor: C.esmeralda }} className="rounded" />
+              <input type="checkbox" checked={activeParams.textEnabled} onChange={(e) => {
+                updateParam("textEnabled", e.target.checked);
+                if (!e.target.checked) {
+                  if (activeRing === 1) setTextosExtras([]);
+                  else setTextosExtras2([]);
+                }
+              }} style={{ accentColor: C.esmeralda }} className="rounded" />
               <span className="text-[11px] text-gray-600">Gravar texto</span>
             </label>
-            {activeParams.textEnabled && (
+            {activeParams.textEnabled && (() => {
+              const extras = activeRing === 1 ? textosExtras : textosExtras2;
+              const setExtras = activeRing === 1 ? setTextosExtras : setTextosExtras2;
+              return (
               <div className="space-y-2 mt-2">
-                <input type="text" maxLength={30} value={activeParams.textContent} onChange={(e) => updateParam("textContent", e.target.value)} placeholder="Texto a gravar..."
-                  className="w-full px-3 py-1.5 text-[11px] rounded-lg border outline-none bg-white" style={{ borderColor: C.cremeBorder }} />
+                {/* Primeiro nome — incluso */}
+                <div>
+                  <label className="text-[8px] text-gray-400 block">Nome principal <span className="text-emerald-500">(incluso)</span></label>
+                  <input type="text" maxLength={20} value={activeParams.textContent}
+                    onChange={(e) => {
+                      // Sem espaços, só 1ª letra maiúscula, resto minúsculo
+                      const raw = e.target.value.replace(/\s/g, "");
+                      if (!raw) { updateParam("textContent", ""); return; }
+                      const formatted = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+                      updateParam("textContent", formatted);
+                    }}
+                    placeholder="Nome (sem espaco)"
+                    className="w-full px-3 py-1.5 text-[11px] rounded-lg border outline-none bg-white" style={{ borderColor: C.cremeBorder }} />
+                </div>
+                {/* Textos adicionais — R$ cada */}
+                {extras.map((txt, idx) => (
+                  <div key={idx}>
+                    <label className="text-[8px] text-gray-400 block">
+                      {idx === 0 ? "Nome/data adicional" : `Adicional ${idx + 1}`} <span className="text-amber-500">+R$ {precoGravacao.toFixed(0)}</span>
+                    </label>
+                    <div className="flex gap-1">
+                      <input type="text" maxLength={20} value={txt}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\s/g, "");
+                          const formatted = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : "";
+                          const u = [...extras]; u[idx] = formatted; setExtras(u);
+                        }}
+                        placeholder="Nome ou data (sem espaco)"
+                        className="flex-1 px-3 py-1.5 text-[11px] rounded-lg border outline-none bg-white" style={{ borderColor: C.cremeBorder }} />
+                      <button onClick={() => setExtras(extras.filter((_, i) => i !== idx))}
+                        className="text-red-400 hover:text-red-600 px-2">
+                        <Minus size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <button onClick={() => setExtras([...extras, ""])}
+                  className="w-full py-1 text-[9px] font-semibold rounded-lg border transition-colors text-center"
+                  style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
+                  + Nome/data adicional (R$ {precoGravacao.toFixed(0)})
+                </button>
+                {/* Fonte */}
                 <div className="flex gap-1.5">
                   {([{ v: 1 as const, l: "Forma" }, { v: 2 as const, l: "Cursiva" }]).map(({ v, l }) => (
                     <button key={v} onClick={() => updateParam("textFontType", v)}
@@ -1709,8 +2362,14 @@ export default function OrcamentoClient({
                       }>{l}</button>
                   ))}
                 </div>
+                {extras.filter(t => t.trim()).length > 0 && (
+                  <p className="text-[9px] text-amber-600 font-semibold">
+                    +{extras.filter(t => t.trim()).length} adicional(is) = R$ {(extras.filter(t => t.trim()).length * precoGravacao).toFixed(0)}
+                  </p>
+                )}
               </div>
-            )}
+              );
+            })()}
           </Card>
 
           {/* Precificacao removida — controlada via Configurações */}
@@ -1768,12 +2427,15 @@ export default function OrcamentoClient({
               {/* Pills de ouro e pedras (só quando há pedras preciosas) */}
               {(() => {
                 const ouroTotal = allianceMode === "par" ? pricing.discountPrice + pricing2.discountPrice : pricing.discountPrice;
-                const pedrasTotal = allianceMode === "par" ? stoneTotalRS + stoneTotalRS2 : stoneTotalRS;
-                if (pedrasTotal <= 0) return null;
+                const pedrasTotal = allianceMode === "par" ? pedrasCost + pedrasCost2 : pedrasCost;
+                const gravTotal = allianceMode === "par" ? gravacaoCost + gravacaoCost2 : gravacaoCost;
+                const hasExtras = pedrasTotal > 0 || gravTotal > 0;
+                if (!hasExtras) return null;
                 return (
                   <>
                     <Pill label="Ouro" value={`R$ ${ouroTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
-                    <Pill label="Pedras" value={`R$ ${pedrasTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
+                    {pedrasTotal > 0 && <Pill label="Pedras" value={`R$ ${pedrasTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />}
+                    {gravTotal > 0 && <Pill label="Gravacao" value={`R$ ${gravTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />}
                   </>
                 );
               })()}
@@ -1822,8 +2484,8 @@ export default function OrcamentoClient({
 // ── Card wrapper ─────────────────────────────────────────────────────────────
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
-      <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{title}</h3>
+    <div className="bg-white rounded-lg border px-2 py-1.5 space-y-1" style={{ borderColor: C.cremeBorder }}>
+      <h3 className="text-[8px] font-bold uppercase tracking-wider text-gray-400">{title}</h3>
       {children}
     </div>
   );

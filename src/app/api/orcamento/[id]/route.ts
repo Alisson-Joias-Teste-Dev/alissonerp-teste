@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
-import { validateFichaTecnica, CALIBRACAO_DEFAULTS, type CalibracaoDefaults } from "@/app/(dashboard)/orcamento/validations";
+import { validateFichaTecnica, migrateProfile, CALIBRACAO_DEFAULTS, type CalibracaoDefaults } from "@/app/(dashboard)/orcamento/validations";
 import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
 import { ProfileType } from "@/app/(dashboard)/orcamento/types";
 
@@ -111,8 +111,10 @@ export async function PATCH(
 
     const perfilNomes: Record<string, string> = {
       Anatomica: "Anatômica", Boleada: "Boleada", BoleadaDouble: "Boleada Dupla",
-      Chanfrada: "Chanfrada", Concava: "Côncava", FrisoUnico: "Friso Único",
-      FrisoLateral: "Friso Lateral", QuadradoCanal: "Quadrado Canal", Simples: "Reta",
+      Chanfrada: "Chanfrada", Concava: "Côncava", QuadradoCanal: "Bordas Elevadas",
+      Simples: "Reta",
+      // Legado (orçamentos antigos)
+      FrisoUnico: "Reta + Friso", FrisoLateral: "Reta + Friso Duplo",
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -232,7 +234,7 @@ export async function PUT(
     if (ficha2 && typeof ficha2 === "object" && quantidade === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
 
     for (const { f, label } of fichasParaValidar) {
-      const profile = (f.perfil as ProfileType) ?? ProfileType.Simples;
+      const profile = migrateProfile(String(f.perfil ?? "Simples"));
       const capacity = computeStoneCapacity(
         Number(f.diametro ?? 0),
         Number(f.espessura ?? 0),
@@ -275,6 +277,13 @@ export async function PUT(
           texto = ${ficha.texto ?? null}, qtd_pedras = ${ficha.qtd_pedras ?? null},
           tamanho_pedra = ${ficha.tamanho_pedra ?? null}, tipo_aplicacao_pedra = ${ficha.tipo_aplicacao_pedra ?? null},
           profundidade_concava = ${ficha.profundidade_concava ?? null},
+          has_friso = ${ficha.has_friso ?? false},
+          friso_kind = ${ficha.friso_kind ?? "friso"},
+          friso_tipo = ${ficha.friso_tipo ?? null},
+          friso_lado = ${ficha.friso_lado ?? null},
+          friso_largura = ${ficha.friso_largura ?? null},
+          friso_profundidade = ${ficha.friso_profundidade ?? null},
+          friso_offset = ${ficha.friso_offset ?? null},
           dome_porcentagem = ${ficha.dome_porcentagem ?? null},
           pedra_drill = ${ficha.pedra_drill ?? false}, pedra_meia_lua = ${ficha.pedra_meia_lua ?? false},
           pedra_volta_completa = ${ficha.pedra_volta_completa ?? false}
@@ -298,6 +307,10 @@ export async function PUT(
           cor_metal = ${ficha2.cor_metal ?? null}, tipo_fonte = ${ficha2.tipo_fonte ?? null},
           texto = ${ficha2.texto ?? null}, qtd_pedras = ${ficha2.qtd_pedras ?? null},
           tamanho_pedra = ${ficha2.tamanho_pedra ?? null}, tipo_aplicacao_pedra = ${ficha2.tipo_aplicacao_pedra ?? null},
+          has_friso = ${ficha2.has_friso ?? false}, friso_kind = ${ficha2.friso_kind ?? "friso"},
+          friso_tipo = ${ficha2.friso_tipo ?? null},
+          friso_lado = ${ficha2.friso_lado ?? null}, friso_largura = ${ficha2.friso_largura ?? null},
+          friso_profundidade = ${ficha2.friso_profundidade ?? null}, friso_offset = ${ficha2.friso_offset ?? null},
           dome_porcentagem = ${ficha2.dome_porcentagem ?? null},
           pedra_drill = ${ficha2.pedra_drill ?? false}, pedra_meia_lua = ${ficha2.pedra_meia_lua ?? false},
           pedra_volta_completa = ${ficha2.pedra_volta_completa ?? false}
@@ -310,7 +323,9 @@ export async function PUT(
         INSERT INTO alissonerp.orcamento_fichas_tecnicas (
           modelo, aro_numeracao, largura, espessura, peso_estimado, perfil, diametro,
           densidade_ouro, cor_metal, tipo_fonte, texto, qtd_pedras, tamanho_pedra,
-          tipo_aplicacao_pedra, dome_porcentagem, pedra_drill, pedra_meia_lua, pedra_volta_completa,
+          tipo_aplicacao_pedra, has_friso, friso_kind, friso_tipo, friso_lado, friso_largura,
+          friso_profundidade, friso_offset,
+          dome_porcentagem, pedra_drill, pedra_meia_lua, pedra_volta_completa,
           pedras_detalhadas
         ) VALUES (
           ${ficha2.modelo ?? null}, ${ficha2.aro_numeracao ?? null}, ${ficha2.largura ?? null},
@@ -318,6 +333,9 @@ export async function PUT(
           ${ficha2.diametro ?? null}, ${ficha2.densidade_ouro ?? null}, ${ficha2.cor_metal ?? null},
           ${ficha2.tipo_fonte ?? null}, ${ficha2.texto ?? null}, ${ficha2.qtd_pedras ?? null},
           ${ficha2.tamanho_pedra ?? null}, ${ficha2.tipo_aplicacao_pedra ?? null},
+          ${ficha2.has_friso ?? false}, ${ficha2.friso_kind ?? "friso"}, ${ficha2.friso_tipo ?? null},
+          ${ficha2.friso_lado ?? null}, ${ficha2.friso_largura ?? null},
+          ${ficha2.friso_profundidade ?? null}, ${ficha2.friso_offset ?? null},
           ${ficha2.dome_porcentagem ?? null}, ${ficha2.pedra_drill ?? false},
           ${ficha2.pedra_meia_lua ?? false}, ${ficha2.pedra_volta_completa ?? false},
           '[]'::jsonb
