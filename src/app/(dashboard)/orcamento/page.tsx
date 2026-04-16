@@ -36,7 +36,8 @@ export default async function OrcamentoPage() {
   try {
     const rows = await sql`
       SELECT id, name, start_mkp, discount_percent, gold_price, camera_override,
-             profile, pricing_categories, groove_rules, stone_markup, stone_prices
+             profile, pricing_categories, groove_rules, stone_markup, stone_prices,
+             risco_width, risco_depth, preco_gravacao, stone_markups_table
       FROM alissonerp.config_orcamento
       WHERE name = 'default'
       LIMIT 1
@@ -58,6 +59,10 @@ export default async function OrcamentoPage() {
     groove_rules: Array.isArray(configRow.groove_rules) ? configRow.groove_rules : [],
     stone_markup: Number(configRow.stone_markup ?? 2.5),
     stone_prices: Array.isArray(configRow.stone_prices) ? configRow.stone_prices : [],
+    risco_width: Number(configRow.risco_width ?? 0.1),
+    risco_depth: Number(configRow.risco_depth ?? 0.2),
+    preco_gravacao: Number(configRow.preco_gravacao ?? 100),
+    stone_markups_table: (typeof configRow.stone_markups_table === "object" && configRow.stone_markups_table) ? configRow.stone_markups_table as Record<string, Record<string, number>> : {},
   } : null;
 
   // Pode gerenciar config: admin, desenvolvedor, gerente_loja

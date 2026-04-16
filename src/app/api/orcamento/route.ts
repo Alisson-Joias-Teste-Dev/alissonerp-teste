@@ -3,7 +3,7 @@ import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
-import { validateFichaTecnica, CALIBRACAO_DEFAULTS, type CalibracaoDefaults } from "@/app/(dashboard)/orcamento/validations";
+import { validateFichaTecnica, migrateProfile, CALIBRACAO_DEFAULTS, type CalibracaoDefaults } from "@/app/(dashboard)/orcamento/validations";
 import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
 import { ProfileType } from "@/app/(dashboard)/orcamento/types";
 
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
     if (ficha2 && typeof ficha2 === "object" && quantidade === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
 
     for (const { f, label } of fichasParaValidar) {
-      const profile = (f.perfil as ProfileType) ?? ProfileType.Simples;
+      const profile = migrateProfile(String(f.perfil ?? "Simples"));
       const capacity = computeStoneCapacity(
         Number(f.diametro ?? 0),
         Number(f.espessura ?? 0),
@@ -128,7 +128,8 @@ export async function POST(req: NextRequest) {
         modelo, aro_numeracao, largura, espessura, peso_estimado,
         perfil, diametro, densidade_ouro, cor_metal,
         tipo_fonte, texto, qtd_pedras, tamanho_pedra, tipo_aplicacao_pedra,
-        profundidade_concava, friso_lado, friso_largura, friso_profundidade, friso_offset,
+        profundidade_concava, has_friso, friso_kind, friso_tipo,
+        friso_lado, friso_largura, friso_profundidade, friso_offset,
         canal_largura, canal_borda_altura, chanfro_tamanho, dome_porcentagem,
         pedra_fileiras, pedra_drill, pedra_meia_lua, pedra_volta_completa,
         pedras_detalhadas
@@ -140,7 +141,9 @@ export async function POST(req: NextRequest) {
         ${ficha.tipo_fonte ?? null}, ${ficha.texto ?? null},
         ${ficha.qtd_pedras ?? null}, ${ficha.tamanho_pedra ?? null},
         ${ficha.tipo_aplicacao_pedra ?? null},
-        ${ficha.profundidade_concava ?? null}, ${ficha.friso_lado ?? null},
+        ${ficha.profundidade_concava ?? null},
+        ${ficha.has_friso ?? false}, ${ficha.friso_kind ?? "friso"}, ${ficha.friso_tipo ?? null},
+        ${ficha.friso_lado ?? null},
         ${ficha.friso_largura ?? null}, ${ficha.friso_profundidade ?? null},
         ${ficha.friso_offset ?? null},
         ${ficha.canal_largura ?? null}, ${ficha.canal_borda_altura ?? null},
@@ -161,7 +164,8 @@ export async function POST(req: NextRequest) {
         modelo, aro_numeracao, largura, espessura, peso_estimado,
         perfil, diametro, densidade_ouro, cor_metal,
         tipo_fonte, texto, qtd_pedras, tamanho_pedra, tipo_aplicacao_pedra,
-        profundidade_concava, friso_lado, friso_largura, friso_profundidade, friso_offset,
+        profundidade_concava, has_friso, friso_kind, friso_tipo,
+        friso_lado, friso_largura, friso_profundidade, friso_offset,
         canal_largura, canal_borda_altura, chanfro_tamanho, dome_porcentagem,
         pedra_fileiras, pedra_drill, pedra_meia_lua, pedra_volta_completa,
         pedras_detalhadas
@@ -173,7 +177,9 @@ export async function POST(req: NextRequest) {
         ${ficha2.tipo_fonte ?? null}, ${ficha2.texto ?? null},
         ${ficha2.qtd_pedras ?? null}, ${ficha2.tamanho_pedra ?? null},
         ${ficha2.tipo_aplicacao_pedra ?? null},
-        ${ficha2.profundidade_concava ?? null}, ${ficha2.friso_lado ?? null},
+        ${ficha2.profundidade_concava ?? null},
+        ${ficha2.has_friso ?? false}, ${ficha2.friso_kind ?? "friso"}, ${ficha2.friso_tipo ?? null},
+        ${ficha2.friso_lado ?? null},
         ${ficha2.friso_largura ?? null}, ${ficha2.friso_profundidade ?? null},
         ${ficha2.friso_offset ?? null},
         ${ficha2.canal_largura ?? null}, ${ficha2.canal_borda_altura ?? null},

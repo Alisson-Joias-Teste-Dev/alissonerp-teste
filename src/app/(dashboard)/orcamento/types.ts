@@ -4,8 +4,6 @@ import type { CalibracaoDefaults } from "./validations";
 
 export enum ProfileType {
   Concava = "Concava",
-  FrisoUnico = "FrisoUnico",
-  FrisoLateral = "FrisoLateral",
   QuadradoCanal = "QuadradoCanal",
   Boleada = "Boleada",
   BoleadaDouble = "BoleadaDouble",
@@ -13,6 +11,9 @@ export enum ProfileType {
   Chanfrada = "Chanfrada",
   Anatomica = "Anatomica",
 }
+
+export type GrooveType = "lateral" | "centro" | "duplo";
+export type GrooveKind = "friso" | "risco";
 
 export interface PricingCategory {
   id: number;
@@ -50,6 +51,9 @@ export interface RingParams {
   goldPrice: number;
   startMkp: number;
   discountPercent: number;
+  hasGroove: boolean;
+  grooveKind: GrooveKind;
+  grooveType: GrooveType;
   hasStones: boolean;
   stoneSize: number;
   stoneRows: number;
@@ -141,6 +145,8 @@ export interface StoneEntry {
 export interface StonePrice {
   tipo: StoneType;
   preco_usd_ct: number;
+  /** Preço fixo em R$ por unidade (usado para zircônia). Se definido, ignora USD/ct. */
+  preco_rs_un?: number;
 }
 
 // ── Peça Personalizada ──────────────────────────────────────────────────────
