@@ -8,7 +8,7 @@ const ALL_TIPOS = [
   "servico_venda", "servico_loja", "fabricacao", "reposicao_venda",
   "reposicao_loja", "compra_fornecedor", "garantia", "servico_interno",
 ];
-const SERVICO_TIPOS = ["servico_venda", "servico_loja", "garantia"];
+const SERVICO_TIPOS = ["servico_venda", "servico_loja", "garantia", "servico_interno"];
 
 // POST /api/ordens — cria uma nova ordem no ERP
 // Body: { tipo_ordem, cliente_id?, vendedor_id?, data_entrega?, peso_metal_negociado?,

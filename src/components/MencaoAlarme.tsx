@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Volume2, VolumeX, Clock } from "lucide-react";
+import { AlertTriangle, Volume2, VolumeX, Clock, Bell, BellOff } from "lucide-react";
 
 interface Pendente {
   id: number;
@@ -25,27 +25,43 @@ interface Resposta {
 const POLL_INTERVAL_MS = 10_000; // 10s — rápido o suficiente p/ sentir "agora"
 const TICK_INTERVAL_MS = 1000;   // 1 bip por segundo (1s bip, 1s silêncio)
 const TICK_FREQUENCY   = 880;    // Hz — A5, bem audível em qualquer speaker
-const TICK_DURATION_S  = 0.15;   // 150ms por bip (curto e claro)
-const TICK_VOLUME      = 0.75;   // 75% — bem audível sem estourar
-const SNOOZE_MINUTOS   = 10;     // minutos que o botão "Adiar" silencia
+const TICK_DURATION_S  = 0.20;   // 200ms por bip (um pouco mais longo)
+const TICK_VOLUME      = 1.0;    // 100% — máximo possível via Web Audio
+const SNOOZE_MINUTOS   = 5;      // minutos que "Adiar" silencia O SOM
 
 /**
- * MencaoAlarme — monitora menções aguardando resposta do usuário logado e
- * dispara banner fixo + bip duplo via Web Audio API até o usuário responder.
+ * MencaoAlarme — monitora menções aguardando resposta do usuário logado.
+ *
+ * Comportamento:
+ *  - Banner vermelho fixo NO TOPO enquanto houver pendências (não some com snooze).
+ *  - Bip a cada 1s via Web Audio (triangle + square empilhados p/ volume máximo).
+ *  - "Adiar 5 min" silencia APENAS O SOM — banner permanece.
+ *  - Notifications API (SO nativo): ao detectar nova menção, dispara notificação
+ *    desktop que toca som do Sistema Operacional — funciona com aba em background,
+ *    minimizada, em outra janela ou outro desktop virtual (não com Chrome fechado).
+ *  - Aviso "áudio suspenso" se AudioContext estiver inválido (user mutou aba / SO).
  *
  * Regras:
- *  - Som só toca após 1ª interação do usuário na página (política do Chrome).
- *    Enquanto não houver interação, o banner mostra "🔊 Ativar som".
- *  - Qualquer comentário do usuário na mesma ordem silencia a pendência.
+ *  - Som Web Audio só toca após 1ª interação (política do Chrome).
+ *  - Notifications exige permissão — pede no click "Ativar som".
+ *  - Qualquer comentário do usuário na ordem silencia a pendência (backend).
  *  - Apenas visualizar NÃO silencia — é proposital.
  */
 export default function MencaoAlarme() {
-  const [pendentes, setPendentes]   = useState<Pendente[]>([]);
-  const [adiando, setAdiando]       = useState<boolean>(false);
-  const [audioReady, setAudioReady] = useState<boolean>(false);
+  const [pendentes, setPendentes]       = useState<Pendente[]>([]);
+  const [silenciadoAte, setSilenciadoAte] = useState<string | null>(null);
+  const [adiando, setAdiando]           = useState<boolean>(false);
+  const [audioReady, setAudioReady]     = useState<boolean>(false);
+  const [audioSuspended, setAudioSuspended] = useState<boolean>(false);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">("default");
   const audioCtxRef   = useRef<AudioContext | null>(null);
   const tickTimerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const notifShownRef = useRef<Set<number>>(new Set()); // ids de menções já notificadas
   const router        = useRouter();
+
+  // Computado: som silenciado por snooze?
+  const somSilenciado = silenciadoAte != null
+    && new Date(silenciadoAte).getTime() > Date.now();
 
   // ── Fetch das pendências ───────────────────────────────────────────────
   const fetchPendentes = useCallback(async () => {
@@ -55,13 +71,12 @@ export default function MencaoAlarme() {
       });
       if (!r.ok) {
         setPendentes([]);
+        setSilenciadoAte(null);
         return;
       }
       const data = (await r.json()) as Resposta;
-      // Durante snooze ativo o endpoint devolve total=0 + silenciado_ate — basta
-      // limpar pendentes (banner/som somem). Quando a janela expira, o próximo
-      // poll traz as pendências de volta e o alarme reinicia sozinho.
       setPendentes(Array.isArray(data.itens) ? data.itens : []);
+      setSilenciadoAte(data.silenciado_ate ?? null);
     } catch {
       // Rede caiu — próxima tentativa em 10s
     }
@@ -74,6 +89,7 @@ export default function MencaoAlarme() {
         audioCtxRef.current.resume().catch(() => {});
       }
       setAudioReady(true);
+      setAudioSuspended(audioCtxRef.current.state === "suspended");
       return audioCtxRef.current;
     }
     try {
@@ -86,31 +102,74 @@ export default function MencaoAlarme() {
       ctx.resume().catch(() => {});
       audioCtxRef.current = ctx;
       setAudioReady(true);
+      setAudioSuspended(ctx.state === "suspended");
       return ctx;
     } catch {
       return null;
     }
   }, []);
 
-  // Toca um bip curto (reutilizado para o loop E para o teste ao ativar)
+  // ── Pedir permissão de Notifications (SO nativo) ───────────────────────
+  const ensureNotifPermission = useCallback(async () => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setNotifPermission("unsupported");
+      return "unsupported" as const;
+    }
+    let perm = Notification.permission;
+    if (perm === "default") {
+      try {
+        perm = await Notification.requestPermission();
+      } catch {
+        perm = "denied";
+      }
+    }
+    setNotifPermission(perm);
+    return perm;
+  }, []);
+
+  // Lê o estado inicial da permissão
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!("Notification" in window)) {
+      setNotifPermission("unsupported");
+      return;
+    }
+    setNotifPermission(Notification.permission);
+  }, []);
+
+  // Toca um bip curto (triangle + square empilhados = máximo volume/agressividade)
   const playBip = useCallback(
     (ctx: AudioContext, delaySec: number, volume = TICK_VOLUME) => {
       try {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "triangle"; // corte bom sem ser estridente
-        osc.frequency.value = TICK_FREQUENCY;
-
         const start = ctx.currentTime + delaySec;
-        // Envelope linear: 8ms attack, sustain, 25ms release
-        gain.gain.setValueAtTime(0, start);
-        gain.gain.linearRampToValueAtTime(volume, start + 0.008);
-        gain.gain.setValueAtTime(volume, start + TICK_DURATION_S - 0.025);
-        gain.gain.linearRampToValueAtTime(0, start + TICK_DURATION_S);
+        const stop  = start + TICK_DURATION_S;
 
-        osc.connect(gain).connect(ctx.destination);
-        osc.start(start);
-        osc.stop(start + TICK_DURATION_S + 0.05);
+        // Master gain — envelope único
+        const master = ctx.createGain();
+        master.gain.setValueAtTime(0, start);
+        master.gain.linearRampToValueAtTime(volume, start + 0.008);
+        master.gain.setValueAtTime(volume, stop - 0.025);
+        master.gain.linearRampToValueAtTime(0, stop);
+        master.connect(ctx.destination);
+
+        // Osc 1 — triangle (fundamental clara)
+        const osc1 = ctx.createOscillator();
+        osc1.type = "triangle";
+        osc1.frequency.value = TICK_FREQUENCY;
+        const g1 = ctx.createGain();
+        g1.gain.value = 0.6;
+        osc1.connect(g1).connect(master);
+
+        // Osc 2 — square oitava acima (bite)
+        const osc2 = ctx.createOscillator();
+        osc2.type = "square";
+        osc2.frequency.value = TICK_FREQUENCY * 2;
+        const g2 = ctx.createGain();
+        g2.gain.value = 0.35;
+        osc2.connect(g2).connect(master);
+
+        osc1.start(start); osc1.stop(stop + 0.05);
+        osc2.start(start); osc2.stop(stop + 0.05);
       } catch {
         // Falha isolada não pode quebrar o loop
       }
@@ -119,8 +178,6 @@ export default function MencaoAlarme() {
   );
 
   // ── Desbloqueio automático na 1ª interação da página ───────────────────
-  // Não toca bip de confirmação — se não houver pendência, fica silencioso.
-  // O loop em playTick dispara automaticamente quando houver pendência real.
   useEffect(() => {
     const unlock = () => {
       ensureAudio();
@@ -173,7 +230,17 @@ export default function MencaoAlarme() {
     };
   }, [fetchPendentes]);
 
-  // ── Loop de bip duplo enquanto houver pendências ───────────────────────
+  // ── Re-render a cada 30s enquanto silenciado (pra expirar contagem) ────
+  useEffect(() => {
+    if (!somSilenciado) return;
+    const t = setInterval(() => {
+      // força re-render ao atualizar um estado derivado
+      setSilenciadoAte((v) => v);
+    }, 30_000);
+    return () => clearInterval(t);
+  }, [somSilenciado]);
+
+  // ── Loop de bip enquanto houver pendências E não estiver silenciado ────
   useEffect(() => {
     const stopTick = () => {
       if (tickTimerRef.current) {
@@ -182,7 +249,7 @@ export default function MencaoAlarme() {
       }
     };
 
-    if (pendentes.length === 0) {
+    if (pendentes.length === 0 || somSilenciado) {
       stopTick();
       return;
     }
@@ -191,8 +258,11 @@ export default function MencaoAlarme() {
       const ctx = audioCtxRef.current;
       if (!ctx) return; // ainda não desbloqueado — banner mostra o botão
       if (ctx.state === "suspended") {
+        setAudioSuspended(true);
         ctx.resume().catch(() => {});
+        return; // não toca nesse tick, espera destravar
       }
+      setAudioSuspended(false);
       playBip(ctx, 0);
     };
 
@@ -201,7 +271,59 @@ export default function MencaoAlarme() {
     tickTimerRef.current = setInterval(playTick, TICK_INTERVAL_MS);
 
     return stopTick;
-  }, [pendentes.length, playBip]);
+  }, [pendentes.length, somSilenciado, playBip]);
+
+  // ── Notifications API (SO nativo): dispara pra cada menção nova ───────
+  useEffect(() => {
+    if (notifPermission !== "granted") return;
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+
+    for (const p of pendentes) {
+      if (notifShownRef.current.has(p.id)) continue;
+
+      // Só notifica se a aba não estiver em foco (evita notif duplicada quando usuário já está vendo)
+      if (document.visibilityState === "visible" && document.hasFocus()) {
+        notifShownRef.current.add(p.id); // marca como "vista" mesmo sem notificar
+        continue;
+      }
+
+      try {
+        const titulo = p.remetente_nome
+          ? `${p.remetente_nome} te mencionou`
+          : "Nova menção aguardando resposta";
+        const body = [
+          p.numero_ordem ? `Ordem ${p.numero_ordem}` : null,
+          p.mensagem ?? p.titulo ?? "",
+        ].filter(Boolean).join(" — ");
+
+        const n = new Notification(titulo, {
+          body,
+          icon: "/icons/icon-192x192.png",
+          badge: "/icons/icon-192x192.png",
+          tag: `mencao-${p.id}`,
+          requireInteraction: true, // fica até o user clicar/dispensar
+          silent: false,            // toca som do SO
+        });
+
+        n.onclick = () => {
+          window.focus();
+          const destino = p.link ?? (p.ordem_id != null ? `/ordens/${p.ordem_id}` : "/");
+          router.push(destino);
+          n.close();
+        };
+
+        notifShownRef.current.add(p.id);
+      } catch {
+        // Falha isolada — ignora, volta a tentar no próximo poll
+      }
+    }
+
+    // Limpa IDs que não estão mais pendentes (pra re-notificar se voltar)
+    const idsAtivos = new Set(pendentes.map((p) => p.id));
+    for (const id of Array.from(notifShownRef.current)) {
+      if (!idsAtivos.has(id)) notifShownRef.current.delete(id);
+    }
+  }, [pendentes, notifPermission, router]);
 
   // ── Navegar pra ordem ──────────────────────────────────────────────────
   const irParaOrdem = useCallback(
@@ -210,24 +332,23 @@ export default function MencaoAlarme() {
         p.link ?? (p.ordem_id != null ? `/ordens/${p.ordem_id}` : null);
       if (!destino) return;
       router.push(destino);
-      // Não revalidamos aqui: pendência SÓ cai ao responder (enviar comentário)
     },
     [router]
   );
 
-  // ── Handler do botão "Ativar som" (fallback manual) ────────────────────
-  const ativarSomManual = useCallback(() => {
+  // ── Handler do botão "Ativar som" ──────────────────────────────────────
+  const ativarSomManual = useCallback(async () => {
     const ctx = ensureAudio();
     if (ctx) {
       // Toca 2 bips de confirmação para o usuário ouvir o volume
       playBip(ctx, 0, 0.3);
       playBip(ctx, TICK_DURATION_S + 0.08, 0.3);
     }
-  }, [ensureAudio, playBip]);
+    // Aproveita o gesto pra pedir permissão de Notifications
+    await ensureNotifPermission();
+  }, [ensureAudio, playBip, ensureNotifPermission]);
 
-  // ── Handler do botão "Adiar" ───────────────────────────────────────────
-  // Silencia o alarme por SNOOZE_MINUTOS. Após esse tempo, o próximo polling
-  // volta a trazer as pendências e o alarme reinicia automaticamente.
+  // ── Handler do botão "Adiar" (só silencia som) ─────────────────────────
   const adiarAlarme = useCallback(async () => {
     if (adiando) return;
     setAdiando(true);
@@ -238,11 +359,11 @@ export default function MencaoAlarme() {
         body: JSON.stringify({ minutos: SNOOZE_MINUTOS }),
       });
       if (r.ok) {
-        // Otimismo: esconde o banner/som imediatamente; o próximo poll confirma
-        setPendentes([]);
+        const data = (await r.json()) as { silenciado_ate: string | null };
+        setSilenciadoAte(data.silenciado_ate ?? null);
       }
     } catch {
-      // Falhou — próximo polling tenta de novo e o alarme continua
+      // Falhou — próximo polling tenta de novo
     } finally {
       setAdiando(false);
     }
@@ -252,6 +373,11 @@ export default function MencaoAlarme() {
 
   const primeira = pendentes[0];
   const total = pendentes.length;
+
+  // Minutos restantes do snooze (pra exibir no banner)
+  const minutosRestantes = somSilenciado && silenciadoAte
+    ? Math.max(0, Math.ceil((new Date(silenciadoAte).getTime() - Date.now()) / 60000))
+    : 0;
 
   return (
     <div
@@ -267,7 +393,7 @@ export default function MencaoAlarme() {
       <div className="px-4 py-2 flex items-center gap-3 flex-wrap">
         <AlertTriangle
           size={18}
-          className="flex-shrink-0 animate-pulse"
+          className={`flex-shrink-0 ${somSilenciado ? "" : "animate-pulse"}`}
           strokeWidth={2.25}
         />
         <span className="text-sm font-semibold">
@@ -317,7 +443,21 @@ export default function MencaoAlarme() {
             Ativar som
           </button>
         )}
-        {audioReady && (
+
+        {/* Aviso: áudio foi suspenso (user mutou aba ou SO está mudo) */}
+        {audioReady && audioSuspended && !somSilenciado && (
+          <span
+            className="flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded animate-pulse"
+            style={{ background: "#fef08a", color: "#854d0e", border: "1px solid #ca8a04" }}
+            title="Áudio suspenso — verifique o volume da aba e do sistema"
+          >
+            <VolumeX size={12} />
+            áudio mudo
+          </span>
+        )}
+
+        {/* Indicador: som está ok */}
+        {audioReady && !audioSuspended && !somSilenciado && (
           <span
             className="flex items-center gap-1 text-[10px] opacity-70"
             title="Áudio ativo"
@@ -327,24 +467,71 @@ export default function MencaoAlarme() {
           </span>
         )}
 
-        {/* Botão "Adiar N min" — silencia temporariamente */}
+        {/* Indicador: som silenciado pelo snooze */}
+        {somSilenciado && (
+          <span
+            className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded"
+            style={{ background: "#fff7ed", color: "#9a3412", border: "1px solid #fb923c" }}
+            title="Som silenciado temporariamente"
+          >
+            <VolumeX size={12} />
+            som mudo ({minutosRestantes} min)
+          </span>
+        )}
+
+        {/* Estado das notificações do SO */}
+        {notifPermission === "granted" && (
+          <span
+            className="flex items-center gap-1 text-[10px] opacity-70"
+            title="Notificações do Sistema Operacional ativas — você será avisado mesmo com a aba em segundo plano"
+          >
+            <Bell size={12} />
+            notif. SO
+          </span>
+        )}
+        {notifPermission === "denied" && (
+          <span
+            className="flex items-center gap-1 text-[10px]"
+            style={{ color: "#b91c1c" }}
+            title="Notificações bloqueadas no navegador — habilite nas configurações do site para receber alertas com a aba em segundo plano"
+          >
+            <BellOff size={12} />
+            notif. bloqueadas
+          </span>
+        )}
+        {notifPermission === "default" && audioReady && (
+          <button
+            onClick={ensureNotifPermission}
+            className="flex items-center gap-1 text-[10px] underline"
+            title="Permitir notificações desktop para receber alertas com a aba em segundo plano"
+          >
+            <Bell size={12} />
+            permitir notif.
+          </button>
+        )}
+
+        {/* Botão "Adiar" — silencia SOMENTE o som */}
         <button
           onClick={adiarAlarme}
-          disabled={adiando}
+          disabled={adiando || somSilenciado}
           className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm transition-colors disabled:opacity-50"
           style={{
             background: "#fff",
             color: "#991b1b",
             border: "1px solid #dc2626",
           }}
-          title={`Silencia o alarme por ${SNOOZE_MINUTOS} minutos. Após esse tempo, se ainda não houver resposta, o alarme volta a tocar.`}
+          title={`Silencia apenas o SOM do alarme por ${SNOOZE_MINUTOS} minutos. O aviso continua visível. Responda para remover de vez.`}
         >
-          <Clock size={14} strokeWidth={2.5} />
-          {adiando ? "Adiando..." : `Adiar ${SNOOZE_MINUTOS} min`}
+          <VolumeX size={14} strokeWidth={2.5} />
+          {adiando
+            ? "Adiando..."
+            : somSilenciado
+              ? `Som mudo (${minutosRestantes} min)`
+              : `Silenciar som ${SNOOZE_MINUTOS} min`}
         </button>
 
         <span className="text-[11px] italic ml-auto hidden md:block opacity-80">
-          Responda na ordem para silenciar
+          Responda na ordem para silenciar definitivamente
         </span>
       </div>
 
