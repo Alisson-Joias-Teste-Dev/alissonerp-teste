@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { uploadFile } from "@/lib/storage";
 
 // GET /api/ordens/[id]/comentarios
 export async function GET(
@@ -48,7 +49,19 @@ export async function POST(
   if (isNaN(ordemId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const body = await req.json();
-  const { texto, mencoes = [], foto_path = null } = body;
+  const { texto, mencoes = [], foto_path: fotaPathBody = null, foto_base64 = null } = body;
+
+  // Upload server-side se vier foto em base64 (preferencial)
+  let foto_path: string | null = fotaPathBody;
+  if (foto_base64) {
+    const ext = (foto_base64 as string).includes("png") ? "png" : "jpg";
+    const path = `comentarios/${ordemId}/${Date.now()}-${user.id.substring(0, 8)}.${ext}`;
+    const result = await uploadFile("ordem-fotos", path, foto_base64 as string, `image/${ext}`);
+    if ("path" in result) {
+      foto_path = result.path;
+    }
+    // Se upload falhar → segue sem foto (não bloqueia o comentário)
+  }
 
   if (!texto?.trim())
     return NextResponse.json({ error: "Texto obrigatório" }, { status: 400 });
