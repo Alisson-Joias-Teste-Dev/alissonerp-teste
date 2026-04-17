@@ -6,9 +6,9 @@ import { createServerSupabase } from "@/lib/supabase/server";
 // Retorna as menções que estão aguardando resposta do usuário logado
 // (usado pelo alarme sonoro do MencaoAlarme no DashboardShell).
 //
-// Respeita snooze global: se alissonerp.usuarios.notif_alarme_silenciado_ate
-// está no futuro, retorna { total: 0, silenciado_ate } para que o alarme
-// fique mudo até a janela expirar.
+// Snooze (alissonerp.usuarios.notif_alarme_silenciado_ate) é SÓ DE SOM:
+// o banner continua visível mesmo silenciado. O frontend usa
+// `silenciado_ate` para suprimir o bip até a janela expirar.
 export async function GET(_req: NextRequest) {
   const supabase = await createServerSupabase();
   const {
@@ -17,7 +17,7 @@ export async function GET(_req: NextRequest) {
   if (!user)
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  // Checa snooze antes de buscar pendências
+  // Snooze é retornado para frontend decidir (não filtra itens)
   const [usuario] = await sql<
     { notif_alarme_silenciado_ate: Date | null }[]
   >`
@@ -27,18 +27,7 @@ export async function GET(_req: NextRequest) {
     LIMIT 1
   `;
 
-  const agora = new Date();
   const silenciadoAte = usuario?.notif_alarme_silenciado_ate ?? null;
-  const ativo =
-    silenciadoAte != null && new Date(silenciadoAte).getTime() > agora.getTime();
-
-  if (ativo) {
-    return NextResponse.json({
-      total: 0,
-      itens: [],
-      silenciado_ate: silenciadoAte,
-    });
-  }
 
   const rows = await sql`
     SELECT
@@ -72,6 +61,6 @@ export async function GET(_req: NextRequest) {
       remetente_nome: r.remetente_nome ?? null,
       created_at: r.created_at,
     })),
-    silenciado_ate: null,
+    silenciado_ate: silenciadoAte,
   });
 }
