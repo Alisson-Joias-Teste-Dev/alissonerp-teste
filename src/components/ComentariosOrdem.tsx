@@ -225,6 +225,15 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   }
 
   function handleTextoKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter sem Shift envia o comentário (quando dropdown de menção não está aberto)
+    if (e.key === "Enter" && !e.shiftKey && (!showMention || mentionResults.length === 0)) {
+      if (texto.trim() && !enviando) {
+        e.preventDefault();
+        enviar();
+      }
+      return;
+    }
+
     if (!showMention || mentionResults.length === 0) return;
 
     if (e.key === "ArrowDown") {
