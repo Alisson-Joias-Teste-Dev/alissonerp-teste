@@ -14,6 +14,8 @@ import {
   CheckCircle,
 } from "lucide-react";
 import QRCode from "qrcode";
+import { useAuth } from "@/hooks/useAuth";
+import { isFullAccess } from "@/lib/roles";
 
 // ─── Tokens (alinhados com VendaDetalheClient) ───────────────────────────────
 const C = {
@@ -33,6 +35,9 @@ interface PointDevice {
   device_id: string;
   nome_legivel: string;
   operating_mode: string | null;
+  vendedor_id: number | null;
+  is_reserva: boolean;
+  ativo: boolean;
   loja: string | null;
 }
 
@@ -61,6 +66,9 @@ export default function MercadoPagoCobranca({
   onPagamentoConfirmado,
   vendaPolling,
 }: Props) {
+  const { role } = useAuth();
+  const adminOuGerente = isFullAccess(role);
+
   const [modal, setModal] = useState<Modal>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,8 +78,10 @@ export default function MercadoPagoCobranca({
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
 
-  // Maquininha Point
+  // Maquininha Point — admin: lista completa, vendedor: minha + reservas
   const [devices, setDevices] = useState<PointDevice[]>([]);
+  const [minhaDevice, setMinhaDevice] = useState<PointDevice | null | undefined>(undefined);
+  const [reservas, setReservas] = useState<PointDevice[]>([]);
   const [deviceSelecionado, setDeviceSelecionado] = useState<string>("");
   const [pagType, setPagType] = useState<"credit_card" | "debit_card">("credit_card");
   const [parcelas, setParcelas] = useState(1);
@@ -83,6 +93,13 @@ export default function MercadoPagoCobranca({
   } | null>(null);
   const [countdown, setCountdown] = useState(0);
 
+  // Estado form inline reserva
+  const [showReservaForm, setShowReservaForm] = useState(false);
+  const [reservaSelecionada, setReservaSelecionada] = useState("");
+  const [reservaJustificativa, setReservaJustificativa] = useState("");
+  const [reservaLoading, setReservaLoading] = useState(false);
+  const [reservaError, setReservaError] = useState<string | null>(null);
+
   // Polling
   const [pago, setPago] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
@@ -91,17 +108,36 @@ export default function MercadoPagoCobranca({
 
   // ─── Fetch devices quando abre modal maquininha ──────────────────────────
   const carregarDevices = useCallback(async () => {
-    try {
-      const res = await fetch("/api/mercado-pago/devices");
-      if (res.ok) {
-        const data = await res.json();
-        setDevices(data);
-        if (data.length === 1) setDeviceSelecionado(data[0].device_id);
+    if (adminOuGerente) {
+      try {
+        const res = await fetch("/api/mercado-pago/devices");
+        if (res.ok) {
+          const data = await res.json();
+          setDevices(data);
+          if (data.length === 1) setDeviceSelecionado(data[0].device_id);
+        }
+      } catch {
+        setError("Erro ao listar maquininhas");
       }
-    } catch {
-      setError("Erro ao listar maquininhas");
+    } else {
+      try {
+        const res = await fetch("/api/mercado-pago/devices?minha=true");
+        if (res.ok) {
+          const data = await res.json() as { minha: PointDevice | null; reservas: PointDevice[] };
+          setMinhaDevice(data.minha);
+          setReservas(data.reservas);
+          if (data.minha) {
+            setDeviceSelecionado(data.minha.device_id);
+          }
+          if (!data.minha && data.reservas.length === 1) {
+            setReservaSelecionada(data.reservas[0].device_id);
+          }
+        }
+      } catch {
+        setError("Erro ao listar maquininhas");
+      }
     }
-  }, []);
+  }, [adminOuGerente]);
 
   useEffect(() => {
     if (modal === "maquininha") carregarDevices();
@@ -239,6 +275,34 @@ export default function MercadoPagoCobranca({
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
+  // ─── Confirmar uso de reserva ────────────────────────────────────────────
+  async function confirmarReserva() {
+    if (!reservaSelecionada) { setReservaError("Selecione uma maquininha reserva"); return; }
+    if (reservaJustificativa.trim().length < 10) { setReservaError("Justificativa muito curta (mínimo 10 caracteres)"); return; }
+    setReservaLoading(true);
+    setReservaError(null);
+    try {
+      const res = await fetch("/api/mercado-pago/uso-reserva", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          venda_id: vendaId,
+          device_id_reserva: reservaSelecionada,
+          justificativa: reservaJustificativa.trim(),
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Erro ao registrar uso de reserva");
+      setDeviceSelecionado(reservaSelecionada);
+      setShowReservaForm(false);
+      setReservaJustificativa("");
+    } catch (e) {
+      setReservaError(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setReservaLoading(false);
+    }
+  }
+
   function fecharModal() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     setModal(null);
@@ -247,6 +311,9 @@ export default function MercadoPagoCobranca({
     setQrDataUrl(null);
     setIntentAtiva(null);
     setPago(false);
+    setShowReservaForm(false);
+    setReservaJustificativa("");
+    setReservaError(null);
   }
 
   if (!visivel) return null;
@@ -400,79 +467,289 @@ export default function MercadoPagoCobranca({
               {/* ─── Modal: Maquininha ─── */}
               {modal === "maquininha" && !intentAtiva && !pago && (
                 <div className="space-y-3">
-                  {devices.length === 0 && (
-                    <div className="text-xs py-3 text-center" style={{ color: "#9CA3AF" }}>
-                      Nenhuma maquininha cadastrada.<br />
-                      Vá em Configurações &gt; Integrações e sincronize.
-                    </div>
-                  )}
-
-                  {devices.length > 0 && (
+                  {/* Admin/gerente: dropdown completo */}
+                  {adminOuGerente && (
                     <>
-                      <div>
-                        <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
-                          Maquininha
-                        </label>
-                        <select
-                          value={deviceSelecionado}
-                          onChange={e => setDeviceSelecionado(e.target.value)}
-                          className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-                          style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
-                        >
-                          <option value="">Selecione...</option>
-                          {devices.map(d => (
-                            <option key={d.device_id} value={d.device_id}>
-                              {d.nome_legivel}{d.loja ? ` — ${d.loja}` : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
-                          Forma
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          {(["credit_card", "debit_card"] as const).map(t => (
-                            <button
-                              key={t}
-                              onClick={() => setPagType(t)}
-                              className="py-2.5 rounded-lg text-xs font-semibold transition-all"
-                              style={{
-                                backgroundColor: pagType === t ? C.esmeralda : "#fff",
-                                color: pagType === t ? C.creme : C.esmeralda,
-                                border: `1px solid ${C.esmeralda}`,
-                              }}
-                            >
-                              {t === "credit_card" ? "Crédito" : "Débito"}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      {pagType === "credit_card" && (
-                        <div>
-                          <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
-                            Parcelas
-                          </label>
-                          <select
-                            value={parcelas}
-                            onChange={e => setParcelas(Number(e.target.value))}
-                            className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-                            style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
-                          >
-                            {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
-                              <option key={n} value={n}>{n}x {fmt(valorSugerido / n)}</option>
-                            ))}
-                          </select>
+                      {devices.length === 0 && (
+                        <div className="text-xs py-3 text-center" style={{ color: "#9CA3AF" }}>
+                          Nenhuma maquininha cadastrada.<br />
+                          Vá em Configurações &gt; Integrações e sincronize.
                         </div>
                       )}
-                      <button
-                        onClick={enviarParaMaquininha}
-                        disabled={loading || !deviceSelecionado}
-                        className="w-full py-3 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50"
-                        style={{ backgroundColor: C.esmeralda, color: C.creme }}
-                      >
-                        {loading ? <Loader2 size={15} className="animate-spin inline" /> : "Enviar pra maquininha"}
-                      </button>
+                      {devices.length > 0 && (
+                        <>
+                          <div>
+                            <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                              Maquininha
+                            </label>
+                            <select
+                              value={deviceSelecionado}
+                              onChange={e => setDeviceSelecionado(e.target.value)}
+                              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
+                              style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
+                            >
+                              <option value="">Selecione...</option>
+                              {devices.map(d => (
+                                <option key={d.device_id} value={d.device_id}>
+                                  {d.nome_legivel}{d.loja ? ` — ${d.loja}` : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                              Forma
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {(["credit_card", "debit_card"] as const).map(t => (
+                                <button
+                                  key={t}
+                                  onClick={() => setPagType(t)}
+                                  className="py-2.5 rounded-lg text-xs font-semibold transition-all"
+                                  style={{
+                                    backgroundColor: pagType === t ? C.esmeralda : "#fff",
+                                    color: pagType === t ? C.creme : C.esmeralda,
+                                    border: `1px solid ${C.esmeralda}`,
+                                  }}
+                                >
+                                  {t === "credit_card" ? "Crédito" : "Débito"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {pagType === "credit_card" && (
+                            <div>
+                              <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                                Parcelas
+                              </label>
+                              <select
+                                value={parcelas}
+                                onChange={e => setParcelas(Number(e.target.value))}
+                                className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
+                                style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
+                              >
+                                {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
+                                  <option key={n} value={n}>{n}x {fmt(valorSugerido / n)}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          <button
+                            onClick={enviarParaMaquininha}
+                            disabled={loading || !deviceSelecionado}
+                            className="w-full py-3 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50"
+                            style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                          >
+                            {loading ? <Loader2 size={15} className="animate-spin inline" /> : "Enviar pra maquininha"}
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {/* Vendedor: lógica minha / reserva */}
+                  {!adminOuGerente && (
+                    <>
+                      {minhaDevice === undefined && (
+                        <div className="flex items-center justify-center py-4 gap-2 text-xs" style={{ color: "#9CA3AF" }}>
+                          <Loader2 size={13} className="animate-spin" /> Carregando maquininha...
+                        </div>
+                      )}
+                      {minhaDevice !== undefined && (
+                        <>
+                          {/* Tem maquininha própria */}
+                          {minhaDevice !== null && !showReservaForm && (
+                            <div>
+                              <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                                Maquininha
+                              </label>
+                              <div
+                                className="flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm"
+                                style={{ borderColor: C.cremeBorder, backgroundColor: "#fff", color: "#1A1A1A" }}
+                              >
+                                <Smartphone size={13} style={{ color: C.esmeralda }} />
+                                <span className="font-medium">{minhaDevice.nome_legivel}</span>
+                                {minhaDevice.loja && <span style={{ color: "#6B7280" }}>— {minhaDevice.loja}</span>}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Sem maquininha própria */}
+                          {minhaDevice === null && !showReservaForm && !deviceSelecionado && (
+                            <div
+                              className="flex items-start gap-2 p-3 rounded-lg text-xs"
+                              style={{ backgroundColor: "#FFFBEB", color: "#92400E", border: "1px solid #FDE68A" }}
+                            >
+                              <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+                              <span>Você não tem maquininha atribuída. Use a da loja.</span>
+                            </div>
+                          )}
+
+                          {/* Device reserva confirmado */}
+                          {minhaDevice === null && !showReservaForm && deviceSelecionado && (
+                            <div>
+                              <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                                Maquininha (reserva da loja)
+                              </label>
+                              <div
+                                className="flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm"
+                                style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB", color: "#92400E" }}
+                              >
+                                <Smartphone size={13} />
+                                <span className="font-medium">
+                                  {reservas.find(r => r.device_id === deviceSelecionado)?.nome_legivel ?? deviceSelecionado}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Botão usar reserva */}
+                          {!showReservaForm && (
+                            <button
+                              onClick={() => { setShowReservaForm(true); setReservaError(null); if (reservas.length === 1) setReservaSelecionada(reservas[0].device_id); }}
+                              className="flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg transition-opacity hover:opacity-80"
+                              style={{ backgroundColor: "#FFFBEB", color: "#B45309", border: "1px solid #FDE68A" }}
+                            >
+                              <AlertTriangle size={12} /> Usar maquininha da loja
+                            </button>
+                          )}
+
+                          {/* Form inline reserva */}
+                          {showReservaForm && (
+                            <div
+                              className="space-y-3 p-3 rounded-lg border"
+                              style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB" }}
+                            >
+                              {reservas.length === 1 && (
+                                <div>
+                                  <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#92400E" }}>
+                                    Maquininha reserva
+                                  </label>
+                                  <p className="text-sm font-medium px-3 py-2 rounded-lg border" style={{ borderColor: "#FDE68A", backgroundColor: "#fff", color: "#1A1A1A" }}>
+                                    {reservas[0].nome_legivel}{reservas[0].loja ? ` — ${reservas[0].loja}` : ""}
+                                  </p>
+                                </div>
+                              )}
+                              {reservas.length > 1 && (
+                                <div>
+                                  <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#92400E" }}>
+                                    Maquininha reserva
+                                  </label>
+                                  <select
+                                    value={reservaSelecionada}
+                                    onChange={e => setReservaSelecionada(e.target.value)}
+                                    className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                                    style={{ borderColor: "#FDE68A", color: "#1A1A1A", backgroundColor: "#fff" }}
+                                  >
+                                    <option value="">Selecione...</option>
+                                    {reservas.map(r => (
+                                      <option key={r.device_id} value={r.device_id}>
+                                        {r.nome_legivel}{r.loja ? ` — ${r.loja}` : ""}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                              {reservas.length === 0 && (
+                                <p className="text-xs" style={{ color: "#92400E" }}>
+                                  Nenhuma maquininha reserva disponível.
+                                </p>
+                              )}
+                              <div>
+                                <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#92400E" }}>
+                                  Motivo / Justificativa *
+                                </label>
+                                <textarea
+                                  value={reservaJustificativa}
+                                  onChange={e => setReservaJustificativa(e.target.value)}
+                                  placeholder="Descreva o motivo (mín. 10 caracteres)..."
+                                  rows={3}
+                                  className="w-full px-3 py-2 rounded-lg border text-xs outline-none resize-none"
+                                  style={{ borderColor: "#FDE68A", color: "#1A1A1A", backgroundColor: "#fff" }}
+                                />
+                              </div>
+                              {reservaError && (
+                                <p className="text-[11px]" style={{ color: "#DC2626" }}>{reservaError}</p>
+                              )}
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={confirmarReserva}
+                                  disabled={reservaLoading || reservas.length === 0}
+                                  className="flex-1 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
+                                  style={{ backgroundColor: "#B45309", color: "#fff" }}
+                                >
+                                  {reservaLoading
+                                    ? <span className="inline-flex items-center gap-1 justify-center"><Loader2 size={11} className="animate-spin" /> Confirmando...</span>
+                                    : "Confirmar"}
+                                </button>
+                                <button
+                                  onClick={() => { setShowReservaForm(false); setReservaError(null); }}
+                                  className="px-3 py-2 rounded-lg text-xs"
+                                  style={{ backgroundColor: "#fff", color: "#6B7280", border: `1px solid ${C.cremeBorder}` }}
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Forma de pagamento + parcelas — só quando tem device */}
+                          {!showReservaForm && deviceSelecionado && (
+                            <>
+                              <div>
+                                <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                                  Forma
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {(["credit_card", "debit_card"] as const).map(t => (
+                                    <button
+                                      key={t}
+                                      onClick={() => setPagType(t)}
+                                      className="py-2.5 rounded-lg text-xs font-semibold transition-all"
+                                      style={{
+                                        backgroundColor: pagType === t ? C.esmeralda : "#fff",
+                                        color: pagType === t ? C.creme : C.esmeralda,
+                                        border: `1px solid ${C.esmeralda}`,
+                                      }}
+                                    >
+                                      {t === "credit_card" ? "Crédito" : "Débito"}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              {pagType === "credit_card" && (
+                                <div>
+                                  <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                                    Parcelas
+                                  </label>
+                                  <select
+                                    value={parcelas}
+                                    onChange={e => setParcelas(Number(e.target.value))}
+                                    className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
+                                    style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
+                                  >
+                                    {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
+                                      <option key={n} value={n}>{n}x {fmt(valorSugerido / n)}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          {/* Botão enviar */}
+                          {!showReservaForm && deviceSelecionado && (
+                            <button
+                              onClick={enviarParaMaquininha}
+                              disabled={loading}
+                              className="w-full py-3 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50"
+                              style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                            >
+                              {loading ? <Loader2 size={15} className="animate-spin inline" /> : "Enviar pra maquininha"}
+                            </button>
+                          )}
+                        </>
+                      )}
                     </>
                   )}
                 </div>

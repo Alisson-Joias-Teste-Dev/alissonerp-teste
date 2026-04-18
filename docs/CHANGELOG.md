@@ -1,8 +1,17 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/04/2026 — Versão: v2.24.0 <!-- Revisado 16/04/2026 -->
+> 📋 Última atualização automática: 18/04/2026 — Versão: v2.25.0 <!-- Revisado 18/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.25.0 (18/04/2026)
+### Feature — maquininhas por vendedor (MP Point)
+- **Migration 151** (`151_mp_point_devices_vendedor.sql`): adiciona `vendedor_id` (FK `public.vendedores`) e `is_reserva BOOLEAN` em `alissonerp.mp_point_devices`. Cria tabela `alissonerp.uso_maquina_reserva` para log de uso de máquina reserva com justificativa obrigatória.
+- **`GET /api/mercado-pago/devices?minha=true`**: retorna `{ minha, reservas }` — máquina do vendedor logado + todas as reservas da loja.
+- **`PATCH /api/mercado-pago/devices`**: aceita `vendedor_id` e `is_reserva` (mutuamente exclusivos; 409 se tentar atribuir vendedor que já tem máquina).
+- **`POST /api/mercado-pago/uso-reserva`**: salva log de uso com justificativa (mín. 10 chars, validado server-side).
+- **`CartaoInline.tsx` + `MercadoPagoCobranca.tsx`**: vendedor vê sua máquina auto-selecionada (sem dropdown); botão "Usar maquininha da loja" abre form inline com justificativa obrigatória; admin/gerente mantém dropdown completo.
+- **Configurações → aba "Maquininhas"**: tabela de devices com modal de edição — atribui vendedor, marca como reserva, renomeia, ativa/desativa. Visível apenas para admin/gerente/desenvolvedor.
 
 ## v2.24.0 (16/04/2026)
 ### Feature — merge feat/orcamento-friso-pedras-v2 (recebida do chefe)

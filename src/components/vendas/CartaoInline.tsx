@@ -6,6 +6,8 @@ import {
   MessageCircle, CheckCircle, AlertTriangle, X, RefreshCw,
 } from "lucide-react";
 import QRCode from "qrcode";
+import { useAuth } from "@/hooks/useAuth";
+import { isFullAccess } from "@/lib/roles";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CartaoInline — Cobrança via Cartão de Crédito no Mercado Pago
@@ -44,6 +46,9 @@ interface PointDevice {
   id: number;
   device_id: string;
   nome_legivel: string;
+  vendedor_id: number | null;
+  is_reserva: boolean;
+  ativo: boolean;
   loja: string | null;
 }
 
@@ -70,6 +75,9 @@ export default function CartaoInline({
   onPagamentoConfirmado,
   ocultar,
 }: Props) {
+  const { role } = useAuth();
+  const adminOuGerente = isFullAccess(role);
+
   const [vendaIdEfetivo, setVendaIdEfetivo] = useState<number | null>(vendaIdProp);
   const [numeroVenda, setNumeroVenda] = useState(numeroVendaProp);
 
@@ -86,8 +94,10 @@ export default function CartaoInline({
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
 
-  // Maquininha state
+  // Maquininha state — admin: lista completa, vendedor: minha + reservas
   const [devices, setDevices] = useState<PointDevice[]>([]);
+  const [minhaDevice, setMinhaDevice] = useState<PointDevice | null | undefined>(undefined); // undefined = carregando
+  const [reservas, setReservas] = useState<PointDevice[]>([]);
   const [deviceSelected, setDeviceSelected] = useState("");
   const [parcelasPoint, setParcelasPoint] = useState(installmentsProp ?? 1);
   const [intentAtiva, setIntentAtiva] = useState<{
@@ -97,6 +107,13 @@ export default function CartaoInline({
     device_nome: string;
   } | null>(null);
   const [countdown, setCountdown] = useState(0);
+
+  // Estado do form inline "usar reserva"
+  const [showReservaForm, setShowReservaForm] = useState(false);
+  const [reservaSelecionada, setReservaSelecionada] = useState("");
+  const [reservaJustificativa, setReservaJustificativa] = useState("");
+  const [reservaLoading, setReservaLoading] = useState(false);
+  const [reservaError, setReservaError] = useState<string | null>(null);
 
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -117,19 +134,41 @@ export default function CartaoInline({
 
   // ─── Fetch devices quando entra em modo maquininha ───────────────────────
   const carregarDevices = useCallback(async () => {
-    try {
-      const res = await fetch("/api/mercado-pago/devices");
-      if (res.ok) {
-        const data = await res.json() as PointDevice[];
-        setDevices(data);
-        if (data.length === 1) setDeviceSelected(data[0].device_id);
-      }
-    } catch { /* ignora erro temporário */ }
-  }, []);
+    if (adminOuGerente) {
+      // Admin/gerente: lista completa
+      try {
+        const res = await fetch("/api/mercado-pago/devices");
+        if (res.ok) {
+          const data = await res.json() as PointDevice[];
+          setDevices(data);
+          if (data.length === 1) setDeviceSelected(data[0].device_id);
+        }
+      } catch { /* ignora */ }
+    } else {
+      // Vendedor: busca minha + reservas
+      try {
+        const res = await fetch("/api/mercado-pago/devices?minha=true");
+        if (res.ok) {
+          const data = await res.json() as { minha: PointDevice | null; reservas: PointDevice[] };
+          setMinhaDevice(data.minha);
+          setReservas(data.reservas);
+          if (data.minha) {
+            setDeviceSelected(data.minha.device_id);
+          }
+          // Pré-selecionar primeira reserva se houver apenas uma
+          if (!data.minha && data.reservas.length === 1) {
+            setReservaSelecionada(data.reservas[0].device_id);
+          }
+        }
+      } catch { /* ignora */ }
+    }
+  }, [adminOuGerente]);
 
   useEffect(() => {
-    if (modo === "maquininha" && devices.length === 0) carregarDevices();
-  }, [modo, devices.length, carregarDevices]);
+    if (modo === "maquininha" && devices.length === 0 && minhaDevice === undefined) {
+      carregarDevices();
+    }
+  }, [modo, devices.length, minhaDevice, carregarDevices]);
 
   // ─── Polling de confirmação ──────────────────────────────────────────────
   const iniciarPolling = useCallback((idParaMonitorar: number) => {
@@ -281,12 +320,43 @@ export default function CartaoInline({
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
+  // ─── Confirmar uso de reserva (vendedor sem maquininha própria) ─────────
+  async function confirmarReserva() {
+    if (!reservaSelecionada) { setReservaError("Selecione uma maquininha reserva"); return; }
+    if (reservaJustificativa.trim().length < 10) { setReservaError("Justificativa muito curta (mínimo 10 caracteres)"); return; }
+    setReservaLoading(true);
+    setReservaError(null);
+    try {
+      const res = await fetch("/api/mercado-pago/uso-reserva", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          venda_id: vendaIdEfetivo ?? undefined,
+          device_id_reserva: reservaSelecionada,
+          justificativa: reservaJustificativa.trim(),
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Erro ao registrar uso de reserva");
+      setDeviceSelected(reservaSelecionada);
+      setShowReservaForm(false);
+      setReservaJustificativa("");
+    } catch (e) {
+      setReservaError(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setReservaLoading(false);
+    }
+  }
+
   function voltarIdle() {
     setModo("idle");
     setError(null);
     setInitPoint(null);
     setQrDataUrl(null);
     setIntentAtiva(null);
+    setShowReservaForm(false);
+    setReservaJustificativa("");
+    setReservaError(null);
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }
 
@@ -434,60 +504,248 @@ export default function CartaoInline({
         <div className="space-y-3">
           {!intentAtiva && (
             <>
-              {devices.length === 0 && (
-                <div className="text-xs py-3 text-center" style={{ color: "#9CA3AF" }}>
-                  Nenhuma maquininha cadastrada.<br />
-                  Vá em Configurações &gt; Integrações e sincronize.
-                </div>
+              {/* ── Admin/gerente: dropdown completo ── */}
+              {adminOuGerente && (
+                <>
+                  {devices.length === 0 && (
+                    <div className="text-xs py-3 text-center" style={{ color: "#9CA3AF" }}>
+                      Nenhuma maquininha cadastrada.<br />
+                      Vá em Configurações &gt; Integrações e sincronize.
+                    </div>
+                  )}
+                  {devices.length > 0 && (
+                    <>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                          Maquininha
+                        </label>
+                        <select
+                          value={deviceSelected}
+                          onChange={e => setDeviceSelected(e.target.value)}
+                          className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none bg-white"
+                          style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
+                        >
+                          <option value="">Selecione...</option>
+                          {devices.map(d => (
+                            <option key={d.device_id} value={d.device_id}>
+                              {d.nome_legivel}{d.loja ? ` — ${d.loja}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                          Parcelas
+                        </label>
+                        <select
+                          value={parcelasPoint}
+                          onChange={e => setParcelasPoint(Number(e.target.value))}
+                          className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none bg-white"
+                          style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
+                        >
+                          {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
+                            <option key={n} value={n}>{n}x de {fmt(valor / n)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        onClick={enviarMaquininha}
+                        disabled={loading || !deviceSelected}
+                        className="w-full py-2.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity hover:opacity-90"
+                        style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                      >
+                        {loading
+                          ? <span className="inline-flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Enviando...</span>
+                          : <>Enviar pra maquininha ({fmt(valor)})</>}
+                      </button>
+                    </>
+                  )}
+                </>
               )}
 
-              {devices.length > 0 && (
+              {/* ── Vendedor: lógica minha / reserva ── */}
+              {!adminOuGerente && (
                 <>
-                  <div>
-                    <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
-                      Maquininha
-                    </label>
-                    <select
-                      value={deviceSelected}
-                      onChange={e => setDeviceSelected(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none bg-white"
-                      style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
-                    >
-                      <option value="">Selecione...</option>
-                      {devices.map(d => (
-                        <option key={d.device_id} value={d.device_id}>
-                          {d.nome_legivel}{d.loja ? ` — ${d.loja}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {minhaDevice === undefined && (
+                    <div className="flex items-center justify-center py-4 gap-2 text-xs" style={{ color: "#9CA3AF" }}>
+                      <Loader2 size={13} className="animate-spin" /> Carregando maquininha...
+                    </div>
+                  )}
 
-                  <div>
-                    <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
-                      Parcelas
-                    </label>
-                    <select
-                      value={parcelasPoint}
-                      onChange={e => setParcelasPoint(Number(e.target.value))}
-                      className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none bg-white"
-                      style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
-                    >
-                      {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
-                        <option key={n} value={n}>{n}x de {fmt(valor / n)}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {minhaDevice !== undefined && (
+                    <>
+                      {/* Tem maquininha própria — mostrar como texto e pré-selecionar */}
+                      {minhaDevice !== null && !showReservaForm && (
+                        <div>
+                          <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                            Maquininha
+                          </label>
+                          <div
+                            className="flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm"
+                            style={{ borderColor: C.cremeBorder, backgroundColor: "#fff", color: "#1A1A1A" }}
+                          >
+                            <Smartphone size={13} style={{ color: C.esmeralda }} />
+                            <span className="font-medium">{minhaDevice.nome_legivel}</span>
+                            {minhaDevice.loja && (
+                              <span style={{ color: "#6B7280" }}>— {minhaDevice.loja}</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
-                  <button
-                    onClick={enviarMaquininha}
-                    disabled={loading || !deviceSelected}
-                    className="w-full py-2.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity hover:opacity-90"
-                    style={{ backgroundColor: C.esmeralda, color: C.creme }}
-                  >
-                    {loading
-                      ? <span className="inline-flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Enviando...</span>
-                      : <>Enviar pra maquininha ({fmt(valor)})</>}
-                  </button>
+                      {/* Não tem maquininha própria */}
+                      {minhaDevice === null && !showReservaForm && !deviceSelected && (
+                        <div
+                          className="flex items-start gap-2 p-3 rounded-lg text-xs"
+                          style={{ backgroundColor: "#FFFBEB", color: "#92400E", border: "1px solid #FDE68A" }}
+                        >
+                          <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+                          <span>Você não tem maquininha atribuída. Use a da loja.</span>
+                        </div>
+                      )}
+
+                      {/* Device reserva já confirmado */}
+                      {minhaDevice === null && !showReservaForm && deviceSelected && (
+                        <div>
+                          <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                            Maquininha (reserva da loja)
+                          </label>
+                          <div
+                            className="flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm"
+                            style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB", color: "#92400E" }}
+                          >
+                            <Smartphone size={13} />
+                            <span className="font-medium">
+                              {reservas.find(r => r.device_id === deviceSelected)?.nome_legivel ?? deviceSelected}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Botão "Usar maquininha da loja" */}
+                      {!showReservaForm && (
+                        <button
+                          onClick={() => { setShowReservaForm(true); setReservaError(null); if (reservas.length === 1) setReservaSelecionada(reservas[0].device_id); }}
+                          className="flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg transition-opacity hover:opacity-80"
+                          style={{ backgroundColor: "#FFFBEB", color: "#B45309", border: "1px solid #FDE68A" }}
+                        >
+                          <AlertTriangle size={12} /> Usar maquininha da loja
+                        </button>
+                      )}
+
+                      {/* Form inline para usar reserva */}
+                      {showReservaForm && (
+                        <div
+                          className="space-y-3 p-3 rounded-lg border"
+                          style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB" }}
+                        >
+                          {reservas.length === 1 && (
+                            <div>
+                              <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#92400E" }}>
+                                Maquininha reserva
+                              </label>
+                              <p className="text-sm font-medium px-3 py-2 rounded-lg border" style={{ borderColor: "#FDE68A", backgroundColor: "#fff", color: "#1A1A1A" }}>
+                                {reservas[0].nome_legivel}{reservas[0].loja ? ` — ${reservas[0].loja}` : ""}
+                              </p>
+                            </div>
+                          )}
+                          {reservas.length > 1 && (
+                            <div>
+                              <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#92400E" }}>
+                                Maquininha reserva
+                              </label>
+                              <select
+                                value={reservaSelecionada}
+                                onChange={e => setReservaSelecionada(e.target.value)}
+                                className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                                style={{ borderColor: "#FDE68A", color: "#1A1A1A", backgroundColor: "#fff" }}
+                              >
+                                <option value="">Selecione...</option>
+                                {reservas.map(r => (
+                                  <option key={r.device_id} value={r.device_id}>
+                                    {r.nome_legivel}{r.loja ? ` — ${r.loja}` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          {reservas.length === 0 && (
+                            <p className="text-xs" style={{ color: "#92400E" }}>
+                              Nenhuma maquininha reserva disponível no momento.
+                            </p>
+                          )}
+                          <div>
+                            <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#92400E" }}>
+                              Motivo / Justificativa *
+                            </label>
+                            <textarea
+                              value={reservaJustificativa}
+                              onChange={e => setReservaJustificativa(e.target.value)}
+                              placeholder="Descreva o motivo (mín. 10 caracteres)..."
+                              rows={3}
+                              className="w-full px-3 py-2 rounded-lg border text-xs outline-none resize-none"
+                              style={{ borderColor: "#FDE68A", color: "#1A1A1A", backgroundColor: "#fff" }}
+                            />
+                          </div>
+                          {reservaError && (
+                            <p className="text-[11px]" style={{ color: "#DC2626" }}>{reservaError}</p>
+                          )}
+                          <div className="flex gap-2">
+                            <button
+                              onClick={confirmarReserva}
+                              disabled={reservaLoading || reservas.length === 0}
+                              className="flex-1 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
+                              style={{ backgroundColor: "#B45309", color: "#fff" }}
+                            >
+                              {reservaLoading
+                                ? <span className="inline-flex items-center gap-1 justify-center"><Loader2 size={11} className="animate-spin" /> Confirmando...</span>
+                                : "Confirmar"}
+                            </button>
+                            <button
+                              onClick={() => { setShowReservaForm(false); setReservaError(null); }}
+                              className="px-3 py-2 rounded-lg text-xs"
+                              style={{ backgroundColor: "#fff", color: "#6B7280", border: `1px solid ${C.cremeBorder}` }}
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Parcelas — mostrar quando tem device selecionado */}
+                      {!showReservaForm && deviceSelected && (
+                        <div>
+                          <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                            Parcelas
+                          </label>
+                          <select
+                            value={parcelasPoint}
+                            onChange={e => setParcelasPoint(Number(e.target.value))}
+                            className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none bg-white"
+                            style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
+                          >
+                            {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
+                              <option key={n} value={n}>{n}x de {fmt(valor / n)}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* Botão enviar — só aparece quando tem device e não está no form de reserva */}
+                      {!showReservaForm && deviceSelected && (
+                        <button
+                          onClick={enviarMaquininha}
+                          disabled={loading}
+                          className="w-full py-2.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity hover:opacity-90"
+                          style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                        >
+                          {loading
+                            ? <span className="inline-flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Enviando...</span>
+                            : <>Enviar pra maquininha ({fmt(valor)})</>}
+                        </button>
+                      )}
+                    </>
+                  )}
                 </>
               )}
             </>

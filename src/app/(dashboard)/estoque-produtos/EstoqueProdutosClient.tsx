@@ -80,7 +80,7 @@ function KpiCard({
   sub,
   accent = P.dourado,
 }: {
-  icon: React.ElementType;
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number; style?: React.CSSProperties }>;
   label: string;
   value: string;
   sub?: string;
