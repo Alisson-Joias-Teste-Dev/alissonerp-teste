@@ -334,7 +334,6 @@ export async function createPointIntent(params: CreatePointIntentParams): Promis
     additional_info: {
       external_reference: `venda:${params.vendaId}:pag:${params.pagamentoId}`,
       print_on_terminal: params.printOnTerminal ?? true,
-      ticket_number: params.numeroVenda,
     },
   };
 
