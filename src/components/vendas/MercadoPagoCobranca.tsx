@@ -558,7 +558,7 @@ export default function MercadoPagoCobranca({
                                 className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
                                 style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
                               >
-                                {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
+                                {Array.from({ length: Math.min(12, Math.max(1, Math.floor(valorSugerido / 5))) }, (_, i) => i + 1).map(n => (
                                   <option key={n} value={n}>{n}x {fmt(valorSugerido / n)}</option>
                                 ))}
                               </select>

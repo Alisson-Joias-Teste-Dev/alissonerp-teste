@@ -52,6 +52,11 @@ const FORMAS_PAGAMENTO = [
 const GATEWAYS   = ["Mercado Pago", "PagSeguro", "Cielo", "Stone", "Getnet", "Rede", "Outro"];
 const BANDEIRAS  = ["Visa", "Mastercard", "Elo", "Amex", "Hipercard", "Outro"];
 const CONDICOES  = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
+// Parcelas disponíveis para MP: mínimo R$5 por parcela
+function condicoesMp(valor: number) {
+  const max = Math.min(12, Math.floor(valor / 5));
+  return CONDICOES.filter(c => c === "À vista" || parseInt(c) <= max);
+}
 
 // formas que exibem tabela de parcelas
 const COM_PARCELAS = ["Cartão de Crédito"];
@@ -344,6 +349,14 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   const totalDesconto = itens.reduce((s, i) => s + (i.preco_lista - i.preco_unitario) * i.quantidade, 0);
   const totalComissao = itens.reduce((s, i) => s + i.valor_comissao, 0);
   const totalVenda    = totalProdutos + totalFrete;
+
+  // Reset pagCondicao se ficar inválida para MP (valor baixou, parcela < R$5)
+  useEffect(() => {
+    if (pagGateway !== "Mercado Pago" || pagForma !== "Cartão de Crédito") return;
+    const opcoes = condicoesMp(totalVenda);
+    if (!opcoes.includes(pagCondicao)) setPagCondicao("À vista");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalVenda, pagGateway, pagForma]);
 
   // Gerar linhas de parcelas quando condição ou total mudam
   useEffect(() => {
@@ -1259,7 +1272,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                 <div>
                   <Label>Condição de Pagamento</Label>
                   <Select value={pagCondicao} onChange={e => setPagCondicao(e.target.value)}>
-                    {CONDICOES.map(c => <option key={c} value={c}>{c}</option>)}
+                    {(pagGateway === "Mercado Pago" ? condicoesMp(totalVenda) : CONDICOES).map(c => <option key={c} value={c}>{c}</option>)}
                   </Select>
                 </div>
               )}
