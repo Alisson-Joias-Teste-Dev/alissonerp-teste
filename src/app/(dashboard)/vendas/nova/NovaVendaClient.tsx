@@ -46,7 +46,7 @@ interface FormaEnvio { id: number; nome: string; id_api: string; }
 interface FormaFrete { id: number; nome: string; codigo: string; id_api_logistica: string; }
 
 const FORMAS_PAGAMENTO = [
-  "Dinheiro", "Cartão de Crédito", "Cartão de Débito",
+  "Dinheiro", "Cartão de Crédito",
   "Vale-Troca", "Pix", "Ouro", "A Receber", "Múltiplas",
 ];
 const GATEWAYS   = ["Mercado Pago", "PagSeguro", "Cielo", "Stone", "Getnet", "Rede", "Outro"];
@@ -61,7 +61,7 @@ function condicoesMp(valor: number) {
 // formas que exibem tabela de parcelas
 const COM_PARCELAS = ["Cartão de Crédito"];
 // formas que exibem gateway/bandeira
-const COM_CARTAO   = ["Cartão de Crédito", "Cartão de Débito", "Pix"];
+const COM_CARTAO   = ["Cartão de Crédito", "Pix"];
 
 function fmt(v: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);

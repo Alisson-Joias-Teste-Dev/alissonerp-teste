@@ -83,7 +83,7 @@ export default function MercadoPagoCobranca({
   const [minhaDevice, setMinhaDevice] = useState<PointDevice | null | undefined>(undefined);
   const [reservas, setReservas] = useState<PointDevice[]>([]);
   const [deviceSelecionado, setDeviceSelecionado] = useState<string>("");
-  const [pagType, setPagType] = useState<"credit_card" | "debit_card">("credit_card");
+  const pagType = "credit_card" as const;
   const [parcelas, setParcelas] = useState(1);
   const [intentAtiva, setIntentAtiva] = useState<{
     pagamento_id: number;
@@ -526,28 +526,7 @@ export default function MercadoPagoCobranca({
                               ))}
                             </select>
                           </div>
-                          <div>
-                            <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
-                              Forma
-                            </label>
-                            <div className="grid grid-cols-2 gap-2">
-                              {(["credit_card", "debit_card"] as const).map(t => (
-                                <button
-                                  key={t}
-                                  onClick={() => setPagType(t)}
-                                  className="py-2.5 rounded-lg text-xs font-semibold transition-all"
-                                  style={{
-                                    backgroundColor: pagType === t ? C.esmeralda : "#fff",
-                                    color: pagType === t ? C.creme : C.esmeralda,
-                                    border: `1px solid ${C.esmeralda}`,
-                                  }}
-                                >
-                                  {t === "credit_card" ? "Crédito" : "Débito"}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                          {pagType === "credit_card" && (
+                          {true && (
                             <div>
                               <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
                                 Parcelas
@@ -726,28 +705,7 @@ export default function MercadoPagoCobranca({
                           {/* Forma de pagamento + parcelas — só quando tem device */}
                           {!showReservaForm && deviceSelecionado && (
                             <>
-                              <div>
-                                <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
-                                  Forma
-                                </label>
-                                <div className="grid grid-cols-2 gap-2">
-                                  {(["credit_card", "debit_card"] as const).map(t => (
-                                    <button
-                                      key={t}
-                                      onClick={() => setPagType(t)}
-                                      className="py-2.5 rounded-lg text-xs font-semibold transition-all"
-                                      style={{
-                                        backgroundColor: pagType === t ? C.esmeralda : "#fff",
-                                        color: pagType === t ? C.creme : C.esmeralda,
-                                        border: `1px solid ${C.esmeralda}`,
-                                      }}
-                                    >
-                                      {t === "credit_card" ? "Crédito" : "Débito"}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                              {pagType === "credit_card" && (
+                              {true && (
                                 <div>
                                   <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
                                     Parcelas
