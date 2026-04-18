@@ -200,18 +200,22 @@ export async function DELETE(
   try {
     await cancelPointIntent(deviceId, intentId);
   } catch (err: unknown) {
-    // Pode falhar se a intent já expirou naturalmente na MP — não é erro crítico
     const msg = err instanceof Error ? err.message : "Erro ao cancelar";
-    await sql`
-      UPDATE alissonerp.pagamentos_venda
-      SET gateway_payload = ${JSON.stringify({
-        ...(payload ?? {}),
-        cancel_error: msg,
-        cancelado_em: new Date().toISOString(),
-      })}::text::jsonb
-      WHERE id = ${pagamentoId}
-    `;
-    return NextResponse.json({ error: msg, pagamento_id: pagamentoId }, { status: 502 });
+    // 404 = intent já processada ou expirada no MP — trata como cancelamento bem-sucedido
+    const isGone = msg.includes("404") || msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("doesn't exist");
+    if (!isGone) {
+      await sql`
+        UPDATE alissonerp.pagamentos_venda
+        SET gateway_payload = ${JSON.stringify({
+          ...(payload ?? {}),
+          cancel_error: msg,
+          cancelado_em: new Date().toISOString(),
+        })}::text::jsonb
+        WHERE id = ${pagamentoId}
+      `;
+      return NextResponse.json({ error: msg, pagamento_id: pagamentoId }, { status: 502 });
+    }
+    // isGone: continua para marcar como cancelado no banco
   }
 
   // Marca pagamento como cancelado (remover não é bom: preserva histórico)
