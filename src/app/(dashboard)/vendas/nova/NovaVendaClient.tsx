@@ -247,6 +247,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   // Múltiplas
   const [pagamentos,     setPagamentos]     = useState<Pagamento[]>([]);
   const [pagMultForma,   setPagMultForma]   = useState("Dinheiro");
+  const [pagMultParcelas, setPagMultParcelas] = useState(1);
   const [pagValor,       setPagValor]       = useState("");
 
   // Vale-Troca
@@ -426,7 +427,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
     const v = parseFloat(pagValor.replace(",", "."));
     if (!v || v <= 0 || restante <= 0) return;
     const valorFinal = Math.min(v, restante);
-    setPagamentos(prev => [...prev, { _key: uid(), forma: pagMultForma, valor: valorFinal, parcelas: 1 }]);
+    setPagamentos(prev => [...prev, { _key: uid(), forma: pagMultForma, valor: valorFinal, parcelas: pagMultForma === "Cartão de Crédito" ? pagMultParcelas : 1 }]);
     setPagValor("");
   }
 
@@ -1452,7 +1453,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                 <div className="flex flex-wrap items-end gap-2 mb-3">
                   <div className="flex-1 min-w-36">
                     <Label>Forma</Label>
-                    <Select value={pagMultForma} onChange={e => { setPagMultForma(e.target.value); setValeValidacao(null); setValeNumero(""); setPagValor(""); }}>
+                    <Select value={pagMultForma} onChange={e => { setPagMultForma(e.target.value); setPagMultParcelas(1); setValeValidacao(null); setValeNumero(""); setPagValor(""); }}>
                       <optgroup label="Métodos de Pagamento">
                         {FORMAS_PAGAMENTO.filter(f => f !== "Múltiplas").map(f => <option key={f} value={f}>{f}</option>)}
                       </optgroup>
@@ -1481,13 +1482,25 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                       </div>
                     </div>
                   ) : (
-                    <div className="flex-1 min-w-28">
-                      <Label>Valor{restante > 0 && <span className="ml-1 font-normal text-xs" style={{ color: "#9CA3AF" }}>(restante: {fmt(restante)})</span>}</Label>
-                      <input type="text" value={pagValor} onChange={e => setPagValor(e.target.value)}
-                        placeholder={restante > 0 ? restante.toFixed(2).replace(".", ",") : "0,00"}
-                        onKeyDown={e => e.key === "Enter" && handleAddPagamento()}
-                        className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
-                    </div>
+                    <>
+                      <div className="flex-1 min-w-28">
+                        <Label>Valor{restante > 0 && <span className="ml-1 font-normal text-xs" style={{ color: "#9CA3AF" }}>(restante: {fmt(restante)})</span>}</Label>
+                        <input type="text" value={pagValor} onChange={e => setPagValor(e.target.value)}
+                          placeholder={restante > 0 ? restante.toFixed(2).replace(".", ",") : "0,00"}
+                          onKeyDown={e => e.key === "Enter" && handleAddPagamento()}
+                          className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                      </div>
+                      {pagMultForma === "Cartão de Crédito" && (
+                        <div className="min-w-28">
+                          <Label>Parcelas</Label>
+                          <Select value={pagMultParcelas} onChange={e => setPagMultParcelas(Number(e.target.value))}>
+                            {CONDICOES.map((c, i) => (
+                              <option key={c} value={i === 0 ? 1 : i + 1}>{c}</option>
+                            ))}
+                          </Select>
+                        </div>
+                      )}
+                    </>
                   )}
                   <button
                     onClick={() => {
@@ -1564,7 +1577,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                       vendaId={null}
                       numeroVenda="Nova"
                       valor={pagamentos.find(p => p.forma === "Cartão de Crédito")!.valor}
-                      installments={pagamentos.find(p => p.forma === "Cartão de Crédito")!.parcelas || 1}
+                      installments={pagamentos.find(p => p.forma === "Cartão de Crédito")!.parcelas || pagMultParcelas}
                       obterVendaId={salvarRascunhoParaPix}
                       onPagamentoConfirmado={(vendaIdConfirmado) => {
                         router.push(`/vendas/${vendaIdConfirmado}`);
