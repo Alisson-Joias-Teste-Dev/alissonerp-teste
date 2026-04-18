@@ -4477,10 +4477,10 @@ function TabMaquininhas() {
                       )}
                     </td>
 
-                    {/* Device ID (truncado) */}
+                    {/* Device ID */}
                     <td className="px-4 py-3">
-                      <span className="font-mono text-[11px]" style={{ color: P.muted }}>
-                        {d.device_id.slice(0, 20)}...
+                      <span className="font-mono text-[11px] break-all" style={{ color: P.muted }}>
+                        {d.device_id}
                       </span>
                     </td>
 
