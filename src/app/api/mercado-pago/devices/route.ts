@@ -47,19 +47,29 @@ export async function GET(req: NextRequest) {
         ORDER BY nome_legivel
       `;
 
+      // Buscar parcelas_padrao_mp do usuário logado
+      const [usuarioRow] = await sql`
+        SELECT parcelas_padrao_mp FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+      `;
+      const parcelas_padrao = Number(usuarioRow?.parcelas_padrao_mp ?? 1);
+
       return NextResponse.json({
         minha: minhaDevice[0] ?? null,
         reservas,
+        parcelas_padrao,
       });
     }
 
     // Comportamento original: lista todos os devices ativos
+    // Inclui parcelas_padrao_mp via JOIN com usuarios (para pré-preencher no modal de edição)
     const devices = await sql`
-      SELECT id, device_id, nome_legivel, store_id, pos_id, operating_mode,
-             ativo, loja, vendedor_id, is_reserva, last_sync_at, created_at, updated_at
-      FROM alissonerp.mp_point_devices
-      WHERE ativo = true
-      ORDER BY nome_legivel
+      SELECT d.id, d.device_id, d.nome_legivel, d.store_id, d.pos_id, d.operating_mode,
+             d.ativo, d.loja, d.vendedor_id, d.is_reserva, d.last_sync_at, d.created_at, d.updated_at,
+             COALESCE(u.parcelas_padrao_mp, 1) AS parcelas_padrao_mp
+      FROM alissonerp.mp_point_devices d
+      LEFT JOIN alissonerp.usuarios u ON u.vendedor_id = d.vendedor_id
+      WHERE d.ativo = true
+      ORDER BY d.nome_legivel
     `;
     return NextResponse.json(devices);
   } catch (err: unknown) {
@@ -158,6 +168,7 @@ export async function PATCH(req: NextRequest) {
     ativo?: boolean;
     vendedor_id?: number | null;
     is_reserva?: boolean;
+    parcelas_padrao_mp?: number;
   };
 
   if (!body.id) return NextResponse.json({ error: "id obrigatório" }, { status: 400 });
@@ -205,6 +216,27 @@ export async function PATCH(req: NextRequest) {
                      END
     WHERE id = ${body.id}
   `;
+
+  // Atualizar parcelas_padrao_mp do vendedor atribuído ao device
+  if (body.parcelas_padrao_mp != null) {
+    // Buscar vendedor_id atual do device (pode ter sido atualizado acima)
+    const [deviceRow] = await sql`
+      SELECT vendedor_id FROM alissonerp.mp_point_devices WHERE id = ${body.id} LIMIT 1
+    `;
+    const vendedorId = deviceRow?.vendedor_id ?? null;
+    if (!vendedorId) {
+      return NextResponse.json(
+        { error: "Não é possível configurar parcelas padrão sem vendedor atribuído ao device" },
+        { status: 400 },
+      );
+    }
+    const p = Math.min(12, Math.max(1, Number(body.parcelas_padrao_mp)));
+    await sql`
+      UPDATE alissonerp.usuarios
+      SET parcelas_padrao_mp = ${p}
+      WHERE vendedor_id = ${vendedorId}
+    `;
+  }
 
   return NextResponse.json({ ok: true });
 }

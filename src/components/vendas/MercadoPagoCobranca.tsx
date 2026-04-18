@@ -123,7 +123,7 @@ export default function MercadoPagoCobranca({
       try {
         const res = await fetch("/api/mercado-pago/devices?minha=true");
         if (res.ok) {
-          const data = await res.json() as { minha: PointDevice | null; reservas: PointDevice[] };
+          const data = await res.json() as { minha: PointDevice | null; reservas: PointDevice[]; parcelas_padrao?: number };
           setMinhaDevice(data.minha);
           setReservas(data.reservas);
           if (data.minha) {
@@ -131,6 +131,11 @@ export default function MercadoPagoCobranca({
           }
           if (!data.minha && data.reservas.length === 1) {
             setReservaSelecionada(data.reservas[0].device_id);
+          }
+          // Aplicar parcelas padrão do vendedor (clampado ao máximo permitido pelo valor)
+          if (data.parcelas_padrao && data.parcelas_padrao > 1) {
+            const maxN = Math.min(12, Math.max(1, Math.floor(valorSugerido / 5)));
+            setParcelas(Math.min(data.parcelas_padrao, maxN));
           }
         }
       } catch {
