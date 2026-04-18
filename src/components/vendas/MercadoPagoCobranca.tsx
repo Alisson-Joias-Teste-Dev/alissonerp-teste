@@ -540,7 +540,7 @@ export default function MercadoPagoCobranca({
                             className="w-full py-3 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50"
                             style={{ backgroundColor: C.esmeralda, color: C.creme }}
                           >
-                            {loading ? <Loader2 size={15} className="animate-spin inline" /> : "Enviar pra maquininha"}
+                            {loading ? <Loader2 size={15} className="animate-spin inline" /> : `${parcelas}x · Enviar pra maquininha (${parcelas === 1 ? fmt(valorSugerido) : fmt(valorSugerido / parcelas) + " / parcela"})`}
                           </button>
                         </>
                       )}
@@ -745,7 +745,7 @@ export default function MercadoPagoCobranca({
                               className="w-full py-3 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50"
                               style={{ backgroundColor: C.esmeralda, color: C.creme }}
                             >
-                              {loading ? <Loader2 size={15} className="animate-spin inline" /> : "Enviar pra maquininha"}
+                              {loading ? <Loader2 size={15} className="animate-spin inline" /> : `${parcelas}x · Enviar pra maquininha (${parcelas === 1 ? fmt(valorSugerido) : fmt(valorSugerido / parcelas) + " / parcela"})`}
                             </button>
                           )}
                         </>

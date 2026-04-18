@@ -556,7 +556,7 @@ export default function CartaoInline({
                       >
                         {loading
                           ? <span className="inline-flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Enviando...</span>
-                          : <>Enviar pra maquininha ({fmt(valor)})</>}
+                          : <>{parcelasPoint}x · Enviar pra maquininha ({parcelasPoint === 1 ? fmt(valor) : `${fmt(valor / parcelasPoint)} / parcela`})</>}
                       </button>
                     </>
                   )}
@@ -741,7 +741,7 @@ export default function CartaoInline({
                         >
                           {loading
                             ? <span className="inline-flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Enviando...</span>
-                            : <>Enviar pra maquininha ({fmt(valor)})</>}
+                            : <>{parcelasPoint}x · Enviar pra maquininha ({parcelasPoint === 1 ? fmt(valor) : `${fmt(valor / parcelasPoint)} / parcela`})</>}
                         </button>
                       )}
                     </>
