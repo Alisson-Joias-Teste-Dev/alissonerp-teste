@@ -1,6 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
-import NovaVendaClient from "./NovaVendaClient";
+import NovaVendaClientV2 from "./NovaVendaClientV2";
 
 export default async function NovaVendaPage() {
   const supabase = await createServerSupabase();
@@ -9,6 +9,7 @@ export default async function NovaVendaPage() {
   let role              = "consultora";
   let vendedorId: number | null = null;
   let maxDesconto       = 15;
+  let vendedorNome      = "";
 
   if (user) {
     const [u] = await sql`
@@ -36,10 +37,17 @@ export default async function NovaVendaPage() {
     }
   }
 
+  // Buscar nome do vendedor
+  if (vendedorId) {
+    const [v] = await sql`SELECT nome FROM public.vendedores WHERE id_vendedor = ${vendedorId} LIMIT 1`;
+    if (v) vendedorNome = v.nome as string;
+  }
+
   return (
-    <NovaVendaClient
+    <NovaVendaClientV2
       role={role}
       vendedorId={vendedorId}
+      vendedorNome={vendedorNome}
       maxDesconto={maxDesconto}
     />
   );

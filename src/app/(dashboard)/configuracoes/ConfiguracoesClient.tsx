@@ -38,6 +38,8 @@ import {
   Package,
   CreditCard,
   Smartphone,
+  Truck,
+  Search,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
@@ -135,7 +137,7 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas" | "fretes";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -4662,7 +4664,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
     const u = params.get("user");
-    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes", "maquininhas"].includes(t)) {
+    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes", "maquininhas", "fretes"].includes(t)) {
       setTab(t as Tab);
     }
     if (u) setInitialUserId(u);
@@ -4681,6 +4683,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "tipos_servico", label: "Tipos Serviço",  icon: Wrench },
     { key: "comissoes",     label: "Comissões",       icon: PenLine },
     { key: "credito_loja", label: "Crédito Loja",    icon: Wallet },
+    { key: "fretes",       label: "Fretes",           icon: Truck },
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let tabs: { key: Tab; label: string; icon: any }[] = isSuperAdmin
@@ -4742,6 +4745,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "comissoes"   && <TabComissoes />}
       {tab === "credito_loja" && <TabCreditoLoja />}
       {tab === "maquininhas" && canSeeMaquininhas && <TabMaquininhas />}
+      {tab === "fretes" && (isSuperAdmin || currentRole === "gerente_loja") && <TabFretes />}
     </div>
   );
 }
@@ -4925,6 +4929,342 @@ function TabCreditoLoja() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab Fretes por Bairro
+// ═══════════════════════════════════════════════════════════════════════════════
+const BAIRROS_FORTALEZA = [
+  "Aerolândia","Água Fria","Aldeota","Alto da Balança","Alto da Paz","Alto da Vila Prudente",
+  "Ancuri","Antônio Bezerra","Areninhas","Autran Nunes","Bairro de Fátima","Barroso",
+  "Bela Vista","Benfica","Boa Vista","Bom Futuro","Bom Jardim","Bom Sucesso",
+  "Cais do Porto","Cajazeiras","Caça e Pesca","Canindezinho","Carlito Pamplona",
+  "Casa Amarela","Castelão","Conjunto Ceará I","Conjunto Ceará II","Couto Fernandes",
+  "Cristo Redentor","Curió","Damas","Demócrito Rocha","Dendê","Dias Macêdo",
+  "Dois Córregos","Dom Lustosa","Edson Queiroz","Ellery","Engenheiro Luciano Cavalcante",
+  "Farias Brito","Floresta","Granja Lisboa","Granja Portugal","Guararapes",
+  "Henrique Jorge","Itaoca","Itaperi","Itinga","Jacarecanga","Jardim América",
+  "Jardim das Oliveiras","Jardim Guanabara","Jardim Iracema","Jardim União",
+  "João XXIII","José Bonifácio","José de Alencar","Jóquei Clube","Lagoa Redonda",
+  "Lavras da Mangabeira","Luciano Cavalcante","Luís Cavalcante","Manoel Sátiro",
+  "Maraponga","Meireles","Messejana","Mondubim","Monte Castelo","Montese",
+  "Mucuripe","Nabuco","Nova Aldeota","Novo Mondubim","Padre Andrade",
+  "Padre Júlio Maria","Parangaba","Parque Araxá","Parque Dois Irmãos",
+  "Parque Genibaú","Parque Iracema","Parque Manibura","Parque Santa Rosa",
+  "Passaré","Paupina","Pici","Pirambu","Planalto Ayrton Senna","Prefeito José Walter",
+  "Praia de Iracema","Praia do Futuro I","Praia do Futuro II","Quintino Cunha",
+  "Rodolfo Teófilo","Salinas","Sabiaguaba","São Bento","São Gerardo","São João do Tauape",
+  "São Miguel","Serrinha","Siqueira","Tarumã","Tauape","Varjota","Vicente Pinzón",
+  "Vila Ellery","Vila Manoel Sátiro","Vila União","Vila Velha","Zé Bonifácio",
+];
+
+interface FreteBairro {
+  id: number;
+  bairro: string;
+  municipio: string | null;
+  valor: number;
+  ativo: boolean;
+}
+
+function TabFretes() {
+  const [fretes, setFretes] = useState<FreteBairro[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filtro, setFiltro] = useState("");
+  const [salvandoId, setSalvandoId] = useState<number | null>(null);
+  const [savedId, setSavedId] = useState<number | null>(null);
+  const [erroId, setErroId] = useState<number | null>(null);
+  const [editValores, setEditValores] = useState<Record<number, string>>({});
+  const [showForm, setShowForm] = useState(false);
+  const [novoForm, setNovoForm] = useState({ bairro: "", municipio: "Fortaleza", valor: "" });
+  const [savingNovo, setSavingNovo] = useState(false);
+  const [erroNovo, setErroNovo] = useState("");
+  const [bairroSugestoes, setBairroSugestoes] = useState<string[]>([]);
+  const [bairroOpen, setBairroOpen] = useState(false);
+
+  const fmtFrete = (v: number) =>
+    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+
+  async function carregar() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/configuracoes/fretes-bairro");
+      const data = await res.json();
+      setFretes(Array.isArray(data) ? data : (data.fretes ?? []));
+    } catch { /* silencioso */ }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { carregar(); }, []);
+
+  async function handleSalvar(frete: FreteBairro) {
+    const valorStr = editValores[frete.id] ?? String(frete.valor);
+    const valor = parseFloat(valorStr.replace(",", "."));
+    if (isNaN(valor) || valor < 0) return;
+    setSalvandoId(frete.id); setErroId(null);
+    try {
+      const res = await fetch(`/api/configuracoes/fretes-bairro/${frete.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ valor }),
+      });
+      if (!res.ok) throw new Error("Erro");
+      setFretes(prev => prev.map(f => f.id === frete.id ? { ...f, valor } : f));
+      setEditValores(prev => { const next = { ...prev }; delete next[frete.id]; return next; });
+      setSavedId(frete.id);
+      setTimeout(() => setSavedId(null), 2000);
+    } catch {
+      setErroId(frete.id);
+    } finally {
+      setSalvandoId(null);
+    }
+  }
+
+  async function handleToggleAtivo(frete: FreteBairro) {
+    setSalvandoId(frete.id);
+    try {
+      const res = await fetch(`/api/configuracoes/fretes-bairro/${frete.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ativo: !frete.ativo }),
+      });
+      if (!res.ok) throw new Error("Erro");
+      setFretes(prev => prev.map(f => f.id === frete.id ? { ...f, ativo: !f.ativo } : f));
+    } catch { /* silencioso */ }
+    finally { setSalvandoId(null); }
+  }
+
+  async function handleCriarFrete() {
+    if (!novoForm.bairro.trim()) { setErroNovo("Bairro é obrigatório"); return; }
+    setSavingNovo(true); setErroNovo("");
+    try {
+      const res = await fetch("/api/configuracoes/fretes-bairro", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bairro: novoForm.bairro, municipio: novoForm.municipio, valor: parseFloat(novoForm.valor.replace(",", ".")) || 0 }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro");
+      setFretes(prev => [...prev, { ...data, valor: Number(data.valor) }].sort((a, b) => a.bairro.localeCompare(b.bairro)));
+      setNovoForm({ bairro: "", municipio: "Fortaleza", valor: "" });
+      setShowForm(false);
+    } catch (e) { setErroNovo(e instanceof Error ? e.message : "Erro ao cadastrar"); }
+    finally { setSavingNovo(false); }
+  }
+
+  const filtered = fretes.filter(f =>
+    filtro.trim() === "" ||
+    f.bairro.toLowerCase().includes(filtro.toLowerCase()) ||
+    (f.municipio ?? "").toLowerCase().includes(filtro.toLowerCase())
+  );
+
+  if (loading) return (
+    <div className="flex items-center gap-2 py-10 justify-center text-sm" style={{ color: P.muted }}>
+      <Loader2 size={14} className="animate-spin" /> Carregando fretes...
+    </div>
+  );
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div>
+        <h3 className="text-sm font-semibold" style={{ color: P.creme }}>Fretes por Bairro</h3>
+        <p className="text-xs mt-0.5" style={{ color: P.muted }}>
+          Configure o valor de frete para cada bairro. Bairros inativos não aparecem no cálculo automático.
+        </p>
+      </div>
+
+      {/* Botão novo + form inline */}
+      {!showForm ? (
+        <button
+          onClick={() => setShowForm(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold w-fit"
+          style={{ backgroundColor: P.verde, color: "#fff" }}
+        >
+          <Plus size={13} /> Adicionar bairro
+        </button>
+      ) : (
+        <div className="rounded-xl p-4 space-y-3" style={{ border: `1px solid ${P.border}`, backgroundColor: P.card }}>
+          <p className="text-xs font-semibold" style={{ color: P.creme }}>Novo Bairro</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="relative">
+              <label className="text-[10px] uppercase tracking-widest mb-1 block" style={{ color: P.muted }}>Bairro *</label>
+              <input
+                type="text"
+                value={novoForm.bairro}
+                onChange={e => {
+                  const v = e.target.value;
+                  setNovoForm(p => ({ ...p, bairro: v }));
+                  if (v.trim().length >= 1) {
+                    const sugs = BAIRROS_FORTALEZA.filter(b => b.toLowerCase().includes(v.toLowerCase())).slice(0, 8);
+                    setBairroSugestoes(sugs);
+                    setBairroOpen(sugs.length > 0);
+                  } else {
+                    setBairroOpen(false);
+                  }
+                }}
+                onBlur={() => setTimeout(() => setBairroOpen(false), 150)}
+                onFocus={() => {
+                  if (novoForm.bairro.trim().length >= 1 && bairroSugestoes.length > 0) setBairroOpen(true);
+                }}
+                placeholder="Nome do bairro"
+                className="w-full border rounded-lg px-3 py-1.5 text-sm outline-none"
+                style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }}
+              />
+              {bairroOpen && (
+                <div className="absolute z-50 w-full mt-1 rounded-xl border shadow-lg bg-white overflow-hidden" style={{ borderColor: P.border, maxHeight: 220, overflowY: "auto" }}>
+                  {bairroSugestoes.map(b => (
+                    <button
+                      key={b}
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-stone-50 border-b last:border-b-0"
+                      style={{ borderColor: P.border, color: P.creme }}
+                      onMouseDown={() => {
+                        setNovoForm(p => ({ ...p, bairro: b }));
+                        setBairroOpen(false);
+                      }}
+                    >
+                      {b}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-widest mb-1 block" style={{ color: P.muted }}>Município</label>
+              <input
+                type="text"
+                value={novoForm.municipio}
+                onChange={e => setNovoForm(p => ({ ...p, municipio: e.target.value }))}
+                className="w-full border rounded-lg px-3 py-1.5 text-sm outline-none"
+                style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-widest mb-1 block" style={{ color: P.muted }}>Valor (R$)</label>
+              <input
+                type="text"
+                value={novoForm.valor}
+                onChange={e => setNovoForm(p => ({ ...p, valor: e.target.value }))}
+                placeholder="0,00"
+                className="w-full border rounded-lg px-3 py-1.5 text-sm outline-none"
+                style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }}
+              />
+            </div>
+          </div>
+          {erroNovo && <p className="text-xs text-red-500">{erroNovo}</p>}
+          <div className="flex gap-2">
+            <button onClick={() => { setShowForm(false); setErroNovo(""); }} className="px-3 py-1.5 rounded-lg text-xs border" style={{ borderColor: P.border, color: P.muted }}>Cancelar</button>
+            <button onClick={handleCriarFrete} disabled={savingNovo} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40" style={{ backgroundColor: P.verde, color: "#fff" }}>
+              {savingNovo ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} Salvar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Filtro */}
+      <div className="relative max-w-xs">
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: P.muted }} />
+        <input
+          type="text"
+          value={filtro}
+          onChange={e => setFiltro(e.target.value)}
+          placeholder="Filtrar por bairro ou município..."
+          className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm outline-none"
+          style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }}
+        />
+        {filtro && (
+          <button onClick={() => setFiltro("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+            <X size={12} />
+          </button>
+        )}
+      </div>
+
+      <p className="text-xs" style={{ color: P.muted }}>
+        {filtered.length} {filtered.length === 1 ? "bairro" : "bairros"}{filtro ? " encontrado(s)" : " no total"}
+      </p>
+
+      {/* Tabela */}
+      <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+        <div className="overflow-x-auto" style={{ maxHeight: 600, overflowY: "auto" }}>
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 z-10">
+              <tr style={{ backgroundColor: P.bg, borderBottom: `1px solid ${P.border}` }}>
+                {["Bairro", "Município", "Valor (R$)", "Ativo", "Ações"].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium" style={{ color: P.muted }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-sm" style={{ color: P.muted }}>
+                    {filtro ? "Nenhum bairro encontrado para este filtro" : "Nenhum frete cadastrado"}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map(frete => (
+                  <tr key={frete.id} className="border-t hover:bg-gray-50 transition-colors" style={{ borderColor: P.border }}>
+                    <td className="px-4 py-3 font-medium" style={{ color: P.creme }}>{frete.bairro}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: P.sage }}>{frete.municipio ?? "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs" style={{ color: P.muted }}>R$</span>
+                        <input
+                          type="text"
+                          value={editValores[frete.id] !== undefined ? editValores[frete.id] : String(frete.valor)}
+                          onChange={e => setEditValores(prev => ({ ...prev, [frete.id]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === "Enter") handleSalvar(frete); }}
+                          className="w-24 border rounded-lg px-2 py-1 text-sm text-right outline-none"
+                          style={{ borderColor: P.border, backgroundColor: P.card, color: P.creme }}
+                        />
+                        {savedId === frete.id && <CheckCircle size={13} style={{ color: P.verde }} />}
+                        {erroId === frete.id && <AlertTriangle size={13} style={{ color: P.vermelho }} />}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => handleToggleAtivo(frete)}
+                        disabled={salvandoId === frete.id}
+                        className="flex items-center gap-1 text-xs disabled:opacity-50"
+                      >
+                        {salvandoId === frete.id ? (
+                          <Loader2 size={14} className="animate-spin" style={{ color: P.muted }} />
+                        ) : frete.ativo ? (
+                          <ToggleRight size={20} style={{ color: P.verde }} />
+                        ) : (
+                          <ToggleLeft size={20} style={{ color: P.muted }} />
+                        )}
+                        <span style={{ color: frete.ativo ? P.verde : P.muted }}>
+                          {frete.ativo ? "Ativo" : "Inativo"}
+                        </span>
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => handleSalvar(frete)}
+                        disabled={salvandoId === frete.id || editValores[frete.id] === undefined}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+                        style={{
+                          backgroundColor: editValores[frete.id] !== undefined ? P.verde : P.bg,
+                          color: editValores[frete.id] !== undefined ? "#fff" : P.sage,
+                          border: `1px solid ${editValores[frete.id] !== undefined ? P.verde : P.border}`,
+                        }}
+                      >
+                        {salvandoId === frete.id ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                        Salvar
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {fmtFrete(0) && null /* suppress unused var */}
     </div>
   );
 }
