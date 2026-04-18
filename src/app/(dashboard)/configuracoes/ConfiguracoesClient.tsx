@@ -4260,6 +4260,7 @@ interface MaqDevice {
   is_reserva: boolean;
   ativo: boolean;
   loja: string | null;
+  parcelas_padrao_mp: number;
 }
 
 interface Vendedor {
@@ -4282,6 +4283,7 @@ function TabMaquininhas() {
   const [editVendedorId, setEditVendedorId] = useState<string>("");
   const [editIsReserva, setEditIsReserva] = useState(false);
   const [editAtivo, setEditAtivo] = useState(true);
+  const [editParcelasPadrao, setEditParcelasPadrao] = useState(1);
   const [saving, setSaving] = useState(false);
   const [saveErro, setSaveErro] = useState<string | null>(null);
 
@@ -4332,6 +4334,7 @@ function TabMaquininhas() {
     setEditVendedorId(d.vendedor_id != null ? String(d.vendedor_id) : "");
     setEditIsReserva(d.is_reserva);
     setEditAtivo(d.ativo);
+    setEditParcelasPadrao(d.parcelas_padrao_mp ?? 1);
     setSaveErro(null);
   }
 
@@ -4353,6 +4356,7 @@ function TabMaquininhas() {
       if (editVendedorId) {
         body.vendedor_id = Number(editVendedorId);
         body.is_reserva = false;
+        body.parcelas_padrao_mp = editParcelasPadrao;
       } else {
         body.vendedor_id = null;
         body.is_reserva = editIsReserva;
@@ -4487,26 +4491,58 @@ function TabMaquininhas() {
                     {/* Vendedor Atribuído */}
                     <td className="px-4 py-3">
                       {editando ? (
-                        <select
-                          value={editVendedorId}
-                          onChange={e => {
-                            setEditVendedorId(e.target.value);
-                            if (e.target.value) setEditIsReserva(false);
-                          }}
-                          className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none"
-                          style={{ borderColor: P.border, color: P.creme }}
-                        >
-                          <option value="">— Nenhum / Reserva</option>
-                          {vendedores.map(v => (
-                            <option key={v.id_vendedor} value={v.id_vendedor}>
-                              {v.nome}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="space-y-2">
+                          <select
+                            value={editVendedorId}
+                            onChange={e => {
+                              setEditVendedorId(e.target.value);
+                              if (e.target.value) setEditIsReserva(false);
+                            }}
+                            className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none"
+                            style={{ borderColor: P.border, color: P.creme }}
+                          >
+                            <option value="">— Nenhum / Reserva</option>
+                            {vendedores.map(v => (
+                              <option key={v.id_vendedor} value={v.id_vendedor}>
+                                {v.nome}
+                              </option>
+                            ))}
+                          </select>
+                          {/* Campo parcelas padrão — só habilitado quando há vendedor selecionado */}
+                          <div>
+                            <label
+                              className="text-[10px] uppercase tracking-wider block mb-1"
+                              style={{ color: editVendedorId ? P.muted : P.muted + "80" }}
+                            >
+                              Parcelas padrão
+                            </label>
+                            <select
+                              value={editParcelasPadrao}
+                              disabled={!editVendedorId}
+                              onChange={e => setEditParcelasPadrao(Number(e.target.value))}
+                              className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none disabled:opacity-40"
+                              style={{ borderColor: P.border, color: P.creme }}
+                            >
+                              {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
+                                <option key={n} value={n}>{n}x</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
                       ) : (
-                        <span style={{ color: d.vendedor_id ? P.creme : P.muted }}>
-                          {nomeVendedor(d.vendedor_id)}
-                        </span>
+                        <div>
+                          <span style={{ color: d.vendedor_id ? P.creme : P.muted }}>
+                            {nomeVendedor(d.vendedor_id)}
+                          </span>
+                          {d.vendedor_id && d.parcelas_padrao_mp > 1 && (
+                            <span
+                              className="block text-[10px] mt-0.5"
+                              style={{ color: P.muted }}
+                            >
+                              {d.parcelas_padrao_mp}x padrão
+                            </span>
+                          )}
+                        </div>
                       )}
                     </td>
 
