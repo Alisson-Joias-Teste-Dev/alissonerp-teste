@@ -39,6 +39,9 @@ import {
   Target,
   RotateCcw,
   Ticket,
+  Receipt,
+  Building2,
+  FileCheck2,
 } from "lucide-react";
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
@@ -82,6 +85,9 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?
   Target,
   RotateCcw,
   Ticket,
+  Receipt,
+  Building2,
+  FileCheck2,
 };
 
 function isGroup(entry: MenuEntry): entry is MenuGroup {
@@ -103,11 +109,14 @@ export default function Sidebar() {
   // Injetar módulos que a role permite mas ainda não estão no banco (role_permissoes)
   const hasServicePanel = role && ROLES_SERVICE_PANEL.includes(role as typeof ROLES_SERVICE_PANEL[number]);
   const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
+  const ROLES_FISCAL_SIDEBAR = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
   const hasOrcamento = role && ROLES_ORCAMENTO.includes(role);
+  const hasFiscal = role && ROLES_FISCAL_SIDEBAR.includes(role);
   let modulosEfetivos = [...modulos_leitura];
   if (modulosEfetivos.length > 0) {
     if (hasServicePanel && !modulosEfetivos.includes("service_painel")) modulosEfetivos.push("service_painel");
     if (hasOrcamento && !modulosEfetivos.includes("orcamento")) modulosEfetivos.push("orcamento");
+    if (hasFiscal && !modulosEfetivos.includes("fiscal")) modulosEfetivos.push("fiscal");
   }
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)

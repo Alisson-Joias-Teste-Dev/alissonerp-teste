@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import {
   Search, RefreshCw, Loader2, Plus, TrendingUp,
   ShoppingBag, DollarSign, ChevronRight, Trophy,
-  ChevronLeft, Wallet,
+  ChevronLeft, Wallet, Receipt, FileCheck,
 } from "lucide-react";
+import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import Link from "next/link";
 
 // ─── Design tokens ──────────────────────────────────────────────────────────
@@ -54,10 +55,13 @@ interface VendaERP {
   total_frete:    number;
   total_venda:    number;
   total_comissao: number;
-  situacao:       string;
-  bloqueado:      boolean;
-  qtd_itens:      number;
-  total_pago:     number;
+  situacao:           string;
+  bloqueado:          boolean;
+  qtd_itens:          number;
+  total_pago:         number;
+  nota_fiscal_id:     number | null;
+  nfce_chave_44:      string | null;
+  empresa_emitente_id: number | null;
 }
 
 interface Vendedor {
@@ -116,6 +120,9 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
   const [vendedores, setVendedores] = useState<Vendedor[]>([]);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState<string | null>(null);
+
+  // NFC-e modal
+  const [vendaNfce, setVendaNfce] = useState<VendaERP | null>(null);
 
   // Saldo crédito (só gerente_loja / diretor)
   const mostraSaldo = ["gerente_loja", "diretor"].includes(role);
@@ -513,14 +520,30 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <Link
-                          href={`/vendas/${v.id}`}
-                          className="p-1 rounded hover:bg-gray-100 transition-colors inline-flex"
-                          style={{ color: "#9CA3AF" }}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          <ChevronRight size={14} />
-                        </Link>
+                        <div className="flex items-center gap-1">
+                          {v.nota_fiscal_id ? (
+                            <span title="NFC-e emitida" className="p-1 inline-flex">
+                              <FileCheck size={14} className="text-emerald-600" />
+                            </span>
+                          ) : v.empresa_emitente_id ? (
+                            <button
+                              title="Emitir NFC-e"
+                              onClick={e => { e.stopPropagation(); setVendaNfce(v); }}
+                              className="p-1 rounded hover:bg-stone-100 transition-colors inline-flex"
+                              style={{ color: "#9CA3AF" }}
+                            >
+                              <Receipt size={14} />
+                            </button>
+                          ) : null}
+                          <Link
+                            href={`/vendas/${v.id}`}
+                            className="p-1 rounded hover:bg-gray-100 transition-colors inline-flex"
+                            style={{ color: "#9CA3AF" }}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <ChevronRight size={14} />
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -560,6 +583,14 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
           </div>
         )}
       </div>
+
+      {vendaNfce && (
+        <EmitirNfceModal
+          venda={vendaNfce}
+          onClose={() => setVendaNfce(null)}
+          onSuccess={() => { fetchVendas(inicio, fim); }}
+        />
+      )}
     </div>
   );
 }
