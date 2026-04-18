@@ -37,11 +37,13 @@ import {
   ShoppingCart,
   Package,
   CreditCard,
+  Smartphone,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
 import UserEditDrawer, { type UsuarioEdit, type Deposito as DepositoEdit } from "@/components/UserEditDrawer";
 import { useAuth } from "@/hooks/useAuth";
+import { isFullAccess } from "@/lib/roles";
 import LocaisEstoqueTab from "@/components/LocaisEstoqueTab";
 
 // ─── Paleta (tema claro — alinhado com aba Usuários) ─────────────────────────
@@ -133,7 +135,7 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -4247,19 +4249,384 @@ function TabComissoes() {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab Maquininhas — Gerenciamento de devices Point por vendedor
+// ═══════════════════════════════════════════════════════════════════════════════
+interface MaqDevice {
+  id: number;
+  device_id: string;
+  nome_legivel: string;
+  vendedor_id: number | null;
+  is_reserva: boolean;
+  ativo: boolean;
+  loja: string | null;
+}
+
+interface Vendedor {
+  id_vendedor: number;
+  nome: string;
+}
+
+function TabMaquininhas() {
+  const [devices, setDevices] = useState<MaqDevice[]>([]);
+  const [vendedores, setVendedores] = useState<Vendedor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+
+  // Estado modal edição inline
+  const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [editNome, setEditNome] = useState("");
+  const [editLoja, setEditLoja] = useState("");
+  const [editVendedorId, setEditVendedorId] = useState<string>("");
+  const [editIsReserva, setEditIsReserva] = useState(false);
+  const [editAtivo, setEditAtivo] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveErro, setSaveErro] = useState<string | null>(null);
+
+  async function carregar() {
+    setLoading(true);
+    setErro(null);
+    try {
+      const [devRes, vendRes] = await Promise.all([
+        fetch("/api/mercado-pago/devices"),
+        fetch("/api/vendedores"),
+      ]);
+      if (!devRes.ok) throw new Error("Erro ao carregar maquininhas");
+      setDevices(await devRes.json());
+      if (vendRes.ok) setVendedores(await vendRes.json());
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { carregar(); }, []);
+
+  async function sincronizar() {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const res = await fetch("/api/mercado-pago/devices", { method: "POST" });
+      const body = await res.json();
+      if (res.ok) {
+        setSyncMsg({ tipo: "ok", texto: `Sincronizado: ${body.inserted} novas, ${body.updated} atualizadas (total ${body.total})` });
+        await carregar();
+      } else {
+        setSyncMsg({ tipo: "erro", texto: body.error ?? "Erro ao sincronizar" });
+      }
+    } catch {
+      setSyncMsg({ tipo: "erro", texto: "Erro de rede" });
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(null), 5000);
+    }
+  }
+
+  function abrirEdicao(d: MaqDevice) {
+    setEditandoId(d.id);
+    setEditNome(d.nome_legivel);
+    setEditLoja(d.loja ?? "");
+    setEditVendedorId(d.vendedor_id != null ? String(d.vendedor_id) : "");
+    setEditIsReserva(d.is_reserva);
+    setEditAtivo(d.ativo);
+    setSaveErro(null);
+  }
+
+  function cancelarEdicao() {
+    setEditandoId(null);
+    setSaveErro(null);
+  }
+
+  async function salvar(id: number) {
+    setSaving(true);
+    setSaveErro(null);
+    try {
+      const body: Record<string, unknown> = {
+        id,
+        nome_legivel: editNome.trim() || undefined,
+        loja: editLoja.trim() || null,
+        ativo: editAtivo,
+      };
+      if (editVendedorId) {
+        body.vendedor_id = Number(editVendedorId);
+        body.is_reserva = false;
+      } else {
+        body.vendedor_id = null;
+        body.is_reserva = editIsReserva;
+      }
+      const res = await fetch("/api/mercado-pago/devices", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 409) throw new Error("Vendedor já tem outra maquininha atribuída");
+        throw new Error(data.error ?? "Erro ao salvar");
+      }
+      setEditandoId(null);
+      await carregar();
+    } catch (e) {
+      setSaveErro(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const nomeVendedor = (id: number | null) => {
+    if (id == null) return "—";
+    return vendedores.find(v => v.id_vendedor === id)?.nome ?? String(id);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-2 text-sm" style={{ color: P.sage }}>
+        <Loader2 size={16} className="animate-spin" /> Carregando maquininhas...
+      </div>
+    );
+  }
+
+  if (erro) {
+    return (
+      <div className="flex items-center gap-2 p-4 rounded-xl text-sm" style={{ backgroundColor: P.vermelho + "18", color: P.vermelho }}>
+        <AlertTriangle size={14} /> {erro}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold" style={{ color: P.creme }}>Maquininhas</h2>
+          <p className="text-xs" style={{ color: P.muted }}>
+            {devices.length === 0
+              ? "Nenhuma maquininha sincronizada"
+              : `${devices.length} maquininha${devices.length > 1 ? "s" : ""} cadastrada${devices.length > 1 ? "s" : ""}`}
+          </p>
+        </div>
+        <button
+          onClick={sincronizar}
+          disabled={syncing}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity hover:opacity-80"
+          style={{ backgroundColor: P.dourado, color: "#fff" }}
+        >
+          {syncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+          {syncing ? "Sincronizando..." : "Sincronizar com MP"}
+        </button>
+      </div>
+
+      {syncMsg && (
+        <div
+          className="flex items-center gap-2 p-3 rounded-lg text-xs"
+          style={{
+            backgroundColor: syncMsg.tipo === "ok" ? P.verde + "18" : P.vermelho + "18",
+            color: syncMsg.tipo === "ok" ? P.verde : P.vermelho,
+          }}
+        >
+          {syncMsg.tipo === "ok" ? <CheckCircle size={13} /> : <AlertTriangle size={13} />}
+          {syncMsg.texto}
+        </div>
+      )}
+
+      {devices.length === 0 && (
+        <div className="text-center py-10 text-sm" style={{ color: P.muted }}>
+          Clique em "Sincronizar com MP" para importar as maquininhas cadastradas no Mercado Pago.
+        </div>
+      )}
+
+      {devices.length > 0 && (
+        <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ backgroundColor: P.bg, borderBottom: `1px solid ${P.border}` }}>
+                {["Nome Legível", "Device ID", "Vendedor Atribuído", "Reserva da Loja", "Status", "Ações"].map(h => (
+                  <th
+                    key={h}
+                    className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium"
+                    style={{ color: P.muted }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {devices.map(d => {
+                const editando = editandoId === d.id;
+                return (
+                  <tr key={d.id} className="border-t" style={{ borderColor: P.border }}>
+                    {/* Nome Legível */}
+                    <td className="px-4 py-3">
+                      {editando ? (
+                        <input
+                          value={editNome}
+                          onChange={e => setEditNome(e.target.value)}
+                          className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none"
+                          style={{ borderColor: P.border, color: P.creme }}
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <Smartphone size={13} style={{ color: P.sage }} />
+                          <span className="font-medium" style={{ color: P.creme }}>{d.nome_legivel}</span>
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Device ID (truncado) */}
+                    <td className="px-4 py-3">
+                      <span className="font-mono text-[11px]" style={{ color: P.muted }}>
+                        {d.device_id.slice(0, 20)}...
+                      </span>
+                    </td>
+
+                    {/* Vendedor Atribuído */}
+                    <td className="px-4 py-3">
+                      {editando ? (
+                        <select
+                          value={editVendedorId}
+                          onChange={e => {
+                            setEditVendedorId(e.target.value);
+                            if (e.target.value) setEditIsReserva(false);
+                          }}
+                          className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none"
+                          style={{ borderColor: P.border, color: P.creme }}
+                        >
+                          <option value="">— Nenhum / Reserva</option>
+                          {vendedores.map(v => (
+                            <option key={v.id_vendedor} value={v.id_vendedor}>
+                              {v.nome}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span style={{ color: d.vendedor_id ? P.creme : P.muted }}>
+                          {nomeVendedor(d.vendedor_id)}
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Reserva da Loja */}
+                    <td className="px-4 py-3">
+                      {editando ? (
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={editIsReserva}
+                            disabled={!!editVendedorId}
+                            onChange={e => setEditIsReserva(e.target.checked)}
+                            className="rounded"
+                          />
+                          <span className="text-xs" style={{ color: editVendedorId ? P.muted : P.creme }}>
+                            Reserva
+                          </span>
+                        </label>
+                      ) : (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded-full font-medium"
+                          style={{
+                            backgroundColor: d.is_reserva ? P.dourado + "22" : P.border,
+                            color: d.is_reserva ? P.dourado : P.muted,
+                          }}
+                        >
+                          {d.is_reserva ? "Sim" : "Não"}
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-4 py-3">
+                      {editando ? (
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <button
+                            type="button"
+                            onClick={() => setEditAtivo(v => !v)}
+                            style={{ color: editAtivo ? P.verde : P.muted }}
+                          >
+                            {editAtivo ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
+                          </button>
+                          <span className="text-xs" style={{ color: editAtivo ? P.verde : P.muted }}>
+                            {editAtivo ? "Ativo" : "Inativo"}
+                          </span>
+                        </label>
+                      ) : (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded-full font-medium"
+                          style={{
+                            backgroundColor: d.ativo ? P.verde + "22" : P.border,
+                            color: d.ativo ? P.verde : P.muted,
+                          }}
+                        >
+                          {d.ativo ? "Ativo" : "Inativo"}
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Ações */}
+                    <td className="px-4 py-3">
+                      {editando ? (
+                        <div className="space-y-1">
+                          {saveErro && (
+                            <p className="text-[11px]" style={{ color: P.vermelho }}>{saveErro}</p>
+                          )}
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => salvar(d.id)}
+                              disabled={saving}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50"
+                              style={{ backgroundColor: P.verde, color: "#fff" }}
+                            >
+                              {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                              Salvar
+                            </button>
+                            <button
+                              onClick={cancelarEdicao}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                              style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+                            >
+                              <X size={11} /> Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => abrirEdicao(d)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                          style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+                        >
+                          <Pencil size={11} /> Editar
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function ConfiguracoesClient({ parametros, webhooks, logs, usuarios, depositos, teores, ligaTipos }: Props) {
   const [tab, setTab] = useState<Tab>("parametros");
   const [initialUserId, setInitialUserId] = useState<string | null>(null);
   const { role: currentRole } = useAuth();
   const isSuperAdmin = currentRole === "desenvolvedor" || currentRole === "admin";
+  const canSeeMaquininhas = isFullAccess(currentRole);
 
   // Ler query params (?tab=usuarios&user=UUID) uma vez no mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
     const u = params.get("user");
-    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes"].includes(t)) {
+    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes", "maquininhas"].includes(t)) {
       setTab(t as Tab);
     }
     if (u) setInitialUserId(u);
@@ -4280,9 +4647,12 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "credito_loja", label: "Crédito Loja",    icon: Wallet },
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tabs: { key: Tab; label: string; icon: any }[] = isSuperAdmin
+  let tabs: { key: Tab; label: string; icon: any }[] = isSuperAdmin
     ? [...baseTabs, { key: "permissoes" as Tab, label: "Permissões", icon: Shield }]
     : baseTabs;
+  if (canSeeMaquininhas) {
+    tabs = [...tabs, { key: "maquininhas" as Tab, label: "Maquininhas", icon: Smartphone }];
+  }
 
   return (
     <div className="p-3 md:p-6 space-y-4 md:space-y-5">
@@ -4335,6 +4705,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "integracoes" && <TabIntegracoes />}
       {tab === "comissoes"   && <TabComissoes />}
       {tab === "credito_loja" && <TabCreditoLoja />}
+      {tab === "maquininhas" && canSeeMaquininhas && <TabMaquininhas />}
     </div>
   );
 }

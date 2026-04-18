@@ -36,6 +36,13 @@ export const ROLES_APROVAR_CREDITO = [...ROLES_FULL_ACCESS, "gerente_loja"] as c
 // Roles que podem abrir/gerenciar devoluções, vale-troca e reembolsos
 export const ROLES_DEVOLUCAO = ["admin", "desenvolvedor", "diretor", "gerente_loja"] as const;
 
+// Roles que podem gerenciar o módulo fiscal (emitentes, regras, dados fiscais, emitir notas)
+export const ROLES_FISCAL = [
+  ...ROLES_FULL_ACCESS,
+  "gerente_fabrica",
+  "gerente_loja",
+] as const;
+
 // Verifica se a role está na lista permitida
 export function hasRole(role: string | null | undefined, permitidas: readonly string[]): boolean {
   if (!role) return false;

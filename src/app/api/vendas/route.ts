@@ -43,8 +43,11 @@ export async function GET(req: NextRequest) {
       v.created_at,
       v.updated_at,
       v.qtd_itens,
-      v.total_pago
+      v.total_pago,
+      ve.empresa_emitente_id,
+      ve.nota_fiscal_id
     FROM alissonerp.vw_vendas_erp_completa v
+    LEFT JOIN alissonerp.vendas_erp ve ON ve.id = v.id
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <  (${fim}::date + INTERVAL '1 day')
       ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}

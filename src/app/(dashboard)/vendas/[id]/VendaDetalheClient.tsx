@@ -14,6 +14,8 @@ import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
 import MercadoPagoCobranca from "@/components/vendas/MercadoPagoCobranca";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import CartaoInline from "@/components/vendas/CartaoInline";
+import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
+import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -89,6 +91,8 @@ interface Venda {
     id: number; numero_ordem: string; tipo_ordem: string;
     situacao: string; status: string; created_at: string;
   }>;
+  empresa_emitente_id?: number | null;
+  nota_fiscal_id?: number | null;
   devolucoes?: Array<{
     id: number;
     numero: string;
@@ -324,6 +328,8 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
+  const [abrirNfce, setAbrirNfce] = useState(false);
+  const [verNotaId, setVerNotaId] = useState<number | null>(null);
 
   // ── Load venda ──────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -909,6 +915,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const podeAprovarConcluir = venda.situacao === "aprovado" && temPagamentoPendente;
 
   return (
+    <>
     <div className="px-3 md:px-6 py-4 md:py-6 max-w-5xl mx-auto">
 
       {/* Header */}
@@ -937,6 +944,21 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {venda && venda.nota_fiscal_id ? (
+            <button onClick={() => setVerNotaId(venda.nota_fiscal_id!)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
+              style={{ borderColor: "#6EE7B7", color: "#065F46" }}
+              title="Ver NFC-e emitida">
+              <FileText size={13} /> NFC-e
+            </button>
+          ) : venda ? (
+            <button onClick={() => setAbrirNfce(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
+              style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+              title="Emitir NFC-e">
+              <FileText size={13} /> NFC-e
+            </button>
+          ) : null}
           <button onClick={gerarPdf} disabled={gerandoPdf}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 hover:bg-gray-50"
             style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
@@ -2187,5 +2209,16 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
 
       </div>
     </div>
+    {abrirNfce && venda && (
+      <EmitirNfceModal
+        venda={{ id: venda.id, numero_venda: venda.numero_venda, total_venda: venda.total_venda, cliente_id: venda.cliente_id }}
+        onClose={() => setAbrirNfce(false)}
+        onSuccess={() => { load(); }}
+      />
+    )}
+    {verNotaId && (
+      <NotaFiscalDetalheModal notaId={verNotaId} onClose={() => setVerNotaId(null)} />
+    )}
+    </>
   );
 }
