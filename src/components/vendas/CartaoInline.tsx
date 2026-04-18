@@ -130,7 +130,7 @@ export default function CartaoInline({
   // ─── Atualiza parcelasPoint se prop mudar (clamp ao máximo permitido) ───
   useEffect(() => {
     if (installmentsProp == null) return;
-    const maxN = Math.min(12, Math.max(1, Math.floor(valor / 5)));
+    const maxN = Math.max(1, Math.floor(valor / 100));
     setParcelasPoint(Math.min(installmentsProp, maxN));
   }, [installmentsProp, valor]);
 
@@ -163,7 +163,7 @@ export default function CartaoInline({
           }
           // Aplicar parcelas padrão do vendedor (clampado ao máximo permitido pelo valor)
           if (data.parcelas_padrao && data.parcelas_padrao > 1) {
-            const maxN = Math.min(12, Math.max(1, Math.floor(valor / 5)));
+            const maxN = Math.max(1, Math.floor(valor / 100));
             setParcelasPoint(Math.min(data.parcelas_padrao, maxN));
           }
         }
@@ -761,7 +761,7 @@ export default function CartaoInline({
                             className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none bg-white"
                             style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
                           >
-                            {Array.from({ length: Math.min(12, Math.max(1, Math.floor(valor / 5))) }, (_, i) => i + 1).map(n => (
+                            {Array.from({ length: Math.max(1, Math.floor(valor / 100)) }, (_, i) => i + 1).map(n => (
                               <option key={n} value={n}>{n}x de {fmt(valor / n)}</option>
                             ))}
                           </select>
