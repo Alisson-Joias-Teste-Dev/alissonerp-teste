@@ -322,7 +322,10 @@ export default function CartaoInline({
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? "Erro ao cancelar");
+        const msg: string = body.error ?? "Erro ao cancelar";
+        // 404 = intent já processada/expirada no MP — limpa o estado mesmo assim
+        const isGone = msg.includes("404") || msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("doesn't exist");
+        if (!isGone) throw new Error(msg);
       }
       setIntentAtiva(null);
       setModo("idle");
