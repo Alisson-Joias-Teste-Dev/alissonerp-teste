@@ -324,6 +324,8 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
   const [isDirty, setIsDirty] = useState(false);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const handleSaveRef    = useRef<() => Promise<void>>(async () => {});
   const [updating, setUpdating] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -751,8 +753,10 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
           body: JSON.stringify(patch),
         });
         if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+        // Atualiza referência local sem recarregar a página inteira
+        setVenda(prev => prev ? { ...prev, ...patch } : prev);
       }
-      await load();
+      setIsDirty(false);
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao salvar"); }
     finally { setSaving(false); }
   }
@@ -865,7 +869,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
       const data = await res.json() as { url?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       setVideoObsInterna(data.url ?? null);
-      setIsDirty(true);
+      markDirty();
     } catch (err) { setVideoUploadErr(err instanceof Error ? err.message : "Erro ao enviar vídeo"); }
     finally { setUploadingVideo(false); }
   }
@@ -874,11 +878,17 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
     if (videoPreviewUrl && videoPreviewUrl !== venda?.video_obs_interna) URL.revokeObjectURL(videoPreviewUrl);
     setVideoPreviewUrl(null); setVideoObsInterna(null); setVideoUploadErr("");
     if (videoInputRef.current) videoInputRef.current.value = "";
-    setIsDirty(true);
+    markDirty();
   }
 
-  // ── Dirty tracking helper ───────────────────────────────────────────────────
-  function markDirty() { if (!isDirty) setIsDirty(true); }
+  // ── Auto-save: latest-ref pattern garante closure sempre atualizada ────────
+  handleSaveRef.current = handleSave;
+
+  function markDirty() {
+    setIsDirty(true);
+    clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => { handleSaveRef.current(); }, 1500);
+  }
 
   // ── Render ──────────────────────────────────────────────────────────────────
   if (loadingVenda) {
@@ -2086,13 +2096,10 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
           </div>
 
           <div className="flex items-center gap-3">
-            {isDirty && (
-              <button onClick={handleSave} disabled={saving}
-                className="px-5 py-2.5 rounded-lg text-sm font-medium border disabled:opacity-40 transition-opacity hover:opacity-80"
-                style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
-                {saving ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null}
-                Salvar Alterações
-              </button>
+            {saving && (
+              <span className="text-xs flex items-center gap-1" style={{ color: "#9CA3AF" }}>
+                <Loader2 size={12} className="animate-spin" /> Salvando...
+              </span>
             )}
             {proximasAcoes.map(acao => {
               const needsValidation = acao.value === "aprovado" || acao.value === "concluido";

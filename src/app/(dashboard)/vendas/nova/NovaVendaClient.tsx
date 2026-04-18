@@ -215,6 +215,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
 
   // Vídeo
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const autoSavedRef  = useRef(false);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [videoObsInterna, setVideoObsInterna] = useState<string | null>(null);
   const [uploadingVideo,  setUploadingVideo]  = useState(false);
@@ -290,6 +291,22 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
       }).catch(() => {});
     }
   }, [isFullAccess, vendedorId]);
+
+  // Auto-save: ao primeiro item ou cliente, cria rascunho e redireciona para edição
+  useEffect(() => {
+    if (autoSavedRef.current) return;
+    if (itens.length === 0 && !cliente) return;
+    autoSavedRef.current = true;
+    const body = montarBodyVenda();
+    fetch("/api/vendas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(r => r.json())
+      .then((data: { id?: number; error?: string }) => {
+        if (data.id) router.replace(`/vendas/${data.id}`);
+        else autoSavedRef.current = false;
+      })
+      .catch(() => { autoSavedRef.current = false; });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itens, cliente]);
 
   // Formas de frete disponíveis para o envio selecionado
   const formaFreteOpts = formaFreteAll.filter(f => {
