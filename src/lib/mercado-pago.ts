@@ -326,7 +326,7 @@ export async function createPointIntent(params: CreatePointIntentParams): Promis
   const baseUrl = await getWebhookBaseUrl("https://erp.alissonjoias.com.br");
   const notificationUrl = `${baseUrl}/api/webhooks/mercado-pago`;
 
-  const body = {
+  const buildBody = (withTicketNumber: boolean) => ({
     amount: Math.round(params.amountCents),
     description: `Venda ${params.numeroVenda}`,
     payment: {
@@ -338,13 +338,28 @@ export async function createPointIntent(params: CreatePointIntentParams): Promis
     additional_info: {
       external_reference: `venda:${params.vendaId}:pag:${params.pagamentoId}`,
       print_on_terminal: params.printOnTerminal ?? true,
+      ...(withTicketNumber ? { ticket_number: params.numeroVenda } : {}),
     },
-  };
+  });
 
-  return mpFetch<PointIntentResponse>(
-    `/point/integration-api/devices/${encodeURIComponent(params.deviceId)}/payment-intents`,
-    { method: "POST", body: JSON.stringify(body) }
-  );
+  const path = `/point/integration-api/devices/${encodeURIComponent(params.deviceId)}/payment-intents`;
+
+  try {
+    return await mpFetch<PointIntentResponse>(path, {
+      method: "POST",
+      body: JSON.stringify(buildBody(true)),
+    });
+  } catch (err) {
+    // ticket_number rejeitado por este modo de operação — tenta sem ele
+    const msg = err instanceof Error ? err.message : "";
+    if (msg.includes("ticket_number") || msg.includes("400")) {
+      return mpFetch<PointIntentResponse>(path, {
+        method: "POST",
+        body: JSON.stringify(buildBody(false)),
+      });
+    }
+    throw err;
+  }
 }
 
 // Cancelar Payment Intent ativa (antes de o cliente passar o cartão)
