@@ -96,6 +96,9 @@ export async function POST(
   if (!valorCobranca || valorCobranca <= 0) {
     return NextResponse.json({ error: "Valor da cobrança deve ser > 0" }, { status: 400 });
   }
+  if (valorCobranca < 1.00) {
+    return NextResponse.json({ error: "Valor mínimo para cobrança na maquininha é R$ 1,00" }, { status: 400 });
+  }
 
   // ─── Cria pagamento pendente ──────────────────────────────────────────────
   const [pag] = await sql`
