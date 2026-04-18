@@ -1710,19 +1710,13 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                 </div>
               )}
 
-              {/* Cartão Crédito / Débito — gateway + bandeira + condição */}
+              {/* Cartão Crédito — gateway + condição */}
               {COM_CARTAO.includes(newPagForma) && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                   <div>
                     <Label>Gateway</Label>
                     <Select value={newPagGateway} onChange={e => setNewPagGateway(e.target.value)}>
                       {GATEWAYS.map(g => <option key={g} value={g}>{g}</option>)}
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Bandeira</Label>
-                    <Select value={newPagBandeira} onChange={e => setNewPagBandeira(e.target.value)}>
-                      {BANDEIRAS.map(b => <option key={b} value={b}>{b}</option>)}
                     </Select>
                   </div>
                   {newPagForma === "Cartão de Crédito" && (
@@ -1767,66 +1761,6 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                 />
               )}
 
-              {/* Tabela de parcelas */}
-              {COM_PARCELAS.includes(newPagForma) && parcelasRows.length > 0 && (
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <p className="text-sm font-semibold" style={{ color: "#374151" }}>Detalhamento das parcelas</p>
-                      <p className="text-xs" style={{ color: "#9CA3AF" }}>Configure o valor e data de cada parcela. Valores editados não serão redistribuídos automaticamente.</p>
-                    </div>
-                    <button onClick={equalizarParcelas}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium"
-                      style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
-                      ↺ Equalizar
-                    </button>
-                  </div>
-                  <div className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-                    <table className="w-full text-sm">
-                      <thead style={{ backgroundColor: C.cremeBg }}>
-                        <tr>
-                          {["Nº", "Dias", "Data", "Valor"].map(h => (
-                            <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280" }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {parcelasRows.map((row, i) => (
-                          <tr key={i} className="border-t" style={{ borderColor: C.cremeBorder }}>
-                            <td className="px-3 py-2.5 text-xs w-8" style={{ color: "#9CA3AF" }}>{row.num}</td>
-                            <td className="px-3 py-2.5 w-24">
-                              <input type="number" value={row.dias} min={0} onChange={e => updateParcelaRow(i, "dias", e.target.value)}
-                                className="w-16 border rounded px-2 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
-                            </td>
-                            <td className="px-3 py-2.5 w-40">
-                              <input type="date" value={row.data} onChange={e => updateParcelaRow(i, "data", e.target.value)}
-                                className="border rounded px-2 py-1 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
-                            </td>
-                            <td className="px-3 py-2.5">
-                              <input type="text" value={row.valor.toFixed(2).replace(".", ",")} onChange={e => updateParcelaRow(i, "valor", e.target.value)}
-                                className="w-full border rounded px-2 py-1 text-sm outline-none text-right tabular-nums" style={{ borderColor: C.cremeBorder }} />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    <div className="grid grid-cols-2 border-t px-4 py-3 text-sm" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
-                      <div>
-                        <p className="text-xs mb-0.5" style={{ color: "#9CA3AF" }}>Total da venda</p>
-                        <p className="font-bold tabular-nums" style={{ color: "#374151" }}>{fmt(totalVenda)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs mb-0.5" style={{ color: "#9CA3AF" }}>Total das parcelas</p>
-                        {(() => {
-                          const soma = parcelasRows.reduce((s, r) => s + r.valor, 0);
-                          const ok = Math.abs(soma - totalVenda) < 0.02;
-                          return <p className="font-bold tabular-nums" style={{ color: ok ? "#059669" : "#D97706" }}>{fmt(soma)}</p>;
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {/* Múltiplas */}
               {newPagForma === "Múltiplas" && (() => {
@@ -1954,12 +1888,6 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                           <Label>Gateway</Label>
                           <Select value={newPagGateway} onChange={e => setNewPagGateway(e.target.value)}>
                             {GATEWAYS.map(g => <option key={g} value={g}>{g}</option>)}
-                          </Select>
-                        </div>
-                        <div>
-                          <Label>Bandeira</Label>
-                          <Select value={newPagBandeira} onChange={e => setNewPagBandeira(e.target.value)}>
-                            {BANDEIRAS.map(b => <option key={b} value={b}>{b}</option>)}
                           </Select>
                         </div>
                       </>

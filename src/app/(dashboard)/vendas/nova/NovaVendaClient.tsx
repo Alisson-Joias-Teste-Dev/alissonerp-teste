@@ -52,9 +52,9 @@ const FORMAS_PAGAMENTO = [
 const GATEWAYS   = ["Mercado Pago", "PagSeguro", "Cielo", "Stone", "Getnet", "Rede", "Outro"];
 const BANDEIRAS  = ["Visa", "Mastercard", "Elo", "Amex", "Hipercard", "Outro"];
 const CONDICOES  = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
-// Parcelas disponíveis para MP: mínimo R$5 por parcela
+// Parcelas disponíveis para MP: mínimo R$100 por parcela
 function condicoesMp(valor: number) {
-  const max = Math.min(12, Math.floor(valor / 5));
+  const max = Math.min(12, Math.floor(valor / 100));
   return CONDICOES.filter(c => c === "À vista" || parseInt(c) <= max);
 }
 
@@ -350,7 +350,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   const totalComissao = itens.reduce((s, i) => s + i.valor_comissao, 0);
   const totalVenda    = totalProdutos + totalFrete;
 
-  // Reset pagCondicao se ficar inválida para MP (valor baixou, parcela < R$5)
+  // Reset pagCondicao se ficar inválida para MP (valor baixou, parcela < R$100)
   useEffect(() => {
     if (pagGateway !== "Mercado Pago" || pagForma !== "Cartão de Crédito") return;
     const opcoes = condicoesMp(totalVenda);
@@ -1253,19 +1253,13 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
             </div>
           )}
 
-          {/* Cartão Crédito / Débito — gateway + bandeira */}
+          {/* Cartão Crédito — gateway + condição */}
           {COM_CARTAO.includes(pagForma) && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
                 <Label>Gateway</Label>
                 <Select value={pagGateway} onChange={e => setPagGateway(e.target.value)}>
                   {GATEWAYS.map(g => <option key={g} value={g}>{g}</option>)}
-                </Select>
-              </div>
-              <div>
-                <Label>Bandeira</Label>
-                <Select value={pagBandeira} onChange={e => setPagBandeira(e.target.value)}>
-                  {BANDEIRAS.map(b => <option key={b} value={b}>{b}</option>)}
                 </Select>
               </div>
               {pagForma === "Cartão de Crédito" && (
@@ -1392,70 +1386,6 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
             />
           )}
 
-          {/* Tabela de parcelas */}
-          {COM_PARCELAS.includes(pagForma) && parcelasRows.length > 0 && (
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <p className="text-sm font-semibold" style={{ color: "#374151" }}>Detalhamento das parcelas</p>
-                  <p className="text-xs" style={{ color: "#9CA3AF" }}>Configure o valor e data de cada parcela. Valores editados não serão redistribuídos automaticamente.</p>
-                </div>
-                <button onClick={equalizarParcelas}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium"
-                  style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
-                  ↺ Equalizar
-                </button>
-              </div>
-              <div className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-                <table className="w-full text-sm">
-                  <thead style={{ backgroundColor: C.cremeBg }}>
-                    <tr>
-                      {["Nº", "Dias", "Data", "Valor"].map(h => (
-                        <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280" }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {parcelasRows.map((row, i) => (
-                      <tr key={i} className="border-t" style={{ borderColor: C.cremeBorder }}>
-                        <td className="px-3 py-2.5 text-xs w-8" style={{ color: "#9CA3AF" }}>{row.num}</td>
-                        <td className="px-3 py-2.5 w-24">
-                          <input type="number" value={row.dias} min={0}
-                            onChange={e => updateParcelaRow(i, "dias", e.target.value)}
-                            className="w-16 border rounded px-2 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
-                        </td>
-                        <td className="px-3 py-2.5 w-40">
-                          <input type="date" value={row.data}
-                            onChange={e => updateParcelaRow(i, "data", e.target.value)}
-                            className="border rounded px-2 py-1 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <input type="text" value={row.valor.toFixed(2).replace(".", ",")}
-                            onChange={e => updateParcelaRow(i, "valor", e.target.value)}
-                            className="w-full border rounded px-2 py-1 text-sm outline-none text-right tabular-nums" style={{ borderColor: C.cremeBorder }} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {/* Totais */}
-                <div className="grid grid-cols-2 border-t px-4 py-3 text-sm" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
-                  <div>
-                    <p className="text-xs mb-0.5" style={{ color: "#9CA3AF" }}>Total da venda</p>
-                    <p className="font-bold tabular-nums" style={{ color: "#374151" }}>{fmt(totalVenda)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs mb-0.5" style={{ color: "#9CA3AF" }}>Total das parcelas</p>
-                    {(() => {
-                      const soma = parcelasRows.reduce((s, r) => s + r.valor, 0);
-                      const ok = Math.abs(soma - totalVenda) < 0.02;
-                      return <p className="font-bold tabular-nums" style={{ color: ok ? "#059669" : "#D97706" }}>{fmt(soma)}</p>;
-                    })()}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Múltiplas */}
           {pagForma === "Múltiplas" && (() => {
