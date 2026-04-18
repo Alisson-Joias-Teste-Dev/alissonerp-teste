@@ -323,6 +323,9 @@ export interface PointIntentResponse {
 }
 
 export async function createPointIntent(params: CreatePointIntentParams): Promise<PointIntentResponse> {
+  const baseUrl = await getWebhookBaseUrl("https://erp.alissonjoias.com.br");
+  const notificationUrl = `${baseUrl}/api/webhooks/mercado-pago`;
+
   const body = {
     amount: Math.round(params.amountCents),
     description: `Venda ${params.numeroVenda}`,
@@ -331,6 +334,7 @@ export async function createPointIntent(params: CreatePointIntentParams): Promis
       type: params.paymentType ?? "credit_card",
       installments_cost: "seller",
     },
+    notification_url: notificationUrl,
     additional_info: {
       external_reference: `venda:${params.vendaId}:pag:${params.pagamentoId}`,
       print_on_terminal: params.printOnTerminal ?? true,
