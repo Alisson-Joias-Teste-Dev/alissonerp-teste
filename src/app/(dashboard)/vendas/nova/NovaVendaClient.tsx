@@ -724,12 +724,11 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
 
       // Se houve troco, mostrar toast antes de redirecionar
       if (valeTrocoToast) {
-        // Aguarda 3s para o usuario ver o toast
-        setTimeout(() => router.push("/vendas"), 3000);
+        setTimeout(() => router.push(`/vendas/${data.id}`), 3000);
         return;
       }
 
-      router.push("/vendas");
+      router.push(`/vendas/${data.id}`);
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao salvar venda"); }
     finally { setSaving(false); }
   }
