@@ -154,9 +154,14 @@ export default function MercadoPagoCobranca({
   }, [initPoint]);
 
   // ─── Polling de confirmação (compartilhado) ───────────────────────────────
-  const iniciarPolling = useCallback(() => {
+  // Dois mecanismos em paralelo:
+  //   1. vendaPolling.detectarConfirmacao() — detecta confirmação via webhook
+  //   2. checar-point — polling ativo no MP quando webhook do Point não chega
+  const iniciarPolling = useCallback((pagamentoIdParaChecar?: number) => {
     if (pollRef.current) clearInterval(pollRef.current);
+    let tick = 0;
     pollRef.current = setInterval(async () => {
+      tick++;
       try {
         const confirmado = await vendaPolling.detectarConfirmacao();
         if (confirmado) {
@@ -170,10 +175,35 @@ export default function MercadoPagoCobranca({
             setIntentAtiva(null);
             onPagamentoConfirmado?.();
           }, 2500);
+          return;
         }
       } catch { /* ignora */ }
+
+      // A cada 2 ticks (7s) checa ativamente no MP quando tem intent Point ativa
+      if (pagamentoIdParaChecar && tick % 2 === 0) {
+        try {
+          const mpRes = await fetch(
+            `/api/vendas/${vendaId}/mercado-pago/checar-point?pagamento_id=${pagamentoIdParaChecar}`
+          );
+          if (mpRes.ok) {
+            const mpData = await mpRes.json();
+            if (mpData.status === "confirmado") {
+              setPago(true);
+              if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+              setTimeout(() => {
+                setModal(null);
+                setPago(false);
+                setInitPoint(null);
+                setQrDataUrl(null);
+                setIntentAtiva(null);
+                onPagamentoConfirmado?.();
+              }, 2500);
+            }
+          }
+        } catch { /* ignora */ }
+      }
     }, 3500);
-  }, [vendaPolling, onPagamentoConfirmado]);
+  }, [vendaPolling, onPagamentoConfirmado, vendaId]);
 
   useEffect(() => {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
@@ -233,7 +263,7 @@ export default function MercadoPagoCobranca({
         device_id: body.device_id,
         device_nome: body.device_nome,
       });
-      iniciarPolling();
+      iniciarPolling(body.pagamento_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro");
     } finally {

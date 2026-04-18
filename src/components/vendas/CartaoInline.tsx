@@ -171,24 +171,51 @@ export default function CartaoInline({
   }, [modo, devices.length, minhaDevice, carregarDevices]);
 
   // ─── Polling de confirmação ──────────────────────────────────────────────
-  const iniciarPolling = useCallback((idParaMonitorar: number) => {
+  // Dois mecanismos em paralelo:
+  //   1. Poll /api/vendas/:id (detecta confirmação via webhook ou manual)
+  //   2. Poll /api/vendas/:id/mercado-pago/checar-point (fallback ativo quando
+  //      o webhook do MP Point não chega — busca por external_reference no MP)
+  const iniciarPolling = useCallback((idParaMonitorar: number, pagamentoIdParaChecar?: number) => {
     if (pollRef.current) clearInterval(pollRef.current);
+
+    let tick = 0;
     pollRef.current = setInterval(async () => {
+      tick++;
       try {
+        // 1. Poll status da venda
         const res = await fetch(`/api/vendas/${idParaMonitorar}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const temMpConfirmado = (data.pagamentos ?? []).some(
-          (p: { gateway?: string; status: string }) =>
-            (p.gateway === "Mercado Pago Online" || p.gateway === "Mercado Pago Point")
-            && p.status === "confirmado"
-        );
-        if (data.situacao === "concluido" || temMpConfirmado) {
-          setPago(true);
-          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-          setTimeout(() => onPagamentoConfirmado(idParaMonitorar), 2500);
+        if (res.ok) {
+          const data = await res.json();
+          const temMpConfirmado = (data.pagamentos ?? []).some(
+            (p: { gateway?: string; status: string }) =>
+              (p.gateway === "Mercado Pago Online" || p.gateway === "Mercado Pago Point")
+              && p.status === "confirmado"
+          );
+          if (data.situacao === "concluido" || data.situacao === "aprovado" || temMpConfirmado) {
+            setPago(true);
+            if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+            setTimeout(() => onPagamentoConfirmado(idParaMonitorar), 2500);
+            return;
+          }
         }
       } catch { /* ignora */ }
+
+      // 2. A cada 2 ticks (8s) checa ativamente no MP se o pagamento chegou
+      if (pagamentoIdParaChecar && tick % 2 === 0) {
+        try {
+          const mpRes = await fetch(
+            `/api/vendas/${idParaMonitorar}/mercado-pago/checar-point?pagamento_id=${pagamentoIdParaChecar}`
+          );
+          if (mpRes.ok) {
+            const mpData = await mpRes.json();
+            if (mpData.status === "confirmado") {
+              setPago(true);
+              if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+              setTimeout(() => onPagamentoConfirmado(idParaMonitorar), 2500);
+            }
+          }
+        } catch { /* ignora */ }
+      }
     }, 4000);
   }, [onPagamentoConfirmado]);
 
@@ -274,7 +301,7 @@ export default function CartaoInline({
         device_id: body.device_id,
         device_nome: body.device_nome,
       });
-      iniciarPolling(id);
+      iniciarPolling(id, body.pagamento_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro");
     } finally {
