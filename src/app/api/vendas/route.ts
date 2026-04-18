@@ -118,6 +118,9 @@ export async function POST(req: NextRequest) {
     endereco_entrega_cidade?:      string | null;
     endereco_entrega_cep?:         string | null;
     endereco_entrega_uf?:          string | null;
+    tipo_venda?:          string | null;
+    numero_rastreio?:     string | null;
+    venda_garantia_id?:   number | null;
     itens?:               ItemInput[];
     pagamentos?:          PagamentoInput[];
   };
@@ -156,6 +159,7 @@ export async function POST(req: NextRequest) {
         video_obs_interna,
         endereco_entrega, endereco_entrega_numero, endereco_entrega_complemento,
         endereco_entrega_bairro, endereco_entrega_cidade, endereco_entrega_cep, endereco_entrega_uf,
+        tipo_venda, numero_rastreio, venda_garantia_id,
         situacao,
         created_by
       ) VALUES (
@@ -176,6 +180,9 @@ export async function POST(req: NextRequest) {
         ${body.endereco_entrega_cidade ?? null},
         ${body.endereco_entrega_cep ?? null},
         ${body.endereco_entrega_uf ?? null},
+        ${body.tipo_venda ?? null},
+        ${body.numero_rastreio ?? null},
+        ${body.venda_garantia_id ?? null},
         'rascunho',
         ${user.id}::uuid
       )
@@ -201,7 +208,7 @@ export async function POST(req: NextRequest) {
     // 3. Inserir itens (trigger recalcula totais automaticamente)
     if (Array.isArray(body.itens) && body.itens.length > 0) {
       for (const item of body.itens) {
-        if (!item.produto_id || item.produto_id <= 0) {
+        if (item.produto_id !== null && item.produto_id !== undefined && Number(item.produto_id) <= 0) {
           throw new Error("produto_id inválido em item");
         }
         if (!item.nome_produto || typeof item.nome_produto !== "string" || item.nome_produto.trim() === "") {
