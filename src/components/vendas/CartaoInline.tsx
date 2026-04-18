@@ -17,7 +17,7 @@ import { isFullAccess } from "@/lib/roles";
 //
 //   1. Link de Pagamento (Preference API)
 //      - Gera init_point → QR Code local (biblioteca qrcode) + link copiável
-//      - Cliente paga remoto via checkout MP (aceita crédito + débito + PIX)
+//      - Cliente paga remoto via checkout MP (aceita crédito + PIX)
 //      - Ideal pra venda online, WhatsApp, email
 //
 //   2. Maquininha Point (Point Integration API)

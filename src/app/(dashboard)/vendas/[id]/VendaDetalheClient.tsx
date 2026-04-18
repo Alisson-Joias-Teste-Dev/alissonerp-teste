@@ -106,14 +106,14 @@ interface Venda {
 }
 
 const FORMAS_PAGAMENTO = [
-  "Dinheiro", "Cartão de Crédito", "Cartão de Débito",
+  "Dinheiro", "Cartão de Crédito",
   "Vale-Troca", "Pix", "Ouro", "A Receber", "Múltiplas",
 ];
 const GATEWAYS   = ["Mercado Pago", "PagSeguro", "Cielo", "Stone", "Getnet", "Rede", "Outro"];
 const BANDEIRAS  = ["Visa", "Mastercard", "Elo", "Amex", "Hipercard", "Outro"];
 const CONDICOES  = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
 const COM_PARCELAS = ["Cartão de Crédito", "Vale-Troca"];
-const COM_CARTAO   = ["Cartão de Crédito", "Cartão de Débito", "Pix"];
+const COM_CARTAO   = ["Cartão de Crédito", "Pix"];
 
 function hoje() { return new Date().toISOString().slice(0, 10); }
 function addDays(dateStr: string, days: number): string {
@@ -566,7 +566,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
     try {
       const parcelas = newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao) || newPagParcelas;
       const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas };
-      if (["Cartão de Crédito", "Cartão de Débito"].includes(newPagForma)) {
+      if (newPagForma === "Cartão de Crédito") {
         body.gateway = newPagGateway;
       }
       const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
@@ -1948,7 +1948,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                         {FORMAS_PAGAMENTO.map(f => <option key={f} value={f}>{f}</option>)}
                       </Select>
                     </div>
-                    {["Cartão de Crédito", "Cartão de Débito"].includes(newPagForma) && (
+                    {newPagForma === "Cartão de Crédito" && (
                       <>
                         <div>
                           <Label>Gateway</Label>
