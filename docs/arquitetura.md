@@ -1,9 +1,9 @@
 # Arquitetura — fabricaAJ ERP
 
-> 📋 Última atualização automática: 30/03/2026 — Versão: v2.15.0 <!-- Revisado 30/03/2026 -->
+> 📋 Última atualização automática: 11/04/2026 — Versão: v2.19.87 <!-- Revisado 11/04/2026 -->
 
 Sistema ERP para a Joalheria ALISSON. Stack: Next.js 16.1.6 + PostgreSQL 15 (Supabase self-hosted).
-**Versão atual: v2.15.0 | Atualizado: 30/03/2026 — Serviço Interno: tipos_servico CRUD, modal foto+vídeo (MediaRecorder), migration 100**
+**Versão atual: v2.19.87 | Atualizado: 11/04/2026 — Integração Mercado Pago completa (Preference + Payment API PIX nativo + Point Smart), valor líquido de recebimento, estorno automático, fix Tiny offline_access, commit-then-sync no webhook**
 
 ---
 
@@ -151,6 +151,45 @@ O cliente Supabase (`src/lib/supabase/client.ts` e `server.ts`) esta configurado
 | `098_triggers_pedras_ct_compras.sql` | Sprint 2 v2.14.0. UPDATE `fn_criar_par_movimentacao` (add `p_local_id` 10º param). UPDATE `fn_processar_apontamento_pcp` (tipos 3/6 com ct; acumula `pcp.total_pedras_ct`; local=1). UPDATE `fn_processar_saida_ordem` (SP pedras ÷0.2; local=1). UPDATE `fn_calcular_item_compra` (pedras: peso_ct×custo_por_ct). UPDATE `fn_concluir_compra` (CE por categoria + local_destino_id + guard status). UPDATE `fn_processar_apontamento_dist` (tipos 3/6 ct; `distribuicoes.total_pedras_ct`; local=1). UPDATE `fn_processar_fechamento_dist` (acumula `pcp.total_pedras_ct`; TEDD local=1). ADD `distribuicoes.total_pedras_ct`, `apontamentos_distribuicao.peso_ct`. |
 | `099_data_entrega_fabricacao.sql` | Função utilitária `fn_adicionar_dias_uteis` + trigger ponte calcula data_entrega=+10 dias úteis para ordens fabricacao. |
 | `100_tipos_servico.sql` | v2.15.0. CREATE `alissonerp.tipos_servico` (id SERIAL, nome TEXT, ativo BOOLEAN, created_at). SEED 5 tipos: Solda Laser, Cravação Manual, Acabamento e polimento, Ajuste Manual, Solda e Limpeza. ADD `alissonerp.ordens.tipos_servico_ids INTEGER[]`. GRANTS authenticated/anon. |
+| `101_fix_triggers_pedras_local.sql` | v2.14.1. Fix peso pedras (p_peso_gramas param), local_estoque_id em fn_processar_transferencia e fn_processar_lancamento_avulso. |
+| `102_fix_local_estoque_functions.sql` | v2.14.1. COALESCE(p_local_id, 1) em fn_criar_par_movimentacao. local_estoque_id=1 em fn_processar_outros_insumos. |
+| `103_transferencia_service.sql` | v2.15.1. ADD tipo_transferencia, protocolo_id, deposito_origem_id em transferencias_ordem. ADD transferencia_service_id FK em servicos. |
+| `104_modulo_comercial_base.sql` | v2.16.0. CREATE faixas_comissao (31 faixas), vendas_erp, itens_venda_erp, pagamentos_venda, metas_vendedoras. Triggers totais + blindagem. |
+| `105_comercial_view_video.sql` | v2.16.0. ADD video_obs_interna em vendas_erp. Recria vw_vendas_erp_completa. |
+| `106_vendas_token_compartilhamento.sql` | v2.16.0. ADD token_compartilhamento UUID em vendas_erp (UNIQUE). |
+| `107_estoque_comercial.sql` | v2.17.0. CREATE estoque_comercial_config, movimentacoes_estoque_comercial, vw_saldo_estoque_comercial, vw_estoque_comercial_com_alerta. |
+| `108_ordens_garantia.sql` | v2.17.0. ADD venda_id e venda_item_ids em ordens. INSERT "Outros" em tipos_servico. |
+| `109_sync_public_vendas.sql` | v2.17.0. ADD public_venda_id FK. Migra 14.301 vendas históricas + 75.956 itens. 3 triggers sync cross-schema. |
+| `110_fix_trigger_sync_exception.sql` | v2.17.0. EXCEPTION WHEN OTHERS em sync functions (nunca bloqueia sistema externo). |
+| `111_estoque_comercial_auto_venda.sql` | v2.17.0. 4 triggers: baixa automática na venda, reversão no delete, estorno no cancelamento, ajuste na atualização. |
+| `111_fichas_tecnicas_erp.sql` | v2.17.0. CREATE fichas_tecnicas (ordem_id, tipo_item, dados JSONB). Fichas editáveis no ERP. |
+| `112_modulo_tarefas.sql` | v2.17.0. CREATE tarefas + comentarios_tarefa. Status: pendente/em_andamento/concluida/cancelada. |
+| `113_financeiro_auto.sql` | v2.17.0. 3 triggers: venda→conta_receber, cancelar venda→cancelar CR, compra→conta_pagar. ADD venda_erp_id/fornecedor_nome/cliente_nome. |
+| `114_blindar_vendas_fechadas.sql` | v2.17.0. fn_proteger_itens_venda_fechada + fn_proteger_venda_fechada (bloqueia edição após confirmado/concluido). |
+| `115_fix_sync_triggers.sql` | v2.18.1. Fix UPDATE trigger para não zerar total_venda. Respeita vendas fechadas. |
+| `116_blindar_itens_venda_public.sql` | v2.17.0. fn_proteger_preco_itens_venda + fn_proteger_delete_itens_venda (bloqueia cascata de repricing). |
+| `117_fix_sync_itens_faltantes.sql` | v2.18.1. fn_sync_venda_update_from_public re-sincroniza itens faltantes (race condition). |
+| `118_sync_bypass_blindagem.sql` | v2.18.4. current_setting('app.sync_ativo') bypass para sync functions. |
+| `119_tarefas_avancadas.sql` | v2.19.0. ADD posicao (kanban). CREATE aprovacoes_tarefa, automacoes_tarefa, automacoes_execucoes. |
+| `120_modulo_orcamento.sql` | v2.19.35. CREATE config_orcamento, orcamento_fichas_tecnicas, orcamentos. |
+| `121_fix_saldo_ct_formula.sql` | v2.19.1. Fix saldo_ct = gramas/0.2. ADD quantidade em views. |
+| `122_views_local_estoque_display.sql` | v2.19.4. ADD local_estoque_id/nome em vw_movimentacoes_directus e vw_estoque_directus_saldo. |
+| `123_lancamento_avulso_local_estoque.sql` | v2.19.7. ADD local_estoque_id em lancamentos_avulso. Update fn_processar_lancamento_avulso. |
+| `124_is_transportador.sql` | v2.19.8. ADD is_transportador BOOLEAN em usuarios. Backfill motoboys existentes. |
+| `125_fix_timeline_proto_duplicado.sql` | v2.19.29. Recria vw_timeline_ordem com LATERAL LIMIT 1 (evita duplicatas protocolo). |
+| `126_orcamento_pedras_config.sql` | v2.19.30. ADD stone_markup, stone_prices JSONB em config_orcamento. ADD pedras_detalhadas em orcamento_fichas_tecnicas. |
+| `127_orcamento_cliente_ordem.sql` | v2.19.39. ADD cliente_id FK e ordem_gerada_id FK em orcamentos. |
+| `128_orcamento_foto_3d.sql` | v2.19.54. ADD foto_3d TEXT em orcamentos. |
+| `129_orcamento_venda_ordem.sql` | v2.19.57. ADD venda_gerada_id em orcamentos. ADD orcamento_id em vendas_erp. |
+| `130_endereco_entrega_venda.sql` | v2.19.60. ADD 7 colunas endereço entrega em vendas_erp. |
+| `130_itens_venda_produto_nullable.sql` | v2.19.62. produto_id NULLABLE em itens_venda_erp (itens customizados). |
+| `131_orcamento_par_aliancas.sql` | v2.19.65. Par de alianças: ADD ficha_tecnica_2_id em orcamentos. |
+| `132_orcamento_validacao_zirconia.sql` | v2.19.66. ADD calibracao JSONB em config_orcamento (validações físicas). Zircônia em stone_prices. |
+| `133_notif_aguardando_resposta.sql` | v2.19.87. Flag aguardando_resposta em notificacoes (módulo em progresso). |
+| `134_notif_alarme_snooze.sql` | v2.19.87. Snooze de alarmes em notificacoes (módulo em progresso). |
+| `135_mercado_pago_integracao.sql` | v2.19.72. **Integração MP base**: CREATE `mp_point_devices` (cadastro maquininhas), `fn_cr_marcar_pago_mp(p_venda_id)`, índice `idx_pagamentos_venda_gateway_id`, entry `mercado-pago-payment` em webhook_config. |
+| `136_unaccent_extension.sql` | v2.19.71. `CREATE EXTENSION unaccent` (busca insensível a acentos em /ordens e /pcp). |
+| `137_pagamentos_valor_liquido.sql` | v2.19.85. **Valor líquido MP**: ADD `valor_liquido NUMERIC(12,2)` e `taxas_mp NUMERIC(12,2)` em `pagamentos_venda`. Fix retroativo JSONB double-encoded (15 rows). `fn_resumo_recebido_mp(p_inicio, p_fim)` pra relatórios. |
 
 ---
 
@@ -520,7 +559,21 @@ Estrutura com Route Groups (Next.js 16):
 | `/entrega`          | `app/(dashboard)/entrega/page.tsx`                    | Server+Client | Controle de entregas                               |
 | `/service`          | `app/(dashboard)/service/page.tsx`                    | Client        | App operador service (dark theme, mobile-first) — requer is_operador_service=true |
 | `/service-painel`   | `app/(dashboard)/service-painel/page.tsx`             | Server+Client | Painel gerente service (KPIs, lista serviços) — grupo PRODUÇÃO na sidebar |
-<!-- Revisado 27/03/2026 -->
+| `/vendas/nova`          | `app/(dashboard)/vendas/nova/page.tsx`                   | Client        | Nova venda completa (cliente+itens+pgto+frete)     |
+| `/vendas/[id]`          | `app/(dashboard)/vendas/[id]/page.tsx`                   | Client        | Detalhe venda editável + PDF + Tiny + compartilhar |
+| `/vendas/analise-comissoes` | `app/(dashboard)/vendas/analise-comissoes/page.tsx`  | Client        | KPIs comissão por período e vendedora              |
+| `/vendas/analise-frete` | `app/(dashboard)/vendas/analise-frete/page.tsx`          | Client        | Resumo frete + entregas pendentes                  |
+| `/vendas/analise-resultado` | `app/(dashboard)/vendas/analise-resultado/page.tsx`  | Client        | Faturamento, ranking, meta achievement             |
+| `/vendas/metas`         | `app/(dashboard)/vendas/metas/page.tsx`                  | Client        | Metas por vendedora com progresso                  |
+| `/vendas/metas/registrar` | `app/(dashboard)/vendas/metas/registrar/page.tsx`      | Client        | Registrar nova meta                                |
+| `/vendas/ranking`       | `app/(dashboard)/vendas/ranking/page.tsx`                | Client        | Ranking mensal vendedoras                          |
+| `/estoque-comercial`    | `app/(dashboard)/estoque-comercial/page.tsx`             | Server+Client | Estoque comercial com alertas                      |
+| `/estoque-comercial/[produtoId]` | `app/(dashboard)/estoque-comercial/[produtoId]/page.tsx` | Server+Client | Detalhe estoque produto + movimentos       |
+| `/orcamento`            | `app/(dashboard)/orcamento/page.tsx`                     | Client        | Orçamento 3D alianças + peças                      |
+| `/orcamento/[token]`    | `app/orcamento/[token]/page.tsx`                         | Client        | Orçamento público compartilhado (sem auth)         |
+| `/relatorios`           | `app/(dashboard)/relatorios/page.tsx`                    | Client        | Relatórios (produção/comercial/financeiro/estoque) |
+| `/tarefas`              | `app/(dashboard)/tarefas/page.tsx`                       | Client        | Tarefas kanban + automações (substitui Asana)      |
+<!-- Revisado 09/04/2026 -->
 
 ---
 
@@ -2456,3 +2509,128 @@ PATCH /api/insumos/[id]             → campos editáveis incluindo foto
 ```
 
 View `vw_detalhe_pote` recriada com colunas: `foto`, `fornecedor_id`, `peso_pedra`, `observacao`.
+
+---
+
+## Módulo Mercado Pago (v2.19.72 → v2.19.87) <!-- Revisado 11/04/2026 -->
+
+Integração completa do Mercado Pago pro módulo de vendas. Fecha o loop **"cliente paga → webhook detecta → venda vira `concluido` automaticamente"** sem intervenção humana. Três canais de cobrança combinados, uma única aplicação MP (Checkout Transparente + API de Pagamentos).
+
+### Canais de cobrança
+
+| Canal | Endpoint ERP | API MP | Cenário |
+|---|---|---|---|
+| **Link online** (PIX + cartão) | `POST /api/vendas/[id]/mercado-pago/criar-link` | Preference API (`/checkout/preferences`) | WhatsApp/email — cliente paga remoto no checkout MP |
+| **PIX nativo escaneável** | `POST /api/vendas/[id]/mercado-pago/criar-pix` | Payment API (`/v1/payments` com `payment_method_id='pix'`) | Cliente escaneia QR no próprio app bancário (EMV/BR Code do BACEN) |
+| **Maquininha Point** | `POST /api/vendas/[id]/mercado-pago/criar-intent-point` | Point Integration API (`/point/integration-api/devices/{id}/payment-intents`) | Cliente presencial passa cartão ou PIX no terminal físico |
+
+**Todas notificam o mesmo webhook** (`POST /api/webhooks/mercado-pago`). MP envia `topic=payment` com o mesmo formato independente do canal — `external_reference` carrega `venda:X:pag:Y` em todos os casos.
+
+### Arquitetura — princípios chave
+
+1. **Helpers em `src/lib/` (não HTTP interno)**: PATCH manual e webhook chamam as mesmas funções TypeScript direto. Zero roundtrip HTTP entre rotas.
+   - `src/lib/mercado-pago.ts` — SDK + Payment API + Point API
+   - `src/lib/vendas-aprovar.ts` — `approveVenda()`, `concluirVenda()`, `sendToTiny()`, `criarOrdemDoOrcamento()`, `estornarVenda()`
+   - `src/lib/public-origin.ts` — `getPublicOrigin(req)` com X-Forwarded-Proto/Host (proxy-aware)
+
+2. **Commit-then-sync (local-first)**: `concluirVenda` faz nessa ordem — `UPDATE situacao='concluido'` → `fn_cr_marcar_pago_mp()` → `criarOrdemDoOrcamento()` → `sendToTiny()` (best-effort). Tiny falhando **não bloqueia** a venda concluída — o pagamento já foi confirmado pelo banco e o fechamento do ERP é inegociável. Tiny vira sincronização informativa que pode ser reenviada depois.
+
+3. **Idempotência em 4 camadas**:
+   - `tiny_pedido_id IS NOT NULL` → `sendToTiny` vira noop
+   - `situacao IN ('aprovado','concluido')` → `approveVenda` retorna `ja_aprovada`
+   - `orcamentos.ordem_gerada_id IS NOT NULL` → `criarOrdemDoOrcamento` retorna ordem existente
+   - `payment_ids_processados[]` em `gateway_payload` → webhook detecta reentrega e retorna 200 sem reprocessar
+
+4. **Segurança do webhook**: validação HMAC SHA-256 com formato `ts=...,v1=hash` no header `x-signature`. Manifesto: `id:${dataId};request-id:${xRequestId};ts:${ts};`. Se HMAC não bate, retorna 401 e loga em `webhook_log`.
+
+### Tabelas novas/alteradas
+
+| Objeto | Migration | Descrição |
+|---|---|---|
+| `alissonerp.mp_point_devices` | 135 | Cadastro das maquininhas Point Smart (device_id UNIQUE, nome_legivel, store_id, pos_id, operating_mode, ativo, loja, last_sync_at, created/updated_at). Sincronizado via `POST /api/mercado-pago/devices`. |
+| `pagamentos_venda.valor_liquido` | 137 | NUMERIC(12,2) — valor que realmente caiu na conta MP (`transaction_details.net_received_amount`). Preenchido pelo webhook ao confirmar pagamento. |
+| `pagamentos_venda.taxas_mp` | 137 | NUMERIC(12,2) — total deduzido pelo MP. Calculado como `transaction_amount - net_received_amount` (mais preciso que somar `fee_details[]` porque MP deduz taxas de adquirência que não aparecem em fee_details). |
+| `alissonerp.fn_cr_marcar_pago_mp(INTEGER)` | 135 | Marca `contas_receber.situacao='pago'` + `data_recebimento=CURRENT_DATE` das CRs pendentes da venda. Retorna `INTEGER` (qtd quitadas). |
+| `alissonerp.fn_resumo_recebido_mp(DATE, DATE)` | 137 | Retorna `qtd`, `total_bruto`, `total_taxas`, `total_liquido` do período pra relatórios. |
+
+### Configurações em `alissonerp.configuracoes_secrets`
+
+| Chave | Descrição |
+|---|---|
+| `mp_access_token` | Access token de produção (formato `APP_USR-...`). Vale pra todas as APIs: Preference, Payment, Point. |
+| `mp_webhook_secret` | Chave secreta HMAC do painel MP (aba Webhooks). Valida assinatura das notificações. |
+| `mp_user_id` | User ID MP da conta (opcional, pro painel). |
+| `mp_webhook_base_url` | URL pública prefixo do `notification_url` (ex: `https://erp.alissonjoias.com.br`). Em dev pode colar URL ngrok. MP rejeita `http://localhost`. |
+
+### Endpoints API
+
+```
+POST /api/vendas/[id]/mercado-pago/criar-link            — Preference (PIX + cartão)
+POST /api/vendas/[id]/mercado-pago/criar-pix             — Payment API (PIX nativo escaneável)
+POST /api/vendas/[id]/mercado-pago/criar-intent-point    — Point Smart (maquininha)
+DELETE /api/vendas/[id]/mercado-pago/criar-intent-point  — Cancelar intent ativa
+
+GET  /api/mercado-pago/devices                           — Lista devices cadastrados
+POST /api/mercado-pago/devices                           — Sync com MP API (upsert)
+PATCH /api/mercado-pago/devices                          — Renomear/ativar/desativar manualmente
+
+POST /api/webhooks/mercado-pago                          — Receiver (HMAC + idempotência + commit-then-sync)
+GET  /api/webhooks/mercado-pago                          — Healthcheck simples
+```
+
+### Componentes UI (`src/components/vendas/`)
+
+| Componente | Uso | Endpoint usado |
+|---|---|---|
+| `PixQrInline.tsx` | Inline no form de pagamento (Nova Venda + Detalhe) quando `forma = 'Pix'`. QR nativo EMV escaneável no banco + copia-e-cola + WhatsApp. | `/criar-pix` |
+| `CartaoInline.tsx` | Inline no form quando `forma = 'Cartão de Crédito'`. Dois botões: "Link de Pagamento" (Preference) e "Maquininha Point" (intent). | `/criar-link` + `/criar-intent-point` |
+| `MercadoPagoCobranca.tsx` | Seção separada no `VendaDetalheClient` com dois botões pra qualquer venda. Modais overlay com QR, link, WhatsApp, device selector. Mantida pra compatibilidade. | `/criar-link` + `/criar-intent-point` |
+
+Todos suportam:
+- `vendaId: number \| null` + callback `obterVendaId` pra fluxo Nova Venda (salva rascunho silenciosamente antes de gerar cobrança)
+- Polling a cada 3-5s detectando `pagamentos_venda.status='confirmado'` ou `vendas_erp.situacao='concluido'`
+- Feedback visual "Pagamento confirmado!" + redirect/refresh automático
+
+### Páginas públicas de retorno
+
+- `src/app/pagamento/[token]/[status]/page.tsx` — 3 estados (`sucesso`, `pendente`, `erro`) usados em `back_urls` da Preference MP. Lookup por `vendas_erp.token_compartilhamento` UUID pra não expor ID interno. Dark theme da Alisson.
+
+### Fluxo de estorno (refund / cancelled / charged_back)
+
+Implementado em `src/lib/vendas-aprovar.ts::estornarVenda()` + webhook. Regras de negócio:
+
+- **Venda com uma única forma de pagamento** (o MP estornado): venda vira `cancelado`. Trigger 111 reverte estoque comercial automaticamente. Contas_receber em ('pago','pendente') viram `cancelado` manual (trigger 113 só cancela CR pendente).
+- **Venda com múltiplas formas** (MP + dinheiro, por exemplo): venda volta pra `rascunho`. Vendedora recobra o valor estornado (ou cancela manual). Outros pagamentos confirmados permanecem.
+- **Chargeback** tratado igual a refund.
+- **Rejected** (tentativa negada) NÃO é estorno — só marca o pagamento como cancelado sem mexer na venda.
+- **Estorno parcial** não suportado ainda (MP permite refund parcial — adicionar depois checando `transaction_amount_refunded`).
+
+### Webhook payload em `pagamentos_venda.gateway_payload`
+
+JSONB com auditoria do último evento MP:
+```json
+{
+  "ultimo_payment_id": "154344233150",
+  "ultimo_status": "approved",
+  "ultimo_update": "2026-04-11T20:17:59Z",
+  "point_of_interaction_type": "PAYMENT_LINK",
+  "payment_method_id": "master",
+  "payment_type_id": "credit_card",
+  "transaction_amount": 1.00,
+  "net_received_amount": 0.97,
+  "taxas_mp_total": 0.03,
+  "fee_details": [{"amount": 0.01, "fee_payer": "collector", "type": "mercadopago_fee"}],
+  "money_release_date": "2026-04-11T20:17:59.000-04:00",
+  "payment_ids_processados": ["154344233150"]
+}
+```
+
+### Pitfalls conhecidos
+
+- **`${JSON.stringify(obj)}::jsonb` bugado**: o driver `postgres` npm encoda como string literal JSON (double-encoded). **Usar `${JSON.stringify(obj)}::text::jsonb`** ou `${sql.json(obj)}`. Aplicado em todos os endpoints MP desde v2.19.85. Outros endpoints legados (ordens, user, service, fichas-tecnicas, purificacao) ainda têm o padrão bugado — funcionam parcialmente via `normalizeRow` helper que parseia na leitura, mas operações JSONB nativas falham.
+- **Tiny token expirava toda hora**: scope OAuth2 precisa ser `openid offline_access` (sem `offline_access` o refresh_token vira session-bound e expira em horas). Fixado em v2.19.84. Após o deploy, reconectar Tiny uma vez — vai pedir consentimento de "acesso offline".
+- **`redirect_uri` atrás de proxy**: Keycloak rejeita troca `authorization_code → token` se `redirect_uri` não bate entre `/auth` e `/callback`. Usar `getPublicOrigin(req)` de `src/lib/public-origin.ts` que respeita `X-Forwarded-Proto` + `X-Forwarded-Host` (não `req.nextUrl.origin` que pode retornar host interno do container).
+- **MP rejeita `http://localhost` como `notification_url`**: em dev, configurar `mp_webhook_base_url` apontando pra domínio público ou ngrok. Sem essa config, o endpoint `criar-link`/`criar-pix` retorna erro 502.
+- **Application `tipo=QR Code` no painel MP developers é restrita**: não permite Payment API direta (erro 401 "Unauthorized use of live credentials"). Precisa criar aplicação do tipo **Checkout Transparente + API de Pagamentos** pra ter acesso completo (PIX + Point + Preference).
+- **CR `pago` vs `recebido`**: o backend sempre grava `'pago'` (trigger 113 e `fn_cr_marcar_pago_mp`). A UI tinha código legado usando `'recebido'`. Corrigido em v2.19.83 — `isRecebido(s) = s === 'pago' || s === 'recebido'` como helper de transição.
+- **`data_vencimento` como `Date` em Server Component**: Next serializa Server→Client preservando tipo Date. Funções client como `isVencido(d)` chamam `d.slice()` assumindo string e crasham. **Fix:** `::text` nos SELECTs da `page.tsx` (`SELECT data_vencimento::text AS data_vencimento, ...`).

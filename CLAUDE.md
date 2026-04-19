@@ -3,7 +3,7 @@
 > **Todo agente DEVE ler este arquivo antes de qualquer task.**
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
-**Versao:** v2.15.0 | **Branch:** `homolog` (nunca main direto)
+**Versao:** v2.19.62 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
 
 ---
@@ -12,7 +12,7 @@
 
 | Schema | Permissao | Conteudo |
 |--------|-----------|----------|
-| `alissonerp` | Leitura+Escrita | ~45 tabelas, ~32 views, ~22 triggers — ERP fabrica |
+| `alissonerp` | Leitura+Escrita | ~60 tabelas, ~35 views, ~30 triggers — ERP fabrica |
 | `public` | READONLY | contatos (=clientes), vendedores, produtos, vendas, user_profiles |
 | `directus` | READONLY | ordens, pcp, apontamento, controle_estoque, protocolo (legado) |
 

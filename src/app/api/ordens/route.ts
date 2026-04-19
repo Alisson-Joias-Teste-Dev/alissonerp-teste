@@ -8,7 +8,7 @@ const ALL_TIPOS = [
   "servico_venda", "servico_loja", "fabricacao", "reposicao_venda",
   "reposicao_loja", "compra_fornecedor", "garantia", "servico_interno",
 ];
-const SERVICO_TIPOS = ["servico_venda", "servico_loja", "garantia"];
+const SERVICO_TIPOS = ["servico_venda", "servico_loja", "garantia", "servico_interno"];
 
 // POST /api/ordens — cria uma nova ordem no ERP
 // Body: { tipo_ordem, cliente_id?, vendedor_id?, data_entrega?, peso_metal_negociado?,
@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     venda_id,            // integer — referência à venda (garantia)
     venda_item_ids,      // integer[] — itens da venda em garantia
     rota_override,       // "pcp" | "protocolo" — para fabricação (escolha do usuário)
+    ficha_tecnica_dados, // { tipo_item, ...dados } — ficha técnica (fabricação)
     itens = [],
   } = body;
 
@@ -122,6 +123,9 @@ export async function POST(req: NextRequest) {
 
   // ── Upload de fotos de referência (server-side, antes da transação) ──────
   // Se qualquer upload falhar → retorna erro sem criar a ordem
+  if (Array.isArray(fotos_base64) && fotos_base64.length > 10) {
+    return NextResponse.json({ error: "Máximo 10 fotos por ordem" }, { status: 400 });
+  }
   const fotosPaths: string[] = [];
   if (Array.isArray(fotos_base64) && fotos_base64.length > 0) {
     for (let i = 0; i < fotos_base64.length; i++) {
@@ -143,21 +147,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Gerar numero_ordem (C-XXXX) ─────────────────────────────────────────
-  // Verifica MAX nos dois schemas para evitar colisão com PDV
-  const [{ max_num: maxAlisson }] = await sql`
-    SELECT COALESCE(MAX(CAST(SUBSTRING(numero_ordem FROM 3) AS INTEGER)), 0) AS max_num
-    FROM alissonerp.ordens
-    WHERE numero_ordem ~ '^C-[0-9]+$'
-  `;
-  const [{ max_num: maxDirectus }] = await sql`
-    SELECT COALESCE(MAX(CAST(SUBSTRING(numero_ordem FROM 3) AS INTEGER)), 0) AS max_num
-    FROM directus.ordens
-    WHERE numero_ordem ~ '^C-[0-9]+$'
-  `;
-  const nextNum = Math.max(Number(maxAlisson), Number(maxDirectus)) + 1;
-  const numeroOrdem = `C-${String(nextNum).padStart(4, "0")}`;
-
   // ── Determinar rota ──────────────────────────────────────────────────────
   // Rota: fabricação permite override (PCP ou Protocolo), demais seguem regra padrão
   const rota = tipo_ordem === "fabricacao" && rota_override
@@ -178,6 +167,12 @@ export async function POST(req: NextRequest) {
   // ── Transação: ordem + itens + auditoria loja ───────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const novaOrdem = await sql.begin(async (tx: any) => {
+    // 0. Gerar numero_ordem dentro da transação (evita race condition)
+    const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
+    const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
+    const nextNum = Math.max(Number(max_id_ali), Number(max_id_dir)) + 1;
+    const numeroOrdem = "C-" + String(nextNum).padStart(4, "0");
+
     // 1. Inserir ordem
     // Preparar tipos_servico_ids como array SQL (pode ser null ou vazio)
     const tiposIds: number[] = Array.isArray(tipos_servico_ids)
@@ -190,13 +185,21 @@ export async function POST(req: NextRequest) {
       ? venda_item_ids.map(Number).filter((n: number) => !isNaN(n))
       : [];
 
+    // Buscar numero_venda se venda_id foi informado — alimenta numero_pedido
+    // na ordem pra aparecer na coluna "PEDIDO PDV" da listagem de ordens.
+    let numeroVendaLigada: string | null = null;
+    if (venda_id) {
+      const [vRow] = await tx`SELECT numero_venda FROM alissonerp.vendas_erp WHERE id = ${venda_id}`;
+      numeroVendaLigada = vRow?.numero_venda ?? null;
+    }
+
     const [ordem] = await tx`
       INSERT INTO alissonerp.ordens (
         numero_ordem, tipo_ordem, cliente_id, vendedor_id,
         data_entrega, peso_metal_negociado, peso_metal_externo,
         foto_peca_servico, peso_peca_servico, video_observacao,
         detalhes_ordem, fotos_paths, tipos_servico_ids,
-        venda_id, venda_item_ids,
+        venda_id, venda_item_ids, numero_pedido,
         situacao, status, rota, origem, created_by
       ) VALUES (
         ${numeroOrdem},
@@ -214,6 +217,7 @@ export async function POST(req: NextRequest) {
         ${tiposIdsVal},
         ${venda_id ?? null},
         ${vendaItemIdsVal.length > 0 ? vendaItemIdsVal : null},
+        ${numeroVendaLigada},
         'criado',
         'aguardando',
         ${rota}::alissonerp.enum_rota_ordem,
@@ -281,6 +285,19 @@ export async function POST(req: NextRequest) {
         })}::jsonb
       )
     `;
+
+    // 4. Criar ficha técnica (se houver dados)
+    if (ficha_tecnica_dados && ficha_tecnica_dados.tipo_item) {
+      await tx`
+        INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
+        VALUES (
+          ${ordem.id},
+          ${ficha_tecnica_dados.tipo_item},
+          ${JSON.stringify(ficha_tecnica_dados)}::jsonb,
+          ${user.id}::uuid
+        )
+      `;
+    }
 
     return ordem;
   });

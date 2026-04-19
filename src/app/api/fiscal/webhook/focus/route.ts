@@ -1,0 +1,117 @@
+import { NextRequest, NextResponse } from "next/server";
+import sql from "@/lib/db";
+
+// ─── Mapeamento de status Focus → interno ─────────────────────────────────────
+
+const STATUS_MAP: Record<string, string> = {
+  autorizado: "autorizada",
+  erro_autorizacao: "rejeitada",
+  denegado: "denegada",
+  cancelado: "cancelada",
+};
+
+// ─── POST /api/fiscal/webhook/focus ──────────────────────────────────────────
+
+interface FocusWebhookPayload {
+  ref?: string;
+  status?: string;
+  chave_nfe?: string;
+  caminho_xml_nota_fiscal?: string;
+  caminho_danfe?: string;
+  mensagem_sefaz?: string;
+  codigo?: string;
+  numero?: number | string;
+}
+
+export async function POST(req: NextRequest) {
+  let body: FocusWebhookPayload;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Body invalido" }, { status: 400 });
+  }
+
+  const { ref, status: focusStatus, chave_nfe, caminho_danfe, mensagem_sefaz, codigo, numero } = body;
+
+  if (!ref) {
+    return NextResponse.json({ error: "ref ausente" }, { status: 400 });
+  }
+
+  // Verificar se a ref existe no banco antes de processar
+  interface NotaRow {
+    id: number;
+    status: string;
+    origem_tabela: string | null;
+    origem_id: number | null;
+    serie: number;
+  }
+
+  const [nota] = await sql<NotaRow[]>`
+    SELECT id, status, origem_tabela, origem_id, serie
+    FROM alissonerp.notas_fiscais
+    WHERE focus_ref = ${ref}
+    LIMIT 1
+  `;
+
+  if (!nota) {
+    // Ref desconhecida — retornar 200 para não forçar reenvio desnecessário
+    return NextResponse.json({ ok: true, message: "ref desconhecida" });
+  }
+
+  const statusInterno = STATUS_MAP[focusStatus ?? ""] ?? null;
+
+  if (!statusInterno) {
+    // Status não mapeado — apenas ack
+    return NextResponse.json({ ok: true, message: "status ignorado" });
+  }
+
+  try {
+    // Atualizar nota fiscal
+    await sql`
+      UPDATE alissonerp.notas_fiscais
+      SET
+        status = ${statusInterno},
+        chave_44 = COALESCE(${chave_nfe ?? null}, chave_44),
+        pdf_danfe_url = COALESCE(${caminho_danfe ?? null}, pdf_danfe_url),
+        mensagem_sefaz = COALESCE(${mensagem_sefaz ?? null}, mensagem_sefaz),
+        codigo_sefaz = COALESCE(${codigo ?? null}, codigo_sefaz),
+        updated_at = now()
+      WHERE id = ${nota.id}
+    `;
+
+    // Se autorizada e veio de vendas_erp → atualizar vendas_erp (NFC-e)
+    if (statusInterno === "autorizada" && nota.origem_tabela === "vendas_erp" && nota.origem_id) {
+      const numNota = numero != null ? Number(numero) : null;
+
+      await sql`
+        UPDATE alissonerp.vendas_erp
+        SET
+          nfce_numero = COALESCE(${numNota}, nfce_numero),
+          nfce_chave_44 = COALESCE(${chave_nfe ?? null}, nfce_chave_44),
+          nfce_emitida_em = COALESCE(nfce_emitida_em, now())
+        WHERE id = ${nota.origem_id}
+      `;
+    }
+
+    // Se autorizada e veio de devolucoes_venda → atualizar devolucoes_venda (NF-e 55)
+    if (statusInterno === "autorizada" && nota.origem_tabela === "devolucoes_venda" && nota.origem_id) {
+      const numNota = numero != null ? Number(numero) : null;
+
+      await sql`
+        UPDATE alissonerp.devolucoes_venda
+        SET
+          nota_fiscal_devolucao_id = COALESCE(nota_fiscal_devolucao_id, ${nota.id}),
+          nfe_numero = COALESCE(${numNota}, nfe_numero),
+          nfe_chave_44 = COALESCE(${chave_nfe ?? null}, nfe_chave_44),
+          nfe_emitida_em = COALESCE(nfe_emitida_em, now())
+        WHERE id = ${nota.origem_id}
+          AND nota_fiscal_devolucao_id IS NULL
+      `;
+    }
+
+    return NextResponse.json({ ok: true, status: statusInterno });
+  } catch (err) {
+    console.error("[webhook/focus] Erro ao processar webhook:", err);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+  }
+}

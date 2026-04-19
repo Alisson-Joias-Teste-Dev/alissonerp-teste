@@ -8,6 +8,7 @@ import { SidebarProvider } from "@/contexts/SidebarContext";
 import ServiceLayout from "@/components/layout/ServiceLayout";
 import ServiceApp from "@/components/service/ServiceApp";
 import GlobalErrorToast from "@/components/ui/GlobalErrorToast";
+import MencaoAlarme from "@/components/MencaoAlarme";
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const { loading, isOperadorService } = useAuth();
@@ -45,6 +46,8 @@ export default function DashboardShell({ children }: { children: React.ReactNode
           {children}
         </main>
       </div>
+      {/* Alarme de menções aguardando resposta (som + banner global) */}
+      <MencaoAlarme />
       {/* Toast de erros global — visível em todas as páginas */}
       <GlobalErrorToast />
     </SidebarProvider>

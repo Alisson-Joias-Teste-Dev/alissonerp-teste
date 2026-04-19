@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { validarDescontos } from "@/lib/validar-desconto";
 
 // ─── GET /api/vendas ───────────────────────────────────────────────────────────
 // Query params: inicio, fim, situacao, vendedor_id, q (busca)
 export async function GET(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const { searchParams } = new URL(req.url);
   const inicio     = searchParams.get("inicio");
   const fim        = searchParams.get("fim");
@@ -44,8 +49,11 @@ export async function GET(req: NextRequest) {
       v.created_at,
       v.updated_at,
       v.qtd_itens,
-      v.total_pago
+      v.total_pago,
+      ve.empresa_emitente_id,
+      ve.nota_fiscal_id
     FROM alissonerp.vw_vendas_erp_completa v
+    LEFT JOIN alissonerp.vendas_erp ve ON ve.id = v.id
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <  (${fim}::date + INTERVAL '1 day')
       ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}
@@ -97,6 +105,11 @@ export async function POST(req: NextRequest) {
   `;
   if (!usuario) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
 
+  const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
+  if (!ROLES_PERMITIDOS.includes(usuario.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const body = await req.json() as {
     cliente_id?:          number | null;
     vendedor_id?:         number | null;
@@ -107,11 +120,42 @@ export async function POST(req: NextRequest) {
     observacoes?:         string | null;
     observacoes_internas?: string | null;
     video_obs_interna?:   string | null;
+    endereco_entrega?:             string | null;
+    endereco_entrega_numero?:      string | null;
+    endereco_entrega_complemento?: string | null;
+    endereco_entrega_bairro?:      string | null;
+    endereco_entrega_cidade?:      string | null;
+    endereco_entrega_cep?:         string | null;
+    endereco_entrega_uf?:          string | null;
+    tipo_venda?:          string | null;
+    numero_rastreio?:     string | null;
+    venda_garantia_id?:   number | null;
     itens?:               ItemInput[];
     pagamentos?:          PagamentoInput[];
   };
 
-  const novaVenda = await sql.begin(async (tx: any) => {
+  // ── Validação de desconto por produto (bloqueia vendedor comum) ───────────
+  if (Array.isArray(body.itens) && body.itens.length > 0) {
+    const itensValidacao = body.itens
+      .filter((it) => it.produto_id && (it.pct_desconto ?? 0) > 0)
+      .map((it) => ({
+        produto_id: Number(it.produto_id),
+        pct_desconto: Number(it.pct_desconto ?? 0),
+        sku: it.sku ?? undefined,
+        nome: it.nome_produto,
+      }));
+    const val = await validarDescontos(itensValidacao, usuario.role);
+    if (!val.ok) {
+      return NextResponse.json(
+        { error: "Desconto acima do permitido", detalhes: val.erros, violacoes: val.violacoes },
+        { status: 403 },
+      );
+    }
+  }
+
+  let novaVenda;
+  try {
+  novaVenda = await sql.begin(async (tx: any) => {
     // 1. Inserir com numero temporário (usa id depois)
     const [venda] = await tx`
       INSERT INTO alissonerp.vendas_erp (
@@ -122,6 +166,9 @@ export async function POST(req: NextRequest) {
         forma_envio, forma_frete,
         observacoes, observacoes_internas,
         video_obs_interna,
+        endereco_entrega, endereco_entrega_numero, endereco_entrega_complemento,
+        endereco_entrega_bairro, endereco_entrega_cidade, endereco_entrega_cep, endereco_entrega_uf,
+        tipo_venda, numero_rastreio, venda_garantia_id,
         situacao,
         created_by
       ) VALUES (
@@ -135,22 +182,59 @@ export async function POST(req: NextRequest) {
         ${body.observacoes ?? null},
         ${body.observacoes_internas ?? null},
         ${body.video_obs_interna ?? null},
+        ${body.endereco_entrega ?? null},
+        ${body.endereco_entrega_numero ?? null},
+        ${body.endereco_entrega_complemento ?? null},
+        ${body.endereco_entrega_bairro ?? null},
+        ${body.endereco_entrega_cidade ?? null},
+        ${body.endereco_entrega_cep ?? null},
+        ${body.endereco_entrega_uf ?? null},
+        ${body.tipo_venda ?? null},
+        ${body.numero_rastreio ?? null},
+        ${body.venda_garantia_id ?? null},
         'rascunho',
         ${user.id}::uuid
       )
       RETURNING id
     `;
 
-    // 2. Atualizar numero_venda com o id gerado: V-00001
+    // 2. Gerar numero_venda seguindo a sequência do public.vendas (ex: 14791)
+    const [{ proximo }] = await tx`
+      SELECT COALESCE(
+        GREATEST(
+          (SELECT MAX(numero_pedido) + 1 FROM public.vendas),
+          (SELECT MAX(numero_venda::bigint) + 1 FROM alissonerp.vendas_erp WHERE numero_venda ~ '^[0-9]+$')
+        ),
+        1
+      ) AS proximo
+    `;
     await tx`
       UPDATE alissonerp.vendas_erp
-      SET numero_venda = 'V-' || LPAD(${venda.id}::text, 5, '0')
+      SET numero_venda = ${String(proximo)}
       WHERE id = ${venda.id}
     `;
 
     // 3. Inserir itens (trigger recalcula totais automaticamente)
     if (Array.isArray(body.itens) && body.itens.length > 0) {
       for (const item of body.itens) {
+        if (item.produto_id !== null && item.produto_id !== undefined && Number(item.produto_id) <= 0) {
+          throw new Error("produto_id inválido em item");
+        }
+        if (!item.nome_produto || typeof item.nome_produto !== "string" || item.nome_produto.trim() === "") {
+          throw new Error("nome_produto obrigatório em item");
+        }
+        if (item.quantidade == null || item.quantidade < 1) {
+          throw new Error("quantidade deve ser >= 1 em item");
+        }
+        if (typeof item.preco_lista !== "number" || item.preco_lista < 0) {
+          throw new Error("preco_lista deve ser >= 0 em item");
+        }
+        if (typeof item.preco_unitario !== "number" || item.preco_unitario < 0) {
+          throw new Error("preco_unitario deve ser >= 0 em item");
+        }
+        if (typeof item.total_item !== "number" || item.total_item < 0) {
+          throw new Error("total_item deve ser >= 0 em item");
+        }
         await tx`
           INSERT INTO alissonerp.itens_venda_erp (
             venda_id, produto_id, nome_produto, sku,
@@ -180,6 +264,12 @@ export async function POST(req: NextRequest) {
     // 4. Inserir pagamentos
     if (Array.isArray(body.pagamentos) && body.pagamentos.length > 0) {
       for (const pag of body.pagamentos) {
+        if (!pag.forma || typeof pag.forma !== "string" || pag.forma.trim() === "") {
+          throw new Error("forma obrigatória em pagamento");
+        }
+        if (typeof pag.valor !== "number" || pag.valor <= 0) {
+          throw new Error("valor deve ser > 0 em pagamento");
+        }
         await tx`
           INSERT INTO alissonerp.pagamentos_venda (
             venda_id, forma, gateway, valor, parcelas, status
@@ -205,6 +295,10 @@ export async function POST(req: NextRequest) {
 
     return completa;
   });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Erro ao criar venda";
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
 
   return NextResponse.json(
     {

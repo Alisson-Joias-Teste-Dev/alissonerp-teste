@@ -5,7 +5,7 @@ import sql from "@/lib/db";
 // Body: { tipo_lancamento, insumo_id, peso, deposito_id?, deposito_destino_id?, obs?, created_by? }
 // Trigger trg_lancamento_avulso executa automaticamente ao INSERT.
 export async function POST(req: NextRequest) {
-  const { tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, obs, created_by } =
+  const { tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, obs, created_by, local_estoque_id } =
     await req.json() as {
       tipo_lancamento: string;
       insumo_id: number;
@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
       peso: number;
       obs?: string | null;
       created_by?: string | null;
+      local_estoque_id?: number | null;
     };
 
   if (!tipo_lancamento || !insumo_id || !peso || peso <= 0) {
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
 
   const [row] = await sql`
     INSERT INTO alissonerp.lancamentos_avulso
-      (tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, obs, created_by)
+      (tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, obs, created_by, local_estoque_id)
     VALUES (
       ${tipo_lancamento}::alissonerp.enum_tipo_lancamento,
       ${insumo_id},
@@ -38,7 +39,8 @@ export async function POST(req: NextRequest) {
       ${deposito_destino_id ?? null},
       ${peso},
       ${obs ?? null},
-      ${created_by ?? null}::uuid
+      ${created_by ?? null}::uuid,
+      ${local_estoque_id ?? 1}
     )
     RETURNING id
   `;

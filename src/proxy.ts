@@ -21,13 +21,30 @@ const MODULO_TO_PREFIX: Record<string, string> = {
   produtos:          "/produtos",
   precificacao:      "/precificacao",
   configuracoes:     "/configuracoes",
+  tarefas:           "/tarefas",
+  relatorios:        "/relatorios",
+  purificacao:       "/purificacao",
+  service:           "/service",
+  service_painel:    "/service-painel",
+  orcamento:         "/orcamento",
 };
 
 const PREFIXOS_PROTEGIDOS = new Set(Object.values(MODULO_TO_PREFIX));
 
-// Cache de permissões por userId (TTL 5 min) — evita query ao banco a cada request
+// Cache de permissões por userId (TTL 5 min, max 500 entradas) — evita query ao banco a cada request
 const rolePermCache = new Map<string, { modulos: string[]; exp: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_MAX_SIZE = 500;
+
+// Limpeza periódica de entradas expiradas (a cada 10 min)
+if (typeof setInterval !== "undefined") {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, val] of rolePermCache) {
+      if (val.exp < now) rolePermCache.delete(key);
+    }
+  }, 10 * 60 * 1000);
+}
 
 async function getModulosForUser(userId: string, _origin: string, cookieHeader: string): Promise<string[] | null> {
   const cached = rolePermCache.get(userId);
@@ -45,6 +62,11 @@ async function getModulosForUser(userId: string, _origin: string, cookieHeader: 
     if (!res.ok) return null;
     const data = await res.json() as { modulos_leitura: string[] };
     const modulos = data.modulos_leitura ?? [];
+    // Evitar crescimento ilimitado do cache
+    if (rolePermCache.size >= CACHE_MAX_SIZE) {
+      const oldest = rolePermCache.keys().next().value;
+      if (oldest) rolePermCache.delete(oldest);
+    }
     rolePermCache.set(userId, { modulos, exp: Date.now() + CACHE_TTL_MS });
     return modulos;
   } catch {
@@ -112,7 +134,14 @@ export async function proxy(request: NextRequest) {
   }
 
   // 2. Checar acesso apenas para rotas protegidas
+  //    /service é controlado pelo DashboardShell (flag is_operador_service), não pelo módulo
+  //    /service-painel é controlado server-side pela page.tsx (ROLES_SERVICE_PANEL), não pelo módulo
   const primeiroSegmento = "/" + pathname.split("/").filter(Boolean)[0];
+  if (primeiroSegmento === "/service" || primeiroSegmento === "/service-painel") {
+    // Proxy apenas garante que está autenticado (já feito acima)
+    // A autorização de role é feita pela própria page.tsx
+    return supabaseResponse;
+  }
   if (PREFIXOS_PROTEGIDOS.has(primeiroSegmento)) {
     const origin = request.nextUrl.origin;
     const cookieHeader = request.headers.get("cookie") ?? "";

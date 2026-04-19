@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // Roles que vêem TODOS os PCPs (sem filtro por depósito)
 const ROLES_VE_TUDO = ["admin", "desenvolvedor", "gerente_fabrica", "pcp", "gerente_loja"];
 
+// Janela default para ordens concluídas no kanban (em dias).
+// Concluídas mais antigas não aparecem por default — só via busca server-side
+// (/api/pcp/buscar) que procura em todo o histórico.
+const JANELA_CONCLUIDAS_DIAS = 30;
+
 export default async function PcpPage() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -24,6 +29,9 @@ export default async function PcpPage() {
     }
   }
 
+  // Filtro temporal: concluídas só dos últimos JANELA_CONCLUIDAS_DIAS dias.
+  // Etapas ativas (novas_ordens, em_andamento, pendencia, aguardando, cancelado)
+  // carregam sempre. Busca por ordem antiga usa /api/pcp/buscar.
   const pcps = depositoIdFiltro != null
     ? await sql`
         SELECT
@@ -46,6 +54,15 @@ export default async function PcpPage() {
             SELECT 1 FROM alissonerp.servicos s
             WHERE s.pcp_id = v.id
               AND s.status IN ('em_servico', 'aguardando', 'concluido')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM alissonerp.transferencias_ordem t
+            WHERE t.pcp_id = v.id
+              AND t.tipo_transferencia = 'service'
+          )
+          AND (
+            v.etapas_cod <> 'concluido'
+            OR v.data_conclusao >= NOW() - (${JANELA_CONCLUIDAS_DIAS} || ' days')::interval
           )
         ORDER BY v.id DESC
         LIMIT 300
@@ -71,9 +88,18 @@ export default async function PcpPage() {
             WHERE s.pcp_id = v.id
               AND s.status IN ('em_servico', 'aguardando', 'concluido')
           )
+          AND NOT EXISTS (
+            SELECT 1 FROM alissonerp.transferencias_ordem t
+            WHERE t.pcp_id = v.id
+              AND t.tipo_transferencia = 'service'
+          )
+          AND (
+            v.etapas_cod <> 'concluido'
+            OR v.data_conclusao >= NOW() - (${JANELA_CONCLUIDAS_DIAS} || ' days')::interval
+          )
         ORDER BY v.id DESC
         LIMIT 300
       `;
 
-  return <KanbanClient pcps={pcps} userRole={userRole} />;
+  return <KanbanClient pcps={pcps} userRole={userRole} janelaConcluidasDias={JANELA_CONCLUIDAS_DIAS} />;
 }

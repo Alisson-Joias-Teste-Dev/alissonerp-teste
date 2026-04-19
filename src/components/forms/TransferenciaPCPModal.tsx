@@ -69,6 +69,8 @@ export default function TransferenciaPCPModal({
   const [operadoresService, setOperadoresService] = useState<OperadorService[]>([]);
   const [loadingOps, setLoadingOps]         = useState(false);
   const [destServiceDepId, setDestServiceDepId] = useState<number | "">("");
+  const [transportadores, setTransportadores] = useState<{id: string; nome: string}[]>([]);
+  const [transportadorId, setTransportadorId] = useState<string>("");
 
   // Origem resolvida da API (pode ser Almox se veio da distribuição)
   const [origemId, setOrigemId]     = useState<number>(depositoId);
@@ -98,7 +100,7 @@ export default function TransferenciaPCPModal({
   const fotoConfirmada = !temMetalSelecionado || validacaoIA?.match === true;
   const podeConfirmar  = modoTransf === "interna"
     ? (!!destDepositoId && fotoConfirmada && !loading && !success)
-    : (!!destServiceDepId && !loading && !success);
+    : (!!destServiceDepId && !!transportadorId && !loading && !success);
 
   // Depósitos disponíveis: exclui Almox (1) e a origem
   const depositos = todosDepositos.filter((d) => d.id !== 1 && d.id !== origemId);
@@ -117,6 +119,12 @@ export default function TransferenciaPCPModal({
           if (found) setOrigemNome(found.nome);
         }
       })
+      .catch(() => {});
+
+    // Transportadores
+    fetch("/api/usuarios/transportadores", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data: unknown) => { if (Array.isArray(data)) setTransportadores(data); })
       .catch(() => {});
 
     // Operadores service
@@ -269,6 +277,7 @@ export default function TransferenciaPCPModal({
       // ── Modo Service ──────────────────────────────────────────────────────
       if (modoTransf === "service") {
         if (!destServiceDepId) { setError("Selecione o operador service."); setLoading(false); return; }
+        if (!transportadorId) { setError("Selecione quem vai levar a peça."); setLoading(false); return; }
         const res = await fetch("/api/pcp/transferir-service", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -276,6 +285,7 @@ export default function TransferenciaPCPModal({
             pcp_id: pcpId,
             deposito_destino_id: destServiceDepId,
             observacao: obs.trim() || null,
+            motoboy_id: transportadorId,
           }),
         });
         const json = await res.json() as { error?: string };
@@ -338,8 +348,12 @@ export default function TransferenciaPCPModal({
       }
       setSuccess(true);
       setTimeout(() => { resetForm(); onSuccess?.(); onClose(); }, 1500);
-    } catch {
-      setError("Erro de conexão");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      setError(msg.includes("fetch") || msg.includes("network") || msg.includes("Failed")
+        ? "Erro de conexão — verifique sua internet e tente novamente"
+        : "Erro ao transferir ordem — tente novamente ou contate o suporte");
+      console.error("Transferência falhou:", err);
     } finally {
       setLoading(false);
     }
@@ -462,12 +476,36 @@ export default function TransferenciaPCPModal({
                   </select>
                 )}
               </div>
+              {/* Transportador */}
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
+                  Quem vai levar? <span style={{ color: "#EF4444" }}>*</span>
+                </label>
+                {transportadores.length === 0 ? (
+                  <p className="text-[12px]" style={{ color: "#9CA3AF" }}>
+                    Nenhum transportador habilitado. Habilite em Configurações → Usuários.
+                  </p>
+                ) : (
+                  <select
+                    value={transportadorId}
+                    onChange={(e) => { setTransportadorId(e.target.value); setError(""); }}
+                    className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none"
+                    style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}
+                  >
+                    <option value="">Selecione o transportador...</option>
+                    {transportadores.map((t) => (
+                      <option key={t.id} value={t.id}>{t.nome}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
               <div
                 className="flex items-start gap-2 px-3 py-2.5 rounded-lg text-[12px]"
-                style={{ backgroundColor: "#FFFBEB", border: "1px solid #FDE68A", color: "#92400E" }}
+                style={{ backgroundColor: "#DBEAFE", border: "1px solid #93C5FD", color: "#1E40AF" }}
               >
                 <AlertCircle size={13} className="flex-shrink-0 mt-0.5" />
-                Protocolo automatico criado. Motoboy precisara levar a peca.
+                Protocolo de ida será criado automaticamente.
               </div>
             </div>
           )}

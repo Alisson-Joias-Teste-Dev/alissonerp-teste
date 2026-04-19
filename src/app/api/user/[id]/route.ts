@@ -53,6 +53,8 @@ export async function PATCH(
     tipos_ordem_permitidos?: string[];
     tipos_protocolo_permitidos?: string[];
     is_operador_service?: boolean;
+    is_transportador?: boolean;
+    mx_desconto_permitido?: number | null;
   };
 
   // Não-admin: só pode alterar nome (proteção backend)
@@ -64,6 +66,8 @@ export async function PATCH(
   const tipos_ordem_permitidos     = isAdmin ? body.tipos_ordem_permitidos     : undefined;
   const tipos_protocolo_permitidos = isAdmin ? body.tipos_protocolo_permitidos : undefined;
   const is_operador_service        = isAdmin ? body.is_operador_service         : undefined;
+  const is_transportador           = isAdmin ? body.is_transportador            : undefined;
+  const mx_desconto_permitido      = isAdmin ? body.mx_desconto_permitido       : undefined;
 
   // Usuário NUNCA pode alterar sua própria role (proteção dupla: frontend + backend)
   const role = isSelfUpdate ? undefined : body.role;
@@ -93,35 +97,35 @@ export async function PATCH(
     await sql`
       UPDATE alissonerp.usuarios
       SET
-        nome        = COALESCE(${nome ?? null}, nome),
-        role        = COALESCE(${role}, role),
-        ativo       = COALESCE(${ativo ?? null}, ativo),
-        deposito_id = ${deposito_id ?? null},
-        vendedor_id = ${vendedor_id ?? null},
-        updated_at  = now()
+        nome                  = COALESCE(${nome ?? null}, nome),
+        role                  = COALESCE(${role}, role),
+        ativo                 = COALESCE(${ativo ?? null}, ativo),
+        deposito_id           = ${deposito_id !== undefined ? (deposito_id ?? null) : sql`deposito_id`},
+        vendedor_id           = ${vendedor_id !== undefined ? (vendedor_id ?? null) : sql`vendedor_id`},
+        mx_desconto_permitido = ${mx_desconto_permitido !== undefined ? (mx_desconto_permitido ?? null) : sql`mx_desconto_permitido`},
+        updated_at            = now()
       WHERE id = ${id}::uuid
     `;
   } else {
     await sql`
       UPDATE alissonerp.usuarios
       SET
-        nome        = COALESCE(${nome ?? null}, nome),
-        ativo       = COALESCE(${ativo ?? null}, ativo),
-        deposito_id = ${deposito_id ?? null},
-        vendedor_id = ${vendedor_id ?? null},
-        updated_at  = now()
+        nome                  = COALESCE(${nome ?? null}, nome),
+        ativo                 = COALESCE(${ativo ?? null}, ativo),
+        deposito_id           = ${deposito_id !== undefined ? (deposito_id ?? null) : sql`deposito_id`},
+        vendedor_id           = ${vendedor_id !== undefined ? (vendedor_id ?? null) : sql`vendedor_id`},
+        mx_desconto_permitido = ${mx_desconto_permitido !== undefined ? (mx_desconto_permitido ?? null) : sql`mx_desconto_permitido`},
+        updated_at            = now()
       WHERE id = ${id}::uuid
     `;
   }
 
   // 1b. Atualizar tipos_ordem_permitidos (separado, apenas admin)
   if (tipos_ordem_permitidos !== undefined) {
-    if (!Array.isArray(tipos_ordem_permitidos)) {
-      return NextResponse.json({ error: "tipos_ordem_permitidos deve ser um array" }, { status: 400 });
-    }
+    const arr = Array.isArray(tipos_ordem_permitidos) ? tipos_ordem_permitidos : [];
     await sql`
       UPDATE alissonerp.usuarios
-      SET tipos_ordem_permitidos = ${JSON.stringify(tipos_ordem_permitidos)}::jsonb,
+      SET tipos_ordem_permitidos = ${sql.json(arr)},
           updated_at = now()
       WHERE id = ${id}::uuid
     `;
@@ -129,22 +133,28 @@ export async function PATCH(
 
   // 1c. Atualizar tipos_protocolo_permitidos (separado, apenas admin)
   if (tipos_protocolo_permitidos !== undefined) {
-    if (!Array.isArray(tipos_protocolo_permitidos)) {
-      return NextResponse.json({ error: "tipos_protocolo_permitidos deve ser um array" }, { status: 400 });
-    }
+    const arr = Array.isArray(tipos_protocolo_permitidos) ? tipos_protocolo_permitidos : [];
     await sql`
       UPDATE alissonerp.usuarios
-      SET tipos_protocolo_permitidos = ${JSON.stringify(tipos_protocolo_permitidos)}::jsonb,
+      SET tipos_protocolo_permitidos = ${sql.json(arr)},
           updated_at = now()
       WHERE id = ${id}::uuid
     `;
   }
 
-  // 1d. Atualizar flag is_operador_service (separado, apenas admin)
+  // 1d. Atualizar flags is_operador_service e is_transportador (separado, apenas admin)
   if (is_operador_service !== undefined) {
     await sql`
       UPDATE alissonerp.usuarios
       SET is_operador_service = ${is_operador_service},
+          updated_at = now()
+      WHERE id = ${id}::uuid
+    `;
+  }
+  if (is_transportador !== undefined) {
+    await sql`
+      UPDATE alissonerp.usuarios
+      SET is_transportador = ${is_transportador},
           updated_at = now()
       WHERE id = ${id}::uuid
     `;
@@ -234,7 +244,7 @@ export async function PATCH(
   const [updated] = await sql`
     SELECT
       u.id, u.email, u.nome, u.role::text, u.ativo, u.deposito_id, u.vendedor_id, u.created_at,
-      u.tipos_ordem_permitidos, u.tipos_protocolo_permitidos, u.is_operador_service,
+      u.tipos_ordem_permitidos, u.tipos_protocolo_permitidos, u.is_operador_service, u.is_transportador, u.mx_desconto_permitido,
       up.avatar_url
     FROM alissonerp.usuarios u
     LEFT JOIN public.user_profiles up ON up.id_user = u.id

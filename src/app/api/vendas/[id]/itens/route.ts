@@ -7,6 +7,10 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const { id } = await params;
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
@@ -63,7 +67,7 @@ export async function POST(
   }
 
   const body = await req.json() as {
-    produto_id:    number;
+    produto_id?:   number | null;
     nome_produto:  string;
     sku?:          string | null;
     quantidade:    number;
@@ -77,8 +81,8 @@ export async function POST(
     observacao?:   string | null;
   };
 
-  if (!body.produto_id || !body.nome_produto) {
-    return NextResponse.json({ error: "produto_id e nome_produto obrigatórios" }, { status: 400 });
+  if (!body.nome_produto) {
+    return NextResponse.json({ error: "nome_produto obrigatório" }, { status: 400 });
   }
   if (!body.quantidade || body.quantidade < 1) {
     return NextResponse.json({ error: "Quantidade inválida" }, { status: 400 });
@@ -96,7 +100,7 @@ export async function POST(
       peso_estimado, observacao
     ) VALUES (
       ${vendaId},
-      ${body.produto_id},
+      ${body.produto_id ?? null},
       ${body.nome_produto},
       ${body.sku ?? null},
       ${body.quantidade},

@@ -13,6 +13,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json([]);
   }
 
+  // Ordenação por relevância:
+  //   1. Produtos ATIVOS antes de inativos
+  //   2. Produtos com preço preenchido antes dos sem preço
+  //   3. Produtos simples (tipo='S') antes de pais com variação (tipo='V')
+  //   4. Match exato no SKU vem primeiro
+  //   5. Match no começo do nome antes de match no meio
+  //   6. Desempate: nome alfabético
   const produtos = await sql`
     SELECT
       p.id_produto AS id,
@@ -29,7 +36,13 @@ export async function GET(req: NextRequest) {
     WHERE
       p.sku  ILIKE ${'%' + q + '%'}
       OR p.nome ILIKE ${'%' + q + '%'}
-    ORDER BY p.nome
+    ORDER BY
+      (p.situacao = 'A')                     DESC,
+      (p.preco_sync IS NOT NULL AND p.preco_sync > 0) DESC,
+      (p.tipo = 'S')                          DESC,
+      (LOWER(p.sku)  = LOWER(${q}))           DESC,
+      (LOWER(p.nome) LIKE LOWER(${q + '%'}))  DESC,
+      p.nome
     LIMIT ${limit}
   `;
 

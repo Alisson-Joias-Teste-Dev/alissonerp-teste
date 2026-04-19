@@ -57,6 +57,8 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
   const [qtdCalculada, setQtdCalculada] = useState<number | null>(null);
 
   const [depositos, setDepositos] = useState<Deposito[]>([]);
+  const [locaisEstoque, setLocaisEstoque] = useState<{id: number; nome: string}[]>([]);
+  const [localEstoqueId, setLocalEstoqueId] = useState<number>(1);
 
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
@@ -84,12 +86,14 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
     Promise.all([
       fetch("/api/insumos/categorias").then((r) => r.json()),
       fetch("/api/depositos").then((r) => r.json()),
-    ]).then(([cats, deps]) => {
+      fetch("/api/locais-estoque", { cache: "no-store" }).then((r) => r.json()),
+    ]).then(([cats, deps, locs]) => {
       setCategorias((cats as Categoria[]) ?? []);
       setDepositos((deps as Deposito[]) ?? []);
+      setLocaisEstoque(Array.isArray(locs) ? locs : []);
+      setLocalEstoqueId(1);
       if (deps?.length) {
         setDepositoId(String(deps[0].id));
-        // Destino padrão = Almoxarifado (id=1), fallback = primeiro dep
         const almox = (deps as Deposito[]).find((d) => d.id === 1);
         setDepositoDestinoId(String(almox?.id ?? deps[0].id));
       }
@@ -174,6 +178,7 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
       insumo_id:       insumoId,
       peso:            pesoNum,
       obs:             obs || null,
+      local_estoque_id: localEstoqueId,
     };
     if (!isSangria) body.deposito_id = Number(depositoId);
     if (isTransferencia) body.deposito_destino_id = Number(depositoDestinoId);
@@ -371,6 +376,25 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
               <div className="px-3 py-2.5 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg, color: "#6B7280" }}>
                 Almoxarifado Central (fixo)
               </div>
+            </div>
+          )}
+
+          {/* Local de Estoque */}
+          {locaisEstoque.length > 1 && (
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#6B7280" }}>
+                Local de Estoque
+              </label>
+              <select
+                value={localEstoqueId}
+                onChange={(e) => setLocalEstoqueId(Number(e.target.value))}
+                className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none"
+                style={{ borderColor: C.cremeBorder }}
+              >
+                {locaisEstoque.map((l) => (
+                  <option key={l.id} value={l.id}>{l.nome}</option>
+                ))}
+              </select>
             </div>
           )}
 

@@ -1,6 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
-import NovaVendaClient from "./NovaVendaClient";
+import NovaVendaClientV2 from "./NovaVendaClientV2";
 
 export default async function NovaVendaPage() {
   const supabase = await createServerSupabase();
@@ -9,6 +9,7 @@ export default async function NovaVendaPage() {
   let role              = "consultora";
   let vendedorId: number | null = null;
   let maxDesconto       = 15;
+  let vendedorNome      = "";
 
   if (user) {
     const [u] = await sql`
@@ -18,23 +19,35 @@ export default async function NovaVendaPage() {
       LIMIT 1
     `;
     if (u) {
-      role      = u.role as string;
+      role       = u.role as string;
       vendedorId = u.vendedor_id ? Number(u.vendedor_id) : null;
 
-      // mx_desconto_permitido individual sobrepõe regra de role
-      if (u.mx_desconto_permitido != null) {
+      const SUPER = ["desenvolvedor", "admin"];
+      if (SUPER.includes(role)) {
+        // Super-admins: desconto irrestrito, ignora coluna individual
+        maxDesconto = 100;
+      } else if (u.mx_desconto_permitido != null && Number(u.mx_desconto_permitido) > 0) {
+        // Valor individual definido explicitamente
         maxDesconto = Number(u.mx_desconto_permitido);
       } else {
-        const FULL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "financeiro"];
+        // Padrão por role
+        const FULL = ["gerente_fabrica", "gerente_loja", "financeiro"];
         maxDesconto = FULL.includes(role) ? 30 : 15;
       }
     }
   }
 
+  // Buscar nome do vendedor
+  if (vendedorId) {
+    const [v] = await sql`SELECT nome FROM public.vendedores WHERE id_vendedor = ${vendedorId} LIMIT 1`;
+    if (v) vendedorNome = v.nome as string;
+  }
+
   return (
-    <NovaVendaClient
+    <NovaVendaClientV2
       role={role}
       vendedorId={vendedorId}
+      vendedorNome={vendedorNome}
       maxDesconto={maxDesconto}
     />
   );

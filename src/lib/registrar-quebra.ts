@@ -33,6 +33,13 @@ export async function registrarQuebra(dados: RegistroQuebra) {
     ? parseFloat(((quebra / dados.ouro_recebido) * 100).toFixed(2))
     : 0;
 
+  // Buscar nome real do insumo no banco; fallback para 'Ouro 18k Amarelo'
+  let insumo_nome = 'Ouro 18k Amarelo';
+  if (dados.insumo_id) {
+    const [ins] = await sql`SELECT nome FROM alissonerp.insumos WHERE id = ${dados.insumo_id} LIMIT 1`;
+    if (ins?.nome) insumo_nome = ins.nome;
+  }
+
   const [registro] = await sql`
     INSERT INTO alissonerp.quebra_operador (
       ordem_id, pcp_id, distribuicao_id, deposito_id, setor_id, insumo_id,
@@ -49,7 +56,7 @@ export async function registrarQuebra(dados: RegistroQuebra) {
       ${dados.numero_ordem ?? null},
       ${dados.deposito_nome},
       ${dados.setor_nome ?? null},
-      'Ouro 18k Amarelo',
+      ${insumo_nome},
       ${dados.tipo},
       ${dados.ouro_recebido},
       ${dados.ouro_entregue},

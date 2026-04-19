@@ -9,7 +9,10 @@ export default async function EstoquePage() {
       sql`
         SELECT deposito_id, deposito_nome, insumo_id, insumo_nome, insumo_sku,
                categoria_nome, categoria_id,
-               total_entrada, total_saida, saldo, total_movimentacoes
+               local_estoque_id, local_estoque_nome,
+               total_entrada, total_saida, saldo,
+               saldo_ct, quantidade, peso_pedra_ct,
+               total_movimentacoes
         FROM alissonerp.vw_estoque_directus_saldo
         WHERE saldo != 0
         ORDER BY ABS(saldo) DESC
@@ -37,7 +40,8 @@ export default async function EstoquePage() {
       `,
       sql`
         SELECT id, entrada, saida, insumo_nome, deposito_nome, setor_nome,
-               marcador, numero_ordem, obs, data_hora, date_created
+               marcador, numero_ordem, obs, data_hora, date_created,
+               local_estoque_nome
         FROM alissonerp.vw_movimentacoes_directus
         ORDER BY date_created DESC
         LIMIT 100

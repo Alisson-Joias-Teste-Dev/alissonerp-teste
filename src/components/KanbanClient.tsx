@@ -161,7 +161,7 @@ const ETAPAS = [
 ];
 
 const ETAPAS_APONTAMENTO   = new Set(["Novas Ordens", "Em Andamento"]);
-const ETAPAS_TRANSFERENCIA = new Set(["Em Andamento"]);
+const ETAPAS_TRANSFERENCIA = new Set(["Novas Ordens", "Em Andamento"]);
 const ETAPAS_SAIDA         = new Set(["Em Andamento"]);
 
 type PCPItem = any;
@@ -332,25 +332,64 @@ function KanbanCard({
 export default function KanbanClient({
   pcps,
   userRole,
+  janelaConcluidasDias = 30,
 }: {
-  pcps: any[];
+  pcps: any[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   userRole?: string | null;
+  janelaConcluidasDias?: number;
 }) {
   const router = useRouter();
   const [search, setSearch]           = useState("");
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
 
+  // Busca server-side (ativada quando search.length >= 2, debounced 300ms).
+  // Por default usamos `pcps` (prop do SSR). Quando o usuário digita,
+  // trocamos por `serverResults` vindo de /api/pcp/buscar, que procura em
+  // TODO o histórico (inclusive concluídas > 30 dias).
+  const [serverResults, setServerResults] = useState<PCPItem[] | null>(null);
+  const [searching, setSearching]         = useState(false);
+  const [searchError, setSearchError]     = useState<string | null>(null);
+
   const isDesenvolvedor = userRole === "desenvolvedor";
 
+  // Debounced server-side search
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 2) {
+      setServerResults(null);
+      setSearching(false);
+      setSearchError(null);
+      return;
+    }
+    setSearching(true);
+    setSearchError(null);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/pcp/buscar?q=${encodeURIComponent(q)}`);
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+        }
+        const data = await res.json() as { results: PCPItem[]; total: number };
+        setServerResults(data.results ?? []);
+      } catch (e) {
+        setSearchError(e instanceof Error ? e.message : "Erro na busca");
+        setServerResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [search]);
+
+  // Lista efetiva:
+  //   - Se não há busca → prop `pcps` (load inicial)
+  //   - Se há busca e serverResults populado → serverResults
+  //   - Enquanto aguarda debounce/fetch → último resultado válido (ou prop)
   const filtered = useMemo(() => {
-    if (!search) return pcps;
-    const q = search.toLowerCase();
-    return pcps.filter(
-      (p) =>
-        p.numero_ordem?.toLowerCase().includes(q) ||
-        p.cliente_nome?.toLowerCase().includes(q)
-    );
-  }, [pcps, search]);
+    if (serverResults != null) return serverResults;
+    return pcps;
+  }, [pcps, serverResults]);
 
   const byEtapa = useMemo(() => {
     const map: Record<string, PCPItem[]> = {};
@@ -381,6 +420,8 @@ export default function KanbanClient({
   const handleClose   = useCallback(() => setActiveModal(null), []);
   const handleSuccess = useCallback(() => { router.refresh(); }, [router]);
 
+  const inSearchMode = serverResults != null;
+
   return (
     <div className="px-3 md:px-6 py-4 md:py-8">
       {/* Header */}
@@ -393,7 +434,17 @@ export default function KanbanClient({
             PCP — Kanban
           </h2>
           <p className="text-sm mt-1" style={{ color: "#6B7280" }}>
-            {pcps.length} registros — alissonerp.vw_pcp_erp
+            {inSearchMode ? (
+              <>
+                <span className="font-semibold" style={{ color: "#184036" }}>🔍 {filtered.length}</span>{" "}
+                resultado(s) da busca em todo o histórico
+              </>
+            ) : (
+              <>
+                {pcps.length} registros ativos + concluídas dos últimos{" "}
+                <span className="font-semibold">{janelaConcluidasDias}</span> dias
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -417,14 +468,42 @@ export default function KanbanClient({
             <Plus size={13} strokeWidth={2.5} />
             Nova Ordem
           </button>
-          <input
-            type="text"
-            placeholder="Buscar ordem ou cliente..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm outline-none w-full md:w-60"
-            style={{ borderColor: "#E8DCC8" }}
-          />
+          <div className="relative w-full md:w-72">
+            <input
+              type="text"
+              placeholder="Buscar ordem, cliente, pedido..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="border rounded-lg pl-3 pr-9 py-2 text-sm outline-none w-full"
+              style={{ borderColor: inSearchMode ? "#184036" : "#E8DCC8" }}
+            />
+            {searching && (
+              <Loader2
+                size={14}
+                className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin"
+                style={{ color: "#184036" }}
+              />
+            )}
+            {!searching && search.length > 0 && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-gray-100"
+                title="Limpar busca"
+              >
+                <X size={14} style={{ color: "#6B7280" }} />
+              </button>
+            )}
+            {searchError && (
+              <p className="absolute left-0 -bottom-5 text-[10px] text-red-500">
+                ⚠ {searchError}
+              </p>
+            )}
+            {inSearchMode && !searching && !searchError && (
+              <p className="absolute left-0 -bottom-5 text-[10px]" style={{ color: "#6B7280" }}>
+                Buscando em todo o histórico (sem limite de data)
+              </p>
+            )}
+          </div>
         </div>
       </div>
 

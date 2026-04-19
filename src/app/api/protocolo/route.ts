@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 // GET /api/protocolo?user_id=UUID — lista protocolos do motoboy (ou todos se todos=true)
 export async function GET(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const userId = req.nextUrl.searchParams.get("user_id");
   const todos = req.nextUrl.searchParams.get("todos") === "true";
 
@@ -35,18 +40,23 @@ export async function POST(req: NextRequest) {
     tipo_protocolo?: string;
   };
 
+  // Auth obrigatória — user.id substitui body.user_id para created_by e permissões
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   if (!direcao || !Array.isArray(ordem_ids) || ordem_ids.length === 0) {
     return NextResponse.json({ error: "Parâmetros inválidos" }, { status: 400 });
   }
 
   const tipoFinal = tipo_protocolo ?? "fabrica";
 
-  // Validar permissão do usuário (admin/dev ignoram)
-  if (user_id) {
+  // Validar permissão do usuário autenticado (admin/dev ignoram)
+  {
     const [usuario] = await sql`
       SELECT role::text AS role, tipos_protocolo_permitidos
       FROM alissonerp.usuarios
-      WHERE id = ${user_id}::uuid
+      WHERE id = ${user.id}::uuid
     `;
 
     if (usuario) {
@@ -70,7 +80,7 @@ export async function POST(req: NextRequest) {
       ${direcao}, 'pendente',
       ${motoboy_id ?? null}::uuid,
       ${foto_criacao ?? null},
-      ${user_id ?? null}::uuid,
+      ${user.id}::uuid,
       ${tipoFinal}
     )
     RETURNING id

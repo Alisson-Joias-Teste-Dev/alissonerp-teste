@@ -1,15 +1,15 @@
 # MEMORY.md — Alisson ERP (Joalheria de Alto Padrao)
 
 > **Referencia de dominio do projeto. Regras e pitfalls estao em `CLAUDE.md` (raiz do repo).**
-> **Atualizado: 31/03/2026 (v2.15.0)**
+> **Atualizado: 09/04/2026 (v2.19.62)**
 
 ## Memorias detalhadas
 - [feedback_permissoes_banco.md](./feedback_permissoes_banco.md) — CRUD só em alissonerp; public e directus são READONLY
 - [project_tela_inicial.md](./project_tela_inicial.md) — Tela inicial `/`: layout, fontes de dados, leao, favicon
 - [project_user_profiles.md](./project_user_profiles.md) — Estrutura real de public.user_profiles + constraint roles + mapeamento roles ERP
 - [project_storage_buckets.md](./project_storage_buckets.md) — Todos os buckets (avatars, ordem-fotos, protocolo-fotos, apontamento-fotos, imagens)
-- [project_api_routes.md](./project_api_routes.md) — Mapa completo das 88 API routes
-- [project_modulo_service.md](./project_modulo_service.md) — Modulo Service v2.15.0: transferencia_service_id, devolver, rotas pcp/transferir-service
+- [project_api_routes.md](./project_api_routes.md) — Mapa completo das 190 API routes
+- [project_modulo_service.md](./project_modulo_service.md) — Modulo Service v2.19.x: transferencia_service_id, devolver, reprovar, transferir-fabrica, aditivo, pedras-estoque
 - [project_sprint1_v2140.md](./project_sprint1_v2140.md) — Sprint 1+2 v2.14.0: migrations 094-098 (locais_estoque, pedras ct, compras expandidas)
 - [reference_psql.md](./reference_psql.md) — psql no Windows: path pgAdmin, IP direto DB, como conectar via PowerShell
 - [project_migracao_360.md](./project_migracao_360.md) — Plano migração 360°: 8 sistemas → fabricaAJ master. 79 workflows n8n. 8 fases. Decisões pendentes D1-D4.
@@ -47,9 +47,36 @@ usuarios.tipos_protocolo_permitidos JSONB (["fabrica","service"])
 ── QUALIDADE ──
 auditorias (loja + fabrica)
 
+── COMERCIAL ──
+vendas_erp (id, numero_venda, cliente_id, vendedor_id, totais, situacao, token_compartilhamento, orcamento_id)
+itens_venda_erp (id, venda_id, produto_id NULLABLE, nome_produto, sku, qtd, precos, comissao, observacao)
+pagamentos_venda (id, venda_id, forma, gateway, valor, parcelas, status)
+faixas_comissao (31 faixas desconto→comissao)
+metas_vendedoras (vendedor_id, mes, ano, meta_valor, meta_quantidade)
+
+── ORCAMENTO ──
+config_orcamento (config global: markup, desconto, precos ouro/pedras, regras, JSONB)
+orcamento_fichas_tecnicas (specs alianca/pedra, pedras_detalhadas JSONB)
+orcamentos (numero ORC-XXXXXX, tipo, peso, valor, status, cliente_id, foto_3d, venda_gerada_id, ordem_gerada_id)
+
+── ESTOQUE COMERCIAL ──
+estoque_comercial_config (produto_id, estoque_minimo, ativo)
+movimentacoes_estoque_comercial (produto_id, tipo entrada/saida, quantidade, motivo)
+vw_saldo_estoque_comercial, vw_estoque_comercial_com_alerta
+
+── TAREFAS ──
+tarefas (titulo, descricao, responsavel_id, status, prioridade, data_limite, ordem_id, tags, posicao)
+comentarios_tarefa (tarefa_id, autor_id, texto)
+aprovacoes_tarefa (tarefa_id, aprovador_id, decisao, motivo)
+automacoes_tarefa (titulo, recorrencia diaria/semanal/mensal, responsavel_id, ativa)
+automacoes_execucoes (automacao_id, tarefa_id, executado_em)
+
+── FICHAS TECNICAS ──
+fichas_tecnicas (ordem_id, tipo_item, dados JSONB) — editaveis no ERP
+
 ── SISTEMA ──
-configuracoes_sistema (config IA + config preco)
-configuracoes_secrets (API keys IA)
+configuracoes_sistema (config IA + config preco + config integracoes)
+configuracoes_secrets (API keys IA + integracoes)
 
 ── PRODUTOS ──
 produto_composicao (BOM: produto_id, insumo_id, tipo, quantidade, tamanho, preco_compra_usd)
@@ -194,12 +221,14 @@ Mapeamentos:
 
 ```
 Dashboard
-Producao      → Ordens, PCP, Distribuicao
-Suprimentos   → Estoque, Insumos, Compras
-Logistica     → Protocolo
+Producao      → Dashboard Fabrica, Ordens, PCP, Distribuicao, Purificacao, Painel Service
+Suprimentos   → Estoque, Quebra, Insumos, Compras
+Logistica     → Protocolo, Conferencia, Entrega
 Qualidade     → Auditoria
-Comercial     → Vendas, Financeiro, Precificacao
+Gestao        → Tarefas, Relatorios
+Comercial     → Vendas, Estoque Comercial, Financeiro, Produtos, Precificacao, Orcamento
 Configuracoes
+Service (standalone, dark theme) → requer is_operador_service=true
 ```
 
 ---
@@ -238,23 +267,34 @@ categoria_precificacao: tabela com cedilla, colunas: id, "categoryName", "range"
 
 ---
 
-## 13. MIGRATIONS (indice)
+## 13. MIGRATIONS (indice — 132 arquivos, 001-130)
 
 ```
 001-013: Schema base + config + RLS + Realtime
-014-016: Views
+014-016: Views cross-schema
 017-022: Auth + triggers (PCP, transferencia, distribuicao, protocolo, compras)
 023-025: Storage + financeiro + webhooks
-026-027: Auditoria + ponte PDV
-031-032: Timeline + grants ficha tecnica
-035: numero_pedido
-040: Fix rota protocolo
-041-042: Protocolo fotos + insumos
-043-044: Configuracoes IA
-045+: Depositos/setores + apontamentos PCP
-055-062: Precificacao + composicao + markup + erp_produtos
-063-064: erp_produtos populate + sequence
-065+: Service module + locais_estoque + pedras ct
+026-030: Auditoria + ponte PDV + ficha tecnica
+031-040: Timeline + grants + numero_pedido + rota protocolo
+041-054: Protocolo fotos + insumos + depositos/setores + distribuicao + PCP
+055-064: Precificacao + composicao + markup + erp_produtos + sequence
+065-072: eh_teste + quebra_operador + roles + comentarios + user_profiles
+073-083: Tipo servico_venda + itens_ordem + detalhes + insumos foto + saida sem peso + estorno
+084-092: Purificacao + ligacao + WhatsApp + permissoes granulares + modulo service
+093-098: Tipo protocolo + locais_estoque + pedras ct + compras expandidas + triggers
+099-102: Data entrega + tipos servico + fix triggers pedras + fix local_estoque
+103: Transferencia service
+104-106: Modulo comercial base + view video + token compartilhamento
+107: Estoque comercial (config + movimentacoes + views alertas)
+108: Ordens garantia (venda_id + venda_item_ids)
+109-110: Sync public.vendas → vendas_erp (14.301 vendas + 75.956 itens) + fix exceptions
+111: Estoque comercial auto-venda (4 triggers) + fichas tecnicas ERP
+112: Modulo tarefas (substitui Asana)
+113: Financeiro auto (3 triggers: venda→CR, cancelar→cancelar CR, compra→CP)
+114-118: Blindagem vendas fechadas + fix sync triggers + bypass blindagem
+119: Tarefas avancadas (kanban + aprovacoes + automacoes)
+120-129: Modulo orcamento (config, fichas, orcamentos, pedras, cliente, foto_3d, venda+ordem)
+130: Endereco entrega venda + produto_id nullable em itens_venda_erp
 ```
 
 ---
@@ -288,23 +328,40 @@ useAuth(): role primaria de /api/user/permissoes, fallback user_metadata.role
 
 ---
 
-## 16. PENDENTES
+## 16. STATUS MODULOS (v2.19.62)
 
 ```
-── FICHA TECNICA ──
-Ficha tecnica no modal auditoria (fetch faltando)
-Mapeamento ENUMs ficha tecnica
-Peso metal externo no modal auditoria
-Modelo externo anel (aguardando valores)
+── PRODUCAO ──
+PCP: completo (apontamentos todos tipos, saida, quebra, transferencia)
+Distribuicao: completo (lotes, saida por ordem, conclusao, estorno lote)
+Service: completo (receber, concluir, transferir, devolver, reprovar, aditivo, pedras)
+Purificacao/Ligacao: completo (18k→24k, 24k→18k, teores configuraveis)
 
-── APONTAMENTOS ──
-Entrada de Metal: OK
-Aditivo de Metal: em andamento
-Tipos 2-9: pendente
+── COMERCIAL ──
+Vendas ERP: completo (CRUD, itens, pagamentos, comissoes, metas, ranking, analises)
+Estoque Comercial: completo (alertas, movimentos, config minimo, sync Tiny)
+Orcamento: completo (3D alianca, pecas, pedras, aprovacao→venda→ordem)
+Precificacao: completo (markup ouro/pedras, simulacao, aprovacao)
+Produtos: completo (CRUD, BOM, variacoes, propagacao)
+PDF + Compartilhamento: completo
 
-── ESTOQUE ──
-Ouro Total: corrigir pra contar SO deposito geral (ID=1)
-Saldo catalogo: usar vw_detalhe_pote
+── GESTAO ──
+Tarefas: completo (kanban drag-drop, aprovacoes, automacoes, comentarios)
+Relatorios: completo (producao, comercial, financeiro, estoque)
+
+── INTEGRACOES ──
+Tiny ERP: completo (enviar pedido, sync estoque, API v3)
+Kommo CRM: basico (sync contato/lead)
+WooCommerce: basico (sync produto)
+Cotacoes automaticas: completo (openexchangerates)
+
+── FINANCEIRO ──
+Contas pagar/receber: completo (CRUD + triggers auto)
+OFX import: completo
+Conciliacao: em andamento
+
+── PENDENTE ──
+Modelo externo anel (aguardando valores do Jonathan)
 ```
 
 ---
@@ -325,7 +382,5 @@ Saldo catalogo: usar vw_detalhe_pote
 ## 18. BUGS CONHECIDOS
 
 ```
-ComprasClient.tsx usa supabase.from() para alissonerp → retorna [] silenciosamente
-  Solucao: migrar para API route com sql direto
-/api/user/alterar-senha eh PATCH, nao GET
+/api/user/alterar-senha eh PATCH, nao GET (documentacao antiga errada)
 ```

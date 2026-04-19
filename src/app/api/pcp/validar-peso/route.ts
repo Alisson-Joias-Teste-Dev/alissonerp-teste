@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 // POST /api/pcp/validar-peso
 // Body (FormData):
@@ -9,6 +10,10 @@ import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 //   peso_ct = string (quilates) — peso em ct (pedra, modo_ct=true)
 //             Se peso_ct fornecido + tipo=pedra → IA lê ct da balança diretamente
 export async function POST(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
   const tipo = (formData.get("tipo") as string | null) ?? "metal";

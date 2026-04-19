@@ -36,12 +36,14 @@ self.addEventListener('fetch', (event) => {
   // Ignorar requisições não-GET
   if (event.request.method !== 'GET') return;
 
-  // Ignorar chamadas de API e Supabase — deixar ir direto pra rede
+  // Ignorar chamadas de API, Supabase, e schemes não-http
   const url = event.request.url;
   if (
+    !url.startsWith('http') ||
     url.includes('/api/') ||
     url.includes('supabase') ||
-    url.includes('_next/webpack-hmr')
+    url.includes('_next/webpack-hmr') ||
+    url.includes('chrome-extension')
   ) {
     return;
   }

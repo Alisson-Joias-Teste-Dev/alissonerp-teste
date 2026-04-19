@@ -34,7 +34,7 @@ export function MobileCard({ titulo, subtitulo, badges, campos, onClick }: Mobil
         {campos.map((c, i) => (
           <div key={i}>
             <span className="text-gray-400 text-xs">{c.label}</span>
-            <p className="text-gray-700">{c.valor}</p>
+            <div className="text-gray-700">{c.valor}</div>
           </div>
         ))}
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -10,8 +10,34 @@ import {
   AlertTriangle,
   FileUp,
   Landmark,
+  Plus,
+  X,
+  Loader2,
+  Link2,
+  Save,
+  TrendingUp,
+  Calendar,
+  Send,
 } from "lucide-react";
 import { dispararWebhook } from "@/lib/webhooks";
+
+// ─── palette (tema claro/creme consistente com o resto do sistema) ───────────
+const C = {
+  esmeralda:   "#184036",
+  esmeraldaLt: "#18403612",
+  creme:       "#F3EADA",
+  cremeBorder: "#E8DCC8",
+  cremeBg:     "#FAFAF7",
+  vermelho:    "#DC2626",
+  vermelhoLt:  "#FEE2E2",
+  ambar:       "#D97706",
+  ambarLt:     "#FEF3C7",
+  verde:       "#059669",
+  verdeLt:     "#D1FAE5",
+  cinza:       "#6B7280",
+  cinzaLt:     "#F3F4F6",
+  cinzaBorder: "#E5E7EB",
+};
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -24,6 +50,12 @@ interface ContaPagar {
   situacao: string;
   categoria: string | null;
   obs: string | null;
+  inter_pagamento_id?: string | null;
+  inter_status?: string | null;
+  inter_tipo?: string | null;
+  inter_dados?: any;
+  inter_enviado_em?: string | null;
+  inter_erro?: string | null;
 }
 
 interface ContaReceber {
@@ -35,6 +67,9 @@ interface ContaReceber {
   situacao: string;
   categoria: string | null;
   obs: string | null;
+  venda_erp_id?: number | null;
+  valor_liquido?: number | null;
+  taxas_mp?: number | null;
 }
 
 interface Extrato {
@@ -75,66 +110,514 @@ const fmt = (v: number) =>
 
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("pt-BR");
+  return new Date(d).toLocaleDateString("pt-BR", { timeZone: "UTC" });
 };
 
-const isVencido = (d: string | null, situacao: string) =>
-  situacao === "pendente" && d && new Date(d) < new Date();
-
-const SITUACAO: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  pendente:   { label: "Pendente",   color: "#DB9864", icon: Clock },
-  pago:       { label: "Pago",       color: "#4A9F73", icon: CheckCircle },
-  recebido:   { label: "Recebido",   color: "#4A9F73", icon: CheckCircle },
-  cancelado:  { label: "Cancelado",  color: "#E05C5C", icon: AlertTriangle },
-  vencido:    { label: "Vencido",    color: "#E05C5C", icon: AlertTriangle },
+const isVencido = (d: string | null, situacao: string) => {
+  if (situacao !== "pendente" || !d) return false;
+  const venc = d.slice(0, 10);
+  const hoje = new Date().toISOString().slice(0, 10);
+  return venc < hoje;
 };
+
+const diasAte = (d: string | null) => {
+  if (!d) return Infinity;
+  const alvo = new Date(d.slice(0, 10) + "T00:00:00Z");
+  const hoje = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
+  return Math.round((alvo.getTime() - hoje.getTime()) / 86400000);
+};
+
+const SITUACAO: Record<string, { label: string; bg: string; color: string; icon: any }> = {
+  pendente:   { label: "Pendente",   bg: C.ambarLt,    color: C.ambar,    icon: Clock },
+  pago:       { label: "Pago",       bg: C.verdeLt,    color: C.verde,    icon: CheckCircle },
+  recebido:   { label: "Recebido",   bg: C.verdeLt,    color: C.verde,    icon: CheckCircle },
+  cancelado:  { label: "Cancelado",  bg: C.cinzaLt,    color: C.cinza,    icon: X },
+  vencido:    { label: "Vencido",    bg: C.vermelhoLt, color: C.vermelho, icon: AlertTriangle },
+};
+
+// ─── Card KPI ────────────────────────────────────────────────────────────────
+function KpiCard({
+  label, value, valueColor, sub, icon: Icon, accent,
+}: {
+  label: string;
+  value: string | number;
+  valueColor?: string;
+  sub?: string;
+  icon?: any;
+  accent?: string;
+}) {
+  return (
+    <div className="rounded-xl bg-white p-4 border" style={{ borderColor: C.cremeBorder }}>
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-[11px] uppercase tracking-wider font-medium" style={{ color: C.cinza }}>{label}</p>
+        {Icon && <Icon size={14} style={{ color: accent ?? C.esmeralda }} />}
+      </div>
+      <p className="text-xl font-semibold tabular-nums" style={{ color: valueColor ?? "#1A1A1A" }}>
+        {value}
+      </p>
+      {sub && <p className="text-[11px] mt-0.5" style={{ color: C.cinza }}>{sub}</p>}
+    </div>
+  );
+}
 
 // ─── ContaRow ────────────────────────────────────────────────────────────────
 
 function ContaRow({
-  descricao,
-  valor,
-  vencimento,
-  liquidacao,
-  situacao,
-  categoria,
-  vencido,
+  descricao, valor, valorLiquido, taxasMp, vencimento, liquidacao,
+  situacao, categoria, vencido, onAction, actionLabel, actionLoading,
 }: {
   descricao: string;
   valor: number;
+  valorLiquido?: number | null;
+  taxasMp?: number | null;
   vencimento: string | null;
   liquidacao: string | null;
   situacao: string;
   categoria: string | null;
   vencido: boolean;
+  onAction?: () => void;
+  actionLabel?: string;
+  actionLoading?: boolean;
 }) {
-  const st = vencido ? SITUACAO["vencido"] : (SITUACAO[situacao] ?? { label: situacao, color: "#4A7568", icon: Clock });
+  const st = vencido ? SITUACAO["vencido"] : (SITUACAO[situacao] ?? { label: situacao, bg: C.cinzaLt, color: C.cinza, icon: Clock });
   const Icon = st.icon;
+  const temLiquidoDiferente = valorLiquido != null && valorLiquido > 0 && Math.abs(valorLiquido - valor) > 0.001;
   return (
-    <tr style={{ borderBottom: "1px solid #0F2922" }} className="hover:bg-[#0F2922]/40 transition-colors">
-      <td className="px-4 py-3 max-w-[220px]">
-        <p className="text-sm truncate" style={{ color: "#F3EADA" }}>{descricao}</p>
-        {categoria && (
-          <p className="text-[10px]" style={{ color: "#4A7568" }}>{categoria}</p>
+    <tr className="hover:bg-stone-50 transition-colors border-b" style={{ borderColor: C.cremeBorder }}>
+      <td className="px-4 py-3 max-w-[260px]">
+        <p className="text-sm truncate font-medium" style={{ color: "#1A1A1A" }}>{descricao}</p>
+        {categoria && <p className="text-[11px]" style={{ color: C.cinza }}>{categoria}</p>}
+      </td>
+      <td className="px-4 py-3 text-right tabular-nums font-semibold whitespace-nowrap" style={{ color: vencido ? C.vermelho : "#374151" }}>
+        {fmt(Number(valor))}
+        {temLiquidoDiferente && (
+          <div className="text-[10px] mt-0.5 font-normal" style={{ color: C.verde }}>
+            líquido {fmt(Number(valorLiquido))}
+            {taxasMp != null && taxasMp > 0 && (
+              <span style={{ color: C.ambar }}> (−{fmt(Number(taxasMp))})</span>
+            )}
+          </div>
         )}
       </td>
-      <td className="px-4 py-3 text-right tabular-nums font-medium whitespace-nowrap" style={{ color: "#DB9864" }}>
-        {fmt(Number(valor))}
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: vencido ? "#E05C5C" : "#80A795" }}>
+      <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: vencido ? C.vermelho : "#374151" }}>
         {fmtDate(vencimento)}
       </td>
-      <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#4A7568" }}>
+      <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: C.cinza }}>
         {fmtDate(liquidacao)}
       </td>
       <td className="px-4 py-3">
         <span
-          className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium"
-          style={{ backgroundColor: st.color + "22", color: st.color }}
+          className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium"
+          style={{ backgroundColor: st.bg, color: st.color }}
         >
           <Icon size={10} />
           {st.label}
         </span>
+      </td>
+      {onAction && situacao === "pendente" && (
+        <td className="px-4 py-3 text-right">
+          <button
+            onClick={onAction}
+            disabled={actionLoading}
+            className="text-[11px] px-2.5 py-1 rounded-lg font-medium disabled:opacity-30 transition-opacity inline-flex items-center gap-1 whitespace-nowrap"
+            style={{ backgroundColor: C.verdeLt, color: C.verde }}
+          >
+            {actionLoading ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
+            {actionLabel}
+          </button>
+        </td>
+      )}
+      {onAction && situacao !== "pendente" && <td className="px-4 py-3" />}
+    </tr>
+  );
+}
+
+// ─── Gráfico Evolução Mensal (barras simples) ────────────────────────────────
+function EvolucaoMensal({ pagar, receber }: { pagar: ContaPagar[]; receber: ContaReceber[] }) {
+  const meses = useMemo(() => {
+    const hoje = new Date();
+    const arr: { mes: string; label: string; receber: number; pagar: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const label = d.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "");
+      arr.push({ mes: ym, label, receber: 0, pagar: 0 });
+    }
+    const mapa = new Map(arr.map(m => [m.mes, m]));
+    pagar.forEach(p => {
+      if (!p.data_vencimento) return;
+      const ym = p.data_vencimento.slice(0, 7);
+      const m = mapa.get(ym);
+      if (m) m.pagar += Number(p.valor);
+    });
+    receber.forEach(r => {
+      if (!r.data_vencimento) return;
+      const ym = r.data_vencimento.slice(0, 7);
+      const m = mapa.get(ym);
+      if (m) m.receber += Number(r.valor);
+    });
+    return arr;
+  }, [pagar, receber]);
+
+  const maxVal = Math.max(1, ...meses.flatMap(m => [m.receber, m.pagar]));
+
+  return (
+    <div className="rounded-xl bg-white p-4 border" style={{ borderColor: C.cremeBorder }}>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={14} style={{ color: C.esmeralda }} />
+          <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>Evolução Mensal</p>
+        </div>
+        <div className="flex items-center gap-3 text-[11px]">
+          <span className="flex items-center gap-1" style={{ color: C.cinza }}>
+            <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: C.verde }} /> A Receber
+          </span>
+          <span className="flex items-center gap-1" style={{ color: C.cinza }}>
+            <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: C.ambar }} /> A Pagar
+          </span>
+        </div>
+      </div>
+      <div className="flex items-end justify-between gap-2 h-32">
+        {meses.map(m => (
+          <div key={m.mes} className="flex-1 flex flex-col items-center gap-1.5">
+            <div className="flex items-end gap-1 h-24 w-full justify-center">
+              <div
+                className="w-3 rounded-t"
+                style={{
+                  backgroundColor: C.verde,
+                  height: `${(m.receber / maxVal) * 100}%`,
+                  minHeight: m.receber > 0 ? 2 : 0,
+                }}
+                title={`A Receber: ${fmt(m.receber)}`}
+              />
+              <div
+                className="w-3 rounded-t"
+                style={{
+                  backgroundColor: C.ambar,
+                  height: `${(m.pagar / maxVal) * 100}%`,
+                  minHeight: m.pagar > 0 ? 2 : 0,
+                }}
+                title={`A Pagar: ${fmt(m.pagar)}`}
+              />
+            </div>
+            <p className="text-[10px] capitalize" style={{ color: C.cinza }}>{m.label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Inter ───────────────────────────────────────────────────────────────────
+
+const INTER_STATUS: Record<string, { label: string; bg: string; color: string }> = {
+  pendente_aprovacao:   { label: "Aguardando aprovação",         bg: C.ambarLt,    color: C.ambar },
+  aguardando_execucao:  { label: "Aprovada, aguardando pagto",   bg: "#DBEAFE",    color: "#1D4ED8" },
+  pago:                 { label: "Pago via Inter",               bg: C.verdeLt,    color: C.verde },
+  rejeitado:            { label: "Rejeitada",                    bg: C.vermelhoLt, color: C.vermelho },
+  cancelado:            { label: "Cancelada",                    bg: C.cinzaLt,    color: C.cinza },
+};
+
+type InterTipo = "pix" | "boleto" | "ted";
+type InterPixSub = "chave" | "qrcode";
+
+function InterBadge({ conta }: { conta: ContaPagar }) {
+  if (!conta.inter_pagamento_id && !conta.inter_status) return <span className="text-[11px]" style={{ color: C.cinza }}>—</span>;
+  const status = conta.inter_status ?? "pendente_aprovacao";
+  const meta = INTER_STATUS[status] ?? { label: status, bg: C.cinzaLt, color: C.cinza };
+  const tooltip = [
+    conta.inter_tipo ? `Tipo: ${conta.inter_tipo.toUpperCase()}` : null,
+    conta.inter_enviado_em ? `Enviado em: ${new Date(conta.inter_enviado_em).toLocaleString("pt-BR")}` : null,
+    conta.inter_erro ? `Erro: ${conta.inter_erro}` : null,
+  ].filter(Boolean).join("\n");
+  return (
+    <span
+      title={tooltip}
+      className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap"
+      style={{ backgroundColor: meta.bg, color: meta.color }}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
+function InterModal({
+  conta, onClose, onSent,
+}: {
+  conta: ContaPagar;
+  onClose: () => void;
+  onSent: (resp: { inter_pagamento_id: string; inter_status: string; inter_tipo: string; inter_enviado_em: string }) => void;
+}) {
+  const [tipo, setTipo] = useState<InterTipo>("pix");
+  const [pixSub, setPixSub] = useState<InterPixSub>("chave");
+  const [chave, setChave] = useState("");
+  const [qrcode, setQrcode] = useState("");
+  const [descricao, setDescricao] = useState("");
+  const [codigoBarras, setCodigoBarras] = useState("");
+  const [banco, setBanco] = useState("");
+  const [agencia, setAgencia] = useState("");
+  const [conta_, setConta_] = useState("");
+  const [digito, setDigito] = useState("");
+  const [tipoConta, setTipoConta] = useState<"CC" | "CP">("CC");
+  const [cpfCnpj, setCpfCnpj] = useState("");
+  const [nomeFavorecido, setNomeFavorecido] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  const valido = useMemo(() => {
+    if (tipo === "pix") {
+      if (pixSub === "chave") return chave.trim().length > 0;
+      return qrcode.trim().length > 0;
+    }
+    if (tipo === "boleto") return codigoBarras.trim().length > 0;
+    return [banco, agencia, conta_, digito, cpfCnpj, nomeFavorecido].every(s => s.trim().length > 0);
+  }, [tipo, pixSub, chave, qrcode, codigoBarras, banco, agencia, conta_, digito, cpfCnpj, nomeFavorecido]);
+
+  async function enviar() {
+    if (!valido) return;
+    setEnviando(true);
+    setErro(null);
+    let dados: any = {};
+    if (tipo === "pix") {
+      dados = pixSub === "chave"
+        ? { chave: chave.trim(), descricao: descricao.trim() || undefined }
+        : { qrcode: qrcode.trim(), descricao: descricao.trim() || undefined };
+    } else if (tipo === "boleto") {
+      dados = { codigoBarras: codigoBarras.trim() };
+    } else {
+      dados = {
+        banco: banco.trim(), agencia: agencia.trim(), conta: conta_.trim(), digito: digito.trim(),
+        tipoConta, cpfCnpj: cpfCnpj.trim(), nomeFavorecido: nomeFavorecido.trim(),
+      };
+    }
+    try {
+      const res = await fetch(`/api/financeiro/inter/enviar/${conta.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tipo, dados }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErro(json?.error || "Erro ao enviar ao Inter");
+        setEnviando(false);
+        return;
+      }
+      onSent({
+        inter_pagamento_id: json.inter_pagamento_id ?? json.pagamento_id ?? json.id ?? "",
+        inter_status: json.inter_status ?? json.status ?? "pendente_aprovacao",
+        inter_tipo: tipo,
+        inter_enviado_em: json.inter_enviado_em ?? new Date().toISOString(),
+      });
+    } catch (e: any) {
+      setErro(e?.message || "Erro de rede");
+      setEnviando(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl border w-full max-w-[500px] max-h-[90vh] overflow-y-auto"
+        style={{ borderColor: C.cremeBorder }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+          <div>
+            <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>Enviar ao Banco Inter</h3>
+            <p className="text-[11px] mt-0.5" style={{ color: C.cinza }}>{conta.descricao} · {fmt(Number(conta.valor))}</p>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-stone-100" aria-label="Fechar">
+            <X size={16} style={{ color: C.cinza }} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {erro && (
+            <div className="rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>
+              {erro}
+            </div>
+          )}
+
+          <Field label="Tipo de Pagamento">
+            <select
+              value={tipo}
+              onChange={e => setTipo(e.target.value as InterTipo)}
+              className="w-full rounded-lg bg-white px-3 py-2 text-sm outline-none border"
+              style={{ borderColor: C.cremeBorder, color: "#374151" }}
+            >
+              <option value="pix">Pix</option>
+              <option value="boleto">Boleto</option>
+              <option value="ted">TED</option>
+            </select>
+          </Field>
+
+          {tipo === "pix" && (
+            <>
+              <div className="flex gap-4 text-xs" style={{ color: "#374151" }}>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" checked={pixSub === "chave"} onChange={() => setPixSub("chave")} />
+                  Chave Pix
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" checked={pixSub === "qrcode"} onChange={() => setPixSub("qrcode")} />
+                  Copia e Cola (QR Code)
+                </label>
+              </div>
+              {pixSub === "chave" ? (
+                <Field label="Chave Pix">
+                  <Input value={chave} onChange={e => setChave(e.target.value)} placeholder="CPF, CNPJ, email, celular ou chave aleatória" />
+                </Field>
+              ) : (
+                <Field label="Pix Copia e Cola">
+                  <textarea
+                    value={qrcode}
+                    onChange={e => setQrcode(e.target.value)}
+                    rows={4}
+                    placeholder="Cole o código Pix copia-e-cola aqui"
+                    className="w-full rounded-lg bg-white px-3 py-2 text-sm outline-none border resize-none font-mono"
+                    style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                  />
+                </Field>
+              )}
+              <Field label="Descrição (opcional)">
+                <Input value={descricao} onChange={e => setDescricao(e.target.value)} placeholder="Descrição do pagamento" />
+              </Field>
+            </>
+          )}
+
+          {tipo === "boleto" && (
+            <Field label="Código de Barras / Linha Digitável">
+              <Input value={codigoBarras} onChange={e => setCodigoBarras(e.target.value)} placeholder="Código de barras ou linha digitável" />
+            </Field>
+          )}
+
+          {tipo === "ted" && (
+            <>
+              <Field label="Banco">
+                <Input value={banco} onChange={e => setBanco(e.target.value)} placeholder="Código do banco, ex: 341 (Itaú)" />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Agência">
+                  <Input value={agencia} onChange={e => setAgencia(e.target.value)} placeholder="0000" />
+                </Field>
+                <Field label="Conta + Dígito">
+                  <div className="flex gap-2">
+                    <Input value={conta_} onChange={e => setConta_(e.target.value)} placeholder="Conta" />
+                    <Input value={digito} onChange={e => setDigito(e.target.value)} placeholder="Dígito" className="w-20" />
+                  </div>
+                </Field>
+              </div>
+              <Field label="Tipo de Conta">
+                <select
+                  value={tipoConta}
+                  onChange={e => setTipoConta(e.target.value as "CC" | "CP")}
+                  className="w-full rounded-lg bg-white px-3 py-2 text-sm outline-none border"
+                  style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                >
+                  <option value="CC">Conta Corrente</option>
+                  <option value="CP">Conta Poupança</option>
+                </select>
+              </Field>
+              <Field label="CPF/CNPJ do Favorecido">
+                <Input value={cpfCnpj} onChange={e => setCpfCnpj(e.target.value)} placeholder="000.000.000-00" />
+              </Field>
+              <Field label="Nome do Favorecido">
+                <Input value={nomeFavorecido} onChange={e => setNomeFavorecido(e.target.value)} placeholder="Nome completo" />
+              </Field>
+            </>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t flex items-center justify-end gap-2" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+          <button
+            onClick={onClose}
+            disabled={enviando}
+            className="px-4 py-2 rounded-lg text-sm font-medium border disabled:opacity-40"
+            style={{ borderColor: C.cremeBorder, color: C.cinza, backgroundColor: "white" }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={enviar}
+            disabled={!valido || enviando}
+            className="px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center gap-2 disabled:opacity-40"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}
+          >
+            {enviando ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            Enviar ao Inter
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ContaPagarRow (com coluna Inter) ────────────────────────────────────────
+
+function ContaPagarRow({
+  conta, vencido, onMarcarPago, onEnviarInter, payLoading,
+}: {
+  conta: ContaPagar;
+  vencido: boolean;
+  onMarcarPago: () => void;
+  onEnviarInter: () => void;
+  payLoading: boolean;
+}) {
+  const st = vencido ? SITUACAO["vencido"] : (SITUACAO[conta.situacao] ?? { label: conta.situacao, bg: C.cinzaLt, color: C.cinza, icon: Clock });
+  const Icon = st.icon;
+  const temInter = !!conta.inter_pagamento_id || !!conta.inter_status;
+  return (
+    <tr className="hover:bg-stone-50 transition-colors border-b" style={{ borderColor: C.cremeBorder }}>
+      <td className="px-4 py-3 max-w-[260px]">
+        <p className="text-sm truncate font-medium" style={{ color: "#1A1A1A" }}>{conta.descricao}</p>
+        {conta.categoria && <p className="text-[11px]" style={{ color: C.cinza }}>{conta.categoria}</p>}
+      </td>
+      <td className="px-4 py-3 text-right tabular-nums font-semibold whitespace-nowrap" style={{ color: vencido ? C.vermelho : "#374151" }}>
+        {fmt(Number(conta.valor))}
+      </td>
+      <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: vencido ? C.vermelho : "#374151" }}>
+        {fmtDate(conta.data_vencimento)}
+      </td>
+      <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: C.cinza }}>
+        {fmtDate(conta.data_pagamento)}
+      </td>
+      <td className="px-4 py-3">
+        <span
+          className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium"
+          style={{ backgroundColor: st.bg, color: st.color }}
+        >
+          <Icon size={10} />
+          {st.label}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        {temInter ? (
+          <InterBadge conta={conta} />
+        ) : conta.situacao === "pendente" ? (
+          <button
+            onClick={onEnviarInter}
+            className="text-[11px] px-2.5 py-1 rounded-lg font-medium inline-flex items-center gap-1 whitespace-nowrap transition-opacity hover:opacity-90"
+            style={{ backgroundColor: "#FF7A00", color: "white" }}
+          >
+            <Send size={10} />
+            Enviar ao Inter
+          </button>
+        ) : (
+          <span className="text-[11px]" style={{ color: C.cinza }}>—</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-right">
+        {conta.situacao === "pendente" && (
+          <button
+            onClick={onMarcarPago}
+            disabled={payLoading}
+            className="text-[11px] px-2.5 py-1 rounded-lg font-medium disabled:opacity-30 transition-opacity inline-flex items-center gap-1 whitespace-nowrap"
+            style={{ backgroundColor: C.verdeLt, color: C.verde }}
+          >
+            {payLoading ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
+            Marcar como Pago
+          </button>
+        )}
       </td>
     </tr>
   );
@@ -144,63 +627,155 @@ function ContaRow({
 
 function TabPagar({ pagar }: { pagar: ContaPagar[] }) {
   const [filtro, setFiltro] = useState("todos");
+  const [lista, setLista] = useState(pagar);
+  const [showForm, setShowForm] = useState(false);
+  const [formSaving, setFormSaving] = useState(false);
+  const [actionId, setActionId] = useState<number | null>(null);
+  const [interModalConta, setInterModalConta] = useState<ContaPagar | null>(null);
+  const [form, setForm] = useState({ descricao: "", valor: "", data_vencimento: "", categoria: "", obs: "" });
 
-  const totalPendente = pagar
-    .filter((p) => p.situacao === "pendente")
-    .reduce((s, p) => s + Number(p.valor), 0);
-  const totalVencido = pagar
-    .filter((p) => isVencido(p.data_vencimento, p.situacao))
-    .reduce((s, p) => s + Number(p.valor), 0);
+  const totalPendente = lista.filter(p => p.situacao === "pendente").reduce((s, p) => s + Number(p.valor), 0);
+  const totalVencido = lista.filter(p => isVencido(p.data_vencimento, p.situacao)).reduce((s, p) => s + Number(p.valor), 0);
+  const total7  = lista.filter(p => p.situacao === "pendente" && diasAte(p.data_vencimento) >= 0 && diasAte(p.data_vencimento) <= 7).reduce((s, p) => s + Number(p.valor), 0);
+  const total15 = lista.filter(p => p.situacao === "pendente" && diasAte(p.data_vencimento) >= 0 && diasAte(p.data_vencimento) <= 15).reduce((s, p) => s + Number(p.valor), 0);
+  const total30 = lista.filter(p => p.situacao === "pendente" && diasAte(p.data_vencimento) >= 0 && diasAte(p.data_vencimento) <= 30).reduce((s, p) => s + Number(p.valor), 0);
 
   const filtradas = useMemo(() => {
-    if (filtro === "vencido") return pagar.filter((p) => isVencido(p.data_vencimento, p.situacao));
-    if (filtro === "todos") return pagar;
-    return pagar.filter((p) => p.situacao === filtro);
-  }, [pagar, filtro]);
+    if (filtro === "vencido") return lista.filter(p => isVencido(p.data_vencimento, p.situacao));
+    if (filtro === "todos") return lista;
+    return lista.filter(p => p.situacao === filtro);
+  }, [lista, filtro]);
+
+  async function handleNovaConta() {
+    if (!form.descricao.trim() || !form.valor) return;
+    setFormSaving(true);
+    const res = await fetch("/api/financeiro/contas-pagar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        descricao: form.descricao.trim(),
+        valor: Number(form.valor),
+        data_vencimento: form.data_vencimento || undefined,
+        categoria: form.categoria || undefined,
+        obs: form.obs || undefined,
+      }),
+    });
+    setFormSaving(false);
+    if (res.ok) {
+      const nova = await res.json();
+      setLista(prev => [{
+        id: nova.id,
+        descricao: form.descricao.trim(),
+        valor: Number(form.valor),
+        data_vencimento: form.data_vencimento || null,
+        data_pagamento: null,
+        situacao: "pendente",
+        categoria: form.categoria || null,
+        obs: form.obs || null,
+      }, ...prev]);
+      setForm({ descricao: "", valor: "", data_vencimento: "", categoria: "", obs: "" });
+      setShowForm(false);
+    } else {
+      const data = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+      alert(data.error || "Erro ao criar conta a pagar");
+    }
+  }
+
+  async function marcarPago(id: number) {
+    setActionId(id);
+    const res = await fetch(`/api/financeiro/contas-pagar/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ situacao: "pago", data_pagamento: new Date().toISOString().slice(0, 10) }),
+    });
+    if (res.ok) {
+      setLista(prev => prev.map(p => p.id === id ? { ...p, situacao: "pago", data_pagamento: new Date().toISOString().slice(0, 10) } : p));
+    } else {
+      const data = await res.json().catch(() => ({ error: "Erro" }));
+      alert(data.error || "Erro ao marcar como pago");
+    }
+    setActionId(null);
+  }
 
   return (
-    <div className="space-y-4">
-      {/* Mini stats */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Total Contas", value: pagar.length },
-          { label: "Pendente", value: fmt(totalPendente), color: "#DB9864" },
-          { label: "Vencido", value: fmt(totalVencido), color: "#E05C5C" },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="rounded-lg p-3" style={{ backgroundColor: "#0F2922", border: "1px solid #1C3D32" }}>
-            <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "#4A7568" }}>{label}</p>
-            <p className="text-lg font-semibold" style={{ color: color ?? "#F3EADA" }}>{value}</p>
-          </div>
-        ))}
+    <div className="space-y-5">
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard label="Total Vencido" value={fmt(totalVencido)} valueColor={C.vermelho} icon={AlertTriangle} accent={C.vermelho} sub="pagamentos em atraso" />
+        <KpiCard label="Próx. 7 dias"   value={fmt(total7)}  valueColor={C.ambar} icon={Calendar} accent={C.ambar} />
+        <KpiCard label="Próx. 15 dias"  value={fmt(total15)} valueColor={C.ambar} icon={Calendar} accent={C.ambar} />
+        <KpiCard label="Próx. 30 dias"  value={fmt(total30)} valueColor={C.ambar} icon={Calendar} accent={C.ambar} />
       </div>
 
-      {/* Filtro status */}
-      <div className="flex gap-2 flex-wrap">
-        {["todos", "pendente", "pago", "cancelado", "vencido"].map((s) => (
-          <button
-            key={s}
-            onClick={() => setFiltro(s)}
-            className="text-[11px] px-3 py-1 rounded-full capitalize transition-colors"
-            style={{
-              backgroundColor: filtro === s ? "#1C3D32" : "transparent",
-              border: "1px solid",
-              borderColor: filtro === s ? "#4A9F73" : "#1C3D32",
-              color: filtro === s ? "#F3EADA" : "#4A7568",
-            }}
-          >
-            {s}
-          </button>
-        ))}
+      {/* Nova conta + filtros */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-90"
+          style={{ backgroundColor: C.esmeralda, color: C.creme }}
+        >
+          {showForm ? <X size={14} /> : <Plus size={14} />}
+          {showForm ? "Cancelar" : "Nova Conta a Pagar"}
+        </button>
+
+        <div className="flex gap-1.5 flex-wrap">
+          {["todos", "pendente", "pago", "cancelado", "vencido"].map(s => (
+            <button
+              key={s}
+              onClick={() => setFiltro(s)}
+              className="text-xs px-3 py-1.5 rounded-full capitalize transition-colors border"
+              style={{
+                backgroundColor: filtro === s ? C.esmeralda : "white",
+                borderColor: filtro === s ? C.esmeralda : C.cremeBorder,
+                color: filtro === s ? C.creme : C.cinza,
+              }}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* Form nova conta */}
+      {showForm && (
+        <div className="rounded-xl bg-white p-5 border space-y-3" style={{ borderColor: C.cremeBorder }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Descrição *">
+              <Input value={form.descricao} onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))} />
+            </Field>
+            <Field label="Valor *">
+              <Input type="number" step="0.01" min="0.01" value={form.valor} onChange={e => setForm(f => ({ ...f, valor: e.target.value }))} />
+            </Field>
+            <Field label="Vencimento">
+              <Input type="date" value={form.data_vencimento} onChange={e => setForm(f => ({ ...f, data_vencimento: e.target.value }))} />
+            </Field>
+            <Field label="Categoria">
+              <Input value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value }))} />
+            </Field>
+          </div>
+          <Field label="Observações">
+            <Input value={form.obs} onChange={e => setForm(f => ({ ...f, obs: e.target.value }))} />
+          </Field>
+          <button
+            onClick={handleNovaConta}
+            disabled={formSaving || !form.descricao.trim() || !form.valor}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}
+          >
+            {formSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            Salvar
+          </button>
+        </div>
+      )}
 
       {/* Tabela */}
-      <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #1C3D32" }}>
+      <div className="rounded-xl bg-white overflow-hidden border" style={{ borderColor: C.cremeBorder }}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr style={{ backgroundColor: "#0F2922", borderBottom: "1px solid #1C3D32" }}>
-                {["Descrição", "Valor", "Vencimento", "Pagamento", "Situação"].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium" style={{ color: "#4A7568" }}>
+              <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
+                {["Descrição", "Valor", "Vencimento", "Pagamento", "Situação", "Inter", ""].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-[11px] uppercase tracking-wider font-semibold" style={{ color: C.cinza }}>
                     {h}
                   </th>
                 ))}
@@ -208,23 +783,44 @@ function TabPagar({ pagar }: { pagar: ContaPagar[] }) {
             </thead>
             <tbody>
               {filtradas.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-sm" style={{ color: "#4A7568" }}>Nenhuma conta encontrada</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm" style={{ color: C.cinza }}>Nenhuma conta encontrada</td></tr>
               ) : (
-                filtradas.map((p) => (
-                  <ContaRow
+                filtradas.map(p => (
+                  <ContaPagarRow
                     key={p.id}
-                    descricao={p.descricao}
-                    valor={p.valor}
-                    vencimento={p.data_vencimento}
-                    liquidacao={p.data_pagamento}
-                    situacao={p.situacao}
-                    categoria={p.categoria}
+                    conta={p}
                     vencido={!!isVencido(p.data_vencimento, p.situacao)}
+                    onMarcarPago={() => marcarPago(p.id)}
+                    onEnviarInter={() => setInterModalConta(p)}
+                    payLoading={actionId === p.id}
                   />
                 ))
               )}
             </tbody>
           </table>
+        </div>
+        {interModalConta && (
+          <InterModal
+            conta={interModalConta}
+            onClose={() => setInterModalConta(null)}
+            onSent={(resp) => {
+              setLista(prev => prev.map(p => p.id === interModalConta.id ? {
+                ...p,
+                inter_pagamento_id: resp.inter_pagamento_id,
+                inter_status: resp.inter_status,
+                inter_tipo: resp.inter_tipo,
+                inter_enviado_em: resp.inter_enviado_em,
+                inter_erro: null,
+              } : p));
+              setInterModalConta(null);
+            }}
+          />
+        )}
+        <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+          <p className="text-xs" style={{ color: C.cinza }}>{filtradas.length} conta(s)</p>
+          <p className="text-xs tabular-nums font-medium" style={{ color: C.ambar }}>
+            Total pendente: {fmt(totalPendente)}
+          </p>
         </div>
       </div>
     </div>
@@ -235,60 +831,165 @@ function TabPagar({ pagar }: { pagar: ContaPagar[] }) {
 
 function TabReceber({ receber }: { receber: ContaReceber[] }) {
   const [filtro, setFiltro] = useState("todos");
+  const [lista, setLista] = useState(receber);
+  const [showForm, setShowForm] = useState(false);
+  const [formSaving, setFormSaving] = useState(false);
+  const [actionId, setActionId] = useState<number | null>(null);
+  const [form, setForm] = useState({ descricao: "", valor: "", data_vencimento: "", categoria: "", obs: "" });
 
-  const totalPendente = receber
-    .filter((r) => r.situacao === "pendente")
-    .reduce((s, r) => s + Number(r.valor), 0);
-  const totalRecebido = receber
-    .filter((r) => r.situacao === "recebido")
-    .reduce((s, r) => s + Number(r.valor), 0);
+  const isRecebido = (s: string) => s === "pago" || s === "recebido";
+
+  const totalPendente = lista.filter(r => r.situacao === "pendente").reduce((s, r) => s + Number(r.valor), 0);
+  const totalVencido  = lista.filter(r => isVencido(r.data_vencimento, r.situacao)).reduce((s, r) => s + Number(r.valor), 0);
+  const totalLiquido  = lista.filter(r => isRecebido(r.situacao)).reduce((s, r) => s + Number(r.valor_liquido ?? r.valor), 0);
+  const totalTaxas    = lista.filter(r => isRecebido(r.situacao)).reduce((s, r) => s + Number(r.taxas_mp ?? 0), 0);
+  const total7  = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) >= 0 && diasAte(r.data_vencimento) <= 7).reduce((s, r) => s + Number(r.valor), 0);
+  const total15 = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) >= 0 && diasAte(r.data_vencimento) <= 15).reduce((s, r) => s + Number(r.valor), 0);
+  const total30 = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) >= 0 && diasAte(r.data_vencimento) <= 30).reduce((s, r) => s + Number(r.valor), 0);
 
   const filtradas = useMemo(() => {
-    if (filtro === "vencido") return receber.filter((r) => isVencido(r.data_vencimento, r.situacao));
-    if (filtro === "todos") return receber;
-    return receber.filter((r) => r.situacao === filtro);
-  }, [receber, filtro]);
+    if (filtro === "vencido") return lista.filter(r => isVencido(r.data_vencimento, r.situacao));
+    if (filtro === "todos") return lista;
+    if (filtro === "recebido") return lista.filter(r => isRecebido(r.situacao));
+    return lista.filter(r => r.situacao === filtro);
+  }, [lista, filtro]);
+
+  async function handleNovaConta() {
+    if (!form.descricao.trim() || !form.valor) return;
+    setFormSaving(true);
+    const res = await fetch("/api/financeiro/contas-receber", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        descricao: form.descricao.trim(),
+        valor: Number(form.valor),
+        data_vencimento: form.data_vencimento || undefined,
+        categoria: form.categoria || undefined,
+        obs: form.obs || undefined,
+      }),
+    });
+    setFormSaving(false);
+    if (res.ok) {
+      const nova = await res.json();
+      setLista(prev => [{
+        id: nova.id,
+        descricao: form.descricao.trim(),
+        valor: Number(form.valor),
+        data_vencimento: form.data_vencimento || null,
+        data_recebimento: null,
+        situacao: "pendente",
+        categoria: form.categoria || null,
+        obs: form.obs || null,
+      }, ...prev]);
+      setForm({ descricao: "", valor: "", data_vencimento: "", categoria: "", obs: "" });
+      setShowForm(false);
+    } else {
+      const data = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+      alert(data.error || "Erro ao criar conta a receber");
+    }
+  }
+
+  async function marcarRecebido(id: number) {
+    setActionId(id);
+    const res = await fetch(`/api/financeiro/contas-receber/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ situacao: "pago", data_recebimento: new Date().toISOString().slice(0, 10) }),
+    });
+    if (res.ok) {
+      setLista(prev => prev.map(r => r.id === id ? { ...r, situacao: "pago", data_recebimento: new Date().toISOString().slice(0, 10) } : r));
+    } else {
+      const data = await res.json().catch(() => ({ error: "Erro" }));
+      alert(data.error || "Erro ao marcar como recebido");
+    }
+    setActionId(null);
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Total Contas", value: receber.length },
-          { label: "A Receber", value: fmt(totalPendente), color: "#DB9864" },
-          { label: "Recebido", value: fmt(totalRecebido), color: "#4A9F73" },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="rounded-lg p-3" style={{ backgroundColor: "#0F2922", border: "1px solid #1C3D32" }}>
-            <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "#4A7568" }}>{label}</p>
-            <p className="text-lg font-semibold" style={{ color: color ?? "#F3EADA" }}>{value}</p>
+    <div className="space-y-5">
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard label="Total Vencido" value={fmt(totalVencido)} valueColor={C.vermelho} icon={AlertTriangle} accent={C.vermelho} sub="recebimentos em atraso" />
+        <KpiCard label="Próx. 7 dias"   value={fmt(total7)}  valueColor={C.verde} icon={Calendar} accent={C.verde} />
+        <KpiCard label="Próx. 15 dias"  value={fmt(total15)} valueColor={C.verde} icon={Calendar} accent={C.verde} />
+        <KpiCard label="Próx. 30 dias"  value={fmt(total30)} valueColor={C.verde} icon={Calendar} accent={C.verde} />
+      </div>
+
+      {/* Recebido líquido */}
+      {totalLiquido > 0 && (
+        <div className="rounded-xl bg-white p-4 border flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
+          <div>
+            <p className="text-[11px] uppercase tracking-wider font-medium" style={{ color: C.cinza }}>Já Recebido (líquido)</p>
+            <p className="text-xl font-semibold tabular-nums" style={{ color: C.verde }}>{fmt(totalLiquido)}</p>
           </div>
-        ))}
+          {totalTaxas > 0 && (
+            <div className="text-right">
+              <p className="text-[11px] uppercase tracking-wider font-medium" style={{ color: C.cinza }}>Taxas MP</p>
+              <p className="text-sm tabular-nums" style={{ color: C.ambar }}>−{fmt(totalTaxas)}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Nova conta + filtros */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-90"
+          style={{ backgroundColor: C.esmeralda, color: C.creme }}
+        >
+          {showForm ? <X size={14} /> : <Plus size={14} />}
+          {showForm ? "Cancelar" : "Nova Conta a Receber"}
+        </button>
+
+        <div className="flex gap-1.5 flex-wrap">
+          {["todos", "pendente", "recebido", "cancelado", "vencido"].map(s => (
+            <button
+              key={s}
+              onClick={() => setFiltro(s)}
+              className="text-xs px-3 py-1.5 rounded-full capitalize transition-colors border"
+              style={{
+                backgroundColor: filtro === s ? C.esmeralda : "white",
+                borderColor: filtro === s ? C.esmeralda : C.cremeBorder,
+                color: filtro === s ? C.creme : C.cinza,
+              }}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
-        {["todos", "pendente", "recebido", "cancelado", "vencido"].map((s) => (
+      {/* Form nova conta */}
+      {showForm && (
+        <div className="rounded-xl bg-white p-5 border space-y-3" style={{ borderColor: C.cremeBorder }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Descrição *"><Input value={form.descricao} onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))} /></Field>
+            <Field label="Valor *"><Input type="number" step="0.01" min="0.01" value={form.valor} onChange={e => setForm(f => ({ ...f, valor: e.target.value }))} /></Field>
+            <Field label="Vencimento"><Input type="date" value={form.data_vencimento} onChange={e => setForm(f => ({ ...f, data_vencimento: e.target.value }))} /></Field>
+            <Field label="Categoria"><Input value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value }))} /></Field>
+          </div>
+          <Field label="Observações"><Input value={form.obs} onChange={e => setForm(f => ({ ...f, obs: e.target.value }))} /></Field>
           <button
-            key={s}
-            onClick={() => setFiltro(s)}
-            className="text-[11px] px-3 py-1 rounded-full capitalize transition-colors"
-            style={{
-              backgroundColor: filtro === s ? "#1C3D32" : "transparent",
-              border: "1px solid",
-              borderColor: filtro === s ? "#4A9F73" : "#1C3D32",
-              color: filtro === s ? "#F3EADA" : "#4A7568",
-            }}
+            onClick={handleNovaConta}
+            disabled={formSaving || !form.descricao.trim() || !form.valor}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}
           >
-            {s}
+            {formSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            Salvar
           </button>
-        ))}
-      </div>
+        </div>
+      )}
 
-      <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #1C3D32" }}>
+      {/* Tabela */}
+      <div className="rounded-xl bg-white overflow-hidden border" style={{ borderColor: C.cremeBorder }}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr style={{ backgroundColor: "#0F2922", borderBottom: "1px solid #1C3D32" }}>
-                {["Descrição", "Valor", "Vencimento", "Recebimento", "Situação"].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium" style={{ color: "#4A7568" }}>
+              <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
+                {["Descrição", "Valor", "Vencimento", "Recebimento", "Situação", ""].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-[11px] uppercase tracking-wider font-semibold" style={{ color: C.cinza }}>
                     {h}
                   </th>
                 ))}
@@ -296,23 +997,34 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
             </thead>
             <tbody>
               {filtradas.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-sm" style={{ color: "#4A7568" }}>Nenhuma conta encontrada</td></tr>
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm" style={{ color: C.cinza }}>Nenhuma conta encontrada</td></tr>
               ) : (
-                filtradas.map((r) => (
+                filtradas.map(r => (
                   <ContaRow
                     key={r.id}
                     descricao={r.descricao}
                     valor={r.valor}
+                    valorLiquido={r.valor_liquido}
+                    taxasMp={r.taxas_mp}
                     vencimento={r.data_vencimento}
                     liquidacao={r.data_recebimento}
                     situacao={r.situacao}
                     categoria={r.categoria}
                     vencido={!!isVencido(r.data_vencimento, r.situacao)}
+                    onAction={() => marcarRecebido(r.id)}
+                    actionLabel="Marcar como Recebido"
+                    actionLoading={actionId === r.id}
                   />
                 ))
               )}
             </tbody>
           </table>
+        </div>
+        <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+          <p className="text-xs" style={{ color: C.cinza }}>{filtradas.length} conta(s)</p>
+          <p className="text-xs tabular-nums font-medium" style={{ color: C.verde }}>
+            Total a receber: {fmt(totalPendente)}
+          </p>
         </div>
       </div>
     </div>
@@ -321,9 +1033,103 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
 
 // ─── TabConciliacao ──────────────────────────────────────────────────────────
 
-function TabConciliacao({ extratos, lancamentos }: { extratos: Extrato[]; lancamentos: Lancamento[] }) {
-  const [extratoSel, setExtratoSel] = useState<number | null>(extratos[0]?.id ?? null);
+function TabConciliacao({ extratos: extratosInit, lancamentos: lancamentosInit }: { extratos: Extrato[]; lancamentos: Lancamento[] }) {
+  const [extratosList, setExtratosList] = useState(extratosInit);
+  const [lancamentosList, setLancamentosList] = useState(lancamentosInit);
+  const [extratoSel, setExtratoSel] = useState<number | null>(extratosInit[0]?.id ?? null);
   const [reprocessando, setReprocessando] = useState<number | null>(null);
+
+  const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<{ inseridos: number; duplicados: number } | null>(null);
+  const [uploadError, setUploadError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [sugestoes, setSugestoes] = useState<Array<{
+    lancamento: { id: number; valor: number; descricao: string | null; data_transacao: string | null; tipo: string };
+    tipo_match: string;
+    matches: Array<{ id: number; valor: number; descricao: string | null; fornecedor_nome?: string; cliente_nome?: string }>;
+  }>>([]);
+  const [loadingSugestoes, setLoadingSugestoes] = useState(false);
+  const [confirmandoId, setConfirmandoId] = useState<number | null>(null);
+
+  const carregarSugestoes = useCallback(async () => {
+    setLoadingSugestoes(true);
+    try {
+      const res = await fetch("/api/financeiro/conciliar");
+      if (res.ok) {
+        const data = await res.json();
+        setSugestoes(data.sugestoes ?? []);
+      }
+    } catch (e) { console.error("Erro ao carregar sugestões:", e); }
+    setLoadingSugestoes(false);
+  }, []);
+
+  useEffect(() => { carregarSugestoes(); }, [carregarSugestoes]);
+
+  async function handleUploadOFX(file: File) {
+    if (!file.name.toLowerCase().endsWith(".ofx")) {
+      setUploadError("Apenas arquivos .ofx são aceitos");
+      return;
+    }
+    setUploading(true);
+    setUploadResult(null);
+    setUploadError("");
+    const fd = new FormData();
+    fd.append("arquivo", file);
+    try {
+      const res = await fetch("/api/financeiro/upload-ofx", { method: "POST", body: fd });
+      const data = await res.json();
+      if (res.ok) {
+        setUploadResult({ inseridos: data.inseridos, duplicados: data.duplicados });
+        const [eRes, lRes] = await Promise.all([
+          fetch("/api/financeiro/extratos"),
+          fetch("/api/financeiro/lancamentos"),
+        ]);
+        if (eRes.ok) { const e = await eRes.json(); setExtratosList(e); }
+        if (lRes.ok) { const l = await lRes.json(); setLancamentosList(l); }
+        carregarSugestoes();
+      } else {
+        setUploadError(data.error ?? "Erro ao processar OFX");
+      }
+    } catch {
+      setUploadError("Falha no upload");
+    }
+    setUploading(false);
+    setTimeout(() => { setUploadResult(null); setUploadError(""); }, 6000);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleUploadOFX(file);
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) handleUploadOFX(file);
+    e.target.value = "";
+  }
+
+  async function confirmarConciliacao(lancamentoId: number, match: { id: number }, tipoMatch: string) {
+    setConfirmandoId(lancamentoId);
+    const body: Record<string, number> = { lancamento_id: lancamentoId };
+    if (tipoMatch === "conta_pagar") body.conta_pagar_id = match.id;
+    else body.conta_receber_id = match.id;
+    try {
+      const res = await fetch("/api/financeiro/conciliar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setSugestoes(prev => prev.filter(s => s.lancamento.id !== lancamentoId));
+        setLancamentosList(prev => prev.map(l => l.id === lancamentoId ? { ...l, conciliado: true } : l));
+      }
+    } catch { /* silenciar */ }
+    setConfirmandoId(null);
+  }
 
   async function handleReprocessar(extratoId: number) {
     setReprocessando(extratoId);
@@ -331,62 +1137,160 @@ function TabConciliacao({ extratos, lancamentos }: { extratos: Extrato[]; lancam
     setReprocessando(null);
   }
 
+  const lancamentos = lancamentosList;
+  const extratos = extratosList;
+
   const lançamentosFiltrados = useMemo(
-    () => (extratoSel ? lancamentos.filter((l) => l.extrato_id === extratoSel) : lancamentos),
+    () => (extratoSel ? lancamentos.filter(l => l.extrato_id === extratoSel) : lancamentos),
     [lancamentos, extratoSel]
   );
 
-  const totalC = lançamentosFiltrados.filter((l) => l.tipo === "C").reduce((s, l) => s + Number(l.valor), 0);
-  const totalD = lançamentosFiltrados.filter((l) => l.tipo === "D").reduce((s, l) => s + Number(l.valor), 0);
-  const conciliados = lançamentosFiltrados.filter((l) => l.conciliado).length;
+  const totalC = lançamentosFiltrados.filter(l => l.tipo === "C").reduce((s, l) => s + Number(l.valor), 0);
+  const totalD = lançamentosFiltrados.filter(l => l.tipo === "D").reduce((s, l) => s + Number(l.valor), 0);
+  const conciliados = lançamentosFiltrados.filter(l => l.conciliado).length;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      {/* Upload OFX */}
+      <div>
+        <p className="text-sm font-semibold mb-2" style={{ color: "#1A1A1A" }}>Importar Extrato OFX</p>
+        <div
+          onDragOver={e => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className="rounded-xl p-8 text-center cursor-pointer transition-colors bg-white"
+          style={{
+            backgroundColor: dragging ? C.esmeraldaLt : "white",
+            border: `2px dashed ${dragging ? C.esmeralda : C.cremeBorder}`,
+          }}
+        >
+          <input ref={fileInputRef} type="file" accept=".ofx" onChange={handleFileSelect} className="hidden" />
+          {uploading ? (
+            <div className="flex items-center justify-center gap-2">
+              <Loader2 size={18} className="animate-spin" style={{ color: C.esmeralda }} />
+              <p className="text-sm" style={{ color: C.cinza }}>Processando arquivo...</p>
+            </div>
+          ) : (
+            <>
+              <FileUp size={28} className="mx-auto mb-2" style={{ color: C.cinza }} />
+              <p className="text-sm font-medium" style={{ color: "#374151" }}>
+                Arraste um arquivo .ofx ou clique para selecionar
+              </p>
+            </>
+          )}
+        </div>
+        {uploadResult && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: C.verdeLt, color: C.verde }}>
+            <CheckCircle size={13} /> {uploadResult.inseridos} inseridos, {uploadResult.duplicados} duplicados
+          </div>
+        )}
+        {uploadError && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>
+            <AlertTriangle size={13} /> {uploadError}
+          </div>
+        )}
+      </div>
+
+      {/* Sugestões de conciliação */}
+      {sugestoes.length > 0 && (
+        <div>
+          <p className="text-sm font-semibold mb-2" style={{ color: "#1A1A1A" }}>
+            Sugestões de Conciliação ({sugestoes.length})
+          </p>
+          <div className="space-y-2">
+            {sugestoes.map(s => (
+              <div key={s.lancamento.id} className="rounded-xl bg-white p-4 border" style={{ borderColor: C.cremeBorder }}>
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span
+                        className="text-[10px] px-2 py-0.5 rounded font-semibold"
+                        style={{
+                          backgroundColor: s.lancamento.tipo === "C" ? C.verdeLt : C.vermelhoLt,
+                          color: s.lancamento.tipo === "C" ? C.verde : C.vermelho,
+                        }}
+                      >
+                        {s.lancamento.tipo === "C" ? "Entrada" : "Saída"}
+                      </span>
+                      <span className="text-sm font-semibold tabular-nums" style={{ color: "#1A1A1A" }}>{fmt(s.lancamento.valor)}</span>
+                      <span className="text-xs" style={{ color: C.cinza }}>{fmtDate(s.lancamento.data_transacao)}</span>
+                    </div>
+                    <p className="text-sm truncate" style={{ color: "#374151" }}>{s.lancamento.descricao ?? "Sem descrição"}</p>
+                  </div>
+                  <Link2 size={14} style={{ color: C.cinza }} />
+                </div>
+                <div className="space-y-1.5">
+                  {s.matches.map(m => (
+                    <div key={m.id} className="flex items-center justify-between gap-2 rounded-lg px-3 py-2" style={{ backgroundColor: C.cremeBg }}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs truncate font-medium" style={{ color: "#374151" }}>
+                          {m.descricao ?? (s.tipo_match === "conta_pagar" ? (m as Record<string, unknown>).fornecedor_nome as string : (m as Record<string, unknown>).cliente_nome as string) ?? "—"}
+                        </p>
+                        <p className="text-[11px] tabular-nums" style={{ color: C.cinza }}>{fmt(m.valor)}</p>
+                      </div>
+                      <button
+                        onClick={() => confirmarConciliacao(s.lancamento.id, m, s.tipo_match)}
+                        disabled={confirmandoId === s.lancamento.id}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-30 transition-opacity inline-flex items-center gap-1 whitespace-nowrap"
+                        style={{ backgroundColor: C.verde, color: "white" }}
+                      >
+                        {confirmandoId === s.lancamento.id ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />}
+                        Confirmar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {loadingSugestoes && (
+        <div className="flex items-center gap-2 text-xs" style={{ color: C.cinza }}>
+          <Loader2 size={12} className="animate-spin" /> Carregando sugestões...
+        </div>
+      )}
+
       {/* Extratos */}
       <div>
-        <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#4A7568" }}>
-          Extratos OFX importados
-        </p>
+        <p className="text-sm font-semibold mb-2" style={{ color: "#1A1A1A" }}>Extratos importados</p>
         {extratos.length === 0 ? (
-          <div
-            className="rounded-xl p-6 text-center"
-            style={{ backgroundColor: "#0F2922", border: "1px dashed #1C3D32" }}
-          >
-            <FileUp size={24} className="mx-auto mb-2" style={{ color: "#4A7568" }} />
-            <p className="text-sm" style={{ color: "#4A7568" }}>
-              Nenhum extrato importado. O n8n enviará extratos OFX automaticamente.
+          <div className="rounded-xl bg-white p-6 text-center border border-dashed" style={{ borderColor: C.cremeBorder }}>
+            <FileUp size={24} className="mx-auto mb-2" style={{ color: C.cinza }} />
+            <p className="text-sm" style={{ color: C.cinza }}>
+              Nenhum extrato importado. Arraste um arquivo .ofx acima.
             </p>
           </div>
         ) : (
           <div className="flex gap-2 flex-wrap">
-            {extratos.map((e) => (
+            {extratos.map(e => (
               <button
                 key={e.id}
                 onClick={() => setExtratoSel(e.id)}
-                className="rounded-lg px-3 py-2 text-left transition-colors"
+                className="rounded-lg px-3 py-2 text-left transition-colors bg-white border"
                 style={{
-                  backgroundColor: extratoSel === e.id ? "#1C3D32" : "#0F2922",
-                  border: `1px solid ${extratoSel === e.id ? "#4A9F73" : "#1C3D32"}`,
+                  borderColor: extratoSel === e.id ? C.esmeralda : C.cremeBorder,
+                  backgroundColor: extratoSel === e.id ? C.esmeraldaLt : "white",
                 }}
               >
                 <div className="flex items-center gap-2 mb-0.5">
-                  <Landmark size={11} style={{ color: "#80A795" }} />
-                  <span className="text-xs font-medium" style={{ color: "#F3EADA" }}>
+                  <Landmark size={12} style={{ color: C.esmeralda }} />
+                  <span className="text-xs font-medium" style={{ color: "#1A1A1A" }}>
                     {e.banco ?? "Banco"} — #{e.id}
                   </span>
-                  {e.processado && (
-                    <CheckCircle size={10} style={{ color: "#4A9F73" }} />
-                  )}
+                  {e.processado && <CheckCircle size={11} style={{ color: C.verde }} />}
                 </div>
-                <p className="text-[10px]" style={{ color: "#4A7568" }}>
+                <p className="text-[10px]" style={{ color: C.cinza }}>
                   {e.total_lancamentos} lançamentos · {fmtDate(e.data_inicio)}
                   {e.data_fim ? ` – ${fmtDate(e.data_fim)}` : ""}
                 </p>
                 <button
-                  onClick={(ev) => { ev.stopPropagation(); handleReprocessar(e.id); }}
+                  onClick={ev => { ev.stopPropagation(); handleReprocessar(e.id); }}
                   disabled={reprocessando === e.id}
-                  className="mt-1.5 text-[10px] flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity disabled:opacity-30"
-                  style={{ color: "#80A795" }}
+                  className="mt-1.5 text-[10px] flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity disabled:opacity-30"
+                  style={{ color: C.esmeralda }}
                 >
                   <RefreshCw size={9} className={reprocessando === e.id ? "animate-spin" : ""} />
                   {reprocessando === e.id ? "Enviando..." : "Reprocessar"}
@@ -397,69 +1301,54 @@ function TabConciliacao({ extratos, lancamentos }: { extratos: Extrato[]; lancam
         )}
       </div>
 
-      {/* Mini stats extrato selecionado */}
+      {/* Mini stats extrato */}
       {extratoSel && lançamentosFiltrados.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: "Lançamentos", value: lançamentosFiltrados.length },
-            { label: "Entradas (C)", value: fmt(totalC), color: "#4A9F73" },
-            { label: "Saídas (D)", value: fmt(totalD), color: "#E05C5C" },
-            { label: "Conciliados", value: conciliados, color: conciliados > 0 ? "#4A9F73" : "#4A7568" },
-          ].map(({ label, value, color }) => (
-            <div key={label} className="rounded-lg p-3" style={{ backgroundColor: "#0F2922", border: "1px solid #1C3D32" }}>
-              <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "#4A7568" }}>{label}</p>
-              <p className="text-base font-semibold" style={{ color: color ?? "#F3EADA" }}>{value}</p>
-            </div>
-          ))}
+          <KpiCard label="Lançamentos" value={lançamentosFiltrados.length} />
+          <KpiCard label="Entradas (C)" value={fmt(totalC)} valueColor={C.verde} />
+          <KpiCard label="Saídas (D)" value={fmt(totalD)} valueColor={C.vermelho} />
+          <KpiCard label="Conciliados" value={conciliados} valueColor={conciliados > 0 ? C.verde : C.cinza} />
         </div>
       )}
 
       {/* Tabela lançamentos */}
       {lançamentosFiltrados.length > 0 && (
-        <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #1C3D32" }}>
+        <div className="rounded-xl bg-white overflow-hidden border" style={{ borderColor: C.cremeBorder }}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ backgroundColor: "#0F2922", borderBottom: "1px solid #1C3D32" }}>
-                  {["Data", "Tipo", "Valor", "Descrição", "FITID", "Conciliado"].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium" style={{ color: "#4A7568" }}>
+                <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
+                  {["Data", "Tipo", "Valor", "Descrição", "FITID", "Conciliado"].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-[11px] uppercase tracking-wider font-semibold" style={{ color: C.cinza }}>
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {lançamentosFiltrados.map((l) => (
-                  <tr key={l.id} style={{ borderBottom: "1px solid #0F2922" }} className="hover:bg-[#0F2922]/40 transition-colors">
-                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#80A795" }}>
-                      {fmtDate(l.data_transacao)}
-                    </td>
+                {lançamentosFiltrados.map(l => (
+                  <tr key={l.id} className="hover:bg-stone-50 transition-colors border-b" style={{ borderColor: C.cremeBorder }}>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#374151" }}>{fmtDate(l.data_transacao)}</td>
                     <td className="px-4 py-3">
                       <span
-                        className="text-[10px] px-2 py-0.5 rounded font-bold"
+                        className="text-[10px] px-2 py-0.5 rounded font-semibold"
                         style={{
-                          backgroundColor: l.tipo === "C" ? "#4A9F7322" : "#E05C5C22",
-                          color: l.tipo === "C" ? "#4A9F73" : "#E05C5C",
+                          backgroundColor: l.tipo === "C" ? C.verdeLt : C.vermelhoLt,
+                          color: l.tipo === "C" ? C.verde : C.vermelho,
                         }}
                       >
                         {l.tipo === "C" ? "↑ Entrada" : "↓ Saída"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-medium whitespace-nowrap" style={{ color: l.tipo === "C" ? "#4A9F73" : "#E05C5C" }}>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold whitespace-nowrap" style={{ color: l.tipo === "C" ? C.verde : C.vermelho }}>
                       {fmt(Number(l.valor))}
                     </td>
-                    <td className="px-4 py-3 max-w-[200px] truncate text-sm" style={{ color: "#F3EADA" }}>
-                      {l.descricao ?? l.memo ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-[10px]" style={{ color: "#4A7568" }}>
-                      {l.fitid ?? "—"}
-                    </td>
+                    <td className="px-4 py-3 max-w-[240px] truncate text-sm" style={{ color: "#374151" }}>{l.descricao ?? l.memo ?? "—"}</td>
+                    <td className="px-4 py-3 font-mono text-[10px]" style={{ color: C.cinza }}>{l.fitid ?? "—"}</td>
                     <td className="px-4 py-3 text-center">
-                      {l.conciliado ? (
-                        <CheckCircle size={14} style={{ color: "#4A9F73" }} className="mx-auto" />
-                      ) : (
-                        <RefreshCw size={12} style={{ color: "#4A7568" }} className="mx-auto" />
-                      )}
+                      {l.conciliado
+                        ? <CheckCircle size={14} style={{ color: C.verde }} className="mx-auto" />
+                        : <RefreshCw size={12} style={{ color: C.cinza }} className="mx-auto" />}
                     </td>
                   </tr>
                 ))}
@@ -472,70 +1361,88 @@ function TabConciliacao({ extratos, lancamentos }: { extratos: Extrato[]; lancam
   );
 }
 
+// ─── Field + Input helpers ────────────────────────────────────────────────────
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="text-xs font-medium block mb-1" style={{ color: "#374151" }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={`w-full rounded-lg bg-white px-3 py-2 text-sm outline-none border ${props.className ?? ""}`}
+      style={{ borderColor: C.cremeBorder, color: "#374151", ...(props.style ?? {}) }}
+    />
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-type Tab = "pagar" | "receber" | "conciliacao";
+type Tab = "pagar" | "receber";
 
 export default function FinanceiroClient({ pagar, receber, extratos, lancamentos }: Props) {
   const [tab, setTab] = useState<Tab>("pagar");
 
-  const totalPagar = pagar.filter((p) => p.situacao === "pendente").reduce((s, p) => s + Number(p.valor), 0);
-  const totalReceber = receber.filter((r) => r.situacao === "pendente").reduce((s, r) => s + Number(r.valor), 0);
+  const totalPagar   = pagar.filter(p => p.situacao === "pendente").reduce((s, p) => s + Number(p.valor), 0);
+  const totalReceber = receber.filter(r => r.situacao === "pendente").reduce((s, r) => s + Number(r.valor), 0);
+  const saldoLiquido = totalReceber - totalPagar;
 
-  const tabs: { key: Tab; label: string; icon: React.ElementType; badge?: string }[] = [
-    { key: "pagar",       label: "Contas a Pagar",   icon: ArrowUpCircle,   badge: pagar.filter((p) => p.situacao === "pendente").length > 0 ? String(pagar.filter((p) => p.situacao === "pendente").length) : undefined },
-    { key: "receber",     label: "Contas a Receber", icon: ArrowDownCircle, badge: receber.filter((r) => r.situacao === "pendente").length > 0 ? String(receber.filter((r) => r.situacao === "pendente").length) : undefined },
-    { key: "conciliacao", label: "Conciliação OFX",  icon: RefreshCw },
+  const tabs: { key: Tab; label: string; icon: any; badge?: string }[] = [
+    { key: "pagar",   label: "Contas a Pagar",   icon: ArrowUpCircle,   badge: pagar.filter(p => p.situacao === "pendente").length > 0 ? String(pagar.filter(p => p.situacao === "pendente").length) : undefined },
+    { key: "receber", label: "Contas a Receber", icon: ArrowDownCircle, badge: receber.filter(r => r.situacao === "pendente").length > 0 ? String(receber.filter(r => r.situacao === "pendente").length) : undefined },
   ];
 
   return (
-    <div className="p-3 md:p-6 space-y-4 md:space-y-5">
+    <div className="px-3 md:px-6 py-4 md:py-6 max-w-6xl mx-auto space-y-5">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1
-            className="text-xl font-semibold tracking-wide"
-            style={{ fontFamily: "var(--font-playfair)", color: "#F3EADA" }}
-          >
-            Financeiro
-          </h1>
-          <p className="text-xs mt-0.5" style={{ color: "#80A795" }}>
-            Contas a Pagar / Receber · Conciliação Bancária
-          </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-1 h-7 rounded-full" style={{ backgroundColor: C.esmeralda }} />
+          <div>
+            <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-playfair)", color: "#1A1A1A" }}>
+              Financeiro
+            </h1>
+            <p className="text-xs mt-0.5" style={{ color: C.cinza }}>
+              Contas a Pagar / Receber · Conciliação Bancária
+            </p>
+          </div>
         </div>
-        {/* Saldo líquido */}
-        <div className="text-right">
-          <p className="text-[10px] uppercase tracking-widest" style={{ color: "#4A7568" }}>Saldo Líquido Pendente</p>
-          <p
-            className="text-xl font-semibold tabular-nums"
-            style={{ color: totalReceber - totalPagar >= 0 ? "#4A9F73" : "#E05C5C" }}
-          >
-            {fmt(totalReceber - totalPagar)}
+        <div className="rounded-xl bg-white px-4 py-3 border" style={{ borderColor: C.cremeBorder }}>
+          <p className="text-[10px] uppercase tracking-wider font-medium" style={{ color: C.cinza }}>Saldo Líquido Pendente</p>
+          <p className="text-xl font-bold tabular-nums" style={{ color: saldoLiquido >= 0 ? C.verde : C.vermelho }}>
+            {fmt(saldoLiquido)}
           </p>
         </div>
       </div>
 
+      {/* Gráfico evolução */}
+      <EvolucaoMensal pagar={pagar} receber={receber} />
+
       {/* Tabs */}
-      <div
-        className="flex gap-1 rounded-xl p-1"
-        style={{ backgroundColor: "#0F2922", border: "1px solid #1C3D32" }}
-      >
+      <div className="flex gap-1 rounded-xl p-1 border" style={{ backgroundColor: C.cremeBg, borderColor: C.cremeBorder }}>
         {tabs.map(({ key, label, icon: Icon, badge }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
-            className="flex-1 flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
             style={{
-              backgroundColor: tab === key ? "#1C3D32" : "transparent",
-              color: tab === key ? "#F3EADA" : "#4A7568",
+              backgroundColor: tab === key ? C.esmeralda : "transparent",
+              color: tab === key ? C.creme : C.cinza,
             }}
           >
             <Icon size={14} strokeWidth={1.75} />
             <span className="hidden sm:inline">{label}</span>
             {badge && (
               <span
-                className="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
-                style={{ backgroundColor: "#DB986422", color: "#DB9864" }}
+                className="text-[10px] px-1.5 py-0.5 rounded-full font-bold"
+                style={{
+                  backgroundColor: tab === key ? C.creme : C.ambarLt,
+                  color: tab === key ? C.esmeralda : C.ambar,
+                }}
               >
                 {badge}
               </span>
@@ -544,10 +1451,9 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
         ))}
       </div>
 
-      {/* Tab content */}
+      {/* Content */}
       {tab === "pagar" && <TabPagar pagar={pagar} />}
       {tab === "receber" && <TabReceber receber={receber} />}
-      {tab === "conciliacao" && <TabConciliacao extratos={extratos} lancamentos={lancamentos} />}
     </div>
   );
 }

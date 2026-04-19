@@ -10,11 +10,26 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const busca = req.nextUrl.searchParams.get("busca")?.trim() ?? "";
+  const cpf = req.nextUrl.searchParams.get("cpf")?.trim() ?? "";
+
+  // Busca por CPF
+  if (cpf.length >= 6) {
+    const contatos = await sql`
+      SELECT id_contato, nome, telefone, email, cpf_cnpj
+      FROM public.contatos
+      WHERE cpf_cnpj ILIKE ${`%${cpf.replace(/\D/g, "")}%`}
+      ORDER BY nome
+      LIMIT 10
+    `;
+    return NextResponse.json(contatos);
+  }
+
+  // Busca por nome/telefone
   if (busca.length < 2) return NextResponse.json([]);
 
   const termo = `%${busca}%`;
   const contatos = await sql`
-    SELECT id_contato, nome, telefone, email
+    SELECT id_contato, nome, telefone, email, cpf_cnpj
     FROM public.contatos
     WHERE nome ILIKE ${termo}
        OR telefone ILIKE ${termo}

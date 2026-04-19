@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { uploadFile } from "@/lib/storage";
 
 // GET /api/ordens/[id]/comentarios
 export async function GET(
@@ -14,7 +15,9 @@ export async function GET(
   if (!user)
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const { id: ordemId } = await params;
+  const { id } = await params;
+  const ordemId = parseInt(id);
+  if (isNaN(ordemId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const comentarios = await sql`
     SELECT c.id, c.texto, c.mencoes, c.autor_id, c.editado, c.editado_em, c.created_at,
@@ -22,7 +25,7 @@ export async function GET(
            u.nome AS autor_nome, u.role AS autor_role
     FROM alissonerp.comentarios_ordem c
     JOIN alissonerp.usuarios u ON u.id = c.autor_id
-    WHERE c.ordem_id = ${parseInt(ordemId)} AND (c.excluido = false OR c.excluido IS NULL)
+    WHERE c.ordem_id = ${ordemId} AND (c.excluido = false OR c.excluido IS NULL)
     ORDER BY c.created_at ASC
   `;
 
@@ -41,9 +44,24 @@ export async function POST(
   if (!user)
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const { id: ordemId } = await params;
+  const { id } = await params;
+  const ordemId = parseInt(id);
+  if (isNaN(ordemId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
   const body = await req.json();
-  const { texto, mencoes = [], foto_path = null } = body;
+  const { texto, mencoes = [], foto_path: fotaPathBody = null, foto_base64 = null } = body;
+
+  // Upload server-side se vier foto em base64 (preferencial)
+  let foto_path: string | null = fotaPathBody;
+  if (foto_base64) {
+    const ext = (foto_base64 as string).includes("png") ? "png" : "jpg";
+    const path = `comentarios/${ordemId}/${Date.now()}-${user.id.substring(0, 8)}.${ext}`;
+    const result = await uploadFile("ordem-fotos", path, foto_base64 as string, `image/${ext}`);
+    if ("path" in result) {
+      foto_path = result.path;
+    }
+    // Se upload falhar → segue sem foto (não bloqueia o comentário)
+  }
 
   if (!texto?.trim())
     return NextResponse.json({ error: "Texto obrigatório" }, { status: 400 });
@@ -57,29 +75,49 @@ export async function POST(
       { status: 404 }
     );
 
+  // ── Fecha menções pendentes do autor nesta ordem ─────────────────────────
+  // Regra: qualquer comentário do usuário na ordem silencia TODAS as menções
+  // tipo='mencao' que estavam aguardando resposta dele naquela ordem.
+  // Rodamos ANTES do INSERT do novo comentário para não fechar menções que
+  // possam vir a ser criadas no mesmo POST (edge case de auto-menção, já
+  // ignorado no loop abaixo).
+  await sql`
+    UPDATE alissonerp.notificacoes
+    SET aguardando_resposta = false,
+        respondida_em = NOW()
+    WHERE usuario_id = ${user.id}::uuid
+      AND ordem_id   = ${ordemId}
+      AND tipo       = 'mencao'
+      AND aguardando_resposta = true
+  `;
+
   const [comentario] = await sql`
     INSERT INTO alissonerp.comentarios_ordem (ordem_id, autor_id, texto, mencoes, foto_path)
-    VALUES (${parseInt(ordemId)}, ${user.id}::uuid, ${texto}, ${mencoes}::uuid[], ${foto_path ?? null})
+    VALUES (${ordemId}, ${user.id}::uuid, ${texto}, ${mencoes}::uuid[], ${foto_path ?? null})
     RETURNING id, created_at
   `;
 
   const [ordem] = await sql`
-    SELECT numero_ordem FROM alissonerp.ordens WHERE id = ${parseInt(ordemId)}
+    SELECT numero_ordem FROM alissonerp.ordens WHERE id = ${ordemId}
   `;
 
   for (const mencionadoId of mencoes) {
     if (mencionadoId === user.id) continue;
     await sql`
-      INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, link, ordem_id, comentario_id, remetente_id)
+      INSERT INTO alissonerp.notificacoes (
+        usuario_id, tipo, titulo, mensagem, link, ordem_id, comentario_id, remetente_id,
+        aguardando_resposta
+      )
       VALUES (
         ${mencionadoId}::uuid,
         'mencao',
         ${`@${autor.nome} mencionou você na ${ordem?.numero_ordem ?? ordemId}`},
         ${texto.substring(0, 100)},
         ${`/ordens/${ordemId}`},
-        ${parseInt(ordemId)},
+        ${ordemId},
         ${comentario.id},
-        ${user.id}::uuid
+        ${user.id}::uuid,
+        true
       )
     `;
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import {
   TrendingUp,
   Gem,
@@ -21,8 +21,23 @@ import {
   Send,
   Download,
   BarChart2,
+  ChevronDown,
+  ChevronRight,
+  PlayCircle,
 } from "lucide-react";
 import type { FaixaPedra } from "./page";
+import {
+  getPricingFactors,
+  prepareCategories,
+  getCategoryPoints,
+  getLimitPrice,
+  calcularPrecoSync,
+  calcularCustoBase,
+  type CurvaConfig,
+  type CurvaCategoriaInput,
+  type CurvaCategoriaPreparada,
+  type PontoCategoriaChip,
+} from "@/lib/curva-precificacao";
 
 // ─── Paleta ────────────────────────────────────────────────────────────────────
 const P = {
@@ -52,11 +67,6 @@ interface Config {
   preco_limiar_subir: string;
   preco_limiar_descer: string;
   preco_arredondamento: string;
-}
-
-interface CategoriaOuro {
-  id: number;
-  [key: string]: unknown;
 }
 
 interface SimulacaoItem {
@@ -126,6 +136,8 @@ interface Props {
   cotacaoInicial: Cotacao;
   currentUserId: string;
   currentUserRole: string;
+  curvaConfigInicial: CurvaConfig | null;
+  curvaCategoriasInicial: CurvaCategoriaInput[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1075,167 +1087,681 @@ function TabPendentes({
   );
 }
 
-// ─── ABA 1: Markup Ouro ───────────────────────────────────────────────────────
-function TabMarkupOuro({ onAbrirSimulacao }: {
-  onAbrirSimulacao: (cat: CategoriaOuro) => void;
+// ─── ABA 1: Curva Dinâmica de Precificação ────────────────────────────────────
+function TabCurvaDinamica({
+  configInicial,
+  categoriasInicial,
+  cotacaoOuro,
+  canEdit,
+}: {
+  configInicial: CurvaConfig | null;
+  categoriasInicial: CurvaCategoriaInput[];
+  cotacaoOuro: number;
+  canEdit: boolean;
 }) {
-  const [categorias, setCategorias] = useState<CategoriaOuro[]>([]);
-  const [totalMap, setTotalMap] = useState<Record<string, number>>({});
-  const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
+  const defaultConfig: CurvaConfig = configInicial ?? {
+    startMkp: 5,
+    startCommission: 8,
+    goldCostPercentage: 100,
+    sucataCompraMinPct: 80,
+    sucataCompraMaxPct: 85,
+    arredondamento: "dezena",
+  };
+  const [config, setConfig] = useState<CurvaConfig>(defaultConfig);
+  const [categorias, setCategorias] = useState<CurvaCategoriaInput[]>(categoriasInicial);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; tipo: "ok" | "erro" } | null>(null);
+  const [pesoSim, setPesoSim] = useState<string>("2.0");
+  const [mkpManual, setMkpManual] = useState<string>("");
+  const [simCategoryIdx, setSimCategoryIdx] = useState<string>(""); // "" = automático
+  const [expandido, setExpandido] = useState<number | null>(null);
+  const [modalAplicar, setModalAplicar] = useState<null | { carregando: boolean; preview?: CurvaPreviewStats }>(null);
+  const [aplicando, setAplicando] = useState(false);
+  const [adicionandoCat, setAdicionandoCat] = useState(false);
 
-  const carregar = useCallback(async () => {
-    setLoading(true);
-    setErro(null);
+  function showToast(msg: string, tipo: "ok" | "erro") {
+    setToast({ msg, tipo });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  // Targets acumulados por categoria
+  const categoriasPreparadas = useMemo<CurvaCategoriaPreparada[]>(
+    () => prepareCategories(config, categorias),
+    [config, categorias],
+  );
+
+  const pesoNum = parseFloat(pesoSim.replace(",", ".")) || 0;
+  const mkpManualNum = parseFloat(mkpManual.replace(",", ".")) || 0;
+
+  // Fatores para o simulador: automático (interpolado) ou categoria fixada
+  const simFactors = useMemo(() => {
+    if (pesoNum <= 0 || cotacaoOuro <= 0) return null;
+    if (simCategoryIdx === "") {
+      return getPricingFactors(pesoNum, config, categorias);
+    }
+    const idx = parseInt(simCategoryIdx);
+    const cat = categoriasPreparadas[idx];
+    if (!cat) return null;
+    return {
+      mkp: cat.targetMkp,
+      commission: cat.targetComm,
+      maxDiscount: cat.maxDiscount,
+      categoriaId: cat.id,
+      categoriaNome: cat.nome,
+    };
+  }, [pesoNum, cotacaoOuro, simCategoryIdx, config, categorias, categoriasPreparadas]);
+
+  const custo = useMemo(() => {
+    if (pesoNum <= 0 || cotacaoOuro <= 0) return null;
+    return calcularCustoBase(pesoNum, cotacaoOuro, config.goldCostPercentage);
+  }, [pesoNum, cotacaoOuro, config.goldCostPercentage]);
+
+  const simVenda = useMemo(() => {
+    if (!simFactors || pesoNum <= 0 || cotacaoOuro <= 0) return null;
+    return calcularPrecoSync(pesoNum, cotacaoOuro, simFactors.mkp, config.arredondamento);
+  }, [simFactors, pesoNum, cotacaoOuro, config.arredondamento]);
+
+  const vendaManual = useMemo(() => {
+    if (mkpManualNum <= 0 || pesoNum <= 0 || cotacaoOuro <= 0) return null;
+    return calcularPrecoSync(pesoNum, cotacaoOuro, mkpManualNum, config.arredondamento);
+  }, [mkpManualNum, pesoNum, cotacaoOuro, config.arredondamento]);
+
+  // ─── Handlers ───
+  function updateConfig<K extends keyof CurvaConfig>(key: K, value: CurvaConfig[K]) {
+    if (!canEdit) return;
+    setConfig((c) => ({ ...c, [key]: value }));
+    setDirty(true);
+  }
+
+  function updateCategoria(id: number, patch: Partial<CurvaCategoriaInput>) {
+    if (!canEdit) return;
+    setCategorias((cats) => cats.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    setDirty(true);
+  }
+
+  async function novaCategoria() {
+    if (!canEdit) return;
+    setAdicionandoCat(true);
     try {
-      const r = await fetch("/api/precificacao/markup-ouro");
-      if (!r.ok) throw new Error("Erro ao carregar");
+      const sorted = [...categorias].sort((a, b) => a.ordem - b.ordem);
+      const last = sorted.at(-1);
+      const newOrdem = last ? last.ordem + 1 : 1;
+      const newMaxWeight = last ? Math.round((last.maxWeight + 10) * 10) / 10 : 10;
+      const body = {
+        nome: `Categoria ${newOrdem}`,
+        max_weight: newMaxWeight,
+        variation: 0.1,
+        comm_variation: 0.1,
+        max_discount: 5,
+        ordem: newOrdem,
+      };
+      const r = await fetch("/api/precificacao/curva/categorias", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       const d = await r.json();
-      setCategorias(d.categorias ?? []);
-      setTotalMap(d.totalMap ?? {});
-      setLoaded(true);
+      if (!r.ok) { showToast(d.error ?? "Erro ao criar categoria", "erro"); return; }
+      setCategorias((cats) => [...cats, d.categoria as CurvaCategoriaInput]);
+      setDirty(true);
     } catch {
-      setErro("Não foi possível carregar as faixas de markup ouro.");
+      showToast("Erro ao criar categoria", "erro");
     } finally {
-      setLoading(false);
+      setAdicionandoCat(false);
     }
-  }, []);
+  }
 
-  useEffect(() => {
-    carregar();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  async function deletarCategoria(id: number) {
+    if (!canEdit) return;
+    if (!confirm("Remover esta categoria da curva?")) return;
+    const r = await fetch(`/api/precificacao/curva/categorias/${id}`, { method: "DELETE" });
+    if (!r.ok) { const d = await r.json(); showToast(d.error ?? "Erro ao remover", "erro"); return; }
+    setCategorias((cats) => cats.filter((c) => c.id !== id));
+    setDirty(true);
+  }
 
-  function getMarkup(cat: CategoriaOuro): number {
-    if (cat.markup != null) return Number(cat.markup);
-    if (cat.curvePoints) {
-      const cp = cat.curvePoints;
-      if (Array.isArray(cp) && cp.length > 0 && (cp[0] as Record<string, unknown>).markup != null) {
-        return Number((cp[0] as Record<string, unknown>).markup);
+  async function salvar() {
+    setSaving(true);
+    try {
+      const rc = await fetch("/api/precificacao/curva/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_mkp: config.startMkp,
+          start_commission: config.startCommission,
+          gold_cost_percentage: config.goldCostPercentage,
+          sucata_compra_min_pct: config.sucataCompraMinPct,
+          sucata_compra_max_pct: config.sucataCompraMaxPct,
+          arredondamento: config.arredondamento,
+        }),
+      });
+      if (!rc.ok) { const d = await rc.json(); showToast(d.error ?? "Erro ao salvar config", "erro"); return; }
+
+      for (const cat of categorias) {
+        const rr = await fetch(`/api/precificacao/curva/categorias/${cat.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            nome: cat.nome,
+            max_weight: cat.maxWeight,
+            variation: cat.variation,
+            comm_variation: cat.commVariation,
+            max_discount: cat.maxDiscount,
+            ativo: cat.ativo,
+          }),
+        });
+        if (!rr.ok) { const d = await rr.json(); showToast(`Erro em "${cat.nome}": ${d.error ?? ""}`, "erro"); return; }
       }
-      if (typeof cp === "object" && cp !== null && "markup" in (cp as object)) {
-        return Number((cp as Record<string, unknown>).markup);
-      }
+      setDirty(false);
+      showToast("Alterações salvas ✓", "ok");
+    } catch {
+      showToast("Erro ao salvar", "erro");
+    } finally {
+      setSaving(false);
     }
-    return 0;
   }
 
-  function getLabel(cat: CategoriaOuro): string {
-    // Coluna real: "categoryName" (tabela legada Directus)
-    return (cat.categoryName ?? cat.nome ?? cat.label ?? cat.descricao ?? `ID ${cat.id}`) as string;
+  async function abrirModalAplicar() {
+    setModalAplicar({ carregando: true });
+    try {
+      const r = await fetch("/api/precificacao/curva/preview-aplicar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config, categorias }),
+      });
+      const d = await r.json();
+      if (!r.ok) { showToast(d.error ?? "Erro ao carregar preview", "erro"); setModalAplicar(null); return; }
+      setModalAplicar({ carregando: false, preview: d.stats });
+    } catch {
+      showToast("Erro ao carregar preview", "erro");
+      setModalAplicar(null);
+    }
   }
 
-  function getPesoRange(cat: CategoriaOuro): string {
-    // Coluna real: "range" — já formatado como "0.1g - 0.5g"
-    if (cat.range != null) return String(cat.range);
-    const min = cat.peso_min ?? cat.pesoMin ?? cat.min;
-    const max = cat.peso_max ?? cat.pesoMax ?? cat.max;
-    if (min != null && max != null) return `${Number(min).toFixed(1)} – ${Number(max).toFixed(1)}g`;
-    return "—";
+  async function confirmarAplicar() {
+    setAplicando(true);
+    try {
+      const r = await fetch("/api/precificacao/curva/aplicar", { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) { showToast(d.error ?? "Erro ao aplicar", "erro"); return; }
+      showToast(`${d.produtos_atualizados} produto(s) atualizado(s) em ${d.elapsed_s}s`, "ok");
+      setModalAplicar(null);
+    } catch {
+      showToast("Erro ao aplicar", "erro");
+    } finally {
+      setAplicando(false);
+    }
   }
+
+  const simLucro = simVenda != null && custo != null ? simVenda - custo : null;
+  const simMargem = simVenda != null && simVenda > 0 && custo != null ? ((simVenda - custo) / simVenda) * 100 : null;
+  const lucroManual = vendaManual != null && custo != null ? vendaManual - custo : null;
+  const margemManual = vendaManual != null && vendaManual > 0 && custo != null ? ((vendaManual - custo) / vendaManual) * 100 : null;
+
+  const simLabel = simCategoryIdx === ""
+    ? "Automático (curva)"
+    : (categoriasPreparadas[parseInt(simCategoryIdx)]?.nome ?? "Categoria");
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      {toast && <Toast msg={toast.msg} tipo={toast.tipo} />}
+
+      <div className="flex items-start justify-between mb-5 gap-3 flex-wrap">
         <div>
           <h2 className="font-semibold text-base" style={{ color: P.text }}>
-            Markup Ouro — Faixas por Peso
+            Curva Dinâmica de Precificação
           </h2>
           <p className="text-xs mt-0.5" style={{ color: P.sage }}>
-            Alterações passam por fluxo de aprovação antes de serem aplicadas
+            MKP e comissão interpolados linearmente entre as faixas. Cotação: <span className="font-mono font-semibold">{fmtBrl(cotacaoOuro)}/g</span>
           </p>
         </div>
-        <button
-          onClick={carregar}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
-          style={{ borderColor: P.border, color: P.sage }}
-        >
-          {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-          Atualizar
-        </button>
+        {canEdit && (
+          <div className="flex gap-2">
+            <button
+              onClick={salvar}
+              disabled={!dirty || saving}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+              style={{ borderColor: P.border, color: dirty ? P.text : P.muted }}
+            >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Salvar Alterações
+            </button>
+            <button
+              onClick={abrirModalAplicar}
+              disabled={dirty || saving}
+              title={dirty ? "Salve antes de aplicar" : "Aplicar curva em todos os produtos"}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ backgroundColor: "#059669" }}
+            >
+              <PlayCircle size={14} />
+              Aplicar em Produtos
+            </button>
+          </div>
+        )}
       </div>
 
-      {erro && (
-        <div
-          className="flex items-center gap-2 p-3 rounded-lg text-sm mb-4"
-          style={{ backgroundColor: "#fef2f2", color: P.vermelho, border: "1px solid #fecaca" }}
-        >
-          <AlertTriangle size={14} />
-          {erro}
+      {/* ── SEÇÃO A: Parâmetros Globais ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <ParamCard label="Markup Inicial" hint="peso = 0.1g" value={config.startMkp} step={0.1} onChange={(v) => updateConfig("startMkp", v)} disabled={!canEdit} suffix="×" />
+        <ParamCard label="Comissão Inicial" hint="peso = 0.1g" value={config.startCommission} step={0.1} onChange={(v) => updateConfig("startCommission", v)} disabled={!canEdit} suffix="%" />
+        <ParamCard label="% Custo Ouro" hint="% da cotação que é custo" value={config.goldCostPercentage} step={1} onChange={(v) => updateConfig("goldCostPercentage", v)} disabled={!canEdit} suffix="%" />
+        <div className="p-4 rounded-2xl shadow-sm" style={{ backgroundColor: P.card, border: `1px solid ${P.border}` }}>
+          <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: P.sage }}>Compra Sucata</div>
+          <div className="text-[11px] mb-2" style={{ color: P.muted }}>% da cotação</div>
+          <div className="flex items-center gap-2">
+            <input type="number" step="0.5" disabled={!canEdit} value={config.sucataCompraMinPct} onChange={(e) => updateConfig("sucataCompraMinPct", Number(e.target.value))} className="w-full rounded-lg px-2 py-1.5 text-sm font-mono outline-none focus:ring-2 disabled:bg-gray-50" style={{ border: `1px solid ${P.border}`, color: P.text }} />
+            <span className="text-xs" style={{ color: P.muted }}>—</span>
+            <input type="number" step="0.5" disabled={!canEdit} value={config.sucataCompraMaxPct} onChange={(e) => updateConfig("sucataCompraMaxPct", Number(e.target.value))} className="w-full rounded-lg px-2 py-1.5 text-sm font-mono outline-none focus:ring-2 disabled:bg-gray-50" style={{ border: `1px solid ${P.border}`, color: P.text }} />
+          </div>
+          <div className="text-[11px] mt-1 font-mono" style={{ color: P.muted }}>
+            = {fmtBrl(cotacaoOuro * config.sucataCompraMinPct / 100)} a {fmtBrl(cotacaoOuro * config.sucataCompraMaxPct / 100)}
+          </div>
         </div>
-      )}
+      </div>
 
-      <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr style={{ backgroundColor: "#f3f4f6" }}>
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Faixa</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Peso</th>
-              <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Markup</th>
-              <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Produtos</th>
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-right" style={{ color: P.muted }}>Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr>
-                <td colSpan={5} className="text-center py-8" style={{ color: P.muted }}>
-                  <Loader2 size={18} className="animate-spin inline-block mr-2" />
-                  Carregando...
-                </td>
+      {/* ── SEÇÃO B: Simulador de Lucratividade ── */}
+      <div className="p-5 rounded-2xl shadow-sm mb-6" style={{ backgroundColor: P.card, border: `1px solid ${P.border}` }}>
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <h3 className="font-semibold text-sm" style={{ color: P.text }}>Simulador de Lucratividade</h3>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="text-xs flex items-center gap-2" style={{ color: P.sage }}>
+              Peso (g)
+              <input
+                type="text"
+                value={pesoSim}
+                onChange={(e) => setPesoSim(e.target.value)}
+                className="w-20 rounded-lg px-2 py-1.5 text-sm font-mono text-right outline-none focus:ring-2"
+                style={{ border: `1px solid ${P.border}`, color: P.text }}
+              />
+            </label>
+            <label className="text-xs flex items-center gap-2" style={{ color: P.sage }}>
+              Modo
+              <select
+                value={simCategoryIdx}
+                onChange={(e) => setSimCategoryIdx(e.target.value)}
+                className="rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2"
+                style={{ border: `1px solid ${P.border}`, color: P.text }}
+              >
+                <option value="">Automático</option>
+                {categoriasPreparadas.map((cat, i) => (
+                  <option key={cat.id} value={String(i)}>{cat.nome}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        {simFactors && custo != null ? (
+          <>
+            <div className="px-4 py-2.5 rounded-xl mb-3 flex items-center justify-between text-sm" style={{ backgroundColor: "#f9fafb", border: `1px solid ${P.border}` }}>
+              <span style={{ color: P.sage }}>
+                Custo Base: <span className="font-mono">{pesoNum.toFixed(2)}g × {fmtBrl(cotacaoOuro)} × {config.goldCostPercentage.toFixed(0)}%</span>
+              </span>
+              <span className="font-mono font-semibold" style={{ color: P.text }}>{fmtBrl(custo)}</span>
+            </div>
+
+            <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ backgroundColor: "#f3f4f6" }}>
+                    <th className="text-left px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Cenário</th>
+                    <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>MKP</th>
+                    <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Comissão</th>
+                    <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Venda</th>
+                    <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Lucro</th>
+                    <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Margem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ borderTop: `1px solid ${P.border}` }}>
+                    <td className="px-3 py-2 font-medium" style={{ color: P.text }}>{simLabel}</td>
+                    <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: P.text }}>{simFactors.mkp.toFixed(3)}×</td>
+                    <td className="px-3 py-2 text-right font-mono" style={{ color: P.sage }}>{simFactors.commission.toFixed(2)}%</td>
+                    <td className="px-3 py-2 text-right font-mono" style={{ color: P.text }}>{simVenda != null ? fmtBrl(simVenda) : "—"}</td>
+                    <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: simLucro != null ? (simLucro > 0 ? "#059669" : "#dc2626") : P.muted }}>
+                      {simLucro != null ? fmtBrl(simLucro) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: simMargem != null ? (simMargem > 0 ? "#059669" : "#dc2626") : P.muted }}>
+                      {simMargem != null ? `${simMargem.toFixed(1)}%` : "—"}
+                    </td>
+                  </tr>
+                  <tr style={{ borderTop: `1px solid ${P.border}`, backgroundColor: "#fafafa" }}>
+                    <td className="px-3 py-2 font-medium" style={{ color: P.text }}>
+                      <span className="flex items-center gap-2">
+                        Manual
+                        <input
+                          type="text"
+                          placeholder="3.0"
+                          value={mkpManual}
+                          onChange={(e) => setMkpManual(e.target.value)}
+                          className="w-16 rounded px-1.5 py-0.5 text-xs font-mono text-right outline-none focus:ring-1"
+                          style={{ border: `1px solid ${P.border}`, color: P.text }}
+                        />
+                        <span className="text-xs font-mono" style={{ color: P.muted }}>×</span>
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono" style={{ color: mkpManualNum > 0 ? P.text : P.muted }}>
+                      {mkpManualNum > 0 ? `${mkpManualNum.toFixed(3)}×` : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono" style={{ color: P.muted }}>—</td>
+                    <td className="px-3 py-2 text-right font-mono" style={{ color: vendaManual != null ? P.text : P.muted }}>
+                      {vendaManual != null ? fmtBrl(vendaManual) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: lucroManual != null ? (lucroManual > 0 ? "#059669" : "#dc2626") : P.muted }}>
+                      {lucroManual != null ? fmtBrl(lucroManual) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: margemManual != null ? (margemManual > 0 ? "#059669" : "#dc2626") : P.muted }}>
+                      {margemManual != null ? `${margemManual.toFixed(1)}%` : "—"}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-center py-4" style={{ color: P.muted }}>Informe um peso válido para simular.</p>
+        )}
+      </div>
+
+      {/* ── SEÇÃO C: Tabela de Categorias ── */}
+      <div className="rounded-2xl overflow-hidden shadow-sm" style={{ backgroundColor: P.card, border: `1px solid ${P.border}` }}>
+        <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${P.border}` }}>
+          <div>
+            <h3 className="font-semibold text-sm" style={{ color: P.text }}>Categorias da Curva</h3>
+            <span className="text-[11px]" style={{ color: P.muted }}>
+              {categoriasPreparadas.length} ativa{categoriasPreparadas.length !== 1 ? "s" : ""} · passo 0.1g / &gt;30g: 1.0g
+            </span>
+          </div>
+          {canEdit && (
+            <button
+              onClick={novaCategoria}
+              disabled={adicionandoCat}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border hover:bg-gray-50 disabled:opacity-50"
+              style={{ borderColor: P.border, color: P.sage }}
+            >
+              {adicionandoCat ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+              Nova Categoria
+            </button>
+          )}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" style={{ minWidth: 780 }}>
+            <thead>
+              <tr style={{ backgroundColor: "#f9fafb" }}>
+                <th className="w-8 px-2 py-2"></th>
+                <th className="w-10 px-2 py-2 text-[11px] font-semibold uppercase tracking-wider text-left" style={{ color: P.muted }}>Ativo</th>
+                <th className="text-left px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Categoria</th>
+                <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Faixa (g)</th>
+                <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Red. MKP (−)</th>
+                <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Red. Com. (−)</th>
+                <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Max Desc. (%)</th>
+                <th className="w-10 px-2 py-2"></th>
               </tr>
-            )}
-            {!loading && loaded && categorias.length === 0 && (
-              <tr>
-                <td colSpan={5} className="text-center py-8 text-sm" style={{ color: P.muted }}>
-                  Nenhuma faixa encontrada.
-                </td>
-              </tr>
-            )}
-            {!loading &&
-              categorias.map((cat, i) => (
-                <tr
-                  key={cat.id}
-                  style={{
-                    backgroundColor: i % 2 === 0 ? P.card : "#fafafa",
-                    borderTop: `1px solid ${P.border}`,
-                  }}
-                >
-                  <td className="px-4 py-3 font-medium" style={{ color: P.text }}>
-                    {getLabel(cat)}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs" style={{ color: P.sage }}>
-                    {getPesoRange(cat)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono font-semibold" style={{ color: P.text }}>
-                    {getMarkup(cat) > 0 ? fmtMarkup(getMarkup(cat)) : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono text-xs" style={{ color: P.muted }}>
-                    {(totalMap[getLabel(cat)] ?? 0).toLocaleString("pt-BR")}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => onAbrirSimulacao(cat)}
-                      title="Simular alteração de markup"
-                      className="px-2 py-1 rounded text-xs font-medium hover:bg-gray-100 transition-colors"
-                      style={{ color: P.sage, border: `1px solid ${P.border}` }}
-                    >
-                      <Pencil size={12} className="inline-block" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {categoriasPreparadas.map((cat, i) => {
+                const prev = i === 0 ? null : categoriasPreparadas[i - 1];
+                const pesoInicio = prev ? prev.maxWeight : 0.1;
+                const expanded = expandido === cat.id;
+                return (
+                  <FragmentRow
+                    key={cat.id}
+                    cat={cat}
+                    pesoInicio={pesoInicio}
+                    expanded={expanded}
+                    toggleExpand={() => setExpandido(expanded ? null : cat.id)}
+                    onPatch={(patch) => updateCategoria(cat.id, patch)}
+                    onDelete={() => deletarCategoria(cat.id)}
+                    canEdit={canEdit}
+                    cotacaoOuro={cotacaoOuro}
+                    config={config}
+                    categoriasPreparadas={categoriasPreparadas}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <p className="flex items-center gap-1.5 mt-3 text-xs" style={{ color: P.muted }}>
         <Info size={12} />
-        Alterações de markup ouro passam por aprovação. O preço atual permanece até aprovação.
+        Altere os parâmetros e clique em "Salvar Alterações". Para recalcular preços dos produtos, use "Aplicar em Produtos".
       </p>
+
+      {/* Modal Aplicar */}
+      {modalAplicar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden" style={{ backgroundColor: P.card, border: `1px solid ${P.border}` }}>
+            <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: `1px solid ${P.border}` }}>
+              <h3 className="font-semibold text-base" style={{ color: P.text }}>Aplicar Curva em Produtos</h3>
+              <button onClick={() => setModalAplicar(null)} disabled={aplicando} style={{ color: P.muted }}><X size={18} /></button>
+            </div>
+            <div className="px-6 py-5">
+              {modalAplicar.carregando ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 size={20} className="animate-spin" style={{ color: P.muted }} />
+                  <span className="ml-2 text-sm" style={{ color: P.sage }}>Calculando impacto...</span>
+                </div>
+              ) : modalAplicar.preview ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <StatBox label="Produtos afetados" value={modalAplicar.preview.produtos_total.toLocaleString("pt-BR")} color={P.text} />
+                    <StatBox label="Variação média" value={`${modalAplicar.preview.variacao_media_pct > 0 ? "+" : ""}${modalAplicar.preview.variacao_media_pct.toFixed(2)}%`} color={modalAplicar.preview.variacao_media_pct > 0 ? "#059669" : modalAplicar.preview.variacao_media_pct < 0 ? "#dc2626" : P.text} />
+                    <StatBox label="Sobem" value={`${modalAplicar.preview.produtos_sobem}`} color="#059669" />
+                    <StatBox label="Descem" value={`${modalAplicar.preview.produtos_descem}`} color="#dc2626" />
+                  </div>
+                  <div className="rounded-lg p-3 text-xs font-mono" style={{ backgroundColor: "#f9fafb", border: `1px solid ${P.border}`, color: P.sage }}>
+                    Min: {modalAplicar.preview.variacao_min_pct.toFixed(2)}% · Max: {modalAplicar.preview.variacao_max_pct.toFixed(2)}% · Sem mudança: {modalAplicar.preview.produtos_sem_mudanca}
+                  </div>
+                  <p className="text-xs mt-3" style={{ color: P.muted }}>
+                    Atualiza markup, comissão e desconto máximo dos produtos ativos. O preço sincronizado é recalculado pelo trigger do banco.
+                  </p>
+                </>
+              ) : null}
+            </div>
+            <div className="flex gap-2 px-6 pb-5">
+              <button onClick={() => setModalAplicar(null)} disabled={aplicando} className="flex-1 px-4 py-2 rounded-xl text-sm border hover:bg-gray-50 disabled:opacity-50" style={{ borderColor: P.border, color: P.sage }}>
+                Cancelar
+              </button>
+              <button onClick={confirmarAplicar} disabled={aplicando || modalAplicar.carregando} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50" style={{ backgroundColor: "#059669" }}>
+                {aplicando ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                Confirmar Aplicação
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+// ─── Tipos auxiliares ─────────────────────────────────────────────────────────
+interface CurvaPreviewStats {
+  produtos_total: number;
+  produtos_sobem: number;
+  produtos_descem: number;
+  produtos_sem_mudanca: number;
+  variacao_media_pct: number;
+  variacao_min_pct: number;
+  variacao_max_pct: number;
+}
+
+// ─── Card simples de parâmetro global ─────────────────────────────────────────
+function ParamCard({ label, hint, value, step, onChange, disabled, suffix }: {
+  label: string; hint?: string; value: number; step: number;
+  onChange: (v: number) => void; disabled?: boolean; suffix?: string;
+}) {
+  return (
+    <div className="p-4 rounded-2xl shadow-sm" style={{ backgroundColor: P.card, border: `1px solid ${P.border}` }}>
+      <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: P.sage }}>{label}</div>
+      {hint && <div className="text-[11px] mb-2" style={{ color: P.muted }}>{hint}</div>}
+      <div className="flex items-center gap-1.5">
+        <input type="number" step={step} disabled={disabled} value={value} onChange={(e) => onChange(Number(e.target.value))}
+          className="w-full rounded-lg px-2 py-1.5 text-lg font-mono font-semibold outline-none focus:ring-2 disabled:bg-gray-50"
+          style={{ border: `1px solid ${P.border}`, color: P.text }} />
+        {suffix && <span className="text-sm font-mono" style={{ color: P.sage }}>{suffix}</span>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Box de estatística no modal aplicar ──────────────────────────────────────
+function StatBox({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="rounded-lg p-3" style={{ backgroundColor: "#f9fafb", border: `1px solid ${P.border}` }}>
+      <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: P.muted }}>{label}</div>
+      <div className="text-base font-mono font-semibold" style={{ color }}>{value}</div>
+    </div>
+  );
+}
+
+// ─── Linha da tabela de categorias (com accordion de chips) ───────────────────
+function FragmentRow({
+  cat,
+  pesoInicio,
+  expanded,
+  toggleExpand,
+  onPatch,
+  onDelete,
+  canEdit,
+  cotacaoOuro,
+  config,
+  categoriasPreparadas,
+}: {
+  cat: CurvaCategoriaPreparada;
+  pesoInicio: number;
+  expanded: boolean;
+  toggleExpand: () => void;
+  onPatch: (patch: Partial<CurvaCategoriaInput>) => void;
+  onDelete: () => void;
+  canEdit: boolean;
+  cotacaoOuro: number;
+  config: CurvaConfig;
+  categoriasPreparadas: CurvaCategoriaPreparada[];
+}) {
+  const chips = useMemo<PontoCategoriaChip[]>(() => {
+    if (!expanded || cotacaoOuro <= 0) return [];
+    return getCategoryPoints(cat, categoriasPreparadas, cotacaoOuro, config);
+  }, [expanded, cat, categoriasPreparadas, cotacaoOuro, config]);
+
+  const limitPrice = cotacaoOuro > 0
+    ? getLimitPrice(cat.maxWeight, cotacaoOuro, config, categoriasPreparadas)
+    : null;
+
+  const inputCls = "rounded px-2 py-1 text-sm font-mono text-right outline-none focus:ring-1 disabled:bg-transparent";
+  const inputStyle = (edit: boolean) => ({ border: `1px solid ${edit ? P.border : "transparent"}`, color: P.text });
+
+  return (
+    <>
+      <tr style={{ borderTop: `1px solid ${P.border}`, backgroundColor: cat.ativo ? P.card : "#fafafa" }}>
+        {/* Expand */}
+        <td className="px-2 py-2 text-center">
+          <button onClick={toggleExpand} className="hover:bg-gray-100 rounded p-0.5" style={{ color: P.muted }}>
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </button>
+        </td>
+        {/* Ativo */}
+        <td className="px-2 py-2">
+          <input type="checkbox" checked={cat.ativo} disabled={!canEdit} onChange={(e) => onPatch({ ativo: e.target.checked })} className="w-4 h-4 cursor-pointer disabled:cursor-not-allowed" />
+        </td>
+        {/* Categoria */}
+        <td className="px-3 py-2">
+          <input type="text" value={cat.nome} disabled={!canEdit} onChange={(e) => onPatch({ nome: e.target.value })}
+            className="w-full rounded px-2 py-1 text-sm outline-none focus:ring-1 disabled:bg-transparent"
+            style={inputStyle(canEdit)} />
+          <div className="text-[10px] mt-0.5 font-mono" style={{ color: P.muted }}>
+            {pesoInicio.toFixed(1)}g → {cat.maxWeight.toFixed(1)}g
+          </div>
+        </td>
+        {/* Faixa (g) */}
+        <td className="px-3 py-2 text-right">
+          <input type="number" step="0.1" value={cat.maxWeight} disabled={!canEdit} onChange={(e) => onPatch({ maxWeight: Number(e.target.value) })}
+            className={`w-20 ${inputCls}`} style={inputStyle(canEdit)} />
+          {limitPrice != null && (
+            <div className="text-[10px] mt-0.5 font-mono" style={{ color: P.muted }}>≈ {fmtBrl(limitPrice)}</div>
+          )}
+        </td>
+        {/* Red. MKP */}
+        <td className="px-3 py-2 text-right">
+          <div className="flex items-center justify-end gap-1">
+            <span className="text-xs font-bold" style={{ color: P.vermelho }}>−</span>
+            <input type="number" step="0.05" min="0" value={cat.variation} disabled={!canEdit} onChange={(e) => onPatch({ variation: Number(e.target.value) })}
+              className={`w-16 ${inputCls}`} style={inputStyle(canEdit)} />
+          </div>
+          <div className="text-[10px] mt-0.5 text-right">
+            <span className="font-mono px-1 rounded" style={{ backgroundColor: "#fef3c7", color: "#92400e" }}>
+              = {cat.targetMkp.toFixed(3)}×
+            </span>
+          </div>
+        </td>
+        {/* Red. Com. */}
+        <td className="px-3 py-2 text-right">
+          <div className="flex items-center justify-end gap-1">
+            <span className="text-xs font-bold" style={{ color: P.blue }}>−</span>
+            <input type="number" step="0.05" min="0" value={cat.commVariation} disabled={!canEdit} onChange={(e) => onPatch({ commVariation: Number(e.target.value) })}
+              className={`w-16 ${inputCls}`} style={inputStyle(canEdit)} />
+          </div>
+          <div className="text-[10px] mt-0.5 text-right">
+            <span className="font-mono px-1 rounded" style={{ backgroundColor: "#dbeafe", color: "#1e3a8a" }}>
+              = {cat.targetComm.toFixed(2)}%
+            </span>
+          </div>
+        </td>
+        {/* Max Desc. */}
+        <td className="px-3 py-2 text-right">
+          <input type="number" step="1" min="0" max="100" value={cat.maxDiscount} disabled={!canEdit} onChange={(e) => onPatch({ maxDiscount: Number(e.target.value) })}
+            className={`w-16 ${inputCls}`} style={inputStyle(canEdit)} />
+          <div className="text-[10px] mt-0.5 font-mono text-right" style={{ color: P.muted }}>%</div>
+        </td>
+        {/* Ações */}
+        <td className="px-2 py-2 text-center">
+          {canEdit && (
+            <button onClick={onDelete} className="hover:bg-red-50 rounded p-0.5 transition-colors" style={{ color: "#dc2626" }} title="Remover categoria">
+              <Trash2 size={13} />
+            </button>
+          )}
+        </td>
+      </tr>
+      {expanded && (
+        <tr style={{ backgroundColor: "#f8fafc" }}>
+          <td colSpan={8} className="px-5 py-3">
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>
+                CURVA: {cat.nome}
+              </span>
+              <span className="text-[11px] font-mono" style={{ color: P.sage }}>
+                MKP Alvo: <span style={{ color: "#92400e" }}>{cat.targetMkp.toFixed(3)}×</span>
+                {" · "}
+                Com: <span style={{ color: "#1e3a8a" }}>{cat.targetComm.toFixed(2)}%</span>
+                {" · "}
+                Passo: 0.1g / &gt;30g: 1.0g
+              </span>
+            </div>
+            {chips.length === 0 ? (
+              <p className="text-xs" style={{ color: P.muted }}>Sem pontos para exibir.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {chips.map((pt) => (
+                  <div
+                    key={pt.weight}
+                    className="rounded-lg px-2 py-1 text-[11px] font-mono"
+                    style={{ backgroundColor: "#ffffff", border: `1px solid ${P.border}`, color: P.text }}
+                  >
+                    <span style={{ color: P.sage }}>{pt.weight.toFixed(pt.weight >= 10 ? 1 : 2)}g</span>
+                    {" "}
+                    <span style={{ color: "#92400e" }}>{pt.mkp.toFixed(3)}×</span>
+                    {" · "}
+                    <span style={{ color: P.text }}>{fmtBrl(pt.price)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -1604,8 +2130,9 @@ function TabRegras({ configInicial }: { configInicial: Record<string, string> })
 }
 
 // ─── Componente Principal ──────────────────────────────────────────────────────
-export default function PrecificacaoClient({ faixasPedrasInicial, configInicial, cotacaoInicial, currentUserId, currentUserRole }: Props) {
+export default function PrecificacaoClient({ faixasPedrasInicial, configInicial, cotacaoInicial, currentUserId, currentUserRole, curvaConfigInicial, curvaCategoriasInicial }: Props) {
   const canAprovar = currentUserRole === "desenvolvedor" || currentUserRole === "admin";
+  const canEditCurva = ["admin", "desenvolvedor", "diretor"].includes(currentUserRole);
   const [tab, setTab] = useState<Tab>("markup-ouro");
   const [modal, setModal] = useState<ModalTarget | null>(null);
   const [pendentesCount, setPendentesCount] = useState(0);
@@ -1627,30 +2154,6 @@ export default function PrecificacaoClient({ faixasPedrasInicial, configInicial,
   function handleEnviado() {
     setPendentesCount((n) => n + 1);
     showGlobalToast("Alteração enviada pra aprovação ✓", "ok");
-  }
-
-  function abrirSimulacaoOuro(cat: CategoriaOuro) {
-    // getMarkup é definido em TabMarkupOuro — replicar a mesma lógica aqui
-    // para extrair o markup de curvePoints quando cat.markup não existe
-    let markupAtual = 0;
-    if (cat.markup != null) {
-      markupAtual = Number(cat.markup);
-    } else if (cat.curvePoints) {
-      const cp = cat.curvePoints;
-      if (Array.isArray(cp) && cp.length > 0 && (cp[0] as Record<string, unknown>).markup != null) {
-        markupAtual = Number((cp[0] as Record<string, unknown>).markup);
-      } else if (typeof cp === "object" && cp !== null && "markup" in (cp as object)) {
-        markupAtual = Number((cp as Record<string, unknown>).markup);
-      }
-    }
-    const faixaNome = (cat.categoryName ?? cat.nome ?? cat.label ?? String(cat.id)) as string;
-    setModal({
-      tipo: "ouro",
-      faixa_id: Number(cat.id),
-      faixa_nome: faixaNome,
-      markup_anterior: markupAtual,
-      allowDirectSave: false,
-    });
   }
 
   function abrirSimulacaoPedra(faixa: FaixaPedra, onSalvarDireto: (markup: number) => Promise<void>) {
@@ -1698,7 +2201,14 @@ export default function PrecificacaoClient({ faixasPedrasInicial, configInicial,
 
       {/* Content */}
       <div className="rounded-2xl p-6 shadow-sm" style={{ backgroundColor: P.card, border: `1px solid ${P.border}` }}>
-        {tab === "markup-ouro"   && <TabMarkupOuro onAbrirSimulacao={abrirSimulacaoOuro} />}
+        {tab === "markup-ouro"   && (
+          <TabCurvaDinamica
+            configInicial={curvaConfigInicial}
+            categoriasInicial={curvaCategoriasInicial}
+            cotacaoOuro={cotacaoInicial.ouro_brl_g}
+            canEdit={canEditCurva}
+          />
+        )}
         {tab === "markup-pedras" && <TabMarkupPedras faixasInicial={faixasPedrasInicial} onAbrirSimulacao={abrirSimulacaoPedra} />}
         {tab === "cotacoes"      && <TabCotacoes cotacao={cotacaoInicial} />}
         {tab === "regras"        && <TabRegras configInicial={configInicial} />}
