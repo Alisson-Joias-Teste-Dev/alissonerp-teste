@@ -11,6 +11,7 @@ import {
 import FichaTecnicaForm, {
   type FichaTecnicaDados, type TipoItem, TIPOS_ITEM, validarFichaTecnica,
 } from "./FichaTecnicaForm";
+import { maskCpfCnpj } from "@/lib/formatters";
 
 // ─── Cores ──────────────────────────────────────────────────────────────────
 const C = {
@@ -310,7 +311,7 @@ export default function NovaOrdemFabricacaoModal({
               {clienteSelecionado && (
                 <div className="rounded-xl p-3 border" style={{ borderColor: C.esmeralda, background: "#F0FDF4" }}>
                   <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>{clienteSelecionado.nome}</p>
-                  {clienteSelecionado.cpf_cnpj && <p className="text-xs text-gray-400 mt-0.5">{clienteSelecionado.cpf_cnpj}</p>}
+                  {clienteSelecionado.cpf_cnpj && <p className="text-xs text-gray-400 mt-0.5 font-mono">{maskCpfCnpj(clienteSelecionado.cpf_cnpj)}</p>}
                 </div>
               )}
               {clienteDropOpen && clienteResultados.length > 0 && dropRect && typeof document !== "undefined" &&
@@ -319,7 +320,7 @@ export default function NovaOrdemFabricacaoModal({
                     {clienteResultados.map(c => (
                       <button key={c.id} className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b last:border-0 text-sm" style={{ borderColor: C.cremeBorder }} onMouseDown={e => { e.preventDefault(); selecionarCliente(c); }}>
                         <span className="font-medium">{c.nome}</span>
-                        {c.cpf_cnpj && <span className="text-gray-400 ml-2 text-xs">{c.cpf_cnpj}</span>}
+                        {c.cpf_cnpj && <span className="text-gray-400 ml-2 text-xs font-mono">{maskCpfCnpj(c.cpf_cnpj)}</span>}
                       </button>
                     ))}
                   </div>,

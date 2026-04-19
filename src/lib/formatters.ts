@@ -47,3 +47,30 @@ export function formatMoeda(valor: number | string | null | undefined): string {
   if (isNaN(num)) return 'R$ 0,00';
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
+
+/**
+ * Remove tudo que não for dígito. Útil para normalizar CPF/CNPJ/telefone/CEP
+ * antes de comparar com valores armazenados sem máscara no banco (intencional).
+ */
+export function onlyDigits(s: string | null | undefined): string {
+  return (s ?? '').replace(/\D+/g, '');
+}
+
+/**
+ * Mascara CPF (11 dígitos) ou CNPJ (14 dígitos) para exibição.
+ * Banco armazena SEM máscara — a máscara é puramente de apresentação.
+ * Ex: "12345678900"   → "123.456.789-00"
+ *     "12345678000199" → "12.345.678/0001-99"
+ * Para quantidades diferentes de dígitos, devolve o valor original.
+ */
+export function maskCpfCnpj(raw: string | null | undefined): string {
+  if (!raw) return '';
+  const d = onlyDigits(raw);
+  if (d.length === 11) {
+    return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  }
+  if (d.length === 14) {
+    return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+  }
+  return raw;
+}

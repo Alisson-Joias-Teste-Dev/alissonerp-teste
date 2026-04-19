@@ -7,6 +7,7 @@ import {
   ArrowLeft, Loader2, CheckCircle, XCircle, Truck, Package,
   CreditCard, FileText, User, RefreshCw, Video, Share2, Copy, Check as CheckIcon,
 } from "lucide-react";
+import { maskCpfCnpj } from "@/lib/formatters";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -356,7 +357,7 @@ export default function VendaDetalheClient({ vendaId, isFullAccess }: Props) {
             <div className="space-y-0.5">
               <p className="font-medium text-sm" style={{ color: "#1A1A1A" }}>{venda.cliente_nome}</p>
               {venda.cliente_cpf_cnpj && (
-                <p className="text-xs" style={{ color: "#6B7280" }}>{venda.cliente_cpf_cnpj}</p>
+                <p className="text-xs font-mono" style={{ color: "#6B7280" }}>{maskCpfCnpj(venda.cliente_cpf_cnpj)}</p>
               )}
               <div className="flex gap-3 flex-wrap mt-1">
                 {venda.cliente_email && (

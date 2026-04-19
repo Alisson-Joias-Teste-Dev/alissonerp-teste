@@ -7,6 +7,7 @@ import {
   User, Package, CreditCard, Truck, FileText, ChevronDown, Video,
 } from "lucide-react";
 import Link from "next/link";
+import { maskCpfCnpj } from "@/lib/formatters";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -424,11 +425,13 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
             renderItem={c => (
               <div>
                 <p className="font-medium text-sm" style={{ color: "#1A1A1A" }}>{c.nome}</p>
-                <p className="text-xs" style={{ color: "#9CA3AF" }}>{c.cpf_cnpj ?? c.telefone ?? "—"}</p>
+                <p className="text-xs" style={{ color: "#9CA3AF" }}>
+                  {c.cpf_cnpj ? maskCpfCnpj(c.cpf_cnpj) : (c.telefone ?? "—")}
+                </p>
               </div>
             )}
             onSelect={setCliente}
-            selectedLabel={cliente ? `${cliente.nome}${cliente.cpf_cnpj ? ` · ${cliente.cpf_cnpj}` : ""}` : null}
+            selectedLabel={cliente ? `${cliente.nome}${cliente.cpf_cnpj ? ` · ${maskCpfCnpj(cliente.cpf_cnpj)}` : ""}` : null}
             onClear={() => setCliente(null)}
           />
         </Section>

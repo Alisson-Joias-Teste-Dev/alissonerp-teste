@@ -10,6 +10,7 @@ import {
   Upload, Trash2, Camera, CheckCircle2, AlertCircle, Video,
   ShoppingBag, Package, ChevronRight,
 } from "lucide-react";
+import { maskCpfCnpj } from "@/lib/formatters";
 
 // ─── Cores ────────────────────────────────────────────────────────────────────
 const C = {
@@ -697,7 +698,7 @@ export default function NovaOrdemServicoBaseModal({
                   <div>
                     <p className="font-semibold text-sm" style={{ color: C.esmeralda }}>{clienteSelecionado.nome}</p>
                     {clienteSelecionado.cpf_cnpj && (
-                      <p className="text-xs text-gray-400">{clienteSelecionado.cpf_cnpj}</p>
+                      <p className="text-xs text-gray-400 font-mono">{maskCpfCnpj(clienteSelecionado.cpf_cnpj)}</p>
                     )}
                   </div>
                   <button onClick={() => { setClienteSelecionado(null); setVendas([]); setVendaSelecionada(null); setStep(0); }}
@@ -747,7 +748,7 @@ export default function NovaOrdemServicoBaseModal({
                             onMouseDown={e => { e.preventDefault(); handleClienteSelect(c); }}
                           >
                             <p className="text-sm font-medium" style={{ color: C.esmeralda }}>{c.nome}</p>
-                            {c.cpf_cnpj && <p className="text-xs text-gray-400">{c.cpf_cnpj}</p>}
+                            {c.cpf_cnpj && <p className="text-xs text-gray-400 font-mono">{maskCpfCnpj(c.cpf_cnpj)}</p>}
                           </button>
                         ))}
                       </div>,

@@ -8,6 +8,7 @@ import {
   X, Search, Loader2, RotateCcw, CheckSquare, Square,
   ShoppingBag, Package, ChevronRight,
 } from "lucide-react";
+import { maskCpfCnpj } from "@/lib/formatters";
 
 // ─── Cores ──────────────────────────────────────────────────────────────────
 const C = {
@@ -281,7 +282,7 @@ export default function NovaOrdemReposicaoVendaModal({
               {clienteSelecionado && (
                 <div className="rounded-xl p-3 border" style={{ borderColor: C.esmeralda, background: "#F0FDF4" }}>
                   <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>{clienteSelecionado.nome}</p>
-                  {clienteSelecionado.cpf_cnpj && <p className="text-xs text-gray-400 mt-0.5">{clienteSelecionado.cpf_cnpj}</p>}
+                  {clienteSelecionado.cpf_cnpj && <p className="text-xs text-gray-400 mt-0.5 font-mono">{maskCpfCnpj(clienteSelecionado.cpf_cnpj)}</p>}
                 </div>
               )}
 
@@ -300,7 +301,7 @@ export default function NovaOrdemReposicaoVendaModal({
                         onMouseDown={e => { e.preventDefault(); selecionarCliente(c); }}
                       >
                         <span className="font-medium">{c.nome}</span>
-                        {c.cpf_cnpj && <span className="text-gray-400 ml-2 text-xs">{c.cpf_cnpj}</span>}
+                        {c.cpf_cnpj && <span className="text-gray-400 ml-2 text-xs font-mono">{maskCpfCnpj(c.cpf_cnpj)}</span>}
                       </button>
                     ))}
                   </div>,
