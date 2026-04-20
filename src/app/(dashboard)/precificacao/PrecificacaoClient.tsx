@@ -1120,6 +1120,12 @@ function TabCurvaDinamica({
   const [aplicando, setAplicando] = useState(false);
   const [adicionandoCat, setAdicionandoCat] = useState(false);
 
+  // Desconto simulado (0–31%, passo 1%) — reduz comissão proporcionalmente.
+  // Com 31% a comissão zera; com 30% (limite operacional) ela ainda paga ~0.1×base.
+  // Fórmula: comissaoEfetiva = comissaoBase × (1 − desconto/31)
+  const [descontoSim, setDescontoSim] = useState<number>(0);
+  const DESC_MAX_ZERA_COMISSAO = 31;
+
   function showToast(msg: string, tipo: "ok" | "erro") {
     setToast({ msg, tipo });
     setTimeout(() => setToast(null), 3500);
@@ -1466,13 +1472,49 @@ function TabCurvaDinamica({
 
       {/* ── SEÇÃO C: Tabela de Categorias ── */}
       <div className="rounded-2xl overflow-hidden shadow-sm" style={{ backgroundColor: P.card, border: `1px solid ${P.border}` }}>
-        <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${P.border}` }}>
+        <div className="px-5 py-3 flex items-center justify-between gap-4 flex-wrap" style={{ borderBottom: `1px solid ${P.border}` }}>
           <div>
             <h3 className="font-semibold text-sm" style={{ color: P.text }}>Categorias da Curva</h3>
             <span className="text-[11px]" style={{ color: P.muted }}>
               {categoriasPreparadas.length} ativa{categoriasPreparadas.length !== 1 ? "s" : ""} · passo 0.1g / &gt;30g: 1.0g
             </span>
           </div>
+
+          {/* Simulador de desconto — reduz comissão proporcionalmente (0→30%) */}
+          <div className="flex items-center gap-3 flex-1 min-w-[280px] max-w-[520px] px-4 py-2 rounded-lg border bg-white" style={{ borderColor: P.border }}>
+            <div className="flex flex-col shrink-0">
+              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Desconto da Consultora</span>
+              <span className="text-[10px] font-mono" style={{ color: P.sage }}>
+                0% cheia · 30% mínima · 31% zera
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={DESC_MAX_ZERA_COMISSAO}
+              step={1}
+              value={descontoSim}
+              onChange={(e) => setDescontoSim(Number(e.target.value))}
+              className="flex-1 accent-red-600"
+            />
+            <div className="flex items-center gap-1 shrink-0">
+              <input
+                type="number"
+                min={0}
+                max={DESC_MAX_ZERA_COMISSAO}
+                step={1}
+                value={descontoSim}
+                onChange={(e) => {
+                  const v = Math.max(0, Math.min(DESC_MAX_ZERA_COMISSAO, Math.round(Number(e.target.value) || 0)));
+                  setDescontoSim(v);
+                }}
+                className="w-14 rounded border px-2 py-1 text-sm font-mono text-right outline-none focus:ring-1"
+                style={{ borderColor: P.border, color: "#dc2626" }}
+              />
+              <span className="text-xs font-bold" style={{ color: "#dc2626" }}>%</span>
+            </div>
+          </div>
+
           {canEdit && (
             <button
               onClick={novaCategoria}
@@ -1517,6 +1559,8 @@ function TabCurvaDinamica({
                     cotacaoOuro={cotacaoOuro}
                     config={config}
                     categoriasPreparadas={categoriasPreparadas}
+                    descontoSim={descontoSim}
+                    descontoMaxZera={DESC_MAX_ZERA_COMISSAO}
                   />
                 );
               })}
@@ -1629,6 +1673,8 @@ function FragmentRow({
   cotacaoOuro,
   config,
   categoriasPreparadas,
+  descontoSim,
+  descontoMaxZera,
 }: {
   cat: CurvaCategoriaPreparada;
   pesoInicio: number;
@@ -1640,7 +1686,11 @@ function FragmentRow({
   cotacaoOuro: number;
   config: CurvaConfig;
   categoriasPreparadas: CurvaCategoriaPreparada[];
+  descontoSim: number;
+  descontoMaxZera: number;
 }) {
+  // Fator de redução linear de comissão: 0% desc → 1.0 · descMax → 0
+  const fatorComissao = Math.max(0, 1 - descontoSim / descontoMaxZera);
   const chips = useMemo<PontoCategoriaChip[]>(() => {
     if (!expanded || cotacaoOuro <= 0) return [];
     return getCategoryPoints(cat, categoriasPreparadas, cotacaoOuro, config);
@@ -1734,7 +1784,16 @@ function FragmentRow({
               <span className="text-[11px] font-mono" style={{ color: P.sage }}>
                 MKP Alvo: <span style={{ color: "#92400e" }}>{cat.targetMkp.toFixed(3)}×</span>
                 {" · "}
-                Com: <span style={{ color: "#1e3a8a" }}>{cat.targetComm.toFixed(2)}%</span>
+                Com base: <span style={{ color: "#1e3a8a" }}>{cat.targetComm.toFixed(2)}%</span>
+                {descontoSim > 0 && (
+                  <>
+                    {" · "}
+                    desc {descontoSim}% → com efetiva:{" "}
+                    <span style={{ color: fatorComissao === 0 ? "#dc2626" : "#166534", fontWeight: 600 }}>
+                      {(cat.targetComm * fatorComissao).toFixed(2)}%
+                    </span>
+                  </>
+                )}
                 {" · "}
                 Passo: 0.1g / &gt;30g: 1.0g
               </span>
@@ -1743,19 +1802,28 @@ function FragmentRow({
               <p className="text-xs" style={{ color: P.muted }}>Sem pontos para exibir.</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
-                {chips.map((pt) => (
-                  <div
-                    key={pt.weight}
-                    className="rounded-lg px-2 py-1 text-[11px] font-mono"
-                    style={{ backgroundColor: "#ffffff", border: `1px solid ${P.border}`, color: P.text }}
-                  >
-                    <span style={{ color: P.sage }}>{pt.weight.toFixed(pt.weight >= 10 ? 1 : 2)}g</span>
-                    {" "}
-                    <span style={{ color: "#92400e" }}>{pt.mkp.toFixed(3)}×</span>
-                    {" · "}
-                    <span style={{ color: P.text }}>{fmtBrl(pt.price)}</span>
-                  </div>
-                ))}
+                {chips.map((pt) => {
+                  const comPct = pt.comm * fatorComissao;
+                  const comRS  = pt.price * (comPct / 100);
+                  return (
+                    <div
+                      key={pt.weight}
+                      className="rounded-lg px-2 py-1 text-[11px] font-mono leading-tight"
+                      style={{ backgroundColor: "#ffffff", border: `1px solid ${P.border}`, color: P.text }}
+                    >
+                      <div>
+                        <span style={{ color: P.sage }}>{pt.weight.toFixed(pt.weight >= 10 ? 1 : 2)}g</span>
+                        {" "}
+                        <span style={{ color: "#92400e" }}>{pt.mkp.toFixed(3)}×</span>
+                        {" · "}
+                        <span style={{ color: P.text }}>{fmtBrl(pt.price)}</span>
+                      </div>
+                      <div className="text-[10px] mt-0.5" style={{ color: comPct === 0 ? "#dc2626" : "#1e3a8a" }}>
+                        Com: {comPct.toFixed(2)}% · {fmtBrl(comRS)}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </td>

@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import ComentariosOrdem from "@/components/ComentariosOrdem";
 import GaleriaFotosOrdem from "@/components/ordem/GaleriaFotosOrdem";
 import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
-import { Pencil, X, Save, Loader2 } from "lucide-react";
+import FichaTecnicaForm, { TIPOS_ITEM, type TipoItem, type FichaTecnicaDados, validarFichaTecnica } from "@/components/ordens/FichaTecnicaForm";
+import { Pencil, X, Save, Loader2, AlertCircle } from "lucide-react";
 
 const C = {
   esmeralda: "#184036",
@@ -224,6 +225,40 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
     router.refresh();
   }
 
+  // ── Ficha técnica pendente ──────────────────────────────────────────────────
+  const ROLES_FICHA = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
+  const podeEditarFicha = userRole ? ROLES_FICHA.includes(userRole) : false;
+  const [fichaEditOpen, setFichaEditOpen] = useState(false);
+  const [fichaDados, setFichaDados] = useState<FichaTecnicaDados | null>(() => {
+    if (fichaTecnica?._origem === "erp") return fichaTecnica.dados as FichaTecnicaDados ?? null;
+    return null;
+  });
+  const [fichaLocal, setFichaLocal] = useState<FichaTecnicaDados | null>(null);
+  const [fichaSaving, setFichaSaving] = useState(false);
+  const [fichaErr, setFichaErr] = useState<string | null>(null);
+  const [fichaPendente, setFichaPendente] = useState<boolean>(!!ordem.ficha_pendente);
+
+  async function salvarFicha() {
+    if (!fichaLocal) return;
+    setFichaSaving(true); setFichaErr(null);
+    try {
+      const res = await fetch(`/api/ordens/${ordem.id}/ficha-tecnica`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dados: fichaLocal }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao salvar");
+      setFichaDados(fichaLocal);
+      setFichaPendente(data.ficha_pendente);
+      setFichaEditOpen(false);
+    } catch (e) {
+      setFichaErr(e instanceof Error ? e.message : "Erro ao salvar");
+    } finally {
+      setFichaSaving(false);
+    }
+  }
+
   const temPcp = !!ordem.pcp_id;
   const pcpConcluido = ordem.pcp_etapas_cod === "5";
   const quebraAlta = Number(ordem.pcp_quebra_pct) > 5;
@@ -283,6 +318,82 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
           </button>
         )}
       </div>
+
+      {/* Banner ficha pendente */}
+      {fichaPendente && ordem.tipo_ordem === "fabricacao" && (
+        <div className="mb-4 flex items-start gap-3 p-4 rounded-xl border"
+          style={{ backgroundColor: "#FFFBEB", borderColor: "#FDE68A" }}>
+          <AlertCircle size={18} className="flex-shrink-0 mt-0.5" style={{ color: "#D97706" }} />
+          <div className="flex-1">
+            <p className="text-sm font-semibold" style={{ color: "#92400E" }}>Ficha técnica pendente</p>
+            <p className="text-xs mt-0.5" style={{ color: "#92400E" }}>
+              Esta ordem aguarda preenchimento da ficha técnica antes de ser liberada para o PCP.
+            </p>
+          </div>
+          {podeEditarFicha && (
+            <button
+              onClick={() => { setFichaLocal(fichaDados ?? undefined as unknown as FichaTecnicaDados); setFichaEditOpen(true); }}
+              className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold"
+              style={{ backgroundColor: "#D97706", color: "white" }}
+            >
+              Preencher ficha
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Modal edição ficha técnica */}
+      {fichaEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-12 px-3 bg-black/40">
+          <div className="bg-white rounded-2xl border shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col"
+            style={{ borderColor: "#E8DCC8" }}>
+            <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: "#E8DCC8" }}>
+              <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>Ficha Técnica</h3>
+              <button onClick={() => setFichaEditOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Tipo do item</label>
+                <select
+                  className="border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                  style={{ borderColor: "#E8DCC8", color: "#374151" }}
+                  value={fichaLocal?.tipo_item ?? ""}
+                  onChange={e => {
+                    const tipo = e.target.value as TipoItem;
+                    if (tipo) setFichaLocal({ tipo_item: tipo });
+                    else setFichaLocal(null);
+                  }}
+                >
+                  <option value="">— Selecionar tipo —</option>
+                  {TIPOS_ITEM.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              {fichaLocal && (
+                <FichaTecnicaForm dados={fichaLocal} onChange={setFichaLocal} />
+              )}
+              {fichaErr && (
+                <p className="text-xs text-red-600">{fichaErr}</p>
+              )}
+            </div>
+            <div className="flex items-center justify-between p-4 border-t" style={{ borderColor: "#E8DCC8" }}>
+              <span className="text-xs" style={{ color: "#6B7280" }}>
+                {fichaLocal && validarFichaTecnica(fichaLocal)
+                  ? "⚠ Campos incompletos — ordem continuará pendente"
+                  : "✓ Ficha completa — ordem será liberada para o PCP"}
+              </span>
+              <button
+                onClick={salvarFicha}
+                disabled={fichaSaving || !fichaLocal}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+                style={{ backgroundColor: "#184036", color: "#F3EADA" }}
+              >
+                {fichaSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Salvar ficha
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         {/* Coluna principal */}

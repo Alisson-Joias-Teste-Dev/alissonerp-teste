@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, deleteFile } from "@/lib/storage";
+import { validarFichaTecnicaServer } from "@/lib/validar-ficha-tecnica";
 
 const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
 const ALL_TIPOS = [
@@ -214,6 +215,11 @@ export async function POST(req: NextRequest) {
       numeroVendaLigada = vRow?.numero_venda ?? null;
     }
 
+    // Determinar ficha_pendente para fabricação
+    const fichaPendente = tipo_ordem === "fabricacao"
+      ? (validarFichaTecnicaServer(ficha_tecnica_dados) !== null)
+      : false;
+
     const [ordem] = await tx`
       INSERT INTO alissonerp.ordens (
         numero_ordem, tipo_ordem, cliente_id, vendedor_id,
@@ -221,7 +227,7 @@ export async function POST(req: NextRequest) {
         foto_peca_servico, peso_peca_servico, video_observacao,
         detalhes_ordem, fotos_paths, tipos_servico_ids,
         venda_id, venda_item_ids, numero_pedido,
-        situacao, status, rota, origem, created_by
+        situacao, status, rota, origem, ficha_pendente, created_by
       ) VALUES (
         ${numeroOrdem},
         ${tipo_ordem}::alissonerp.enum_tipo_ordem,
@@ -243,6 +249,7 @@ export async function POST(req: NextRequest) {
         'aguardando',
         ${rota}::alissonerp.enum_rota_ordem,
         'erp',
+        ${fichaPendente},
         ${user.id}::uuid
       )
       RETURNING id, numero_ordem

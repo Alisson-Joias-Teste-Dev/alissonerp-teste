@@ -24,9 +24,17 @@ export async function GET(req: NextRequest) {
       p.unidade,
       ep.sufixo_variacao,
       ep.numeracao,
-      ep.largura_aro
+      ep.largura_aro,
+      COALESCE(est.saldo, 0) AS saldo_disponivel,
+      (ftp.id IS NOT NULL) AS tem_ficha_tecnica
     FROM public.produtos p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+    LEFT JOIN (
+      SELECT produto_id, SUM(saldo) AS saldo
+      FROM alissonerp.vw_saldo_estoque_comercial
+      GROUP BY produto_id
+    ) est ON est.produto_id = p.id_produto
+    LEFT JOIN alissonerp.fichas_tecnicas_produto ftp ON ftp.produto_id = p.id_produto
     WHERE
       ${servico ? sql`p.sku ILIKE 'AS%' AND (p.sku ILIKE ${'%' + q + '%'} OR p.nome ILIKE ${'%' + q + '%'})` : sql`(p.sku ILIKE ${'%' + q + '%'} OR p.nome ILIKE ${'%' + q + '%'})`}
     ORDER BY
@@ -42,8 +50,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(
     produtos.map((p) => ({
       ...p,
-      preco_venda:      p.preco_venda      != null ? Number(p.preco_venda)      : null,
-      peso_precificado: p.peso_precificado != null ? Number(p.peso_precificado) : null,
+      preco_venda:       p.preco_venda       != null ? Number(p.preco_venda)       : null,
+      peso_precificado:  p.peso_precificado  != null ? Number(p.peso_precificado)  : null,
+      saldo_disponivel:  Number(p.saldo_disponivel ?? 0),
+      tem_ficha_tecnica: Boolean(p.tem_ficha_tecnica),
     }))
   );
 }

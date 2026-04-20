@@ -26,6 +26,7 @@ interface ProdutoDetalhe {
   peso_precificado: string | null;
   preco_tiny: string | null;
   preco_sync: string | null;
+  preco_curva: number | null;
   preco_pedras: string | null;
   preco_total_sync: string | null;
   diferenca_percentual: string | null;
@@ -35,7 +36,11 @@ interface ProdutoDetalhe {
   descricao: string | null;
   referencia: string | null;
   categoria: string | null;
+  categoria_geral: string | null;
   sub_categoria: string | null;
+  markup: string | null;
+  fator: string | null;
+  tipo_item: "joia" | "insumo" | null;
   // erp_produtos
   erp_id?: number | null;
   eh_pai?: boolean | null;
@@ -443,8 +448,21 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
   const [larguraAro, setLarguraAro] = useState("");
   const [alturaAro, setAlturaAro] = useState("");
   const [baseVal, setBaseVal] = useState("");
+  const [nomeEdit, setNomeEdit] = useState("");
+  const [tipoMetalEdit, setTipoMetalEdit] = useState("");
+  const [categoriaEdit, setCategoriaEdit] = useState("");
+  const [situacaoEdit, setSituacaoEdit] = useState("A");
+  const [pesoEdit, setPesoEdit] = useState("");
+  const [markupEdit, setMarkupEdit] = useState("");
+  const [fatorEdit, setFatorEdit] = useState("");
+  const [catPrecEdit, setCatPrecEdit] = useState("");
+  const [precoTinyEdit, setPrecoTinyEdit] = useState("");
+  const [tipoItemEdit, setTipoItemEdit] = useState<"" | "joia" | "insumo">("");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; texto: string } | null>(null);
+
+  // Cotação do ouro (para cálculo de preview em runtime)
+  const [cotacaoOuro, setCotacaoOuro] = useState<number>(0);
 
   // Variações (quando eh_pai)
   const [variacoes, setVariacoes] = useState<Variacao[]>([]);
@@ -470,15 +488,28 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
         const b = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(b.error ?? "Erro ao carregar produto");
       }
-      const data = await res.json() as { produto: ProdutoDetalhe; composicao: BomItem[]; variacoes: Variacao[] };
+      const data = await res.json() as { produto: ProdutoDetalhe; composicao: BomItem[]; variacoes: Variacao[]; cotacao_ouro?: number };
       setProduto(data.produto);
       setComposicao(data.composicao);
       setVariacoes(data.variacoes ?? []);
+      setCotacaoOuro(Number(data.cotacao_ouro ?? 0));
       setTemPedra(data.produto.tem_pedra_preciosa);
       setObservacaoErp(data.produto.observacao_erp ?? "");
       setLarguraAro(data.produto.largura_aro ?? "");
       setAlturaAro(data.produto.altura_aro ?? "");
       setBaseVal(data.produto.base ?? "");
+      setNomeEdit(data.produto.nome ?? "");
+      setTipoMetalEdit(data.produto.tipo_metal ?? "");
+      setCategoriaEdit(data.produto.categoria_geral ?? "");
+      setSituacaoEdit(data.produto.situacao ?? "A");
+      // Converte valores numéricos para string (DB retorna number em alguns tipos)
+      const toStr = (v: unknown): string => (v == null ? "" : String(v));
+      setPesoEdit(toStr(data.produto.peso_precificado));
+      setMarkupEdit(toStr(data.produto.markup));
+      setFatorEdit(toStr(data.produto.fator));
+      setCatPrecEdit(toStr(data.produto.categoria));
+      setPrecoTinyEdit(toStr(data.produto.preco_tiny));
+      setTipoItemEdit(data.produto.tipo_item ?? "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro desconhecido");
     } finally {
@@ -542,6 +573,39 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
       if (larg !== (produto.largura_aro ? parseFloat(produto.largura_aro) : null)) body.largura_aro = larg;
       if (alt  !== (produto.altura_aro  ? parseFloat(produto.altura_aro)  : null)) body.altura_aro  = alt;
       if (bas  !== (produto.base        ? parseFloat(produto.base)        : null)) body.base        = bas;
+
+      if (nomeEdit.trim() !== (produto.nome ?? "").trim()) body.nome = nomeEdit.trim();
+      if ((tipoMetalEdit || "") !== (produto.tipo_metal ?? "")) body.tipo_metal = tipoMetalEdit || null;
+      if ((categoriaEdit || "") !== (produto.categoria_geral ?? "")) body.categoria_geral = categoriaEdit || null;
+      if (situacaoEdit !== (produto.situacao ?? "A")) body.situacao = situacaoEdit;
+
+      // Precificação — aceita formato brasileiro:
+      //   "4.500"     → 4500  (ponto como milhar)
+      //   "4.500,50"  → 4500.5
+      //   "4500,50"   → 4500.5
+      //   "4.5"       → 4.5   (sem 3 dígitos após o ponto = decimal)
+      //   "4500"      → 4500
+      const parseNum = (v: string | number | null | undefined) => {
+        if (v == null) return null;
+        if (typeof v === "number") return isNaN(v) ? null : v;
+        let t = String(v).trim();
+        if (!t) return null;
+        if (t.includes(",")) {
+          // Vírgula = decimal BR. Remover todos os pontos (milhar) e trocar vírgula por ponto.
+          t = t.replace(/\./g, "").replace(",", ".");
+        } else if (/^\d{1,3}(\.\d{3})+$/.test(t)) {
+          // Só pontos com grupos de 3 dígitos (ex: 4.500 ou 1.234.567) = milhar BR.
+          t = t.replace(/\./g, "");
+        }
+        const n = parseFloat(t);
+        return isNaN(n) ? null : n;
+      };
+      if ((pesoEdit || "") !== (produto.peso_precificado ?? "")) body.peso_precificado = parseNum(pesoEdit);
+      if ((markupEdit || "") !== (produto.markup ?? "")) body.markup = parseNum(markupEdit);
+      if ((fatorEdit || "") !== (produto.fator ?? "")) body.fator = parseNum(fatorEdit);
+      if ((catPrecEdit || "") !== (produto.categoria ?? "")) body.categoria_precificacao = catPrecEdit || null;
+      if ((precoTinyEdit || "") !== (produto.preco_tiny ?? "")) body.preco_tiny = parseNum(precoTinyEdit);
+      if (tipoItemEdit !== (produto.tipo_item ?? "")) body.tipo_item = tipoItemEdit || null;
 
       if (Object.keys(body).length === 0) {
         setSaveMsg({ ok: true, texto: "Nenhuma alteração para salvar." });
@@ -630,7 +694,17 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
       (observacaoErp.trim() || null) !== (produto.observacao_erp?.trim() || null) ||
       (larguraAro || "") !== (produto.largura_aro ?? "") ||
       (alturaAro  || "") !== (produto.altura_aro  ?? "") ||
-      (baseVal    || "") !== (produto.base         ?? ""));
+      (baseVal    || "") !== (produto.base         ?? "") ||
+      nomeEdit.trim() !== (produto.nome ?? "").trim() ||
+      (tipoMetalEdit || "") !== (produto.tipo_metal ?? "") ||
+      (categoriaEdit || "") !== (produto.categoria_geral ?? "") ||
+      situacaoEdit !== (produto.situacao ?? "A") ||
+      (pesoEdit || "")       !== (produto.peso_precificado ?? "") ||
+      (markupEdit || "")     !== (produto.markup ?? "") ||
+      (fatorEdit || "")      !== (produto.fator ?? "") ||
+      (catPrecEdit || "")    !== (produto.categoria ?? "") ||
+      (precoTinyEdit || "")  !== (produto.preco_tiny ?? "") ||
+      tipoItemEdit           !== (produto.tipo_item ?? ""));
 
   return (
     <>
@@ -683,37 +757,248 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
             </div>
           )}
 
-          {produto && !loading && (
-            <>
-              {/* ── DADOS BÁSICOS ── */}
+          {produto && !loading && (() => {
+            // Pedras têm uma ficha própria: mostra só mm, ct, pontos e valor.
+            // O restante (composição, medidas de joia, peso em g, markup, curva,
+            // variações) não se aplica — o preço vem direto de preco_tiny.
+            //
+            // NOTA: no payload do endpoint /api/produtos/[id], o campo `categoria`
+            // é na verdade `categoria_precificacao` da tabela, e `categoria_geral`
+            // é o campo `categoria` (onde fica "Pedras"). Mapeamento histórico.
+            const catPedra = (produto.categoria_geral ?? produto.categoria ?? "").toLowerCase();
+            const isPedra = catPedra.startsWith("pedras");
+            if (isPedra) {
+              // ── Parse dados da pedra ────────────────────────────────────
+              const parseNumPedra = (v: string | number | null | undefined) => {
+                if (v == null) return 0;
+                if (typeof v === "number") return isNaN(v) ? 0 : v;
+                let t = String(v).trim();
+                if (!t) return 0;
+                if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+                const n = parseFloat(t);
+                return isNaN(n) ? 0 : n;
+              };
+
+              // Extrai mm do nome (ex: "Diamante Natural 1.5mm" → 1.5)
+              const mmMatch = (produto.nome ?? "").match(/([\d.,]+)\s*mm\b/i);
+              const mm = mmMatch ? parseNumPedra(mmMatch[1]) : 0;
+
+              // Peso em g → ct (1ct = 0.2g, então ct = g / 0.2 = g × 5)
+              const pesoG = parseNumPedra(produto.peso_precificado);
+              const ct = pesoG / 0.2;
+              // Pontos: 1 ct = 100 pontos
+              const pontos = ct * 100;
+
+              const precoPedra = parseNumPedra(precoTinyEdit) || parseNumPedra(produto.preco_tiny);
+
+              return (
+                <>
+                  {/* ── CABEÇALHO DA PEDRA ── */}
+                  <section>
+                    <p className={sectionTitleCls}>Ficha da Pedra</p>
+                    <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-100">
+                      <div>
+                        <p className={labelCls}>Nome</p>
+                        <input
+                          type="text"
+                          value={nomeEdit}
+                          onChange={(e) => setNomeEdit(e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <p className={labelCls}>SKU</p>
+                          <p className="text-sm font-mono text-gray-700 py-1.5">{produto.sku || "—"}</p>
+                        </div>
+                        <div>
+                          <p className={labelCls}>Situação</p>
+                          <select
+                            value={situacaoEdit}
+                            onChange={(e) => setSituacaoEdit(e.target.value)}
+                            className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                          >
+                            <option value="A">Ativo</option>
+                            <option value="I">Inativo</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* ── ESPECIFICAÇÕES DA PEDRA (mm, ct, pontos) ── */}
+                  <section>
+                    <p className={sectionTitleCls}>Especificações</p>
+                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="text-center py-3 rounded-lg bg-white border border-gray-100">
+                          <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">Tamanho</p>
+                          <p className="text-xl font-mono font-bold text-gray-800 mt-1">
+                            {mm > 0 ? `${mm.toFixed(1)}` : "—"}
+                            <span className="text-xs text-gray-400 ml-1">mm</span>
+                          </p>
+                        </div>
+                        <div className="text-center py-3 rounded-lg bg-white border border-gray-100">
+                          <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">Peso</p>
+                          <p className="text-xl font-mono font-bold text-gray-800 mt-1">
+                            {ct > 0 ? ct.toFixed(3) : "—"}
+                            <span className="text-xs text-gray-400 ml-1">ct</span>
+                          </p>
+                        </div>
+                        <div className="text-center py-3 rounded-lg bg-white border border-gray-100">
+                          <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">Pontos</p>
+                          <p className="text-xl font-mono font-bold text-gray-800 mt-1">
+                            {pontos > 0 ? pontos.toFixed(1) : "—"}
+                            <span className="text-xs text-gray-400 ml-1">pt</span>
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-gray-400 text-center mt-2">
+                        1 ct = 0.2 g · 1 ct = 100 pontos
+                      </p>
+                    </div>
+                  </section>
+
+                  {/* ── VALOR DA PEDRA ── */}
+                  <section>
+                    <p className={sectionTitleCls}>Valor</p>
+                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 space-y-3">
+                      <div>
+                        <p className={labelCls}>Preço de Venda (R$)</p>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={precoTinyEdit}
+                          onChange={(e) => setPrecoTinyEdit(e.target.value)}
+                          placeholder="—"
+                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono font-semibold text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                          style={{ color: "#184036" }}
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1">
+                          Cadastrado no momento da criação. Pode ser editado a qualquer momento.
+                        </p>
+                      </div>
+                      {precoPedra > 0 && pontos > 0 && (
+                        <div className="text-[11px] text-gray-500 font-mono pt-2 border-t border-gray-200">
+                          R$ {(precoPedra / pontos).toFixed(2)}/pt · R$ {(precoPedra / ct).toFixed(2)}/ct
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </>
+              );
+            }
+
+            // ── Produto comum (joia): renderização padrão ──────────────────
+            return (
+              <>
+              {/* ── DADOS BÁSICOS (EDITÁVEIS) ── */}
               <section>
                 <p className={sectionTitleCls}>Dados Básicos</p>
                 <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-100">
+                  <div>
+                    <p className={labelCls}>Nome</p>
+                    <input
+                      type="text"
+                      value={nomeEdit}
+                      onChange={(e) => setNomeEdit(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                    />
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <p className={labelCls}>Nome</p>
-                      <p className="text-sm text-gray-700">{produto.nome}</p>
+                      <p className={labelCls}>SKU</p>
+                      <p className="text-sm font-mono text-gray-700 py-1.5">{produto.sku || "—"}</p>
                     </div>
                     <div>
-                      <p className={labelCls}>SKU</p>
-                      <p className="text-sm font-mono text-gray-700">{produto.sku || "—"}</p>
+                      <p className={labelCls}>Situação</p>
+                      <select
+                        value={situacaoEdit}
+                        onChange={(e) => setSituacaoEdit(e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      >
+                        <option value="A">Ativo</option>
+                        <option value="I">Inativo</option>
+                      </select>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <p className={labelCls}>Metal</p>
-                      <p className="text-sm text-gray-700">{produto.tipo_metal || "—"}</p>
+                      <select
+                        value={tipoMetalEdit}
+                        onChange={(e) => setTipoMetalEdit(e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      >
+                        <option value="">— Sem metal definido —</option>
+                        <option value="Ouro Amarelo 18k">Ouro Amarelo 18k</option>
+                        <option value="Ouro Branco 18k">Ouro Branco 18k</option>
+                        <option value="Ouro Rose 18k">Ouro Rose 18k</option>
+                        <option value="Prata">Prata</option>
+                        {/* Mantém o valor atual caso seja algo fora da lista (legado) */}
+                        {tipoMetalEdit &&
+                          !["", "Ouro Amarelo 18k", "Ouro Branco 18k", "Ouro Rose 18k", "Prata"].includes(tipoMetalEdit) && (
+                            <option value={tipoMetalEdit}>{tipoMetalEdit} (legado)</option>
+                          )}
+                      </select>
                     </div>
                     <div>
-                      <p className={labelCls}>Situação</p>
-                      <p className="text-sm text-gray-700">
-                        {produto.situacao === "A"
-                          ? "Ativo"
-                          : produto.situacao === "I"
-                          ? "Inativo"
-                          : produto.situacao ?? "—"}
-                      </p>
+                      <p className={labelCls}>Categoria</p>
+                      <input
+                        type="text"
+                        value={categoriaEdit}
+                        onChange={(e) => setCategoriaEdit(e.target.value)}
+                        placeholder="ex: Anel, Pulseira -> Feminino"
+                        list="drawer-categoria-options"
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      />
+                      <datalist id="drawer-categoria-options">
+                        <option value="Anel" />
+                        <option value="Anel -> Feminino" />
+                        <option value="Anel -> Masculino" />
+                        <option value="Anel -> Infantil" />
+                        <option value="Anel -> Formatura" />
+                        <option value="Alianças" />
+                        <option value="Pulseira" />
+                        <option value="Pulseira -> Feminino" />
+                        <option value="Pulseira -> Masculino" />
+                        <option value="Pulseira -> Baby" />
+                        <option value="Pingente" />
+                        <option value="Pingente -> Feminino" />
+                        <option value="Pingente -> Masculino" />
+                        <option value="Pingente -> Religioso" />
+                        <option value="Corrente" />
+                        <option value="Corrente -> Adulto" />
+                        <option value="Corrente -> Infantil" />
+                        <option value="Brinco" />
+                        <option value="Bracelete" />
+                        <option value="Bracelete -> Feminino" />
+                        <option value="Bracelete -> Masculino" />
+                        <option value="Escapulário" />
+                        <option value="Piercing" />
+                        <option value="Tornozeleira" />
+                        <option value="Fecho" />
+                        <option value="Insumos" />
+                        <option value="Insumos -> Copa" />
+                        <option value="Insumos -> Estojo" />
+                        <option value="Insumos -> Embalagens" />
+                        <option value="Mostruário Loja" />
+                        <option value="Pedras" />
+                        <option value="Serviços" />
+                      </datalist>
                     </div>
+                  </div>
+                  <div>
+                    <p className={labelCls}>Tipo de item</p>
+                    <select
+                      value={tipoItemEdit}
+                      onChange={(e) => setTipoItemEdit(e.target.value as "" | "joia" | "insumo")}
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                    >
+                      <option value="">— Sem classificação —</option>
+                      <option value="joia">Joia</option>
+                      <option value="insumo">Insumo</option>
+                    </select>
                   </div>
                   {produto.referencia && (
                     <div>
@@ -721,20 +1006,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                       <p className="text-sm text-gray-700">{produto.referencia}</p>
                     </div>
                   )}
-                  {(produto.categoria || produto.sub_categoria) && (
-                    <div className="grid grid-cols-2 gap-3">
-                      {produto.categoria && (
-                        <div>
-                          <p className={labelCls}>Categoria</p>
-                          <p className="text-sm text-gray-700">{produto.categoria}</p>
-                        </div>
-                      )}
-                      {produto.sub_categoria && (
-                        <div>
-                          <p className={labelCls}>Sub-categoria</p>
-                          <p className="text-sm text-gray-700">{produto.sub_categoria}</p>
-                        </div>
-                      )}
+                  {produto.categoria && (
+                    <div>
+                      <p className={labelCls}>Categoria de precificação</p>
+                      <p className="text-sm text-gray-700">{produto.categoria}</p>
                     </div>
                   )}
                 </div>
@@ -905,46 +1180,162 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                 </div>
               </section>
 
-              {/* ── PRECIFICAÇÃO ── */}
+              {/* ── PRECIFICAÇÃO (editável) ── */}
               <section>
                 <p className={sectionTitleCls}>Precificação</p>
                 <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-100">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <p className={labelCls}>Peso precificado</p>
-                      <p className="text-sm font-mono text-gray-700">
-                        {formatPeso(produto.peso_precificado)}g
-                      </p>
+                      <p className={labelCls}>Peso precificado (g)</p>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={pesoEdit}
+                        onChange={(e) => setPesoEdit(e.target.value)}
+                        placeholder="—"
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      />
                     </div>
                     <div>
-                      <p className={labelCls}>Preço Tiny</p>
-                      <p className="text-sm font-mono text-gray-700">{formatPreco(produto.preco_tiny)}</p>
+                      <p className={labelCls}>Markup</p>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={markupEdit}
+                        onChange={(e) => setMarkupEdit(e.target.value)}
+                        placeholder="—"
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      />
                     </div>
+                    <div>
+                      <p className={labelCls}>Fator</p>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={fatorEdit}
+                        onChange={(e) => setFatorEdit(e.target.value)}
+                        placeholder="1"
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <p className={labelCls}>Categoria de precificação</p>
+                    <input
+                      type="text"
+                      value={catPrecEdit}
+                      onChange={(e) => setCatPrecEdit(e.target.value)}
+                      placeholder="—"
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                    />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <p className={labelCls}>Preço Sync (ouro)</p>
-                      <p className="text-sm font-mono font-semibold text-gray-800">
-                        {formatPreco(produto.preco_sync)}
-                      </p>
+                      <p className={labelCls}>Preço Tiny (R$)</p>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={precoTinyEdit}
+                        onChange={(e) => setPrecoTinyEdit(e.target.value)}
+                        placeholder="—"
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      />
                     </div>
                     <div>
+                      <p className={labelCls}>Preço Sync (ouro)</p>
+                      {(() => {
+                        // ── Preview em runtime: peso × cotação × markup × fator ──
+                        // parseNum aceita string OU number (DB retorna number em alguns casos)
+                        const parseNum = (v: string | number | null | undefined) => {
+                          if (v == null) return 0;
+                          if (typeof v === "number") return isNaN(v) ? 0 : v;
+                          let t = String(v).trim();
+                          if (!t) return 0;
+                          if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+                          else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, "");
+                          const n = parseFloat(t);
+                          return isNaN(n) ? 0 : n;
+                        };
+                        const pesoLive   = parseNum(pesoEdit);
+                        const markupLive = parseNum(markupEdit);
+                        const fatorLive  = parseNum(fatorEdit) || 1;
+                        const podeCalc = pesoLive > 0 && markupLive > 0 && cotacaoOuro > 0;
+                        const precoLive = podeCalc
+                          ? Math.round((pesoLive * cotacaoOuro * markupLive * fatorLive) / 10) * 10
+                          : null;
+
+                        // Campos alterados vs valores gravados no banco
+                        const editando =
+                          (pesoEdit || "")   !== (produto.peso_precificado ?? "") ||
+                          (markupEdit || "") !== (produto.markup ?? "") ||
+                          (fatorEdit || "")  !== (produto.fator ?? "");
+
+                        // Prioridade de exibição:
+                        //   1. Se está editando e dá pra calcular → PREVIEW em azul (não salvo ainda)
+                        //   2. Se preco_sync do DB > 0 → valor oficial
+                        //   3. Se preco_curva calculado no SELECT > 0 → valor da curva (verde)
+                        //   4. Sem peso/markup → —
+                        if (editando && precoLive != null) {
+                          return (
+                            <>
+                              <p className="text-sm font-mono font-semibold text-blue-600 py-1.5">
+                                {formatPreco(String(precoLive))}
+                                <sup className="ml-0.5 text-[8px] font-bold">?</sup>
+                              </p>
+                              <p className="text-[10px] text-blue-500">preview · salve para aplicar</p>
+                            </>
+                          );
+                        }
+                        if (produto.preco_sync && parseFloat(produto.preco_sync) > 0) {
+                          return (
+                            <>
+                              <p className="text-sm font-mono font-semibold text-gray-800 py-1.5">
+                                {formatPreco(produto.preco_sync)}
+                              </p>
+                              <p className="text-[10px] text-gray-400">calculado pelo trigger</p>
+                            </>
+                          );
+                        }
+                        if (produto.preco_curva != null && produto.preco_curva > 0) {
+                          return (
+                            <>
+                              <p className="text-sm font-mono font-semibold text-emerald-700 py-1.5">
+                                {formatPreco(String(produto.preco_curva))}
+                                <sup className="ml-0.5 text-[8px] font-bold">C</sup>
+                              </p>
+                              <p className="text-[10px] text-emerald-600" title="peso × cotação_ouro × markup × fator">
+                                calculado pela curva
+                              </p>
+                            </>
+                          );
+                        }
+                        return (
+                          <>
+                            <p className="text-sm font-mono text-gray-400 py-1.5">—</p>
+                            <p className="text-[10px] text-gray-400">preencha peso e markup</p>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
                       <p className={labelCls}>Preço Pedras</p>
-                      <p className="text-sm font-mono text-gray-700">
+                      <p className="text-sm font-mono text-gray-700 py-1.5">
                         {produto.tem_pedra_preciosa ? formatPreco(produto.preco_pedras) : "—"}
                       </p>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
                     <div>
                       <p className={labelCls}>Preço Total Sync</p>
-                      <p className="text-sm font-mono font-semibold text-gray-800">
+                      <p className="text-sm font-mono font-semibold text-gray-800 py-1.5">
                         {formatPreco(produto.preco_total_sync)}
                       </p>
                     </div>
                     <div>
-                      <p className={labelCls}>Variação (Δ%)</p>
-                      <DeltaBadge pct={produto.diferenca_percentual} />
+                      <p className={labelCls}>Δ% (Tiny vs Sync)</p>
+                      <div className="py-1.5">
+                        <DeltaBadge pct={produto.diferenca_percentual} />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1032,8 +1423,9 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                   </p>
                 </div>
               </section>
-            </>
-          )}
+              </>
+            );
+          })()}
         </div>
 
         {/* Footer — Save */}

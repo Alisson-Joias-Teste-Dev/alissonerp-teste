@@ -30,6 +30,10 @@
   --color-dourado-DEFAULT: #DB9864;
   --color-dourado-dark:    #C4823E;
 
+  /* Alias para o módulo Gestão de Estoque (mantém identidade ao usar esmeralda do ERP) */
+  --color-alisson-gold:    #184036;
+  --color-alisson-black:   #FFFFFF;
+
   /* Fontes */
   --font-display: var(--font-playfair), Georgia, serif;
   --font-sans:    var(--font-dm-sans), system-ui, sans-serif;
