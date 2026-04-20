@@ -96,10 +96,13 @@ export default function Sidebar() {
   const hasServicePanel = role && ROLES_SERVICE_PANEL.includes(role as typeof ROLES_SERVICE_PANEL[number]);
   const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
   const hasOrcamento = role && ROLES_ORCAMENTO.includes(role);
-  let modulosEfetivos = [...modulos_leitura];
+  const ROLES_GESTAO_ESTOQUE = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+  const hasGestaoEstoque = role && ROLES_GESTAO_ESTOQUE.includes(role);
+  const modulosEfetivos = [...modulos_leitura];
   if (modulosEfetivos.length > 0) {
     if (hasServicePanel && !modulosEfetivos.includes("service_painel")) modulosEfetivos.push("service_painel");
     if (hasOrcamento && !modulosEfetivos.includes("orcamento")) modulosEfetivos.push("orcamento");
+    if (hasGestaoEstoque && !modulosEfetivos.includes("gestao_estoque")) modulosEfetivos.push("gestao_estoque");
   }
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)

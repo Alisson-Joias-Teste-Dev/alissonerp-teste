@@ -46,7 +46,7 @@ export async function GET(
             p.id_produto,
             p.nome,
             p.sku,
-            NULL::text   AS tipo_metal,
+            p.tipo_metal,
             p.peso_precificado,
             p.preco_tiny,
             p.preco_sync,
@@ -59,6 +59,10 @@ export async function GET(
             NULL::text   AS descricao,
             NULL::text   AS referencia,
             p.categoria_precificacao AS categoria,
+            p.categoria              AS categoria_geral,
+            p.markup,
+            p.fator,
+            (SELECT tipo_item FROM alissonerp.produto_tipo_item WHERE produto_id = p.id_produto) AS tipo_item,
             NULL::text   AS sub_categoria,
             ep.id        AS erp_id,
             ep.eh_pai,
@@ -85,7 +89,7 @@ export async function GET(
             p.id_produto,
             p.nome,
             p.sku,
-            NULL::text    AS tipo_metal,
+            p.tipo_metal,
             p.peso_precificado,
             p.preco_tiny,
             p.preco_sync,
@@ -98,6 +102,10 @@ export async function GET(
             NULL::text    AS descricao,
             NULL::text    AS referencia,
             p.categoria_precificacao AS categoria,
+            p.categoria              AS categoria_geral,
+            p.markup,
+            p.fator,
+            (SELECT tipo_item FROM alissonerp.produto_tipo_item WHERE produto_id = p.id_produto) AS tipo_item,
             NULL::text    AS sub_categoria,
             NULL::integer AS erp_id,
             NULL::boolean AS eh_pai,
@@ -198,6 +206,53 @@ export async function PATCH(
   if (typeof body.tem_pedra_preciosa === "boolean") {
     pubUpdate.tem_pedra_preciosa = body.tem_pedra_preciosa;
   }
+  if (typeof body.nome === "string") {
+    const n = body.nome.trim();
+    if (n) pubUpdate.nome = n;
+  }
+  if (body.tipo_metal !== undefined) {
+    const t = typeof body.tipo_metal === "string" ? body.tipo_metal.trim() : null;
+    pubUpdate.tipo_metal = t ? t : null;
+  }
+  if (body.categoria_geral !== undefined) {
+    const c = typeof body.categoria_geral === "string" ? body.categoria_geral.trim() : null;
+    pubUpdate.categoria = c ? c : null;
+  }
+  if (typeof body.situacao === "string" && (body.situacao === "A" || body.situacao === "I")) {
+    pubUpdate.situacao = body.situacao;
+  }
+  if (body.peso_precificado !== undefined) {
+    const n = body.peso_precificado == null ? null : Number(body.peso_precificado);
+    if (n != null && (isNaN(n) || n < 0)) return NextResponse.json({ error: "peso_precificado inválido" }, { status: 400 });
+    pubUpdate.peso_precificado = n;
+  }
+  if (body.markup !== undefined) {
+    const n = body.markup == null ? null : Number(body.markup);
+    if (n != null && (isNaN(n) || n < 0)) return NextResponse.json({ error: "markup inválido" }, { status: 400 });
+    pubUpdate.markup = n;
+  }
+  if (body.fator !== undefined) {
+    const n = body.fator == null ? null : Number(body.fator);
+    if (n != null && (isNaN(n) || n < 0)) return NextResponse.json({ error: "fator inválido" }, { status: 400 });
+    pubUpdate.fator = n;
+  }
+  if (body.categoria_precificacao !== undefined) {
+    const c = typeof body.categoria_precificacao === "string" ? body.categoria_precificacao.trim() : null;
+    pubUpdate.categoria_precificacao = c ? c : null;
+  }
+  if (body.preco_tiny !== undefined) {
+    const n = body.preco_tiny == null ? null : Number(body.preco_tiny);
+    if (n != null && (isNaN(n) || n < 0)) return NextResponse.json({ error: "preco_tiny inválido" }, { status: 400 });
+    pubUpdate.preco_tiny = n;
+  }
+
+  // tipo_item vai para tabela auxiliar
+  let tipoItem: "joia" | "insumo" | null | undefined = undefined;
+  if (body.tipo_item !== undefined) {
+    if (body.tipo_item === null || body.tipo_item === "") tipoItem = null;
+    else if (body.tipo_item === "joia" || body.tipo_item === "insumo") tipoItem = body.tipo_item;
+    else return NextResponse.json({ error: "tipo_item inválido" }, { status: 400 });
+  }
 
   // Campos que vão para erp_produtos (upsert)
   const erpUpdate: Record<string, unknown> = {};
@@ -214,12 +269,12 @@ export async function PATCH(
     erpUpdate.base = body.base != null ? Number(body.base) : null;
   }
 
-  if (Object.keys(pubUpdate).length === 0 && Object.keys(erpUpdate).length === 0) {
+  if (Object.keys(pubUpdate).length === 0 && Object.keys(erpUpdate).length === 0 && tipoItem === undefined) {
     return NextResponse.json({ error: "Nenhum campo editável informado" }, { status: 400 });
   }
 
   try {
-    // ── public.produtos — só tem_pedra_preciosa ────────────────────────────
+    // ── public.produtos ────────────────────────────────────────────────────
     if (pubUpdate.tem_pedra_preciosa !== undefined) {
       await sql`
         UPDATE public.produtos
@@ -227,6 +282,46 @@ export async function PATCH(
         WHERE id_produto = ${produtoId}
       `;
       await recalcularPrecoPedras(produtoId);
+    }
+    if (pubUpdate.nome !== undefined) {
+      await sql`UPDATE public.produtos SET nome = ${pubUpdate.nome as string} WHERE id_produto = ${produtoId}`;
+    }
+    if (pubUpdate.tipo_metal !== undefined) {
+      await sql`UPDATE public.produtos SET tipo_metal = ${pubUpdate.tipo_metal as string | null} WHERE id_produto = ${produtoId}`;
+    }
+    if (pubUpdate.categoria !== undefined) {
+      await sql`UPDATE public.produtos SET categoria = ${pubUpdate.categoria as string | null} WHERE id_produto = ${produtoId}`;
+    }
+    if (pubUpdate.situacao !== undefined) {
+      await sql`UPDATE public.produtos SET situacao = ${pubUpdate.situacao as string} WHERE id_produto = ${produtoId}`;
+    }
+    // Precificação — campos de entrada. Trigger em public.produtos recalcula preco_sync.
+    if (pubUpdate.peso_precificado !== undefined) {
+      await sql`UPDATE public.produtos SET peso_precificado = ${pubUpdate.peso_precificado as number | null} WHERE id_produto = ${produtoId}`;
+    }
+    if (pubUpdate.markup !== undefined) {
+      await sql`UPDATE public.produtos SET markup = ${pubUpdate.markup as number | null} WHERE id_produto = ${produtoId}`;
+    }
+    if (pubUpdate.fator !== undefined) {
+      await sql`UPDATE public.produtos SET fator = ${pubUpdate.fator as number | null} WHERE id_produto = ${produtoId}`;
+    }
+    if (pubUpdate.categoria_precificacao !== undefined) {
+      await sql`UPDATE public.produtos SET categoria_precificacao = ${pubUpdate.categoria_precificacao as string | null} WHERE id_produto = ${produtoId}`;
+    }
+    if (pubUpdate.preco_tiny !== undefined) {
+      await sql`UPDATE public.produtos SET preco_tiny = ${pubUpdate.preco_tiny as number | null} WHERE id_produto = ${produtoId}`;
+    }
+    // tipo_item: upsert ou delete em alissonerp.produto_tipo_item
+    if (tipoItem !== undefined) {
+      if (tipoItem === null) {
+        await sql`DELETE FROM alissonerp.produto_tipo_item WHERE produto_id = ${produtoId}`;
+      } else {
+        await sql`
+          INSERT INTO alissonerp.produto_tipo_item (produto_id, tipo_item)
+          VALUES (${produtoId}, ${tipoItem})
+          ON CONFLICT (produto_id) DO UPDATE SET tipo_item = EXCLUDED.tipo_item, updated_at = now()
+        `;
+      }
     }
 
     // ── erp_produtos — upsert com campos ERP ──────────────────────────────

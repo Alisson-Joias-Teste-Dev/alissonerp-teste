@@ -66,8 +66,16 @@ const COR_METAL_OPTS = ["Amarelo", "Branco", "Rosé"];
 
 function parseNumericInput(value: string | number): number {
   if (typeof value === "number") return value;
-  const normalized = value.toString().replace(",", ".").trim();
-  return parseFloat(normalized) || 0;
+  let t = value.toString().trim();
+  if (!t) return 0;
+  if (t.includes(",")) {
+    // Vírgula = decimal BR → remove pontos (milhar), troca vírgula por ponto
+    t = t.replace(/\./g, "").replace(",", ".");
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(t)) {
+    // Só pontos com grupos de 3 dígitos = separador de milhar BR
+    t = t.replace(/\./g, "");
+  }
+  return parseFloat(t) || 0;
 }
 
 // ─── Helpers de precificação automática ───────────────────────────────────────

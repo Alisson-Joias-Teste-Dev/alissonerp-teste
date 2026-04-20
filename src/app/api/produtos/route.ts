@@ -75,11 +75,15 @@ export async function GET(req: NextRequest) {
   }
 
   const sp = req.nextUrl.searchParams;
-  const busca      = sp.get("busca")?.trim() ?? "";
-  const tem_pedra  = sp.get("tem_pedra");
-  const situacao   = sp.get("situacao") ?? "A";
-  const parent_sku = sp.get("parent_sku")?.trim() ?? "";
-  const agrupar    = sp.get("agrupar") !== "false";
+  const busca       = sp.get("busca")?.trim() ?? "";
+  const tem_pedra   = sp.get("tem_pedra");
+  const tipo_metal  = sp.get("tipo_metal")?.trim() ?? "";
+  const situacao    = sp.get("situacao") ?? "A";
+  const parent_sku  = sp.get("parent_sku")?.trim() ?? "";
+  const agrupar     = sp.get("agrupar") !== "false";
+  const categoria    = sp.get("categoria")?.trim() ?? "";
+  const subcategoria = sp.get("subcategoria")?.trim() ?? "";
+  const apenasComEstoque = sp.get("apenas_com_estoque") === "true";
 
   const page   = Math.max(1, Number(sp.get("page")  ?? 1));
   const limit  = Math.min(200, Math.max(1, Number(sp.get("limit") ?? 50)));
@@ -96,12 +100,76 @@ export async function GET(req: NextRequest) {
     ? sql`AND (p.nome ILIKE ${"%" + busca + "%"} OR p.sku ILIKE ${"%" + busca + "%"})`
     : sql``;
 
+  const skuPrefix = sp.get("sku_prefix")?.trim() ?? "";
+  const wSkuPrefix = skuPrefix
+    ? sql`AND p.sku ILIKE ${skuPrefix + "%"}`
+    : sql``;
+
+  // Tipo de item (joia/insumo) — vem de alissonerp.produto_tipo_item
+  const tipoItem = sp.get("tipo_item")?.trim() ?? "";
+  const wTipoItem =
+    tipoItem === "joia"     ? sql`AND ti.tipo_item = 'joia'` :
+    tipoItem === "insumo"   ? sql`AND ti.tipo_item = 'insumo'` :
+    tipoItem === "__sem__"  ? sql`AND ti.tipo_item IS NULL` :
+    sql``;
+
+  // Pendências — produtos com dados incompletos.
+  const esconderInsumos = sp.get("esconder_insumos") === "true";
+  const wEsconderInsumos = esconderInsumos
+    ? sql`AND (p.sku IS NULL OR p.sku NOT ILIKE 'IS%')
+          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Insumos%')
+          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Matérias Primas%')`
+    : sql``;
+
+  const pendencia = sp.get("pendencia")?.trim() ?? "";
+  const wSemCat   = sql`(p.categoria IS NULL OR TRIM(p.categoria) = '')`;
+  const wSemMetal = sql`(p.tipo_metal IS NULL OR TRIM(p.tipo_metal) = '')`;
+  const wSemPeso  = sql`(p.peso_precificado IS NULL OR p.peso_precificado = 0)`;
+  // "Sem preço" = TODOS os preços são nulos ou zero (comparação numérica).
+  // Antes comparava ::text = '0' e falhava para "0.00" gravado como string.
+  const wSemPreco = sql`COALESCE(p.preco_sync::numeric,       0) = 0
+                    AND COALESCE(p.preco_total_sync::numeric, 0) = 0
+                    AND COALESCE(p.preco_tiny::numeric,       0) = 0`;
+  const wPendencia =
+    pendencia === "sem_categoria" ? sql`AND ${wSemCat}` :
+    pendencia === "sem_metal"     ? sql`AND ${wSemMetal}` :
+    pendencia === "sem_peso"      ? sql`AND ${wSemPeso}` :
+    pendencia === "sem_preco"     ? sql`AND ${wSemPreco}` :
+    pendencia === "qualquer"      ? sql`AND (${wSemCat} OR ${wSemMetal} OR ${wSemPeso} OR ${wSemPreco})` :
+    sql``;
+
   const wPedra =
     tem_pedra === "true"  ? sql`AND p.tem_pedra_preciosa = true`  :
     tem_pedra === "false" ? sql`AND p.tem_pedra_preciosa = false` :
     sql``;
 
   const wSituacao = situacao ? sql`AND p.situacao = ${situacao}` : sql``;
+
+  // tipo_metal: "__sem__" = somente sem metal definido; valor = match exato
+  const wTipoMetal =
+    tipo_metal === "__sem__" ? sql`AND (p.tipo_metal IS NULL OR TRIM(p.tipo_metal) = '')` :
+    tipo_metal                ? sql`AND p.tipo_metal = ${tipo_metal}` :
+    sql``;
+
+  // Categoria — pai + filho ("Anel" casa "Anel" e "Anel -> Feminino"; subcategoria afina)
+  const wCategoria = categoria
+    ? subcategoria
+      ? sql`AND TRIM(p.categoria) = ${`${categoria} -> ${subcategoria}`}`
+      : sql`AND (TRIM(p.categoria) = ${categoria} OR TRIM(p.categoria) ILIKE ${`${categoria} -> %`})`
+    : sql``;
+
+  // Apenas com saldo >= 1 em public.estoque (join por SKU, agregando para
+  // Saldo pode vir de 2 fontes:
+  //   public.estoque (produtos acabados do Tiny) OU
+  //   alissonerp.vw_estoque_directus_saldo (pedras/insumos legado)
+  const wEstoque = apenasComEstoque
+    ? sql`AND (
+        EXISTS (SELECT 1 FROM public.estoque e
+                WHERE e.sku = p.sku AND e.saldo >= 1)
+        OR EXISTS (SELECT 1 FROM alissonerp.vw_estoque_directus_saldo v
+                   WHERE v.insumo_sku = p.sku AND v.saldo >= 1)
+      )`
+    : sql``;
 
   const orderFieldIdent =
     orderField === "nome"                 ? sql`p.nome`               :
@@ -138,7 +206,8 @@ export async function GET(req: NextRequest) {
         SELECT COUNT(*) AS total
         FROM public.produtos p
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
-        WHERE TRUE ${wBusca} ${wPedra} ${wSituacao} ${wAgrupamento}
+        LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
+        WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
       `;
 
       const total      = Number(countRow?.total ?? 0);
@@ -149,7 +218,7 @@ export async function GET(req: NextRequest) {
           p.id_produto,
           p.nome,
           p.sku,
-          NULL::text AS tipo_metal,
+          p.tipo_metal,
           p.peso_precificado,
           p.preco_tiny,
           p.preco_sync,
@@ -158,7 +227,20 @@ export async function GET(req: NextRequest) {
           p.diferenca_percentual,
           p.tem_pedra_preciosa,
           p.situacao,
+          p.categoria,
           NULL::text AS foto_produto,
+          COALESCE(
+            (SELECT e.saldo::int FROM public.estoque e WHERE e.sku = p.sku LIMIT 1),
+            (SELECT SUM(v.saldo)::int FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku),
+            0
+          ) AS saldo_estoque,
+          ARRAY_REMOVE(ARRAY[
+            CASE WHEN ${wSemCat}   THEN 'sem_categoria' END,
+            CASE WHEN ${wSemMetal} THEN 'sem_metal'     END,
+            CASE WHEN ${wSemPeso}  THEN 'sem_peso'      END,
+            CASE WHEN ${wSemPreco} THEN 'sem_preco'     END
+          ], NULL) AS pendencias,
+          ti.tipo_item,
           ep.id               AS erp_id,
           ep.eh_pai,
           ep.eh_variacao,
@@ -172,7 +254,8 @@ export async function GET(req: NextRequest) {
           ) ELSE 0 END AS qtd_variacoes
         FROM public.produtos p
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
-        WHERE TRUE ${wBusca} ${wPedra} ${wSituacao} ${wAgrupamento}
+        LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
+        WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
         ORDER BY ${orderVariacoes}
         LIMIT  ${limit}
         OFFSET ${offset}
@@ -185,7 +268,8 @@ export async function GET(req: NextRequest) {
     const [countRow] = await sql<{ total: string }[]>`
       SELECT COUNT(*) AS total
       FROM public.produtos p
-      WHERE TRUE ${wBusca} ${wPedra} ${wSituacao}
+      LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
+      WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
     `;
 
     const total      = Number(countRow?.total ?? 0);
@@ -196,7 +280,7 @@ export async function GET(req: NextRequest) {
         p.id_produto,
         p.nome,
         p.sku,
-        NULL::text    AS tipo_metal,
+        p.tipo_metal,
         p.peso_precificado,
         p.preco_tiny,
         p.preco_sync,
@@ -205,7 +289,20 @@ export async function GET(req: NextRequest) {
         p.diferenca_percentual,
         p.tem_pedra_preciosa,
         p.situacao,
+        p.categoria,
         NULL::text    AS foto_produto,
+        COALESCE(
+          (SELECT e.saldo::int FROM public.estoque e WHERE e.sku = p.sku LIMIT 1),
+          (SELECT SUM(v.saldo)::int FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku),
+          0
+        ) AS saldo_estoque,
+        ARRAY_REMOVE(ARRAY[
+          CASE WHEN ${wSemCat}   THEN 'sem_categoria' END,
+          CASE WHEN ${wSemMetal} THEN 'sem_metal'     END,
+          CASE WHEN ${wSemPeso}  THEN 'sem_peso'      END,
+          CASE WHEN ${wSemPreco} THEN 'sem_preco'     END
+        ], NULL) AS pendencias,
+        ti.tipo_item,
         NULL::integer AS erp_id,
         NULL::boolean AS eh_pai,
         NULL::boolean AS eh_variacao,
@@ -214,7 +311,8 @@ export async function GET(req: NextRequest) {
         NULL::text    AS numeracao,
         0::integer    AS qtd_variacoes
       FROM public.produtos p
-      WHERE TRUE ${wBusca} ${wPedra} ${wSituacao}
+      LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
+      WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
       ORDER BY ${orderFieldIdent} ${orderDir} NULLS LAST
       LIMIT  ${limit}
       OFFSET ${offset}

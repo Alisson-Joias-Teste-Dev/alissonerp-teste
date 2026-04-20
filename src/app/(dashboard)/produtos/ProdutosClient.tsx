@@ -13,6 +13,7 @@ import {
 import { formatPeso } from "@/lib/formatters";
 import ProdutoDrawer from "@/components/produtos/ProdutoDrawer";
 import CadastroProdutoModal from "@/components/produtos/CadastroProdutoModal";
+import BulkEditModal from "@/components/produtos/BulkEditModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,7 +30,11 @@ export interface Produto {
   diferenca_percentual: string | null;
   tem_pedra_preciosa: boolean;
   situacao: string | null;
+  categoria: string | null;
   foto_produto: string | null;
+  saldo_estoque: number | null;
+  pendencias: string[] | null;
+  tipo_item: "joia" | "insumo" | null;
   // erp_produtos
   erp_id: number | null;
   eh_pai: boolean | null;
@@ -38,6 +43,12 @@ export interface Produto {
   sufixo_variacao: string | null;
   numeracao: string | null;
   qtd_variacoes: number;
+}
+
+interface CategoriaPai {
+  pai: string;
+  total: number;
+  filhos: { nome: string; total: number }[];
 }
 
 type OrderField = "nome" | "sku" | "preco_sync" | "diferenca_percentual" | "preco_tiny" | "peso_precificado" | "id_produto";
@@ -135,6 +146,25 @@ export default function ProdutosClient() {
   const [tipoMetal, setTipoMetal] = useState("");
   const [temPedra, setTemPedra] = useState("");
   const [situacao, setSituacao] = useState("A");
+  const [apenasComEstoque, setApenasComEstoque] = useState(true);
+  const [categoriaPai, setCategoriaPai] = useState("");
+  const [subcategoria, setSubcategoria]   = useState("");
+  const [pendencia, setPendencia] = useState("");
+  const [esconderInsumos, setEsconderInsumos] = useState(true);
+  const [tipoItem, setTipoItem]   = useState("");
+
+  // Categorias hierárquicas (do recorte ativo+saldo>=1)
+  const [categorias, setCategorias] = useState<CategoriaPai[]>([]);
+  const [pendContagem, setPendContagem] = useState<{
+    qualquer: number; sem_categoria: number; sem_metal: number;
+    sem_peso: number; sem_preco: number;
+  }>({ qualquer: 0, sem_categoria: 0, sem_metal: 0, sem_peso: 0, sem_preco: 0 });
+
+  // Tick forçado para recarregar contadores (metais/categorias/pendências) após salvar
+  const [refreshTick, setRefreshTick] = useState(0);
+  const bumpRefresh = () => setRefreshTick((t) => t + 1);
+  // Metais distintos (contagem só de ativos)
+  const [metais, setMetais] = useState<{ tipo_metal: string | null; total: number }[]>([]);
 
   // Sorting
   const [order, setOrder] = useState<OrderField>("nome");
@@ -162,6 +192,10 @@ export default function ProdutosClient() {
   // Cadastro modal
   const [showCadastro, setShowCadastro] = useState(false);
 
+  // Seleção em massa
+  const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
+  const [showBulkEdit, setShowBulkEdit]   = useState(false);
+
   // Debounce busca
   const buscaTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [debouncedBusca, setDebouncedBusca] = useState("");
@@ -174,6 +208,70 @@ export default function ProdutosClient() {
     }, 300);
     return () => { if (buscaTimer.current) clearTimeout(buscaTimer.current); };
   }, [busca]);
+
+  // Monta query string apenas com filtros contextuais (exceto o foco do select)
+  function paramsContexto(extraExclude: string[] = []): string {
+    const p = new URLSearchParams();
+    if (debouncedBusca) p.set("busca", debouncedBusca);
+    if (tipoMetal && !extraExclude.includes("tipo_metal")) p.set("tipo_metal", tipoMetal);
+    if (temPedra) p.set("tem_pedra", temPedra);
+    if (situacao) p.set("situacao", situacao);
+    if (categoriaPai && !extraExclude.includes("categoria")) p.set("categoria", categoriaPai);
+    if (subcategoria && !extraExclude.includes("categoria")) p.set("subcategoria", subcategoria);
+    if (apenasComEstoque) p.set("apenas_com_estoque", "true");
+    if (esconderInsumos) p.set("esconder_insumos", "true");
+    if (pendencia && !extraExclude.includes("pendencia")) p.set("pendencia", pendencia);
+    return p.toString();
+  }
+
+  // Recarrega contadores (metais, categorias, pendências) sempre que filtros mudam
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      try {
+        const qsMetais   = paramsContexto(["tipo_metal"]);
+        const qsCats     = paramsContexto(["categoria"]);
+        const qsPend     = paramsContexto(["pendencia"]);
+        const [r1, r2, r3] = await Promise.all([
+          fetch(`/api/produtos/categorias?${qsCats}`),
+          fetch(`/api/produtos/metais?${qsMetais}`),
+          fetch(`/api/produtos/pendencias-contagem?${qsPend}`),
+        ]);
+        if (r1.ok) {
+          const data = await r1.json() as { categorias: CategoriaPai[] };
+          if (!cancelado) setCategorias(data.categorias ?? []);
+        }
+        if (r2.ok) {
+          const data = await r2.json() as { metais: { tipo_metal: string | null; total: number }[] };
+          if (!cancelado) setMetais(data.metais ?? []);
+        }
+        if (r3.ok) {
+          const data = await r3.json() as typeof pendContagem;
+          if (!cancelado) setPendContagem(data);
+        }
+      } catch {
+        // não-crítico
+      }
+    })();
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedBusca, tipoMetal, temPedra, situacao, categoriaPai, subcategoria, apenasComEstoque, esconderInsumos, pendencia, refreshTick]);
+
+  // Reseta subcategoria quando trocar a pai
+  useEffect(() => { setSubcategoria(""); }, [categoriaPai]);
+
+  function toggleSelecao(id: number, e?: React.MouseEvent) {
+    e?.stopPropagation();
+    setSelecionados((prev) => {
+      const s = new Set(prev);
+      if (s.has(id)) s.delete(id); else s.add(id);
+      return s;
+    });
+  }
+  function limparSelecao() { setSelecionados(new Set()); }
+
+  const subcategoriasDisponiveis =
+    categorias.find((c) => c.pai === categoriaPai)?.filhos ?? [];
 
   const fetchProdutos = useCallback(async () => {
     setLoading(true);
@@ -188,8 +286,14 @@ export default function ProdutosClient() {
         dir,
         agrupar: "true",
       });
-      if (tipoMetal) params.set("tipo_metal", tipoMetal);
-      if (temPedra)  params.set("tem_pedra", temPedra);
+      if (tipoMetal)         params.set("tipo_metal", tipoMetal);
+      if (temPedra)          params.set("tem_pedra", temPedra);
+      if (categoriaPai)      params.set("categoria", categoriaPai);
+      if (subcategoria)      params.set("subcategoria", subcategoria);
+      if (apenasComEstoque)  params.set("apenas_com_estoque", "true");
+      if (pendencia)         params.set("pendencia", pendencia);
+      if (esconderInsumos)   params.set("esconder_insumos", "true");
+      if (tipoItem)          params.set("tipo_item", tipoItem);
 
       const res = await fetch(`/api/produtos?${params.toString()}`);
       if (!res.ok) {
@@ -208,7 +312,7 @@ export default function ProdutosClient() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedBusca, situacao, page, limit, order, dir, tipoMetal, temPedra]);
+  }, [debouncedBusca, situacao, page, limit, order, dir, tipoMetal, temPedra, categoriaPai, subcategoria, apenasComEstoque, pendencia, tipoItem, esconderInsumos]);
 
   useEffect(() => { fetchProdutos(); }, [fetchProdutos]);
 
@@ -299,10 +403,14 @@ export default function ProdutosClient() {
           </div>
           <select value={tipoMetal} onChange={(e) => handleFilterChange(() => setTipoMetal(e.target.value))} className={selectCls}>
             <option value="">Todos os metais</option>
-            <option value="Ouro Amarelo 18k">Ouro Amarelo 18k</option>
-            <option value="Ouro Branco 18k">Ouro Branco 18k</option>
-            <option value="Ouro Rose 18k">Ouro Rose 18k</option>
-            <option value="Prata">Prata</option>
+            {metais.map((m) => (
+              <option
+                key={m.tipo_metal ?? "__sem__"}
+                value={m.tipo_metal ?? "__sem__"}
+              >
+                {m.tipo_metal ?? "Sem metal definido"} ({m.total})
+              </option>
+            ))}
           </select>
           <select value={temPedra} onChange={(e) => handleFilterChange(() => setTemPedra(e.target.value))} className={selectCls}>
             <option value="">Com e sem pedra</option>
@@ -314,6 +422,88 @@ export default function ProdutosClient() {
             <option value="I">Somente inativos</option>
             <option value="">Todos</option>
           </select>
+
+          <select
+            value={categoriaPai}
+            onChange={(e) => handleFilterChange(() => setCategoriaPai(e.target.value))}
+            className={selectCls}
+            title="Categoria (pai)"
+          >
+            <option value="">Todas as categorias</option>
+            {categorias.map((c) => (
+              <option key={c.pai} value={c.pai}>
+                {c.pai} ({c.total})
+              </option>
+            ))}
+          </select>
+
+          {subcategoriasDisponiveis.length > 0 && (
+            <select
+              value={subcategoria}
+              onChange={(e) => handleFilterChange(() => setSubcategoria(e.target.value))}
+              className={selectCls}
+              title="Subcategoria"
+            >
+              <option value="">Todas subcategorias</option>
+              {subcategoriasDisponiveis.map((f) => (
+                <option key={f.nome} value={f.nome}>
+                  {f.nome} ({f.total})
+                </option>
+              ))}
+            </select>
+          )}
+
+          <select
+            value={tipoItem}
+            onChange={(e) => handleFilterChange(() => setTipoItem(e.target.value))}
+            className={selectCls}
+            title="Tipo do item (joia ou insumo)"
+          >
+            <option value="">Joias + Insumos</option>
+            <option value="joia">Só joias</option>
+            <option value="insumo">Só insumos</option>
+            <option value="__sem__">Sem classificação</option>
+          </select>
+
+          <select
+            value={pendencia}
+            onChange={(e) => handleFilterChange(() => setPendencia(e.target.value))}
+            className={selectCls}
+            title="Produtos com campos faltando"
+          >
+            <option value="">Sem filtro de pendência</option>
+            <option value="qualquer">Qualquer pendência ({pendContagem.qualquer})</option>
+            <option value="sem_categoria">Sem categoria ({pendContagem.sem_categoria})</option>
+            <option value="sem_metal">Sem metal ({pendContagem.sem_metal})</option>
+            <option value="sem_peso">Sem peso ({pendContagem.sem_peso})</option>
+            <option value="sem_preco">Sem preço ({pendContagem.sem_preco})</option>
+          </select>
+
+          <label
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white cursor-pointer select-none hover:border-gray-300 transition-colors"
+            title="Mostrar somente produtos com saldo ≥ 1 em estoque"
+          >
+            <input
+              type="checkbox"
+              checked={apenasComEstoque}
+              onChange={(e) => handleFilterChange(() => setApenasComEstoque(e.target.checked))}
+              className="accent-[#184036]"
+            />
+            Somente com estoque
+          </label>
+
+          <label
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white cursor-pointer select-none hover:border-gray-300 transition-colors"
+            title="Esconder produtos com SKU IS* e categoria Insumos/Matérias Primas"
+          >
+            <input
+              type="checkbox"
+              checked={esconderInsumos}
+              onChange={(e) => handleFilterChange(() => setEsconderInsumos(e.target.checked))}
+              className="accent-[#184036]"
+            />
+            Esconder insumos
+          </label>
         </div>
       </div>
 
@@ -329,6 +519,29 @@ export default function ProdutosClient() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b" style={{ borderColor: C.cremeBorder, backgroundColor: C.bg }}>
+                {/* select col */}
+                <th className="w-8 px-2">
+                  <input
+                    type="checkbox"
+                    checked={rows.length > 0 && rows.every((r) => selecionados.has(Number(r.id_produto)))}
+                    ref={(el) => {
+                      if (!el) return;
+                      const some = rows.some((r) => selecionados.has(Number(r.id_produto)));
+                      const all  = rows.length > 0 && rows.every((r) => selecionados.has(Number(r.id_produto)));
+                      el.indeterminate = some && !all;
+                    }}
+                    onChange={(e) => {
+                      setSelecionados((prev) => {
+                        const s = new Set(prev);
+                        if (e.target.checked) rows.forEach((r) => s.add(Number(r.id_produto)));
+                        else rows.forEach((r) => s.delete(Number(r.id_produto)));
+                        return s;
+                      });
+                    }}
+                    className="accent-[#184036]"
+                    title="Selecionar/desmarcar todos desta página"
+                  />
+                </th>
                 {/* expand col */}
                 <th className="w-8" />
                 <SortHeader field="sku"                  label="SKU"        current={order} dir={dir} onSort={handleSort} />
@@ -336,6 +549,7 @@ export default function ProdutosClient() {
                 <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">Metal</th>
                 <SortHeader field="peso_precificado"     label="Peso"       current={order} dir={dir} onSort={handleSort} />
                 <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">Situação</th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">Estoque</th>
                 <SortHeader field="preco_sync"           label="Preço Sync" current={order} dir={dir} onSort={handleSort} />
                 <SortHeader field="preco_tiny"           label="Preço Tiny" current={order} dir={dir} onSort={handleSort} />
                 <SortHeader field="diferenca_percentual" label="Δ%"         current={order} dir={dir} onSort={handleSort} />
@@ -344,13 +558,13 @@ export default function ProdutosClient() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={11} className="px-3 py-12 text-center text-gray-400 text-sm">
                     Carregando...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={11} className="px-3 py-12 text-center text-gray-400 text-sm">
                     Nenhum produto encontrado.
                   </td>
                 </tr>
@@ -367,12 +581,32 @@ export default function ProdutosClient() {
                       className="border-b last:border-0 cursor-pointer transition-colors"
                       style={{
                         borderColor: C.cremeBorder,
-                        backgroundColor: isChild ? "#F8FAF8" : undefined,
+                        backgroundColor: selecionados.has(Number(p.id_produto))
+                          ? "#E8F0EC"
+                          : isChild ? "#F8FAF8" : undefined,
                       }}
                       onClick={() => setSelectedId(p.id_produto)}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = isChild ? "#F0F5F0" : "#F9FAFB"; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = isChild ? "#F8FAF8" : ""; }}
+                      onMouseEnter={(e) => {
+                        if (selecionados.has(Number(p.id_produto))) return;
+                        (e.currentTarget as HTMLElement).style.backgroundColor = isChild ? "#F0F5F0" : "#F9FAFB";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (selecionados.has(Number(p.id_produto))) {
+                          (e.currentTarget as HTMLElement).style.backgroundColor = "#E8F0EC";
+                          return;
+                        }
+                        (e.currentTarget as HTMLElement).style.backgroundColor = isChild ? "#F8FAF8" : "";
+                      }}
                     >
+                      {/* Select checkbox */}
+                      <td className="px-2 py-2.5 w-8" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selecionados.has(Number(p.id_produto))}
+                          onChange={(e) => toggleSelecao(Number(p.id_produto), e as unknown as React.MouseEvent)}
+                          className="accent-[#184036]"
+                        />
+                      </td>
                       {/* Expand button */}
                       <td className="pl-2 pr-0 py-2.5 w-8">
                         {isPai ? (
@@ -416,6 +650,24 @@ export default function ProdutosClient() {
                           {isChild && p.numeracao && (
                             <span className="text-[10px] text-blue-500 font-mono">nº{p.numeracao}</span>
                           )}
+                          {(p.pendencias?.length ?? 0) > 0 && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                              style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}
+                              title={p.pendencias!.map((t) => t.replace("_", " ")).join(", ")}
+                            >
+                              ⚠ {p.pendencias!.length}
+                            </span>
+                          )}
+                          {p.tipo_item === "insumo" && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                              style={{ backgroundColor: "#DBEAFE", color: "#1E40AF" }}
+                              title="Insumo"
+                            >
+                              INSUMO
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -432,6 +684,15 @@ export default function ProdutosClient() {
                       {/* Situação */}
                       <td className="px-3 py-2.5">
                         <SituacaoBadge situacao={p.situacao} />
+                      </td>
+
+                      {/* Estoque */}
+                      <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
+                        {(p.saldo_estoque ?? 0) > 0 ? (
+                          <span className="text-emerald-700 font-semibold">{p.saldo_estoque}</span>
+                        ) : (
+                          <span className="text-gray-300">0</span>
+                        )}
                       </td>
 
                       {/* Preço Sync */}
@@ -499,11 +760,49 @@ export default function ProdutosClient() {
         )}
       </div>
 
+      {/* Barra de ações de seleção (fixa no rodapé quando há seleção) */}
+      {selecionados.size > 0 && (
+        <div
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 rounded-full shadow-lg border"
+          style={{ backgroundColor: C.esmeralda, borderColor: C.esmeralda }}
+        >
+          <span className="text-sm text-white font-medium">
+            {selecionados.size} selecionado(s)
+          </span>
+          <button
+            onClick={() => setShowBulkEdit(true)}
+            className="px-3 py-1 rounded-md bg-white text-[#184036] text-xs font-semibold hover:bg-gray-100 transition-colors"
+          >
+            Editar em massa
+          </button>
+          <button
+            onClick={limparSelecao}
+            className="px-3 py-1 rounded-md bg-transparent border border-white/30 text-white text-xs hover:bg-white/10 transition-colors"
+          >
+            Limpar
+          </button>
+        </div>
+      )}
+
+      {/* Modal edição em massa */}
+      <BulkEditModal
+        open={showBulkEdit}
+        ids={Array.from(selecionados)}
+        onClose={() => setShowBulkEdit(false)}
+        onSaved={(n) => {
+          setShowBulkEdit(false);
+          limparSelecao();
+          fetchProdutos();
+          bumpRefresh();
+          alert(`${n} produto(s) atualizado(s) com sucesso.`);
+        }}
+      />
+
       {/* Drawer */}
       <ProdutoDrawer
         produtoId={selectedId}
         onClose={() => setSelectedId(null)}
-        onSaved={() => fetchProdutos()}
+        onSaved={() => { fetchProdutos(); bumpRefresh(); }}
       />
 
       {/* Modal de Cadastro */}
@@ -513,6 +812,7 @@ export default function ProdutosClient() {
         onCreated={(produtoId, _sku) => {
           setShowCadastro(false);
           fetchProdutos();
+          bumpRefresh();
           setSelectedId(produtoId);
         }}
       />

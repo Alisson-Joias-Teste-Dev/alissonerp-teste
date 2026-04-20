@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(ls src/app/api/produtos/[id]/modelo-3d/reprocessar/)",
+      "Bash(ls src/app/api/produtos/[id]/modelo-3d/medidas/)",
+      "Bash(pm2 restart:*)",
+      "Bash(npx tsc:*)",
+      "Bash(node -e ':*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git push:*)",
+      "WebFetch(domain:rfidmoura.com.br)",
+      "Bash(findstr /i \"DATABASE_URL\" C:\\\\Users\\\\aliss\\\\alissonerp\\\\.env.local)",
+      "Bash(node scripts/diag_rfid_pre.mjs)",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}

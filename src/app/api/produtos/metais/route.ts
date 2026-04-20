@@ -1,0 +1,46 @@
+/**
+ * GET /api/produtos/metais
+ *
+ * Retorna distintos tipo_metal + contagem, **aplicando os demais filtros
+ * ativos** (situacao, busca, categoria, apenas_com_estoque, esconder_insumos,
+ * pendencia, tem_pedra, sku_prefix). Só NÃO aplica tipo_metal (foco).
+ *
+ * Isso garante que o contador bate com a listagem real.
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { createServerSupabase } from "@/lib/supabase/server";
+import { isProdutosAccess } from "@/lib/roles";
+import sql from "@/lib/db";
+import { buildFiltrosProdutos } from "@/lib/produtos-filtros";
+
+export async function GET(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  const role = user.user_metadata?.role as string | undefined;
+  if (!isProdutosAccess(role)) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+
+  try {
+    const f = buildFiltrosProdutos(req.nextUrl.searchParams, {
+      exclude: ["tipo_metal", "tipo_item"],
+    });
+
+    const rows = await sql<{ tipo_metal: string | null; total: number }[]>`
+      SELECT
+        NULLIF(TRIM(p.tipo_metal), '') AS tipo_metal,
+        COUNT(*)::int                  AS total
+      FROM public.produtos p
+      LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+      WHERE (ep.eh_variacao = false OR ep.id IS NULL)
+        ${f.wBusca} ${f.wSkuPrefix} ${f.wPedra} ${f.wSituacao}
+        ${f.wCategoria} ${f.wEstoque} ${f.wEsconderInsumos} ${f.wPendencia}
+      GROUP BY 1
+      ORDER BY 2 DESC
+    `;
+
+    return NextResponse.json({ metais: rows });
+  } catch (err) {
+    console.error("[GET /api/produtos/metais]", err);
+    return NextResponse.json({ error: "Erro ao buscar metais" }, { status: 500 });
+  }
+}
