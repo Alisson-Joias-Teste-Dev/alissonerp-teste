@@ -1,0 +1,2085 @@
+diff --git a/next.config.ts b/next.config.ts
+index 68a6c64..0011493 100644
+--- a/next.config.ts
++++ b/next.config.ts
+@@ -2,6 +2,12 @@ import type { NextConfig } from "next";
+ 
+ const nextConfig: NextConfig = {
+   output: "standalone",
++  experimental: {
++    serverActions: {
++      bodySizeLimit: "50mb",
++    },
++    proxyClientMaxBodySize: 52428800, // 50MB — upload de .3dm
++  },
+ };
+ 
+ export default nextConfig;
+diff --git a/package-lock.json b/package-lock.json
+index 9021a1f..cdef439 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -11,6 +11,7 @@
+         "@supabase/ssr": "^0.9.0",
+         "@supabase/supabase-js": "^2.98.0",
+         "@tanstack/react-query": "^5.90.21",
++        "@types/react-grid-layout": "^1.3.6",
+         "class-variance-authority": "^0.7.1",
+         "clsx": "^2.1.1",
+         "lucide-react": "^0.577.0",
+@@ -18,6 +19,7 @@
+         "postgres": "^3.4.8",
+         "react": "19.2.3",
+         "react-dom": "19.2.3",
++        "react-grid-layout": "^2.2.3",
+         "recharts": "^3.8.0",
+         "rhino3dm": "^8.17.0",
+         "tailwind-merge": "^3.5.0",
+@@ -1822,7 +1824,6 @@
+       "version": "19.2.14",
+       "resolved": "https://registry.npmjs.org/@types/react/-/react-19.2.14.tgz",
+       "integrity": "sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==",
+-      "devOptional": true,
+       "license": "MIT",
+       "dependencies": {
+         "csstype": "^3.2.2"
+@@ -1838,6 +1839,15 @@
+         "@types/react": "^19.2.0"
+       }
+     },
++    "node_modules/@types/react-grid-layout": {
++      "version": "1.3.6",
++      "resolved": "https://registry.npmjs.org/@types/react-grid-layout/-/react-grid-layout-1.3.6.tgz",
++      "integrity": "sha512-Cw7+sb3yyjtmxwwJiXtEXcu5h4cgs+sCGkHwHXsFmPyV30bf14LeD/fa2LwQovuD2HWxCcjIdNhDlcYGj95qGA==",
++      "license": "MIT",
++      "dependencies": {
++        "@types/react": "*"
++      }
++    },
+     "node_modules/@types/stats.js": {
+       "version": "0.17.4",
+       "resolved": "https://registry.npmjs.org/@types/stats.js/-/stats.js-0.17.4.tgz",
+@@ -3007,7 +3017,6 @@
+       "version": "3.2.3",
+       "resolved": "https://registry.npmjs.org/csstype/-/csstype-3.2.3.tgz",
+       "integrity": "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==",
+-      "devOptional": true,
+       "license": "MIT"
+     },
+     "node_modules/d3-array": {
+@@ -3978,6 +3987,12 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/fast-equals": {
++      "version": "4.0.3",
++      "resolved": "https://registry.npmjs.org/fast-equals/-/fast-equals-4.0.3.tgz",
++      "integrity": "sha512-G3BSX9cfKttjr+2o1O22tYMLq0DPluZnYtq1rXumE1SpL/F/SLIfHx08WYQoWSIpeMYf8sRbJ8++71+v6Pnxfg==",
++      "license": "MIT"
++    },
+     "node_modules/fast-glob": {
+       "version": "3.3.1",
+       "resolved": "https://registry.npmjs.org/fast-glob/-/fast-glob-3.3.1.tgz",
+@@ -4965,7 +4980,6 @@
+       "version": "4.0.0",
+       "resolved": "https://registry.npmjs.org/js-tokens/-/js-tokens-4.0.0.tgz",
+       "integrity": "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==",
+-      "dev": true,
+       "license": "MIT"
+     },
+     "node_modules/js-yaml": {
+@@ -5376,7 +5390,6 @@
+       "version": "1.4.0",
+       "resolved": "https://registry.npmjs.org/loose-envify/-/loose-envify-1.4.0.tgz",
+       "integrity": "sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "js-tokens": "^3.0.0 || ^4.0.0"
+@@ -5637,7 +5650,6 @@
+       "version": "4.1.1",
+       "resolved": "https://registry.npmjs.org/object-assign/-/object-assign-4.1.1.tgz",
+       "integrity": "sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==",
+-      "dev": true,
+       "license": "MIT",
+       "engines": {
+         "node": ">=0.10.0"
+@@ -6089,7 +6101,6 @@
+       "version": "15.8.1",
+       "resolved": "https://registry.npmjs.org/prop-types/-/prop-types-15.8.1.tgz",
+       "integrity": "sha512-oj87CgZICdulUohogVAR7AjlC0327U4el4L6eAvOqCeudMDVU0NThNaV+b9Df4dXgSP1gXMTnPdhfe/2qDH5cg==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "loose-envify": "^1.4.0",
+@@ -6149,6 +6160,38 @@
+         "react": "^19.2.3"
+       }
+     },
++    "node_modules/react-draggable": {
++      "version": "4.5.0",
++      "resolved": "https://registry.npmjs.org/react-draggable/-/react-draggable-4.5.0.tgz",
++      "integrity": "sha512-VC+HBLEZ0XJxnOxVAZsdRi8rD04Iz3SiiKOoYzamjylUcju/hP9np/aZdLHf/7WOD268WMoNJMvYfB5yAK45cw==",
++      "license": "MIT",
++      "dependencies": {
++        "clsx": "^2.1.1",
++        "prop-types": "^15.8.1"
++      },
++      "peerDependencies": {
++        "react": ">= 16.3.0",
++        "react-dom": ">= 16.3.0"
++      }
++    },
++    "node_modules/react-grid-layout": {
++      "version": "2.2.3",
++      "resolved": "https://registry.npmjs.org/react-grid-layout/-/react-grid-layout-2.2.3.tgz",
++      "integrity": "sha512-OAEJHBxmfuxQfVtZwRzmsokijGlBgzYIJ7MUlLk/VSa43SaGzu15w5D0P2RDrfX5EvP9POMbL6bFrai/huDzbQ==",
++      "license": "MIT",
++      "dependencies": {
++        "clsx": "^2.1.1",
++        "fast-equals": "^4.0.3",
++        "prop-types": "^15.8.1",
++        "react-draggable": "^4.4.6",
++        "react-resizable": "^3.1.3",
++        "resize-observer-polyfill": "^1.5.1"
++      },
++      "peerDependencies": {
++        "react": ">= 16.3.0",
++        "react-dom": ">= 16.3.0"
++      }
++    },
+     "node_modules/react-is": {
+       "version": "16.13.1",
+       "resolved": "https://registry.npmjs.org/react-is/-/react-is-16.13.1.tgz",
+@@ -6178,6 +6221,20 @@
+         }
+       }
+     },
++    "node_modules/react-resizable": {
++      "version": "3.1.3",
++      "resolved": "https://registry.npmjs.org/react-resizable/-/react-resizable-3.1.3.tgz",
++      "integrity": "sha512-liJBNayhX7qA4tBJiBD321FDhJxgGTJ07uzH5zSORXoE8h7PyEZ8mLqmosST7ppf6C4zUsbd2gzDMmBCfFp9Lw==",
++      "license": "MIT",
++      "dependencies": {
++        "prop-types": "15.x",
++        "react-draggable": "^4.5.0"
++      },
++      "peerDependencies": {
++        "react": ">= 16.3",
++        "react-dom": ">= 16.3"
++      }
++    },
+     "node_modules/recharts": {
+       "version": "3.8.0",
+       "resolved": "https://registry.npmjs.org/recharts/-/recharts-3.8.0.tgz",
+@@ -6273,6 +6330,12 @@
+       "integrity": "sha512-K/BG6eIky/SBpzfHZv/dd+9JBFiS4SWV7FIujVyJRux6e45+73RaUHXLmIR1f7WOMaQ0U1km6qwklRQxpJJY0w==",
+       "license": "MIT"
+     },
++    "node_modules/resize-observer-polyfill": {
++      "version": "1.5.1",
++      "resolved": "https://registry.npmjs.org/resize-observer-polyfill/-/resize-observer-polyfill-1.5.1.tgz",
++      "integrity": "sha512-LwZrotdHOo12nQuZlHEmtuXdqGoOD0OhaxopaNFxWzInpEgaLWoVuAMbTzixuosCx2nEG58ngzW3vxdWoxIgdg==",
++      "license": "MIT"
++    },
+     "node_modules/resolve": {
+       "version": "1.22.11",
+       "resolved": "https://registry.npmjs.org/resolve/-/resolve-1.22.11.tgz",
+diff --git a/package.json b/package.json
+index 7bd1135..f4e16c3 100644
+--- a/package.json
++++ b/package.json
+@@ -12,6 +12,7 @@
+     "@supabase/ssr": "^0.9.0",
+     "@supabase/supabase-js": "^2.98.0",
+     "@tanstack/react-query": "^5.90.21",
++    "@types/react-grid-layout": "^1.3.6",
+     "class-variance-authority": "^0.7.1",
+     "clsx": "^2.1.1",
+     "lucide-react": "^0.577.0",
+@@ -19,6 +20,7 @@
+     "postgres": "^3.4.8",
+     "react": "19.2.3",
+     "react-dom": "19.2.3",
++    "react-grid-layout": "^2.2.3",
+     "recharts": "^3.8.0",
+     "rhino3dm": "^8.17.0",
+     "tailwind-merge": "^3.5.0",
+diff --git a/src/app/(dashboard)/dashboard-fabrica/page.tsx b/src/app/(dashboard)/dashboard-fabrica/page.tsx
+index a68ff1b..b26113c 100644
+--- a/src/app/(dashboard)/dashboard-fabrica/page.tsx
++++ b/src/app/(dashboard)/dashboard-fabrica/page.tsx
+@@ -1,303 +1,154 @@
+ "use client";
+ 
+-import { useCallback, useEffect, useState } from "react";
+-import {
+-  CheckCircle2,
+-  Wrench,
+-  Clock,
+-  XCircle,
+-  Scale,
+-  Layers,
+-  TrendingDown,
+-  TrendingUp,
+-  ArrowDownCircle,
+-  ArrowUpCircle,
+-  Wallet,
+-  ChevronLeft,
+-  ChevronRight,
+-  AlertTriangle,
+-  RefreshCw,
+-} from "lucide-react";
+-import { formatPeso } from "@/lib/formatters";
+-
+-// ─── Paleta (igual ao DashboardClient) ────────────────────────────────────────
++import { useCallback, useEffect, useState, useRef } from "react";
++import { RefreshCw, Plus, Pencil, Save, RotateCcw } from "lucide-react";
++import { WidgetInstance, DEFAULT_LAYOUT, generateWidgetId, getWidgetDef } from "@/lib/widgets/registry";
++import WidgetGrid from "@/components/dashboard/WidgetGrid";
++import WidgetPicker from "@/components/dashboard/WidgetPicker";
++import DrillDownDrawer from "@/components/dashboard/DrillDownDrawer";
++
++// ─── Paleta ──────────────────────────────────────────────────────────────────
+ const P = {
+-  esmeralda:     "#184036",
+-  esmeraldaMid:  "#1C3D32",
+-  esmeraldaLight:"#0F2922",
+-  sage:          "#80A795",
+-  dourado:       "#DB9864",
+-  creme:         "#F3EADA",
+-  cremeMuted:    "#4A7568",
+-  verde:         "#4A9F73",
+-  vermelho:      "#E05C5C",
+-  laranja:       "#DB9864",
++  esmeralda:      "#184036",
++  esmeraldaMid:   "#1C3D32",
++  esmeraldaLight: "#0F2922",
++  sage:           "#80A795",
++  dourado:        "#DB9864",
++  creme:          "#F3EADA",
++  cremeMuted:     "#4A7568",
++  verde:          "#4A9F73",
++  vermelho:       "#E05C5C",
+ };
+ 
+-// ─── Types ───────────────────────────────────────────────────────────────────
+-interface Ordens {
+-  concluidas: number;
+-  em_producao: number;
+-  aguardando: number;
+-  canceladas: number;
+-}
+-
+-interface SaldoPoteRow {
+-  insumo_id: number;
+-  insumo_nome: string;
+-  saldo_g: number;
+-}
+-
+-interface OuroProducaoRow {
+-  deposito_id: number;
+-  deposito_nome: string;
+-  setor_nome: string | null;
+-  ouro_g: number;
+-}
+-
+-interface QuebraOperadorRow {
+-  deposito_id: number;
+-  deposito_nome: string;
+-  setor_nome: string | null;
+-  registros: number;
+-  recebido: number;
+-  entregue: number;
+-  quebra: number;
+-  percentual: number;
+-}
+-
+-interface Financeiro {
+-  saldo_anterior: number;
+-  entradas: number;
+-  saidas: number;
+-  saldo_atual: number;
+-}
+-
+-interface DashboardData {
+-  periodo: { inicio: string; fim: string };
+-  ordens: Ordens;
+-  saldo_pote: SaldoPoteRow[];
+-  ouro_producao: OuroProducaoRow[];
+-  quebra_operadores: QuebraOperadorRow[];
+-  financeiro: Financeiro;
+-}
+-
+-interface MovRow {
+-  id: number;
+-  data_hora: string;
+-  entrada: number | null;
+-  saida: number | null;
+-  marcador: string | null;
+-  obs: string | null;
+-  insumo_nome: string;
+-  deposito_nome: string;
+-}
+-
+-interface MovData {
+-  total: number;
+-  page: number;
+-  pageSize: number;
+-  totalPages: number;
+-  rows: MovRow[];
+-}
+-
+-// ─── Period helpers ───────────────────────────────────────────────────────────
++// ─── Helpers ─────────────────────────────────────────────────────────────────
+ function toYMD(d: Date) {
+   return d.toISOString().split("T")[0];
+ }
+-
+ function hoje() { return toYMD(new Date()); }
+-
+ function menosNDias(n: number) {
+   const d = new Date();
+   d.setDate(d.getDate() - n);
+   return toYMD(d);
+ }
+ 
+-// ─── Formatters ───────────────────────────────────────────────────────────────
+-function fmtDate(iso: string | null) {
+-  if (!iso) return "—";
+-  return new Date(iso).toLocaleDateString("pt-BR", {
+-    day: "2-digit", month: "2-digit", year: "2-digit",
+-    hour: "2-digit", minute: "2-digit",
+-  });
+-}
+-
+-// ─── KPI Card ─────────────────────────────────────────────────────────────────
+-function KpiCard({
+-  icon: Icon,
+-  label,
+-  value,
+-  sub,
+-  color,
+-}: {
+-  icon: React.ElementType;
+-  label: string;
+-  value: string | number;
+-  sub?: string;
+-  color?: string;
+-}) {
+-  const c = color ?? P.dourado;
+-  return (
+-    <div
+-      className="rounded-xl p-4"
+-      style={{ backgroundColor: P.esmeraldaLight, border: `1px solid ${P.esmeraldaMid}` }}
+-    >
+-      <div className="flex items-center gap-2 mb-3">
+-        <div
+-          className="w-8 h-8 rounded-lg flex items-center justify-center"
+-          style={{ backgroundColor: c + "22" }}
+-        >
+-          <Icon size={15} strokeWidth={1.75} style={{ color: c }} />
+-        </div>
+-        <span className="text-[10px] uppercase tracking-widest" style={{ color: P.cremeMuted }}>
+-          {label}
+-        </span>
+-      </div>
+-      <p className="text-2xl font-semibold font-mono tabular-nums" style={{ color: c }}>
+-        {value}
+-      </p>
+-      {sub && (
+-        <p className="text-[10px] mt-1" style={{ color: P.cremeMuted }}>
+-          {sub}
+-        </p>
+-      )}
+-    </div>
+-  );
+-}
+-
+-// ─── Section heading ──────────────────────────────────────────────────────────
+-function SectionHeading({ children }: { children: React.ReactNode }) {
+-  return (
+-    <p
+-      className="text-[11px] font-semibold uppercase tracking-widest mb-3"
+-      style={{ color: P.cremeMuted }}
+-    >
+-      {children}
+-    </p>
+-  );
+-}
+-
+-// ─── Panel wrapper ────────────────────────────────────────────────────────────
+-function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
+-  return (
+-    <div
+-      className={`rounded-xl p-5 ${className ?? ""}`}
+-      style={{ backgroundColor: P.esmeraldaLight, border: `1px solid ${P.esmeraldaMid}` }}
+-    >
+-      {children}
+-    </div>
+-  );
+-}
+-
+-// ─── MAIN PAGE ────────────────────────────────────────────────────────────────
++// ─── MAIN PAGE ───────────────────────────────────────────────────────────────
+ export default function DashboardFabricaPage() {
+   // ── Period state ──
+-  const [preset, setPreset] = useState<"today" | "7d" | "30d" | "custom">("30d");
++  const [preset, setPreset] = useState<string>("30d");
+   const [inicio, setInicio] = useState(menosNDias(30));
+-  const [fim, setFim]       = useState(hoje());
+-
+-  // ── Data state ──
+-  const [data,    setData]    = useState<DashboardData | null>(null);
+-  const [loading, setLoading] = useState(true);
+-  const [error,   setError]   = useState<string | null>(null);
+-
+-  // ── Movimentações state ──
+-  const [movData,    setMovData]    = useState<MovData | null>(null);
+-  const [movLoading, setMovLoading] = useState(true);
+-  const [movPage,    setMovPage]    = useState(1);
+-
+-  // ── Fetch main dashboard ──
+-  const fetchDashboard = useCallback(async (ini: string, fi: string) => {
+-    setLoading(true);
+-    setError(null);
++  const [fim, setFim] = useState(hoje());
++
++  // ── Widget state ──
++  const [widgets, setWidgets] = useState<WidgetInstance[]>([]);
++  const [configLoaded, setConfigLoaded] = useState(false);
++  const [editing, setEditing] = useState(false);
++  const [pickerOpen, setPickerOpen] = useState(false);
++  const [saving, setSaving] = useState(false);
++  const [drillDown, setDrillDown] = useState<{ type: string; title: string } | null>(null);
++  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
++
++  // ── Load user config ──
++  const fetchConfig = useCallback(async () => {
+     try {
+-      const res = await fetch(`/api/dashboard/fabrica?inicio=${ini}&fim=${fi}`);
+-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
++      const res = await fetch("/api/dashboard/config");
++      if (!res.ok) throw new Error();
+       const json = await res.json();
+-      console.log("DASHBOARD RESPONSE:", json);
+-      console.log("ORDENS:", json.ordens);
+-      setData(json);
+-    } catch (e: unknown) {
+-      setError(e instanceof Error ? e.message : "Erro ao carregar dashboard");
++      setWidgets(json.layout ?? DEFAULT_LAYOUT);
++    } catch {
++      setWidgets(DEFAULT_LAYOUT);
+     } finally {
+-      setLoading(false);
++      setConfigLoaded(true);
+     }
+   }, []);
+ 
+-  // ── Fetch movimentacoes ──
+-  const fetchMovimentacoes = useCallback(async (ini: string, fi: string, page: number) => {
+-    setMovLoading(true);
+-    try {
+-      const res = await fetch(
+-        `/api/dashboard/fabrica/movimentacoes?inicio=${ini}&fim=${fi}&page=${page}&pageSize=15`
+-      );
+-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+-      const json = await res.json();
+-      setMovData(json);
+-    } catch {
+-      setMovData(null);
+-    } finally {
+-      setMovLoading(false);
+-    }
++  useEffect(() => { fetchConfig(); }, [fetchConfig]);
++
++  // ── Save config (debounced) ──
++  const saveConfig = useCallback(async (layout: WidgetInstance[]) => {
++    if (saveTimer.current) clearTimeout(saveTimer.current);
++    saveTimer.current = setTimeout(async () => {
++      setSaving(true);
++      try {
++        await fetch("/api/dashboard/config", {
++          method: "PUT",
++          headers: { "Content-Type": "application/json" },
++          body: JSON.stringify({ layout }),
++        });
++      } catch { /* silent */ }
++      finally { setSaving(false); }
++    }, 800);
+   }, []);
+ 
+-  // ── Apply preset ──
+-  function applyPreset(p: typeof preset) {
+-    setPreset(p);
+-    let ini = inicio;
+-    let fi  = fim;
+-    if (p === "today")  { ini = hoje();          fi = hoje(); }
+-    if (p === "7d")     { ini = menosNDias(7);   fi = hoje(); }
+-    if (p === "30d")    { ini = menosNDias(30);  fi = hoje(); }
+-    setInicio(ini);
+-    setFim(fi);
+-    setMovPage(1);
+-    fetchDashboard(ini, fi);
+-    fetchMovimentacoes(ini, fi, 1);
++  // ── Handlers ──
++  function handleLayoutChange(updated: WidgetInstance[]) {
++    setWidgets(updated);
++    saveConfig(updated);
+   }
+ 
+-  function applyCustom() {
+-    setPreset("custom");
+-    setMovPage(1);
+-    fetchDashboard(inicio, fim);
+-    fetchMovimentacoes(inicio, fim, 1);
++  function handleRemoveWidget(id: string) {
++    const next = widgets.filter(w => w.i !== id);
++    setWidgets(next);
++    saveConfig(next);
+   }
+ 
+-  // ── Initial load ──
+-  useEffect(() => {
+-    fetchDashboard(inicio, fim);
+-    fetchMovimentacoes(inicio, fim, 1);
+-  // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, []);
+-
+-  // ── Mov page change ──
+-  useEffect(() => {
+-    if (movPage > 1 || movData !== null) {
+-      fetchMovimentacoes(inicio, fim, movPage);
+-    }
+-  // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [movPage]);
++  function handleAddWidget(type: string) {
++    const def = getWidgetDef(type);
++    if (!def) return;
++    const maxY = widgets.reduce((m, w) => Math.max(m, w.y + w.h), 0);
++    const newWidget: WidgetInstance = {
++      i: generateWidgetId(),
++      type,
++      x: 0,
++      y: maxY,
++      w: def.defaultSize.w,
++      h: def.defaultSize.h,
++    };
++    const next = [...widgets, newWidget];
++    setWidgets(next);
++    saveConfig(next);
++  }
+ 
+-  // ── Computed ──
+-  const ordens: Ordens = data?.ordens ?? { concluidas: 0, em_producao: 0, aguardando: 0, canceladas: 0 };
+-  const financeiro: Financeiro = data?.financeiro ?? { saldo_anterior: 0, entradas: 0, saidas: 0, saldo_atual: 0 };
+-  const saldoPote = data?.saldo_pote ?? [];
+-  const ouroProducao = data?.ouro_producao ?? [];
+-  const quebraOps = data?.quebra_operadores ?? [];
+-  const totalSaldoPote = saldoPote.reduce((s, r) => s + Number(r.saldo_g), 0);
+-  const totalOuroProducao = ouroProducao.reduce((s, r) => s + Number(r.ouro_g), 0);
++  function handleResetLayout() {
++    setWidgets(DEFAULT_LAYOUT);
++    saveConfig(DEFAULT_LAYOUT);
++  }
+ 
+-  const PRESETS: { key: typeof preset; label: string }[] = [
+-    { key: "today", label: "Hoje" },
+-    { key: "7d",    label: "7 dias" },
+-    { key: "30d",   label: "30 dias" },
+-    { key: "custom",label: "Personalizado" },
++  // ── Period presets ──
++  const PRESETS: { key: string; label: string }[] = [
++    { key: "today",     label: "Hoje" },
++    { key: "yesterday", label: "Ontem" },
++    { key: "3d",  label: "3 dias" },
++    { key: "7d",  label: "7 dias" },
++    { key: "15d", label: "15 dias" },
++    { key: "30d", label: "30 dias" },
++    { key: "custom", label: "Personalizado" },
+   ];
+ 
++  function applyPreset(p: string) {
++    setPreset(p);
++    let ini = inicio;
++    let fi = fim;
++    if (p === "today")     { ini = hoje();         fi = hoje(); }
++    if (p === "yesterday") { ini = menosNDias(1);  fi = menosNDias(1); }
++    if (p === "3d")        { ini = menosNDias(3);  fi = hoje(); }
++    if (p === "7d")        { ini = menosNDias(7);  fi = hoje(); }
++    if (p === "15d")       { ini = menosNDias(15); fi = hoje(); }
++    if (p === "30d")       { ini = menosNDias(30); fi = hoje(); }
++    setInicio(ini);
++    setFim(fi);
++  }
++
++  if (!configLoaded) {
++    return (
++      <div className="flex items-center justify-center h-[60vh]">
++        <div className="animate-spin rounded-full h-8 w-8 border-2 border-t-transparent" style={{ borderColor: P.dourado, borderTopColor: "transparent" }} />
++      </div>
++    );
++  }
++
+   return (
+-    <div className="p-3 md:p-6 space-y-4 md:space-y-6">
+-      {/* ── Header ──────────────────────────────────────────────────────────── */}
++    <div className="p-3 md:p-6 space-y-4">
++      {/* ── Header ── */}
+       <div className="flex items-start justify-between flex-wrap gap-3">
+         <div>
+           <h1
+@@ -307,486 +158,124 @@ export default function DashboardFabricaPage() {
+             Dashboard Fábrica
+           </h1>
+           <p className="text-xs mt-0.5" style={{ color: P.sage }}>
+-            Produção · Ouro · Quebra — tempo real
++            {editing ? "Arraste e redimensione os widgets" : "Produção · Ouro · Quebra — tempo real"}
+           </p>
+         </div>
+ 
+-        {/* Período */}
+         <div className="flex items-center gap-2 flex-wrap">
+-          {PRESETS.map(({ key, label }) => (
+-            <button
+-              key={key}
+-              onClick={() => key !== "custom" ? applyPreset(key) : setPreset("custom")}
+-              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+-              style={{
+-                backgroundColor: preset === key ? P.dourado + "33" : "transparent",
+-                border: `1px solid ${preset === key ? P.dourado : P.esmeraldaMid}`,
+-                color: preset === key ? P.dourado : P.cremeMuted,
+-              }}
+-            >
+-              {label}
+-            </button>
+-          ))}
+-
+-          {/* Custom date range */}
+-          {preset === "custom" && (
+-            <div className="flex items-center gap-1.5">
+-              <input
+-                type="date"
+-                value={inicio}
+-                onChange={e => setInicio(e.target.value)}
+-                className="rounded-lg px-2 py-1 text-xs"
+-                style={{
+-                  backgroundColor: P.esmeraldaLight,
+-                  border: `1px solid ${P.esmeraldaMid}`,
+-                  color: P.creme,
+-                }}
+-              />
+-              <span className="text-xs" style={{ color: P.cremeMuted }}>até</span>
+-              <input
+-                type="date"
+-                value={fim}
+-                onChange={e => setFim(e.target.value)}
+-                className="rounded-lg px-2 py-1 text-xs"
+-                style={{
+-                  backgroundColor: P.esmeraldaLight,
+-                  border: `1px solid ${P.esmeraldaMid}`,
+-                  color: P.creme,
+-                }}
+-              />
+-              <button
+-                onClick={applyCustom}
+-                className="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+-                style={{ backgroundColor: P.dourado + "33", border: `1px solid ${P.dourado}`, color: P.dourado }}
+-              >
+-                Aplicar
+-              </button>
+-            </div>
+-          )}
+-
+-          <button
+-            onClick={() => {
+-              fetchDashboard(inicio, fim);
+-              fetchMovimentacoes(inicio, fim, movPage);
+-            }}
+-            className="p-1.5 rounded-lg transition-opacity hover:opacity-70"
+-            style={{ border: `1px solid ${P.esmeraldaMid}`, color: P.cremeMuted }}
+-            title="Atualizar"
+-          >
+-            <RefreshCw size={13} strokeWidth={1.75} />
+-          </button>
+-        </div>
+-      </div>
+-
+-      {error && (
+-        <div className="rounded-lg px-4 py-3 text-sm" style={{ backgroundColor: "#3B1515", border: "1px solid #E05C5C", color: P.vermelho }}>
+-          {error}
+-        </div>
+-      )}
+-
+-      {/* ── Financeiro Ouro ──────────────────────────────────────────────────── */}
+-      <div>
+-        <SectionHeading>Ouro — Financeiro do Período (Almoxarifado)</SectionHeading>
+-
+-        {/* 5 cards na mesma linha: 4 de período + Saldo Atual (tempo real) no canto direito */}
+-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+-          {[
+-            { icon: Wallet,         label: "Saldo Anterior",  value: `${formatPeso(financeiro.saldo_anterior)}g`,                                               color: P.sage     },
+-            { icon: ArrowDownCircle,label: "Entradas",         value: `${formatPeso(financeiro.entradas)}g`,                                                     color: P.verde    },
+-            { icon: ArrowUpCircle,  label: "Saídas",           value: `${formatPeso(financeiro.saidas)}g`,                                                       color: P.vermelho },
+-            { icon: TrendingUp,     label: "Saldo do Período", value: `${formatPeso(financeiro.saldo_anterior + financeiro.entradas - financeiro.saidas)}g`,     color: P.sage     },
+-          ].map(({ icon: Icon, label, value, color }) => (
+-            <div
+-              key={label}
+-              className="rounded-xl px-4 py-3 flex items-center gap-3"
+-              style={{ backgroundColor: P.esmeraldaLight, border: `1px solid ${P.esmeraldaMid}` }}
+-            >
+-              <div
+-                className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+-                style={{ backgroundColor: color + "22" }}
+-              >
+-                <Icon size={16} strokeWidth={1.75} style={{ color }} />
+-              </div>
+-              <div>
+-                <p className="text-[9px] uppercase tracking-widest" style={{ color: P.cremeMuted }}>
+-                  {label}
+-                </p>
+-                <p className="text-sm font-semibold font-mono tabular-nums" style={{ color }}>
+-                  {loading ? "—" : value}
+-                </p>
+-              </div>
+-            </div>
+-          ))}
+-
+-          {/* Saldo Atual — tempo real, canto direito, mesmo tamanho */}
+-          <div
+-            className="rounded-xl px-4 py-3 flex items-center gap-3"
+-            style={{ backgroundColor: P.esmeraldaLight, border: `1px solid ${P.dourado}55` }}
+-          >
+-            <div
+-              className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+-              style={{ backgroundColor: P.dourado + "22" }}
+-            >
+-              <TrendingUp size={16} strokeWidth={1.75} style={{ color: P.dourado }} />
+-            </div>
+-            <div>
+-              <div className="flex items-center gap-1.5">
+-                <p className="text-[9px] uppercase tracking-widest" style={{ color: P.cremeMuted }}>
+-                  Saldo Atual
+-                </p>
+-                <span
+-                  className="text-[8px] font-medium px-1 py-px rounded"
+-                  style={{ backgroundColor: P.dourado + "22", color: P.dourado + "bb" }}
++          {/* Período */}
++          {!editing && (
++            <>
++              {PRESETS.map(({ key, label }) => (
++                <button
++                  key={key}
++                  onClick={() => key !== "custom" ? applyPreset(key) : setPreset("custom")}
++                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
++                  style={{
++                    backgroundColor: preset === key ? P.dourado + "33" : "transparent",
++                    border: `1px solid ${preset === key ? P.dourado : P.esmeraldaMid}`,
++                    color: preset === key ? P.dourado : P.cremeMuted,
++                  }}
+                 >
+-                  ⚡ tempo real
+-                </span>
+-              </div>
+-              <p className="text-sm font-semibold font-mono tabular-nums" style={{ color: P.dourado }}>
+-                {loading ? "—" : `${formatPeso(financeiro.saldo_atual)}g`}
+-              </p>
+-            </div>
+-          </div>
+-        </div>
+-      </div>
+-
+-      {/* ── KPI Cards produção ────────────────────────────────────────────── */}
+-      <div>
+-        <SectionHeading>Ordens de Produção</SectionHeading>
+-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+-          <KpiCard
+-            icon={CheckCircle2}
+-            label="Concluídas"
+-            value={loading ? "—" : ordens.concluidas}
+-            sub="no período"
+-            color={P.verde}
+-          />
+-          <KpiCard
+-            icon={Wrench}
+-            label="Em Produção"
+-            value={loading ? "—" : ordens.em_producao}
+-            sub="em andamento + aguardando"
+-            color={P.dourado}
+-          />
+-          <KpiCard
+-            icon={Clock}
+-            label="Aguardando"
+-            value={loading ? "—" : ordens.aguardando}
+-            sub="novas ordens + pendência"
+-            color={P.sage}
+-          />
+-          <KpiCard
+-            icon={XCircle}
+-            label="Canceladas"
+-            value={loading ? "—" : ordens.canceladas}
+-            sub="no período"
+-            color={P.vermelho}
+-          />
+-        </div>
+-      </div>
++                  {label}
++                </button>
++              ))}
+ 
+-      {/* ── Ouro: Saldo Pote + Em Produção ──────────────────────────────────── */}
+-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
++              {preset === "custom" && (
++                <div className="flex items-center gap-1.5">
++                  <input type="date" value={inicio} onChange={e => setInicio(e.target.value)}
++                    className="rounded-lg px-2 py-1 text-xs"
++                    style={{ backgroundColor: P.esmeraldaLight, border: `1px solid ${P.esmeraldaMid}`, color: P.creme }}
++                  />
++                  <span className="text-xs" style={{ color: P.cremeMuted }}>até</span>
++                  <input type="date" value={fim} onChange={e => setFim(e.target.value)}
++                    className="rounded-lg px-2 py-1 text-xs"
++                    style={{ backgroundColor: P.esmeraldaLight, border: `1px solid ${P.esmeraldaMid}`, color: P.creme }}
++                  />
++                </div>
++              )}
+ 
+-        {/* Saldo do Pote — tempo real */}
+-        <Panel>
+-          <SectionHeading>Saldo Total no Pote (Almoxarifado · Tempo Real)</SectionHeading>
+-          {loading ? (
+-            <p className="text-sm py-6 text-center" style={{ color: P.cremeMuted }}>Carregando...</p>
+-          ) : saldoPote.length === 0 ? (
+-            <p className="text-sm py-6 text-center" style={{ color: P.cremeMuted }}>Sem saldo no pote</p>
+-          ) : (
+-            <>
+-              <div
+-                className="flex items-center justify-between rounded-lg px-4 py-3 mb-3"
+-                style={{ backgroundColor: P.esmeralda + "88", border: `1px solid ${P.dourado}33` }}
++              <button
++                onClick={() => { /* force re-render via key change */ setFim(fim + " "); setTimeout(() => setFim(fim.trim()), 50); }}
++                className="p-1.5 rounded-lg transition-opacity hover:opacity-70"
++                style={{ border: `1px solid ${P.esmeraldaMid}`, color: P.cremeMuted }}
++                title="Atualizar"
+               >
+-                <div className="flex items-center gap-2">
+-                  <Scale size={16} strokeWidth={1.75} style={{ color: P.dourado }} />
+-                  <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: P.dourado }}>
+-                    Total Ouro
+-                  </span>
+-                </div>
+-                <span className="text-xl font-semibold font-mono tabular-nums" style={{ color: P.dourado }}>
+-                  {formatPeso(totalSaldoPote)}g
+-                </span>
+-              </div>
+-              <div className="space-y-2">
+-                {saldoPote.map((row) => (
+-                  <div
+-                    key={row.insumo_id}
+-                    className="flex items-center justify-between rounded-lg px-3 py-2"
+-                    style={{ backgroundColor: "#0c1f1a" }}
+-                  >
+-                    <span className="text-xs" style={{ color: P.sage }}>{row.insumo_nome}</span>
+-                    <span className="text-sm font-semibold font-mono tabular-nums" style={{ color: P.creme }}>
+-                      {formatPeso(row.saldo_g)}g
+-                    </span>
+-                  </div>
+-                ))}
+-              </div>
++                <RefreshCw size={13} strokeWidth={1.75} />
++              </button>
+             </>
+           )}
+-        </Panel>
+ 
+-        {/* Ouro em Produção por Operador — tempo real */}
+-        <Panel>
+-          <SectionHeading>Ouro em Produção por Operador (Tempo Real)</SectionHeading>
+-          {loading ? (
+-            <p className="text-sm py-6 text-center" style={{ color: P.cremeMuted }}>Carregando...</p>
+-          ) : ouroProducao.length === 0 ? (
+-            <p className="text-sm py-6 text-center" style={{ color: P.cremeMuted }}>Nenhum ouro em produção</p>
+-          ) : (
++          {/* Edit controls */}
++          {editing && (
+             <>
+-              <div
+-                className="flex items-center justify-between rounded-lg px-4 py-3 mb-3"
+-                style={{ backgroundColor: P.esmeralda + "88", border: `1px solid ${P.verde}33` }}
++              <button
++                onClick={() => setPickerOpen(true)}
++                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
++                style={{ backgroundColor: P.verde + "22", border: `1px solid ${P.verde}`, color: P.verde }}
+               >
+-                <div className="flex items-center gap-2">
+-                  <Layers size={16} strokeWidth={1.75} style={{ color: P.verde }} />
+-                  <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: P.verde }}>
+-                    Total em Produção
+-                  </span>
+-                </div>
+-                <span className="text-xl font-semibold font-mono tabular-nums" style={{ color: P.verde }}>
+-                  {formatPeso(totalOuroProducao)}g
+-                </span>
+-              </div>
+-              <div className="space-y-2">
+-                {ouroProducao.map((row) => (
+-                  <div
+-                    key={`${row.deposito_id}-${row.setor_nome ?? "geral"}`}
+-                    className="flex items-center justify-between rounded-lg px-3 py-2"
+-                    style={{ backgroundColor: "#0c1f1a" }}
+-                  >
+-                    <div>
+-                      <span className="text-xs font-medium" style={{ color: P.sage }}>
+-                        {row.deposito_nome}
+-                      </span>
+-                      {row.setor_nome && (
+-                        <span className="text-[10px] ml-1.5" style={{ color: P.cremeMuted }}>
+-                          · {row.setor_nome}
+-                        </span>
+-                      )}
+-                    </div>
+-                    <span className="text-sm font-semibold font-mono tabular-nums" style={{ color: P.creme }}>
+-                      {formatPeso(row.ouro_g)}g
+-                    </span>
+-                  </div>
+-                ))}
+-              </div>
++                <Plus size={13} strokeWidth={2} />
++                Adicionar Widget
++              </button>
++              <button
++                onClick={handleResetLayout}
++                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
++                style={{ backgroundColor: P.vermelho + "22", border: `1px solid ${P.vermelho}44`, color: P.vermelho }}
++                title="Restaurar layout padrão"
++              >
++                <RotateCcw size={13} strokeWidth={2} />
++                Restaurar Padrão
++              </button>
+             </>
+           )}
+-        </Panel>
+-      </div>
+ 
+-      {/* ── Quebra por Operador ───────────────────────────────────────────────── */}
+-      <Panel>
+-        <SectionHeading>Quebra por Operador — no Período</SectionHeading>
+-        {loading ? (
+-          <p className="text-sm py-6 text-center" style={{ color: P.cremeMuted }}>Carregando...</p>
+-        ) : quebraOps.length === 0 ? (
+-          <p className="text-sm py-6 text-center" style={{ color: P.cremeMuted }}>
+-            Sem registros de quebra no período
+-          </p>
+-        ) : (
+-          <div className="overflow-x-auto">
+-            <table className="w-full text-xs">
+-              <thead>
+-                <tr style={{ borderBottom: `1px solid ${P.esmeraldaMid}` }}>
+-                  {["Operador", "Setor", "Registros", "Recebido (g)", "Entregue (g)", "Quebra (g)", "Quebra %"].map((h) => (
+-                    <th
+-                      key={h}
+-                      className="px-3 py-2 text-left font-semibold uppercase tracking-wider"
+-                      style={{ color: P.cremeMuted }}
+-                    >
+-                      {h}
+-                    </th>
+-                  ))}
+-                </tr>
+-              </thead>
+-              <tbody>
+-                {quebraOps.map((row, i) => {
+-                  const isAlerta = row.percentual > 5;
+-                  return (
+-                    <tr
+-                      key={`${row.deposito_id}-${i}`}
+-                      className="transition-colors"
+-                      style={{
+-                        backgroundColor: isAlerta ? "#3B1515" : (i % 2 === 0 ? "transparent" : "#0c1f1a"),
+-                        borderBottom: `1px solid ${P.esmeraldaMid}`,
+-                      }}
+-                    >
+-                      <td className="px-3 py-2 font-medium" style={{ color: isAlerta ? P.vermelho : P.creme }}>
+-                        <div className="flex items-center gap-1.5">
+-                          {isAlerta && <AlertTriangle size={11} strokeWidth={2} style={{ color: P.vermelho }} />}
+-                          {row.deposito_nome}
+-                        </div>
+-                      </td>
+-                      <td className="px-3 py-2" style={{ color: P.sage }}>
+-                        {row.setor_nome ?? "—"}
+-                      </td>
+-                      <td className="px-3 py-2 font-mono tabular-nums" style={{ color: P.sage }}>
+-                        {row.registros}
+-                      </td>
+-                      <td className="px-3 py-2 font-mono tabular-nums" style={{ color: P.sage }}>
+-                        {formatPeso(row.recebido)}
+-                      </td>
+-                      <td className="px-3 py-2 font-mono tabular-nums" style={{ color: P.sage }}>
+-                        {formatPeso(row.entregue)}
+-                      </td>
+-                      <td className="px-3 py-2 font-mono tabular-nums" style={{ color: isAlerta ? P.vermelho : P.sage }}>
+-                        {formatPeso(row.quebra)}
+-                      </td>
+-                      <td className="px-3 py-2 font-mono tabular-nums" style={{ color: isAlerta ? P.vermelho : P.sage }}>
+-                        <span
+-                          className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
+-                          style={{
+-                            backgroundColor: isAlerta ? P.vermelho + "22" : P.sage + "22",
+-                            color: isAlerta ? P.vermelho : P.sage,
+-                          }}
+-                        >
+-                          {row.percentual.toFixed(2)}%
+-                        </span>
+-                      </td>
+-                    </tr>
+-                  );
+-                })}
+-              </tbody>
+-            </table>
+-            {quebraOps.some(r => r.percentual > 5) && (
+-              <div
+-                className="mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+-                style={{ backgroundColor: "#3B1515", border: `1px solid ${P.vermelho}44`, color: P.vermelho }}
+-              >
+-                <AlertTriangle size={13} strokeWidth={2} />
+-                Operadores com quebra acima de 5% precisam de atenção
+-              </div>
+-            )}
+-          </div>
+-        )}
+-      </Panel>
++          <button
++            onClick={() => setEditing(!editing)}
++            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
++            style={{
++              backgroundColor: editing ? P.dourado + "33" : "transparent",
++              border: `1px solid ${editing ? P.dourado : P.esmeraldaMid}`,
++              color: editing ? P.dourado : P.cremeMuted,
++            }}
++          >
++            {editing ? <Save size={13} strokeWidth={2} /> : <Pencil size={13} strokeWidth={2} />}
++            {editing ? "Concluir" : "Editar Dashboard"}
++          </button>
+ 
+-      {/* ── Movimentações de Estoque ──────────────────────────────────────────── */}
+-      <Panel>
+-        <div className="flex items-center justify-between mb-3">
+-          <SectionHeading>Movimentações de Estoque — Ouro no Período</SectionHeading>
+-          {movData && (
+-            <span className="text-[10px]" style={{ color: P.cremeMuted }}>
+-              {movData.total} registros
++          {saving && (
++            <span className="text-[10px] animate-pulse" style={{ color: P.dourado }}>
++              Salvando...
+             </span>
+           )}
+         </div>
+-
+-        {movLoading ? (
+-          <p className="text-sm py-6 text-center" style={{ color: P.cremeMuted }}>Carregando...</p>
+-        ) : !movData || movData.rows.length === 0 ? (
+-          <p className="text-sm py-6 text-center" style={{ color: P.cremeMuted }}>
+-            Sem movimentações no período
+-          </p>
+-        ) : (
+-          <>
+-            <div className="overflow-x-auto">
+-              <table className="w-full text-xs">
+-                <thead>
+-                  <tr style={{ borderBottom: `1px solid ${P.esmeraldaMid}` }}>
+-                    {["Data/Hora", "Depósito", "Insumo", "Entrada (g)", "Saída (g)", "Marcador", "Observação"].map((h) => (
+-                      <th
+-                        key={h}
+-                        className="px-3 py-2 text-left font-semibold uppercase tracking-wider"
+-                        style={{ color: P.cremeMuted }}
+-                      >
+-                        {h}
+-                      </th>
+-                    ))}
+-                  </tr>
+-                </thead>
+-                <tbody>
+-                  {movData.rows.map((row, i) => (
+-                    <tr
+-                      key={row.id}
+-                      style={{
+-                        backgroundColor: i % 2 === 0 ? "transparent" : "#0c1f1a",
+-                        borderBottom: `1px solid ${P.esmeraldaMid}`,
+-                      }}
+-                    >
+-                      <td className="px-3 py-2 font-mono whitespace-nowrap" style={{ color: P.cremeMuted }}>
+-                        {fmtDate(row.data_hora)}
+-                      </td>
+-                      <td className="px-3 py-2" style={{ color: P.sage }}>
+-                        {row.deposito_nome}
+-                      </td>
+-                      <td className="px-3 py-2" style={{ color: P.sage }}>
+-                        {row.insumo_nome}
+-                      </td>
+-                      <td className="px-3 py-2 font-mono tabular-nums" style={{ color: P.verde }}>
+-                        {row.entrada ? `+${formatPeso(row.entrada)}` : "—"}
+-                      </td>
+-                      <td className="px-3 py-2 font-mono tabular-nums" style={{ color: P.vermelho }}>
+-                        {row.saida ? `-${formatPeso(row.saida)}` : "—"}
+-                      </td>
+-                      <td className="px-3 py-2">
+-                        {row.marcador ? (
+-                          <span
+-                            className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium"
+-                            style={{ backgroundColor: P.esmeralda + "88", color: P.dourado }}
+-                          >
+-                            {row.marcador}
+-                          </span>
+-                        ) : (
+-                          <span style={{ color: P.cremeMuted }}>—</span>
+-                        )}
+-                      </td>
+-                      <td className="px-3 py-2 max-w-[180px] truncate" style={{ color: P.cremeMuted }}>
+-                        {row.obs ?? "—"}
+-                      </td>
+-                    </tr>
+-                  ))}
+-                </tbody>
+-              </table>
+-            </div>
+-
+-            {/* Paginação */}
+-            {movData.totalPages > 1 && (
+-              <div className="flex items-center justify-between mt-4">
+-                <span className="text-[11px]" style={{ color: P.cremeMuted }}>
+-                  Página {movData.page} de {movData.totalPages}
+-                </span>
+-                <div className="flex items-center gap-1.5">
+-                  <button
+-                    disabled={movData.page <= 1}
+-                    onClick={() => setMovPage(p => Math.max(1, p - 1))}
+-                    className="p-1.5 rounded-lg transition-opacity disabled:opacity-30"
+-                    style={{ border: `1px solid ${P.esmeraldaMid}`, color: P.cremeMuted }}
+-                  >
+-                    <ChevronLeft size={14} strokeWidth={1.75} />
+-                  </button>
+-                  <button
+-                    disabled={movData.page >= movData.totalPages}
+-                    onClick={() => setMovPage(p => Math.min(movData.totalPages, p + 1))}
+-                    className="p-1.5 rounded-lg transition-opacity disabled:opacity-30"
+-                    style={{ border: `1px solid ${P.esmeraldaMid}`, color: P.cremeMuted }}
+-                  >
+-                    <ChevronRight size={14} strokeWidth={1.75} />
+-                  </button>
+-                </div>
+-              </div>
+-            )}
+-          </>
+-        )}
+-      </Panel>
+-
+-      {/* ── Legenda quebra ──────────────────────────────────────────────────── */}
+-      <div className="flex items-center gap-6 pb-2">
+-        {[
+-          { icon: TrendingDown, label: "Quebra = ouro recebido − ouro entregue", color: P.cremeMuted },
+-          { icon: AlertTriangle, label: "Alerta > 5% — verificar operador", color: P.vermelho },
+-        ].map(({ icon: Icon, label, color }) => (
+-          <div key={label} className="flex items-center gap-1.5 text-[10px]" style={{ color }}>
+-            <Icon size={11} strokeWidth={2} />
+-            {label}
+-          </div>
+-        ))}
+       </div>
++
++      {/* ── Widget Grid ── */}
++      <WidgetGrid
++        widgets={widgets}
++        periodo={{ inicio, fim }}
++        editing={editing}
++        onLayoutChange={handleLayoutChange}
++        onRemoveWidget={handleRemoveWidget}
++        onDrillDown={(type, title) => setDrillDown({ type, title })}
++      />
++
++      {/* ── Widget Picker ── */}
++      <WidgetPicker
++        open={pickerOpen}
++        onClose={() => setPickerOpen(false)}
++        onAdd={handleAddWidget}
++        existingTypes={widgets.map(w => w.type)}
++      />
++
++      {/* ── Drill-Down Drawer ── */}
++      <DrillDownDrawer
++        open={!!drillDown}
++        onClose={() => setDrillDown(null)}
++        widgetType={drillDown?.type ?? ""}
++        title={drillDown?.title ?? ""}
++        periodo={{ inicio, fim }}
++      />
+     </div>
+   );
+ }
+diff --git a/src/app/api/dashboard/fabrica/route.ts b/src/app/api/dashboard/fabrica/route.ts
+index 3378a88..cb6908e 100644
+--- a/src/app/api/dashboard/fabrica/route.ts
++++ b/src/app/api/dashboard/fabrica/route.ts
+@@ -85,6 +85,79 @@ export async function GET(req: NextRequest) {
+       AND me.data_hora < ${inicioTs}::timestamptz
+   `;
+ 
++  // 7. Ordens com tempo de entrega — concluídas no período + atrasadas em aberto
++  const ordensEntrega = await sql`
++    SELECT
++      o.id,
++      o.numero_ordem,
++      o.cliente_nome,
++      o.status,
++      o.tipo_ordem,
++      o.data_entrega,
++      o.date_created,
++      p.data_conclusao,
++      CASE
++        WHEN p.data_conclusao IS NOT NULL
++          THEN EXTRACT(DAY FROM (p.data_conclusao - o.date_created))::int
++        ELSE EXTRACT(DAY FROM (NOW() - o.date_created))::int
++      END AS dias_producao,
++      CASE
++        WHEN o.data_entrega IS NOT NULL AND p.data_conclusao IS NULL AND o.data_entrega < CURRENT_DATE
++          THEN true
++        WHEN o.data_entrega IS NOT NULL AND p.data_conclusao IS NOT NULL AND p.data_conclusao::date > o.data_entrega
++          THEN true
++        ELSE false
++      END AS atrasada,
++      CASE
++        WHEN o.data_entrega IS NOT NULL AND p.data_conclusao IS NOT NULL
++          THEN (p.data_conclusao::date - o.data_entrega)::int
++        WHEN o.data_entrega IS NOT NULL AND p.data_conclusao IS NULL
++          THEN (CURRENT_DATE - o.data_entrega)::int
++        ELSE NULL
++      END AS dias_atraso
++    FROM alissonerp.vw_ordens_completa o
++    LEFT JOIN alissonerp.pcp p ON p.ordem_id = o.id
++    WHERE (
++      -- Concluídas no período
++      (p.data_conclusao BETWEEN ${inicioTs}::timestamptz AND ${fimTs}::timestamptz)
++      -- OU atrasadas em aberto (não concluídas com data_entrega vencida)
++      OR (
++        o.data_entrega IS NOT NULL
++        AND o.data_entrega < CURRENT_DATE
++        AND o.status NOT IN ('Concluído', 'Concluido')
++      )
++    )
++    ORDER BY
++      CASE WHEN o.status NOT IN ('Concluído', 'Concluido') AND o.data_entrega < CURRENT_DATE THEN 0 ELSE 1 END,
++      dias_atraso DESC NULLS LAST
++    LIMIT 50
++  `;
++
++  // 8. Tempo médio de entrega (ordens concluídas no período que tinham data_entrega)
++  const [tempoMedio] = await sql`
++    SELECT
++      COUNT(*)::int AS total_concluidas,
++      ROUND(AVG(EXTRACT(DAY FROM (p.data_conclusao - o.date_created)))::numeric, 1)::float8 AS media_dias_producao,
++      COUNT(*) FILTER (
++        WHERE o.data_entrega IS NOT NULL
++          AND p.data_conclusao::date > o.data_entrega
++      )::int AS concluidas_atrasadas
++    FROM alissonerp.vw_ordens_completa o
++    LEFT JOIN alissonerp.pcp p ON p.ordem_id = o.id
++    WHERE p.data_conclusao BETWEEN ${inicioTs}::timestamptz AND ${fimTs}::timestamptz
++  `;
++
++  // 8b. Ordens atrasadas em aberto (query separada, sem filtro de conclusão)
++  const [atrasadasAberto] = await sql`
++    SELECT COUNT(*)::int AS em_aberto_atrasadas
++    FROM alissonerp.vw_ordens_completa o
++    LEFT JOIN alissonerp.pcp p ON p.ordem_id = o.id
++    WHERE o.data_entrega IS NOT NULL
++      AND o.data_entrega < CURRENT_DATE
++      AND o.status NOT IN ('Concluído', 'Concluido')
++      AND (p.data_conclusao IS NULL OR p.id IS NULL)
++  `;
++
+   const saldoAtual = saldoPote.reduce((s, r) => s + Number(r.saldo_g), 0);
+ 
+   return NextResponse.json({
+@@ -93,6 +166,13 @@ export async function GET(req: NextRequest) {
+     saldo_pote:        saldoPote,
+     ouro_producao:     ouroProducao,
+     quebra_operadores: quebraOperadores,
++    ordens_entrega:    ordensEntrega,
++    tempo_medio: {
++      total_concluidas:      Number(tempoMedio?.total_concluidas ?? 0),
++      media_dias_producao:   Number(tempoMedio?.media_dias_producao ?? 0),
++      concluidas_atrasadas:  Number(tempoMedio?.concluidas_atrasadas ?? 0),
++      em_aberto_atrasadas:   Number(atrasadasAberto?.em_aberto_atrasadas ?? 0),
++    },
+     financeiro: {
+       saldo_anterior: Number(saldoAnterior?.saldo ?? 0),
+       entradas:       Number(movimentacoes?.total_entradas ?? 0),
+diff --git a/src/app/api/produtos/route.ts b/src/app/api/produtos/route.ts
+index 7f38956..5571e49 100644
+--- a/src/app/api/produtos/route.ts
++++ b/src/app/api/produtos/route.ts
+@@ -274,12 +274,29 @@ export async function POST(req: NextRequest) {
+     categoria_precificacao?: string;
+     tem_pedra_preciosa?: boolean;
+     medidas?: { largura_aro?: number; altura_aro?: number; base?: number };
++    ficha_tecnica_ia?: {
++      tipo_peca?: string | null;
++      largura?: number | null;
++      altura?: number | null;
++      profundidade?: number | null;
++      diametro_interno?: number | null;
++      peso_estimado_metal?: number | null;
++      qtd_pedras?: number | null;
++      tamanho_pedras_mm?: number | null;
++      tamanho_pedras_ct?: number | null;
++      tipo_cravacao?: string | null;
++      qtd_garras?: number | null;
++      largura_garras_mm?: number | null;
++      altura_garras_mm?: number | null;
++      confianca_pct?: number | null;
++      observacoes?: string | null;
++    } | null;
+     composicao?: ComposicaoItem[];
+     variacoes?: VariacoesConfig;
+   };
+ 
+   const { nome, tipo_metal, cor_metal, peso_precificado, markup, fator,
+-          categoria_precificacao, tem_pedra_preciosa, medidas, composicao, variacoes } = body;
++          categoria_precificacao, tem_pedra_preciosa, medidas, ficha_tecnica_ia, composicao, variacoes } = body;
+ 
+   if (!nome?.trim()) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
+   if (!peso_precificado || peso_precificado <= 0) return NextResponse.json({ error: "peso_precificado inválido" }, { status: 400 });
+@@ -358,6 +375,51 @@ export async function POST(req: NextRequest) {
+         RETURNING id, produto_id, sku
+       `;
+ 
++      // INSERT ficha técnica com medidas da IA (se disponível)
++      if (ficha_tecnica_ia) {
++        await tx`
++          INSERT INTO alissonerp.fichas_tecnicas_produto
++            (produto_id, tipo_peca, largura, altura, profundidade, diametro_interno,
++             peso_estimado_metal, qtd_pedras, tamanho_pedras_mm, tamanho_pedras_ct,
++             tipo_cravacao, qtd_garras, largura_garra, altura_garra,
++             ia_confianca, ia_provider)
++          VALUES
++            (${paiId},
++             ${ficha_tecnica_ia.tipo_peca ?? null},
++             ${ficha_tecnica_ia.largura ?? null},
++             ${ficha_tecnica_ia.altura ?? null},
++             ${ficha_tecnica_ia.profundidade ?? null},
++             ${ficha_tecnica_ia.diametro_interno ?? null},
++             ${ficha_tecnica_ia.peso_estimado_metal ?? null},
++             ${ficha_tecnica_ia.qtd_pedras ?? 0},
++             ${ficha_tecnica_ia.tamanho_pedras_mm ?? null},
++             ${ficha_tecnica_ia.tamanho_pedras_ct ?? null},
++             ${ficha_tecnica_ia.tipo_cravacao ?? null},
++             ${ficha_tecnica_ia.qtd_garras ?? 0},
++             ${ficha_tecnica_ia.largura_garras_mm ?? null},
++             ${ficha_tecnica_ia.altura_garras_mm ?? null},
++             ${ficha_tecnica_ia.confianca_pct ?? null},
++             'ia')
++          ON CONFLICT (produto_id)
++          DO UPDATE SET
++            tipo_peca = EXCLUDED.tipo_peca,
++            largura = EXCLUDED.largura,
++            altura = EXCLUDED.altura,
++            profundidade = EXCLUDED.profundidade,
++            diametro_interno = EXCLUDED.diametro_interno,
++            peso_estimado_metal = EXCLUDED.peso_estimado_metal,
++            qtd_pedras = EXCLUDED.qtd_pedras,
++            tamanho_pedras_mm = EXCLUDED.tamanho_pedras_mm,
++            tamanho_pedras_ct = EXCLUDED.tamanho_pedras_ct,
++            tipo_cravacao = EXCLUDED.tipo_cravacao,
++            qtd_garras = EXCLUDED.qtd_garras,
++            largura_garra = EXCLUDED.largura_garra,
++            altura_garra = EXCLUDED.altura_garra,
++            ia_confianca = EXCLUDED.ia_confianca,
++            updated_at = now()
++        `;
++      }
++
+       // INSERT BOM do pai
+       for (const item of bomPai) {
+         await tx`
+diff --git a/src/components/produtos/CadastroProdutoModal.tsx b/src/components/produtos/CadastroProdutoModal.tsx
+index eb00792..8473254 100644
+--- a/src/components/produtos/CadastroProdutoModal.tsx
++++ b/src/components/produtos/CadastroProdutoModal.tsx
+@@ -658,6 +658,23 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
+           altura_aro:  alturaAro  ? parseNumericInput(alturaAro)  : null,
+           base:        base       ? parseNumericInput(base)       : null,
+         },
++        ficha_tecnica_ia: fichaTecnicaIA ? {
++          tipo_peca: fichaTecnicaIA.tipo_peca,
++          largura: fichaTecnicaIA.medidas.largura_mm,
++          altura: fichaTecnicaIA.medidas.altura_mm,
++          profundidade: fichaTecnicaIA.medidas.profundidade_mm,
++          diametro_interno: fichaTecnicaIA.medidas.diametro_interno_mm,
++          peso_estimado_metal: fichaTecnicaIA.peso_estimado_g,
++          qtd_pedras: fichaTecnicaIA.pedras.qtd,
++          tamanho_pedras_mm: fichaTecnicaIA.pedras.tamanho_mm,
++          tamanho_pedras_ct: fichaTecnicaIA.pedras.tamanho_ct,
++          tipo_cravacao: fichaTecnicaIA.pedras.tipo_cravacao,
++          qtd_garras: fichaTecnicaIA.garras.qtd,
++          largura_garras_mm: fichaTecnicaIA.garras.largura_mm,
++          altura_garras_mm: fichaTecnicaIA.garras.altura_mm,
++          confianca_pct: fichaTecnicaIA.confianca_pct,
++          observacoes: fichaTecnicaIA.observacoes,
++        } : null,
+         composicao: bom.map((b) => ({
+           insumo_id: b.insumo_id,
+           tipo: b.tipo,
+@@ -1019,6 +1036,10 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
+                         altura: fichaTecnicaIA?.medidas.altura_mm,
+                         profundidade: fichaTecnicaIA?.medidas.profundidade_mm,
+                         diametro_interno: fichaTecnicaIA?.medidas.diametro_interno_mm,
++                        peso_g: fichaTecnicaIA?.peso_estimado_g,
++                        qtd_pedras: fichaTecnicaIA?.pedras.qtd,
++                        tamanho_pedras_mm: fichaTecnicaIA?.pedras.tamanho_mm,
++                        tipo_peca: fichaTecnicaIA?.tipo_peca,
+                       }}
+                       alturaCanvas={250}
+                     />
+diff --git a/src/components/produtos/ProdutoDrawer.tsx b/src/components/produtos/ProdutoDrawer.tsx
+index 15a1190..ebe763b 100644
+--- a/src/components/produtos/ProdutoDrawer.tsx
++++ b/src/components/produtos/ProdutoDrawer.tsx
+@@ -14,6 +14,7 @@ import {
+   GitFork,
+   ChevronRight,
+   Upload,
++  RefreshCw,
+ } from "lucide-react";
+ import { formatPeso } from "@/lib/formatters";
+ import dynamic from "next/dynamic";
+@@ -534,9 +535,16 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
+     altura?: number | string | null;
+     profundidade?: number | string | null;
+     diametro_interno?: number | string | null;
++    peso_estimado_metal?: number | string | null;
++    qtd_pedras?: number | null;
++    tamanho_pedras_mm?: number | string | null;
++    tipo_peca?: string | null;
++    qtd_garras?: number | null;
++    tipo_cravacao?: string | null;
+     created_at?: string;
+   } | null>(null);
+   const [uploading3d, setUploading3d] = useState(false);
++  const [reprocessando3d, setReprocessando3d] = useState(false);
+   const [erro3d, setErro3d] = useState<string | null>(null);
+   const [podeUpload3d, setPodeUpload3d] = useState(false);
+ 
+@@ -593,7 +601,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
+       setErro3d(null);
+       fetch(`/api/produtos/${produtoId}/modelo-3d`)
+         .then(r => r.ok ? r.json() : null)
+-        .then((d: { ficha: { arquivo_3dm?: string; arquivo_glb?: string; largura?: number | string | null; altura?: number | string | null; profundidade?: number | string | null; diametro_interno?: number | string | null; created_at?: string } | null; podeUpload: boolean } | null) => {
++        // eslint-disable-next-line @typescript-eslint/no-explicit-any
++        .then((d: { ficha: Record<string, any> | null; podeUpload: boolean } | null) => {
+           if (d) {
+             setFicha3d(d.ficha);
+             setPodeUpload3d(d.podeUpload);
+@@ -750,13 +759,72 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
+     setUploading3d(true);
+     setErro3d(null);
+     try {
++      // 1. Upload do arquivo
+       const fd = new FormData();
+       fd.append("arquivo", file);
+       const res = await fetch(`/api/produtos/${produto.id_produto}/modelo-3d`, { method: "POST", body: fd });
+       const data = await res.json() as { url?: string; error?: string };
+       if (!res.ok) { setErro3d(data.error ?? "Erro no upload"); return; }
+-      // Resetar arquivo_glb ao fazer novo upload (invalida cache de conversão)
+-      setFicha3d(prev => ({ ...prev, arquivo_3dm: data.url, arquivo_glb: undefined, created_at: new Date().toISOString() }));
++
++      // 2. Processar .3dm com IA para extrair medidas
++      const fd2 = new FormData();
++      fd2.append("arquivo", file);
++      const resIA = await fetch("/api/produtos/processar-3dm", { method: "POST", body: fd2 });
++      if (resIA.ok) {
++        const iaData = await resIA.json() as {
++          ficha?: {
++            tipo_peca: string | null;
++            medidas: { largura_mm: number | null; altura_mm: number | null; profundidade_mm: number | null; diametro_interno_mm: number | null };
++            peso_estimado_g: number;
++            pedras: { qtd: number; tamanho_mm: number | null; tamanho_ct: number | null; tipo_cravacao: string | null };
++            garras: { qtd: number; largura_mm: number | null; altura_mm: number | null };
++            confianca_pct: number;
++          } | null;
++          provedor?: string;
++        };
++
++        // 3. Salvar medidas da IA em fichas_tecnicas_produto
++        if (iaData.ficha) {
++          await fetch(`/api/produtos/${produto.id_produto}/modelo-3d/medidas`, {
++            method: "PATCH",
++            headers: { "Content-Type": "application/json" },
++            body: JSON.stringify({
++              tipo_peca: iaData.ficha.tipo_peca,
++              largura: iaData.ficha.medidas.largura_mm,
++              altura: iaData.ficha.medidas.altura_mm,
++              profundidade: iaData.ficha.medidas.profundidade_mm,
++              diametro_interno: iaData.ficha.medidas.diametro_interno_mm,
++              peso_estimado_metal: iaData.ficha.peso_estimado_g,
++              qtd_pedras: iaData.ficha.pedras.qtd,
++              tamanho_pedras_mm: iaData.ficha.pedras.tamanho_mm,
++              tamanho_pedras_ct: iaData.ficha.pedras.tamanho_ct,
++              tipo_cravacao: iaData.ficha.pedras.tipo_cravacao,
++              qtd_garras: iaData.ficha.garras.qtd,
++              largura_garra: iaData.ficha.garras.largura_mm,
++              altura_garra: iaData.ficha.garras.altura_mm,
++              ia_confianca: iaData.ficha.confianca_pct,
++              ia_provider: iaData.provedor ?? "ia",
++            }),
++          });
++
++          // Atualizar state local com medidas
++          setFicha3d(prev => ({
++            ...prev,
++            arquivo_3dm: data.url,
++            arquivo_glb: undefined,
++            largura: iaData.ficha!.medidas.largura_mm,
++            altura: iaData.ficha!.medidas.altura_mm,
++            profundidade: iaData.ficha!.medidas.profundidade_mm,
++            diametro_interno: iaData.ficha!.medidas.diametro_interno_mm,
++            created_at: new Date().toISOString(),
++          }));
++        } else {
++          setFicha3d(prev => ({ ...prev, arquivo_3dm: data.url, arquivo_glb: undefined, created_at: new Date().toISOString() }));
++        }
++      } else {
++        // IA falhou — salvar só o arquivo
++        setFicha3d(prev => ({ ...prev, arquivo_3dm: data.url, arquivo_glb: undefined, created_at: new Date().toISOString() }));
++      }
+     } catch {
+       setErro3d("Erro de conexão");
+     } finally {
+@@ -772,6 +840,34 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
+     if (res.ok) setFicha3d(null);
+   }
+ 
++  async function handleReprocessar3d() {
++    if (!produto) return;
++    setReprocessando3d(true);
++    setErro3d(null);
++    try {
++      const res = await fetch(`/api/produtos/${produto.id_produto}/modelo-3d/reprocessar`, { method: "POST" });
++      const data = await res.json() as {
++        ok?: boolean;
++        medidas?: { largura: number | null; altura: number | null; profundidade: number | null; diametro_interno: number | null };
++        error?: string;
++      };
++      if (!res.ok) { setErro3d(data.error ?? "Erro ao reprocessar"); return; }
++      if (data.medidas) {
++        setFicha3d(prev => ({
++          ...prev,
++          largura: data.medidas!.largura,
++          altura: data.medidas!.altura,
++          profundidade: data.medidas!.profundidade,
++          diametro_interno: data.medidas!.diametro_interno,
++        }));
++      }
++    } catch {
++      setErro3d("Erro de conexao ao reprocessar");
++    } finally {
++      setReprocessando3d(false);
++    }
++  }
++
+   const hasChanges =
+     produto !== null &&
+     (temPedra !== produto.tem_pedra_preciosa ||
+@@ -919,15 +1015,30 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
+                           <Viewer3D
+                             produtoId={produto!.id_produto}
+                             medidas={{
+-                              // fichas_tecnicas_produto tem precedência; fallback em erp_produtos
+                               largura:          ficha3d.largura          ?? produto?.largura_aro,
+                               altura:           ficha3d.altura           ?? produto?.altura_aro,
+                               profundidade:     ficha3d.profundidade      ?? produto?.base,
+                               diametro_interno: ficha3d.diametro_interno,
++                              peso_g:           ficha3d.peso_estimado_metal,
++                              qtd_pedras:       ficha3d.qtd_pedras,
++                              tamanho_pedras_mm: ficha3d.tamanho_pedras_mm,
++                              tipo_peca:        ficha3d.tipo_peca,
+                             }}
+                             alturaCanvas={320}
+                           />
+                         </div>
++                        {/* Botão reprocessar: quando tem .3dm mas sem medidas extraídas */}
++                        {podeUpload3d && !ficha3d.largura && !ficha3d.altura && !ficha3d.profundidade && (
++                          <button
++                            onClick={handleReprocessar3d}
++                            disabled={reprocessando3d}
++                            className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors disabled:opacity-60"
++                            style={{ borderColor: "#93C5FD", color: "#1D4ED8", backgroundColor: "#EFF6FF" }}
++                          >
++                            {reprocessando3d ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
++                            {reprocessando3d ? "Extraindo medidas com IA..." : "Extrair medidas do modelo 3D"}
++                          </button>
++                        )}
+                       </div>
+                     ) : (
+                       <div className="text-center py-2">
+@@ -1199,6 +1310,29 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
+               {/* ── MEDIDAS (ficha técnica) ── */}
+               <section>
+                 <p className={sectionTitleCls}>Medidas</p>
++
++                {/* Medidas extraídas do modelo 3D (fichas_tecnicas_produto) */}
++                {ficha3d && (ficha3d.largura || ficha3d.altura || ficha3d.profundidade || ficha3d.diametro_interno) && (
++                  <div className="mb-3 rounded-lg px-3 py-2 text-xs space-y-1"
++                    style={{ backgroundColor: "#EFF6FF", border: "1px solid #BFDBFE" }}>
++                    <p className="font-semibold text-blue-800 text-[10px] uppercase tracking-wider">Medidas do Modelo 3D (IA)</p>
++                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-gray-700">
++                      {ficha3d.largura != null && (
++                        <p>Largura: <span className="font-medium">{ficha3d.largura}mm</span></p>
++                      )}
++                      {ficha3d.altura != null && (
++                        <p>Altura: <span className="font-medium">{ficha3d.altura}mm</span></p>
++                      )}
++                      {ficha3d.profundidade != null && (
++                        <p>Profundidade: <span className="font-medium">{ficha3d.profundidade}mm</span></p>
++                      )}
++                      {ficha3d.diametro_interno != null && (
++                        <p>Ø interno: <span className="font-medium">{ficha3d.diametro_interno}mm</span></p>
++                      )}
++                    </div>
++                  </div>
++                )}
++
+                 <div className="grid grid-cols-3 gap-2">
+                   <div>
+                     <label className={labelCls}>Largura aro (mm)</label>
+diff --git a/src/components/produtos/Viewer3D.tsx b/src/components/produtos/Viewer3D.tsx
+index f2788bd..086d625 100644
+--- a/src/components/produtos/Viewer3D.tsx
++++ b/src/components/produtos/Viewer3D.tsx
+@@ -8,6 +8,10 @@ interface Medidas {
+   altura?: number | string | null;
+   profundidade?: number | string | null;
+   diametro_interno?: number | string | null;
++  peso_g?: number | string | null;
++  qtd_pedras?: number | null;
++  tamanho_pedras_mm?: number | string | null;
++  tipo_peca?: string | null;
+ }
+ 
+ interface Viewer3DProps {
+@@ -19,7 +23,6 @@ interface Viewer3DProps {
+   alturaCanvas?: number;
+ }
+ 
+-// Converte medida pra número (pode vir como string do banco)
+ function toNum(v: number | string | null | undefined): number | null {
+   if (v == null) return null;
+   const n = parseFloat(String(v));
+@@ -43,10 +46,8 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+     let threejsData: any;
+ 
+     if (jsonData) {
+-      // Stepper: JSON já veio na resposta da IA — usar direto
+       threejsData = jsonData;
+     } else if (produtoId) {
+-      // ProdutoDrawer: buscar via API (conversão lazy no servidor)
+       try {
+         const res = await fetch(`/api/produtos/${produtoId}/modelo-3d/json`);
+         if (!res.ok) {
+@@ -69,12 +70,12 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+       return;
+     }
+ 
+-    // ── 2. Importar three.js dinamicamente (client-side only) ──────────────────
++    // ── 2. Importar three.js ──────────────────────────────────────────────────────
+     let THREE: typeof import('three');
+     try {
+       THREE = await import('three');
+     } catch {
+-      setErroMsg('Não foi possível carregar three.js');
++      setErroMsg('Nao foi possivel carregar three.js');
+       setEstado('erro');
+       return;
+     }
+@@ -90,7 +91,7 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+ 
+     // ── 3. Configurar cena ──────────────────────────────────────────────────────
+     const scene = new THREE.Scene();
+-    scene.background = new THREE.Color(0xf8f7f4);
++    scene.background = new THREE.Color(0xf0f0f0);
+ 
+     const w = container.clientWidth || 400;
+     const h = alturaCanvas;
+@@ -101,40 +102,41 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+     renderer.setSize(w, h);
+     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+     renderer.shadowMap.enabled = false;
++    renderer.toneMapping = THREE.ACESFilmicToneMapping;
++    renderer.toneMappingExposure = 1.2;
+     container.appendChild(renderer.domElement);
+ 
+-    // Iluminação showroom joalheria
+-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
++    // Iluminacao showroom joalheria
++    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+     scene.add(ambientLight);
+-    const spot1 = new THREE.DirectionalLight(0xfff8e8, 0.9);
++    const spot1 = new THREE.DirectionalLight(0xfff8e8, 1.0);
+     spot1.position.set(50, 60, 50);
+     scene.add(spot1);
+-    const spot2 = new THREE.DirectionalLight(0xe8f0ff, 0.5);
++    const spot2 = new THREE.DirectionalLight(0xe8f0ff, 0.6);
+     spot2.position.set(-40, 30, -40);
+     scene.add(spot2);
+-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.25);
++    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+     fillLight.position.set(0, -20, 30);
+     scene.add(fillLight);
++    // Rim light para brilho nas bordas
++    const rimLight = new THREE.DirectionalLight(0xffffff, 0.4);
++    rimLight.position.set(-30, 40, -60);
++    scene.add(rimLight);
+ 
+-    // Material ouro 18k
++    // Material ouro 18k amarelo
+     const materialOuro = new THREE.MeshStandardMaterial({
+       color: 0xd4a843,
+-      metalness: 0.92,
+-      roughness: 0.12,
++      metalness: 0.95,
++      roughness: 0.08,
++      envMapIntensity: 1.2,
+     });
+ 
+     // ── 4. Parsear o JSON three.js ─────────────────────────────────────────────
+-    // rhino3dm toThreejsJSON() retorna BufferGeometry (não uma cena Object).
+-    // toThreejsJSONMerged() também retorna um único BufferGeometry mesclado.
+-    // Formato esperado: { metadata: { type: "BufferGeometry" }, data: { attributes: {...} } }
+-    console.log('[Viewer3D] threejsData keys:', Object.keys(threejsData), '| type:', threejsData?.metadata?.type);
+-
+     let modeloObj: T.Object3D | null = null;
+     try {
+       const geoLoader = new THREE.BufferGeometryLoader();
+ 
+       if (Array.isArray(threejsData)) {
+-        // Array de geometrias — criar Group com um Mesh por geometria
+         const group = new THREE.Group();
+         for (const geoJson of threejsData) {
+           const geometry = geoLoader.parse(geoJson);
+@@ -143,27 +145,22 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+         modeloObj = group;
+ 
+       } else if (threejsData?.metadata?.type === 'BufferGeometry' || threejsData?.data?.attributes || threejsData?.attributes) {
+-        // Geometria única (toThreejsJSONMerged ou toThreejsJSON)
+         const geometry = geoLoader.parse(threejsData);
+         modeloObj = new THREE.Mesh(geometry, materialOuro);
+ 
+       } else {
+-        // Fallback: tentar ObjectLoader (formato de cena completa)
+         const loader = new THREE.ObjectLoader();
+         // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         modeloObj = loader.parse(threejsData as any);
+         modeloObj.traverse((child: T.Object3D) => {
+           if ((child as T.Mesh).isMesh) {
+             (child as T.Mesh).material = materialOuro;
+-            (child as T.Mesh).castShadow = false;
+           }
+         });
+       }
+ 
+       if (!modeloObj) throw new Error('Nenhum objeto 3D gerado');
+ 
+-      // Aplicar material (para Mesh direto o material já foi aplicado acima;
+-      // para Group precisamos atravessar os filhos)
+       if (!(modeloObj as T.Mesh).isMesh) {
+         modeloObj.traverse((child: T.Object3D) => {
+           if ((child as T.Mesh).isMesh) {
+@@ -178,18 +175,16 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+       modeloObj.position.sub(center);
+       scene.add(modeloObj);
+ 
+-      // Recalcular bbox APÓS centralização — cotas precisam das coordenadas reais na cena
+       const boxFinal = new THREE.Box3().setFromObject(modeloObj);
+       const size = boxFinal.getSize(new THREE.Vector3());
+       const maxDim = Math.max(size.x, size.y, size.z, 0.01);
+ 
+-      // Câmera: posicionar baseado no tamanho do objeto
++      // Camera
+       const dist = maxDim * 2.2;
+       camera.position.set(dist * 0.8, dist * 0.6, dist);
+       camera.lookAt(0, 0, 0);
+ 
+-      // ── 5. Linhas de cota — apenas quando medidas reais do banco estão disponíveis ──
+-      // Sem fallback para bbox: medidas do bbox são incorretas para peças montadas (anéis).
++      // ── 5. Linhas de cota ──────────────────────────────────────────────────────
+       if (largura || altura || profundidade) {
+         adicionarCotas(scene, boxFinal, {
+           largura:      largura      ?? 0,
+@@ -209,7 +204,7 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+       return;
+     }
+ 
+-    // ── 6. Controles de câmera (orbit manual) ─────────────────────────────────
++    // ── 6. Controles de camera (orbit manual) ─────────────────────────────────
+     let isDragging = false;
+     let isPanning = false;
+     let prevMouse = { x: 0, y: 0 };
+@@ -291,8 +286,6 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+           radius = Math.max(0.1, Math.min(radius, 1000));
+         }
+         lastTouchDist = dist;
+-
+-        // Pan com dois dedos
+         const cx = (t0.clientX + t1.clientX) / 2;
+         const cy = (t0.clientY + t1.clientY) / 2;
+         const panDx = cx - lastTouchCenter.x;
+@@ -370,15 +363,21 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+   const altura = toNum(medidas?.altura);
+   const profundidade = toNum(medidas?.profundidade);
+   const diamInterno = toNum(medidas?.diametro_interno);
++  const peso = toNum(medidas?.peso_g);
++  const qtdPedras = medidas?.qtd_pedras ?? null;
++  const tamPedras = toNum(medidas?.tamanho_pedras_mm);
++  const tipoPeca = medidas?.tipo_peca ?? null;
++
++  const temMedidas = largura || altura || profundidade || diamInterno || peso || qtdPedras;
+ 
+   return (
+-    <div className="relative w-full rounded-lg overflow-hidden border border-gray-200 bg-[#f8f7f4]" style={{ height: alturaCanvas }}>
++    <div className="relative w-full rounded-lg overflow-hidden border border-gray-200" style={{ height: alturaCanvas, background: '#f0f0f0' }}>
+       {/* Canvas container */}
+       <div ref={containerRef} className="w-full h-full" />
+ 
+       {/* Estados de loading */}
+       {(estado === 'buscando' || estado === 'convertendo' || estado === 'carregando') && (
+-        <div className="absolute inset-0 flex items-center justify-center bg-[#f8f7f4]/90">
++        <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(240,240,240,0.9)' }}>
+           <div className="text-center">
+             <div className="animate-spin h-7 w-7 border-2 border-[#184036] border-t-transparent rounded-full mx-auto mb-2" />
+             <p className="text-xs text-gray-500">
+@@ -392,9 +391,9 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+ 
+       {/* Erro */}
+       {estado === 'erro' && (
+-        <div className="absolute inset-0 flex items-center justify-center bg-[#f8f7f4]/90">
++        <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(240,240,240,0.9)' }}>
+           <div className="text-center px-4">
+-            <p className="text-xs text-red-500 mb-2">{erroMsg ?? 'Não foi possível carregar o modelo 3D'}</p>
++            <p className="text-xs text-red-500 mb-2">{erroMsg ?? 'Nao foi possivel carregar o modelo 3D'}</p>
+             <button
+               onClick={iniciar}
+               className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+@@ -405,36 +404,73 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+         </div>
+       )}
+ 
+-      {/* Hint controles (só quando carregado) */}
+-      {estado === 'ok' && (
+-        <div className="absolute bottom-2 right-2 text-[10px] text-gray-400 bg-white/70 rounded px-1.5 py-0.5 pointer-events-none">
+-          Drag rotacionar · Scroll zoom · Shift+Drag pan
+-        </div>
++      {/* Painel de medidas (estilo Rhino) */}
++      {estado === 'ok' && temMedidas && (
++        <>
++          {/* Medidas principais - canto superior esquerdo */}
++          <div className="absolute top-2 left-2 flex flex-col gap-1">
++            {altura != null && (
++              <div className="flex items-center gap-1">
++                <svg width="14" height="14" viewBox="0 0 14 14" className="text-gray-500">
++                  <line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" strokeWidth="1.5" />
++                  <line x1="4" y1="2" x2="10" y2="2" stroke="currentColor" strokeWidth="1" />
++                  <line x1="4" y1="12" x2="10" y2="12" stroke="currentColor" strokeWidth="1" />
++                </svg>
++                <span className="text-[11px] font-bold text-gray-800 bg-white/85 rounded px-1.5 py-0.5 border border-gray-200/80 shadow-sm">
++                  {altura.toFixed(2)}mm
++                </span>
++              </div>
++            )}
++            {largura != null && (
++              <div className="flex items-center gap-1">
++                <svg width="14" height="14" viewBox="0 0 14 14" className="text-gray-500">
++                  <line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" strokeWidth="1.5" />
++                  <line x1="2" y1="4" x2="2" y2="10" stroke="currentColor" strokeWidth="1" />
++                  <line x1="12" y1="4" x2="12" y2="10" stroke="currentColor" strokeWidth="1" />
++                </svg>
++                <span className="text-[11px] font-bold text-gray-800 bg-white/85 rounded px-1.5 py-0.5 border border-gray-200/80 shadow-sm">
++                  {largura.toFixed(2)}mm
++                </span>
++              </div>
++            )}
++            {diamInterno != null && (
++              <div className="flex items-center gap-1">
++                <svg width="14" height="14" viewBox="0 0 14 14" className="text-gray-500">
++                  <circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="1" />
++                  <line x1="3" y1="7" x2="11" y2="7" stroke="currentColor" strokeWidth="1.5" />
++                </svg>
++                <span className="text-[11px] font-bold text-gray-800 bg-white/85 rounded px-1.5 py-0.5 border border-gray-200/80 shadow-sm">
++                  {diamInterno.toFixed(2)}mm
++                </span>
++              </div>
++            )}
++          </div>
++
++          {/* Info da peca - canto superior direito */}
++          <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
++            {peso != null && (
++              <span className="text-[12px] font-bold text-gray-800 bg-white/85 rounded px-2 py-0.5 border border-gray-200/80 shadow-sm">
++                {peso.toFixed(1)}g
++              </span>
++            )}
++            {qtdPedras != null && qtdPedras > 0 && (
++              <span className="text-[11px] font-semibold text-gray-700 bg-white/85 rounded px-1.5 py-0.5 border border-gray-200/80 shadow-sm">
++                {qtdPedras} pedras{tamPedras ? ` de ${tamPedras.toFixed(1)}mm` : ''}
++              </span>
++            )}
++            {tipoPeca && (
++              <span className="text-[10px] font-medium text-gray-500 bg-white/80 rounded px-1.5 py-0.5 border border-gray-200/60">
++                {tipoPeca}
++              </span>
++            )}
++          </div>
++        </>
+       )}
+ 
+-      {/* Legenda de medidas */}
+-      {estado === 'ok' && (largura || altura || profundidade || diamInterno) && (
+-        <div className="absolute bottom-2 left-2 flex gap-2 flex-wrap">
+-          {largura && (
+-            <span className="text-[10px] bg-white/80 rounded px-1.5 py-0.5 text-gray-600 font-medium border border-gray-200/60">
+-              L {largura.toFixed(1)}mm
+-            </span>
+-          )}
+-          {altura && (
+-            <span className="text-[10px] bg-white/80 rounded px-1.5 py-0.5 text-gray-600 font-medium border border-gray-200/60">
+-              A {altura.toFixed(1)}mm
+-            </span>
+-          )}
+-          {profundidade && (
+-            <span className="text-[10px] bg-white/80 rounded px-1.5 py-0.5 text-gray-600 font-medium border border-gray-200/60">
+-              P {profundidade.toFixed(1)}mm
+-            </span>
+-          )}
+-          {diamInterno && (
+-            <span className="text-[10px] bg-white/80 rounded px-1.5 py-0.5 text-gray-600 font-medium border border-gray-200/60">
+-              Ø {diamInterno.toFixed(1)}mm
+-            </span>
+-          )}
++      {/* Hint controles */}
++      {estado === 'ok' && (
++        <div className="absolute bottom-1.5 right-2 text-[9px] text-gray-400 bg-white/60 rounded px-1.5 py-0.5 pointer-events-none">
++          Arrastar: rotacionar | Scroll: zoom | Shift+Arrastar: pan
+         </div>
+       )}
+     </div>
+@@ -443,7 +479,6 @@ export default function Viewer3D({ produtoId, jsonData, medidas, alturaCanvas =
+ 
+ // ── Linhas de cota 3D ──────────────────────────────────────────────────────────
+ 
+-// Helper: ArrowHelper com depthTest desabilitado (visível através do modelo)
+ function adicionarSeta(
+   scene: import('three').Scene,
+   dir: import('three').Vector3,
+@@ -472,32 +507,25 @@ function adicionarCotas(
+   const max = bbox.max.clone();
+   const size = bbox.getSize(new THREE.Vector3());
+ 
+-  // Offset proporcional ao maior eixo — mínimo de 1mm para modelos muito pequenos
+   const maxSz = Math.max(size.x, size.y, size.z, 1);
+   const off = maxSz * 0.14;
+-
+-  // Tamanho das setas proporcional ao modelo (mesmo tamanho em todos os eixos para consistência)
+   const arrowLen = maxSz * 0.10;
+   const headLen  = maxSz * 0.06;
+   const headW    = maxSz * 0.04;
+-
+-  // Tamanho dos labels: largura = 28% do modelo, altura = metade (canvas 2:1)
+   const lW = maxSz * 0.28;
+   const lH = lW * 0.5;
+ 
+-  const mat     = new THREE.LineBasicMaterial({ color: 0x444444, depthTest: false, depthWrite: false });
+-  const corSeta = 0x222222;
++  const mat     = new THREE.LineBasicMaterial({ color: 0x333333, depthTest: false, depthWrite: false });
++  const corSeta = 0x111111;
+ 
+-  // ── Largura (eixo X) — linha abaixo-frontal do modelo ──────────────────────
++  // ── Largura (eixo X) ──────────────────────────────────────────────────────
+   if (medidas.largura) {
+     const y = min.y - off;
+     const z = max.z + off * 0.6;
+ 
+-    // Linha de cota principal
+     const linha = [new THREE.Vector3(min.x, y, z), new THREE.Vector3(max.x, y, z)];
+     scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(linha), mat));
+ 
+-    // Linhas de extensão (do modelo até a cota)
+     scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+       new THREE.Vector3(min.x, min.y, z), new THREE.Vector3(min.x, y - off * 0.15, z),
+     ]), mat));
+@@ -505,18 +533,16 @@ function adicionarCotas(
+       new THREE.Vector3(max.x, min.y, z), new THREE.Vector3(max.x, y - off * 0.15, z),
+     ]), mat));
+ 
+-    // Setas apontando para dentro (indicam a dimensão)
+     adicionarSeta(scene, new THREE.Vector3(1, 0, 0),  linha[0], arrowLen, corSeta, headLen, headW, THREE);
+     adicionarSeta(scene, new THREE.Vector3(-1, 0, 0), linha[1], arrowLen, corSeta, headLen, headW, THREE);
+ 
+-    // Label centrado abaixo da linha de cota
+-    const label = criarLabel(`${medidas.largura.toFixed(1)}`, THREE);
++    const label = criarLabel(`${medidas.largura.toFixed(2)}`, THREE);
+     label.position.set((min.x + max.x) / 2, y - off * 0.45, z);
+     label.scale.set(lW, lH, 1);
+     scene.add(label);
+   }
+ 
+-  // ── Altura (eixo Y) — linha à direita do modelo ────────────────────────────
++  // ── Altura (eixo Y) ────────────────────────────────────────────────────────
+   if (medidas.altura) {
+     const x = max.x + off;
+     const z = max.z;
+@@ -534,13 +560,13 @@ function adicionarCotas(
+     adicionarSeta(scene, new THREE.Vector3(0, 1, 0),  linha[0], arrowLen, corSeta, headLen, headW, THREE);
+     adicionarSeta(scene, new THREE.Vector3(0, -1, 0), linha[1], arrowLen, corSeta, headLen, headW, THREE);
+ 
+-    const label = criarLabel(`${medidas.altura.toFixed(1)}`, THREE);
++    const label = criarLabel(`${medidas.altura.toFixed(2)}`, THREE);
+     label.position.set(x + off * 0.5 + lW * 0.5, (min.y + max.y) / 2, z);
+     label.scale.set(lW, lH, 1);
+     scene.add(label);
+   }
+ 
+-  // ── Profundidade (eixo Z) — linha à direita-abaixo do modelo ───────────────
++  // ── Profundidade (eixo Z) ──────────────────────────────────────────────────
+   if (medidas.profundidade) {
+     const x = max.x + off;
+     const y = min.y - off;
+@@ -558,7 +584,7 @@ function adicionarCotas(
+     adicionarSeta(scene, new THREE.Vector3(0, 0, 1),  linha[0], arrowLen, corSeta, headLen, headW, THREE);
+     adicionarSeta(scene, new THREE.Vector3(0, 0, -1), linha[1], arrowLen, corSeta, headLen, headW, THREE);
+ 
+-    const label = criarLabel(`${medidas.profundidade.toFixed(1)}`, THREE);
++    const label = criarLabel(`${medidas.profundidade.toFixed(2)}`, THREE);
+     label.position.set(x + off * 0.5 + lW * 0.5, y, (min.z + max.z) / 2);
+     label.scale.set(lW, lH, 1);
+     scene.add(label);
+@@ -571,23 +597,20 @@ function criarLabel(texto: string, THREE: typeof import('three')): import('three
+   canvas.height = 128;
+   const ctx = canvas.getContext('2d')!;
+ 
+-  // Fundo branco semi-transparente com borda suave
+   ctx.clearRect(0, 0, 256, 128);
+   ctx.fillStyle = 'rgba(255,255,255,0.92)';
+   ctx.beginPath();
+   ctx.roundRect(6, 6, 244, 116, 12);
+   ctx.fill();
+ 
+-  // Borda sutil
+-  ctx.strokeStyle = 'rgba(100,100,100,0.3)';
++  ctx.strokeStyle = 'rgba(60,60,60,0.4)';
+   ctx.lineWidth = 2;
+   ctx.beginPath();
+   ctx.roundRect(6, 6, 244, 116, 12);
+   ctx.stroke();
+ 
+-  // Texto
+   ctx.font = 'bold 54px Arial, sans-serif';
+-  ctx.fillStyle = '#222222';
++  ctx.fillStyle = '#111111';
+   ctx.textAlign = 'center';
+   ctx.textBaseline = 'middle';
+   ctx.fillText(`${texto}mm`, 128, 64);

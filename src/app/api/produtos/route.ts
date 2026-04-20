@@ -369,12 +369,29 @@ export async function POST(req: NextRequest) {
     categoria_precificacao?: string;
     tem_pedra_preciosa?: boolean;
     medidas?: { largura_aro?: number; altura_aro?: number; base?: number };
+    ficha_tecnica_ia?: {
+      tipo_peca?: string | null;
+      largura?: number | null;
+      altura?: number | null;
+      profundidade?: number | null;
+      diametro_interno?: number | null;
+      peso_estimado_metal?: number | null;
+      qtd_pedras?: number | null;
+      tamanho_pedras_mm?: number | null;
+      tamanho_pedras_ct?: number | null;
+      tipo_cravacao?: string | null;
+      qtd_garras?: number | null;
+      largura_garras_mm?: number | null;
+      altura_garras_mm?: number | null;
+      confianca_pct?: number | null;
+      observacoes?: string | null;
+    } | null;
     composicao?: ComposicaoItem[];
     variacoes?: VariacoesConfig;
   };
 
   const { nome, tipo_metal, cor_metal, peso_precificado, markup, fator,
-          categoria_precificacao, tem_pedra_preciosa, medidas, composicao, variacoes } = body;
+          categoria_precificacao, tem_pedra_preciosa, medidas, ficha_tecnica_ia, composicao, variacoes } = body;
 
   if (!nome?.trim()) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
   if (!peso_precificado || peso_precificado <= 0) return NextResponse.json({ error: "peso_precificado inválido" }, { status: 400 });
@@ -452,6 +469,51 @@ export async function POST(req: NextRequest) {
            ${medidas?.base        ?? null})
         RETURNING id, produto_id, sku
       `;
+
+      // INSERT ficha técnica com medidas da IA (se disponível)
+      if (ficha_tecnica_ia) {
+        await tx`
+          INSERT INTO alissonerp.fichas_tecnicas_produto
+            (produto_id, tipo_peca, largura, altura, profundidade, diametro_interno,
+             peso_estimado_metal, qtd_pedras, tamanho_pedras_mm, tamanho_pedras_ct,
+             tipo_cravacao, qtd_garras, largura_garra, altura_garra,
+             ia_confianca, ia_provider)
+          VALUES
+            (${paiId},
+             ${ficha_tecnica_ia.tipo_peca ?? null},
+             ${ficha_tecnica_ia.largura ?? null},
+             ${ficha_tecnica_ia.altura ?? null},
+             ${ficha_tecnica_ia.profundidade ?? null},
+             ${ficha_tecnica_ia.diametro_interno ?? null},
+             ${ficha_tecnica_ia.peso_estimado_metal ?? null},
+             ${ficha_tecnica_ia.qtd_pedras ?? 0},
+             ${ficha_tecnica_ia.tamanho_pedras_mm ?? null},
+             ${ficha_tecnica_ia.tamanho_pedras_ct ?? null},
+             ${ficha_tecnica_ia.tipo_cravacao ?? null},
+             ${ficha_tecnica_ia.qtd_garras ?? 0},
+             ${ficha_tecnica_ia.largura_garras_mm ?? null},
+             ${ficha_tecnica_ia.altura_garras_mm ?? null},
+             ${ficha_tecnica_ia.confianca_pct ?? null},
+             'ia')
+          ON CONFLICT (produto_id)
+          DO UPDATE SET
+            tipo_peca = EXCLUDED.tipo_peca,
+            largura = EXCLUDED.largura,
+            altura = EXCLUDED.altura,
+            profundidade = EXCLUDED.profundidade,
+            diametro_interno = EXCLUDED.diametro_interno,
+            peso_estimado_metal = EXCLUDED.peso_estimado_metal,
+            qtd_pedras = EXCLUDED.qtd_pedras,
+            tamanho_pedras_mm = EXCLUDED.tamanho_pedras_mm,
+            tamanho_pedras_ct = EXCLUDED.tamanho_pedras_ct,
+            tipo_cravacao = EXCLUDED.tipo_cravacao,
+            qtd_garras = EXCLUDED.qtd_garras,
+            largura_garra = EXCLUDED.largura_garra,
+            altura_garra = EXCLUDED.altura_garra,
+            ia_confianca = EXCLUDED.ia_confianca,
+            updated_at = now()
+        `;
+      }
 
       // INSERT BOM do pai
       for (const item of bomPai) {
