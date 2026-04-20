@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import {
   Search, RefreshCw, Loader2, Plus, TrendingUp,
   ShoppingBag, DollarSign, ChevronRight, Trophy,
-  ChevronLeft,
+  ChevronLeft, Wallet, Receipt, FileCheck,
 } from "lucide-react";
+import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import Link from "next/link";
 
 // ─── Design tokens ──────────────────────────────────────────────────────────
@@ -54,10 +55,13 @@ interface VendaERP {
   total_frete:    number;
   total_venda:    number;
   total_comissao: number;
-  situacao:       string;
-  bloqueado:      boolean;
-  qtd_itens:      number;
-  total_pago:     number;
+  situacao:           string;
+  bloqueado:          boolean;
+  qtd_itens:          number;
+  total_pago:         number;
+  nota_fiscal_id:     number | null;
+  nfce_chave_44:      string | null;
+  empresa_emitente_id: number | null;
 }
 
 interface Vendedor {
@@ -116,6 +120,20 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
   const [vendedores, setVendedores] = useState<Vendedor[]>([]);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState<string | null>(null);
+
+  // NFC-e modal
+  const [vendaNfce, setVendaNfce] = useState<VendaERP | null>(null);
+
+  // Saldo crédito (só gerente_loja / diretor)
+  const mostraSaldo = ["gerente_loja", "diretor"].includes(role);
+  const [saldoCredito, setSaldoCredito] = useState<{ saldo: number; limite: number } | null>(null);
+  useEffect(() => {
+    if (!mostraSaldo) return;
+    fetch("/api/saldo-credito")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setSaldoCredito({ saldo: d.saldo_atual, limite: d.limite }); })
+      .catch(() => {});
+  }, [mostraSaldo]);
 
   // Carregar vendedores (apenas acesso total)
   useEffect(() => {
@@ -238,7 +256,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
       </div>
 
       {/* ── Stats ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div className={`grid grid-cols-2 ${mostraSaldo ? "md:grid-cols-5" : "md:grid-cols-4"} gap-3 mb-5`}>
         {[
           { icon: ShoppingBag,  label: "Vendas",    value: String(stats.count),       mono: false },
           { icon: TrendingUp,   label: "Faturado",  value: fmt(stats.faturado),        mono: true  },
@@ -264,6 +282,27 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
             </p>
           </div>
         ))}
+        {/* Card Saldo Crédito — só gerente_loja e diretor */}
+        {mostraSaldo && saldoCredito && (() => {
+          const pct = saldoCredito.limite > 0 ? saldoCredito.saldo / saldoCredito.limite : 1;
+          const cor = pct > 0.2 ? "#059669" : pct > 0.05 ? "#D97706" : "#EF4444";
+          return (
+            <div className="rounded-xl p-3 border" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <Wallet size={12} style={{ color: cor }} />
+                <span className="text-[11px] uppercase tracking-wide font-medium" style={{ color: "#9CA3AF" }}>
+                  Saldo Crédito
+                </span>
+              </div>
+              <p className="text-base font-semibold tabular-nums" style={{ color: cor }}>
+                {fmt(saldoCredito.saldo)}
+              </p>
+              <div className="mt-1.5 h-1 rounded-full" style={{ backgroundColor: "#E5E7EB" }}>
+                <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(pct * 100, 100)}%`, backgroundColor: cor }} />
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── Período ── */}
@@ -481,14 +520,30 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <Link
-                          href={`/vendas/${v.id}`}
-                          className="p-1 rounded hover:bg-gray-100 transition-colors inline-flex"
-                          style={{ color: "#9CA3AF" }}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          <ChevronRight size={14} />
-                        </Link>
+                        <div className="flex items-center gap-1">
+                          {v.nota_fiscal_id ? (
+                            <span title="NFC-e emitida" className="p-1 inline-flex">
+                              <FileCheck size={14} className="text-emerald-600" />
+                            </span>
+                          ) : v.empresa_emitente_id ? (
+                            <button
+                              title="Emitir NFC-e"
+                              onClick={e => { e.stopPropagation(); setVendaNfce(v); }}
+                              className="p-1 rounded hover:bg-stone-100 transition-colors inline-flex"
+                              style={{ color: "#9CA3AF" }}
+                            >
+                              <Receipt size={14} />
+                            </button>
+                          ) : null}
+                          <Link
+                            href={`/vendas/${v.id}`}
+                            className="p-1 rounded hover:bg-gray-100 transition-colors inline-flex"
+                            style={{ color: "#9CA3AF" }}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <ChevronRight size={14} />
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -528,6 +583,14 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
           </div>
         )}
       </div>
+
+      {vendaNfce && (
+        <EmitirNfceModal
+          venda={vendaNfce}
+          onClose={() => setVendaNfce(null)}
+          onSuccess={() => { fetchVendas(inicio, fim); }}
+        />
+      )}
     </div>
   );
 }

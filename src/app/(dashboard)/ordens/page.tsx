@@ -60,12 +60,14 @@ export default async function OrdensPage({
     ? sql`AND vendedor_id = ${vendedorIdFiltro}`
     : sql``;
 
+  // unaccent() torna a busca insensível a acentos: usuário digita "Joao"
+  // e encontra "João". Requer extensão unaccent (migration 136).
   const whereBusca = busca
     ? sql`AND (
-        numero_ordem  ILIKE ${'%' + busca + '%'}
+        unaccent(numero_ordem)  ILIKE unaccent(${'%' + busca + '%'})
         OR numero_pedido::text ILIKE ${'%' + busca + '%'}
-        OR cliente_nome  ILIKE ${'%' + busca + '%'}
-        OR vendedor_nome ILIKE ${'%' + busca + '%'}
+        OR unaccent(cliente_nome)  ILIKE unaccent(${'%' + busca + '%'})
+        OR unaccent(vendedor_nome) ILIKE unaccent(${'%' + busca + '%'})
       )`
     : sql``;
 

@@ -1,9 +1,9 @@
 # Arquitetura — fabricaAJ ERP
 
-> 📋 Última atualização automática: 09/04/2026 — Versão: v2.19.62 <!-- Revisado 09/04/2026 -->
+> 📋 Última atualização automática: 11/04/2026 — Versão: v2.19.87 <!-- Revisado 11/04/2026 -->
 
 Sistema ERP para a Joalheria ALISSON. Stack: Next.js 16.1.6 + PostgreSQL 15 (Supabase self-hosted).
-**Versão atual: v2.19.62 | Atualizado: 09/04/2026 — Orçamento 3D, Vendas redesign, Tarefas, Estoque Comercial, Integrações**
+**Versão atual: v2.19.87 | Atualizado: 11/04/2026 — Integração Mercado Pago completa (Preference + Payment API PIX nativo + Point Smart), valor líquido de recebimento, estorno automático, fix Tiny offline_access, commit-then-sync no webhook**
 
 ---
 
@@ -183,6 +183,13 @@ O cliente Supabase (`src/lib/supabase/client.ts` e `server.ts`) esta configurado
 | `129_orcamento_venda_ordem.sql` | v2.19.57. ADD venda_gerada_id em orcamentos. ADD orcamento_id em vendas_erp. |
 | `130_endereco_entrega_venda.sql` | v2.19.60. ADD 7 colunas endereço entrega em vendas_erp. |
 | `130_itens_venda_produto_nullable.sql` | v2.19.62. produto_id NULLABLE em itens_venda_erp (itens customizados). |
+| `131_orcamento_par_aliancas.sql` | v2.19.65. Par de alianças: ADD ficha_tecnica_2_id em orcamentos. |
+| `132_orcamento_validacao_zirconia.sql` | v2.19.66. ADD calibracao JSONB em config_orcamento (validações físicas). Zircônia em stone_prices. |
+| `133_notif_aguardando_resposta.sql` | v2.19.87. Flag aguardando_resposta em notificacoes (módulo em progresso). |
+| `134_notif_alarme_snooze.sql` | v2.19.87. Snooze de alarmes em notificacoes (módulo em progresso). |
+| `135_mercado_pago_integracao.sql` | v2.19.72. **Integração MP base**: CREATE `mp_point_devices` (cadastro maquininhas), `fn_cr_marcar_pago_mp(p_venda_id)`, índice `idx_pagamentos_venda_gateway_id`, entry `mercado-pago-payment` em webhook_config. |
+| `136_unaccent_extension.sql` | v2.19.71. `CREATE EXTENSION unaccent` (busca insensível a acentos em /ordens e /pcp). |
+| `137_pagamentos_valor_liquido.sql` | v2.19.85. **Valor líquido MP**: ADD `valor_liquido NUMERIC(12,2)` e `taxas_mp NUMERIC(12,2)` em `pagamentos_venda`. Fix retroativo JSONB double-encoded (15 rows). `fn_resumo_recebido_mp(p_inicio, p_fim)` pra relatórios. |
 
 ---
 
@@ -2502,3 +2509,128 @@ PATCH /api/insumos/[id]             → campos editáveis incluindo foto
 ```
 
 View `vw_detalhe_pote` recriada com colunas: `foto`, `fornecedor_id`, `peso_pedra`, `observacao`.
+
+---
+
+## Módulo Mercado Pago (v2.19.72 → v2.19.87) <!-- Revisado 11/04/2026 -->
+
+Integração completa do Mercado Pago pro módulo de vendas. Fecha o loop **"cliente paga → webhook detecta → venda vira `concluido` automaticamente"** sem intervenção humana. Três canais de cobrança combinados, uma única aplicação MP (Checkout Transparente + API de Pagamentos).
+
+### Canais de cobrança
+
+| Canal | Endpoint ERP | API MP | Cenário |
+|---|---|---|---|
+| **Link online** (PIX + cartão) | `POST /api/vendas/[id]/mercado-pago/criar-link` | Preference API (`/checkout/preferences`) | WhatsApp/email — cliente paga remoto no checkout MP |
+| **PIX nativo escaneável** | `POST /api/vendas/[id]/mercado-pago/criar-pix` | Payment API (`/v1/payments` com `payment_method_id='pix'`) | Cliente escaneia QR no próprio app bancário (EMV/BR Code do BACEN) |
+| **Maquininha Point** | `POST /api/vendas/[id]/mercado-pago/criar-intent-point` | Point Integration API (`/point/integration-api/devices/{id}/payment-intents`) | Cliente presencial passa cartão ou PIX no terminal físico |
+
+**Todas notificam o mesmo webhook** (`POST /api/webhooks/mercado-pago`). MP envia `topic=payment` com o mesmo formato independente do canal — `external_reference` carrega `venda:X:pag:Y` em todos os casos.
+
+### Arquitetura — princípios chave
+
+1. **Helpers em `src/lib/` (não HTTP interno)**: PATCH manual e webhook chamam as mesmas funções TypeScript direto. Zero roundtrip HTTP entre rotas.
+   - `src/lib/mercado-pago.ts` — SDK + Payment API + Point API
+   - `src/lib/vendas-aprovar.ts` — `approveVenda()`, `concluirVenda()`, `sendToTiny()`, `criarOrdemDoOrcamento()`, `estornarVenda()`
+   - `src/lib/public-origin.ts` — `getPublicOrigin(req)` com X-Forwarded-Proto/Host (proxy-aware)
+
+2. **Commit-then-sync (local-first)**: `concluirVenda` faz nessa ordem — `UPDATE situacao='concluido'` → `fn_cr_marcar_pago_mp()` → `criarOrdemDoOrcamento()` → `sendToTiny()` (best-effort). Tiny falhando **não bloqueia** a venda concluída — o pagamento já foi confirmado pelo banco e o fechamento do ERP é inegociável. Tiny vira sincronização informativa que pode ser reenviada depois.
+
+3. **Idempotência em 4 camadas**:
+   - `tiny_pedido_id IS NOT NULL` → `sendToTiny` vira noop
+   - `situacao IN ('aprovado','concluido')` → `approveVenda` retorna `ja_aprovada`
+   - `orcamentos.ordem_gerada_id IS NOT NULL` → `criarOrdemDoOrcamento` retorna ordem existente
+   - `payment_ids_processados[]` em `gateway_payload` → webhook detecta reentrega e retorna 200 sem reprocessar
+
+4. **Segurança do webhook**: validação HMAC SHA-256 com formato `ts=...,v1=hash` no header `x-signature`. Manifesto: `id:${dataId};request-id:${xRequestId};ts:${ts};`. Se HMAC não bate, retorna 401 e loga em `webhook_log`.
+
+### Tabelas novas/alteradas
+
+| Objeto | Migration | Descrição |
+|---|---|---|
+| `alissonerp.mp_point_devices` | 135 | Cadastro das maquininhas Point Smart (device_id UNIQUE, nome_legivel, store_id, pos_id, operating_mode, ativo, loja, last_sync_at, created/updated_at). Sincronizado via `POST /api/mercado-pago/devices`. |
+| `pagamentos_venda.valor_liquido` | 137 | NUMERIC(12,2) — valor que realmente caiu na conta MP (`transaction_details.net_received_amount`). Preenchido pelo webhook ao confirmar pagamento. |
+| `pagamentos_venda.taxas_mp` | 137 | NUMERIC(12,2) — total deduzido pelo MP. Calculado como `transaction_amount - net_received_amount` (mais preciso que somar `fee_details[]` porque MP deduz taxas de adquirência que não aparecem em fee_details). |
+| `alissonerp.fn_cr_marcar_pago_mp(INTEGER)` | 135 | Marca `contas_receber.situacao='pago'` + `data_recebimento=CURRENT_DATE` das CRs pendentes da venda. Retorna `INTEGER` (qtd quitadas). |
+| `alissonerp.fn_resumo_recebido_mp(DATE, DATE)` | 137 | Retorna `qtd`, `total_bruto`, `total_taxas`, `total_liquido` do período pra relatórios. |
+
+### Configurações em `alissonerp.configuracoes_secrets`
+
+| Chave | Descrição |
+|---|---|
+| `mp_access_token` | Access token de produção (formato `APP_USR-...`). Vale pra todas as APIs: Preference, Payment, Point. |
+| `mp_webhook_secret` | Chave secreta HMAC do painel MP (aba Webhooks). Valida assinatura das notificações. |
+| `mp_user_id` | User ID MP da conta (opcional, pro painel). |
+| `mp_webhook_base_url` | URL pública prefixo do `notification_url` (ex: `https://erp.alissonjoias.com.br`). Em dev pode colar URL ngrok. MP rejeita `http://localhost`. |
+
+### Endpoints API
+
+```
+POST /api/vendas/[id]/mercado-pago/criar-link            — Preference (PIX + cartão)
+POST /api/vendas/[id]/mercado-pago/criar-pix             — Payment API (PIX nativo escaneável)
+POST /api/vendas/[id]/mercado-pago/criar-intent-point    — Point Smart (maquininha)
+DELETE /api/vendas/[id]/mercado-pago/criar-intent-point  — Cancelar intent ativa
+
+GET  /api/mercado-pago/devices                           — Lista devices cadastrados
+POST /api/mercado-pago/devices                           — Sync com MP API (upsert)
+PATCH /api/mercado-pago/devices                          — Renomear/ativar/desativar manualmente
+
+POST /api/webhooks/mercado-pago                          — Receiver (HMAC + idempotência + commit-then-sync)
+GET  /api/webhooks/mercado-pago                          — Healthcheck simples
+```
+
+### Componentes UI (`src/components/vendas/`)
+
+| Componente | Uso | Endpoint usado |
+|---|---|---|
+| `PixQrInline.tsx` | Inline no form de pagamento (Nova Venda + Detalhe) quando `forma = 'Pix'`. QR nativo EMV escaneável no banco + copia-e-cola + WhatsApp. | `/criar-pix` |
+| `CartaoInline.tsx` | Inline no form quando `forma = 'Cartão de Crédito'`. Dois botões: "Link de Pagamento" (Preference) e "Maquininha Point" (intent). | `/criar-link` + `/criar-intent-point` |
+| `MercadoPagoCobranca.tsx` | Seção separada no `VendaDetalheClient` com dois botões pra qualquer venda. Modais overlay com QR, link, WhatsApp, device selector. Mantida pra compatibilidade. | `/criar-link` + `/criar-intent-point` |
+
+Todos suportam:
+- `vendaId: number \| null` + callback `obterVendaId` pra fluxo Nova Venda (salva rascunho silenciosamente antes de gerar cobrança)
+- Polling a cada 3-5s detectando `pagamentos_venda.status='confirmado'` ou `vendas_erp.situacao='concluido'`
+- Feedback visual "Pagamento confirmado!" + redirect/refresh automático
+
+### Páginas públicas de retorno
+
+- `src/app/pagamento/[token]/[status]/page.tsx` — 3 estados (`sucesso`, `pendente`, `erro`) usados em `back_urls` da Preference MP. Lookup por `vendas_erp.token_compartilhamento` UUID pra não expor ID interno. Dark theme da Alisson.
+
+### Fluxo de estorno (refund / cancelled / charged_back)
+
+Implementado em `src/lib/vendas-aprovar.ts::estornarVenda()` + webhook. Regras de negócio:
+
+- **Venda com uma única forma de pagamento** (o MP estornado): venda vira `cancelado`. Trigger 111 reverte estoque comercial automaticamente. Contas_receber em ('pago','pendente') viram `cancelado` manual (trigger 113 só cancela CR pendente).
+- **Venda com múltiplas formas** (MP + dinheiro, por exemplo): venda volta pra `rascunho`. Vendedora recobra o valor estornado (ou cancela manual). Outros pagamentos confirmados permanecem.
+- **Chargeback** tratado igual a refund.
+- **Rejected** (tentativa negada) NÃO é estorno — só marca o pagamento como cancelado sem mexer na venda.
+- **Estorno parcial** não suportado ainda (MP permite refund parcial — adicionar depois checando `transaction_amount_refunded`).
+
+### Webhook payload em `pagamentos_venda.gateway_payload`
+
+JSONB com auditoria do último evento MP:
+```json
+{
+  "ultimo_payment_id": "154344233150",
+  "ultimo_status": "approved",
+  "ultimo_update": "2026-04-11T20:17:59Z",
+  "point_of_interaction_type": "PAYMENT_LINK",
+  "payment_method_id": "master",
+  "payment_type_id": "credit_card",
+  "transaction_amount": 1.00,
+  "net_received_amount": 0.97,
+  "taxas_mp_total": 0.03,
+  "fee_details": [{"amount": 0.01, "fee_payer": "collector", "type": "mercadopago_fee"}],
+  "money_release_date": "2026-04-11T20:17:59.000-04:00",
+  "payment_ids_processados": ["154344233150"]
+}
+```
+
+### Pitfalls conhecidos
+
+- **`${JSON.stringify(obj)}::jsonb` bugado**: o driver `postgres` npm encoda como string literal JSON (double-encoded). **Usar `${JSON.stringify(obj)}::text::jsonb`** ou `${sql.json(obj)}`. Aplicado em todos os endpoints MP desde v2.19.85. Outros endpoints legados (ordens, user, service, fichas-tecnicas, purificacao) ainda têm o padrão bugado — funcionam parcialmente via `normalizeRow` helper que parseia na leitura, mas operações JSONB nativas falham.
+- **Tiny token expirava toda hora**: scope OAuth2 precisa ser `openid offline_access` (sem `offline_access` o refresh_token vira session-bound e expira em horas). Fixado em v2.19.84. Após o deploy, reconectar Tiny uma vez — vai pedir consentimento de "acesso offline".
+- **`redirect_uri` atrás de proxy**: Keycloak rejeita troca `authorization_code → token` se `redirect_uri` não bate entre `/auth` e `/callback`. Usar `getPublicOrigin(req)` de `src/lib/public-origin.ts` que respeita `X-Forwarded-Proto` + `X-Forwarded-Host` (não `req.nextUrl.origin` que pode retornar host interno do container).
+- **MP rejeita `http://localhost` como `notification_url`**: em dev, configurar `mp_webhook_base_url` apontando pra domínio público ou ngrok. Sem essa config, o endpoint `criar-link`/`criar-pix` retorna erro 502.
+- **Application `tipo=QR Code` no painel MP developers é restrita**: não permite Payment API direta (erro 401 "Unauthorized use of live credentials"). Precisa criar aplicação do tipo **Checkout Transparente + API de Pagamentos** pra ter acesso completo (PIX + Point + Preference).
+- **CR `pago` vs `recebido`**: o backend sempre grava `'pago'` (trigger 113 e `fn_cr_marcar_pago_mp`). A UI tinha código legado usando `'recebido'`. Corrigido em v2.19.83 — `isRecebido(s) = s === 'pago' || s === 'recebido'` como helper de transição.
+- **`data_vencimento` como `Date` em Server Component**: Next serializa Server→Client preservando tipo Date. Funções client como `isVencido(d)` chamam `d.slice()` assumindo string e crasham. **Fix:** `::text` nos SELECTs da `page.tsx` (`SELECT data_vencimento::text AS data_vencimento, ...`).

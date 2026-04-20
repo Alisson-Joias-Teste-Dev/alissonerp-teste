@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Package, AlertTriangle, CheckCircle, Plus, Search,
   RefreshCw, ArrowUpCircle, ArrowDownCircle, Settings2,
-  Loader2, X,
+  Loader2, X, ArrowRightLeft, ClipboardList,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -14,12 +14,15 @@ interface ItemEstoque {
   nome_produto:        string;
   sku:                 string | null;
   categoria:           string | null;
-  saldo:               number;
+  saldo_fisico:        number;
+  reservado:           number;
+  disponivel:          number;
+  em_transito:         number;
   estoque_minimo:      number;
   ativo:               boolean;
   config_id:           number | null;
   total_movimentacoes: number;
-  alerta:              "ok" | "no_minimo" | "abaixo_minimo" | "zerado";
+  alerta:              "ok" | "no_minimo" | "abaixo_minimo" | "zerado" | "negativo";
 }
 
 interface MovModal {
@@ -29,12 +32,18 @@ interface MovModal {
   tipo: "entrada" | "saida";
 }
 
+interface LocalEstoque {
+  id: number;
+  nome: string;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const ALERTA_STYLE: Record<string, { bg: string; text: string; label: string }> = {
   ok:            { bg: "#D1FAE5", text: "#065F46", label: "OK"            },
   no_minimo:     { bg: "#FEF3C7", text: "#92400E", label: "No mínimo"     },
   abaixo_minimo: { bg: "#FEE2E2", text: "#991B1B", label: "Abaixo mín."  },
   zerado:        { bg: "#F3F4F6", text: "#6B7280", label: "Zerado"        },
+  negativo:      { bg: "#FCA5A5", text: "#7F1D1D", label: "Negativo"     },
 };
 
 const MOTIVOS_ENTRADA = [
@@ -105,13 +114,13 @@ function AddProdutoModal({ onClose, onAdded }: { onClose: () => void; onAdded: (
               <input
                 className="w-full border rounded-lg pl-8 pr-3 py-2 text-sm outline-none"
                 style={{ borderColor: "#E8DCC8" }}
-                placeholder="Buscar produto por nome ou SKU…"
+                placeholder="Buscar produto por nome ou SKU..."
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 autoFocus
               />
             </div>
-            {loading && <p className="text-xs text-gray-400 text-center py-2">Buscando…</p>}
+            {loading && <p className="text-xs text-gray-400 text-center py-2">Buscando...</p>}
             <ul className="divide-y max-h-56 overflow-y-auto">
               {results.map(p => (
                 <li
@@ -134,7 +143,7 @@ function AddProdutoModal({ onClose, onAdded }: { onClose: () => void; onAdded: (
               <p className="font-medium text-sm" style={{ color: "#184036" }}>{selected.nome}</p>
             </div>
             <div className="mb-4">
-              <label className="block text-xs font-semibold mb-1 text-gray-500">Estoque mínimo</label>
+              <label className="block text-xs font-semibold mb-1 text-gray-500">Estoque minimo</label>
               <input
                 type="number"
                 min={0}
@@ -173,11 +182,12 @@ function AddProdutoModal({ onClose, onAdded }: { onClose: () => void; onAdded: (
 
 // ─── MovimentacaoModal ────────────────────────────────────────────────────────
 function MovimentacaoModal({
-  mov, onClose, onDone,
-}: { mov: MovModal; onClose: () => void; onDone: () => void }) {
+  mov, locais, onClose, onDone,
+}: { mov: MovModal; locais: LocalEstoque[]; onClose: () => void; onDone: () => void }) {
   const motivos = mov.tipo === "entrada" ? MOTIVOS_ENTRADA : MOTIVOS_SAIDA;
   const [qtd,        setQtd]        = useState(1);
   const [motivo,     setMotivo]     = useState(motivos[0].value);
+  const [localId,    setLocalId]    = useState(2); // Default: Loja
   const [observacao, setObservacao] = useState("");
   const [saving,     setSaving]     = useState(false);
   const [err,        setErr]        = useState("");
@@ -193,6 +203,7 @@ function MovimentacaoModal({
           tipo: mov.tipo,
           quantidade: qtd,
           motivo,
+          local_estoque_id: localId,
           observacao: observacao || undefined,
         }),
       });
@@ -218,22 +229,33 @@ function MovimentacaoModal({
               ? <ArrowUpCircle size={18} style={{ color: accentColor }} />
               : <ArrowDownCircle size={18} style={{ color: accentColor }} />}
             <h2 className="font-bold text-lg" style={{ color: "#184036" }}>
-              {isEntrada ? "Entrada" : "Saída"}
+              {isEntrada ? "Entrada" : "Saida"}
             </h2>
           </div>
           <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
         </div>
 
         <p className="text-sm font-medium mb-4" style={{ color: "#374151" }}>{mov.nomeProduto}</p>
-        <p className="text-xs text-gray-500 mb-4">Saldo atual: <strong>{mov.saldoAtual}</strong></p>
 
         <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold mb-1 text-gray-500">Local</label>
+            <select
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+              style={{ borderColor: "#E8DCC8" }}
+              value={localId}
+              onChange={e => setLocalId(Number(e.target.value))}
+            >
+              {locais.map(l => (
+                <option key={l.id} value={l.id}>{l.nome}</option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
             <input
               type="number"
               min={1}
-              max={mov.tipo === "saida" ? mov.saldoAtual : undefined}
               className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
               style={{ borderColor: "#E8DCC8" }}
               value={qtd}
@@ -254,11 +276,11 @@ function MovimentacaoModal({
             </select>
           </div>
           <div>
-            <label className="block text-xs font-semibold mb-1 text-gray-500">Observação (opcional)</label>
+            <label className="block text-xs font-semibold mb-1 text-gray-500">Observacao (opcional)</label>
             <input
               className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
               style={{ borderColor: "#E8DCC8" }}
-              placeholder="…"
+              placeholder="..."
               value={observacao}
               onChange={e => setObservacao(e.target.value)}
             />
@@ -274,7 +296,7 @@ function MovimentacaoModal({
           disabled={saving}
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-          Confirmar {isEntrada ? "Entrada" : "Saída"}
+          Confirmar {isEntrada ? "Entrada" : "Saida"}
         </button>
       </div>
     </div>
@@ -284,11 +306,12 @@ function MovimentacaoModal({
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function EstoqueComercialClient() {
   const router = useRouter();
-  const [items,   setItems]   = useState<ItemEstoque[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search,  setSearch]  = useState("");
-  const [addOpen, setAddOpen] = useState(false);
-  const [movModal, setMovModal] = useState<MovModal | null>(null);
+  const [items,     setItems]     = useState<ItemEstoque[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [search,    setSearch]    = useState("");
+  const [addOpen,   setAddOpen]   = useState(false);
+  const [movModal,  setMovModal]  = useState<MovModal | null>(null);
+  const [locais,    setLocais]    = useState<LocalEstoque[]>([]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -300,7 +323,14 @@ export default function EstoqueComercialClient() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const fetchLocais = useCallback(async () => {
+    try {
+      const r = await fetch("/api/locais-estoque");
+      if (r.ok) setLocais(await r.json());
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { fetchData(); fetchLocais(); }, [fetchData, fetchLocais]);
 
   const filtered = items.filter(i =>
     !search ||
@@ -310,12 +340,13 @@ export default function EstoqueComercialClient() {
 
   // Stats
   const totalProdutos    = items.length;
-  const alertaZerado     = items.filter(i => i.alerta === "zerado").length;
+  const alertaZerado     = items.filter(i => i.alerta === "zerado" || i.alerta === "negativo").length;
   const alertaBaixo      = items.filter(i => i.alerta === "abaixo_minimo").length;
-  const totalUnidades    = items.reduce((s, i) => s + i.saldo, 0);
+  const totalDisponivel  = items.reduce((s, i) => s + i.disponivel, 0);
+  const totalReservado   = items.reduce((s, i) => s + i.reservado, 0);
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6 max-w-6xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -325,6 +356,24 @@ export default function EstoqueComercialClient() {
           <p className="text-sm text-gray-500 mt-0.5">Controle de produtos acabados para venda</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push("/estoque-comercial/transferencias")}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium hover:bg-gray-100 transition-colors"
+            style={{ color: "#184036" }}
+            title="Transferencias"
+          >
+            <ArrowRightLeft size={15} />
+            <span className="hidden sm:inline">Transferencias</span>
+          </button>
+          <button
+            onClick={() => router.push("/estoque-comercial/inventario")}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium hover:bg-gray-100 transition-colors"
+            style={{ color: "#184036" }}
+            title="Inventario"
+          >
+            <ClipboardList size={15} />
+            <span className="hidden sm:inline">Inventario</span>
+          </button>
           <button
             onClick={fetchData}
             className="p-2 rounded-xl hover:bg-gray-100 transition-colors"
@@ -344,12 +393,13 @@ export default function EstoqueComercialClient() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
         {[
-          { label: "Produtos",     value: totalProdutos, icon: Package,       color: "#184036" },
-          { label: "Unidades",     value: totalUnidades, icon: CheckCircle,   color: "#059669" },
-          { label: "Zerados",      value: alertaZerado,  icon: X,             color: "#6B7280" },
-          { label: "Abaixo mín.",  value: alertaBaixo,   icon: AlertTriangle, color: "#DC2626" },
+          { label: "Produtos",     value: totalProdutos,   icon: Package,       color: "#184036" },
+          { label: "Disponivel",   value: totalDisponivel, icon: CheckCircle,   color: "#059669" },
+          { label: "Reservado",    value: totalReservado,  icon: Package,       color: "#2563EB" },
+          { label: "Zerados",      value: alertaZerado,    icon: X,             color: "#6B7280" },
+          { label: "Abaixo min.",  value: alertaBaixo,     icon: AlertTriangle, color: "#DC2626" },
         ].map(stat => (
           <div
             key={stat.label}
@@ -371,7 +421,7 @@ export default function EstoqueComercialClient() {
         <input
           className="w-full border rounded-xl pl-8 pr-3 py-2 text-sm outline-none"
           style={{ borderColor: "#E8DCC8" }}
-          placeholder="Buscar por nome ou SKU…"
+          placeholder="Buscar por nome ou SKU..."
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
@@ -407,10 +457,12 @@ export default function EstoqueComercialClient() {
             <thead style={{ background: "#F9F6F0" }}>
               <tr>
                 <th className="text-left px-4 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Produto</th>
-                <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Saldo</th>
-                <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Mínimo</th>
+                <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Fisico</th>
+                <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#2563EB" }}>Reservado</th>
+                <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#059669" }}>Disponivel</th>
+                <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Minimo</th>
                 <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Status</th>
-                <th className="text-right px-4 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Ações</th>
+                <th className="text-right px-4 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Acoes</th>
               </tr>
             </thead>
             <tbody>
@@ -432,8 +484,25 @@ export default function EstoqueComercialClient() {
                       {item.sku && <p className="text-xs text-gray-400">{item.sku}</p>}
                     </td>
                     <td className="px-3 py-3 text-center">
-                      <span className="text-lg font-bold" style={{ color: item.saldo === 0 ? "#9CA3AF" : "#184036" }}>
-                        {item.saldo}
+                      <span className="text-sm font-medium" style={{ color: "#6B7280" }}>
+                        {item.saldo_fisico}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-center">
+                      {item.reservado > 0 ? (
+                        <span className="text-sm font-medium" style={{ color: "#2563EB" }}>
+                          {item.reservado}
+                        </span>
+                      ) : (
+                        <span className="text-sm text-gray-300">-</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 text-center">
+                      <span
+                        className="text-lg font-bold"
+                        style={{ color: item.disponivel <= 0 ? "#DC2626" : "#059669" }}
+                      >
+                        {item.disponivel}
                       </span>
                     </td>
                     <td className="px-3 py-3 text-center text-gray-500 text-sm">
@@ -455,24 +524,24 @@ export default function EstoqueComercialClient() {
                           onClick={() => setMovModal({
                             produtoId: item.produto_id,
                             nomeProduto: item.nome_produto,
-                            saldoAtual: item.saldo,
+                            saldoAtual: item.disponivel,
                             tipo: "entrada",
                           })}
                         >
                           <ArrowUpCircle size={16} style={{ color: "#059669" }} />
                         </button>
                         <button
-                          title="Saída"
+                          title="Saida"
                           className="p-1.5 rounded-lg hover:bg-red-50 transition-colors"
                           onClick={() => setMovModal({
                             produtoId: item.produto_id,
                             nomeProduto: item.nome_produto,
-                            saldoAtual: item.saldo,
+                            saldoAtual: item.disponivel,
                             tipo: "saida",
                           })}
-                          disabled={item.saldo === 0}
+                          disabled={item.disponivel <= 0}
                         >
-                          <ArrowDownCircle size={16} style={{ color: item.saldo === 0 ? "#D1D5DB" : "#DC2626" }} />
+                          <ArrowDownCircle size={16} style={{ color: item.disponivel <= 0 ? "#D1D5DB" : "#DC2626" }} />
                         </button>
                         <button
                           title="Configurar"
@@ -501,6 +570,7 @@ export default function EstoqueComercialClient() {
       {movModal && (
         <MovimentacaoModal
           mov={movModal}
+          locais={locais}
           onClose={() => setMovModal(null)}
           onDone={fetchData}
         />

@@ -6,6 +6,7 @@ export async function GET() {
   const rows = await sql`
     SELECT id_vendedor, nome
     FROM public.vendedores
+    WHERE situacao = 'Ativo'
     ORDER BY nome
   `;
   return NextResponse.json(rows);

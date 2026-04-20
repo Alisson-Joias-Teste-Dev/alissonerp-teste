@@ -29,6 +29,8 @@ export async function GET(
       v.qtd_itens, v.total_pago,
       ve.endereco_entrega, ve.endereco_entrega_numero, ve.endereco_entrega_complemento,
       ve.endereco_entrega_bairro, ve.endereco_entrega_cidade, ve.endereco_entrega_cep, ve.endereco_entrega_uf,
+      ve.credito_gerente_usado, ve.aprovacao_credito_tipo, ve.aprovacao_credito_tarefa_id,
+      (SELECT t.status FROM alissonerp.tarefas t WHERE t.id = ve.aprovacao_credito_tarefa_id) AS aprovacao_credito_status,
       c.endereco AS cliente_endereco, c.numero AS cliente_numero, c.complemento AS cliente_complemento,
       c.bairro AS cliente_bairro, c.municipio AS cliente_municipio, c.cep AS cliente_cep, c.uf AS cliente_uf
     FROM alissonerp.vw_vendas_erp_completa v
@@ -53,7 +55,8 @@ export async function GET(
   const pagamentos = await sql`
     SELECT
       id, forma, gateway, valor, parcelas,
-      status, gateway_id, data_confirmacao, created_at
+      status, gateway_id, data_confirmacao, created_at,
+      valor_liquido, taxas_mp
     FROM alissonerp.pagamentos_venda
     WHERE venda_id = ${vendaId}
     ORDER BY id
@@ -66,8 +69,21 @@ export async function GET(
     ORDER BY id
   `;
 
+  const devolucoes = await sql`
+    SELECT id, numero, tipo, status, tipo_compensacao,
+           valor_total_devolvido, valor_compensacao, created_at
+    FROM alissonerp.devolucoes_venda
+    WHERE venda_id = ${vendaId}
+    ORDER BY id DESC
+  `;
+
   return NextResponse.json({
     ...venda,
+    devolucoes: devolucoes.map((d) => ({
+      ...d,
+      valor_total_devolvido: Number(d.valor_total_devolvido),
+      valor_compensacao: Number(d.valor_compensacao),
+    })),
     total_produtos: Number(venda.total_produtos),
     total_desconto: Number(venda.total_desconto),
     total_frete:    Number(venda.total_frete),
@@ -75,6 +91,10 @@ export async function GET(
     total_comissao: Number(venda.total_comissao),
     total_pago:     Number(venda.total_pago),
     qtd_itens:      Number(venda.qtd_itens),
+    credito_gerente_usado: Number(venda.credito_gerente_usado ?? 0),
+    aprovacao_credito_tipo: venda.aprovacao_credito_tipo ?? null,
+    aprovacao_credito_tarefa_id: venda.aprovacao_credito_tarefa_id ?? null,
+    aprovacao_credito_status: venda.aprovacao_credito_status ?? null,
     itens: itens.map((i) => ({
       ...i,
       quantidade:     Number(i.quantidade),
@@ -87,7 +107,9 @@ export async function GET(
     })),
     pagamentos: pagamentos.map((p) => ({
       ...p,
-      valor: Number(p.valor),
+      valor:         Number(p.valor),
+      valor_liquido: p.valor_liquido != null ? Number(p.valor_liquido) : null,
+      taxas_mp:      p.taxas_mp      != null ? Number(p.taxas_mp)      : null,
     })),
     ordens,
   });
@@ -105,7 +127,7 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-  const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+  const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "diretor", "gerente_fabrica", "gerente_loja", "consultora"];
   if (!usuario || !ROLES_PERMITIDOS.includes(usuario.role)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
@@ -139,6 +161,9 @@ export async function PATCH(
     endereco_entrega_cidade?:      string | null;
     endereco_entrega_cep?:         string | null;
     endereco_entrega_uf?:          string | null;
+    tipo_venda?:           string | null;
+    numero_rastreio?:      string | null;
+    venda_garantia_id?:    number | null;
   };
 
   const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "cancelado", "concluido"];
@@ -451,7 +476,10 @@ export async function PATCH(
       endereco_entrega_bairro      = COALESCE(${body.endereco_entrega_bairro ?? null},      endereco_entrega_bairro),
       endereco_entrega_cidade      = COALESCE(${body.endereco_entrega_cidade ?? null},      endereco_entrega_cidade),
       endereco_entrega_cep         = COALESCE(${body.endereco_entrega_cep ?? null},         endereco_entrega_cep),
-      endereco_entrega_uf          = COALESCE(${body.endereco_entrega_uf ?? null},          endereco_entrega_uf)
+      endereco_entrega_uf          = COALESCE(${body.endereco_entrega_uf ?? null},          endereco_entrega_uf),
+      tipo_venda           = COALESCE(${body.tipo_venda ?? null},           tipo_venda),
+      numero_rastreio      = COALESCE(${body.numero_rastreio ?? null},      numero_rastreio),
+      venda_garantia_id    = COALESCE(${body.venda_garantia_id ?? null},    venda_garantia_id)
     WHERE id = ${vendaId}
   `;
 
@@ -509,6 +537,7 @@ export async function PATCH(
   if (body.situacao === "aprovado" || body.situacao === "concluido") {
     const [vendaOrc] = await sql`
       SELECT v.orcamento_id, v.cliente_id, v.vendedor_id, v.data_entrega,
+             v.numero_venda,
              o.id AS orc_id, o.tipo, o.peso, o.numero_orcamento, o.nome_modelo,
              o.foto_3d, o.ficha_tecnica_id, o.ficha_tecnica_2_id, o.quantidade,
              ft.perfil, ft.modelo, ft.aro_numeracao, ft.largura, ft.espessura,
@@ -538,19 +567,21 @@ export async function PATCH(
         const pesoItem1 = Number(vendaOrc.peso_estimado ?? vendaOrc.peso ?? 0);
         const pesoNeg = Number(vendaOrc.peso ?? vendaOrc.peso_estimado ?? 0);
 
-        // Criar ordem
+        // Criar ordem — inclui numero_pedido pra aparecer na coluna "PEDIDO PDV"
         const [ordem] = await tx`
           INSERT INTO alissonerp.ordens (
             numero_ordem, tipo_ordem, situacao, status, rota,
             cliente_id, vendedor_id, peso_metal_negociado,
-            data_entrega, detalhes_ordem, foto_peca_servico, venda_id, created_at
+            data_entrega, detalhes_ordem, foto_peca_servico, venda_id,
+            numero_pedido, created_at
           ) VALUES (
             ${numeroOrdem}, 'fabricacao'::alissonerp.enum_tipo_ordem,
             'criado', 'aguardando', 'pcp',
             ${vendaOrc.cliente_id}, ${vendaOrc.vendedor_id},
             ${pesoNeg}, ${vendaOrc.data_entrega},
             ${'Venda V-' + String(vendaId).padStart(5, '0') + ' / Orçamento ' + vendaOrc.numero_orcamento + (isPar ? ' (Par)' : '')},
-            ${vendaOrc.foto_3d ?? null}, ${vendaId}, NOW()
+            ${vendaOrc.foto_3d ?? null}, ${vendaId},
+            ${vendaOrc.numero_venda ?? null}, NOW()
           ) RETURNING id, numero_ordem
         `;
         ordemCriada = { id: ordem.id, numero_ordem: ordem.numero_ordem };

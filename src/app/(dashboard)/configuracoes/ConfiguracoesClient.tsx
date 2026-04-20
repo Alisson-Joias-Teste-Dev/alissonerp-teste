@@ -32,11 +32,20 @@ import {
   Wrench,
   Link2,
   DollarSign,
+  Wallet,
+  Landmark,
+  ShoppingCart,
+  Package,
+  CreditCard,
+  Smartphone,
+  Truck,
+  Search,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
 import UserEditDrawer, { type UsuarioEdit, type Deposito as DepositoEdit } from "@/components/UserEditDrawer";
 import { useAuth } from "@/hooks/useAuth";
+import { isFullAccess } from "@/lib/roles";
 import LocaisEstoqueTab from "@/components/LocaisEstoqueTab";
 
 // ─── Paleta (tema claro — alinhado com aba Usuários) ─────────────────────────
@@ -88,6 +97,8 @@ interface Usuario {
   ativo: boolean;
   created_at: string;
   avatar_url: string | null;
+  deposito_id?: number | null;
+  vendedor_id?: number | null;
   tipos_ordem_permitidos?: string[];
   tipos_protocolo_permitidos?: string[];
   is_operador_service?: boolean;
@@ -126,7 +137,7 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas" | "fretes";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -514,8 +525,8 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
       role:                       u.role,
       ativo:                      u.ativo,
       avatar_url:                 u.avatar_url ?? null,
-      deposito_id:                null,
-      vendedor_id:                null,
+      deposito_id:                u.deposito_id ?? null,
+      vendedor_id:                u.vendedor_id ?? null,
       tipos_ordem_permitidos:     u.tipos_ordem_permitidos ?? [],
       tipos_protocolo_permitidos: u.tipos_protocolo_permitidos ?? [],
       is_operador_service:        u.is_operador_service ?? false,
@@ -534,10 +545,17 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
         u.id === updated.id
           ? {
               ...u,
-              nome:       updated.nome,
-              role:       updated.role,
-              ativo:      updated.ativo,
-              avatar_url: updated.avatar_url ?? u.avatar_url,
+              nome:                       updated.nome,
+              role:                       updated.role,
+              ativo:                      updated.ativo,
+              avatar_url:                 updated.avatar_url ?? u.avatar_url,
+              deposito_id:                updated.deposito_id ?? u.deposito_id,
+              vendedor_id:                updated.vendedor_id ?? u.vendedor_id,
+              tipos_ordem_permitidos:     updated.tipos_ordem_permitidos ?? u.tipos_ordem_permitidos,
+              tipos_protocolo_permitidos: updated.tipos_protocolo_permitidos ?? u.tipos_protocolo_permitidos,
+              is_operador_service:        updated.is_operador_service ?? u.is_operador_service,
+              is_transportador:           updated.is_transportador ?? u.is_transportador,
+              mx_desconto_permitido:      updated.mx_desconto_permitido !== undefined ? updated.mx_desconto_permitido : u.mx_desconto_permitido,
             }
           : u
       )
@@ -3036,6 +3054,54 @@ function TabIntegracoes() {
   const [tinyClientSecret, setTinyClientSecret] = useState("");
   const [showTinySecret, setShowTinySecret] = useState(false);
 
+  // Mercado Pago fields
+  const [mpConfigured, setMpConfigured] = useState(false);
+  const [mpAccessToken, setMpAccessToken] = useState("");
+  const [mpWebhookSecret, setMpWebhookSecret] = useState("");
+  const [mpUserId, setMpUserId] = useState("");
+  const [mpWebhookBaseUrl, setMpWebhookBaseUrl] = useState("");
+  const [showMpToken, setShowMpToken] = useState(false);
+  const [showMpSecret, setShowMpSecret] = useState(false);
+
+  // Banco Inter fields
+  const [interConfigured, setInterConfigured] = useState(false);
+  const [interExpanded, setInterExpanded] = useState(false);
+  const [wooExpanded, setWooExpanded] = useState(false);
+  const [kommoExpanded, setKommoExpanded] = useState(false);
+  const [tinyExpanded, setTinyExpanded] = useState(false);
+  const [mpExpanded, setMpExpanded] = useState(false);
+  const [interClientId, setInterClientId] = useState("");
+  const [interClientSecret, setInterClientSecret] = useState("");
+  const [interCertPem, setInterCertPem] = useState("");
+  const [interKeyPem, setInterKeyPem] = useState("");
+  const [interContaCorrente, setInterContaCorrente] = useState("");
+  const [interCronSecret, setInterCronSecret] = useState("");
+  const [showInterClientSecret, setShowInterClientSecret] = useState(false);
+  const [showInterCronSecret, setShowInterCronSecret] = useState(false);
+
+  // Mercado Pago Point devices
+  interface PointDeviceRow {
+    id: number;
+    device_id: string;
+    nome_legivel: string;
+    loja: string | null;
+    operating_mode: string | null;
+    ativo: boolean;
+    last_sync_at: string | null;
+  }
+  const [mpDevices, setMpDevices] = useState<PointDeviceRow[]>([]);
+  const [mpSyncLoading, setMpSyncLoading] = useState(false);
+  const [mpEditDeviceId, setMpEditDeviceId] = useState<number | null>(null);
+  const [mpEditNome, setMpEditNome] = useState("");
+  const [mpEditLoja, setMpEditLoja] = useState("");
+
+  const carregarMpDevices = async () => {
+    try {
+      const res = await fetch("/api/mercado-pago/devices");
+      if (res.ok) setMpDevices(await res.json());
+    } catch { /* silenciar */ }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -3045,11 +3111,63 @@ function TabIntegracoes() {
           setWooConfigured(data.woo_configured);
           setKommoConfigured(data.kommo_configured);
           setTinyConfigured(data.tiny_configured);
+          setMpConfigured(data.mp_configured ?? false);
+          setInterConfigured(data.inter_configured ?? false);
+          if (data.mp_configured) carregarMpDevices();
         }
       } catch { /* silenciar */ }
       setLoading(false);
     })();
   }, []);
+
+  async function sincronizarMpDevices() {
+    setMpSyncLoading(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/mercado-pago/devices", { method: "POST" });
+      const body = await res.json();
+      if (res.ok) {
+        setMsg({
+          tipo: "ok",
+          texto: `Maquininhas sincronizadas: ${body.inserted} novas, ${body.updated} atualizadas (total ${body.total})`,
+        });
+        await carregarMpDevices();
+      } else {
+        setMsg({ tipo: "erro", texto: body.error ?? "Erro ao sincronizar" });
+      }
+    } catch {
+      setMsg({ tipo: "erro", texto: "Erro de rede" });
+    }
+    setMpSyncLoading(false);
+    setTimeout(() => setMsg(null), 5000);
+  }
+
+  async function salvarDevice(id: number) {
+    const res = await fetch("/api/mercado-pago/devices", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        nome_legivel: mpEditNome.trim() || undefined,
+        loja: mpEditLoja.trim() || null,
+      }),
+    });
+    if (res.ok) {
+      setMpEditDeviceId(null);
+      setMpEditNome("");
+      setMpEditLoja("");
+      await carregarMpDevices();
+    }
+  }
+
+  async function alternarDeviceAtivo(id: number, ativo: boolean) {
+    const res = await fetch("/api/mercado-pago/devices", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ativo: !ativo }),
+    });
+    if (res.ok) await carregarMpDevices();
+  }
 
   async function salvarWoo() {
     if (!wooUrl.trim() && !wooKey.trim() && !wooSecret.trim()) return;
@@ -3109,6 +3227,116 @@ function TabIntegracoes() {
     setTimeout(() => setMsg(null), 4000);
   }
 
+  async function salvarMercadoPago() {
+    if (!mpAccessToken.trim() && !mpWebhookSecret.trim() && !mpUserId.trim() && !mpWebhookBaseUrl.trim()) return;
+    setSaving(true);
+    setMsg(null);
+    const body: Record<string, string> = {};
+    if (mpAccessToken.trim())    body.mp_access_token    = mpAccessToken.trim();
+    if (mpWebhookSecret.trim())  body.mp_webhook_secret  = mpWebhookSecret.trim();
+    if (mpUserId.trim())         body.mp_user_id         = mpUserId.trim();
+    if (mpWebhookBaseUrl.trim()) body.mp_webhook_base_url = mpWebhookBaseUrl.trim();
+    const res = await fetch("/api/configuracoes/integracoes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setMpAccessToken("");
+      setMpWebhookSecret("");
+      setMpUserId("");
+      setMpWebhookBaseUrl("");
+      setMsg({ tipo: "ok", texto: "Mercado Pago salvo com sucesso" });
+      fetch("/api/configuracoes/integracoes").then(r => r.ok ? r.json() : null).then(d => {
+        if (d) {
+          setWooConfigured(d.woo_configured);
+          setKommoConfigured(d.kommo_configured);
+          setTinyConfigured(d.tiny_configured);
+          setTinyHasCredentials(d.tiny_has_credentials ?? false);
+          setMpConfigured(d.mp_configured ?? false);
+        }
+      }).catch(() => {});
+    } else {
+      const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+      setMsg({ tipo: "erro", texto: d.error ?? "Erro ao salvar" });
+    }
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  function gerarCronSecret() {
+    // 32 chars hex aleatorio (sem dependencias)
+    const arr = new Uint8Array(16);
+    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+      crypto.getRandomValues(arr);
+    } else {
+      for (let i = 0; i < 16; i++) arr[i] = Math.floor(Math.random() * 256);
+    }
+    const hex = Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+    setInterCronSecret(hex);
+  }
+
+  async function salvarInter() {
+    // Validacoes
+    if (!interClientId.trim() || !interClientSecret.trim() || !interCertPem.trim() || !interKeyPem.trim() || !interContaCorrente.trim()) {
+      setMsg({ tipo: "erro", texto: "Preencha todos os campos obrigatórios (Client ID, Secret, Cert, Key, Conta Corrente)" });
+      setTimeout(() => setMsg(null), 5000);
+      return;
+    }
+    if (!interCertPem.trim().startsWith("-----BEGIN ")) {
+      setMsg({ tipo: "erro", texto: "Certificado inválido — deve começar com '-----BEGIN '" });
+      setTimeout(() => setMsg(null), 5000);
+      return;
+    }
+    if (!interKeyPem.trim().startsWith("-----BEGIN ")) {
+      setMsg({ tipo: "erro", texto: "Chave privada inválida — deve começar com '-----BEGIN '" });
+      setTimeout(() => setMsg(null), 5000);
+      return;
+    }
+
+    setSaving(true);
+    setMsg(null);
+    const body: Record<string, string> = {
+      inter_client_id: interClientId.trim(),
+      inter_client_secret: interClientSecret.trim(),
+      inter_cert_pem: interCertPem.trim(),
+      inter_key_pem: interKeyPem.trim(),
+      inter_conta_corrente: interContaCorrente.trim(),
+    };
+    if (interCronSecret.trim()) body.inter_cron_secret = interCronSecret.trim();
+
+    const res = await fetch("/api/configuracoes/integracoes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setInterClientId("");
+      setInterClientSecret("");
+      setInterCertPem("");
+      setInterKeyPem("");
+      setInterContaCorrente("");
+      setInterCronSecret("");
+      setInterExpanded(false);
+      setMsg({ tipo: "ok", texto: "Banco Inter salvo com sucesso" });
+      fetch("/api/configuracoes/integracoes").then(r => r.ok ? r.json() : null).then(d => {
+        if (d) {
+          setWooConfigured(d.woo_configured);
+          setKommoConfigured(d.kommo_configured);
+          setTinyConfigured(d.tiny_configured);
+          setTinyHasCredentials(d.tiny_has_credentials ?? false);
+          setMpConfigured(d.mp_configured ?? false);
+          setInterConfigured(d.inter_configured ?? false);
+        }
+      }).catch(() => {});
+    } else {
+      const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+      setMsg({ tipo: "erro", texto: d.error ?? "Erro ao salvar" });
+    }
+    setTimeout(() => setMsg(null), 5000);
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 py-10 justify-center text-sm" style={{ color: P.muted }}>
@@ -3151,46 +3379,73 @@ function TabIntegracoes() {
         style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
       >
         <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: P.creme }}>WooCommerce</p>
-            <p className="text-xs" style={{ color: P.muted }}>Integração com loja virtual</p>
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-lg p-2 flex items-center justify-center"
+              style={{ backgroundColor: "#96588A" + "22", color: "#96588A" }}
+            >
+              <ShoppingCart size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>WooCommerce</p>
+              <p className="text-xs" style={{ color: P.muted }}>Integração com loja virtual</p>
+            </div>
           </div>
           <StatusBadge ok={wooConfigured} />
         </div>
 
-        {[
-          { label: "URL da Loja", value: wooUrl, set: setWooUrl, masked: false, placeholder: "https://sualoja.com.br" },
-          { label: "Consumer Key", value: wooKey, set: setWooKey, masked: !showWooKey, toggle: () => setShowWooKey(!showWooKey), showState: showWooKey, placeholder: "ck_..." },
-          { label: "Consumer Secret", value: wooSecret, set: setWooSecret, masked: !showWooSecret, toggle: () => setShowWooSecret(!showWooSecret), showState: showWooSecret, placeholder: "cs_..." },
-        ].map(({ label, value, set, masked, toggle, showState, placeholder }) => (
-          <div key={label}>
-            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>{label}</label>
-            <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
-              <input
-                type={masked ? "password" : "text"}
-                value={value}
-                onChange={(e) => set(e.target.value)}
-                placeholder={placeholder}
-                className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
-                style={{ color: P.creme }}
-              />
-              {toggle && (
-                <button onClick={toggle} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
-                  {showState ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-
         <button
-          onClick={salvarWoo}
-          disabled={saving || (!wooUrl.trim() && !wooKey.trim() && !wooSecret.trim())}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
-          style={{ backgroundColor: P.verde, color: "#fff" }}
+          onClick={() => setWooExpanded(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium hover:opacity-80 transition-opacity"
+          style={{ color: P.sage }}
         >
-          <Save size={13} /> Salvar WooCommerce
+          {wooExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {wooExpanded ? "Ocultar credenciais" : (wooConfigured ? "Atualizar credenciais" : "Configurar credenciais")}
         </button>
+
+        {wooExpanded && (
+          <div className="space-y-4 pt-2">
+            {[
+              { label: "URL da Loja", value: wooUrl, set: setWooUrl, masked: false, placeholder: "https://sualoja.com.br" },
+              { label: "Consumer Key", value: wooKey, set: setWooKey, masked: !showWooKey, toggle: () => setShowWooKey(!showWooKey), showState: showWooKey, placeholder: "ck_..." },
+              { label: "Consumer Secret", value: wooSecret, set: setWooSecret, masked: !showWooSecret, toggle: () => setShowWooSecret(!showWooSecret), showState: showWooSecret, placeholder: "cs_..." },
+            ].map(({ label, value, set, masked, toggle, showState, placeholder }) => (
+              <div key={label}>
+                <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>{label}</label>
+                <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                  <input
+                    type={masked ? "password" : "text"}
+                    value={value}
+                    onChange={(e) => set(e.target.value)}
+                    placeholder={placeholder}
+                    className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                    style={{ color: P.creme }}
+                  />
+                  {toggle && (
+                    <button onClick={toggle} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+                      {showState ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            <button
+              onClick={salvarWoo}
+              disabled={saving || (!wooUrl.trim() && !wooKey.trim() && !wooSecret.trim())}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+              style={{ backgroundColor: P.verde, color: "#fff" }}
+            >
+              <Save size={13} /> Salvar WooCommerce
+            </button>
+          </div>
+        )}
+
+        {wooConfigured && !wooExpanded && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
+            <CheckCircle size={12} /> WooCommerce ativo — sincronização de produtos e pedidos
+          </p>
+        )}
       </div>
 
       {/* Kommo */}
@@ -3199,45 +3454,72 @@ function TabIntegracoes() {
         style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
       >
         <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: P.creme }}>Kommo (CRM)</p>
-            <p className="text-xs" style={{ color: P.muted }}>Integração com CRM de vendas</p>
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-lg p-2 flex items-center justify-center"
+              style={{ backgroundColor: "#3E74DB" + "22", color: "#3E74DB" }}
+            >
+              <Users size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>Kommo (CRM)</p>
+              <p className="text-xs" style={{ color: P.muted }}>Integração com CRM de vendas</p>
+            </div>
           </div>
           <StatusBadge ok={kommoConfigured} />
         </div>
 
-        {[
-          { label: "URL do Kommo", value: kommoUrl, set: setKommoUrl, masked: false, placeholder: "https://suaempresa.kommo.com" },
-          { label: "Token", value: kommoToken, set: setKommoToken, masked: !showKommoToken, toggle: () => setShowKommoToken(!showKommoToken), showState: showKommoToken, placeholder: "Token de acesso" },
-        ].map(({ label, value, set, masked, toggle, showState, placeholder }) => (
-          <div key={label}>
-            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>{label}</label>
-            <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
-              <input
-                type={masked ? "password" : "text"}
-                value={value}
-                onChange={(e) => set(e.target.value)}
-                placeholder={placeholder}
-                className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
-                style={{ color: P.creme }}
-              />
-              {toggle && (
-                <button onClick={toggle} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
-                  {showState ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-
         <button
-          onClick={salvarKommo}
-          disabled={saving || (!kommoUrl.trim() && !kommoToken.trim())}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
-          style={{ backgroundColor: P.verde, color: "#fff" }}
+          onClick={() => setKommoExpanded(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium hover:opacity-80 transition-opacity"
+          style={{ color: P.sage }}
         >
-          <Save size={13} /> Salvar Kommo
+          {kommoExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {kommoExpanded ? "Ocultar credenciais" : (kommoConfigured ? "Atualizar credenciais" : "Configurar credenciais")}
         </button>
+
+        {kommoExpanded && (
+          <div className="space-y-4 pt-2">
+            {[
+              { label: "URL do Kommo", value: kommoUrl, set: setKommoUrl, masked: false, placeholder: "https://suaempresa.kommo.com" },
+              { label: "Token", value: kommoToken, set: setKommoToken, masked: !showKommoToken, toggle: () => setShowKommoToken(!showKommoToken), showState: showKommoToken, placeholder: "Token de acesso" },
+            ].map(({ label, value, set, masked, toggle, showState, placeholder }) => (
+              <div key={label}>
+                <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>{label}</label>
+                <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                  <input
+                    type={masked ? "password" : "text"}
+                    value={value}
+                    onChange={(e) => set(e.target.value)}
+                    placeholder={placeholder}
+                    className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                    style={{ color: P.creme }}
+                  />
+                  {toggle && (
+                    <button onClick={toggle} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+                      {showState ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            <button
+              onClick={salvarKommo}
+              disabled={saving || (!kommoUrl.trim() && !kommoToken.trim())}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+              style={{ backgroundColor: P.verde, color: "#fff" }}
+            >
+              <Save size={13} /> Salvar Kommo
+            </button>
+          </div>
+        )}
+
+        {kommoConfigured && !kommoExpanded && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
+            <CheckCircle size={12} /> Kommo ativo — leads sincronizados
+          </p>
+        )}
       </div>
 
       {/* Tiny ERP (Olist) — OAuth2 */}
@@ -3246,13 +3528,32 @@ function TabIntegracoes() {
         style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
       >
         <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: P.creme }}>Tiny ERP (Olist)</p>
-            <p className="text-xs" style={{ color: P.muted }}>Envio automático de pedidos ao aprovar venda</p>
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-lg p-2 flex items-center justify-center"
+              style={{ backgroundColor: "#00B1A3" + "22", color: "#00B1A3" }}
+            >
+              <Package size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>Tiny ERP (Olist)</p>
+              <p className="text-xs" style={{ color: P.muted }}>ERP para estoque e pedidos (OAuth2)</p>
+            </div>
           </div>
           <StatusBadge ok={tinyConfigured} />
         </div>
 
+        <button
+          onClick={() => setTinyExpanded(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium hover:opacity-80 transition-opacity"
+          style={{ color: P.sage }}
+        >
+          {tinyExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {tinyExpanded ? "Ocultar credenciais" : (tinyConfigured ? "Atualizar credenciais" : "Configurar credenciais")}
+        </button>
+
+        {tinyExpanded && (
+          <div className="space-y-4 pt-2">
         <div>
           <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>URL de Redirecionamento (copie e cadastre no Tiny)</label>
           <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
@@ -3339,6 +3640,429 @@ function TabIntegracoes() {
         {tinyConfigured && (
           <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
             <CheckCircle size={12} /> Conexão ativa com o Tiny ERP
+          </p>
+        )}
+          </div>
+        )}
+
+        {tinyConfigured && !tinyExpanded && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
+            <CheckCircle size={12} /> Tiny ERP ativo — pedidos sincronizados automaticamente
+          </p>
+        )}
+      </div>
+
+      {/* Mercado Pago (Preference + Point Smart) */}
+      <div
+        className="rounded-xl p-5 space-y-4"
+        style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-lg p-2 flex items-center justify-center"
+              style={{ backgroundColor: "#00B1EA" + "22", color: "#00B1EA" }}
+            >
+              <CreditCard size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>Mercado Pago</p>
+              <p className="text-xs" style={{ color: P.muted }}>
+                Pagamentos PIX, cartão e link de pagamento
+              </p>
+            </div>
+          </div>
+          <StatusBadge ok={mpConfigured} />
+        </div>
+
+        <button
+          onClick={() => setMpExpanded(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium hover:opacity-80 transition-opacity"
+          style={{ color: P.sage }}
+        >
+          {mpExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {mpExpanded ? "Ocultar credenciais" : (mpConfigured ? "Atualizar credenciais" : "Configurar credenciais")}
+        </button>
+
+        {mpExpanded && (
+          <div className="space-y-4 pt-2">
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+            URL do webhook (cadastre no painel MP)
+          </label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              readOnly
+              value={`${typeof window !== "undefined" ? window.location.origin : "https://erp.alisson.api.br"}/api/webhooks/mercado-pago`}
+              className="flex-1 bg-transparent px-3 py-2.5 text-xs outline-none select-all"
+              style={{ color: P.sage }}
+              onClick={e => (e.target as HTMLInputElement).select()}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+            Access Token (Production)
+          </label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              type={showMpToken ? "text" : "password"}
+              value={mpAccessToken}
+              onChange={(e) => setMpAccessToken(e.target.value)}
+              placeholder="APP_USR-..."
+              className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+              style={{ color: P.creme }}
+            />
+            <button onClick={() => setShowMpToken(!showMpToken)} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+              {showMpToken ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+            Webhook Secret (chave de assinatura HMAC)
+          </label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              type={showMpSecret ? "text" : "password"}
+              value={mpWebhookSecret}
+              onChange={(e) => setMpWebhookSecret(e.target.value)}
+              placeholder="Chave secreta do painel MP"
+              className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+              style={{ color: P.creme }}
+            />
+            <button onClick={() => setShowMpSecret(!showMpSecret)} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+              {showMpSecret ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+            User ID (opcional)
+          </label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              type="text"
+              value={mpUserId}
+              onChange={(e) => setMpUserId(e.target.value)}
+              placeholder="User ID da conta MP"
+              className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+              style={{ color: P.creme }}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+            URL base p/ webhook (dev: ngrok, prod: domínio público)
+          </label>
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+            <input
+              type="text"
+              value={mpWebhookBaseUrl}
+              onChange={(e) => setMpWebhookBaseUrl(e.target.value)}
+              placeholder="https://abc123.ngrok.io"
+              className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+              style={{ color: P.creme }}
+            />
+          </div>
+          <p className="text-[10px] mt-1" style={{ color: P.muted }}>
+            Usada como prefixo do notification_url nas Preferences. Deixe em branco para usar o origin atual.
+          </p>
+        </div>
+
+        <button
+          onClick={salvarMercadoPago}
+          disabled={saving || (!mpAccessToken.trim() && !mpWebhookSecret.trim() && !mpUserId.trim() && !mpWebhookBaseUrl.trim())}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+          style={{ backgroundColor: P.verde, color: "#fff" }}
+        >
+          <Save size={13} /> Salvar Mercado Pago
+        </button>
+          </div>
+        )}
+
+        {mpConfigured && !mpExpanded && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
+            <CheckCircle size={12} /> Mercado Pago ativo — recebimentos automáticos
+          </p>
+        )}
+
+        {/* ─── Maquininhas Point ─── */}
+        {mpConfigured && (
+          <div className="pt-4 mt-2 border-t space-y-3" style={{ borderColor: P.border }}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: P.sage }}>
+                  Maquininhas Point
+                </p>
+                <p className="text-[11px]" style={{ color: P.muted }}>
+                  {mpDevices.length === 0
+                    ? "Nenhuma maquininha sincronizada ainda"
+                    : `${mpDevices.length} maquininha${mpDevices.length > 1 ? "s" : ""} cadastrada${mpDevices.length > 1 ? "s" : ""}`}
+                </p>
+              </div>
+              <button
+                onClick={sincronizarMpDevices}
+                disabled={mpSyncLoading}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+                style={{ backgroundColor: P.dourado, color: "#fff" }}
+              >
+                {mpSyncLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                {mpSyncLoading ? "Sincronizando..." : "Sincronizar com MP"}
+              </button>
+            </div>
+
+            {mpDevices.length > 0 && (
+              <div className="rounded-lg border overflow-hidden" style={{ borderColor: P.border }}>
+                <table className="w-full text-xs">
+                  <thead style={{ backgroundColor: P.bg }}>
+                    <tr>
+                      <th className="text-left px-3 py-2 font-semibold" style={{ color: P.sage }}>Nome</th>
+                      <th className="text-left px-3 py-2 font-semibold" style={{ color: P.sage }}>Loja</th>
+                      <th className="text-left px-3 py-2 font-semibold" style={{ color: P.sage }}>Modo</th>
+                      <th className="text-center px-3 py-2 font-semibold" style={{ color: P.sage }}>Ativo</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mpDevices.map(d => {
+                      const editando = mpEditDeviceId === d.id;
+                      return (
+                        <tr key={d.id} className="border-t" style={{ borderColor: P.border }}>
+                          <td className="px-3 py-2">
+                            {editando ? (
+                              <input
+                                value={mpEditNome}
+                                onChange={e => setMpEditNome(e.target.value)}
+                                className="w-full px-2 py-1 rounded border text-xs"
+                                style={{ borderColor: P.border, color: P.creme }}
+                              />
+                            ) : (
+                              <>
+                                <div className="font-medium" style={{ color: P.creme }}>{d.nome_legivel}</div>
+                                <div className="text-[10px] font-mono" style={{ color: P.muted }}>
+                                  {d.device_id.slice(0, 32)}...
+                                </div>
+                              </>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            {editando ? (
+                              <input
+                                value={mpEditLoja}
+                                onChange={e => setMpEditLoja(e.target.value)}
+                                placeholder="Matriz / Filial..."
+                                className="w-full px-2 py-1 rounded border text-xs"
+                                style={{ borderColor: P.border, color: P.creme }}
+                              />
+                            ) : (
+                              <span style={{ color: P.muted }}>{d.loja ?? "—"}</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2" style={{ color: P.muted }}>
+                            {d.operating_mode ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <button
+                              onClick={() => alternarDeviceAtivo(d.id, d.ativo)}
+                              style={{ color: d.ativo ? P.verde : P.muted }}
+                            >
+                              {d.ativo ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
+                            </button>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {editando ? (
+                              <div className="flex items-center gap-1 justify-end">
+                                <button
+                                  onClick={() => salvarDevice(d.id)}
+                                  className="px-2 py-1 rounded text-[10px] font-semibold"
+                                  style={{ backgroundColor: P.verde, color: "#fff" }}
+                                >
+                                  Salvar
+                                </button>
+                                <button
+                                  onClick={() => { setMpEditDeviceId(null); setMpEditNome(""); setMpEditLoja(""); }}
+                                  style={{ color: P.muted }}
+                                >
+                                  <X size={13} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setMpEditDeviceId(d.id);
+                                  setMpEditNome(d.nome_legivel);
+                                  setMpEditLoja(d.loja ?? "");
+                                }}
+                                style={{ color: P.sage }}
+                              >
+                                <Pencil size={13} />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Banco Inter */}
+      <div
+        className="rounded-xl p-5 space-y-4"
+        style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-lg p-2 flex items-center justify-center"
+              style={{ backgroundColor: "#FF7A00" + "22", color: "#FF7A00" }}
+            >
+              <Landmark size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>Banco Inter</p>
+              <p className="text-xs" style={{ color: P.muted }}>
+                Pagamentos automáticos via PIX, boleto e TED (mTLS + OAuth2)
+              </p>
+            </div>
+          </div>
+          <StatusBadge ok={interConfigured} />
+        </div>
+
+        <button
+          onClick={() => setInterExpanded(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium hover:opacity-80 transition-opacity"
+          style={{ color: P.sage }}
+        >
+          {interExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {interExpanded ? "Ocultar credenciais" : (interConfigured ? "Atualizar credenciais" : "Configurar credenciais")}
+        </button>
+
+        {interExpanded && (
+          <div className="space-y-4 pt-2">
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>Client ID</label>
+              <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                <input
+                  type="text"
+                  value={interClientId}
+                  onChange={(e) => setInterClientId(e.target.value)}
+                  placeholder="Client ID do app Inter"
+                  className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                  style={{ color: P.creme }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>Client Secret</label>
+              <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                <input
+                  type={showInterClientSecret ? "text" : "password"}
+                  value={interClientSecret}
+                  onChange={(e) => setInterClientSecret(e.target.value)}
+                  placeholder="Client Secret do app Inter"
+                  className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                  style={{ color: P.creme }}
+                />
+                <button onClick={() => setShowInterClientSecret(!showInterClientSecret)} className="px-3 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+                  {showInterClientSecret ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+                Certificado (.crt — cole o conteúdo PEM)
+              </label>
+              <textarea
+                value={interCertPem}
+                onChange={(e) => setInterCertPem(e.target.value)}
+                placeholder={"-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----"}
+                rows={10}
+                className="w-full bg-transparent px-3 py-2.5 text-xs outline-none rounded-lg font-mono"
+                style={{ color: P.creme, border: `1px solid ${P.border}`, resize: "vertical" }}
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+                Chave Privada (.key — cole o conteúdo PEM)
+              </label>
+              <textarea
+                value={interKeyPem}
+                onChange={(e) => setInterKeyPem(e.target.value)}
+                placeholder={"-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----"}
+                rows={10}
+                className="w-full bg-transparent px-3 py-2.5 text-xs outline-none rounded-lg font-mono"
+                style={{ color: P.creme, border: `1px solid ${P.border}`, resize: "vertical" }}
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>Conta Corrente</label>
+              <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                <input
+                  type="text"
+                  value={interContaCorrente}
+                  onChange={(e) => setInterContaCorrente(e.target.value)}
+                  placeholder="Número da conta corrente"
+                  className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                  style={{ color: P.creme }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+                Cron Secret (opcional — protege endpoint /sync)
+              </label>
+              <div className="flex items-center rounded-lg overflow-hidden gap-2" style={{ border: `1px solid ${P.border}` }}>
+                <input
+                  type={showInterCronSecret ? "text" : "password"}
+                  value={interCronSecret}
+                  onChange={(e) => setInterCronSecret(e.target.value)}
+                  placeholder="String aleatória (32+ chars)"
+                  className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
+                  style={{ color: P.creme }}
+                />
+                <button onClick={() => setShowInterCronSecret(!showInterCronSecret)} className="px-2 py-2.5 transition-opacity hover:opacity-70" style={{ color: P.muted }}>
+                  {showInterCronSecret ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={gerarCronSecret}
+                  className="px-3 py-2.5 text-[11px] font-semibold transition-opacity hover:opacity-80"
+                  style={{ color: P.dourado }}
+                >
+                  Gerar
+                </button>
+              </div>
+            </div>
+
+            <button
+              onClick={salvarInter}
+              disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+              style={{ backgroundColor: P.verde, color: "#fff" }}
+            >
+              <Save size={13} /> Salvar credenciais
+            </button>
+          </div>
+        )}
+
+        {interConfigured && !interExpanded && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
+            <CheckCircle size={12} /> Integração Inter ativa — pagamentos automáticos disponíveis
           </p>
         )}
       </div>
@@ -3527,19 +4251,420 @@ function TabComissoes() {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab Maquininhas — Gerenciamento de devices Point por vendedor
+// ═══════════════════════════════════════════════════════════════════════════════
+interface MaqDevice {
+  id: number;
+  device_id: string;
+  nome_legivel: string;
+  vendedor_id: number | null;
+  is_reserva: boolean;
+  ativo: boolean;
+  loja: string | null;
+  parcelas_padrao_mp: number;
+}
+
+interface Vendedor {
+  id_vendedor: number;
+  nome: string;
+}
+
+function TabMaquininhas() {
+  const [devices, setDevices] = useState<MaqDevice[]>([]);
+  const [vendedores, setVendedores] = useState<Vendedor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+
+  // Estado modal edição inline
+  const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [editNome, setEditNome] = useState("");
+  const [editLoja, setEditLoja] = useState("");
+  const [editVendedorId, setEditVendedorId] = useState<string>("");
+  const [editIsReserva, setEditIsReserva] = useState(false);
+  const [editAtivo, setEditAtivo] = useState(true);
+  const [editParcelasPadrao, setEditParcelasPadrao] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [saveErro, setSaveErro] = useState<string | null>(null);
+
+  async function carregar() {
+    setLoading(true);
+    setErro(null);
+    try {
+      const [devRes, vendRes] = await Promise.all([
+        fetch("/api/mercado-pago/devices"),
+        fetch("/api/vendedores"),
+      ]);
+      if (!devRes.ok) throw new Error("Erro ao carregar maquininhas");
+      setDevices(await devRes.json());
+      if (vendRes.ok) setVendedores(await vendRes.json());
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { carregar(); }, []);
+
+  async function sincronizar() {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const res = await fetch("/api/mercado-pago/devices", { method: "POST" });
+      const body = await res.json();
+      if (res.ok) {
+        setSyncMsg({ tipo: "ok", texto: `Sincronizado: ${body.inserted} novas, ${body.updated} atualizadas (total ${body.total})` });
+        await carregar();
+      } else {
+        setSyncMsg({ tipo: "erro", texto: body.error ?? "Erro ao sincronizar" });
+      }
+    } catch {
+      setSyncMsg({ tipo: "erro", texto: "Erro de rede" });
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(null), 5000);
+    }
+  }
+
+  function abrirEdicao(d: MaqDevice) {
+    setEditandoId(d.id);
+    setEditNome(d.nome_legivel);
+    setEditLoja(d.loja ?? "");
+    setEditVendedorId(d.vendedor_id != null ? String(d.vendedor_id) : "");
+    setEditIsReserva(d.is_reserva);
+    setEditAtivo(d.ativo);
+    setEditParcelasPadrao(d.parcelas_padrao_mp ?? 1);
+    setSaveErro(null);
+  }
+
+  function cancelarEdicao() {
+    setEditandoId(null);
+    setSaveErro(null);
+  }
+
+  async function salvar(id: number) {
+    setSaving(true);
+    setSaveErro(null);
+    try {
+      const body: Record<string, unknown> = {
+        id,
+        nome_legivel: editNome.trim() || undefined,
+        loja: editLoja.trim() || null,
+        ativo: editAtivo,
+      };
+      if (editVendedorId) {
+        body.vendedor_id = Number(editVendedorId);
+        body.is_reserva = false;
+        body.parcelas_padrao_mp = editParcelasPadrao;
+      } else {
+        body.vendedor_id = null;
+        body.is_reserva = editIsReserva;
+      }
+      const res = await fetch("/api/mercado-pago/devices", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 409) throw new Error("Vendedor já tem outra maquininha atribuída");
+        throw new Error(data.error ?? "Erro ao salvar");
+      }
+      setEditandoId(null);
+      await carregar();
+    } catch (e) {
+      setSaveErro(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const nomeVendedor = (id: number | null) => {
+    if (id == null) return "—";
+    return vendedores.find(v => v.id_vendedor === id)?.nome ?? String(id);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-2 text-sm" style={{ color: P.sage }}>
+        <Loader2 size={16} className="animate-spin" /> Carregando maquininhas...
+      </div>
+    );
+  }
+
+  if (erro) {
+    return (
+      <div className="flex items-center gap-2 p-4 rounded-xl text-sm" style={{ backgroundColor: P.vermelho + "18", color: P.vermelho }}>
+        <AlertTriangle size={14} /> {erro}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold" style={{ color: P.creme }}>Maquininhas</h2>
+          <p className="text-xs" style={{ color: P.muted }}>
+            {devices.length === 0
+              ? "Nenhuma maquininha sincronizada"
+              : `${devices.length} maquininha${devices.length > 1 ? "s" : ""} cadastrada${devices.length > 1 ? "s" : ""}`}
+          </p>
+        </div>
+        <button
+          onClick={sincronizar}
+          disabled={syncing}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity hover:opacity-80"
+          style={{ backgroundColor: P.dourado, color: "#fff" }}
+        >
+          {syncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+          {syncing ? "Sincronizando..." : "Sincronizar com MP"}
+        </button>
+      </div>
+
+      {syncMsg && (
+        <div
+          className="flex items-center gap-2 p-3 rounded-lg text-xs"
+          style={{
+            backgroundColor: syncMsg.tipo === "ok" ? P.verde + "18" : P.vermelho + "18",
+            color: syncMsg.tipo === "ok" ? P.verde : P.vermelho,
+          }}
+        >
+          {syncMsg.tipo === "ok" ? <CheckCircle size={13} /> : <AlertTriangle size={13} />}
+          {syncMsg.texto}
+        </div>
+      )}
+
+      {devices.length === 0 && (
+        <div className="text-center py-10 text-sm" style={{ color: P.muted }}>
+          Clique em "Sincronizar com MP" para importar as maquininhas cadastradas no Mercado Pago.
+        </div>
+      )}
+
+      {devices.length > 0 && (
+        <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ backgroundColor: P.bg, borderBottom: `1px solid ${P.border}` }}>
+                {["Nome Legível", "Device ID", "Vendedor Atribuído", "Reserva da Loja", "Status", "Ações"].map(h => (
+                  <th
+                    key={h}
+                    className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium"
+                    style={{ color: P.muted }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {devices.map(d => {
+                const editando = editandoId === d.id;
+                return (
+                  <tr key={d.id} className="border-t" style={{ borderColor: P.border }}>
+                    {/* Nome Legível */}
+                    <td className="px-4 py-3">
+                      {editando ? (
+                        <input
+                          value={editNome}
+                          onChange={e => setEditNome(e.target.value)}
+                          className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none"
+                          style={{ borderColor: P.border, color: P.creme }}
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <Smartphone size={13} style={{ color: P.sage }} />
+                          <span className="font-medium" style={{ color: P.creme }}>{d.nome_legivel}</span>
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Device ID */}
+                    <td className="px-4 py-3">
+                      <span className="font-mono text-[11px] break-all" style={{ color: P.muted }}>
+                        {d.device_id}
+                      </span>
+                    </td>
+
+                    {/* Vendedor Atribuído */}
+                    <td className="px-4 py-3">
+                      {editando ? (
+                        <div className="space-y-2">
+                          <select
+                            value={editVendedorId}
+                            onChange={e => {
+                              setEditVendedorId(e.target.value);
+                              if (e.target.value) setEditIsReserva(false);
+                            }}
+                            className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none"
+                            style={{ borderColor: P.border, color: P.creme }}
+                          >
+                            <option value="">— Nenhum / Reserva</option>
+                            {vendedores.map(v => (
+                              <option key={v.id_vendedor} value={v.id_vendedor}>
+                                {v.nome}
+                              </option>
+                            ))}
+                          </select>
+                          {/* Campo parcelas padrão — só habilitado quando há vendedor selecionado */}
+                          <div>
+                            <label
+                              className="text-[10px] uppercase tracking-wider block mb-1"
+                              style={{ color: editVendedorId ? P.muted : P.muted + "80" }}
+                            >
+                              Parcelas padrão
+                            </label>
+                            <select
+                              value={editParcelasPadrao}
+                              disabled={!editVendedorId}
+                              onChange={e => setEditParcelasPadrao(Number(e.target.value))}
+                              className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none disabled:opacity-40"
+                              style={{ borderColor: P.border, color: P.creme }}
+                            >
+                              {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
+                                <option key={n} value={n}>{n}x</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <span style={{ color: d.vendedor_id ? P.creme : P.muted }}>
+                            {nomeVendedor(d.vendedor_id)}
+                          </span>
+                          {d.vendedor_id && d.parcelas_padrao_mp > 1 && (
+                            <span
+                              className="block text-[10px] mt-0.5"
+                              style={{ color: P.muted }}
+                            >
+                              {d.parcelas_padrao_mp}x padrão
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Reserva da Loja */}
+                    <td className="px-4 py-3">
+                      {editando ? (
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={editIsReserva}
+                            disabled={!!editVendedorId}
+                            onChange={e => setEditIsReserva(e.target.checked)}
+                            className="rounded"
+                          />
+                          <span className="text-xs" style={{ color: editVendedorId ? P.muted : P.creme }}>
+                            Reserva
+                          </span>
+                        </label>
+                      ) : (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded-full font-medium"
+                          style={{
+                            backgroundColor: d.is_reserva ? P.dourado + "22" : P.border,
+                            color: d.is_reserva ? P.dourado : P.muted,
+                          }}
+                        >
+                          {d.is_reserva ? "Sim" : "Não"}
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-4 py-3">
+                      {editando ? (
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <button
+                            type="button"
+                            onClick={() => setEditAtivo(v => !v)}
+                            style={{ color: editAtivo ? P.verde : P.muted }}
+                          >
+                            {editAtivo ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
+                          </button>
+                          <span className="text-xs" style={{ color: editAtivo ? P.verde : P.muted }}>
+                            {editAtivo ? "Ativo" : "Inativo"}
+                          </span>
+                        </label>
+                      ) : (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded-full font-medium"
+                          style={{
+                            backgroundColor: d.ativo ? P.verde + "22" : P.border,
+                            color: d.ativo ? P.verde : P.muted,
+                          }}
+                        >
+                          {d.ativo ? "Ativo" : "Inativo"}
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Ações */}
+                    <td className="px-4 py-3">
+                      {editando ? (
+                        <div className="space-y-1">
+                          {saveErro && (
+                            <p className="text-[11px]" style={{ color: P.vermelho }}>{saveErro}</p>
+                          )}
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => salvar(d.id)}
+                              disabled={saving}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50"
+                              style={{ backgroundColor: P.verde, color: "#fff" }}
+                            >
+                              {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                              Salvar
+                            </button>
+                            <button
+                              onClick={cancelarEdicao}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                              style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+                            >
+                              <X size={11} /> Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => abrirEdicao(d)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                          style={{ backgroundColor: P.bg, color: P.sage, border: `1px solid ${P.border}` }}
+                        >
+                          <Pencil size={11} /> Editar
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function ConfiguracoesClient({ parametros, webhooks, logs, usuarios, depositos, teores, ligaTipos }: Props) {
   const [tab, setTab] = useState<Tab>("parametros");
   const [initialUserId, setInitialUserId] = useState<string | null>(null);
   const { role: currentRole } = useAuth();
   const isSuperAdmin = currentRole === "desenvolvedor" || currentRole === "admin";
+  const canSeeMaquininhas = isFullAccess(currentRole);
 
   // Ler query params (?tab=usuarios&user=UUID) uma vez no mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
     const u = params.get("user");
-    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes"].includes(t)) {
+    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes", "maquininhas", "fretes"].includes(t)) {
       setTab(t as Tab);
     }
     if (u) setInitialUserId(u);
@@ -3557,11 +4682,16 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "locais",        label: "Locais",         icon: MapPin },
     { key: "tipos_servico", label: "Tipos Serviço",  icon: Wrench },
     { key: "comissoes",     label: "Comissões",       icon: PenLine },
+    { key: "credito_loja", label: "Crédito Loja",    icon: Wallet },
+    { key: "fretes",       label: "Fretes",           icon: Truck },
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tabs: { key: Tab; label: string; icon: any }[] = isSuperAdmin
+  let tabs: { key: Tab; label: string; icon: any }[] = isSuperAdmin
     ? [...baseTabs, { key: "permissoes" as Tab, label: "Permissões", icon: Shield }]
     : baseTabs;
+  if (canSeeMaquininhas) {
+    tabs = [...tabs, { key: "maquininhas" as Tab, label: "Maquininhas", icon: Smartphone }];
+  }
 
   return (
     <div className="p-3 md:p-6 space-y-4 md:space-y-5">
@@ -3613,6 +4743,528 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "cotacoes" && <TabCotacoes />}
       {tab === "integracoes" && <TabIntegracoes />}
       {tab === "comissoes"   && <TabComissoes />}
+      {tab === "credito_loja" && <TabCreditoLoja />}
+      {tab === "maquininhas" && canSeeMaquininhas && <TabMaquininhas />}
+      {tab === "fretes" && (isSuperAdmin || currentRole === "gerente_loja") && <TabFretes />}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab Crédito Loja — Saldo rotativo do gerente de loja
+// ═══════════════════════════════════════════════════════════════════════════════
+function TabCreditoLoja() {
+  const [saldo, setSaldo] = useState<number | null>(null);
+  const [limite, setLimite] = useState<number | null>(null);
+  const [movimentos, setMovimentos] = useState<Array<{
+    id: number; tipo: string; valor: number; saldo_antes: number; saldo_depois: number;
+    descricao: string | null; usuario_nome: string | null; numero_venda: string | null; created_at: string;
+  }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [ajusteValor, setAjusteValor] = useState("");
+  const [ajusteDesc, setAjusteDesc] = useState("");
+  const [novoLimite, setNovoLimite] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const fmt = (v: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [sRes, mRes] = await Promise.all([
+        fetch("/api/saldo-credito").then(r => r.json()),
+        fetch("/api/saldo-credito/movimentos?limit=30").then(r => r.json()),
+      ]);
+      setSaldo(sRes.saldo_atual);
+      setLimite(sRes.limite);
+      setNovoLimite(String(sRes.limite));
+      setMovimentos(mRes.movimentos ?? []);
+    } catch { /* silencioso */ }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { loadData(); }, []);
+
+  async function handleAjuste() {
+    const valor = parseFloat(ajusteValor.replace(",", "."));
+    if (!valor || !ajusteDesc.trim()) return alert("Valor e descrição obrigatórios");
+    setSaving(true);
+    try {
+      const res = await fetch("/api/saldo-credito", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ valor, descricao: ajusteDesc.trim() }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error);
+      setAjusteValor(""); setAjusteDesc("");
+      await loadData();
+    } catch (e) { alert(e instanceof Error ? e.message : "Erro"); }
+    finally { setSaving(false); }
+  }
+
+  async function handleLimite() {
+    const lim = parseFloat(novoLimite.replace(",", "."));
+    if (isNaN(lim) || lim < 0) return alert("Limite inválido");
+    setSaving(true);
+    try {
+      const res = await fetch("/api/saldo-credito", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limite: lim }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+      await loadData();
+    } catch (e) { alert(e instanceof Error ? e.message : "Erro"); }
+    finally { setSaving(false); }
+  }
+
+  if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin" style={{ color: P.creme }} /></div>;
+
+  const pctUsado = limite && limite > 0 ? ((limite - (saldo ?? 0)) / limite) * 100 : 0;
+  const corBarra = pctUsado > 80 ? "#EF4444" : pctUsado > 50 ? "#D97706" : "#059669";
+
+  return (
+    <div className="space-y-6">
+      {/* Cards resumo */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="rounded-xl border p-5" style={{ borderColor: P.border, backgroundColor: P.card }}>
+          <p className="text-xs uppercase tracking-widest mb-1" style={{ color: P.sage }}>Saldo Disponível</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: "#059669" }}>{fmt(saldo ?? 0)}</p>
+        </div>
+        <div className="rounded-xl border p-5" style={{ borderColor: P.border, backgroundColor: P.card }}>
+          <p className="text-xs uppercase tracking-widest mb-1" style={{ color: P.sage }}>Limite Configurado</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: P.creme }}>{fmt(limite ?? 0)}</p>
+        </div>
+        <div className="rounded-xl border p-5" style={{ borderColor: P.border, backgroundColor: P.card }}>
+          <p className="text-xs uppercase tracking-widest mb-1" style={{ color: P.sage }}>Utilização</p>
+          <div className="flex items-end gap-2">
+            <p className="text-2xl font-bold tabular-nums" style={{ color: corBarra }}>{pctUsado.toFixed(0)}%</p>
+          </div>
+          <div className="mt-2 h-2 rounded-full" style={{ backgroundColor: P.border }}>
+            <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(pctUsado, 100)}%`, backgroundColor: corBarra }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Ajuste manual + alterar limite */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="rounded-xl border p-4" style={{ borderColor: P.border, backgroundColor: P.card }}>
+          <p className="text-sm font-semibold mb-3" style={{ color: P.creme }}>Ajustar Saldo</p>
+          <div className="space-y-2">
+            <input type="text" value={ajusteValor} onChange={e => setAjusteValor(e.target.value)}
+              placeholder="Valor (positivo = crédito, negativo = débito)"
+              className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
+            <input type="text" value={ajusteDesc} onChange={e => setAjusteDesc(e.target.value)}
+              placeholder="Descrição do ajuste"
+              className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
+            <button onClick={handleAjuste} disabled={saving}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+              style={{ backgroundColor: P.creme, color: P.card }}>
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Aplicar Ajuste
+            </button>
+          </div>
+        </div>
+        <div className="rounded-xl border p-4" style={{ borderColor: P.border, backgroundColor: P.card }}>
+          <p className="text-sm font-semibold mb-3" style={{ color: P.creme }}>Alterar Limite</p>
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <input type="text" value={novoLimite} onChange={e => setNovoLimite(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
+            </div>
+            <button onClick={handleLimite} disabled={saving}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+              style={{ backgroundColor: P.creme, color: P.card }}>
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salvar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabela de movimentos */}
+      <div className="rounded-xl border overflow-hidden" style={{ borderColor: P.border }}>
+        <div className="px-4 py-3" style={{ backgroundColor: P.card }}>
+          <p className="text-sm font-semibold" style={{ color: P.creme }}>Movimentações Recentes</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ backgroundColor: P.bg }}>
+                <th className="text-left px-4 py-2 font-medium" style={{ color: P.sage }}>Data</th>
+                <th className="text-left px-4 py-2 font-medium" style={{ color: P.sage }}>Tipo</th>
+                <th className="text-left px-4 py-2 font-medium" style={{ color: P.sage }}>Venda</th>
+                <th className="text-right px-4 py-2 font-medium" style={{ color: P.sage }}>Valor</th>
+                <th className="text-right px-4 py-2 font-medium" style={{ color: P.sage }}>Saldo</th>
+                <th className="text-left px-4 py-2 font-medium" style={{ color: P.sage }}>Descrição</th>
+                <th className="text-left px-4 py-2 font-medium" style={{ color: P.sage }}>Usuário</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movimentos.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-8 text-center" style={{ color: P.sage }}>Nenhuma movimentação registrada</td></tr>
+              )}
+              {movimentos.map(m => (
+                <tr key={m.id} className="border-t" style={{ borderColor: P.border }}>
+                  <td className="px-4 py-2 tabular-nums" style={{ color: P.sage }}>
+                    {new Date(m.created_at).toLocaleDateString("pt-BR")}
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full"
+                      style={{
+                        backgroundColor: m.tipo === "credito" ? "#D1FAE5" : m.tipo === "debito" ? "#FEE2E2" : "#DBEAFE",
+                        color: m.tipo === "credito" ? "#065F46" : m.tipo === "debito" ? "#991B1B" : "#1E40AF",
+                      }}>
+                      {m.tipo}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2" style={{ color: P.creme }}>{m.numero_venda ?? "—"}</td>
+                  <td className="px-4 py-2 text-right tabular-nums font-medium"
+                    style={{ color: m.tipo === "credito" ? "#059669" : m.tipo === "debito" ? "#EF4444" : "#3B82F6" }}>
+                    {m.tipo === "debito" ? "-" : "+"}{fmt(m.valor)}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums" style={{ color: P.sage }}>{fmt(m.saldo_depois)}</td>
+                  <td className="px-4 py-2 text-xs" style={{ color: P.sage }}>{m.descricao ?? "—"}</td>
+                  <td className="px-4 py-2 text-xs" style={{ color: P.sage }}>{m.usuario_nome ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab Fretes por Bairro
+// ═══════════════════════════════════════════════════════════════════════════════
+const BAIRROS_FORTALEZA = [
+  "Aerolândia","Água Fria","Aldeota","Alto da Balança","Alto da Paz","Alto da Vila Prudente",
+  "Ancuri","Antônio Bezerra","Areninhas","Autran Nunes","Bairro de Fátima","Barroso",
+  "Bela Vista","Benfica","Boa Vista","Bom Futuro","Bom Jardim","Bom Sucesso",
+  "Cais do Porto","Cajazeiras","Caça e Pesca","Canindezinho","Carlito Pamplona",
+  "Casa Amarela","Castelão","Conjunto Ceará I","Conjunto Ceará II","Couto Fernandes",
+  "Cristo Redentor","Curió","Damas","Demócrito Rocha","Dendê","Dias Macêdo",
+  "Dois Córregos","Dom Lustosa","Edson Queiroz","Ellery","Engenheiro Luciano Cavalcante",
+  "Farias Brito","Floresta","Granja Lisboa","Granja Portugal","Guararapes",
+  "Henrique Jorge","Itaoca","Itaperi","Itinga","Jacarecanga","Jardim América",
+  "Jardim das Oliveiras","Jardim Guanabara","Jardim Iracema","Jardim União",
+  "João XXIII","José Bonifácio","José de Alencar","Jóquei Clube","Lagoa Redonda",
+  "Lavras da Mangabeira","Luciano Cavalcante","Luís Cavalcante","Manoel Sátiro",
+  "Maraponga","Meireles","Messejana","Mondubim","Monte Castelo","Montese",
+  "Mucuripe","Nabuco","Nova Aldeota","Novo Mondubim","Padre Andrade",
+  "Padre Júlio Maria","Parangaba","Parque Araxá","Parque Dois Irmãos",
+  "Parque Genibaú","Parque Iracema","Parque Manibura","Parque Santa Rosa",
+  "Passaré","Paupina","Pici","Pirambu","Planalto Ayrton Senna","Prefeito José Walter",
+  "Praia de Iracema","Praia do Futuro I","Praia do Futuro II","Quintino Cunha",
+  "Rodolfo Teófilo","Salinas","Sabiaguaba","São Bento","São Gerardo","São João do Tauape",
+  "São Miguel","Serrinha","Siqueira","Tarumã","Tauape","Varjota","Vicente Pinzón",
+  "Vila Ellery","Vila Manoel Sátiro","Vila União","Vila Velha","Zé Bonifácio",
+];
+
+interface FreteBairro {
+  id: number;
+  bairro: string;
+  municipio: string | null;
+  valor: number;
+  ativo: boolean;
+}
+
+function TabFretes() {
+  const [fretes, setFretes] = useState<FreteBairro[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filtro, setFiltro] = useState("");
+  const [salvandoId, setSalvandoId] = useState<number | null>(null);
+  const [savedId, setSavedId] = useState<number | null>(null);
+  const [erroId, setErroId] = useState<number | null>(null);
+  const [editValores, setEditValores] = useState<Record<number, string>>({});
+  const [showForm, setShowForm] = useState(false);
+  const [novoForm, setNovoForm] = useState({ bairro: "", municipio: "Fortaleza", valor: "" });
+  const [savingNovo, setSavingNovo] = useState(false);
+  const [erroNovo, setErroNovo] = useState("");
+  const [bairroSugestoes, setBairroSugestoes] = useState<string[]>([]);
+  const [bairroOpen, setBairroOpen] = useState(false);
+
+  const fmtFrete = (v: number) =>
+    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+
+  async function carregar() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/configuracoes/fretes-bairro");
+      const data = await res.json();
+      setFretes(Array.isArray(data) ? data : (data.fretes ?? []));
+    } catch { /* silencioso */ }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { carregar(); }, []);
+
+  async function handleSalvar(frete: FreteBairro) {
+    const valorStr = editValores[frete.id] ?? String(frete.valor);
+    const valor = parseFloat(valorStr.replace(",", "."));
+    if (isNaN(valor) || valor < 0) return;
+    setSalvandoId(frete.id); setErroId(null);
+    try {
+      const res = await fetch(`/api/configuracoes/fretes-bairro/${frete.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ valor }),
+      });
+      if (!res.ok) throw new Error("Erro");
+      setFretes(prev => prev.map(f => f.id === frete.id ? { ...f, valor } : f));
+      setEditValores(prev => { const next = { ...prev }; delete next[frete.id]; return next; });
+      setSavedId(frete.id);
+      setTimeout(() => setSavedId(null), 2000);
+    } catch {
+      setErroId(frete.id);
+    } finally {
+      setSalvandoId(null);
+    }
+  }
+
+  async function handleToggleAtivo(frete: FreteBairro) {
+    setSalvandoId(frete.id);
+    try {
+      const res = await fetch(`/api/configuracoes/fretes-bairro/${frete.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ativo: !frete.ativo }),
+      });
+      if (!res.ok) throw new Error("Erro");
+      setFretes(prev => prev.map(f => f.id === frete.id ? { ...f, ativo: !f.ativo } : f));
+    } catch { /* silencioso */ }
+    finally { setSalvandoId(null); }
+  }
+
+  async function handleCriarFrete() {
+    if (!novoForm.bairro.trim()) { setErroNovo("Bairro é obrigatório"); return; }
+    setSavingNovo(true); setErroNovo("");
+    try {
+      const res = await fetch("/api/configuracoes/fretes-bairro", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bairro: novoForm.bairro, municipio: novoForm.municipio, valor: parseFloat(novoForm.valor.replace(",", ".")) || 0 }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro");
+      setFretes(prev => [...prev, { ...data, valor: Number(data.valor) }].sort((a, b) => a.bairro.localeCompare(b.bairro)));
+      setNovoForm({ bairro: "", municipio: "Fortaleza", valor: "" });
+      setShowForm(false);
+    } catch (e) { setErroNovo(e instanceof Error ? e.message : "Erro ao cadastrar"); }
+    finally { setSavingNovo(false); }
+  }
+
+  const filtered = fretes.filter(f =>
+    filtro.trim() === "" ||
+    f.bairro.toLowerCase().includes(filtro.toLowerCase()) ||
+    (f.municipio ?? "").toLowerCase().includes(filtro.toLowerCase())
+  );
+
+  if (loading) return (
+    <div className="flex items-center gap-2 py-10 justify-center text-sm" style={{ color: P.muted }}>
+      <Loader2 size={14} className="animate-spin" /> Carregando fretes...
+    </div>
+  );
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div>
+        <h3 className="text-sm font-semibold" style={{ color: P.creme }}>Fretes por Bairro</h3>
+        <p className="text-xs mt-0.5" style={{ color: P.muted }}>
+          Configure o valor de frete para cada bairro. Bairros inativos não aparecem no cálculo automático.
+        </p>
+      </div>
+
+      {/* Botão novo + form inline */}
+      {!showForm ? (
+        <button
+          onClick={() => setShowForm(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold w-fit"
+          style={{ backgroundColor: P.verde, color: "#fff" }}
+        >
+          <Plus size={13} /> Adicionar bairro
+        </button>
+      ) : (
+        <div className="rounded-xl p-4 space-y-3" style={{ border: `1px solid ${P.border}`, backgroundColor: P.card }}>
+          <p className="text-xs font-semibold" style={{ color: P.creme }}>Novo Bairro</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="relative">
+              <label className="text-[10px] uppercase tracking-widest mb-1 block" style={{ color: P.muted }}>Bairro *</label>
+              <input
+                type="text"
+                value={novoForm.bairro}
+                onChange={e => {
+                  const v = e.target.value;
+                  setNovoForm(p => ({ ...p, bairro: v }));
+                  if (v.trim().length >= 1) {
+                    const sugs = BAIRROS_FORTALEZA.filter(b => b.toLowerCase().includes(v.toLowerCase())).slice(0, 8);
+                    setBairroSugestoes(sugs);
+                    setBairroOpen(sugs.length > 0);
+                  } else {
+                    setBairroOpen(false);
+                  }
+                }}
+                onBlur={() => setTimeout(() => setBairroOpen(false), 150)}
+                onFocus={() => {
+                  if (novoForm.bairro.trim().length >= 1 && bairroSugestoes.length > 0) setBairroOpen(true);
+                }}
+                placeholder="Nome do bairro"
+                className="w-full border rounded-lg px-3 py-1.5 text-sm outline-none"
+                style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }}
+              />
+              {bairroOpen && (
+                <div className="absolute z-50 w-full mt-1 rounded-xl border shadow-lg bg-white overflow-hidden" style={{ borderColor: P.border, maxHeight: 220, overflowY: "auto" }}>
+                  {bairroSugestoes.map(b => (
+                    <button
+                      key={b}
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-stone-50 border-b last:border-b-0"
+                      style={{ borderColor: P.border, color: P.creme }}
+                      onMouseDown={() => {
+                        setNovoForm(p => ({ ...p, bairro: b }));
+                        setBairroOpen(false);
+                      }}
+                    >
+                      {b}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-widest mb-1 block" style={{ color: P.muted }}>Município</label>
+              <input
+                type="text"
+                value={novoForm.municipio}
+                onChange={e => setNovoForm(p => ({ ...p, municipio: e.target.value }))}
+                className="w-full border rounded-lg px-3 py-1.5 text-sm outline-none"
+                style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-widest mb-1 block" style={{ color: P.muted }}>Valor (R$)</label>
+              <input
+                type="text"
+                value={novoForm.valor}
+                onChange={e => setNovoForm(p => ({ ...p, valor: e.target.value }))}
+                placeholder="0,00"
+                className="w-full border rounded-lg px-3 py-1.5 text-sm outline-none"
+                style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }}
+              />
+            </div>
+          </div>
+          {erroNovo && <p className="text-xs text-red-500">{erroNovo}</p>}
+          <div className="flex gap-2">
+            <button onClick={() => { setShowForm(false); setErroNovo(""); }} className="px-3 py-1.5 rounded-lg text-xs border" style={{ borderColor: P.border, color: P.muted }}>Cancelar</button>
+            <button onClick={handleCriarFrete} disabled={savingNovo} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40" style={{ backgroundColor: P.verde, color: "#fff" }}>
+              {savingNovo ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} Salvar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Filtro */}
+      <div className="relative max-w-xs">
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: P.muted }} />
+        <input
+          type="text"
+          value={filtro}
+          onChange={e => setFiltro(e.target.value)}
+          placeholder="Filtrar por bairro ou município..."
+          className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm outline-none"
+          style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }}
+        />
+        {filtro && (
+          <button onClick={() => setFiltro("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+            <X size={12} />
+          </button>
+        )}
+      </div>
+
+      <p className="text-xs" style={{ color: P.muted }}>
+        {filtered.length} {filtered.length === 1 ? "bairro" : "bairros"}{filtro ? " encontrado(s)" : " no total"}
+      </p>
+
+      {/* Tabela */}
+      <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+        <div className="overflow-x-auto" style={{ maxHeight: 600, overflowY: "auto" }}>
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 z-10">
+              <tr style={{ backgroundColor: P.bg, borderBottom: `1px solid ${P.border}` }}>
+                {["Bairro", "Município", "Valor (R$)", "Ativo", "Ações"].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-medium" style={{ color: P.muted }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-sm" style={{ color: P.muted }}>
+                    {filtro ? "Nenhum bairro encontrado para este filtro" : "Nenhum frete cadastrado"}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map(frete => (
+                  <tr key={frete.id} className="border-t hover:bg-gray-50 transition-colors" style={{ borderColor: P.border }}>
+                    <td className="px-4 py-3 font-medium" style={{ color: P.creme }}>{frete.bairro}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: P.sage }}>{frete.municipio ?? "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs" style={{ color: P.muted }}>R$</span>
+                        <input
+                          type="text"
+                          value={editValores[frete.id] !== undefined ? editValores[frete.id] : String(frete.valor)}
+                          onChange={e => setEditValores(prev => ({ ...prev, [frete.id]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === "Enter") handleSalvar(frete); }}
+                          className="w-24 border rounded-lg px-2 py-1 text-sm text-right outline-none"
+                          style={{ borderColor: P.border, backgroundColor: P.card, color: P.creme }}
+                        />
+                        {savedId === frete.id && <CheckCircle size={13} style={{ color: P.verde }} />}
+                        {erroId === frete.id && <AlertTriangle size={13} style={{ color: P.vermelho }} />}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => handleToggleAtivo(frete)}
+                        disabled={salvandoId === frete.id}
+                        className="flex items-center gap-1 text-xs disabled:opacity-50"
+                      >
+                        {salvandoId === frete.id ? (
+                          <Loader2 size={14} className="animate-spin" style={{ color: P.muted }} />
+                        ) : frete.ativo ? (
+                          <ToggleRight size={20} style={{ color: P.verde }} />
+                        ) : (
+                          <ToggleLeft size={20} style={{ color: P.muted }} />
+                        )}
+                        <span style={{ color: frete.ativo ? P.verde : P.muted }}>
+                          {frete.ativo ? "Ativo" : "Inativo"}
+                        </span>
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => handleSalvar(frete)}
+                        disabled={salvandoId === frete.id || editValores[frete.id] === undefined}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+                        style={{
+                          backgroundColor: editValores[frete.id] !== undefined ? P.verde : P.bg,
+                          color: editValores[frete.id] !== undefined ? "#fff" : P.sage,
+                          border: `1px solid ${editValores[frete.id] !== undefined ? P.verde : P.border}`,
+                        }}
+                      >
+                        {salvandoId === frete.id ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                        Salvar
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {fmtFrete(0) && null /* suppress unused var */}
     </div>
   );
 }

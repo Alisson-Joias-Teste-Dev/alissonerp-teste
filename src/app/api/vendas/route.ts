@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { validarDescontos } from "@/lib/validar-desconto";
 
 // ─── GET /api/vendas ───────────────────────────────────────────────────────────
 // Query params: inicio, fim, situacao, vendedor_id, q (busca)
@@ -42,8 +43,11 @@ export async function GET(req: NextRequest) {
       v.created_at,
       v.updated_at,
       v.qtd_itens,
-      v.total_pago
+      v.total_pago,
+      ve.empresa_emitente_id,
+      ve.nota_fiscal_id
     FROM alissonerp.vw_vendas_erp_completa v
+    LEFT JOIN alissonerp.vendas_erp ve ON ve.id = v.id
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <  (${fim}::date + INTERVAL '1 day')
       ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}
@@ -114,9 +118,31 @@ export async function POST(req: NextRequest) {
     endereco_entrega_cidade?:      string | null;
     endereco_entrega_cep?:         string | null;
     endereco_entrega_uf?:          string | null;
+    tipo_venda?:          string | null;
+    numero_rastreio?:     string | null;
+    venda_garantia_id?:   number | null;
     itens?:               ItemInput[];
     pagamentos?:          PagamentoInput[];
   };
+
+  // ── Validação de desconto por produto (bloqueia vendedor comum) ───────────
+  if (Array.isArray(body.itens) && body.itens.length > 0) {
+    const itensValidacao = body.itens
+      .filter((it) => it.produto_id && (it.pct_desconto ?? 0) > 0)
+      .map((it) => ({
+        produto_id: Number(it.produto_id),
+        pct_desconto: Number(it.pct_desconto ?? 0),
+        sku: it.sku ?? undefined,
+        nome: it.nome_produto,
+      }));
+    const val = await validarDescontos(itensValidacao, usuario.role);
+    if (!val.ok) {
+      return NextResponse.json(
+        { error: "Desconto acima do permitido", detalhes: val.erros, violacoes: val.violacoes },
+        { status: 403 },
+      );
+    }
+  }
 
   let novaVenda;
   try {
@@ -133,6 +159,7 @@ export async function POST(req: NextRequest) {
         video_obs_interna,
         endereco_entrega, endereco_entrega_numero, endereco_entrega_complemento,
         endereco_entrega_bairro, endereco_entrega_cidade, endereco_entrega_cep, endereco_entrega_uf,
+        tipo_venda, numero_rastreio, venda_garantia_id,
         situacao,
         created_by
       ) VALUES (
@@ -153,6 +180,9 @@ export async function POST(req: NextRequest) {
         ${body.endereco_entrega_cidade ?? null},
         ${body.endereco_entrega_cep ?? null},
         ${body.endereco_entrega_uf ?? null},
+        ${body.tipo_venda ?? null},
+        ${body.numero_rastreio ?? null},
+        ${body.venda_garantia_id ?? null},
         'rascunho',
         ${user.id}::uuid
       )
@@ -178,7 +208,7 @@ export async function POST(req: NextRequest) {
     // 3. Inserir itens (trigger recalcula totais automaticamente)
     if (Array.isArray(body.itens) && body.itens.length > 0) {
       for (const item of body.itens) {
-        if (!item.produto_id || item.produto_id <= 0) {
+        if (item.produto_id !== null && item.produto_id !== undefined && Number(item.produto_id) <= 0) {
           throw new Error("produto_id inválido em item");
         }
         if (!item.nome_produto || typeof item.nome_produto !== "string" || item.nome_produto.trim() === "") {

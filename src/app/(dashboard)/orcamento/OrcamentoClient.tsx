@@ -57,9 +57,19 @@ type OrcamentoTipo = "alianca" | "peca" | null;
 type AllianceMode = "unidade" | "par";
 
 // ── Pill helper ──────────────────────────────────────────────────────────────
-function Pill({ label, value }: { label: string; value: string }) {
+function Pill({ label, value, onDoubleClick, title }: {
+  label: string;
+  value: string;
+  onDoubleClick?: () => void;
+  title?: string;
+}) {
   return (
-    <div className="text-center">
+    <div
+      className="text-center select-none"
+      onDoubleClick={onDoubleClick}
+      title={title}
+      style={{ cursor: onDoubleClick ? "pointer" : "default" }}
+    >
       <p className="text-[9px] uppercase tracking-wider text-gray-400">{label}</p>
       <p className="text-sm font-bold" style={{ color: "#184036" }}>{value}</p>
     </div>
@@ -197,6 +207,11 @@ export default function OrcamentoClient({
     startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0,
   });
   const [currentMesh, setCurrentMesh] = useState<THREE.Mesh | null>(null);
+
+  // Toggle: double-click no pill de peso alterna entre arredondado (0,5g steps)
+  // e peso real sem arredondamento (3 casas decimais).
+  const [showRawWeight, setShowRawWeight] = useState(false);
+  const toggleRawWeight = () => setShowRawWeight((v) => !v);
 
   // ── Par de alianças ───────────────────────────────────────────────────────
   const [allianceMode, setAllianceMode] = useState<AllianceMode>("unidade");
@@ -2382,12 +2397,32 @@ export default function OrcamentoClient({
             <div className="flex items-center justify-between gap-4">
               {allianceMode === "par" ? (
                 <>
-                  <Pill label="Peso 1" value={`${pricing.weight.toFixed(1)}g`} />
-                  <Pill label="Peso 2" value={`${pricing2.weight.toFixed(1)}g`} />
-                  <Pill label="Total" value={`${pricingTotal.weight.toFixed(1)}g`} />
+                  <Pill
+                    label={showRawWeight ? "Peso 1 (real)" : "Peso 1"}
+                    value={`${(showRawWeight ? weightEst.weightRaw : pricing.weight).toFixed(showRawWeight ? 3 : 1)}g`}
+                    onDoubleClick={toggleRawWeight}
+                    title={showRawWeight ? `Arredondado: ${pricing.weight.toFixed(1)}g (clique 2× para voltar)` : `Peso real: ${weightEst.weightRaw.toFixed(3)}g (clique 2× para ver)`}
+                  />
+                  <Pill
+                    label={showRawWeight ? "Peso 2 (real)" : "Peso 2"}
+                    value={`${(showRawWeight ? weightEst2.weightRaw : pricing2.weight).toFixed(showRawWeight ? 3 : 1)}g`}
+                    onDoubleClick={toggleRawWeight}
+                    title={showRawWeight ? `Arredondado: ${pricing2.weight.toFixed(1)}g (clique 2× para voltar)` : `Peso real: ${weightEst2.weightRaw.toFixed(3)}g (clique 2× para ver)`}
+                  />
+                  <Pill
+                    label={showRawWeight ? "Total (real)" : "Total"}
+                    value={`${(showRawWeight ? (weightEst.weightRaw + weightEst2.weightRaw) : pricingTotal.weight).toFixed(showRawWeight ? 3 : 1)}g`}
+                    onDoubleClick={toggleRawWeight}
+                    title={showRawWeight ? `Arredondado: ${pricingTotal.weight.toFixed(1)}g (clique 2× para voltar)` : `Peso real: ${(weightEst.weightRaw + weightEst2.weightRaw).toFixed(3)}g (clique 2× para ver)`}
+                  />
                 </>
               ) : (
-                <Pill label="Peso" value={`${pricing.weight.toFixed(1)}g`} />
+                <Pill
+                  label={showRawWeight ? "Peso (real)" : "Peso"}
+                  value={`${(showRawWeight ? weightEst.weightRaw : pricing.weight).toFixed(showRawWeight ? 3 : 1)}g`}
+                  onDoubleClick={toggleRawWeight}
+                  title={showRawWeight ? `Arredondado: ${pricing.weight.toFixed(1)}g (clique 2× para voltar)` : `Peso real: ${weightEst.weightRaw.toFixed(3)}g (clique 2× para ver)`}
+                />
               )}
               {/* Pills de ouro e pedras (só quando há pedras preciosas) */}
               {(() => {

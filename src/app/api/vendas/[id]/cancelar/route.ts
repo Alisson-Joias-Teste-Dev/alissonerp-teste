@@ -52,11 +52,26 @@ export async function POST(
     );
   }
 
+  // Se havia crédito do gerente usado, devolver ao saldo
+  const [vendaCredito] = await sql`
+    SELECT credito_gerente_usado FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+  `;
+  const creditoUsado = parseFloat(vendaCredito?.credito_gerente_usado ?? "0");
+
   await sql`
     UPDATE alissonerp.vendas_erp
     SET situacao = 'cancelado', bloqueado = true
     WHERE id = ${vendaId}
   `;
+
+  if (creditoUsado > 0) {
+    try {
+      const { creditarSaldo } = await import("@/lib/saldo-credito");
+      await creditarSaldo(creditoUsado, vendaId, null, user.id);
+    } catch (err) {
+      console.error(`[cancelar] Erro ao devolver saldo de crédito:`, err);
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

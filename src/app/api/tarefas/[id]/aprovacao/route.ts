@@ -101,7 +101,50 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     WHERE id = ${Number(id)}
   `;
 
-  // Notificar solicitante
+  // ── Hook: aprovação de crédito (venda vinculada à tarefa) ────────────────
+  const [tarefaInfo] = await sql`
+    SELECT venda_id, tags FROM alissonerp.tarefas WHERE id = ${Number(id)}
+  `;
+  if (tarefaInfo?.venda_id) {
+    try {
+      const { processarAprovacaoCredito } = await import("@/lib/vendas-credito-aprovar");
+      const resultado = await processarAprovacaoCredito(
+        Number(id), user.id, body.decisao, body.motivo,
+      );
+      return NextResponse.json({ ok: true, credito: resultado });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[aprovacao] Erro ao processar crédito:`, msg);
+      // Não falha silenciosamente — retorna erro pra UI mostrar
+      return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    }
+  }
+
+  // ── Hook: aprovação de devolução ───────────────────────────────────────────
+  // Detecta via FK direto (devolucoes_venda.tarefa_id) E também via tag 'devolucao'
+  // (redundante pra robustez caso um dos lados falhe)
+  const [devLink] = await sql`
+    SELECT id FROM alissonerp.devolucoes_venda WHERE tarefa_id = ${Number(id)} LIMIT 1
+  `;
+  const tagsRaw = tarefaInfo?.tags;
+  const tags: string[] = Array.isArray(tagsRaw)
+    ? tagsRaw
+    : (typeof tagsRaw === "string" ? tagsRaw.replace(/[{}"]/g, "").split(",") : []);
+  if (devLink || tags.includes("devolucao")) {
+    try {
+      const { processarAprovacaoDevolucao } = await import("@/lib/devolucoes");
+      const resultado = await processarAprovacaoDevolucao(
+        Number(id), user.id, body.decisao, body.motivo,
+      );
+      return NextResponse.json({ ok: true, devolucao: resultado });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[aprovacao] Erro ao processar devolucao:`, msg);
+      return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    }
+  }
+
+  // Notificar solicitante (fluxo normal sem venda)
   await sql`
     INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id)
     VALUES (${String(aprovacao.solicitante_id)}::uuid, 'aprovacao',

@@ -35,17 +35,17 @@ export async function POST() {
   tinyToken = tinyToken.replace(/"/g, "").trim();
   if (!tinyToken) return NextResponse.json({ error: "Token do Tiny inválido" }, { status: 400 });
 
-  // Buscar produtos ativos com saldo + id_api_tiny (ID do produto no Tiny)
+  // Buscar produtos ativos com saldo consolidado + id_api_tiny (ID do produto no Tiny)
   const produtos = await sql`
     SELECT
       ec.produto_id,
       p.sku,
       p.nome AS nome_produto,
       p.id_api_tiny,
-      COALESCE(s.saldo, 0) AS saldo
+      COALESCE(s.saldo_fisico, 0) AS saldo
     FROM alissonerp.estoque_comercial_config ec
     JOIN public.produtos p ON p.id_produto = ec.produto_id
-    LEFT JOIN alissonerp.vw_saldo_estoque_comercial s ON s.produto_id = ec.produto_id
+    LEFT JOIN alissonerp.vw_saldo_estoque_comercial_consolidado s ON s.produto_id = ec.produto_id
     WHERE ec.ativo = true
       AND p.id_api_tiny IS NOT NULL
     ORDER BY p.nome

@@ -5,8 +5,11 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle,
   Truck, Video, FileText, UserPlus, MapPin, Pencil, User, Package, CreditCard, XCircle,
+  Ticket, AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
+import PixQrInline from "@/components/vendas/PixQrInline";
+import CartaoInline from "@/components/vendas/CartaoInline";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -36,24 +39,29 @@ interface ItemVenda {
   preco_unitario: number; total_item: number; pct_comissao: number;
   valor_comissao: number; peso_estimado: number | null; unidade: string | null;
 }
-interface Pagamento { _key: string; forma: string; valor: number; parcelas: number; }
+interface Pagamento { _key: string; forma: string; valor: number; parcelas: number; vale_numero?: string; }
 interface ParcelaRow { num: number; dias: number; data: string; valor: number; }
 interface Vendedor { id_vendedor: number; nome: string; }
 interface FormaEnvio { id: number; nome: string; id_api: string; }
 interface FormaFrete { id: number; nome: string; codigo: string; id_api_logistica: string; }
 
 const FORMAS_PAGAMENTO = [
-  "Dinheiro", "Cartão de Crédito", "Cartão de Débito",
+  "Dinheiro", "Cartão de Crédito",
   "Vale-Troca", "Pix", "Ouro", "A Receber", "Múltiplas",
 ];
 const GATEWAYS   = ["Mercado Pago", "PagSeguro", "Cielo", "Stone", "Getnet", "Rede", "Outro"];
 const BANDEIRAS  = ["Visa", "Mastercard", "Elo", "Amex", "Hipercard", "Outro"];
 const CONDICOES  = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
+// Parcelas disponíveis para MP: mínimo R$100 por parcela
+function condicoesMp(valor: number) {
+  const max = Math.min(12, Math.floor(valor / 100));
+  return CONDICOES.filter(c => c === "À vista" || parseInt(c) <= max);
+}
 
 // formas que exibem tabela de parcelas
-const COM_PARCELAS = ["Cartão de Crédito", "Vale-Troca"];
+const COM_PARCELAS = ["Cartão de Crédito"];
 // formas que exibem gateway/bandeira
-const COM_CARTAO   = ["Cartão de Crédito", "Cartão de Débito", "Pix"];
+const COM_CARTAO   = ["Cartão de Crédito", "Pix"];
 
 function fmt(v: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
@@ -207,6 +215,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
 
   // Vídeo
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const autoSavedRef  = useRef(false);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [videoObsInterna, setVideoObsInterna] = useState<string | null>(null);
   const [uploadingVideo,  setUploadingVideo]  = useState(false);
@@ -244,11 +253,26 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   // Múltiplas
   const [pagamentos,     setPagamentos]     = useState<Pagamento[]>([]);
   const [pagMultForma,   setPagMultForma]   = useState("Dinheiro");
+  const [pagMultParcelas, setPagMultParcelas] = useState(1);
   const [pagValor,       setPagValor]       = useState("");
+
+  // Vale-Troca
+  const [valeNumero,      setValeNumero]      = useState("");
+  const [valeValidando,   setValeValidando]   = useState(false);
+  const [valeValidacao,   setValeValidacao]   = useState<{
+    ok: boolean;
+    erro?: string;
+    valor_disponivel?: number;
+    cliente_id?: number | null;
+  } | null>(null);
+  const [valeTrocoToast,  setValeTrocoToast]  = useState<{ numero: string; valor: number } | null>(null);
 
   // Submit
   const [saving,  setSaving]  = useState(false);
   const [saveErr, setSaveErr] = useState("");
+  // Aprovação crédito (A Receber)
+  const [aprovacaoEnviada, setAprovacaoEnviada] = useState(false);
+  const [vendaIdCriada, setVendaIdCriada] = useState<number | null>(null);
 
   // Carregar dados de referência
   useEffect(() => {
@@ -257,8 +281,32 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
       setFormaEnvioOpts(d.envio ?? []);
       setFormaFreteAll(d.frete ?? []);
     }).catch(() => {});
-    if (isFullAccess) fetch("/api/vendedores").then(r => r.json()).then(setVendedores).catch(() => {});
-  }, [isFullAccess]);
+    if (isFullAccess) {
+      fetch("/api/vendedores").then(r => r.json()).then(setVendedores).catch(() => {});
+    } else if (vendedorId) {
+      // Consultora: buscar só o próprio vendedor pra mostrar o nome
+      fetch("/api/vendedores").then(r => r.json()).then((all: Vendedor[]) => {
+        const proprio = all.filter(v => Number(v.id_vendedor) === vendedorId);
+        if (proprio.length) setVendedores(proprio);
+      }).catch(() => {});
+    }
+  }, [isFullAccess, vendedorId]);
+
+  // Auto-save: ao primeiro item ou cliente, cria rascunho e redireciona para edição
+  useEffect(() => {
+    if (autoSavedRef.current) return;
+    if (itens.length === 0 && !cliente) return;
+    autoSavedRef.current = true;
+    const body = montarBodyVenda();
+    fetch("/api/vendas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(r => r.json())
+      .then((data: { id?: number; error?: string }) => {
+        if (data.id) router.replace(`/vendas/${data.id}`);
+        else autoSavedRef.current = false;
+      })
+      .catch(() => { autoSavedRef.current = false; });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itens, cliente]);
 
   // Formas de frete disponíveis para o envio selecionado
   const formaFreteOpts = formaFreteAll.filter(f => {
@@ -319,6 +367,14 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   const totalComissao = itens.reduce((s, i) => s + i.valor_comissao, 0);
   const totalVenda    = totalProdutos + totalFrete;
 
+  // Reset pagCondicao se ficar inválida para MP (valor baixou, parcela < R$100)
+  useEffect(() => {
+    if (pagGateway !== "Mercado Pago" || pagForma !== "Cartão de Crédito") return;
+    const opcoes = condicoesMp(totalVenda);
+    if (!opcoes.includes(pagCondicao)) setPagCondicao("À vista");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalVenda, pagGateway, pagForma]);
+
   // Gerar linhas de parcelas quando condição ou total mudam
   useEffect(() => {
     if (pagForma === "Múltiplas") return;
@@ -372,12 +428,36 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
     });
   }
 
+  async function validarValeTroca() {
+    if (!valeNumero.trim()) return;
+    setValeValidando(true);
+    setValeValidacao(null);
+    try {
+      const res = await fetch("/api/vale-troca/validar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ numero: valeNumero.trim() }),
+      });
+      const d = await res.json() as {
+        ok: boolean;
+        erro?: string;
+        valor_disponivel?: number;
+        cliente_id?: number | null;
+      };
+      setValeValidacao(d);
+    } catch {
+      setValeValidacao({ ok: false, erro: "Erro ao validar" });
+    } finally {
+      setValeValidando(false);
+    }
+  }
+
   function handleAddPagamento() {
     const restante = +(totalVenda - pagamentos.reduce((s, p) => s + p.valor, 0)).toFixed(2);
     const v = parseFloat(pagValor.replace(",", "."));
     if (!v || v <= 0 || restante <= 0) return;
     const valorFinal = Math.min(v, restante);
-    setPagamentos(prev => [...prev, { _key: uid(), forma: pagMultForma, valor: valorFinal, parcelas: 1 }]);
+    setPagamentos(prev => [...prev, { _key: uid(), forma: pagMultForma, valor: valorFinal, parcelas: pagMultForma === "Cartão de Crédito" ? pagMultParcelas : 1 }]);
     setPagValor("");
   }
 
@@ -409,7 +489,8 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
   }
 
   const totalPago     = pagamentos.reduce((s, p) => s + p.valor, 0);
-  void totalPago; // usado em modo Múltiplas
+  // Pagamento cobre o total? (Múltiplas: soma dos pagamentos; simples: sempre cobre)
+  const pagamentoCobre = pagForma === "Múltiplas" ? Math.abs(totalPago - totalVenda) < 0.01 : true;
 
   // ── CEP lookup ──────────────────────────────────────────────────────────────
   async function buscaCEP(cep: string, target: "entrega" | "novoCliente") {
@@ -490,55 +571,181 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
     finally { setSavingCliente(false); }
   }
 
+  // ── Monta body de criação de venda (compartilhado entre submit e salvar rascunho Pix) ──
+  function montarBodyVenda() {
+    const envioNome = formaEnvioOpts.find(e => e.id === formaEnvioId)?.nome ?? "";
+    const freteNome = formaFreteAll.find(f => f.id === formaFreteId)?.nome ?? "";
+    return {
+      cliente_id: cliente?.id ?? null,
+      vendedor_id: vendedorSel || null,
+      data_entrega: dataEntrega || null,
+      total_frete: totalFrete,
+      forma_envio: envioNome || null,
+      forma_frete: freteNome || null,
+      observacoes: observacoes || null,
+      observacoes_internas: obsInternas || null,
+      video_obs_interna: videoObsInterna,
+      ...(!mesmoEndereco && showEndEntrega ? {
+        endereco_entrega: endEntrega.logradouro || null,
+        endereco_entrega_numero: endEntrega.numero || null,
+        endereco_entrega_complemento: endEntrega.complemento || null,
+        endereco_entrega_bairro: endEntrega.bairro || null,
+        endereco_entrega_cidade: endEntrega.cidade || null,
+        endereco_entrega_cep: endEntrega.cep || null,
+        endereco_entrega_uf: endEntrega.uf || null,
+      } : {}),
+      itens: itens.map(i => ({
+        produto_id: i.produto_id, nome_produto: i.nome_produto, sku: i.sku,
+        quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
+        preco_unitario: i.preco_unitario, total_item: i.total_item,
+        pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao, peso_estimado: i.peso_estimado,
+      })),
+    };
+  }
+
+  // ── Salvar rascunho e retornar id (pro PixQrInline chamar criar-link) ───
+  async function salvarRascunhoParaPix(): Promise<{ id: number; numero_venda: string }> {
+    if (itens.length === 0) throw new Error("Adicione ao menos 1 item antes de gerar o QR Code");
+    if (totalVenda <= 0) throw new Error("Total da venda deve ser maior que zero");
+
+    // NÃO inclui pagamentos — o criar-link vai criar o pagamento MP separadamente
+    const body = montarBodyVenda();
+    const res = await fetch("/api/vendas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json() as { id: number; numero_venda: string; error?: string };
+    if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+    return { id: data.id, numero_venda: data.numero_venda };
+  }
+
   // ── Submit ─────────────────────────────────────────────────────────────────
+  // Detectar se pagamentos incluem "A Receber"
+  const temAReceberNova = pagForma === "A Receber" || (pagForma === "Múltiplas" && pagamentos.some(p => p.forma === "A Receber"));
+
+  function montarBody() {
+    const envioNome  = formaEnvioOpts.find(e => e.id === formaEnvioId)?.nome ?? "";
+    const freteNome  = formaFreteAll.find(f => f.id === formaFreteId)?.nome ?? "";
+    return {
+      cliente_id: cliente?.id ?? null,
+      vendedor_id: vendedorSel || null,
+      data_entrega: dataEntrega || null,
+      total_frete: totalFrete,
+      forma_envio: envioNome || null,
+      forma_frete: freteNome || null,
+      observacoes: observacoes || null,
+      observacoes_internas: obsInternas || null,
+      video_obs_interna: videoObsInterna,
+      ...(!mesmoEndereco && showEndEntrega ? {
+        endereco_entrega: endEntrega.logradouro || null,
+        endereco_entrega_numero: endEntrega.numero || null,
+        endereco_entrega_complemento: endEntrega.complemento || null,
+        endereco_entrega_bairro: endEntrega.bairro || null,
+        endereco_entrega_cidade: endEntrega.cidade || null,
+        endereco_entrega_cep: endEntrega.cep || null,
+        endereco_entrega_uf: endEntrega.uf || null,
+      } : {}),
+      itens: itens.map(i => ({
+        produto_id: i.produto_id, nome_produto: i.nome_produto, sku: i.sku,
+        quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
+        preco_unitario: i.preco_unitario, total_item: i.total_item,
+        pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao, peso_estimado: i.peso_estimado,
+      })),
+      pagamentos: pagForma === "Múltiplas"
+        ? pagamentos
+            // Vale-Troca eh inserido via /pagamentos route (precisa de vale_numero)
+            .filter(p => p.forma !== "Vale-Troca")
+            .map(p => ({ forma: p.forma, valor: p.valor, parcelas: p.parcelas, status: "pendente" }))
+        : pagForma === "Vale-Troca"
+        ? [] // Vale-Troca simples tambem vai via /pagamentos route
+        : [{
+            forma: pagForma,
+            valor: totalVenda,
+            parcelas: pagCondicao === "À vista" ? 1 : parseInt(pagCondicao),
+            gateway: COM_CARTAO.includes(pagForma) ? pagGateway : null,
+            bandeira: COM_CARTAO.includes(pagForma) ? pagBandeira : null,
+            status: "pendente",
+          }],
+    };
+  }
+
+  // Apos criar venda, aplica Vale-Troca via /api/vendas/[id]/pagamentos
+  async function aplicarValeNaVenda(vendaId: number, valor: number, numero?: string): Promise<void> {
+    const res = await fetch(`/api/vendas/${vendaId}/pagamentos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        forma: "Vale-Troca",
+        valor,
+        vale_numero: (numero ?? valeNumero).trim(),
+      }),
+    });
+    const data = await res.json() as {
+      novo_vale?: { id: number; numero: string; valor_original: number };
+      precisa_complemento?: boolean;
+      error?: string;
+    };
+    if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+    if (data.novo_vale) {
+      setValeTrocoToast({ numero: data.novo_vale.numero, valor: data.novo_vale.valor_original });
+    }
+  }
+
   async function submit(situacao: "rascunho" | "aprovado") {
     setSaving(true); setSaveErr("");
     try {
-      const envioNome  = formaEnvioOpts.find(e => e.id === formaEnvioId)?.nome ?? "";
-      const freteNome  = formaFreteAll.find(f => f.id === formaFreteId)?.nome ?? "";
-      const body = {
-        cliente_id: cliente?.id ?? null,
-        vendedor_id: vendedorSel || null,
-        data_entrega: dataEntrega || null,
-        total_frete: totalFrete,
-        forma_envio: envioNome || null,
-        forma_frete: freteNome || null,
-        observacoes: observacoes || null,
-        observacoes_internas: obsInternas || null,
-        video_obs_interna: videoObsInterna,
-        ...(!mesmoEndereco && showEndEntrega ? {
-          endereco_entrega: endEntrega.logradouro || null,
-          endereco_entrega_numero: endEntrega.numero || null,
-          endereco_entrega_complemento: endEntrega.complemento || null,
-          endereco_entrega_bairro: endEntrega.bairro || null,
-          endereco_entrega_cidade: endEntrega.cidade || null,
-          endereco_entrega_cep: endEntrega.cep || null,
-          endereco_entrega_uf: endEntrega.uf || null,
-        } : {}),
-        itens: itens.map(i => ({
-          produto_id: i.produto_id, nome_produto: i.nome_produto, sku: i.sku,
-          quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
-          preco_unitario: i.preco_unitario, total_item: i.total_item,
-          pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao, peso_estimado: i.peso_estimado,
-        })),
-        pagamentos: pagForma === "Múltiplas"
-          ? pagamentos.map(p => ({ forma: p.forma, valor: p.valor, parcelas: p.parcelas, status: "pendente" }))
-          : [{
-              forma: pagForma,
-              valor: totalVenda,
-              parcelas: pagCondicao === "À vista" ? 1 : parseInt(pagCondicao),
-              gateway: COM_CARTAO.includes(pagForma) ? pagGateway : null,
-              bandeira: COM_CARTAO.includes(pagForma) ? pagBandeira : null,
-              status: "pendente",
-            }],
-      };
+      // Se forma = Vale-Troca, exige validacao previa
+      const pagValeItem = pagForma === "Múltiplas" ? pagamentos.find(p => p.forma === "Vale-Troca") : null;
+      const usaVale = pagForma === "Vale-Troca" || !!pagValeItem;
+      // Numero do vale: no modo direto usa estado; no modo Múltiplas usa o salvo no item
+      const valeNumeroFinal = pagForma === "Vale-Troca" ? valeNumero.trim() : (pagValeItem?.vale_numero ?? "");
+      if (usaVale) {
+        if (!valeNumeroFinal) throw new Error("Numero do vale-troca obrigatorio");
+        if (pagForma === "Vale-Troca" && !valeValidacao?.ok) throw new Error("Vale-troca nao validado — clique em Validar antes de salvar");
+      }
+
+      const body = montarBody();
       const res  = await fetch("/api/vendas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json() as { id: number; numero_venda: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+
+      // Aplicar Vale-Troca na venda recem-criada
+      if (usaVale) {
+        // Validacao: Vale-Troca direto deve cobrir o total; caso contrário usar Múltiplas
+        if (
+          pagForma === "Vale-Troca" &&
+          valeValidacao?.ok &&
+          valeValidacao.valor_disponivel !== undefined &&
+          valeValidacao.valor_disponivel < totalVenda
+        ) {
+          throw new Error(`Saldo do vale insuficiente (${fmt(valeValidacao.valor_disponivel)}). Use "Múltiplas" para combinar com outro pagamento.`);
+        }
+        const valorVale = pagValeItem ? pagValeItem.valor : totalVenda;
+        await aplicarValeNaVenda(data.id, valorVale, valeNumeroFinal);
+      }
+
       if (situacao === "aprovado") {
+        if (temAReceberNova) {
+          // Tem A Receber → solicitar aprovação de crédito (não aprovar direto)
+          const apRes = await fetch(`/api/vendas/${data.id}/solicitar-aprovacao`, { method: "POST" });
+          const apData = await apRes.json();
+          if (!apRes.ok) throw new Error(apData.error ?? "Erro ao solicitar aprovação");
+          // Redirecionar para detalhe da venda (mostra banner de aguardando aprovação)
+          router.push(`/vendas/${data.id}`);
+          return;
+        }
+        // Sem A Receber → aprovar direto (fluxo normal)
         await fetch(`/api/vendas/${data.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ situacao: "aprovado" }) });
       }
-      router.push("/vendas");
+
+      // Se houve troco, mostrar toast antes de redirecionar
+      if (valeTrocoToast) {
+        setTimeout(() => router.push(`/vendas/${data.id}`), 3000);
+        return;
+      }
+
+      router.push(`/vendas/${data.id}`);
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao salvar venda"); }
     finally { setSaving(false); }
   }
@@ -628,7 +835,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                 </Select>
               ) : (
                 <div className="border rounded-lg px-3 py-2.5 text-sm" style={{ borderColor: C.cremeBorder, color: "#374151", backgroundColor: C.cremeBg }}>
-                  {vendedores.find(v => v.id_vendedor === vendedorId)?.nome ?? "—"}
+                  {vendedores.find(v => Number(v.id_vendedor) === vendedorId)?.nome ?? "—"}
                 </div>
               )}
             </div>
@@ -1001,33 +1208,81 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
             </Select>
           </div>
 
-          {/* Dinheiro */}
-          {["Dinheiro", "Ouro", "A Receber"].includes(pagForma) && (
+          {/* Dinheiro / Ouro — simples */}
+          {["Dinheiro", "Ouro"].includes(pagForma) && (
             <div className="rounded-lg border px-4 py-3 text-sm mb-4" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
               Pagamento em {pagForma.toLowerCase()}. Não há campos adicionais necessários.
             </div>
           )}
 
-          {/* Cartão Crédito / Débito — gateway + bandeira */}
+          {/* A Receber simples — botão solicitar aprovação direto */}
+          {pagForma === "A Receber" && totalVenda > 0 && (
+            <div className="rounded-xl border p-4 mb-4 space-y-2" style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB" }}>
+              <p className="text-sm font-medium" style={{ color: "#374151" }}>
+                A Receber — {fmt(totalVenda)}
+              </p>
+              {aprovacaoEnviada ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: "#D1FAE5", color: "#065F46" }}>
+                    Aprovação solicitada
+                  </span>
+                  <button onClick={() => router.push(`/vendas/${vendaIdCriada}`)}
+                    className="text-xs underline" style={{ color: C.esmeralda }}>
+                    Ver venda
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={async () => {
+                    setSaving(true); setSaveErr("");
+                    try {
+                      if (!cliente) throw new Error("Selecione um cliente");
+                      if (itens.length === 0) throw new Error("Adicione ao menos 1 item");
+                      const body = montarBody();
+                      const res = await fetch("/api/vendas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                      const data = await res.json() as { id: number; error?: string };
+                      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+                      const apRes = await fetch(`/api/vendas/${data.id}/solicitar-aprovacao`, { method: "POST" });
+                      const apData = await apRes.json();
+                      if (!apRes.ok) throw new Error(apData.error ?? "Erro ao solicitar aprovação");
+                      setVendaIdCriada(data.id);
+                      setAprovacaoEnviada(true);
+                    } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro"); }
+                    finally { setSaving(false); }
+                  }}
+                  disabled={saving || itens.length === 0 || !cliente || vendedorSel === "" || formaEnvioId === ""}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: "#D97706", color: "#fff" }}>
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                  Solicitar Aprovação
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Aviso crédito gerente quando A Receber */}
+          {(pagForma === "A Receber" || pagForma === "Múltiplas") && (
+            <div className="rounded-lg border px-4 py-3 text-xs mb-4"
+              style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
+              Vendas com &quot;A Receber&quot; requerem aprovação do gerente de loja.
+              Se o valor exceder o saldo disponível, será encaminhado ao diretor e a comissão será zerada.
+            </div>
+          )}
+
+          {/* Cartão Crédito — gateway + condição */}
           {COM_CARTAO.includes(pagForma) && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
                 <Label>Gateway</Label>
                 <Select value={pagGateway} onChange={e => setPagGateway(e.target.value)}>
                   {GATEWAYS.map(g => <option key={g} value={g}>{g}</option>)}
                 </Select>
               </div>
-              <div>
-                <Label>Bandeira</Label>
-                <Select value={pagBandeira} onChange={e => setPagBandeira(e.target.value)}>
-                  {BANDEIRAS.map(b => <option key={b} value={b}>{b}</option>)}
-                </Select>
-              </div>
               {pagForma === "Cartão de Crédito" && (
                 <div>
                   <Label>Condição de Pagamento</Label>
                   <Select value={pagCondicao} onChange={e => setPagCondicao(e.target.value)}>
-                    {CONDICOES.map(c => <option key={c} value={c}>{c}</option>)}
+                    {(pagGateway === "Mercado Pago" ? condicoesMp(totalVenda) : CONDICOES).map(c => <option key={c} value={c}>{c}</option>)}
                   </Select>
                 </div>
               )}
@@ -1035,7 +1290,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
           )}
 
           {/* Ouro / A Receber / Pix / Vale-Troca — só condição */}
-          {COM_PARCELAS.includes(pagForma) && !COM_CARTAO.includes(pagForma) && pagForma !== "Dinheiro" && (
+          {COM_PARCELAS.includes(pagForma) && !COM_CARTAO.includes(pagForma) && pagForma !== "Dinheiro" && pagForma !== "Vale-Troca" && (
             <div className="mb-4 w-56">
               <Label>Condição de Pagamento</Label>
               <Select value={pagCondicao} onChange={e => setPagCondicao(e.target.value)}>
@@ -1044,70 +1299,109 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
             </div>
           )}
 
-          {/* Tabela de parcelas */}
-          {COM_PARCELAS.includes(pagForma) && parcelasRows.length > 0 && (
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <p className="text-sm font-semibold" style={{ color: "#374151" }}>Detalhamento das parcelas</p>
-                  <p className="text-xs" style={{ color: "#9CA3AF" }}>Configure o valor e data de cada parcela. Valores editados não serão redistribuídos automaticamente.</p>
-                </div>
-                <button onClick={equalizarParcelas}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium"
-                  style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
-                  ↺ Equalizar
+          {/* Vale-Troca — input + validar */}
+          {pagForma === "Vale-Troca" && totalVenda > 0 && (
+            <div
+              className="rounded-xl border p-4 mb-4 space-y-3"
+              style={{ borderColor: C.cremeBorder, backgroundColor: C.esmeraldaLt }}
+            >
+              <div className="flex items-center gap-2">
+                <Ticket size={16} style={{ color: C.esmeralda }} />
+                <span className="text-sm font-medium" style={{ color: C.esmeralda }}>
+                  Informe o numero do Vale-Troca
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={valeNumero}
+                  onChange={e => {
+                    setValeNumero(e.target.value);
+                    setValeValidacao(null);
+                  }}
+                  placeholder="VT-00001"
+                  className="flex-1 border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                  style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                  onKeyDown={e => e.key === "Enter" && (e.preventDefault(), validarValeTroca())}
+                />
+                <button
+                  type="button"
+                  onClick={validarValeTroca}
+                  disabled={!valeNumero.trim() || valeValidando}
+                  className="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                >
+                  {valeValidando ? <Loader2 size={14} className="animate-spin" /> : "Validar"}
                 </button>
               </div>
-              <div className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-                <table className="w-full text-sm">
-                  <thead style={{ backgroundColor: C.cremeBg }}>
-                    <tr>
-                      {["Nº", "Dias", "Data", "Valor"].map(h => (
-                        <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280" }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {parcelasRows.map((row, i) => (
-                      <tr key={i} className="border-t" style={{ borderColor: C.cremeBorder }}>
-                        <td className="px-3 py-2.5 text-xs w-8" style={{ color: "#9CA3AF" }}>{row.num}</td>
-                        <td className="px-3 py-2.5 w-24">
-                          <input type="number" value={row.dias} min={0}
-                            onChange={e => updateParcelaRow(i, "dias", e.target.value)}
-                            className="w-16 border rounded px-2 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
-                        </td>
-                        <td className="px-3 py-2.5 w-40">
-                          <input type="date" value={row.data}
-                            onChange={e => updateParcelaRow(i, "data", e.target.value)}
-                            className="border rounded px-2 py-1 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <input type="text" value={row.valor.toFixed(2).replace(".", ",")}
-                            onChange={e => updateParcelaRow(i, "valor", e.target.value)}
-                            className="w-full border rounded px-2 py-1 text-sm outline-none text-right tabular-nums" style={{ borderColor: C.cremeBorder }} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {/* Totais */}
-                <div className="grid grid-cols-2 border-t px-4 py-3 text-sm" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
-                  <div>
-                    <p className="text-xs mb-0.5" style={{ color: "#9CA3AF" }}>Total da venda</p>
-                    <p className="font-bold tabular-nums" style={{ color: "#374151" }}>{fmt(totalVenda)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs mb-0.5" style={{ color: "#9CA3AF" }}>Total das parcelas</p>
-                    {(() => {
-                      const soma = parcelasRows.reduce((s, r) => s + r.valor, 0);
-                      const ok = Math.abs(soma - totalVenda) < 0.02;
-                      return <p className="font-bold tabular-nums" style={{ color: ok ? "#059669" : "#D97706" }}>{fmt(soma)}</p>;
-                    })()}
+              {valeValidacao && (
+                <div
+                  className="rounded-lg border p-3 flex items-start gap-2"
+                  style={{
+                    borderColor: valeValidacao.ok ? "#A7F3D0" : "#FECACA",
+                    backgroundColor: valeValidacao.ok ? "#ECFDF5" : "#FEF2F2",
+                  }}
+                >
+                  {valeValidacao.ok ? (
+                    <CheckCircle size={16} className="flex-shrink-0 mt-0.5" style={{ color: "#065F46" }} />
+                  ) : (
+                    <AlertCircle size={16} className="flex-shrink-0 mt-0.5" style={{ color: "#991B1B" }} />
+                  )}
+                  <div className="text-xs flex-1" style={{ color: valeValidacao.ok ? "#065F46" : "#991B1B" }}>
+                    <p className="font-medium">
+                      {valeValidacao.ok ? "Vale-troca valido" : (valeValidacao.erro ?? "Vale invalido")}
+                    </p>
+                    {valeValidacao.ok && valeValidacao.valor_disponivel !== undefined && (
+                      <>
+                        <p className="mt-0.5">
+                          Saldo disponivel: <strong>{fmt(valeValidacao.valor_disponivel)}</strong>
+                          {valeValidacao.valor_disponivel > totalVenda && (
+                            <span className="ml-2">
+                              — troco (vale novo): <strong>{fmt(valeValidacao.valor_disponivel - totalVenda)}</strong>
+                            </span>
+                          )}
+                        </p>
+                        {valeValidacao.valor_disponivel < totalVenda && (
+                          <p className="mt-1.5 font-semibold" style={{ color: "#B45309" }}>
+                            Saldo insuficiente — faltam {fmt(totalVenda - valeValidacao.valor_disponivel)}.
+                            Selecione &quot;Múltiplas&quot; como forma de pagamento para combinar o vale com outro método.
+                          </p>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
+
+          {/* QR Code Pix via Mercado Pago (quando forma=Pix) */}
+          {pagForma === "Pix" && totalVenda > 0 && (
+            <PixQrInline
+              vendaId={null}
+              numeroVenda="Nova"
+              valor={totalVenda}
+              obterVendaId={salvarRascunhoParaPix}
+              onPagamentoConfirmado={(vendaIdConfirmado) => {
+                router.push(`/vendas/${vendaIdConfirmado}`);
+              }}
+            />
+          )}
+
+          {/* Cartão de Crédito via Mercado Pago (link ou maquininha) */}
+          {pagForma === "Cartão de Crédito" && totalVenda > 0 && (
+            <CartaoInline
+              vendaId={null}
+              numeroVenda="Nova"
+              valor={totalVenda}
+              installments={pagCondicao === "À vista" ? 1 : parseInt(pagCondicao) || 1}
+              obterVendaId={salvarRascunhoParaPix}
+              onPagamentoConfirmado={(vendaIdConfirmado) => {
+                router.push(`/vendas/${vendaIdConfirmado}`);
+              }}
+            />
+          )}
+
 
           {/* Múltiplas */}
           {pagForma === "Múltiplas" && (() => {
@@ -1118,30 +1412,95 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                 <div className="flex flex-wrap items-end gap-2 mb-3">
                   <div className="flex-1 min-w-36">
                     <Label>Forma</Label>
-                    <Select value={pagMultForma} onChange={e => setPagMultForma(e.target.value)}>
+                    <Select value={pagMultForma} onChange={e => { setPagMultForma(e.target.value); setPagMultParcelas(1); setValeValidacao(null); setValeNumero(""); setPagValor(""); }}>
                       <optgroup label="Métodos de Pagamento">
                         {FORMAS_PAGAMENTO.filter(f => f !== "Múltiplas").map(f => <option key={f} value={f}>{f}</option>)}
                       </optgroup>
                     </Select>
                   </div>
-                  <div className="flex-1 min-w-28">
-                    <Label>Valor{restante > 0 && <span className="ml-1 font-normal text-xs" style={{ color: "#9CA3AF" }}>(restante: {fmt(restante)})</span>}</Label>
-                    <input type="text" value={pagValor} onChange={e => setPagValor(e.target.value)}
-                      placeholder={restante > 0 ? restante.toFixed(2).replace(".", ",") : "0,00"}
-                      onKeyDown={e => e.key === "Enter" && handleAddPagamento()}
-                      className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
-                  </div>
-                  <button onClick={handleAddPagamento} disabled={restante <= 0}
+                  {pagMultForma === "Vale-Troca" ? (
+                    /* Vale-Troca: input do número + Validar substituem o campo de valor */
+                    <div className="flex-1 min-w-48 flex gap-2">
+                      <div className="flex-1">
+                        <Label>Número do Vale</Label>
+                        <input type="text" value={valeNumero}
+                          onChange={e => { setValeNumero(e.target.value); setValeValidacao(null); setPagValor(""); }}
+                          placeholder="VT-00001"
+                          className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none"
+                          style={{ borderColor: valeValidacao?.ok ? "#6EE7B7" : C.cremeBorder, color: "#374151" }}
+                          onKeyDown={e => e.key === "Enter" && (e.preventDefault(), validarValeTroca())}
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <button type="button" onClick={async () => { await validarValeTroca(); }}
+                          disabled={!valeNumero.trim() || valeValidando}
+                          className="px-3 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40 whitespace-nowrap"
+                          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                          {valeValidando ? <Loader2 size={14} className="animate-spin" /> : "Validar"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex-1 min-w-28">
+                        <Label>Valor{restante > 0 && <span className="ml-1 font-normal text-xs" style={{ color: "#9CA3AF" }}>(restante: {fmt(restante)})</span>}</Label>
+                        <input type="text" value={pagValor} onChange={e => setPagValor(e.target.value)}
+                          placeholder={restante > 0 ? restante.toFixed(2).replace(".", ",") : "0,00"}
+                          onKeyDown={e => e.key === "Enter" && handleAddPagamento()}
+                          className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                      </div>
+                      {pagMultForma === "Cartão de Crédito" && (
+                        <div className="min-w-28">
+                          <Label>Parcelas</Label>
+                          <Select value={pagMultParcelas} onChange={e => setPagMultParcelas(Number(e.target.value))}>
+                            {CONDICOES.map((c, i) => (
+                              <option key={c} value={i === 0 ? 1 : i + 1}>{c}</option>
+                            ))}
+                          </Select>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (pagMultForma === "Vale-Troca") {
+                        if (!valeValidacao?.ok || !valeValidacao.valor_disponivel) return;
+                        const valorValeDisp = Math.min(valeValidacao.valor_disponivel, restante);
+                        setPagamentos(prev => [...prev, { _key: uid(), forma: "Vale-Troca", valor: valorValeDisp, parcelas: 1, vale_numero: valeNumero.trim() }]);
+                        setValeNumero(""); setValeValidacao(null); setPagValor("");
+                      } else {
+                        handleAddPagamento();
+                      }
+                    }}
+                    disabled={restante <= 0 || (pagMultForma === "Vale-Troca" ? !valeValidacao?.ok : false)}
                     className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
                     style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                     <Plus size={13} /> Adicionar
                   </button>
                 </div>
+                {/* Feedback validação vale em Múltiplas */}
+                {pagMultForma === "Vale-Troca" && valeValidacao && (
+                  <div className="rounded-lg border p-3 flex items-start gap-2 mb-3"
+                    style={{ borderColor: valeValidacao.ok ? "#A7F3D0" : "#FECACA", backgroundColor: valeValidacao.ok ? "#ECFDF5" : "#FEF2F2" }}>
+                    {valeValidacao.ok
+                      ? <CheckCircle size={16} className="flex-shrink-0 mt-0.5" style={{ color: "#065F46" }} />
+                      : <AlertCircle size={16} className="flex-shrink-0 mt-0.5" style={{ color: "#991B1B" }} />}
+                    <div className="text-xs" style={{ color: valeValidacao.ok ? "#065F46" : "#991B1B" }}>
+                      <p className="font-medium">{valeValidacao.ok ? "Vale-troca válido" : (valeValidacao.erro ?? "Vale inválido")}</p>
+                      {valeValidacao.ok && valeValidacao.valor_disponivel !== undefined && (
+                        <p className="mt-0.5">Saldo disponível: <strong>{fmt(Math.min(valeValidacao.valor_disponivel, restante))}</strong> será adicionado</p>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {pagamentos.length > 0 && (
                   <div className="space-y-1.5">
                     {pagamentos.map(p => (
                       <div key={p._key} className="flex items-center justify-between px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }}>
-                        <span style={{ color: "#374151" }}>{p.forma}</span>
+                        <span style={{ color: "#374151" }}>
+                          {p.forma}
+                          {p.vale_numero && <span className="ml-1.5 text-xs font-mono" style={{ color: "#6B7280" }}>({p.vale_numero})</span>}
+                        </span>
                         <div className="flex items-center gap-3">
                           <span className="tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(p.valor)}</span>
                           <button onClick={() => setPagamentos(prev => prev.filter(x => x._key !== p._key))} className="text-gray-300 hover:text-red-400"><X size={13} /></button>
@@ -1152,6 +1511,84 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                       <span style={{ color: "#6B7280" }}>Restante a pagar</span>
                       <span className="tabular-nums font-semibold" style={{ color: restante > 0.01 ? "#D97706" : "#059669" }}>{fmt(restante)}</span>
                     </div>
+                  </div>
+                )}
+
+                {/* Pix inline dentro de Múltiplas */}
+                {pagamentos.some(p => p.forma === "Pix") && totalVenda > 0 && (
+                  <div className="mt-3">
+                    <PixQrInline
+                      vendaId={null}
+                      numeroVenda="Nova"
+                      valor={pagamentos.find(p => p.forma === "Pix")!.valor}
+                      obterVendaId={salvarRascunhoParaPix}
+                      onPagamentoConfirmado={(vendaIdConfirmado) => {
+                        router.push(`/vendas/${vendaIdConfirmado}`);
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Cartão inline dentro de Múltiplas */}
+                {pagamentos.some(p => p.forma === "Cartão de Crédito") && totalVenda > 0 && (
+                  <div className="mt-3">
+                    <CartaoInline
+                      vendaId={null}
+                      numeroVenda="Nova"
+                      valor={pagamentos.find(p => p.forma === "Cartão de Crédito")!.valor}
+                      installments={pagamentos.find(p => p.forma === "Cartão de Crédito")!.parcelas || pagMultParcelas}
+                      obterVendaId={salvarRascunhoParaPix}
+                      onPagamentoConfirmado={(vendaIdConfirmado) => {
+                        router.push(`/vendas/${vendaIdConfirmado}`);
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* A Receber inline dentro de Múltiplas — botão solicitar aprovação */}
+                {pagamentos.some(p => p.forma === "A Receber") && restante < 0.01 && totalVenda > 0 && (
+                  <div className="mt-3 rounded-xl border p-4 space-y-2" style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB" }}>
+                    <p className="text-sm font-medium" style={{ color: "#374151" }}>
+                      A Receber — {fmt(pagamentos.find(p => p.forma === "A Receber")!.valor)}
+                    </p>
+                    {aprovacaoEnviada ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: "#D1FAE5", color: "#065F46" }}>
+                          Aprovação solicitada
+                        </span>
+                        <button onClick={() => router.push(`/vendas/${vendaIdCriada}`)}
+                          className="text-xs underline" style={{ color: C.esmeralda }}>
+                          Ver venda
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={async () => {
+                          setSaving(true); setSaveErr("");
+                          try {
+                            if (!cliente) throw new Error("Selecione um cliente");
+                            if (itens.length === 0) throw new Error("Adicione ao menos 1 item");
+                            // 1. Salvar rascunho com pagamentos
+                            const body = montarBody();
+                            const res = await fetch("/api/vendas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                            const data = await res.json() as { id: number; error?: string };
+                            if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+                            // 2. Solicitar aprovação de crédito
+                            const apRes = await fetch(`/api/vendas/${data.id}/solicitar-aprovacao`, { method: "POST" });
+                            const apData = await apRes.json();
+                            if (!apRes.ok) throw new Error(apData.error ?? "Erro ao solicitar aprovação");
+                            setVendaIdCriada(data.id);
+                            setAprovacaoEnviada(true);
+                          } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro"); }
+                          finally { setSaving(false); }
+                        }}
+                        disabled={saving || itens.length === 0 || !cliente || vendedorSel === "" || formaEnvioId === ""}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                        style={{ backgroundColor: "#D97706", color: "#fff" }}>
+                        {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                        Solicitar Aprovação
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1273,16 +1710,62 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               {saving ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null}
               Salvar Rascunho
             </button>
-            <button onClick={() => submit("aprovado")} disabled={saving || itens.length === 0}
-              className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
-              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-              Concluir Venda
-            </button>
+            {/* Esconde botão principal quando tem A Receber (já tem botão inline na seção de pagamento) */}
+            {!temAReceberNova && (() => {
+              const camposFaltando: string[] = [];
+              if (!cliente) camposFaltando.push("Cliente");
+              if (vendedorSel === "") camposFaltando.push("Vendedor");
+              if (formaEnvioId === "") camposFaltando.push("Forma de envio");
+              const podeConcluir = !saving && itens.length > 0 && pagamentoCobre && camposFaltando.length === 0;
+              return (
+                <div className="relative group">
+                  <button onClick={() => submit("aprovado")} disabled={!podeConcluir}
+                    className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                    style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                    {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                    Concluir Venda
+                  </button>
+                  {camposFaltando.length > 0 && (
+                    <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block w-48 p-2 rounded-lg border bg-white shadow-lg text-xs z-10"
+                      style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
+                      Preencha antes de concluir:
+                      {camposFaltando.map(f => <p key={f} className="text-red-500">• {f}</p>)}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
       </div>
+
+      {/* Toast Vale-Troca: troco gerado */}
+      {valeTrocoToast && (
+        <div
+          className="fixed bottom-4 right-4 z-50 rounded-xl shadow-lg border p-4 max-w-sm animate-in slide-in-from-bottom-4"
+          style={{ borderColor: "#A7F3D0", backgroundColor: "#ECFDF5" }}
+        >
+          <div className="flex items-start gap-2">
+            <Ticket size={18} className="flex-shrink-0 mt-0.5" style={{ color: "#065F46" }} />
+            <div className="flex-1">
+              <p className="text-sm font-semibold" style={{ color: "#065F46" }}>
+                Novo vale-troco gerado!
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: "#065F46" }}>
+                <strong>{valeTrocoToast.numero}</strong> — {fmt(valeTrocoToast.valor)}
+              </p>
+            </div>
+            <button
+              onClick={() => setValeTrocoToast(null)}
+              className="p-1 rounded hover:bg-white/50"
+              style={{ color: "#065F46" }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

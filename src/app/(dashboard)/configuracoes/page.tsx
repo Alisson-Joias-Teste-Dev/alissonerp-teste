@@ -27,6 +27,7 @@ export default async function ConfiguracoesPage() {
     sql`
       SELECT
         u.id, u.email, u.nome, u.role, u.ativo, u.created_at,
+        u.deposito_id, u.vendedor_id,
         u.tipos_ordem_permitidos,
         u.tipos_protocolo_permitidos,
         u.is_operador_service,

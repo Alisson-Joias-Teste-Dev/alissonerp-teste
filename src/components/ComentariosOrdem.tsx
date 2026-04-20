@@ -106,6 +106,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   // Foto no comentário
   const [fotoFile, setFotoFile] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+  const [fotoBase64, setFotoBase64] = useState<string | null>(null);
   const fotoInputRef = useRef<HTMLInputElement>(null);
 
   // @mention
@@ -225,6 +226,15 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   }
 
   function handleTextoKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter sem Shift envia o comentário (quando dropdown de menção não está aberto)
+    if (e.key === "Enter" && !e.shiftKey && (!showMention || mentionResults.length === 0)) {
+      if (texto.trim() && !enviando) {
+        e.preventDefault();
+        enviar();
+      }
+      return;
+    }
+
     if (!showMention || mentionResults.length === 0) return;
 
     if (e.key === "ArrowDown") {
@@ -262,12 +272,23 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
     setTimeout(() => textareaRef.current?.focus(), 0);
   }
 
+  function lerBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
   function selecionarFoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (fotoPreview) URL.revokeObjectURL(fotoPreview);
     setFotoFile(file);
     setFotoPreview(URL.createObjectURL(file));
+    // Pré-carrega base64 para envio server-side
+    lerBase64(file).then(setFotoBase64).catch(() => setFotoBase64(null));
     e.target.value = "";
   }
 
@@ -275,41 +296,17 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
     if (fotoPreview) URL.revokeObjectURL(fotoPreview);
     setFotoFile(null);
     setFotoPreview(null);
+    setFotoBase64(null);
   }
 
   async function enviar() {
     if (!texto.trim() || enviando) return;
     setEnviando(true);
     try {
-      let fotoPath: string | null = null;
-
-      // Upload da foto se selecionada
-      if (fotoFile) {
-        const supabase = createClient();
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const ext = fotoFile.name.split(".").pop()?.toLowerCase() ?? "jpg";
-          const timestamp = Date.now();
-          fotoPath = `comentarios/${ordemId}/${timestamp}-${user.id.substring(0, 8)}.${ext}`;
-
-          const { error: uploadErr } = await supabase.storage
-            .from("ordem-fotos")
-            .upload(fotoPath, fotoFile, {
-              contentType: fotoFile.type || "image/jpeg",
-              upsert: false,
-            });
-
-          if (uploadErr) {
-            console.error("Erro upload foto comentário:", uploadErr.message);
-            fotoPath = null; // envia comentário sem foto se upload falhar
-          }
-        }
-      }
-
       const res = await fetch(`/api/ordens/${ordemId}/comentarios`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto: texto.trim(), mencoes, foto_path: fotoPath }),
+        body: JSON.stringify({ texto: texto.trim(), mencoes, foto_base64: fotoBase64 ?? null }),
       });
       if (res.ok) {
         setTexto("");
