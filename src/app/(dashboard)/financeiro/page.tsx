@@ -1,13 +1,15 @@
 import sql from "@/lib/db";
+import { createServerSupabase } from "@/lib/supabase/server";
 import FinanceiroClient from "./FinanceiroClient";
 
 export const dynamic = 'force-dynamic';
 
 export default async function FinanceiroPage() {
-  // IMPORTANTE: colunas DATE/TIMESTAMP retornadas como ::text pra evitar
-  // que o Next serialize como objeto Date (quebra isVencido() e outras
-  // funções que fazem .slice() nas strings).
-  const [pagar, receber, extratos, lancamentos] = await Promise.all([
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const [usuario, pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas] = await Promise.all([
+    user ? sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1` : Promise.resolve([]),
     sql`
       SELECT
         id, descricao, valor,
@@ -27,9 +29,8 @@ export default async function FinanceiroPage() {
         cr.situacao, cr.categoria, cr.obs,
         cr.created_at::text AS created_at,
         cr.venda_erp_id,
-        -- Soma de valor_liquido dos pagamentos MP confirmados da venda
-        -- (NULL quando não há pagamento MP — ex: CRs de dinheiro, pix
-        --  manual). Fallback pra valor bruto quando líquido não disponível.
+        v.created_at::text  AS venda_created_at,
+        v.numero_venda      AS venda_numero,
         (
           SELECT SUM(p.valor_liquido)
           FROM alissonerp.pagamentos_venda p
@@ -45,6 +46,7 @@ export default async function FinanceiroPage() {
             AND p.taxas_mp IS NOT NULL
         ) AS taxas_mp
       FROM alissonerp.contas_receber cr
+      LEFT JOIN alissonerp.vendas_erp v ON v.id = cr.venda_erp_id
       ORDER BY cr.data_vencimento ASC NULLS LAST, cr.id DESC
       LIMIT 200
     `,
@@ -71,7 +73,36 @@ export default async function FinanceiroPage() {
       ORDER BY lb.data_transacao DESC, lb.id DESC
       LIMIT 300
     `,
+    sql`
+      SELECT
+        p.id,
+        p.forma,
+        p.valor,
+        p.caixa_baixa_id,
+        p.data_confirmacao::text AS data_confirmacao,
+        v.numero_venda,
+        v.id AS venda_id,
+        vend.nome AS vendedor_nome
+      FROM alissonerp.pagamentos_venda p
+      JOIN alissonerp.vendas_erp v ON v.id = p.venda_id
+      LEFT JOIN public.vendedores vend ON vend.id_vendedor = v.vendedor_id
+      WHERE p.status = 'confirmado'
+        AND p.forma NOT IN ('Vale-Troca', 'A Receber')
+      ORDER BY p.data_confirmacao DESC NULLS LAST, p.id DESC
+      LIMIT 1000
+    `,
+    sql`
+      SELECT
+        id, total, qtd_pagamentos,
+        realizado_nome, obs,
+        created_at::text AS created_at
+      FROM alissonerp.fin_caixa_baixas
+      ORDER BY id DESC
+      LIMIT 50
+    `,
   ]);
+
+  const userRole = (usuario as any[])[0]?.role ?? null;
 
   return (
     <FinanceiroClient
@@ -79,6 +110,9 @@ export default async function FinanceiroPage() {
       receber={receber as any[]}
       extratos={extratos as any[]}
       lancamentos={lancamentos as any[]}
+      caixaPagamentos={caixaPagamentos as any[]}
+      caixaBaixas={caixaBaixas as any[]}
+      userRole={userRole}
     />
   );
 }

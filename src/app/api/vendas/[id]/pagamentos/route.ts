@@ -91,18 +91,19 @@ export async function POST(
     }
   }
 
-  const statusPagamento = 'pendente'; // Sempre pendente na criação
+  const isDinheiro = body.forma === 'Dinheiro';
 
   const [novo] = await sql`
     INSERT INTO alissonerp.pagamentos_venda (
-      venda_id, forma, gateway, valor, parcelas, status
+      venda_id, forma, gateway, valor, parcelas, status, data_confirmacao
     ) VALUES (
       ${vendaId},
       ${body.forma},
       ${body.gateway ?? null},
       ${body.valor},
       ${body.parcelas ?? 1},
-      ${statusPagamento}
+      ${isDinheiro ? 'confirmado' : 'pendente'},
+      ${isDinheiro ? sql`now()` : null}
     )
     RETURNING id
   `;

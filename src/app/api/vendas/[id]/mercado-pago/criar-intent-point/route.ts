@@ -43,7 +43,7 @@ export async function POST(
     device_id: string;
     valor?: number;
     installments?: number;
-    payment_type?: "credit_card" | "debit_card";
+    payment_type?: "credit_card" | "debit_card" | "pix";
   };
 
   if (!body.device_id) {
