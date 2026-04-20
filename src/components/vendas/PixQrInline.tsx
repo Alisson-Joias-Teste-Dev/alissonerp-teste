@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import QRCode from "qrcode";
 import {
   QrCode, Copy, Check, Loader2, MessageCircle, CheckCircle, AlertTriangle, RefreshCw,
 } from "lucide-react";
@@ -47,6 +48,8 @@ interface Props {
   onPagamentoConfirmado: (vendaId: number) => void;
   /** Se true, não mostra o componente (quando venda já tem pag MP confirmado) */
   ocultar?: boolean;
+  /** Endpoint alternativo. Default: "criar-pix". Use "criar-pix-instore" para taxa zero. */
+  endpoint?: "criar-pix" | "criar-pix-instore";
 }
 
 export default function PixQrInline({
@@ -56,6 +59,7 @@ export default function PixQrInline({
   obterVendaId,
   onPagamentoConfirmado,
   ocultar,
+  endpoint = "criar-pix",
 }: Props) {
   // vendaId "efetivo" — inicialmente o prop, mas pode ser atualizado quando
   // o componente salva rascunho via obterVendaId.
@@ -86,10 +90,11 @@ export default function PixQrInline({
         const data = await res.json();
         const temMpConfirmado = (data.pagamentos ?? []).some(
           (p: { gateway?: string; status: string }) =>
-            (p.gateway === "Mercado Pago Online" || p.gateway === "Mercado Pago Point")
+            (p.gateway === "Mercado Pago Online" || p.gateway === "Mercado Pago Point" ||
+             p.gateway === "Mercado Pago Pix" || p.gateway === "Mercado Pago Pix In-Store")
             && p.status === "confirmado"
         );
-        if (data.situacao === "concluido" || temMpConfirmado) {
+        if (data.situacao === "concluido" || data.situacao === "aprovado" || temMpConfirmado) {
           setPago(true);
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
           setTimeout(() => onPagamentoConfirmado(idParaMonitorar), 2500);
@@ -121,7 +126,7 @@ export default function PixQrInline({
 
       // Usa o endpoint criar-pix (Payment API, PIX nativo) em vez do
       // criar-link (Preference, checkout MP).
-      const res = await fetch(`/api/vendas/${idParaUsar}/mercado-pago/criar-pix`, {
+      const res = await fetch(`/api/vendas/${idParaUsar}/mercado-pago/${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ valor }),
@@ -142,7 +147,16 @@ export default function PixQrInline({
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Erro ao gerar QR Code Pix");
       setPixCode(body.qr_code);
-      setPixQrBase64(body.qr_code_base64);
+      // In-Store API não retorna base64 — gera client-side
+      if (body.qr_code_base64) {
+        setPixQrBase64(body.qr_code_base64);
+      } else if (body.qr_code) {
+        const dataUrl = await QRCode.toDataURL(body.qr_code, {
+          width: 220, margin: 1,
+          color: { dark: C.esmeralda, light: "#ffffff" },
+        });
+        setPixQrBase64(dataUrl.replace(/^data:image\/\w+;base64,/, ""));
+      }
       iniciarPolling(idParaUsar);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro");

@@ -5,6 +5,7 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   RefreshCw,
+  Wallet,
   CheckCircle,
   Clock,
   AlertTriangle,
@@ -18,6 +19,9 @@ import {
   TrendingUp,
   Calendar,
   Send,
+  Banknote,
+  CreditCard,
+  Smartphone,
 } from "lucide-react";
 import { dispararWebhook } from "@/lib/webhooks";
 
@@ -40,6 +44,26 @@ const C = {
 };
 
 // ─── types ───────────────────────────────────────────────────────────────────
+
+interface CaixaDinheiro {
+  id: number;
+  forma: string;
+  valor: number;
+  caixa_baixa_id: number | null;
+  data_confirmacao: string | null;
+  numero_venda: string;
+  vendedor_nome: string | null;
+  venda_id: number;
+}
+
+interface CaixaBaixa {
+  id: number;
+  total: number;
+  qtd_pagamentos: number;
+  realizado_nome: string | null;
+  obs: string | null;
+  created_at: string;
+}
 
 interface ContaPagar {
   id: number;
@@ -68,6 +92,8 @@ interface ContaReceber {
   categoria: string | null;
   obs: string | null;
   venda_erp_id?: number | null;
+  venda_created_at?: string | null;
+  venda_numero?: string | null;
   valor_liquido?: number | null;
   taxas_mp?: number | null;
 }
@@ -101,6 +127,9 @@ interface Props {
   receber: ContaReceber[];
   extratos: Extrato[];
   lancamentos: Lancamento[];
+  caixaPagamentos: CaixaDinheiro[];
+  caixaBaixas: CaixaBaixa[];
+  userRole: string | null;
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -165,6 +194,7 @@ function KpiCard({
 function ContaRow({
   descricao, valor, valorLiquido, taxasMp, vencimento, liquidacao,
   situacao, categoria, vencido, onAction, actionLabel, actionLoading,
+  vendaId, vendaNumero, vendaCreatedAt,
 }: {
   descricao: string;
   valor: number;
@@ -178,15 +208,31 @@ function ContaRow({
   onAction?: () => void;
   actionLabel?: string;
   actionLoading?: boolean;
+  vendaId?: number | null;
+  vendaNumero?: string | null;
+  vendaCreatedAt?: string | null;
 }) {
   const st = vencido ? SITUACAO["vencido"] : (SITUACAO[situacao] ?? { label: situacao, bg: C.cinzaLt, color: C.cinza, icon: Clock });
   const Icon = st.icon;
   const temLiquidoDiferente = valorLiquido != null && valorLiquido > 0 && Math.abs(valorLiquido - valor) > 0.001;
+  const fmtDatetime = (d: string | null) => {
+    if (!d) return null;
+    return new Date(d).toLocaleString("pt-BR", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
   return (
     <tr className="hover:bg-stone-50 transition-colors border-b" style={{ borderColor: C.cremeBorder }}>
       <td className="px-4 py-3 max-w-[260px]">
-        <p className="text-sm truncate font-medium" style={{ color: "#1A1A1A" }}>{descricao}</p>
-        {categoria && <p className="text-[11px]" style={{ color: C.cinza }}>{categoria}</p>}
+        {vendaId ? (
+          <a href={`/vendas/${vendaId}`} className="text-sm truncate font-medium block hover:underline" style={{ color: C.esmeralda }}>
+            {vendaNumero ? `Venda #${vendaNumero}` : descricao}
+          </a>
+        ) : (
+          <p className="text-sm truncate font-medium" style={{ color: "#1A1A1A" }}>{descricao}</p>
+        )}
+        {vendaCreatedAt && (
+          <p className="text-[11px]" style={{ color: C.cinza }}>{fmtDatetime(vendaCreatedAt)}</p>
+        )}
+        {!vendaCreatedAt && categoria && <p className="text-[11px]" style={{ color: C.cinza }}>{categoria}</p>}
       </td>
       <td className="px-4 py-3 text-right tabular-nums font-semibold whitespace-nowrap" style={{ color: vencido ? C.vermelho : "#374151" }}>
         {fmt(Number(valor))}
@@ -829,30 +875,71 @@ function TabPagar({ pagar }: { pagar: ContaPagar[] }) {
 
 // ─── TabReceber ──────────────────────────────────────────────────────────────
 
-function TabReceber({ receber }: { receber: ContaReceber[] }) {
+type Periodo = "hoje" | "7dias" | "30dias" | "mes" | "personalizado";
+
+function calcPeriodo(periodo: Periodo, dataInicio: string, dataFim: string): { ini: string; fim: string } {
+  const hoje = new Date().toISOString().slice(0, 10);
+  if (periodo === "hoje") return { ini: hoje, fim: hoje };
+  if (periodo === "7dias") {
+    const d = new Date(); d.setDate(d.getDate() - 6);
+    return { ini: d.toISOString().slice(0, 10), fim: hoje };
+  }
+  if (periodo === "30dias") {
+    const d = new Date(); d.setDate(d.getDate() - 29);
+    return { ini: d.toISOString().slice(0, 10), fim: hoje };
+  }
+  if (periodo === "mes") {
+    const d = new Date();
+    return { ini: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`, fim: hoje };
+  }
+  return { ini: dataInicio, fim: dataFim };
+}
+
+function TabReceber({ receber, saldoLiquido }: { receber: ContaReceber[]; saldoLiquido: number }) {
   const [filtro, setFiltro] = useState("todos");
   const [lista, setLista] = useState(receber);
+  const [showPendentes, setShowPendentes] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [formSaving, setFormSaving] = useState(false);
   const [actionId, setActionId] = useState<number | null>(null);
   const [form, setForm] = useState({ descricao: "", valor: "", data_vencimento: "", categoria: "", obs: "" });
+  const [periodo, setPeriodo] = useState<Periodo>("30dias");
+  const hoje = new Date().toISOString().slice(0, 10);
+  const [dataInicio, setDataInicio] = useState(hoje);
+  const [dataFim, setDataFim] = useState(hoje);
 
   const isRecebido = (s: string) => s === "pago" || s === "recebido";
 
+  const { ini, fim } = calcPeriodo(periodo, dataInicio, dataFim);
+  const recebidoNoPeriodo = lista.filter(r =>
+    isRecebido(r.situacao) &&
+    r.data_recebimento != null &&
+    r.data_recebimento.slice(0, 10) >= ini &&
+    r.data_recebimento.slice(0, 10) <= fim
+  );
+
   const totalPendente = lista.filter(r => r.situacao === "pendente").reduce((s, r) => s + Number(r.valor), 0);
   const totalVencido  = lista.filter(r => isVencido(r.data_vencimento, r.situacao)).reduce((s, r) => s + Number(r.valor), 0);
-  const totalLiquido  = lista.filter(r => isRecebido(r.situacao)).reduce((s, r) => s + Number(r.valor_liquido ?? r.valor), 0);
-  const totalTaxas    = lista.filter(r => isRecebido(r.situacao)).reduce((s, r) => s + Number(r.taxas_mp ?? 0), 0);
+  const totalLiquido  = recebidoNoPeriodo.reduce((s, r) => s + Number(r.valor_liquido ?? r.valor), 0);
+  const totalTaxas    = recebidoNoPeriodo.reduce((s, r) => s + Number(r.taxas_mp ?? 0), 0);
   const total7  = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) >= 0 && diasAte(r.data_vencimento) <= 7).reduce((s, r) => s + Number(r.valor), 0);
   const total15 = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) >= 0 && diasAte(r.data_vencimento) <= 15).reduce((s, r) => s + Number(r.valor), 0);
   const total30 = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) >= 0 && diasAte(r.data_vencimento) <= 30).reduce((s, r) => s + Number(r.valor), 0);
 
   const filtradas = useMemo(() => {
-    if (filtro === "vencido") return lista.filter(r => isVencido(r.data_vencimento, r.situacao));
-    if (filtro === "todos") return lista;
-    if (filtro === "recebido") return lista.filter(r => isRecebido(r.situacao));
-    return lista.filter(r => r.situacao === filtro);
-  }, [lista, filtro]);
+    let base: ContaReceber[];
+    if (filtro === "vencido") base = lista.filter(r => isVencido(r.data_vencimento, r.situacao));
+    else if (filtro === "todos") base = lista;
+    else if (filtro === "recebido") base = lista.filter(r => isRecebido(r.situacao));
+    else base = lista.filter(r => r.situacao === filtro);
+    // Aplica filtro de período ao data_recebimento nos registros já recebidos
+    return base.filter(r => {
+      if (!isRecebido(r.situacao)) return true;
+      if (!r.data_recebimento) return true;
+      const d = r.data_recebimento.slice(0, 10);
+      return d >= ini && d <= fim;
+    });
+  }, [lista, filtro, ini, fim]);
 
   async function handleNovaConta() {
     if (!form.descricao.trim() || !form.valor) return;
@@ -905,8 +992,95 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
     setActionId(null);
   }
 
+  const pendentes = lista.filter(r => r.situacao === "pendente");
+
   return (
     <div className="space-y-5">
+
+      {/* Card Saldo Líquido — clicável */}
+      <div>
+        <button
+          onClick={() => setShowPendentes(v => !v)}
+          className="w-full text-left rounded-xl bg-white px-5 py-4 border flex items-center justify-between gap-3 hover:shadow-sm transition-shadow"
+          style={{ borderColor: saldoLiquido >= 0 ? C.verde : C.vermelho, borderWidth: 1.5 }}
+        >
+          <div>
+            <p className="text-[11px] uppercase tracking-wider font-medium" style={{ color: C.cinza }}>Saldo Líquido Pendente</p>
+            <p className="text-2xl font-bold tabular-nums mt-0.5" style={{ color: saldoLiquido >= 0 ? C.verde : C.vermelho }}>
+              {fmt(saldoLiquido)}
+            </p>
+            <p className="text-xs mt-1" style={{ color: C.cinza }}>
+              {pendentes.length} conta{pendentes.length !== 1 ? "s" : ""} pendente{pendentes.length !== 1 ? "s" : ""} · clique para ver detalhes
+            </p>
+          </div>
+          <TrendingUp size={28} style={{ color: saldoLiquido >= 0 ? C.verde : C.vermelho, opacity: 0.4, flexShrink: 0 }} />
+        </button>
+
+        {showPendentes && (
+          <div className="mt-2 rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
+                    <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Descrição</th>
+                    <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Vencimento</th>
+                    <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Status</th>
+                    <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendentes.length === 0 && (
+                    <tr><td colSpan={4} className="px-4 py-8 text-center text-sm" style={{ color: C.cinza }}>Nenhuma conta pendente.</td></tr>
+                  )}
+                  {pendentes.map(r => {
+                    const vencido = isVencido(r.data_vencimento, r.situacao);
+                    const dias = diasAte(r.data_vencimento);
+                    return (
+                      <tr key={r.id} className="border-t hover:bg-gray-50 transition-colors" style={{ borderColor: C.cremeBorder }}>
+                        <td className="px-4 py-3 font-medium" style={{ color: "#1A1A1A" }}>
+                          {r.venda_erp_id ? (
+                            <a href={`/vendas/${r.venda_erp_id}`} className="hover:underline" style={{ color: C.esmeralda }}>
+                              {r.descricao}
+                            </a>
+                          ) : r.descricao}
+                        </td>
+                        <td className="px-4 py-3 text-xs" style={{ color: vencido ? C.vermelho : C.cinza }}>
+                          {fmtDate(r.data_vencimento)}
+                        </td>
+                        <td className="px-4 py-3">
+                          {vencido ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>
+                              <AlertTriangle size={11} /> Vencido há {Math.abs(dias)} dia{Math.abs(dias) !== 1 ? "s" : ""}
+                            </span>
+                          ) : r.data_vencimento ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: C.verdeLt, color: C.verde }}>
+                              <Clock size={11} /> Vence em {dias} dia{dias !== 1 ? "s" : ""}
+                            </span>
+                          ) : (
+                            <span className="text-xs" style={{ color: C.cinza }}>Sem vencimento</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: vencido ? C.vermelho : "#374151" }}>
+                          {fmt(Number(r.valor))}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-3 border-t flex items-center justify-between" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+              <p className="text-xs" style={{ color: C.vermelho }}>
+                {pendentes.filter(r => isVencido(r.data_vencimento, r.situacao)).length} vencida{pendentes.filter(r => isVencido(r.data_vencimento, r.situacao)).length !== 1 ? "s" : ""}
+              </p>
+              <p className="text-xs tabular-nums font-medium" style={{ color: C.cinza }}>
+                Total pendente: <strong>{fmt(totalPendente)}</strong>
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Total Vencido" value={fmt(totalVencido)} valueColor={C.vermelho} icon={AlertTriangle} accent={C.vermelho} sub="recebimentos em atraso" />
@@ -915,12 +1089,54 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
         <KpiCard label="Próx. 30 dias"  value={fmt(total30)} valueColor={C.verde} icon={Calendar} accent={C.verde} />
       </div>
 
-      {/* Recebido líquido */}
-      {totalLiquido > 0 && (
-        <div className="rounded-xl bg-white p-4 border flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
+      {/* Recebido líquido com filtro de período */}
+      <div className="rounded-xl bg-white border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+        <div className="px-4 py-3 border-b flex items-center justify-between gap-3 flex-wrap" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+          <p className="text-xs font-semibold" style={{ color: "#1A1A1A" }}>Já Recebido</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(["hoje", "7dias", "30dias", "mes", "personalizado"] as Periodo[]).map(p => (
+              <button
+                key={p}
+                onClick={() => setPeriodo(p)}
+                className="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border"
+                style={{
+                  backgroundColor: periodo === p ? C.esmeralda : "transparent",
+                  borderColor: periodo === p ? C.esmeralda : C.cremeBorder,
+                  color: periodo === p ? C.creme : C.cinza,
+                }}
+              >
+                {p === "hoje" ? "Hoje" : p === "7dias" ? "7 dias" : p === "30dias" ? "30 dias" : p === "mes" ? "Este mês" : "Personalizado"}
+              </button>
+            ))}
+          </div>
+        </div>
+        {periodo === "personalizado" && (
+          <div className="px-4 py-3 border-b flex items-center gap-3 flex-wrap" style={{ borderColor: C.cremeBorder }}>
+            <div className="flex items-center gap-2">
+              <label className="text-xs" style={{ color: C.cinza }}>De</label>
+              <input
+                type="date" value={dataInicio}
+                onChange={e => setDataInicio(e.target.value)}
+                className="rounded-lg border px-2 py-1 text-xs outline-none"
+                style={{ borderColor: C.cremeBorder, color: "#374151" }}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs" style={{ color: C.cinza }}>até</label>
+              <input
+                type="date" value={dataFim}
+                onChange={e => setDataFim(e.target.value)}
+                className="rounded-lg border px-2 py-1 text-xs outline-none"
+                style={{ borderColor: C.cremeBorder, color: "#374151" }}
+              />
+            </div>
+          </div>
+        )}
+        <div className="px-4 py-4 flex items-center justify-between">
           <div>
-            <p className="text-[11px] uppercase tracking-wider font-medium" style={{ color: C.cinza }}>Já Recebido (líquido)</p>
-            <p className="text-xl font-semibold tabular-nums" style={{ color: C.verde }}>{fmt(totalLiquido)}</p>
+            <p className="text-[11px] uppercase tracking-wider font-medium" style={{ color: C.cinza }}>Total líquido recebido</p>
+            <p className="text-xl font-semibold tabular-nums mt-0.5" style={{ color: C.verde }}>{fmt(totalLiquido)}</p>
+            <p className="text-[11px] mt-0.5" style={{ color: C.cinza }}>{recebidoNoPeriodo.length} recebimento{recebidoNoPeriodo.length !== 1 ? "s" : ""} no período</p>
           </div>
           {totalTaxas > 0 && (
             <div className="text-right">
@@ -929,7 +1145,7 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
             </div>
           )}
         </div>
-      )}
+      </div>
 
       {/* Nova conta + filtros */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1014,6 +1230,9 @@ function TabReceber({ receber }: { receber: ContaReceber[] }) {
                     onAction={() => marcarRecebido(r.id)}
                     actionLabel="Marcar como Recebido"
                     actionLoading={actionId === r.id}
+                    vendaId={r.venda_erp_id}
+                    vendaNumero={r.venda_numero}
+                    vendaCreatedAt={r.venda_created_at}
                   />
                 ))
               )}
@@ -1382,9 +1601,354 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-type Tab = "pagar" | "receber";
+// ─── TabCaixa ────────────────────────────────────────────────────────────────
+// palette escuro igual ao dashboard de ouro
+const D = {
+  bg:      "#0F2922",
+  border:  "#1C3D32",
+  muted:   "#4A7568",
+  sage:    "#80A795",
+  verde:   "#4A9F73",
+  vermelho:"#E05C5C",
+  dourado: "#DB9864",
+};
 
-export default function FinanceiroClient({ pagar, receber, extratos, lancamentos }: Props) {
+function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
+  caixa: CaixaDinheiro[];
+  baixas: CaixaBaixa[];
+  podeBaixar: boolean;
+}) {
+  const [baixas, setBaixas] = useState(baixasInit);
+  const [caixaList, setCaixaList] = useState(caixa);
+  const [dando, setDando] = useState(false);
+  const [obs, setObs] = useState("");
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [viewTab, setViewTab] = useState<"pendentes" | "historico">("pendentes");
+  const [formaFiltro, setFormaFiltro] = useState<string>("Todos");
+
+  const [periodoC, setPeriodoC] = useState<Periodo>("30dias");
+  const hojeStr = new Date().toISOString().slice(0, 10);
+  const [dataInicioC, setDataInicioC] = useState(hojeStr);
+  const [dataFimC, setDataFimC] = useState(hojeStr);
+  const { ini: cIni, fim: cFim } = calcPeriodo(periodoC, dataInicioC, dataFimC);
+
+  const inPeriod = (d: string | null) => !!d && d.slice(0, 10) >= cIni && d.slice(0, 10) <= cFim;
+  const sumList  = (list: CaixaDinheiro[]) => list.reduce((s, r) => s + Number(r.valor), 0);
+
+  // Apenas Dinheiro tem baixa física
+  const pendentes = caixaList.filter(r => r.forma === "Dinheiro" && r.caixa_baixa_id == null);
+  const totalPendente = sumList(pendentes);
+
+  const byForma        = (f: string) => caixaList.filter(r => r.forma === f);
+  const byFormaPeriodo = (f: string) => byForma(f).filter(r => inPeriod(r.data_confirmacao));
+
+  // Métricas Dinheiro (para a view específica)
+  const entradasDinheiroAntes = sumList(byForma("Dinheiro").filter(r => !!r.data_confirmacao && r.data_confirmacao.slice(0, 10) < cIni));
+  const saidasAntes    = baixas.filter(b => !!b.created_at && b.created_at.slice(0, 10) < cIni).reduce((s, b) => s + b.total, 0);
+  const saldoAnterior  = entradasDinheiroAntes - saidasAntes;
+  const saidasPeriodo  = baixas.filter(b => inPeriod(b.created_at)).reduce((s, b) => s + b.total, 0);
+  const saldoPeriodoDin = sumList(byFormaPeriodo("Dinheiro")) - saidasPeriodo;
+
+  const formasPresentes = useMemo(() =>
+    Array.from(new Set(caixaList.map(r => r.forma))).sort(),
+  [caixaList]);
+
+  const listaFiltrada = (formaFiltro === "Todos" ? caixaList : caixaList.filter(r => r.forma === formaFiltro))
+    .filter(r => inPeriod(r.data_confirmacao));
+
+  const showBaixa = formaFiltro === "Todos" || formaFiltro === "Dinheiro";
+
+  const fmtDatetime = (d: string | null) => {
+    if (!d) return "—";
+    return new Date(d).toLocaleString("pt-BR", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
+  const FORMA_COLOR: Record<string, { bg: string; text: string }> = {
+    "Dinheiro":         { bg: C.verdeLt,   text: C.verde },
+    "Pix":              { bg: "#EFF6FF",    text: "#1D4ED8" },
+    "Cartão de Crédito":{ bg: "#F3E8FF",    text: "#7C3AED" },
+  };
+  const formaColor = (f: string) => FORMA_COLOR[f] ?? { bg: C.cinzaLt, text: C.cinza };
+
+  async function darBaixa() {
+    setDando(true);
+    setErro(null);
+    try {
+      const res = await fetch("/api/financeiro/caixa/baixa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ obs: obs.trim() || undefined }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setErro(json.error || "Erro ao dar baixa"); setDando(false); return; }
+      setBaixas(prev => [{ id: json.id, total: json.total, qtd_pagamentos: json.qtd_pagamentos, realizado_nome: json.realizado_nome, obs: obs.trim() || null, created_at: json.created_at }, ...prev]);
+      setCaixaList(prev => prev.map(r => r.forma === "Dinheiro" && r.caixa_baixa_id == null ? { ...r, caixa_baixa_id: json.id } : r));
+      setObs("");
+      setShowConfirm(false);
+      setViewTab("historico");
+    } catch { setErro("Erro de rede"); }
+    setDando(false);
+  }
+
+  const PagamentosTable = ({ lista, showForma }: { lista: CaixaDinheiro[]; showForma?: boolean }) => (
+    <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
+              <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Venda</th>
+              {showForma && <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Forma</th>}
+              <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Consultora</th>
+              <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Data</th>
+              <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Valor</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lista.length === 0 && (
+              <tr><td colSpan={showForma ? 5 : 4} className="px-4 py-8 text-center text-sm" style={{ color: C.cinza }}>Nenhum registro.</td></tr>
+            )}
+            {lista.map(r => {
+              const fc = formaColor(r.forma);
+              return (
+                <tr key={r.id} className="border-t hover:bg-gray-50 transition-colors" style={{ borderColor: C.cremeBorder }}>
+                  <td className="px-4 py-3">
+                    <a href={`/vendas/${r.venda_id}`} className="font-semibold hover:underline" style={{ color: C.esmeralda }}>#{r.numero_venda}</a>
+                  </td>
+                  {showForma && (
+                    <td className="px-4 py-3">
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                        style={{ backgroundColor: fc.bg, color: fc.text }}>{r.forma}</span>
+                    </td>
+                  )}
+                  <td className="px-4 py-3 text-sm" style={{ color: "#374151" }}>{r.vendedor_nome || <span style={{ color: C.cinza }}>—</span>}</td>
+                  <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{fmtDatetime(r.data_confirmacao)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: C.verde }}>{fmt(Number(r.valor))}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {lista.length > 0 && (
+        <div className="px-4 py-3 border-t flex justify-end" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+          <p className="text-xs tabular-nums font-medium" style={{ color: C.verde }}>
+            Total: {fmt(sumList(lista))}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Período */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.cinza }}>
+          Caixa — Financeiro do Período
+        </p>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {(["hoje", "7dias", "30dias", "mes", "personalizado"] as Periodo[]).map(p => (
+            <button key={p} onClick={() => setPeriodoC(p)}
+              className="text-xs px-3 py-1.5 rounded-full capitalize transition-colors border"
+              style={{
+                backgroundColor: periodoC === p ? C.esmeralda : "white",
+                borderColor: periodoC === p ? C.esmeralda : C.cremeBorder,
+                color: periodoC === p ? C.creme : C.cinza,
+              }}
+            >
+              {p === "hoje" ? "Hoje" : p === "7dias" ? "7 dias" : p === "30dias" ? "30 dias" : p === "mes" ? "Este mês" : "Personalizado"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {periodoC === "personalizado" && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <label className="text-xs" style={{ color: C.cinza }}>De</label>
+            <input type="date" value={dataInicioC} onChange={e => setDataInicioC(e.target.value)}
+              className="rounded-lg px-2 py-1 text-xs outline-none bg-white"
+              style={{ border: `1px solid ${C.cremeBorder}`, color: "#374151" }} />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs" style={{ color: C.cinza }}>até</label>
+            <input type="date" value={dataFimC} onChange={e => setDataFimC(e.target.value)}
+              className="rounded-lg px-2 py-1 text-xs outline-none bg-white"
+              style={{ border: `1px solid ${C.cremeBorder}`, color: "#374151" }} />
+          </div>
+        </div>
+      )}
+
+      {/* Filtro por forma */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {["Todos", ...formasPresentes].map(f => {
+          const fc = f === "Todos" ? null : formaColor(f);
+          const isActive = formaFiltro === f;
+          return (
+            <button key={f} onClick={() => setFormaFiltro(f)}
+              className="text-xs px-3 py-1.5 rounded-full transition-colors border font-medium"
+              style={{
+                backgroundColor: isActive ? (fc?.text ?? C.esmeralda) : "white",
+                borderColor: isActive ? (fc?.text ?? C.esmeralda) : C.cremeBorder,
+                color: isActive ? "white" : (fc?.text ?? C.cinza),
+              }}
+            >{f}</button>
+          );
+        })}
+      </div>
+
+      {/* KPI Cards */}
+      {formaFiltro === "Todos" ? (
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <KpiCard label="Total no Período"  value={fmt(sumList(listaFiltrada))}                   valueColor={C.esmeralda}  icon={Wallet}          accent={C.esmeralda} />
+          <KpiCard label="Dinheiro"          value={fmt(sumList(byFormaPeriodo("Dinheiro")))}      valueColor={C.verde}      icon={Banknote}        accent={C.verde}      sub={`${pendentes.length} sem baixa`} />
+          <KpiCard label="PIX"               value={fmt(sumList(byFormaPeriodo("Pix")))}           valueColor="#1D4ED8"      icon={Smartphone}      accent="#1D4ED8" />
+          <KpiCard label="Cartão"            value={fmt(sumList(byFormaPeriodo("Cartão de Crédito")))} valueColor="#7C3AED"  icon={CreditCard}      accent="#7C3AED" />
+          <KpiCard label="Baixas Realizadas" value={fmt(saidasPeriodo)}                            valueColor={C.vermelho}   icon={ArrowUpCircle}   accent={C.vermelho} />
+        </div>
+      ) : formaFiltro === "Dinheiro" ? (
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <KpiCard label="Saldo Anterior"    value={fmt(saldoAnterior)}                    valueColor={C.cinza}                                           icon={Wallet}          accent={C.cinza} />
+          <KpiCard label="Entradas"          value={fmt(sumList(byFormaPeriodo("Dinheiro")))} valueColor={C.verde}                                        icon={ArrowDownCircle} accent={C.verde} />
+          <KpiCard label="Saídas"            value={fmt(saidasPeriodo)}                    valueColor={C.vermelho}                                        icon={ArrowUpCircle}   accent={C.vermelho} />
+          <KpiCard label="Saldo do Período"  value={fmt(saldoPeriodoDin)}                  valueColor={saldoPeriodoDin >= 0 ? C.verde : C.vermelho}       icon={TrendingUp}      accent={saldoPeriodoDin >= 0 ? C.verde : C.vermelho} />
+          <div className="rounded-xl bg-white p-4 border" style={{ borderColor: C.ambar + "99" }}>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-1.5">
+                <p className="text-[11px] uppercase tracking-wider font-medium" style={{ color: C.cinza }}>Saldo Atual</p>
+                <span className="text-[8px] font-medium px-1.5 py-px rounded-full" style={{ backgroundColor: C.ambarLt, color: C.ambar }}>⚡ tempo real</span>
+              </div>
+              <Banknote size={14} style={{ color: C.ambar }} />
+            </div>
+            <p className="text-xl font-semibold tabular-nums" style={{ color: totalPendente > 0 ? C.ambar : C.cinza }}>{fmt(totalPendente)}</p>
+            <p className="text-[11px] mt-0.5" style={{ color: C.cinza }}>{pendentes.length} sem baixa</p>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <KpiCard label="Total no Período" value={fmt(sumList(listaFiltrada))}                                     valueColor={C.esmeralda} icon={ArrowDownCircle} accent={C.esmeralda} />
+          <KpiCard label="Qtd. Transações"  value={String(listaFiltrada.length)}                                   valueColor={C.cinza}     icon={Landmark}        accent={C.cinza} />
+          <KpiCard label="Total Histórico"  value={fmt(sumList(caixaList.filter(r => r.forma === formaFiltro)))}   valueColor={C.cinza}     icon={TrendingUp}      accent={C.cinza} />
+        </div>
+      )}
+
+      {/* Baixa de Dinheiro */}
+      {showBaixa && podeBaixar && pendentes.length > 0 && (
+        <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: C.ambar, backgroundColor: "#FFFBEB" }}>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-sm font-semibold" style={{ color: "#92400E" }}>
+                {pendentes.length} pagamento{pendentes.length !== 1 ? "s" : ""} em dinheiro aguardando baixa · {fmt(totalPendente)}
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: C.ambar }}>Dinheiro físico que precisa ser retirado do caixa e registrado</p>
+            </div>
+            <button onClick={() => setShowConfirm(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
+              style={{ backgroundColor: C.esmeralda, color: C.creme }}
+            >
+              <CheckCircle size={14} /> Dar Baixa no Caixa
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showBaixa && !podeBaixar && pendentes.length > 0 && (
+        <div className="rounded-xl border px-4 py-3 flex items-center gap-2" style={{ borderColor: C.cremeBorder, backgroundColor: C.ambarLt }}>
+          <AlertTriangle size={14} style={{ color: C.ambar }} />
+          <p className="text-xs" style={{ color: C.ambar }}>
+            {pendentes.length} pagamento{pendentes.length !== 1 ? "s" : ""} em dinheiro ({fmt(totalPendente)}) — apenas gerentes e admins podem dar baixa.
+          </p>
+        </div>
+      )}
+
+      {/* Modal confirmação baixa */}
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setShowConfirm(false)}>
+          <div className="bg-white rounded-2xl border w-full max-w-md p-6 space-y-4" style={{ borderColor: C.cremeBorder }} onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>Confirmar Baixa de Caixa</h3>
+            <div className="rounded-xl p-4 border space-y-1" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+              <p className="text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Total a baixar</p>
+              <p className="text-2xl font-bold tabular-nums" style={{ color: C.esmeralda }}>{fmt(totalPendente)}</p>
+              <p className="text-xs" style={{ color: C.cinza }}>{pendentes.length} pagamento{pendentes.length !== 1 ? "s" : ""} em dinheiro</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: "#374151" }}>Observação (opcional)</label>
+              <input value={obs} onChange={e => setObs(e.target.value)}
+                placeholder="Ex: Entregue ao caixa central, cofre, etc."
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+            </div>
+            {erro && <p className="text-xs rounded-lg px-3 py-2" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>{erro}</p>}
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={() => setShowConfirm(false)} disabled={dando}
+                className="px-4 py-2 rounded-lg text-sm border font-medium disabled:opacity-40"
+                style={{ borderColor: C.cremeBorder, color: C.cinza }}>Cancelar</button>
+              <button onClick={darBaixa} disabled={dando}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                {dando ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                Confirmar Baixa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-tabs (Dinheiro) ou tabela simples (outros) */}
+      {formaFiltro === "Dinheiro" ? (
+        <>
+          <div className="flex gap-1 rounded-xl p-1 border" style={{ backgroundColor: C.cremeBg, borderColor: C.cremeBorder }}>
+            {(["pendentes", "historico"] as const).map(t => (
+              <button key={t} onClick={() => setViewTab(t)}
+                className="flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors"
+                style={{ backgroundColor: viewTab === t ? C.esmeralda : "transparent", color: viewTab === t ? C.creme : C.cinza }}>
+                {t === "pendentes" ? `Pendentes de Baixa (${pendentes.length})` : `Histórico de Baixas (${baixas.length})`}
+              </button>
+            ))}
+          </div>
+
+          {viewTab === "pendentes" && <PagamentosTable lista={pendentes} />}
+          {viewTab === "historico" && (
+            <div className="space-y-3">
+              {baixas.length === 0 && (
+                <div className="rounded-xl border p-6 text-center" style={{ borderColor: C.cremeBorder }}>
+                  <p className="text-sm" style={{ color: C.cinza }}>Nenhuma baixa registrada ainda.</p>
+                </div>
+              )}
+              {baixas.map(b => {
+                const pagsDaBaixa = caixaList.filter(r => r.caixa_baixa_id === b.id);
+                return (
+                  <details key={b.id} className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+                    <summary className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer select-none list-none" style={{ backgroundColor: C.cremeBg }}>
+                      <div className="flex items-center gap-3">
+                        <CheckCircle size={14} style={{ color: C.verde }} />
+                        <div>
+                          <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>Baixa #{b.id} · {fmt(b.total)}</p>
+                          <p className="text-[11px]" style={{ color: C.cinza }}>
+                            {b.qtd_pagamentos} pagamento{b.qtd_pagamentos !== 1 ? "s" : ""} · por {b.realizado_nome ?? "—"} · {fmtDatetime(b.created_at)}
+                          </p>
+                        </div>
+                      </div>
+                      {b.obs && <span className="text-xs italic" style={{ color: C.cinza }}>{b.obs}</span>}
+                    </summary>
+                    <PagamentosTable lista={pagsDaBaixa} />
+                  </details>
+                );
+              })}
+            </div>
+          )}
+        </>
+      ) : (
+        <PagamentosTable lista={listaFiltrada} showForma={formaFiltro === "Todos"} />
+      )}
+    </div>
+  );
+}
+
+type Tab = "pagar" | "receber" | "caixa";
+
+export default function FinanceiroClient({ pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas, userRole }: Props) {
   const [tab, setTab] = useState<Tab>("pagar");
 
   const totalPagar   = pagar.filter(p => p.situacao === "pendente").reduce((s, p) => s + Number(p.valor), 0);
@@ -1394,27 +1958,20 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
   const tabs: { key: Tab; label: string; icon: any; badge?: string }[] = [
     { key: "pagar",   label: "Contas a Pagar",   icon: ArrowUpCircle,   badge: pagar.filter(p => p.situacao === "pendente").length > 0 ? String(pagar.filter(p => p.situacao === "pendente").length) : undefined },
     { key: "receber", label: "Contas a Receber", icon: ArrowDownCircle, badge: receber.filter(r => r.situacao === "pendente").length > 0 ? String(receber.filter(r => r.situacao === "pendente").length) : undefined },
+    { key: "caixa",   label: "Caixa",             icon: Banknote,        badge: caixaPagamentos.filter(r => r.forma === "Dinheiro" && r.caixa_baixa_id == null).length > 0 ? String(caixaPagamentos.filter(r => r.forma === "Dinheiro" && r.caixa_baixa_id == null).length) : undefined },
   ];
 
   return (
     <div className="px-3 md:px-6 py-4 md:py-6 max-w-6xl mx-auto space-y-5">
       {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-1 h-7 rounded-full" style={{ backgroundColor: C.esmeralda }} />
-          <div>
-            <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-playfair)", color: "#1A1A1A" }}>
-              Financeiro
-            </h1>
-            <p className="text-xs mt-0.5" style={{ color: C.cinza }}>
-              Contas a Pagar / Receber · Conciliação Bancária
-            </p>
-          </div>
-        </div>
-        <div className="rounded-xl bg-white px-4 py-3 border" style={{ borderColor: C.cremeBorder }}>
-          <p className="text-[10px] uppercase tracking-wider font-medium" style={{ color: C.cinza }}>Saldo Líquido Pendente</p>
-          <p className="text-xl font-bold tabular-nums" style={{ color: saldoLiquido >= 0 ? C.verde : C.vermelho }}>
-            {fmt(saldoLiquido)}
+      <div className="flex items-center gap-3">
+        <div className="w-1 h-7 rounded-full" style={{ backgroundColor: C.esmeralda }} />
+        <div>
+          <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-playfair)", color: "#1A1A1A" }}>
+            Financeiro
+          </h1>
+          <p className="text-xs mt-0.5" style={{ color: C.cinza }}>
+            Contas a Pagar / Receber · Conciliação Bancária
           </p>
         </div>
       </div>
@@ -1452,8 +2009,9 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
       </div>
 
       {/* Content */}
-      {tab === "pagar" && <TabPagar pagar={pagar} />}
-      {tab === "receber" && <TabReceber receber={receber} />}
+      {tab === "pagar"   && <TabPagar pagar={pagar} />}
+      {tab === "receber" && <TabReceber receber={receber} saldoLiquido={totalReceber} />}
+      {tab === "caixa"   && <TabCaixa caixa={caixaPagamentos} baixas={caixaBaixas} podeBaixar={["admin","desenvolvedor","gerente_loja","gerente_fabrica"].includes(userRole ?? "")} />}
     </div>
   );
 }

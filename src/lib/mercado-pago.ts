@@ -127,6 +127,12 @@ export async function createPreference(params: CreatePreferenceParams) {
   };
 }
 
+// ─── Merchant Order (In-Store QR) ───────────────────────────────────────────
+
+export async function fetchMerchantOrder(orderId: string): Promise<Record<string, unknown>> {
+  return mpFetch<Record<string, unknown>>(`/merchant_orders/${orderId}`);
+}
+
 // ─── Payment (fetch detalhado) ──────────────────────────────────────────────
 
 export async function fetchPayment(paymentId: string) {
@@ -309,7 +315,7 @@ export interface CreatePointIntentParams {
   pagamentoId: number;
   numeroVenda: string;
   installments?: number;
-  paymentType?: "credit_card" | "debit_card";
+  paymentType?: "credit_card" | "debit_card" | "pix";
   printOnTerminal?: boolean;
 }
 
@@ -373,4 +379,108 @@ export async function cancelPointIntent(deviceId: string, intentId: string): Pro
 // Buscar status da intent
 export async function getPointIntentStatus(intentId: string): Promise<{ status?: string; created_on?: string }> {
   return mpFetch(`/point/integration-api/payment-intents/${encodeURIComponent(intentId)}/events`);
+}
+
+// ─── In-Store QR Code (PIX taxa zero, PDV) ────────────────────────────────────
+// Endpoint diferente do Payment API — usa a API de QR de Ponto de Venda.
+// Taxa: 0% (igual ao PIX recebido pela maquininha).
+// Fluxo: sistema cria QR com external_reference → cliente escaneia →
+//        MP dispara webhook → sistema confirma automaticamente.
+
+export async function getMpUserId(): Promise<string> {
+  const res = await mpFetch<{ id?: number | string }>("/users/me");
+  const id = res?.id;
+  if (!id) throw new Error("Não foi possível obter o user_id da conta MP");
+  return String(id);
+}
+
+// Garante que existe um POS na conta MP, criando loja+caixa se necessário.
+// Persiste o external_pos_id em configuracoes_secrets para não recriar.
+async function ensureMpPos(userId: string): Promise<string> {
+  // 1. Verifica se já temos um external_id de POS salvo (deve ser string, não número puro)
+  const saved = await readSecret("mp_pos_id");
+  // Só usa se não for um número puro (numérico = id salvo erroneamente na versão anterior)
+  if (saved && !/^\d+$/.test(saved)) {
+    console.log("[MP InStore] Usando POS externo salvo:", saved);
+    return saved;
+  }
+
+  // 2. Busca store_id de um POS existente para criar o POS correto com external_id
+  console.log("[MP InStore] Buscando POS para userId:", userId);
+  const posListRes = await mpFetch<{ results?: Array<{ id?: number | string; external_id?: string; store_id?: string | number }> }>(
+    `/pos?user_id=${userId}&limit=50`
+  ).catch((e) => { console.error("[MP InStore] pos list error:", e?.message); return { results: [] }; });
+
+  // Pega o store_id mais recente (último POS criado)
+  const results = posListRes.results ?? [];
+  const storeIdNum = results.length > 0
+    ? String(results[results.length - 1].store_id ?? results[0].store_id ?? "")
+    : "";
+  if (!storeIdNum) throw new Error("Nenhuma store encontrada. Configure uma loja em https://www.mercadopago.com.br/stores");
+
+  // 3. Cria POS com external_id para usar no endpoint In-Store QR
+  const externalId = "erppdv01";
+  console.log("[MP InStore] Criando POS com external_id:", externalId, "store_id:", storeIdNum);
+  const newPos = await mpFetch<{ id?: number | string; external_id?: string }>("/pos", {
+    method: "POST",
+    body: JSON.stringify({ name: "Caixa ERP", external_id: externalId, store_id: storeIdNum }),
+  });
+  console.log("[MP InStore] POS criado:", JSON.stringify(newPos));
+
+  const posExternalId = String(newPos.external_id ?? externalId);
+
+  // 4. Persiste para não recriar nas próximas chamadas
+  await sql`
+    INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted)
+    VALUES ('mp_pos_id', ${JSON.stringify(posExternalId)})
+    ON CONFLICT (chave) DO UPDATE SET valor_encrypted = EXCLUDED.valor_encrypted
+  `;
+
+  return posExternalId;
+}
+
+export interface CreateInStorePixParams {
+  vendaId: number;
+  pagamentoId: number;
+  numeroVenda: string;
+  valor: number;
+  notificationUrl: string;
+  expiraEmMinutos?: number;
+}
+
+export interface InStorePixResponse {
+  qr_data: string;
+  in_store_order_id: string;
+}
+
+export async function createInStorePixQr(params: CreateInStorePixParams): Promise<InStorePixResponse> {
+  const userId = await getMpUserId();
+  const posId = await ensureMpPos(userId);
+  const expiresAt = new Date(Date.now() + (params.expiraEmMinutos ?? 30) * 60 * 1000);
+  const expiresAtStr = expiresAt.toISOString().replace("Z", "-00:00");
+
+  const body = {
+    external_reference: `venda:${params.vendaId}:pag:${params.pagamentoId}`,
+    title: `Venda ${params.numeroVenda} - Alisson Joias`,
+    description: `Venda ${params.numeroVenda}`,
+    notification_url: params.notificationUrl,
+    total_amount: Math.round(params.valor * 100) / 100,
+    items: [{
+      sku_number: String(params.vendaId),
+      category: "others",
+      title: `Venda ${params.numeroVenda}`,
+      description: `Venda ${params.numeroVenda}`,
+      quantity: 1,
+      unit_price: Math.round(params.valor * 100) / 100,
+      unit_measure: "unit",
+      total_amount: Math.round(params.valor * 100) / 100,
+    }],
+    expiration_date: expiresAtStr,
+  };
+
+  const path = `/instore/orders/qr/seller/collectors/${userId}/pos/${encodeURIComponent(posId)}/qrs`;
+  console.log("[MP InStore] PUT QR path:", path);
+  const qrRes = await mpFetch<InStorePixResponse>(path, { method: "PUT", body: JSON.stringify(body) });
+  console.log("[MP InStore] QR response:", JSON.stringify(qrRes));
+  return qrRes;
 }

@@ -61,13 +61,19 @@ const TIPO_CONFIG: Record<TipoOrdemServico, { titulo: string; bannerColor: strin
   servico_venda: { titulo: "Nova Ordem de Serviço Venda",  bannerColor: "#1E40AF", label: "Ordem de Serviço Venda",  itensLabel: "Iten(s) de serviço" },
 };
 
+export interface OrdemInitialData {
+  cliente: { id: number; nome: string; cpf_cnpj: string | null; telefone: string | null; celular: string | null };
+  venda:   { id: number; numero_venda: string; data_venda: string; total_venda: number; situacao: string; qtd_itens: number };
+}
+
 export interface NovaOrdemServicoBaseModalProps {
-  isOpen:     boolean;
-  onClose:    () => void;
-  onSuccess?: (numeroOrdem: string) => void;
-  userId:     string;
-  userName:   string;
-  tipoOrdem:  TipoOrdemServico;
+  isOpen:      boolean;
+  onClose:     () => void;
+  onSuccess?:  (numeroOrdem: string) => void;
+  userId:      string;
+  userName:    string;
+  tipoOrdem:   TipoOrdemServico;
+  initialData?: OrdemInitialData;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -159,7 +165,7 @@ function Steps({ current }: { current: number }) {
 
 // ─── Main Modal ───────────────────────────────────────────────────────────────
 export default function NovaOrdemServicoBaseModal({
-  isOpen, onClose, onSuccess, userId, userName, tipoOrdem,
+  isOpen, onClose, onSuccess, userId, userName, tipoOrdem, initialData,
 }: NovaOrdemServicoBaseModalProps) {
   const cfg = TIPO_CONFIG[tipoOrdem];
 
@@ -249,6 +255,21 @@ export default function NovaOrdemServicoBaseModal({
       setSalvando(false); setErro(null);
       setProximoNumero(null); setLoadingNumero(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  // ── Pré-preencher com initialData ao abrir ────────────────────────────────
+  useEffect(() => {
+    if (!isOpen || !initialData) return;
+    const { cliente, venda } = initialData;
+    setClienteSelecionado(cliente);
+    setVendaSelecionada(venda);
+    setLoadingItens(true);
+    fetch(`/api/vendas/${venda.id}`)
+      .then(r => r.ok ? r.json() : { itens: [] })
+      .then(data => setItensVenda(data.itens ?? []))
+      .catch(() => setItensVenda([]))
+      .finally(() => { setLoadingItens(false); setStep(2); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 

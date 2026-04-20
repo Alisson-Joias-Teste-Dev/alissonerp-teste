@@ -43,6 +43,13 @@ export const ROLES_FISCAL = [
   "gerente_loja",
 ] as const;
 
+// Roles que podem dar baixa no caixa dinheiro
+export const ROLES_BAIXA_CAIXA = ["admin", "desenvolvedor", "gerente_loja", "gerente_fabrica"] as const;
+
+export function podedarBaixaCaixa(role: string | null | undefined): boolean {
+  return ROLES_BAIXA_CAIXA.includes(role as typeof ROLES_BAIXA_CAIXA[number]);
+}
+
 // Verifica se a role está na lista permitida
 export function hasRole(role: string | null | undefined, permitidas: readonly string[]): boolean {
   if (!role) return false;

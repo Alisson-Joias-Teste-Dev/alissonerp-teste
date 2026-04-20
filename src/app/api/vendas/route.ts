@@ -270,16 +270,18 @@ export async function POST(req: NextRequest) {
         if (typeof pag.valor !== "number" || pag.valor <= 0) {
           throw new Error("valor deve ser > 0 em pagamento");
         }
+        const isDinheiro = pag.forma === 'Dinheiro';
         await tx`
           INSERT INTO alissonerp.pagamentos_venda (
-            venda_id, forma, gateway, valor, parcelas, status
+            venda_id, forma, gateway, valor, parcelas, status, data_confirmacao
           ) VALUES (
             ${venda.id},
             ${pag.forma},
             ${pag.gateway ?? null},
             ${pag.valor},
             ${pag.parcelas ?? 1},
-            ${pag.status ?? 'pendente'}
+            ${isDinheiro ? 'confirmado' : (pag.status ?? 'pendente')},
+            ${isDinheiro ? sql`now()` : null}
           )
         `;
       }

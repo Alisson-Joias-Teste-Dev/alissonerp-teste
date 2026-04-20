@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft, ArrowRight, Search, X, Plus, Loader2, CheckCircle,
   User, Package, Truck, CreditCard, FileText, Star,
-  MapPin, AlertCircle, Check, ChevronRight, Ticket, Pencil,
+  MapPin, AlertCircle, Check, ChevronRight, Ticket, Pencil, Wrench, Video,
 } from "lucide-react";
 import Link from "next/link";
-import PixQrInline from "@/components/vendas/PixQrInline";
 import CartaoInline from "@/components/vendas/CartaoInline";
+import PixQrInline from "@/components/vendas/PixQrInline";
 import { maskCpfCnpj } from "@/lib/formatters";
+import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -52,6 +53,7 @@ interface FaixaComissao {
   desconto_pct: number;
   comissao_pct: number;
 }
+
 
 interface ItemVenda {
   _key: string;
@@ -107,9 +109,21 @@ interface Props {
   vendedorId: number | null;
   vendedorNome: string;
   maxDesconto: number;
+  vendedores?: { id: number; nome: string }[];
+  userId: string;
+  userName: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+const TIPOS_SERVICO = [
+  { id: 1, nome: "Solda Laser" },
+  { id: 2, nome: "Cravação Manual" },
+  { id: 3, nome: "Acabamento e polimento" },
+  { id: 4, nome: "Ajuste Manual" },
+  { id: 5, nome: "Solda e Limpeza" },
+  { id: 6, nome: "Outros" },
+];
+
 const FORMAS_PAGAMENTO = ["Dinheiro", "Cartão de Crédito", "Pix", "Vale-Troca", "A Receber", "Múltiplas"];
 const GATEWAYS = ["Mercado Pago", "PagSeguro", "Cielo", "Stone", "Getnet", "Rede", "Outro"];
 const CONDICOES = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
@@ -232,8 +246,15 @@ function Autocomplete<T>({
 }
 
 // ─── Progress bar ─────────────────────────────────────────────────────────────
-function ProgressBar({ step, total }: { step: number; total: number }) {
-  const steps = [
+function ProgressBar({ step, total, tipoVenda }: { step: number; total: number; tipoVenda: string | null }) {
+  const steps = tipoVenda === "servico" ? [
+    { icon: User, label: "Cliente" },
+    { icon: Star, label: "Tipo" },
+    { icon: Wrench, label: "Serviço" },
+    { icon: Truck, label: "Entrega" },
+    { icon: CreditCard, label: "Pagamento" },
+    { icon: CheckCircle, label: "Finalizar" },
+  ] : [
     { icon: User, label: "Cliente" },
     { icon: Star, label: "Tipo" },
     { icon: Truck, label: "Entrega" },
@@ -307,7 +328,7 @@ function DescontoValorInput({ precoLista, pctDesconto, onCommit }: {
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
-export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxDesconto }: Props) {
+export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxDesconto, vendedores = [], userId, userName }: Props) {
   const router = useRouter();
 
   // ── Wizard state ──────────────────────────────────────────────────────────
@@ -336,6 +357,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [vendaGarantiaId, setVendaGarantiaId] = useState<number | null>(null);
   const [historicoVendas, setHistoricoVendas] = useState<VendaHistorico[]>([]);
   const [loadingHistorico, setLoadingHistorico] = useState(false);
+  const [selVendedorId, setSelVendedorId] = useState<number | null>(vendedorId);
+  const [selVendedorNome, setSelVendedorNome] = useState<string>(vendedorNome);
 
   // ── Step 3: Entrega ───────────────────────────────────────────────────────
   const [modoEntrega, setModoEntrega] = useState<"loja" | "correios" | "transportadora" | "motoboy" | "uber" | null>(null);
@@ -382,11 +405,23 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   // ── Step 6: Finalizar ─────────────────────────────────────────────────────
   const [showModalFim, setShowModalFim] = useState(false);
   const [concluindo, setConcluindo] = useState(false);
+  const [showOrdemModal, setShowOrdemModal] = useState(false);
+  const [ordemCriada, setOrdemCriada] = useState<{ id: number; numero_ordem: string } | null>(null);
+
+  // ── Step 3 Serviço (servico type only) ────────────────────────────────────
+  const [svcPesoMetal, setSvcPesoMetal] = useState("");
+  const [svcFotoB64, setSvcFotoB64] = useState<string | null>(null);
+  const [svcFotoPreview, setSvcFotoPreview] = useState<string | null>(null);
+  const [svcVideoB64, setSvcVideoB64] = useState<string | null>(null);
+  const [svcVideoNome, setSvcVideoNome] = useState<string | null>(null);
+  const [validandoSvcFoto, setValidandoSvcFoto] = useState(false);
+  const [validacaoSvcFoto, setValidacaoSvcFoto] = useState<{ match: boolean; mensagem: string } | null>(null);
 
   // Load commission tables on mount
   useEffect(() => {
     fetch("/api/vendas/faixas-comissao").then(r => r.json()).then(setFaixas).catch(() => {});
   }, []);
+
 
   // ─── Computed totals ─────────────────────────────────────────────────────
   const totalProdutos = itens.reduce((s, i) => s + i.total_item, 0);
@@ -502,6 +537,56 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         setCpfExistente(found ? found.nome : null);
       } catch { /* silent */ }
     }, 400);
+  }
+
+  // ─── Serviço step helpers ─────────────────────────────────────────────────
+  async function validarFotoServico(b64: string, peso: number) {
+    setValidandoSvcFoto(true);
+    setValidacaoSvcFoto(null);
+    try {
+      const puro = b64.replace(/^data:[^;]+;base64,/, "");
+      const mt = b64.startsWith("data:image/png") ? "image/png" : "image/jpeg";
+      const blob = await fetch(`data:${mt};base64,${puro}`).then(r => r.blob());
+      const fd = new FormData();
+      fd.append("file", new File([blob], "foto.jpg", { type: mt }));
+      fd.append("peso", String(peso));
+      fd.append("tipo", "metal");
+      const res = await fetch("/api/pcp/validar-peso", { method: "POST", body: fd });
+      const data = await res.json();
+      setValidacaoSvcFoto(data);
+    } catch {
+      setValidacaoSvcFoto({ match: false, mensagem: "Erro ao validar" });
+    } finally {
+      setValidandoSvcFoto(false);
+    }
+  }
+
+  function handleSvcFotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const b64 = ev.target?.result as string;
+      setSvcFotoB64(b64);
+      setSvcFotoPreview(b64);
+      setValidacaoSvcFoto(null);
+      const peso = parseFloat(svcPesoMetal.replace(",", "."));
+      if (peso > 0) await validarFotoServico(b64, peso);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleSvcVideoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 15 * 1024 * 1024) {
+      setSaveErr("Vídeo muito grande. Limite: 15MB");
+      return;
+    }
+    setSvcVideoNome(file.name);
+    const reader = new FileReader();
+    reader.onload = (ev) => { setSvcVideoB64(ev.target?.result as string); };
+    reader.readAsDataURL(file);
   }
 
   // ─── Create new client ───────────────────────────────────────────────────
@@ -652,7 +737,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
     return {
       cliente_id: cliente?.id ?? null,
-      vendedor_id: vendedorId || null,
+      vendedor_id: selVendedorId || null,
       data_entrega: dataEntrega || null,
       total_frete: totalFrete,
       forma_envio: modoEntrega === "loja" ? "Retirada na Loja" : modoEntrega === "correios" ? "Correios" : modoEntrega === "transportadora" ? "Transportadora" : modoEntrega === "motoboy" ? "Motoboy" : modoEntrega === "uber" ? "Uber" : null,
@@ -747,8 +832,16 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     if (step === 1 && !cliente) { setSaveErr("Selecione um cliente para continuar"); return; }
     if (step === 2 && !tipoVenda) { setSaveErr("Selecione o tipo de venda"); return; }
     if (step === 2 && tipoVenda === "garantia" && !vendaGarantiaId) { setSaveErr("Selecione a venda em garantia"); return; }
-    if (step === 3 && !modoEntrega) { setSaveErr("Selecione o modo de entrega"); return; }
-    if (step === 4 && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
+    if (step === 3 && tipoVenda === "servico") {
+      const pesoSvc = parseFloat(svcPesoMetal.replace(",", "."));
+      if (!svcPesoMetal || isNaN(pesoSvc) || pesoSvc <= 0) { setSaveErr("Informe o peso do metal externo"); return; }
+      if (!svcFotoB64) { setSaveErr("Foto da balança é obrigatória"); return; }
+      if (!validacaoSvcFoto?.match) { setSaveErr("Valide a foto com a IA antes de continuar"); return; }
+      if (itens.length === 0) { setSaveErr("Adicione pelo menos 1 serviço para faturamento"); return; }
+    }
+    if (step === 3 && tipoVenda !== "servico" && !modoEntrega) { setSaveErr("Selecione o modo de entrega"); return; }
+    if (step === 4 && tipoVenda === "servico" && !modoEntrega) { setSaveErr("Selecione o modo de entrega"); return; }
+    if (step === 4 && tipoVenda !== "servico" && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
 
     if (step === 5) {
       if (pagForma === "Múltiplas" && !pagamentoCobre) {
@@ -781,11 +874,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   }
 
   // ─── Concluir venda ───────────────────────────────────────────────────────
-  async function concluirVenda() {
+  async function concluirVenda(vendaIdOverride?: number) {
     setConcluindo(true); setSaveErr("");
     try {
       // Ensure we have a vendaId
-      let idFinal = vendaId;
+      let idFinal = vendaIdOverride ?? vendaId;
       if (!idFinal) {
         const { id } = await salvarRascunho();
         idFinal = id;
@@ -812,6 +905,32 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ situacao: "aprovado" }),
         });
+      }
+
+      // Auto-criar ordem de serviço para tipo "servico"
+      if (tipoVenda === "servico") {
+        try {
+          const pesoExterno = parseFloat(svcPesoMetal.replace(",", "."));
+          const ordemBody: Record<string, unknown> = {
+            tipo_ordem: "servico_venda",
+            cliente_id: cliente?.id ?? null,
+            foto_peca_servico_base64: svcFotoB64,
+            peso_metal_externo: pesoExterno,
+            venda_id: idFinal,
+            itens: itens.map(i => ({ produto_id: i.produto_id, quantidade: i.quantidade })),
+          };
+          if (svcVideoB64) ordemBody.video_observacao_base64 = svcVideoB64;
+          const ordemRes = await fetch("/api/ordens", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(ordemBody),
+          });
+          const ordemData = await ordemRes.json();
+          if (ordemRes.ok) setOrdemCriada(ordemData);
+          else console.error("[concluirVenda] Erro ao criar ordem:", ordemData.error);
+        } catch (err) {
+          console.error("[concluirVenda] Erro ao criar ordem:", err);
+        }
       }
 
       setShowModalFim(true);
@@ -859,7 +978,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       </div>
 
       {/* Progress */}
-      <ProgressBar step={step} total={6} />
+      <ProgressBar step={step} total={6} tipoVenda={tipoVenda} />
 
       {/* Card */}
       <div className="rounded-xl border bg-white" style={{ borderColor: C.cremeBorder }}>
@@ -1069,11 +1188,33 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               <Star size={18} className="inline mr-2" style={{ color: C.esmeralda }} />
               Tipo de Venda
             </h3>
-            <div className="flex items-center gap-2 mb-4 text-sm rounded-lg px-3 py-2" style={{ backgroundColor: C.cremeBg, borderColor: C.cremeBorder, border: `1px solid ${C.cremeBorder}` }}>
-              <User size={13} style={{ color: C.esmeralda }} />
-              <span style={{ color: "#6B7280" }}>Consultora:</span>
-              <span className="font-medium" style={{ color: "#1A1A1A" }}>{vendedorNome || "—"}</span>
-            </div>
+            {vendedores.length > 0 ? (
+              <div className="flex items-center gap-2 mb-4 text-sm rounded-lg px-3 py-2" style={{ backgroundColor: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}>
+                <User size={13} style={{ color: C.esmeralda }} />
+                <span style={{ color: "#6B7280" }}>Consultora:</span>
+                <select
+                  value={selVendedorId ?? ""}
+                  onChange={e => {
+                    const id = e.target.value ? Number(e.target.value) : null;
+                    setSelVendedorId(id);
+                    setSelVendedorNome(vendedores.find(v => v.id === id)?.nome ?? "");
+                  }}
+                  className="flex-1 bg-transparent font-medium outline-none cursor-pointer"
+                  style={{ color: "#1A1A1A" }}
+                >
+                  <option value="">— Selecione —</option>
+                  {vendedores.map(v => (
+                    <option key={v.id} value={v.id}>{v.nome}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mb-4 text-sm rounded-lg px-3 py-2" style={{ backgroundColor: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}>
+                <User size={13} style={{ color: C.esmeralda }} />
+                <span style={{ color: "#6B7280" }}>Consultora:</span>
+                <span className="font-medium" style={{ color: "#1A1A1A" }}>{selVendedorNome || "—"}</span>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3 mb-4">
               {([
@@ -1146,8 +1287,222 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
           </div>
         )}
 
-        {/* ── PASSO 3: Entrega ── */}
-        {step === 3 && (
+        {/* ── PASSO 3: Serviço (apenas tipo servico) ── */}
+        {step === 3 && tipoVenda === "servico" && (
+          <div className="p-6 space-y-5">
+            <h3 className="text-lg font-semibold" style={{ color: "#1A1A1A" }}>
+              <Wrench size={18} className="inline mr-2" style={{ color: C.esmeralda }} />
+              Informações do Serviço
+            </h3>
+
+            {/* Produto/Serviço para faturamento */}
+            <div>
+              <Label required>Serviço para Faturamento</Label>
+              {itens.length > 0 && (
+                <div className="rounded-lg border overflow-hidden mb-3" style={{ borderColor: C.cremeBorder }}>
+                  <table className="w-full text-sm">
+                    <thead style={{ backgroundColor: C.cremeBg }}>
+                      <tr>
+                        {["Descrição", "Qtde", "Desconto", "Preço Un", "Total", ""].map(h => (
+                          <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: "#6B7280" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {itens.map(item => (
+                        <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
+                          <td className="px-3 py-2 font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
+                          <td className="px-3 py-2 text-center">
+                            <input type="number" min={1} value={item.quantidade}
+                              onChange={e => updateItem(item._key, "quantidade", e.target.value)}
+                              className="w-14 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                          </td>
+                          <td className="px-3 py-2 tabular-nums text-xs" style={{ color: "#6B7280" }}>
+                            {item.pct_desconto > 0 ? `${item.pct_desconto}%` : "—"}
+                          </td>
+                          <td className="px-3 py-2 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</td>
+                          <td className="px-3 py-2 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
+                          <td className="px-3 py-2">
+                            <button onClick={() => setItens(prev => prev.filter(i => i._key !== item._key))} className="text-gray-300 hover:text-red-400"><X size={14} /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="p-4 rounded-xl border" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                <Autocomplete<Produto>
+                  placeholder="Buscar serviço por nome ou SKU..."
+                  onSearch={async q => { const r = await fetch(`/api/vendas/produtos/busca?q=${encodeURIComponent(q)}&limit=15&servico=1`); return r.json(); }}
+                  renderItem={p => (
+                    <div>
+                      <p className="font-medium text-sm">{p.nome}</p>
+                      <p className="text-xs" style={{ color: "#9CA3AF" }}>{p.sku} · {p.preco_venda != null ? fmt(p.preco_venda) : "sem preço"}</p>
+                    </div>
+                  )}
+                  onSelect={p => { setProdutoSel(p); setPctDesconto(0); setDescontoErr(""); }}
+                  selectedLabel={produtoSel ? `${produtoSel.nome} · ${fmt(produtoSel.preco_venda ?? 0)}` : null}
+                  onClear={() => { setProdutoSel(null); setDescontoErr(""); }}
+                />
+                {produtoSel && (
+                  <div className="mt-3 flex items-end gap-3 flex-wrap">
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Qtd</label>
+                      <input type="number" min={1} value={qtd} onChange={e => setQtd(Math.max(1, Number(e.target.value)))}
+                        className="w-16 border rounded-lg px-2 py-1.5 text-sm outline-none text-center" style={{ borderColor: C.cremeBorder }} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Desconto %</label>
+                      <input type="number" min={0} max={maxDesconto} step={1} value={pctDesconto}
+                        onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(v > maxDesconto ? `Máximo: ${maxDesconto}%` : ""); }}
+                        className="w-20 border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
+                        style={{ borderColor: descontoErr ? "#EF4444" : C.cremeBorder }} />
+                      {descontoErr && <p className="text-[11px] text-red-500 mt-0.5">{descontoErr}</p>}
+                    </div>
+                    <div className="text-xs" style={{ color: "#6B7280" }}>
+                      = {produtoSel ? fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario) : "—"}
+                    </div>
+                    <button onClick={handleAddItem} disabled={!!descontoErr || pctDesconto > maxDesconto}
+                      className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50"
+                      style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                      <Plus size={14} /> Adicionar
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {itens.length > 0 && (
+                <div className="pt-2 flex justify-end">
+                  <span className="text-sm font-semibold tabular-nums" style={{ color: C.esmeralda }}>Total: {fmt(totalProdutos)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Peso + Foto balança */}
+            <div className="space-y-3">
+              <div>
+                <Label required>Peso do Metal Externo (g)</Label>
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  value={svcPesoMetal}
+                  onChange={e => { setSvcPesoMetal(e.target.value); setValidacaoSvcFoto(null); }}
+                  placeholder="Ex: 2,50"
+                  className="max-w-[200px]"
+                />
+              </div>
+
+              <div>
+                <Label required>Foto da Balança</Label>
+                <div className="flex flex-col gap-3">
+                  <label
+                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 border-dashed cursor-pointer hover:bg-stone-50 transition-colors w-full"
+                    style={{ borderColor: svcFotoB64 ? C.esmeralda : C.cremeBorder }}
+                  >
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture={"environment" as unknown as boolean}
+                      className="hidden"
+                      onChange={handleSvcFotoChange}
+                    />
+                    {svcFotoB64
+                      ? <span className="text-sm font-medium" style={{ color: C.esmeralda }}>Foto selecionada — toque para trocar</span>
+                      : <span className="text-sm" style={{ color: "#6B7280" }}>📷 Tirar foto ou selecionar da galeria</span>
+                    }
+                  </label>
+
+                  {svcFotoPreview && (
+                    <div className="relative w-fit">
+                      <img src={svcFotoPreview} alt="Preview" className="w-40 h-28 object-cover rounded-lg border" style={{ borderColor: C.cremeBorder }} />
+                      <button
+                        onClick={() => { setSvcFotoB64(null); setSvcFotoPreview(null); setValidacaoSvcFoto(null); }}
+                        className="absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center bg-red-500 text-white"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  )}
+
+                  {svcFotoB64 && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {validandoSvcFoto ? (
+                        <div className="flex items-center gap-2 text-sm" style={{ color: "#9CA3AF" }}>
+                          <Loader2 size={14} className="animate-spin" /> Validando com IA...
+                        </div>
+                      ) : validacaoSvcFoto ? (
+                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${validacaoSvcFoto.match ? "bg-green-50" : "bg-red-50"}`}
+                          style={{ color: validacaoSvcFoto.match ? "#065F46" : "#991B1B" }}>
+                          {validacaoSvcFoto.match ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
+                          <span>{validacaoSvcFoto.mensagem}</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            const peso = parseFloat(svcPesoMetal.replace(",", "."));
+                            if (!peso || isNaN(peso) || peso <= 0) { setSaveErr("Informe o peso antes de validar"); return; }
+                            if (svcFotoB64) validarFotoServico(svcFotoB64, peso);
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium"
+                          style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                        >
+                          Validar com IA
+                        </button>
+                      )}
+                      {validacaoSvcFoto && !validandoSvcFoto && (
+                        <button
+                          onClick={() => {
+                            const peso = parseFloat(svcPesoMetal.replace(",", "."));
+                            if (svcFotoB64 && peso > 0) validarFotoServico(svcFotoB64, peso);
+                          }}
+                          className="text-xs underline"
+                          style={{ color: "#9CA3AF" }}
+                        >
+                          Revalidar
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Vídeo (opcional) */}
+            <div>
+              <Label>
+                Detalhes em Vídeo{" "}
+                <span className="font-normal text-xs" style={{ color: "#9CA3AF" }}>(opcional)</span>
+              </Label>
+              <label className="flex items-center gap-2 px-4 py-2.5 rounded-lg border cursor-pointer w-fit hover:bg-stone-50 transition-colors" style={{ borderColor: C.cremeBorder }}>
+                <input
+                  type="file"
+                  accept="video/*"
+                  capture={"environment" as unknown as boolean}
+                  className="hidden"
+                  onChange={handleSvcVideoChange}
+                />
+                <Video size={15} style={{ color: C.esmeralda }} />
+                <span className="text-sm" style={{ color: "#374151" }}>
+                  {svcVideoNome ?? "Gravar ou selecionar vídeo"}
+                </span>
+                {svcVideoNome && (
+                  <span
+                    className="ml-1"
+                    onClick={e => { e.preventDefault(); setSvcVideoB64(null); setSvcVideoNome(null); }}
+                  >
+                    <X size={12} style={{ color: "#9CA3AF" }} />
+                  </span>
+                )}
+              </label>
+            </div>
+
+          </div>
+        )}
+
+        {/* ── PASSO 3: Entrega (não-servico) / PASSO 4: Entrega (servico) ── */}
+        {((step === 3 && tipoVenda !== "servico") || (step === 4 && tipoVenda === "servico")) && (
           <div className="p-6 space-y-5">
             <h3 className="text-lg font-semibold" style={{ color: "#1A1A1A" }}>
               <Truck size={18} className="inline mr-2" style={{ color: C.esmeralda }} />
@@ -1300,12 +1655,12 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
           </div>
         )}
 
-        {/* ── PASSO 4: Produtos/Serviços ── */}
-        {step === 4 && (
+        {/* ── PASSO 4: Produtos/Serviços (não-servico apenas) ── */}
+        {step === 4 && tipoVenda !== "servico" && (
           <div className="p-6 space-y-4">
             <h3 className="text-lg font-semibold" style={{ color: "#1A1A1A" }}>
               <Package size={18} className="inline mr-2" style={{ color: C.esmeralda }} />
-              {tipoVenda === "servico" || tipoVenda === "fabricacao" ? "Serviços" : "Produtos"}
+              {tipoVenda === "fabricacao" ? "Serviços" : "Produtos"}
               {tipoVenda === "garantia" && (
                 <span className="ml-2 text-xs font-normal px-2 py-0.5 rounded-full" style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
                   Garantia da venda {historicoVendas.find(v => v.id === vendaGarantiaId)?.numero_venda ?? ""}
@@ -1432,14 +1787,14 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               </>
             )}
 
-            {/* Serviço / Fabricação */}
-            {(tipoVenda === "servico" || tipoVenda === "fabricacao") && (
+            {/* Fabricação */}
+            {tipoVenda === "fabricacao" && (
               <div className="p-4 rounded-xl border" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
-                <p className="text-sm font-medium mb-3" style={{ color: "#374151" }}>Adicionar serviço</p>
+                <p className="text-sm font-medium mb-3" style={{ color: "#374151" }}>Adicionar peça sob encomenda</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Descrição do serviço</label>
-                    <Input value={servDescricao} onChange={e => setServDescricao(e.target.value)} placeholder="Ex: Polimento e limpeza do anel" />
+                    <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Descrição</label>
+                    <Input value={servDescricao} onChange={e => setServDescricao(e.target.value)} placeholder="Ex: Anel solitário ouro 18k" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Valor (R$)</label>
@@ -1572,22 +1927,15 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               </div>
             )}
 
-            {/* Pix QR */}
-            {pagForma === "Pix" && totalVenda > 0 && vendaId && (
+            {/* Pix In-Store (taxa zero, confirmação automática) */}
+            {pagForma === "Pix" && totalVenda > 0 && (
               <PixQrInline
-                vendaId={vendaId}
+                vendaId={vendaId ?? null}
                 numeroVenda={numeroVenda || "Nova"}
                 valor={totalVenda}
-                onPagamentoConfirmado={(id) => router.push(`/vendas/${id}`)}
-              />
-            )}
-            {pagForma === "Pix" && totalVenda > 0 && !vendaId && (
-              <PixQrInline
-                vendaId={null}
-                numeroVenda="Nova"
-                valor={totalVenda}
-                obterVendaId={salvarRascunho}
-                onPagamentoConfirmado={(id) => router.push(`/vendas/${id}`)}
+                endpoint="criar-pix-instore"
+                obterVendaId={!vendaId ? salvarRascunho : undefined}
+                onPagamentoConfirmado={(id) => { if (tipoVenda === "servico") concluirVenda(id); else router.push(`/vendas/${id}`); }}
               />
             )}
 
@@ -1598,7 +1946,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                 numeroVenda={numeroVenda || "Nova"}
                 valor={totalVenda}
                 installments={pagCondicao === "À vista" ? 1 : parseInt(pagCondicao) || 1}
-                onPagamentoConfirmado={(id) => router.push(`/vendas/${id}`)}
+                onPagamentoConfirmado={(id) => { if (tipoVenda === "servico") concluirVenda(id); else router.push(`/vendas/${id}`); }}
               />
             )}
             {pagForma === "Cartão de Crédito" && totalVenda > 0 && !vendaId && (
@@ -1608,7 +1956,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                 valor={totalVenda}
                 installments={pagCondicao === "À vista" ? 1 : parseInt(pagCondicao) || 1}
                 obterVendaId={salvarRascunho}
-                onPagamentoConfirmado={(id) => router.push(`/vendas/${id}`)}
+                onPagamentoConfirmado={(id) => { if (tipoVenda === "servico") concluirVenda(id); else router.push(`/vendas/${id}`); }}
               />
             )}
 
@@ -1660,14 +2008,21 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                             onKeyDown={e => e.key === "Enter" && handleAddPagamento()}
                             className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
                         </div>
-                        {pagMultForma === "Cartão de Crédito" && (
-                          <div className="min-w-28">
-                            <Label>Parcelas</Label>
-                            <Sel value={pagMultParcelas} onChange={e => setPagMultParcelas(Number(e.target.value))}>
-                              {CONDICOES.map((c, i) => <option key={c} value={i === 0 ? 1 : i + 1}>{c}</option>)}
-                            </Sel>
-                          </div>
-                        )}
+                        {pagMultForma === "Cartão de Crédito" && (() => {
+                          const valCC = parseFloat(pagValor.replace(",", ".")) || restante;
+                          const opcoesCC = condicoesMp(valCC);
+                          const maxCC = opcoesCC.length > 1 ? parseInt(opcoesCC[opcoesCC.length - 1]) : 1;
+                          const parcelasOk = pagMultParcelas <= maxCC ? pagMultParcelas : 1;
+                          if (parcelasOk !== pagMultParcelas) setPagMultParcelas(parcelasOk);
+                          return (
+                            <div className="min-w-28">
+                              <Label>Parcelas</Label>
+                              <Sel value={parcelasOk} onChange={e => setPagMultParcelas(Number(e.target.value))}>
+                                {opcoesCC.map((c, i) => <option key={c} value={i === 0 ? 1 : i + 1}>{c}</option>)}
+                              </Sel>
+                            </div>
+                          );
+                        })()}
                       </>
                     )}
                     <button
@@ -1713,11 +2068,12 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                   {pagamentos.some(p => p.forma === "Pix") && totalVenda > 0 && (
                     <div className="mt-3">
                       <PixQrInline
-                        vendaId={vendaId}
+                        vendaId={vendaId ?? null}
                         numeroVenda={numeroVenda || "Nova"}
                         valor={pagamentos.find(p => p.forma === "Pix")!.valor}
-                        obterVendaId={vendaId ? undefined : salvarRascunho}
-                        onPagamentoConfirmado={(id) => router.push(`/vendas/${id}`)}
+                        endpoint="criar-pix-instore"
+                        obterVendaId={!vendaId ? salvarRascunho : undefined}
+                        onPagamentoConfirmado={(id: number) => { if (tipoVenda === "servico") concluirVenda(id); else router.push(`/vendas/${id}`); }}
                       />
                     </div>
                   )}
@@ -1731,7 +2087,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                         valor={pagamentos.find(p => p.forma === "Cartão de Crédito")!.valor}
                         installments={pagamentos.find(p => p.forma === "Cartão de Crédito")!.parcelas || pagMultParcelas}
                         obterVendaId={vendaId ? undefined : salvarRascunho}
-                        onPagamentoConfirmado={(id) => router.push(`/vendas/${id}`)}
+                        onPagamentoConfirmado={(id) => { if (tipoVenda === "servico") concluirVenda(id); else router.push(`/vendas/${id}`); }}
                       />
                     </div>
                   )}
@@ -1842,7 +2198,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
             {saveErr && <p className="text-sm text-red-600">{saveErr}</p>}
 
             <button
-              onClick={concluirVenda}
+              onClick={() => concluirVenda()}
               disabled={concluindo || (pagForma === "Múltiplas" && !pagamentoCobre)}
               className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-base font-bold disabled:opacity-40 transition-opacity hover:opacity-90"
               style={{ backgroundColor: C.esmeralda, color: C.creme }}
@@ -1906,31 +2262,78 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               </div>
             </div>
 
-            <p className="text-sm text-center" style={{ color: "#6B7280" }}>
-              Deseja abrir uma ordem para esta venda?
-            </p>
-
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={() => {
-                  const tipo = tipoParaOrdem();
-                  router.push(`/ordens?nova=1&tipo=${tipo}&cliente_id=${cliente?.id ?? ""}&venda_id=${vendaId}&cliente_nome=${encodeURIComponent(cliente?.nome ?? "")}`);
-                }}
-                className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-semibold"
-                style={{ backgroundColor: C.esmeralda, color: C.creme }}
-              >
-                <ChevronRight size={16} /> Sim, abrir ordem
-              </button>
-              <button
-                onClick={() => router.push(`/vendas/${vendaId}`)}
-                className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-medium border"
-                style={{ borderColor: C.cremeBorder, color: "#374151" }}
-              >
-                Não, ir para a venda
-              </button>
-            </div>
+            {tipoVenda === "servico" ? (
+              <div className="flex flex-col gap-3">
+                {ordemCriada ? (
+                  <div className="flex items-center justify-center gap-2 py-2 text-sm rounded-lg" style={{ backgroundColor: "#ECFDF5", color: "#065F46" }}>
+                    <CheckCircle size={16} /> Ordem {ordemCriada.numero_ordem} criada automaticamente
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-2 py-2 text-sm rounded-lg" style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                    <AlertCircle size={16} /> Ordem de serviço não foi criada — crie manualmente
+                  </div>
+                )}
+                {ordemCriada && (
+                  <button
+                    onClick={() => router.push(`/ordens/${ordemCriada.id}`)}
+                    className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-semibold"
+                    style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                  >
+                    <ChevronRight size={16} /> Ver Ordem de Serviço
+                  </button>
+                )}
+                <button
+                  onClick={() => router.push(`/vendas/${vendaId}`)}
+                  className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-medium border"
+                  style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                >
+                  Ver Venda
+                </button>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-center" style={{ color: "#6B7280" }}>
+                  Deseja abrir uma ordem para esta venda?
+                </p>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => {
+                      const tipo = tipoParaOrdem();
+                      router.push(`/ordens?nova=1&tipo=${tipo}&cliente_id=${cliente?.id ?? ""}&venda_id=${vendaId}&cliente_nome=${encodeURIComponent(cliente?.nome ?? "")}`);
+                    }}
+                    className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-semibold"
+                    style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                  >
+                    <ChevronRight size={16} /> Sim, abrir ordem
+                  </button>
+                  <button
+                    onClick={() => router.push(`/vendas/${vendaId}`)}
+                    className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-medium border"
+                    style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                  >
+                    Não, ir para a venda
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
+      )}
+
+      {/* Modal Ordem de Serviço — pré-preenchido com dados da venda */}
+      {showOrdemModal && cliente && vendaId && (
+        <NovaOrdemServicoBaseModal
+          isOpen={showOrdemModal}
+          onClose={() => setShowOrdemModal(false)}
+          onSuccess={() => router.push(`/vendas/${vendaId}`)}
+          userId={userId}
+          userName={userName}
+          tipoOrdem="servico_venda"
+          initialData={{
+            cliente: { id: cliente.id, nome: cliente.nome, cpf_cnpj: cliente.cpf_cnpj, telefone: cliente.telefone, celular: cliente.celular },
+            venda:   { id: vendaId, numero_venda: numeroVenda, data_venda: new Date().toISOString(), total_venda: totalVenda, situacao: "aprovado", qtd_itens: itens.length },
+          }}
+        />
       )}
 
       {/* Toast Vale-Troca: troco gerado */}

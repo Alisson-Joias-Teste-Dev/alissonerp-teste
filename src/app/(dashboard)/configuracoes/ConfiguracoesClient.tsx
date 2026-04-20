@@ -137,7 +137,17 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas" | "fretes";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas" | "fretes" | "gateways";
+
+interface Gateway {
+  id: number;
+  nome: string;
+  tipo: "pix" | "cartao" | "dinheiro" | "ouro" | "outro";
+  ativo: boolean;
+  cor: string;
+  obs: string | null;
+  created_at: string;
+}
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -4664,7 +4674,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
     const u = params.get("user");
-    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes", "maquininhas", "fretes"].includes(t)) {
+    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes", "maquininhas", "fretes", "gateways"].includes(t)) {
       setTab(t as Tab);
     }
     if (u) setInitialUserId(u);
@@ -4684,6 +4694,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "comissoes",     label: "Comissões",       icon: PenLine },
     { key: "credito_loja", label: "Crédito Loja",    icon: Wallet },
     { key: "fretes",       label: "Fretes",           icon: Truck },
+    { key: "gateways",    label: "Gateways",          icon: CreditCard },
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let tabs: { key: Tab; label: string; icon: any }[] = isSuperAdmin
@@ -4745,7 +4756,8 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "comissoes"   && <TabComissoes />}
       {tab === "credito_loja" && <TabCreditoLoja />}
       {tab === "maquininhas" && canSeeMaquininhas && <TabMaquininhas />}
-      {tab === "fretes" && (isSuperAdmin || currentRole === "gerente_loja") && <TabFretes />}
+      {tab === "fretes"    && (isSuperAdmin || currentRole === "gerente_loja") && <TabFretes />}
+      {tab === "gateways"  && isSuperAdmin && <TabGateways />}
     </div>
   );
 }
@@ -5265,6 +5277,269 @@ function TabFretes() {
         </div>
       </div>
       {fmtFrete(0) && null /* suppress unused var */}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab Gateways — Gateways de Pagamento do Caixa
+// ═══════════════════════════════════════════════════════════════════════════════
+function TabGateways() {
+  const [gateways, setGateways] = useState<Gateway[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [form, setForm] = useState({ nome: "", tipo: "outro" as Gateway["tipo"], cor: "#6B7280", obs: "" });
+  const [erro, setErro] = useState<string | null>(null);
+
+  const TIPO_LABELS: Record<Gateway["tipo"], string> = {
+    pix: "PIX", cartao: "Cartão", dinheiro: "Dinheiro", ouro: "Ouro", outro: "Outro",
+  };
+  const TIPO_CORES: Record<Gateway["tipo"], string> = {
+    pix: "#1D4ED8", cartao: "#7C3AED", dinheiro: "#059669", ouro: "#D97706", outro: "#6B7280",
+  };
+
+  useEffect(() => {
+    fetch("/api/configuracoes/gateways")
+      .then(r => r.json())
+      .then(data => { setGateways(Array.isArray(data) ? data : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  function startAdd() {
+    setEditingId(null);
+    setForm({ nome: "", tipo: "outro", cor: "#6B7280", obs: "" });
+    setErro(null);
+    setShowForm(true);
+  }
+
+  function startEdit(g: Gateway) {
+    setEditingId(g.id);
+    setForm({ nome: g.nome, tipo: g.tipo, cor: g.cor, obs: g.obs ?? "" });
+    setErro(null);
+    setShowForm(true);
+  }
+
+  async function handleSave() {
+    if (!form.nome.trim()) { setErro("Nome obrigatório"); return; }
+    setSaving(true);
+    setErro(null);
+    try {
+      const url = editingId ? `/api/configuracoes/gateways/${editingId}` : "/api/configuracoes/gateways";
+      const method = editingId ? "PATCH" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome: form.nome.trim(), tipo: form.tipo, cor: form.cor, obs: form.obs.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setErro(data.error || "Erro ao salvar"); setSaving(false); return; }
+      if (editingId) {
+        setGateways(prev => prev.map(g => g.id === editingId ? data : g));
+      } else {
+        setGateways(prev => [...prev, data]);
+      }
+      setShowForm(false);
+      setEditingId(null);
+    } catch { setErro("Erro de rede"); }
+    setSaving(false);
+  }
+
+  async function handleToggle(g: Gateway) {
+    setTogglingId(g.id);
+    const res = await fetch(`/api/configuracoes/gateways/${g.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ativo: !g.ativo }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setGateways(prev => prev.map(x => x.id === g.id ? data : x));
+    }
+    setTogglingId(null);
+  }
+
+  async function handleDelete(g: Gateway) {
+    if (!confirm(`Excluir/desativar gateway "${g.nome}"?`)) return;
+    setDeletingId(g.id);
+    const res = await fetch(`/api/configuracoes/gateways/${g.id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (data.deleted) {
+      setGateways(prev => prev.filter(x => x.id !== g.id));
+    } else if (data.deactivated) {
+      setGateways(prev => prev.map(x => x.id === g.id ? { ...x, ativo: false } : x));
+    }
+    setDeletingId(null);
+  }
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold" style={{ color: P.creme }}>Gateways de Pagamento</h2>
+          <p className="text-xs mt-0.5" style={{ color: P.sage }}>Configure as contas/gateways que recebem os pagamentos do caixa</p>
+        </div>
+        <button
+          onClick={startAdd}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-90"
+          style={{ backgroundColor: P.verde, color: "#fff" }}
+        >
+          <Plus size={14} /> Novo Gateway
+        </button>
+      </div>
+
+      {/* Form novo/editar */}
+      {showForm && (
+        <div className="rounded-xl border p-5 space-y-4" style={{ borderColor: P.border, backgroundColor: P.card }}>
+          <h3 className="text-sm font-semibold" style={{ color: P.creme }}>
+            {editingId ? "Editar Gateway" : "Novo Gateway"}
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: P.sage }}>Nome *</label>
+              <input
+                value={form.nome}
+                onChange={e => setForm(f => ({ ...f, nome: e.target.value }))}
+                placeholder="Ex: Mercado Pago, Stone, Nubank..."
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                style={{ borderColor: P.border, color: P.creme }}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: P.sage }}>Tipo</label>
+              <select
+                value={form.tipo}
+                onChange={e => {
+                  const t = e.target.value as Gateway["tipo"];
+                  setForm(f => ({ ...f, tipo: t, cor: TIPO_CORES[t] }));
+                }}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                style={{ borderColor: P.border, color: P.creme, backgroundColor: P.card }}
+              >
+                <option value="pix">PIX</option>
+                <option value="cartao">Cartão</option>
+                <option value="dinheiro">Dinheiro</option>
+                <option value="ouro">Ouro</option>
+                <option value="outro">Outro (múltiplos)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: P.sage }}>Cor</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.cor} onChange={e => setForm(f => ({ ...f, cor: e.target.value }))}
+                  className="w-10 h-9 rounded-lg border cursor-pointer" style={{ borderColor: P.border }} />
+                <span className="text-xs font-mono" style={{ color: P.sage }}>{form.cor}</span>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: P.sage }}>Observação</label>
+              <input
+                value={form.obs}
+                onChange={e => setForm(f => ({ ...f, obs: e.target.value }))}
+                placeholder="Ex: conta PJ Bradesco"
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                style={{ borderColor: P.border, color: P.creme }}
+              />
+            </div>
+          </div>
+          {erro && (
+            <p className="text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: "#FEE2E2", color: P.vermelho }}>{erro}</p>
+          )}
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => { setShowForm(false); setEditingId(null); setErro(null); }}
+              disabled={saving}
+              className="px-4 py-2 rounded-lg text-sm border font-medium disabled:opacity-40"
+              style={{ borderColor: P.border, color: P.sage }}
+            >Cancelar</button>
+            <button onClick={handleSave} disabled={saving}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+              style={{ backgroundColor: P.verde, color: "#fff" }}
+            >
+              {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+              {editingId ? "Salvar Alterações" : "Criar Gateway"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Lista */}
+      {loading ? (
+        <div className="flex items-center justify-center py-10">
+          <Loader2 size={18} className="animate-spin" style={{ color: P.muted }} />
+        </div>
+      ) : gateways.length === 0 ? (
+        <div className="rounded-xl border p-8 text-center" style={{ borderColor: P.border }}>
+          <CreditCard size={28} className="mx-auto mb-2" style={{ color: P.muted }} />
+          <p className="text-sm" style={{ color: P.sage }}>Nenhum gateway cadastrado.</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: P.border }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ backgroundColor: P.bg, borderBottom: `1px solid ${P.border}` }}>
+                {["Gateway", "Tipo", "Status", "Observação", ""].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: P.sage }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {gateways.map(g => (
+                <tr key={g.id} className="border-t hover:bg-gray-50 transition-colors" style={{ borderColor: P.border }}>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: g.cor }} />
+                      <span className="font-medium" style={{ color: P.creme }}>{g.nome}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                      style={{ backgroundColor: TIPO_CORES[g.tipo] + "18", color: TIPO_CORES[g.tipo] }}>
+                      {TIPO_LABELS[g.tipo]}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => handleToggle(g)} disabled={togglingId === g.id}
+                      className="flex items-center gap-1 text-xs disabled:opacity-50">
+                      {togglingId === g.id ? (
+                        <Loader2 size={14} className="animate-spin" style={{ color: P.muted }} />
+                      ) : g.ativo ? (
+                        <ToggleRight size={20} style={{ color: P.verde }} />
+                      ) : (
+                        <ToggleLeft size={20} style={{ color: P.muted }} />
+                      )}
+                      <span style={{ color: g.ativo ? P.verde : P.muted }}>{g.ativo ? "Ativo" : "Inativo"}</span>
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-xs max-w-[200px] truncate" style={{ color: P.sage }}>{g.obs ?? "—"}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => startEdit(g)}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                        title="Editar">
+                        <Pencil size={13} style={{ color: P.sage }} />
+                      </button>
+                      <button onClick={() => handleDelete(g)} disabled={deletingId === g.id}
+                        className="p-1.5 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40"
+                        title="Excluir">
+                        {deletingId === g.id
+                          ? <Loader2 size={13} className="animate-spin" style={{ color: P.vermelho }} />
+                          : <Trash2 size={13} style={{ color: P.vermelho }} />
+                        }
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-[11px]" style={{ color: P.muted }}>
+        Gateways em uso por pagamentos serão desativados (não excluídos) ao remover.
+      </p>
     </div>
   );
 }

@@ -59,13 +59,15 @@ export default async function OrdemDetalhePage({
 
   if (!ordens[0]) return notFound();
 
-  // Consultora só pode ver ordens do seu vendedor_id
+  // Auth: consultora só vê suas ordens; captura role para o client
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
+  let userRole: string | null = null;
   if (user) {
     const [usuario] = await sql`
       SELECT role, vendedor_id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
     `;
+    userRole = usuario?.role ?? null;
     if (usuario?.role === "consultora" && usuario.vendedor_id != null) {
       const ordemVendedorId = (ordens[0] as any).vendedor_id;
       if (ordemVendedorId !== usuario.vendedor_id) {
@@ -99,6 +101,7 @@ export default async function OrdemDetalhePage({
       transferencias={transferencias}
       fichaTecnica={fichaTecnica}
       timeline={timeline as any[]}
+      userRole={userRole}
     />
   );
 }
