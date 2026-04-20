@@ -32,6 +32,9 @@ export async function GET(req: NextRequest) {
       FROM public.produtos p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       WHERE (ep.eh_variacao = false OR ep.id IS NULL)
+        -- Pedras não têm tipo_metal (não são feitas de metal). Excluídas
+        -- do bucket "Sem Metal" pra não poluir a contagem.
+        AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Pedras%')
         ${f.wBusca} ${f.wSkuPrefix} ${f.wPedra} ${f.wSituacao}
         ${f.wCategoria} ${f.wEstoque} ${f.wEsconderInsumos} ${f.wPendencia}
       GROUP BY 1

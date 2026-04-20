@@ -115,10 +115,14 @@ export async function GET(req: NextRequest) {
 
   // Pendências — produtos com dados incompletos.
   const esconderInsumos = sp.get("esconder_insumos") === "true";
+  // Esconder insumos também cobre mostruário e matérias-primas
   const wEsconderInsumos = esconderInsumos
     ? sql`AND (p.sku IS NULL OR p.sku NOT ILIKE 'IS%')
+          AND (p.sku IS NULL OR p.sku NOT ILIKE 'MO%')
           AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Insumos%')
-          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Matérias Primas%')`
+          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Matérias Primas%')
+          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Mostruário%')
+          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Mostruario%')`
     : sql``;
 
   const pendencia = sp.get("pendencia")?.trim() ?? "";
@@ -159,15 +163,23 @@ export async function GET(req: NextRequest) {
     : sql``;
 
   // Apenas com saldo >= 1 em public.estoque (join por SKU, agregando para
-  // Saldo pode vir de 2 fontes:
-  //   public.estoque (produtos acabados do Tiny) OU
-  //   alissonerp.vw_estoque_directus_saldo (pedras/insumos legado)
+  // Saldo vem de 3 fontes: public.estoque (Tiny) + vw_estoque_directus_saldo (legado)
+  // + FILHOS (variações do pai com estoque em public.estoque).
   const wEstoque = apenasComEstoque
     ? sql`AND (
         EXISTS (SELECT 1 FROM public.estoque e
                 WHERE e.sku = p.sku AND e.saldo >= 1)
         OR EXISTS (SELECT 1 FROM alissonerp.vw_estoque_directus_saldo v
                    WHERE v.insumo_sku = p.sku AND v.saldo >= 1)
+        OR EXISTS (
+          SELECT 1
+          FROM alissonerp.erp_produtos pai_ep
+          INNER JOIN alissonerp.erp_produtos filho_ep ON filho_ep.parent_id = pai_ep.id
+          INNER JOIN public.produtos filho_prod ON filho_prod.id_produto = filho_ep.produto_id
+          INNER JOIN public.estoque e2 ON e2.sku = filho_prod.sku
+          WHERE pai_ep.produto_id = p.id_produto
+            AND e2.saldo >= 1
+        )
       )`
     : sql``;
 
@@ -207,6 +219,7 @@ export async function GET(req: NextRequest) {
         FROM public.produtos p
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
+        LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
         WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
       `;
 
@@ -232,6 +245,13 @@ export async function GET(req: NextRequest) {
           COALESCE(
             (SELECT e.saldo::int FROM public.estoque e WHERE e.sku = p.sku LIMIT 1),
             (SELECT SUM(v.saldo)::int FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku),
+            -- Soma estoque dos filhos (variações) se for pai
+            (SELECT SUM(e_f.saldo)::int
+             FROM alissonerp.erp_produtos pai_e
+             INNER JOIN alissonerp.erp_produtos filho_e ON filho_e.parent_id = pai_e.id
+             INNER JOIN public.produtos prod_f ON prod_f.id_produto = filho_e.produto_id
+             INNER JOIN public.estoque e_f ON e_f.sku = prod_f.sku
+             WHERE pai_e.produto_id = p.id_produto),
             0
           ) AS saldo_estoque,
           ARRAY_REMOVE(ARRAY[
@@ -240,6 +260,27 @@ export async function GET(req: NextRequest) {
             CASE WHEN ${wSemPeso}  THEN 'sem_peso'      END,
             CASE WHEN ${wSemPreco} THEN 'sem_preco'     END
           ], NULL) AS pendencias,
+          -- Preço da curva = peso × cotação_ouro × markup_aplicado × fator, arredondado à dezena.
+          -- Usa markup_aplicado de produto_curva_aplicada (se a curva foi aplicada);
+          -- senão usa o markup da própria public.produtos. Cotação buscada de public.parametros.
+          --
+          -- EXCEÇÃO: produtos da categoria "Pedras" NÃO entram no racional do ouro —
+          -- seu preço vem direto de preco_tiny (cadastro manual, R$/unidade).
+          -- Retornamos NULL aqui para que a UI mostre apenas preco_tiny.
+          CASE
+            WHEN p.categoria ILIKE 'Pedras%' THEN NULL
+            WHEN p.peso_precificado > 0
+             AND (cpa.markup_aplicado > 0 OR p.markup > 0)
+             AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
+            THEN ROUND(
+              p.peso_precificado::numeric
+              * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
+              * COALESCE(cpa.markup_aplicado::numeric, p.markup::numeric)
+              * COALESCE(p.fator::numeric, 1)
+              / 10
+            )::int * 10
+            ELSE NULL
+          END AS preco_curva,
           ti.tipo_item,
           ep.id               AS erp_id,
           ep.eh_pai,
@@ -255,6 +296,7 @@ export async function GET(req: NextRequest) {
         FROM public.produtos p
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
+        LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
         WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
         ORDER BY ${orderVariacoes}
         LIMIT  ${limit}
@@ -302,6 +344,21 @@ export async function GET(req: NextRequest) {
           CASE WHEN ${wSemPeso}  THEN 'sem_peso'      END,
           CASE WHEN ${wSemPreco} THEN 'sem_preco'     END
         ], NULL) AS pendencias,
+        -- Pedras ficam fora do cálculo (ver comentário na query principal).
+        CASE
+          WHEN p.categoria ILIKE 'Pedras%' THEN NULL
+          WHEN p.peso_precificado > 0
+           AND (cpa.markup_aplicado > 0 OR p.markup > 0)
+           AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
+          THEN ROUND(
+            p.peso_precificado::numeric
+            * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
+            * COALESCE(cpa.markup_aplicado::numeric, p.markup::numeric)
+            * COALESCE(p.fator::numeric, 1)
+            / 10
+          )::int * 10
+          ELSE NULL
+        END AS preco_curva,
         ti.tipo_item,
         NULL::integer AS erp_id,
         NULL::boolean AS eh_pai,
@@ -312,6 +369,7 @@ export async function GET(req: NextRequest) {
         0::integer    AS qtd_variacoes
       FROM public.produtos p
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
+      LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
       WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
       ORDER BY ${orderFieldIdent} ${orderDir} NULLS LAST
       LIMIT  ${limit}
@@ -367,6 +425,7 @@ export async function POST(req: NextRequest) {
     markup?: number;
     fator?: number;
     categoria_precificacao?: string;
+    categoria_geral?: string | null;
     tem_pedra_preciosa?: boolean;
     medidas?: { largura_aro?: number; altura_aro?: number; base?: number };
     ficha_tecnica_ia?: {
@@ -388,10 +447,13 @@ export async function POST(req: NextRequest) {
     } | null;
     composicao?: ComposicaoItem[];
     variacoes?: VariacoesConfig;
+    // Quantidades iniciais em estoque por numeração (ex: {"16": 2, "18": 1}).
+    // Só tem efeito quando variacoes é gerado. Insere/atualiza public.estoque.
+    quantidades?: Record<string, number>;
   };
 
   const { nome, tipo_metal, cor_metal, peso_precificado, markup, fator,
-          categoria_precificacao, tem_pedra_preciosa, medidas, ficha_tecnica_ia, composicao, variacoes } = body;
+          categoria_precificacao, categoria_geral, tem_pedra_preciosa, medidas, ficha_tecnica_ia, composicao, variacoes, quantidades } = body;
 
   if (!nome?.trim()) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
   if (!peso_precificado || peso_precificado <= 0) return NextResponse.json({ error: "peso_precificado inválido" }, { status: 400 });
@@ -448,11 +510,11 @@ export async function POST(req: NextRequest) {
         INSERT INTO public.produtos
           (id_produto, sku, nome, tipo_metal, situacao,
            peso_precificado, markup, fator,
-           categoria_precificacao, tem_pedra_preciosa)
+           categoria_precificacao, categoria, tem_pedra_preciosa)
         VALUES
           (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
            ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
-           ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false})
+           ${categoria_precificacao ?? null}, ${categoria_geral ?? null}, ${tem_pedra_preciosa ?? false})
         RETURNING id_produto, sku, nome, preco_sync
       `;
 
@@ -593,6 +655,32 @@ export async function POST(req: NextRequest) {
 
         variacoesCriadas.push({ sku: skuVar, nome: nomeVar, peso: pesoVar, produto_id: varId });
         contador++;
+      }
+
+      // ── Estoque inicial: insere saldo em public.estoque por variação ──────
+      // body.quantidades = { "16": 2, "18": 1 } → casa com combo.numeracao.
+      // UPSERT por SKU para ser idempotente (e preservar produto_id_api se vier do Tiny).
+      if (quantidades && Object.keys(quantidades).length > 0) {
+        for (const v of variacoesCriadas) {
+          // numeracao vem do sufixo "-N" do sku (ex: "1701-3" → 3). Mais seguro
+          // é casar pela posição mas aqui usamos a convenção: sufixo = contador.
+          const match = v.sku.match(/-(\d+)$/);
+          if (!match) continue;
+          const posContador = match[1];
+          // Mapear posContador → numeração do combo correspondente (pelo índice)
+          const idxCombo = variacoesCriadas.findIndex((x) => x.sku === v.sku);
+          const comboN = combos[idxCombo]?.numeracao;
+          if (comboN == null) continue;
+          const qtd = quantidades[String(comboN)];
+          if (!qtd || qtd <= 0) continue;
+          await tx`
+            INSERT INTO public.estoque (sku, saldo, estoque_loja)
+            VALUES (${v.sku}, ${qtd}, ${qtd})
+            ON CONFLICT (sku) DO UPDATE SET
+              saldo        = public.estoque.saldo        + EXCLUDED.saldo,
+              estoque_loja = public.estoque.estoque_loja + EXCLUDED.estoque_loja
+          `;
+        }
       }
 
       return { pai: prodPai, erp: erpPai, variacoes: variacoesCriadas };

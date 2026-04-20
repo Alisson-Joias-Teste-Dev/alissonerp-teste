@@ -62,6 +62,26 @@ export async function GET(
             p.categoria              AS categoria_geral,
             p.markup,
             p.fator,
+            -- Preço calculado pela curva (peso × ouro × markup_aplicado × fator).
+            -- Usa markup da curva se aplicada, senão markup do produto. Fator default 1.
+            -- EXCEÇÃO: pedras não seguem a curva (preço vem direto de preco_tiny).
+            CASE
+              WHEN p.categoria ILIKE 'Pedras%' THEN NULL
+              WHEN p.peso_precificado > 0
+               AND ((SELECT markup_aplicado FROM alissonerp.produto_curva_aplicada WHERE produto_id = p.id_produto) > 0 OR p.markup > 0)
+               AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
+              THEN ROUND(
+                p.peso_precificado::numeric
+                * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
+                * COALESCE(
+                    (SELECT markup_aplicado::numeric FROM alissonerp.produto_curva_aplicada WHERE produto_id = p.id_produto),
+                    p.markup::numeric
+                  )
+                * COALESCE(p.fator::numeric, 1)
+                / 10
+              )::int * 10
+              ELSE NULL
+            END AS preco_curva,
             (SELECT tipo_item FROM alissonerp.produto_tipo_item WHERE produto_id = p.id_produto) AS tipo_item,
             NULL::text   AS sub_categoria,
             ep.id        AS erp_id,
@@ -105,6 +125,26 @@ export async function GET(
             p.categoria              AS categoria_geral,
             p.markup,
             p.fator,
+            -- Preço calculado pela curva (peso × ouro × markup_aplicado × fator).
+            -- Usa markup da curva se aplicada, senão markup do produto. Fator default 1.
+            -- EXCEÇÃO: pedras não seguem a curva (preço vem direto de preco_tiny).
+            CASE
+              WHEN p.categoria ILIKE 'Pedras%' THEN NULL
+              WHEN p.peso_precificado > 0
+               AND ((SELECT markup_aplicado FROM alissonerp.produto_curva_aplicada WHERE produto_id = p.id_produto) > 0 OR p.markup > 0)
+               AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
+              THEN ROUND(
+                p.peso_precificado::numeric
+                * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
+                * COALESCE(
+                    (SELECT markup_aplicado::numeric FROM alissonerp.produto_curva_aplicada WHERE produto_id = p.id_produto),
+                    p.markup::numeric
+                  )
+                * COALESCE(p.fator::numeric, 1)
+                / 10
+              )::int * 10
+              ELSE NULL
+            END AS preco_curva,
             (SELECT tipo_item FROM alissonerp.produto_tipo_item WHERE produto_id = p.id_produto) AS tipo_item,
             NULL::text    AS sub_categoria,
             NULL::integer AS erp_id,
@@ -173,7 +213,11 @@ export async function GET(
       `;
     }
 
-    return NextResponse.json({ produto, composicao, variacoes });
+    // Cotação atual do ouro (para cálculo em runtime no drawer)
+    const [cot] = await sql<{ ouro: string | null }[]>`SELECT ouro FROM public.parametros LIMIT 1`;
+    const cotacao_ouro = Number(cot?.ouro ?? 0);
+
+    return NextResponse.json({ produto, composicao, variacoes, cotacao_ouro });
   } catch (err) {
     console.error("[GET /api/produtos/[id]]", err);
     return NextResponse.json({ error: "Erro ao buscar produto" }, { status: 500 });

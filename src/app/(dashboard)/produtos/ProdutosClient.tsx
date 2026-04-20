@@ -13,6 +13,7 @@ import {
 import { formatPeso } from "@/lib/formatters";
 import ProdutoDrawer from "@/components/produtos/ProdutoDrawer";
 import CadastroProdutoModal from "@/components/produtos/CadastroProdutoModal";
+import GerenciarPedrasModal from "@/components/produtos/GerenciarPedrasModal";
 import BulkEditModal from "@/components/produtos/BulkEditModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -25,6 +26,7 @@ export interface Produto {
   peso_precificado: string | null;
   preco_tiny: string | null;
   preco_sync: string | null;
+  preco_curva: number | null;
   preco_pedras: string | null;
   preco_total_sync: string | null;
   diferenca_percentual: string | null;
@@ -51,7 +53,7 @@ interface CategoriaPai {
   filhos: { nome: string; total: number }[];
 }
 
-type OrderField = "nome" | "sku" | "preco_sync" | "diferenca_percentual" | "preco_tiny" | "peso_precificado" | "id_produto";
+type OrderField = "nome" | "sku" | "preco_sync" | "peso_precificado" | "id_produto";
 type OrderDir = "asc" | "desc";
 
 // ─── Design constants ─────────────────────────────────────────────────────────
@@ -71,16 +73,6 @@ function formatPreco(val: string | null | undefined): string {
   const n = parseFloat(val);
   if (isNaN(n)) return "—";
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function DeltaBadge({ pct }: { pct: string | null | undefined }) {
-  if (!pct) return <span className="text-gray-400 font-mono text-xs">—</span>;
-  const n = parseFloat(pct);
-  if (isNaN(n)) return <span className="text-gray-400 font-mono text-xs">—</span>;
-  if (Math.abs(n) < 0.01) return <span className="text-gray-400 font-mono text-xs">= 0%</span>;
-  const sign = n > 0 ? "+" : "";
-  const cls = n > 0 ? "text-red-600" : "text-green-600";
-  return <span className={`font-mono text-xs font-medium ${cls}`}>{sign}{n.toFixed(1)}%</span>;
 }
 
 function SituacaoBadge({ situacao }: { situacao: string | null }) {
@@ -191,6 +183,7 @@ export default function ProdutosClient() {
 
   // Cadastro modal
   const [showCadastro, setShowCadastro] = useState(false);
+  const [showPedras, setShowPedras]     = useState(false);
 
   // Seleção em massa
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
@@ -380,13 +373,22 @@ export default function ProdutosClient() {
               {loading ? "Carregando..." : error ? "—" : `${total.toLocaleString("pt-BR")} produto(s)`}
             </p>
           </div>
-          <button
-            onClick={() => setShowCadastro(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors hover:opacity-90"
-            style={{ backgroundColor: "#184036" }}
-          >
-            + Novo Produto
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowPedras(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border hover:bg-gray-50"
+              style={{ borderColor: "#184036", color: "#184036" }}
+            >
+              💎 Pedras
+            </button>
+            <button
+              onClick={() => setShowCadastro(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors hover:opacity-90"
+              style={{ backgroundColor: "#184036" }}
+            >
+              + Novo Produto
+            </button>
+          </div>
         </div>
 
         {/* Filters */}
@@ -494,7 +496,7 @@ export default function ProdutosClient() {
 
           <label
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white cursor-pointer select-none hover:border-gray-300 transition-colors"
-            title="Esconder produtos com SKU IS* e categoria Insumos/Matérias Primas"
+            title="Esconder produtos com SKU IS*/MO*, categoria Insumos, Matérias Primas e Mostruário"
           >
             <input
               type="checkbox"
@@ -502,7 +504,7 @@ export default function ProdutosClient() {
               onChange={(e) => handleFilterChange(() => setEsconderInsumos(e.target.checked))}
               className="accent-[#184036]"
             />
-            Esconder insumos
+            Esconder insumos e mostruário
           </label>
         </div>
       </div>
@@ -551,20 +553,18 @@ export default function ProdutosClient() {
                 <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">Situação</th>
                 <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">Estoque</th>
                 <SortHeader field="preco_sync"           label="Preço Sync" current={order} dir={dir} onSort={handleSort} />
-                <SortHeader field="preco_tiny"           label="Preço Tiny" current={order} dir={dir} onSort={handleSort} />
-                <SortHeader field="diferenca_percentual" label="Δ%"         current={order} dir={dir} onSort={handleSort} />
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={11} className="px-3 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={9} className="px-3 py-12 text-center text-gray-400 text-sm">
                     Carregando...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-3 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={9} className="px-3 py-12 text-center text-gray-400 text-sm">
                     Nenhum produto encontrado.
                   </td>
                 </tr>
@@ -671,44 +671,65 @@ export default function ProdutosClient() {
                         </div>
                       </td>
 
-                      {/* Metal */}
-                      <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">
-                        {p.tipo_metal || "—"}
-                      </td>
+                      {(() => {
+                        // Pedras: colunas Metal e Preço Sync ficam em branco; Peso em ct;
+                        // a coluna "Preço Sync" passa a exibir preco_tiny (preço de venda cadastrado).
+                        const isPedra = (p.categoria ?? "").toLowerCase().startsWith("pedras");
+                        const pesoG = parseFloat(p.peso_precificado ?? "0") || 0;
+                        const ct    = pesoG / 0.2;
 
-                      {/* Peso */}
-                      <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap">
-                        {formatPeso(p.peso_precificado)}g
-                      </td>
+                        return (
+                          <>
+                            {/* Metal */}
+                            <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">
+                              {isPedra ? <span className="text-gray-300">—</span> : (p.tipo_metal || "—")}
+                            </td>
 
-                      {/* Situação */}
-                      <td className="px-3 py-2.5">
-                        <SituacaoBadge situacao={p.situacao} />
-                      </td>
+                            {/* Peso — em ct para pedras, em g para joias */}
+                            <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap">
+                              {isPedra
+                                ? (ct > 0 ? `${ct.toFixed(3)} ct` : "—")
+                                : `${formatPeso(p.peso_precificado)}g`}
+                            </td>
 
-                      {/* Estoque */}
-                      <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
-                        {(p.saldo_estoque ?? 0) > 0 ? (
-                          <span className="text-emerald-700 font-semibold">{p.saldo_estoque}</span>
-                        ) : (
-                          <span className="text-gray-300">0</span>
-                        )}
-                      </td>
+                            {/* Situação */}
+                            <td className="px-3 py-2.5">
+                              <SituacaoBadge situacao={p.situacao} />
+                            </td>
 
-                      {/* Preço Sync */}
-                      <td className="px-3 py-2.5 font-mono text-xs text-gray-800 whitespace-nowrap">
-                        {formatPreco(p.preco_sync)}
-                      </td>
+                            {/* Estoque */}
+                            <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
+                              {(p.saldo_estoque ?? 0) > 0 ? (
+                                <span className="text-emerald-700 font-semibold">{p.saldo_estoque}</span>
+                              ) : (
+                                <span className="text-gray-300">0</span>
+                              )}
+                            </td>
 
-                      {/* Preço Tiny */}
-                      <td className="px-3 py-2.5 font-mono text-xs text-gray-500 whitespace-nowrap">
-                        {formatPreco(p.preco_tiny)}
-                      </td>
-
-                      {/* Δ% */}
-                      <td className="px-3 py-2.5 whitespace-nowrap">
-                        <DeltaBadge pct={p.diferenca_percentual} />
-                      </td>
+                            {/* Preço — para pedras: preco_tiny (venda); para joias: preco_sync ou preco_curva */}
+                            <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
+                              {isPedra ? (
+                                p.preco_tiny != null && parseFloat(p.preco_tiny) > 0 ? (
+                                  <span className="font-semibold" style={{ color: "#184036" }}>
+                                    {formatPreco(p.preco_tiny)}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )
+                              ) : p.preco_sync != null && parseFloat(p.preco_sync) > 0 ? (
+                                <span className="text-gray-800">{formatPreco(p.preco_sync)}</span>
+                              ) : p.preco_curva != null && p.preco_curva > 0 ? (
+                                <span className="text-emerald-700" title="Calculado pela curva (trigger não atualizou preco_sync — ver migration 157)">
+                                  {formatPreco(String(p.preco_curva))}
+                                  <sup className="ml-0.5 text-[8px] font-bold">C</sup>
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                          </>
+                        );
+                      })()}
                     </tr>
                   );
                 })
@@ -815,6 +836,12 @@ export default function ProdutosClient() {
           bumpRefresh();
           setSelectedId(produtoId);
         }}
+      />
+
+      <GerenciarPedrasModal
+        open={showPedras}
+        onClose={() => setShowPedras(false)}
+        onCreated={bumpRefresh}
       />
     </div>
   );

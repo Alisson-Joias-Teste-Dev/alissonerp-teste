@@ -23,10 +23,24 @@ import {
   type CurvaCategoriaInput,
   type Arredondamento,
 } from "@/lib/curva-precificacao";
+import { buildFiltrosProdutos } from "@/lib/produtos-filtros";
 
 interface RequestBody {
   config?: CurvaConfig;
   categorias?: CurvaCategoriaInput[];
+  // Filtros opcionais da tela /produtos — restringe o alvo da aplicação.
+  filtros?: {
+    situacao?: string;
+    esconder_insumos?: boolean;
+    apenas_com_estoque?: boolean;
+    categoria?: string;
+    subcategoria?: string;
+    tipo_metal?: string;
+    tem_pedra?: string;
+    busca?: string;
+    sku_prefix?: string;
+    pendencia?: string;
+  };
 }
 
 interface PreviewItem {
@@ -89,13 +103,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Cotação do ouro não disponível" }, { status: 500 });
     }
 
-    // ── Buscar produtos ativos com peso ──
+    // ── Montar filtros opcionais ──
+    const sp = new URLSearchParams();
+    const f = body.filtros ?? {};
+    sp.set("situacao", f.situacao ?? "A");
+    if (f.esconder_insumos)   sp.set("esconder_insumos", "true");
+    if (f.apenas_com_estoque) sp.set("apenas_com_estoque", "true");
+    if (f.categoria)    sp.set("categoria", f.categoria);
+    if (f.subcategoria) sp.set("subcategoria", f.subcategoria);
+    if (f.tipo_metal)   sp.set("tipo_metal", f.tipo_metal);
+    if (f.tem_pedra)    sp.set("tem_pedra", f.tem_pedra);
+    if (f.busca)        sp.set("busca", f.busca);
+    if (f.sku_prefix)   sp.set("sku_prefix", f.sku_prefix);
+    if (f.pendencia)    sp.set("pendencia", f.pendencia);
+    const w = buildFiltrosProdutos(sp, { exclude: ["tipo_item"] });
+
+    // ── Buscar produtos alvo (ativos com peso + filtros da tela) ──
     const produtos = (await sql`
-      SELECT id_produto, sku, nome, peso_precificado, markup, preco_sync
-      FROM public.produtos
-      WHERE situacao = 'A'
-        AND peso_precificado IS NOT NULL
-        AND peso_precificado > 0
+      SELECT p.id_produto, p.sku, p.nome, p.peso_precificado, p.markup, p.preco_sync
+      FROM public.produtos p
+      LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+      WHERE (ep.eh_variacao = false OR ep.id IS NULL)
+        AND p.peso_precificado IS NOT NULL
+        AND p.peso_precificado > 0
+        ${w.wBusca} ${w.wSkuPrefix} ${w.wPedra} ${w.wSituacao}
+        ${w.wCategoria} ${w.wTipoMetal} ${w.wEstoque}
+        ${w.wEsconderInsumos} ${w.wPendencia}
     `) as unknown as Array<{
       id_produto: string | number;
       sku: string | null;
