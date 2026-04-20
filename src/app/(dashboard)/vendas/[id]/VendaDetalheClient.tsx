@@ -1642,6 +1642,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                           vendaId={venda.id}
                           numeroVenda={venda.numero_venda}
                           valor={pag.valor}
+                          endpoint="criar-pix-instore"
                           onPagamentoConfirmado={() => load()}
                         />
                       </div>
@@ -1759,6 +1760,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                   vendaId={venda.id}
                   numeroVenda={venda.numero_venda}
                   valor={Math.max(0, venda.total_venda - venda.total_pago)}
+                  endpoint="criar-pix-instore"
                   onPagamentoConfirmado={() => load()}
                 />
               )}

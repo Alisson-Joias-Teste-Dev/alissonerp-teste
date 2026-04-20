@@ -1384,6 +1384,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               vendaId={null}
               numeroVenda="Nova"
               valor={totalVenda}
+              endpoint="criar-pix-instore"
               obterVendaId={salvarRascunhoParaPix}
               onPagamentoConfirmado={(vendaIdConfirmado) => {
                 router.push(`/vendas/${vendaIdConfirmado}`);
@@ -1524,6 +1525,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                       vendaId={null}
                       numeroVenda="Nova"
                       valor={pagamentos.find(p => p.forma === "Pix")!.valor}
+                      endpoint="criar-pix-instore"
                       obterVendaId={salvarRascunhoParaPix}
                       onPagamentoConfirmado={(vendaIdConfirmado) => {
                         router.push(`/vendas/${vendaIdConfirmado}`);
