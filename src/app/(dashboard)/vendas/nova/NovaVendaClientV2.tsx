@@ -47,6 +47,8 @@ interface Produto {
   unidade: string | null;
   sufixo_variacao: string | null;
   numeracao: string | null;
+  saldo_disponivel: number;
+  tem_ficha_tecnica: boolean;
 }
 
 interface FaixaComissao {
@@ -68,6 +70,7 @@ interface ItemVenda {
   pct_comissao: number;
   valor_comissao: number;
   peso_estimado: number | null;
+  saldo_disponivel: number;
 }
 
 interface Pagamento {
@@ -257,8 +260,8 @@ function ProgressBar({ step, total, tipoVenda }: { step: number; total: number; 
   ] : [
     { icon: User, label: "Cliente" },
     { icon: Star, label: "Tipo" },
-    { icon: Truck, label: "Entrega" },
     { icon: Package, label: "Produtos" },
+    { icon: Truck, label: "Entrega" },
     { icon: CreditCard, label: "Pagamento" },
     { icon: CheckCircle, label: "Finalizar" },
   ];
@@ -353,7 +356,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const cpfTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Step 2: Tipo ──────────────────────────────────────────────────────────
-  const [tipoVenda, setTipoVenda] = useState<"produto" | "servico" | "fabricacao" | "garantia" | null>(null);
+  const [tipoVenda, setTipoVenda] = useState<"produto" | "servico" | "garantia" | null>(null);
   const [vendaGarantiaId, setVendaGarantiaId] = useState<number | null>(null);
   const [historicoVendas, setHistoricoVendas] = useState<VendaHistorico[]>([]);
   const [loadingHistorico, setLoadingHistorico] = useState(false);
@@ -667,6 +670,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       preco_unitario: precoUnit, total_item: totalItem,
       pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100,
       peso_estimado: produto.peso_precificado,
+      saldo_disponivel: produto.saldo_disponivel ?? 0,
     };
   }
 
@@ -705,6 +709,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       quantidade: 1, preco_lista: valor, pct_desconto: 0,
       preco_unitario: valor, total_item: valor,
       pct_comissao: 0, valor_comissao: 0, peso_estimado: null,
+      saldo_disponivel: 0,
     }]);
     setServDescricao(""); setServValor("");
   }
@@ -839,9 +844,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       if (!validacaoSvcFoto?.match) { setSaveErr("Valide a foto com a IA antes de continuar"); return; }
       if (itens.length === 0) { setSaveErr("Adicione pelo menos 1 serviço para faturamento"); return; }
     }
-    if (step === 3 && tipoVenda !== "servico" && !modoEntrega) { setSaveErr("Selecione o modo de entrega"); return; }
+    if (step === 3 && tipoVenda !== "servico" && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
+    if (step === 4 && tipoVenda !== "servico" && !modoEntrega) { setSaveErr("Selecione o modo de entrega"); return; }
     if (step === 4 && tipoVenda === "servico" && !modoEntrega) { setSaveErr("Selecione o modo de entrega"); return; }
-    if (step === 4 && tipoVenda !== "servico" && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
 
     if (step === 5) {
       if (pagForma === "Múltiplas" && !pagamentoCobre) {
@@ -945,7 +950,6 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   function tipoParaOrdem() {
     if (tipoVenda === "produto") return "fabricacao";
     if (tipoVenda === "servico") return "servico_venda";
-    if (tipoVenda === "fabricacao") return "fabricacao";
     if (tipoVenda === "garantia") return "garantia";
     return "fabricacao";
   }
@@ -1220,7 +1224,6 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               {([
                 { key: "produto", icon: "🏷️", label: "Produto", desc: "Venda de produto do estoque" },
                 { key: "servico", icon: "🔧", label: "Serviço", desc: "Conserto ou reforma" },
-                { key: "fabricacao", icon: "⚙️", label: "Fabricação", desc: "Peça sob encomenda" },
                 { key: "garantia", icon: "🛡️", label: "Garantia", desc: "Garantia de venda anterior" },
               ] as const).map(({ key, icon, label, desc }) => (
                 <button
@@ -1502,7 +1505,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         )}
 
         {/* ── PASSO 3: Entrega (não-servico) / PASSO 4: Entrega (servico) ── */}
-        {((step === 3 && tipoVenda !== "servico") || (step === 4 && tipoVenda === "servico")) && (
+        {((step === 4 && tipoVenda !== "servico") || (step === 4 && tipoVenda === "servico")) && (
           <div className="p-6 space-y-5">
             <h3 className="text-lg font-semibold" style={{ color: "#1A1A1A" }}>
               <Truck size={18} className="inline mr-2" style={{ color: C.esmeralda }} />
@@ -1516,7 +1519,6 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                 {([
                   { key: "loja", icon: "🏪", label: "Retirada na Loja", desc: "Sem frete" },
                   { key: "correios", icon: "📦", label: "Correios", desc: "Com rastreio" },
-                  { key: "transportadora", icon: "🚛", label: "Transportadora", desc: "Com rastreio" },
                   { key: "motoboy", icon: "🏍️", label: "Motoboy", desc: "Entrega local" },
                   { key: "uber", icon: "🚗", label: "Uber", desc: "Entrega por app" },
                 ] as const).map(({ key, icon, label, desc }) => (
@@ -1656,11 +1658,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         )}
 
         {/* ── PASSO 4: Produtos/Serviços (não-servico apenas) ── */}
-        {step === 4 && tipoVenda !== "servico" && (
+        {step === 3 && tipoVenda !== "servico" && (
           <div className="p-6 space-y-4">
             <h3 className="text-lg font-semibold" style={{ color: "#1A1A1A" }}>
               <Package size={18} className="inline mr-2" style={{ color: C.esmeralda }} />
-              {tipoVenda === "fabricacao" ? "Serviços" : "Produtos"}
+              Produtos
               {tipoVenda === "garantia" && (
                 <span className="ml-2 text-xs font-normal px-2 py-0.5 rounded-full" style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
                   Garantia da venda {historicoVendas.find(v => v.id === vendaGarantiaId)?.numero_venda ?? ""}
@@ -1688,7 +1690,15 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                   {itens.map((item, idx) => (
                     <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                       <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
-                      <td className="px-3 py-2.5 max-w-[180px] truncate font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
+                      <td className="px-3 py-2.5 max-w-[200px] font-medium" style={{ color: "#1A1A1A" }}>
+                        <span className="block truncate">{item.nome_produto}</span>
+                        {tipoVenda === "produto" && item.saldo_disponivel < item.quantidade && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded mt-0.5"
+                            style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                            Sob encomenda · estoque: {item.saldo_disponivel}
+                          </span>
+                        )}
+                      </td>
                       {(tipoVenda === "produto" || tipoVenda === "garantia") && (
                         <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku ?? "—"}</td>
                       )}
@@ -1727,6 +1737,18 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               </table>
             </div>
 
+            {/* Aviso itens sem estoque */}
+            {tipoVenda === "produto" && itens.some(i => i.saldo_disponivel < i.quantidade) && (
+              <div className="flex items-start gap-2 p-3 rounded-lg text-xs"
+                style={{ backgroundColor: "#FFFBEB", border: "1px solid #FDE68A", color: "#92400E" }}>
+                <span>⚠️</span>
+                <span>
+                  Itens marcados como <b>sob encomenda</b> não têm estoque suficiente.
+                  Uma <b>ordem de reposição será aberta automaticamente</b> ao concluir a venda, com prazo de 10 dias úteis.
+                </span>
+              </div>
+            )}
+
             {/* Adicionar item */}
             {(tipoVenda === "produto" || tipoVenda === "garantia") && (
               <>
@@ -1742,7 +1764,13 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                       renderItem={p => (
                         <div>
                           <p className="font-medium text-sm">{p.nome}</p>
-                          <p className="text-xs" style={{ color: "#9CA3AF" }}>{p.sku} · {p.preco_venda != null ? fmt(p.preco_venda) : "sem preço"}</p>
+                          <p className="text-xs" style={{ color: "#9CA3AF" }}>
+                            {p.sku} · {p.preco_venda != null ? fmt(p.preco_venda) : "sem preço"}
+                            {" · "}
+                            <span style={{ color: p.saldo_disponivel > 0 ? "#059669" : "#D97706", fontWeight: 600 }}>
+                              estoque: {p.saldo_disponivel}
+                            </span>
+                          </p>
                         </div>
                       )}
                       onSelect={p => { setProdutoSel(p); setPctDesconto(0); setDescontoErr(""); }}
@@ -1787,27 +1815,6 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               </>
             )}
 
-            {/* Fabricação */}
-            {tipoVenda === "fabricacao" && (
-              <div className="p-4 rounded-xl border" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
-                <p className="text-sm font-medium mb-3" style={{ color: "#374151" }}>Adicionar peça sob encomenda</p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Descrição</label>
-                    <Input value={servDescricao} onChange={e => setServDescricao(e.target.value)} placeholder="Ex: Anel solitário ouro 18k" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Valor (R$)</label>
-                    <Input value={servValor} onChange={e => setServValor(e.target.value)} placeholder="0,00" type="text" />
-                  </div>
-                  <button onClick={handleAddServico} disabled={!servDescricao.trim() || !servValor}
-                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
-                    style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                    <Plus size={14} /> Adicionar
-                  </button>
-                </div>
-              </div>
-            )}
 
             {/* Subtotal */}
             {itens.length > 0 && (
