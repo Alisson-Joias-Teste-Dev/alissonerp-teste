@@ -66,16 +66,27 @@ const COR_METAL_OPTS = ["Amarelo", "Branco", "Rosé"];
 
 function parseNumericInput(value: string | number): number {
   if (typeof value === "number") return value;
-  const normalized = value.toString().replace(",", ".").trim();
-  return parseFloat(normalized) || 0;
+  let t = value.toString().trim();
+  if (!t) return 0;
+  if (t.includes(",")) {
+    // Vírgula = decimal BR → remove pontos (milhar), troca vírgula por ponto
+    t = t.replace(/\./g, "").replace(",", ".");
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(t)) {
+    // Só pontos com grupos de 3 dígitos = separador de milhar BR
+    t = t.replace(/\./g, "");
+  }
+  return parseFloat(t) || 0;
 }
 
 // ─── Helpers de precificação automática ───────────────────────────────────────
 
 function parseFaixaPeso(faixa: string): { min: number; max: number } | null {
-  const match = faixa.match(/([\d.]+)\s*[-–]\s*([\d.]+)/);
+  // Aceita formatos "0.1 - 0.5", "0.1g - 0.5g", "0,1 g até 0,5 g", etc.
+  // O [\d.,]+ captura número BR ou US; g? absorve o sufixo opcional.
+  const match = faixa.match(/([\d.,]+)\s*g?\s*[-–até]+\s*([\d.,]+)/i);
   if (!match) return null;
-  return { min: parseFloat(match[1]), max: parseFloat(match[2]) };
+  const parseN = (s: string) => parseFloat(s.replace(",", "."));
+  return { min: parseN(match[1]), max: parseN(match[2]) };
 }
 
 function extrairMarkupDaCategoria(cat: Categoria): number {
@@ -94,10 +105,137 @@ function buscarCategoriaPorPeso(peso: number, cats: Categoria[]): Categoria | nu
   return null;
 }
 
+// ── Detecção automática de categoria pelo nome do produto ────────────────────
+const CAT_KEYWORDS: Record<string, string[]> = {
+  "Anel":        ["anel", "aneis"],
+  "Pulseira":    ["pulseira", "pulseiras"],
+  "Pingente":    ["pingente", "pingentes"],
+  "Corrente":    ["corrente", "correntes", "cordao"],
+  "Brinco":      ["brinco", "brincos", "argola", "argolas", "tarracha", "tarrachas"],
+  "Alianças":    ["alianca", "aliancas"],
+  "Bracelete":   ["bracelete", "braceletes"],
+  "Escapulário": ["escapulario", "escapularios"],
+  "Piercing":    ["piercing", "piercings"],
+  "Colar":       ["colar", "colares", "gargantilha", "choker", "riviera"],
+  "Pedras":      ["pedra", "pedras"],
+};
+const CAT_STOPWORDS = new Set(["par", "pares", "de", "da", "do", "a", "o", "um", "uma", "ref"]);
+
+function normalizarNome(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").trim();
+}
+
+function detectarCategoriaPorNome(nome: string): string | null {
+  const norm = normalizarNome(nome);
+  const words = norm.split(/\s+/).filter(Boolean);
+  const significante = words.find((w) => !CAT_STOPWORDS.has(w));
+  if (!significante) return null;
+  for (const [cat, kws] of Object.entries(CAT_KEYWORDS)) {
+    if (kws.some((k) => significante === k)) return cat;
+  }
+  return null;
+}
+
+/**
+ * Detecta categoria completa "Pai -> Sub" a partir do nome.
+ * Ex: "Anel Feminino Diamante"     → "Anel -> Feminino"
+ *     "Pingente Religioso N Sra"   → "Pingente -> Religioso"
+ *     "Corrente Infantil Baby"     → "Corrente -> Infantil"
+ */
+const SUBCATEGORIAS: Record<string, string> = {
+  feminino: "Feminino",
+  feminina: "Feminino",
+  masculino: "Masculino",
+  masculina: "Masculino",
+  infantil: "Infantil",
+  baby: "Baby",
+  religioso: "Religioso",
+  religiosa: "Religioso",
+  formatura: "Formatura",
+  adulto: "Adulto",
+};
+
+function detectarCategoriaCompleta(nome: string): string | null {
+  const pai = detectarCategoriaPorNome(nome);
+  if (!pai) return null;
+  const norm = normalizarNome(nome);
+  const words = norm.split(/\s+/);
+  for (const w of words) {
+    if (SUBCATEGORIAS[w]) return `${pai} -> ${SUBCATEGORIAS[w]}`;
+  }
+  return pai;
+}
+
+/**
+ * Detecta tipo de metal pelo nome. Default: Ouro Amarelo 18k.
+ */
+function detectarTipoMetalPorNome(nome: string): string {
+  const n = normalizarNome(nome);
+  if (/\bprata\b/.test(n)) return "Prata";
+  if (/\bouro\s+branco\b|\bouro\s+br\b|\bbranco\b/.test(n)) return "Ouro Branco 18k";
+  if (/\bouro\s+rose\b|\brose\b/.test(n)) return "Ouro Rose 18k";
+  return "Ouro Amarelo 18k";
+}
+
+/**
+ * Detecta se o produto TEM pedra preciosa pelo nome.
+ */
+const KEYWORDS_PEDRA = [
+  "diamante", "diamantes", "brilhante", "brilhantes",
+  "moissanit", "moissanite", "moissanites",
+  "safira", "safiras", "esmeralda", "esmeraldas",
+  "rubi", "rubis", "ametista", "ametistas",
+  "topazio", "topázio", "topazios",
+  "zirconia", "zirconias",
+  "aguamarinha", "agua-marinha", "aguas-marinhas",
+  "espinelio", "espinélio", "peridoto",
+];
+function detectarTemPedraPorNome(nome: string): boolean {
+  const n = normalizarNome(nome);
+  return KEYWORDS_PEDRA.some((k) => n.includes(normalizarNome(k)));
+}
+
+/**
+ * Numerações padrão por categoria/subcategoria completa.
+ * Para anéis e alianças: grade completa de 1 a 35 (cobre todos os tamanhos).
+ */
+const NUMERACOES_1_A_35 = Array.from({ length: 35 }, (_, i) => i + 1);
+
+function getNumeracoesPadrao(categoriaCompleta: string | null): number[] {
+  if (!categoriaCompleta) return NUMERACOES_1_A_35;
+  const c = categoriaCompleta.toLowerCase();
+  if (c.includes("anel")) return NUMERACOES_1_A_35;
+  if (c.includes("alianca") || c.includes("aliança")) return NUMERACOES_1_A_35;
+  return NUMERACOES_1_A_35;
+}
+
+/**
+ * Base de numeração (peso referência) padrão.
+ */
+function getBaseNumeracaoPadrao(categoriaCompleta: string | null): number {
+  if (!categoriaCompleta) return 16;
+  const c = categoriaCompleta.toLowerCase();
+  if (c.includes("anel") && c.includes("masculino")) return 22;
+  if (c.includes("anel") && c.includes("feminino"))  return 15;
+  if (c.includes("alianca") || c.includes("aliança")) return 18;
+  return 16;
+}
+
+/**
+ * Define se o produto TIPICAMENTE tem variações pela categoria.
+ *   Anel / Aliança → SIM (tamanhos 14, 16, 18...)
+ *   Demais (pingente, brinco, colar, pulseira, etc.) → NÃO (peça única)
+ */
+function temVariacoesPorCategoria(categoriaCompleta: string | null): boolean {
+  if (!categoriaCompleta) return false; // sem categoria detectada → assume peça única
+  const c = categoriaCompleta.toLowerCase();
+  return c.includes("anel") || c.includes("alianca") || c.includes("aliança");
+}
+
 function arredondarDezena(valor: number): number {
   return Math.round(valor / 10) * 10;
 }
-const NUMERACOES = [10, 12, 14, 15, 16, 17, 18, 19, 20, 22, 24, 26, 28, 30];
+const NUMERACOES = NUMERACOES_1_A_35; // 1-35 (completo)
 const COMPRIMENTOS_DEFAULT = [38, 40, 42, 45, 50, 55, 60];
 
 function gerarCombinacoes(
@@ -379,7 +517,11 @@ interface Props {
 }
 
 export default function CadastroProdutoModal({ open, onClose, onCreated }: Props) {
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(1); // preservado para compat (validações só)
+  // Seções expansíveis (substituem o stepper antigo)
+  const [expandComp, setExpandComp]     = useState(false);
+  const [expandMed,  setExpandMed]      = useState(false);
+  const [expandVar,  setExpandVar]      = useState(false);
   const [saving, setSaving] = useState(false);
   const [globalErr, setGlobalErr] = useState<string | null>(null);
 
@@ -401,6 +543,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   const [markup, setMarkup] = useState("");
   const [fator] = useState("1");
   const [categoria, setCategoria] = useState("");
+  const [categoriaGeral, setCategoriaGeral] = useState(""); // Anel, Pulseira, etc. — detectada pelo nome
   const [temPedra, setTemPedra] = useState(false);
 
   // Step 2: BOM
@@ -419,7 +562,9 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   const [eixoNumeracao, setEixoNumeracao] = useState(false);
   const [eixoCorMetal, setEixoCorMetal] = useState(false);
   const [eixoComprimento, setEixoComprimento] = useState(false);
-  const [numeracoesSel, setNumeracoesSel] = useState<number[]>([14, 16, 18, 20]);
+  const [numeracoesSel, setNumeracoesSel] = useState<number[]>(NUMERACOES_1_A_35);
+  // Quantidade inicial em estoque por numeração (default vazio = 0)
+  const [quantidadesVar, setQuantidadesVar] = useState<Record<string, string>>({});
   const [coresSel, setCoresSel] = useState<string[]>(["Amarelo"]);
   const [comprimentosSel, setComprimentosSel] = useState<number[]>([40, 45, 50]);
   const [comprimentoCustom, setComprimentoCustom] = useState("");
@@ -438,9 +583,9 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
     setBom([]); setShowBomForm(false);
     setLarguraAro(""); setAlturaAro(""); setBase("");
     setEixoNumeracao(false); setEixoCorMetal(false); setEixoComprimento(false);
-    setNumeracoesSel([14, 16, 18, 20]); setCoresSel(["Amarelo"]);
+    setNumeracoesSel(NUMERACOES_1_A_35); setCoresSel(["Amarelo"]);
     setComprimentosSel([40, 45, 50]); setTipoRegra("incremental");
-    setBaseNumeracao(16); setIncremento(0.1); setTabelaPeso({});
+    setBaseNumeracao(16); setIncremento(0.1); setTabelaPeso({}); setQuantidadesVar({});
     loadSetup();
   }, [open]);
 
@@ -482,6 +627,36 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
       setCategoria(cat.nome);
     }
   }, [peso, categorias]);
+
+  // ── Auto-detectar categoria + subcategoria + tipo_metal + tem_pedra ───────
+  // Trigger: mudança no nome. Sempre sobrescreve valores anteriores para manter
+  // sincronia (ex: usuário digita "Anel Feminino" → troca para "Anel Masculino"
+  // → os valores são atualizados).
+  useEffect(() => {
+    if (!nome.trim()) return;
+    // 1. Categoria completa (pai + subcategoria)
+    const catCompleta = detectarCategoriaCompleta(nome);
+    if (catCompleta) setCategoriaGeral(catCompleta);
+    // 2. Tipo de metal pelo nome (sobrescreve default)
+    const metal = detectarTipoMetalPorNome(nome);
+    setTipoMetal(metal);
+    // Cor do metal sincroniza com tipo_metal (usado no eixo Cor)
+    if (metal === "Ouro Branco 18k") setCorMetal("Branco");
+    else if (metal === "Ouro Rose 18k") setCorMetal("Rosé");
+    else if (metal === "Prata") setCorMetal("Prata");
+    else setCorMetal("Amarelo");
+    // 3. Detectar tem pedra preciosa
+    if (detectarTemPedraPorNome(nome)) setTemPedra(true);
+    // 4. Numerações e base de numeração padrão
+    const nums = getNumeracoesPadrao(catCompleta);
+    setNumeracoesSel(nums);
+    setBaseNumeracao(getBaseNumeracaoPadrao(catCompleta));
+    // 5. Anéis e Alianças → ativam variações por tamanho automaticamente
+    const temVarAuto = temVariacoesPorCategoria(catCompleta);
+    setTemVariacoes(temVarAuto);
+    setEixoNumeracao(temVarAuto);
+    setExpandVar(temVarAuto); // abre seção de variações na ficha técnica
+  }, [nome]);
 
   // ── Preview de precificação automática ────────────────────────────────────
   const pesoNum = parseNumericInput(peso);
@@ -553,11 +728,12 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
         nome: nome.trim(),
         sku: sku.trim(),
         tipo_metal: tipoMetal || null,
-        cor_metal: corMetal || null,
+        // Cor do metal removida do modal — já está implícita no tipo_metal ("Ouro Amarelo 18k")
         peso_precificado: parseNumericInput(peso),
         markup: parseFloat(markup),
         fator: 1,
         categoria_precificacao: categoria || null,
+        categoria_geral: categoriaGeral || null,
         tem_pedra_preciosa: temPedra,
         medidas: {
           largura_aro: larguraAro ? parseFloat(larguraAro) : null,
@@ -579,6 +755,15 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
           valores,
           regra_peso: regra,
         };
+        // Quantidades iniciais de estoque por numeração (só valores > 0)
+        const quantidades: Record<string, number> = {};
+        for (const [num, val] of Object.entries(quantidadesVar)) {
+          const n = parseInt(val || "0", 10);
+          if (n > 0) quantidades[num] = n;
+        }
+        if (Object.keys(quantidades).length > 0) {
+          body.quantidades = quantidades;
+        }
       }
 
       const res = await fetch("/api/produtos", {
@@ -628,13 +813,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
           </button>
         </div>
 
-        {/* Stepper */}
-        <div
-          className="px-6 py-3 border-b flex justify-center"
-          style={{ borderColor: C.cremeBorder }}
-        >
-          <StepIndicator step={step} total={4} />
-        </div>
+        {/* (Stepper removido — tela única com ficha técnica colapsável) */}
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5" style={{ backgroundColor: C.bg }}>
@@ -644,8 +823,8 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
             </div>
           ) : (
             <>
-              {/* ── STEP 1: Dados Básicos ────────────────────────────────── */}
-              {step === 1 && (
+              {/* ── DADOS BÁSICOS (sempre visível) ──────────────────────── */}
+              {(
                 <div className="space-y-4">
                   <div>
                     <label className={labelCls}>Nome do Produto *</label>
@@ -659,30 +838,19 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                     />
                   </div>
 
-                  {/* Toggle: com/sem variações + SKU automático */}
+                  {/* SKU automático — produto com variações é detectado pela categoria
+                      (Anel/Aliança → sim; demais → peça única). Usuário pode ajustar
+                      depois na Etapa 4 (Variações) se precisar. */}
                   <div>
-                    <label className={labelCls}>Produto com variações?</label>
-                    <div className="flex gap-2">
-                      {[true, false].map((v) => (
-                        <button
-                          key={String(v)}
-                          type="button"
-                          onClick={() => setTemVariacoes(v)}
-                          className="flex-1 py-2 rounded-lg border text-sm font-medium transition-colors"
-                          style={{
-                            backgroundColor: temVariacoes === v ? C.esmeralda : "#F9FAFB",
-                            color: temVariacoes === v ? "#fff" : "#374151",
-                            borderColor: temVariacoes === v ? C.esmeralda : "#E5E7EB",
-                          }}
-                        >
-                          {v ? "Sim (anéis, colares...)" : "Não (peça única)"}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="mt-1.5 text-[11px] text-gray-400">
+                    <p className="text-[11px] text-gray-400">
                       SKU:{" "}
                       <span className="font-mono font-semibold text-gray-600">{sku || "—"}</span>
                       {" "}(automático)
+                      {temVariacoes && (
+                        <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          variações por tamanho
+                        </span>
+                      )}
                     </p>
                   </div>
 
@@ -699,15 +867,14 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                       </select>
                     </div>
                     <div>
-                      <label className={labelCls}>Cor do Metal</label>
-                      <select
-                        value={corMetal}
-                        onChange={(e) => setCorMetal(e.target.value)}
+                      <label className={labelCls}>Categoria (auto)</label>
+                      <input
+                        type="text"
+                        value={categoriaGeral}
+                        onChange={(e) => setCategoriaGeral(e.target.value)}
+                        placeholder="— detectada pelo nome —"
                         className={inputCls}
-                      >
-                        <option value="">— selecione —</option>
-                        {COR_METAL_OPTS.map((v) => <option key={v}>{v}</option>)}
-                      </select>
+                      />
                     </div>
                   </div>
 
@@ -761,9 +928,15 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                 </div>
               )}
 
-              {/* ── STEP 2: Composição (BOM) ─────────────────────────────── */}
-              {step === 2 && (
-                <div className="space-y-3">
+              {/* ── COMPOSIÇÃO (accordion) ──────────────────────────────── */}
+              <div className="mt-6 rounded-lg border bg-white" style={{ borderColor: C.cremeBorder }}>
+                <button type="button" onClick={() => setExpandComp(v => !v)} className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg">
+                  <span>Composição (BOM) <span className="ml-1 text-[10px] text-gray-400">{bom.length > 0 ? `${bom.length} item(s)` : "opcional"}</span></span>
+                  {expandComp ? <ChevronLeft size={14} className="rotate-90" /> : <ChevronRight size={14} />}
+                </button>
+              </div>
+              {expandComp && (
+                <div className="space-y-3 mt-2 p-4 bg-white rounded-lg border" style={{ borderColor: C.cremeBorder }}>
                   <p className="text-xs text-gray-500">
                     Adicione os insumos do produto. O metal deve ter o peso base da peça modelo.
                     Para variações, o peso do metal será ajustado por numeração automaticamente.
@@ -847,9 +1020,15 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                 </div>
               )}
 
-              {/* ── STEP 3: Medidas ──────────────────────────────────────── */}
-              {step === 3 && (
-                <div className="space-y-4">
+              {/* ── MEDIDAS (accordion) ─────────────────────────────────── */}
+              <div className="mt-3 rounded-lg border bg-white" style={{ borderColor: C.cremeBorder }}>
+                <button type="button" onClick={() => setExpandMed(v => !v)} className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg">
+                  <span>Medidas <span className="ml-1 text-[10px] text-gray-400">largura/altura/base do aro</span></span>
+                  {expandMed ? <ChevronLeft size={14} className="rotate-90" /> : <ChevronRight size={14} />}
+                </button>
+              </div>
+              {expandMed && (
+                <div className="space-y-4 mt-2 p-4 bg-white rounded-lg border" style={{ borderColor: C.cremeBorder }}>
                   <p className="text-xs text-gray-500">
                     Medidas da peça modelo (mm). Campos opcionais — podem ser preenchidos depois no drawer do produto.
                   </p>
@@ -894,277 +1073,52 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                 </div>
               )}
 
-              {/* ── STEP 4: Variações ─────────────────────────────────────── */}
-              {step === 4 && (
-                <div className="space-y-4">
-                  {/* Gerar variações? (sincronizado com toggle da Etapa 1) */}
-                  <div className="flex gap-3">
-                    {[true, false].map((v) => (
-                      <button
-                        key={String(v)}
-                        type="button"
-                        onClick={() => setTemVariacoes(v)}
-                        className="flex-1 py-2.5 rounded-lg border text-sm font-medium transition-colors"
-                        style={{
-                          backgroundColor: temVariacoes === v ? C.esmeralda : "#F9FAFB",
-                          color: temVariacoes === v ? "#fff" : "#374151",
-                          borderColor: temVariacoes === v ? C.esmeralda : "#E5E7EB",
-                        }}
-                      >
-                        {v ? "✓ Gerar variações automáticas" : "Produto simples (sem variações)"}
-                      </button>
-                    ))}
+
+              {/* ── VARIAÇÕES (tabela com quantidade de estoque inicial) ─── */}
+              {temVariacoes && combos.length > 0 && (
+                <div className="mt-3 rounded-xl border bg-white overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+                  <div className="px-4 py-2.5 bg-gray-50 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
+                    <span className="text-sm font-semibold text-gray-700">
+                      Variações por tamanho <span className="text-[11px] text-gray-400 font-normal">({combos.length} tamanhos)</span>
+                    </span>
+                    <span className="text-[11px] text-gray-500">
+                      Total: {Object.values(quantidadesVar).reduce((acc, q) => acc + (parseInt(q) || 0), 0)} un.
+                    </span>
                   </div>
-
-                  {gerarVariacoes && (
-                    <>
-                      {/* Eixo: Numeração */}
-                      <div className="bg-white rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            id="eixoNum"
-                            checked={eixoNumeracao}
-                            onChange={(e) => setEixoNumeracao(e.target.checked)}
-                            className="w-4 h-4 accent-[#184036]"
-                          />
-                          <label htmlFor="eixoNum" className="text-sm font-semibold text-gray-800 select-none cursor-pointer">
-                            Numeração (tamanho do aro)
-                          </label>
-                        </div>
-                        {eixoNumeracao && (
-                          <>
-                            <div className="flex flex-wrap gap-1.5">
-                              {NUMERACOES.map((n) => (
-                                <button
-                                  key={n}
-                                  type="button"
-                                  onClick={() => setNumeracoesSel((s) => s.includes(n) ? s.filter((x) => x !== n) : [...s, n].sort((a, b) => a - b))}
-                                  className="px-2.5 py-1 rounded-md text-xs font-medium transition-colors"
-                                  style={{
-                                    backgroundColor: numeracoesSel.includes(n) ? C.esmeralda : "#F3F4F6",
-                                    color: numeracoesSel.includes(n) ? "#fff" : "#4B5563",
-                                  }}
-                                >
-                                  {n}
-                                </button>
-                              ))}
-                            </div>
-
-                            {/* Regra de peso */}
-                            <div>
-                              <label className={labelCls}>Regra de Peso por Numeração</label>
-                              <div className="flex gap-2 mb-2">
-                                {(["incremental", "tabela"] as const).map((t) => (
-                                  <button
-                                    key={t}
-                                    type="button"
-                                    onClick={() => setTipoRegra(t)}
-                                    className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
-                                    style={{
-                                      backgroundColor: tipoRegra === t ? C.esmeralda : "#F3F4F6",
-                                      color: tipoRegra === t ? "#fff" : "#4B5563",
-                                    }}
-                                  >
-                                    {t === "incremental" ? "Incremental" : "Tabela manual"}
-                                  </button>
-                                ))}
-                              </div>
-
-                              {tipoRegra === "incremental" && (
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                    <label className={labelCls}>Nº base</label>
-                                    <input
-                                      type="number"
-                                      value={baseNumeracao}
-                                      onChange={(e) => setBaseNumeracao(Number(e.target.value))}
-                                      className={inputCls}
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className={labelCls}>+g por número</label>
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      value={incremento}
-                                      onChange={(e) => setIncremento(Number(e.target.value))}
-                                      className={inputCls}
-                                    />
-                                  </div>
-                                </div>
-                              )}
-
-                              {tipoRegra === "tabela" && (
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                  {numeracoesSel.map((n) => (
-                                    <div key={n}>
-                                      <label className={labelCls}>Nº {n} (g)</label>
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        value={tabelaPeso[String(n)] ?? ""}
-                                        onChange={(e) => setTabelaPeso((t) => ({ ...t, [String(n)]: e.target.value }))}
-                                        className={inputCls}
-                                        placeholder={peso || "0.00"}
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        )}
-                      </div>
-
-                      {/* Eixo: Cor do Metal */}
-                      <div className="bg-white rounded-xl border p-4 space-y-2" style={{ borderColor: C.cremeBorder }}>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            id="eixoCor"
-                            checked={eixoCorMetal}
-                            onChange={(e) => setEixoCorMetal(e.target.checked)}
-                            className="w-4 h-4 accent-[#184036]"
-                          />
-                          <label htmlFor="eixoCor" className="text-sm font-semibold text-gray-800 select-none cursor-pointer">
-                            Cor do Metal
-                          </label>
-                        </div>
-                        {eixoCorMetal && (
-                          <div className="flex gap-2">
-                            {COR_METAL_OPTS.map((c) => (
-                              <button
-                                key={c}
-                                type="button"
-                                onClick={() => setCoresSel((s) => s.includes(c) ? s.filter((x) => x !== c) : [...s, c])}
-                                className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
-                                style={{
-                                  backgroundColor: coresSel.includes(c) ? C.esmeralda : "#F3F4F6",
-                                  color: coresSel.includes(c) ? "#fff" : "#4B5563",
-                                }}
-                              >
-                                {c}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Eixo: Comprimento */}
-                      <div className="bg-white rounded-xl border p-4 space-y-2" style={{ borderColor: C.cremeBorder }}>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            id="eixoComp"
-                            checked={eixoComprimento}
-                            onChange={(e) => setEixoComprimento(e.target.checked)}
-                            className="w-4 h-4 accent-[#184036]"
-                          />
-                          <label htmlFor="eixoComp" className="text-sm font-semibold text-gray-800 select-none cursor-pointer">
-                            Comprimento (cm)
-                          </label>
-                        </div>
-                        {eixoComprimento && (
-                          <div className="flex flex-wrap gap-1.5">
-                            {[...new Set([...COMPRIMENTOS_DEFAULT, ...comprimentosSel])].sort((a, b) => a - b).map((c) => (
-                              <button
-                                key={c}
-                                type="button"
-                                onClick={() => setComprimentosSel((s) => s.includes(c) ? s.filter((x) => x !== c) : [...s, c])}
-                                className="px-2.5 py-1 rounded-md text-xs font-medium transition-colors"
-                                style={{
-                                  backgroundColor: comprimentosSel.includes(c) ? C.esmeralda : "#F3F4F6",
-                                  color: comprimentosSel.includes(c) ? "#fff" : "#4B5563",
-                                }}
-                              >
-                                {c}cm
-                              </button>
-                            ))}
-                            <div className="flex gap-1">
-                              <input
-                                type="number"
-                                value={comprimentoCustom}
-                                onChange={(e) => setComprimentoCustom(e.target.value)}
-                                className="w-16 border border-gray-200 rounded-md px-2 py-1 text-xs"
-                                placeholder="cm"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const n = parseFloat(comprimentoCustom);
-                                  if (n > 0) {
-                                    setComprimentosSel((s) => [...new Set([...s, n])].sort((a, b) => a - b));
-                                    setComprimentoCustom("");
-                                  }
-                                }}
-                                className="px-2 py-1 rounded-md text-xs font-medium"
-                                style={{ backgroundColor: C.sage, color: "#fff" }}
-                              >
-                                +
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Preview das variações */}
-                      {combos.length > 0 && (
-                        <div>
-                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                            Preview — {combos.length} variação(ões) serão criadas
-                          </p>
-                          <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="border-b" style={{ borderColor: C.cremeBorder, backgroundColor: C.bg }}>
-                                  <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400">SKU</th>
-                                  <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400">Nome</th>
-                                  <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-400">Peso</th>
-                                  <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-400">Preço Est.</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {combos.slice(0, 30).map((combo, i) => {
-                                  const n = i + 1;
-                                  const skuVar = `${sku}-${n}`;
-                                  const pesoVar = calcPesoVariacao(parseFloat(peso || "0"), combo.numeracao as number | undefined, regra);
-                                  const sufixos: string[] = [];
-                                  if (combo.numeracao != null) sufixos.push(`nº ${combo.numeracao}`);
-                                  if (combo.cor_metal && combo.cor_metal !== corMetal) sufixos.push(String(combo.cor_metal));
-                                  if (combo.comprimento != null) sufixos.push(`${combo.comprimento}cm`);
-                                  const nomeVar = sufixos.length > 0 ? `${nome} ${sufixos.join(" ")}` : `${nome} ${n}`;
-                                  return (
-                                    <tr key={i} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
-                                      <td className="px-3 py-1.5 font-mono text-gray-600">{skuVar}</td>
-                                      <td className="px-3 py-1.5 text-gray-700">{nomeVar}</td>
-                                      <td className="px-3 py-1.5 text-right font-mono text-gray-600">{pesoVar.toFixed(2)}g</td>
-                                      <td className="px-3 py-1.5 text-right font-mono text-gray-800">{precoEst(pesoVar)}</td>
-                                    </tr>
-                                  );
-                                })}
-                                {combos.length > 30 && (
-                                  <tr>
-                                    <td colSpan={4} className="px-3 py-1.5 text-center text-gray-400 text-xs">
-                                      +{combos.length - 30} variações...
-                                    </td>
-                                  </tr>
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
-
-                      {eixos.length === 0 && (
-                        <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
-                          Selecione pelo menos um eixo de variação acima.
-                        </p>
-                      )}
-                    </>
-                  )}
+                  <div className="max-h-72 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 sticky top-0 z-10">
+                        <tr className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                          <th className="text-left px-3 py-2 w-20">Tamanho</th>
+                          <th className="text-right px-3 py-2 w-32">Qtd em Estoque</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {combos.map((combo, i) => {
+                          const num = String(combo.numeracao ?? (i + 1));
+                          return (
+                            <tr key={i} className="border-t hover:bg-gray-50" style={{ borderColor: C.cremeBorder }}>
+                              <td className="px-3 py-1.5 font-mono text-xs text-gray-700">{num}</td>
+                              <td className="px-3 py-1.5 text-right">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={quantidadesVar[num] ?? ""}
+                                  onChange={(e) => setQuantidadesVar((prev) => ({ ...prev, [num]: e.target.value }))}
+                                  placeholder="0"
+                                  className="w-20 border border-gray-200 rounded px-2 py-1 text-xs text-right font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
+
             </>
           )}
 
@@ -1183,39 +1137,25 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
         >
           <button
             type="button"
-            onClick={step === 1 ? onClose : prevStep}
+            onClick={onClose}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
           >
             <ChevronLeft size={15} />
-            {step === 1 ? "Cancelar" : "Voltar"}
+            Cancelar
           </button>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400">{step} / 4</span>
-            {step < 4 ? (
-              <button
-                type="button"
-                onClick={nextStep}
-                className="flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: C.esmeralda }}
-              >
-                Próxima <ChevronRight size={15} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={saving || (gerarVariacoes && eixos.length === 0 && combos.length === 0)}
-                className="flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-60"
-                style={{ backgroundColor: C.esmeralda }}
-              >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                {saving ? "Criando..." : gerarVariacoes && combos.length > 0
-                  ? `Criar Produto + ${combos.length} variações`
-                  : "Criar Produto"}
-              </button>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={saving || (gerarVariacoes && eixos.length === 0 && combos.length === 0)}
+            className="flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-60"
+            style={{ backgroundColor: C.esmeralda }}
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            {saving ? "Criando..." : gerarVariacoes && combos.length > 0
+              ? `Salvar Produto + ${combos.length} variações`
+              : "Salvar Produto"}
+          </button>
         </div>
       </div>
     </div>
