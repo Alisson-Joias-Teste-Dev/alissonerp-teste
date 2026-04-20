@@ -4,10 +4,12 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import {
   CircleDot, ChevronDown, Gem, Type, Ruler, Minus, Plus, Save,
-  Printer, Download, Loader2, Settings2, RotateCcw, User,
+  Printer, Download, Loader2, Settings2, RotateCcw, User, X,
 } from "lucide-react";
 import * as THREE from "three";
 import { ProfileType } from "./types";
+import { maskCpfCnpj } from "@/lib/formatters";
+import { calcularPrecoSync, getPricingFactors, type CurvaConfig, type CurvaCategoriaInput } from "@/lib/curva-precificacao";
 import type {
   RingParams, RingSize, PricingCategory, GrooveRule, PricingResult, ConfigOrcamento,
   StoneEntry, StonePrice, StoneType, StoneCut,
@@ -51,6 +53,8 @@ interface Props {
   userId: string;
   vendedorId: number | null;
   maxDesconto: number;
+  curvaConfig: CurvaConfig | null;
+  curvaCategorias: CurvaCategoriaInput[];
 }
 
 type OrcamentoTipo = "alianca" | "peca" | null;
@@ -97,6 +101,7 @@ function Slider({ label, value, min, max, step, unit, onChange }: {
 // ══════════════════════════════════════════════════════════════════════════════
 export default function OrcamentoClient({
   cotacaoOuro, cotacaoDolar, config, canManageConfig, userName, userId, vendedorId, maxDesconto,
+  curvaConfig, curvaCategorias,
 }: Props) {
   const [orcamentoTipo, setOrcamentoTipo] = useState<OrcamentoTipo>(null);
 
@@ -199,6 +204,40 @@ export default function OrcamentoClient({
   const [pecaPeso, setPecaPeso] = useState(5.0);
   const [pecaMetalColor, setPecaMetalColor] = useState("#FFD700");
   const [pecaGoldDensity, setPecaGoldDensity] = useState(14.69);
+  const [pecaFotoRef, setPecaFotoRef] = useState<string | null>(null);
+  const [pecaDescontoPct, setPecaDescontoPct] = useState(0);
+
+  // Pedras para peça personalizada (vem de public.produtos categoria pedras)
+  interface PedraProduto {
+    id: number; sku: string | null; nome: string; preco: number;
+    tipo_de_pedra: string | null; categoria: string | null;
+    peso_precificado: number | null;
+  }
+  interface PecaPedraItem { _key: string; produto: PedraProduto; qtd: number; }
+  const [pecaPedras, setPecaPedras] = useState<PecaPedraItem[]>([]);
+  const [pedrasBusca, setPedrasBusca] = useState("");
+  const [pedrasResults, setPedrasResults] = useState<PedraProduto[]>([]);
+  const [pedrasLoading, setPedrasLoading] = useState(false);
+  const [pedrasShowDropdown, setPedrasShowDropdown] = useState(false);
+  const pedrasTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pecaPedrasTotalRS = useMemo(
+    () => pecaPedras.reduce((s, p) => s + p.produto.preco * p.qtd, 0),
+    [pecaPedras]
+  );
+  function searchPedras(v: string) {
+    if (pedrasTimer.current) clearTimeout(pedrasTimer.current);
+    setPedrasBusca(v);
+    if (v.length < 2) { setPedrasResults([]); setPedrasShowDropdown(false); return; }
+    pedrasTimer.current = setTimeout(async () => {
+      setPedrasLoading(true);
+      try {
+        const r = await fetch(`/api/orcamento/produtos-pedras?q=${encodeURIComponent(v)}`);
+        const data = await r.json();
+        setPedrasResults(Array.isArray(data) ? data : []);
+        setPedrasShowDropdown(true);
+      } finally { setPedrasLoading(false); }
+    }, 350);
+  }
 
   const [profile, setProfile] = useState<ProfileType>((config?.profile as ProfileType) ?? ProfileType.Anatomica);
   const [ringSize, setRingSize] = useState<RingSize>(RING_SIZES[14]);
@@ -1103,7 +1142,17 @@ export default function OrcamentoClient({
   // MODO: PEÇA PERSONALIZADA
   // ═══════════════════════════════════════════════════════════════════════════
   if (orcamentoTipo === "peca") {
-    const pecaTotal = pecaPricing.discountPrice + (stoneEntries.length > 0 ? stoneTotalRS : 0);
+    // Valor do ouro + desconto máximo vêm da Curva Dinâmica de Precificação (/precificacao)
+    const pecaFactors = curvaConfig && curvaCategorias.length > 0
+      ? getPricingFactors(pecaPeso, curvaConfig, curvaCategorias)
+      : null;
+    const pecaValorOuro = pecaFactors && curvaConfig
+      ? calcularPrecoSync(pecaPeso, cotacaoOuro, pecaFactors.mkp, curvaConfig.arredondamento)
+      : 0;
+    const pecaMaxDesconto = pecaFactors?.maxDiscount ?? 0;
+    const pecaSubtotal = pecaValorOuro + pecaPedrasTotalRS;
+    const pecaDescontoValor = pecaSubtotal * (pecaDescontoPct / 100);
+    const pecaTotal = pecaSubtotal - pecaDescontoValor;
     return (
       <div className="min-h-screen" style={{ backgroundColor: C.cremeBg }}>
         <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
@@ -1114,31 +1163,46 @@ export default function OrcamentoClient({
             <div className="w-16" />
           </div>
 
-          {/* Cliente autocomplete */}
-          <div className="bg-white rounded-xl border p-4 relative" style={{ borderColor: clienteId ? "#059669" : C.cremeBorder }}>
-            <div className="flex items-center gap-2">
-              <User size={14} className={clienteId ? "text-green-600" : "text-gray-400"} />
-              <input type="text" value={clientName}
-                onChange={(e) => { setClientName(e.target.value); setClienteId(null); buscarClientes(e.target.value); }}
-                onFocus={() => { if (clienteResults.length > 0) setShowClienteDropdown(true); }}
-                placeholder="Buscar cliente..." className="flex-1 text-sm outline-none" />
-              {clienteId && <span className="text-[9px] text-green-600 font-semibold">Vinculado</span>}
-              {!clienteId && clientName.length >= 2 && clienteResults.length === 0 && (
-                <button onClick={() => setShowCpfSearch(true)} className="text-[9px] text-blue-600 font-semibold hover:underline">Buscar CPF</button>
+          {/* Cliente — mesmo visual da nova venda */}
+          {clienteId ? (
+            <div className="flex items-center justify-between rounded-xl border px-4 py-3 bg-white" style={{ borderColor: "#059669" }}>
+              <div className="flex items-center gap-2">
+                <User size={14} className="text-green-600" />
+                <div>
+                  <p className="text-sm font-medium" style={{ color: "#1A1A1A" }}>{clientName}</p>
+                </div>
+              </div>
+              <button onClick={() => { setClienteId(null); setClientName(""); setClienteResults([]); }}
+                className="text-gray-400 hover:text-gray-600 ml-2">
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border p-4 relative" style={{ borderColor: C.cremeBorder }}>
+              <div className="flex items-center gap-2">
+                <User size={14} className="text-gray-400" />
+                <input type="text" value={clientName}
+                  onChange={(e) => { setClientName(e.target.value); setClienteId(null); buscarClientes(e.target.value); }}
+                  onFocus={() => { if (clienteResults.length > 0) setShowClienteDropdown(true); }}
+                  onBlur={() => setTimeout(() => setShowClienteDropdown(false), 150)}
+                  placeholder="Buscar cliente pelo nome ou CPF..." className="flex-1 text-sm outline-none" />
+                {!clienteId && clientName.length >= 2 && clienteResults.length === 0 && (
+                  <button onClick={() => setShowCpfSearch(true)} className="text-[9px] text-blue-600 font-semibold hover:underline whitespace-nowrap">Buscar CPF</button>
+                )}
+              </div>
+              {showClienteDropdown && clienteResults.length > 0 && (
+                <div className="absolute z-20 left-0 right-0 mt-2 bg-white rounded-xl border shadow-lg max-h-48 overflow-y-auto" style={{ borderColor: C.cremeBorder }}>
+                  {clienteResults.map((c) => (
+                    <button key={c.id_contato} onMouseDown={() => selecionarCliente(c)}
+                      className="w-full text-left px-3 py-2.5 hover:bg-stone-50 text-sm border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                      <p className="font-medium" style={{ color: "#1A1A1A" }}>{c.nome}</p>
+                      {c.cpf_cnpj && <p className="text-[10px]" style={{ color: "#9CA3AF" }}>{maskCpfCnpj(c.cpf_cnpj)}</p>}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
-            {showClienteDropdown && clienteResults.length > 0 && (
-              <div className="absolute z-20 left-0 right-0 mt-2 bg-white rounded-xl border shadow-lg max-h-48 overflow-y-auto" style={{ borderColor: C.cremeBorder }}>
-                {clienteResults.map((c) => (
-                  <button key={c.id_contato} onClick={() => selecionarCliente(c)}
-                    className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
-                    <span className="font-medium">{c.nome}</span>
-                    {c.cpf_cnpj && <span className="ml-2 text-[10px] text-gray-400">{c.cpf_cnpj}</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          )}
 
           {/* Peso + Metal */}
           <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
@@ -1168,87 +1232,191 @@ export default function OrcamentoClient({
                 ))}
               </div>
             </div>
+
+            {/* Valor do ouro — calculado pela Curva Dinâmica de Precificação (/precificacao) */}
+            {(() => {
+              let valorOuro = 0;
+              if (curvaConfig && curvaCategorias.length > 0) {
+                const factors = getPricingFactors(pecaPeso, curvaConfig, curvaCategorias);
+                valorOuro = calcularPrecoSync(pecaPeso, cotacaoOuro, factors.mkp, curvaConfig.arredondamento);
+              }
+              return (
+                <div className="rounded-lg px-3 py-2.5 text-xs flex items-center justify-between"
+                  style={{ backgroundColor: "rgba(212,175,55,0.08)", border: "1px solid rgba(212,175,55,0.25)" }}>
+                  <span style={{ color: "#6B7280" }}>Valor do ouro</span>
+                  <strong className="text-sm font-bold tabular-nums" style={{ color: C.esmeralda }}>
+                    {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(valorOuro)}
+                  </strong>
+                </div>
+              );
+            })()}
+
+            {/* Foto de referência */}
+            <div>
+              <label className="text-[10px] text-gray-400 block mb-1.5">Foto de referência / exemplo</label>
+              {pecaFotoRef ? (
+                <div className="relative inline-block">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={pecaFotoRef} alt="Referência" className="w-32 h-32 object-cover rounded-lg border" style={{ borderColor: C.cremeBorder }} />
+                  <button
+                    onClick={() => setPecaFotoRef(null)}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-[10px] font-bold"
+                  >×</button>
+                </div>
+              ) : (
+                <label className="flex items-center gap-2 cursor-pointer w-fit px-3 py-2 rounded-lg border text-xs font-medium transition-colors hover:bg-stone-50"
+                  style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  Adicionar foto
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => setPecaFotoRef(ev.target?.result as string);
+                    reader.readAsDataURL(file);
+                  }} />
+                </label>
+              )}
+            </div>
           </div>
 
-          {/* Pedras */}
+          {/* Pedras — busca por produtos da categoria Pedras */}
           <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Pedras Preciosas</h3>
-              <button onClick={addStone} className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
-                style={{ backgroundColor: "rgba(212,175,55,0.1)", color: C.gold }}>
-                <Plus size={12} className="inline mr-1" />Adicionar
-              </button>
+              {pecaPedras.length > 0 && (
+                <span className="text-xs font-semibold tabular-nums" style={{ color: C.gold }}>
+                  Total: {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(pecaPedrasTotalRS)}
+                </span>
+              )}
             </div>
-            {stoneEntries.length === 0 ? (
-              <p className="text-xs text-gray-400 text-center py-4">Sem pedras — clique em Adicionar</p>
+
+            {/* Autocomplete de busca */}
+            <div className="relative">
+              <div className="flex items-center gap-2 border rounded-lg px-3 py-2" style={{ borderColor: C.cremeBorder }}>
+                {pedrasLoading ? <Loader2 size={13} className="animate-spin text-gray-400" /> : <Gem size={13} className="text-gray-400" />}
+                <input
+                  type="text" value={pedrasBusca}
+                  onChange={(e) => searchPedras(e.target.value)}
+                  onFocus={() => pedrasResults.length > 0 && setPedrasShowDropdown(true)}
+                  onBlur={() => setTimeout(() => setPedrasShowDropdown(false), 150)}
+                  placeholder="Buscar pedra (nome, SKU ou tipo)..."
+                  className="flex-1 text-sm outline-none"
+                />
+              </div>
+              {pedrasShowDropdown && pedrasResults.length > 0 && (
+                <div className="absolute z-20 left-0 right-0 mt-1 bg-white rounded-xl border shadow-lg max-h-56 overflow-y-auto" style={{ borderColor: C.cremeBorder }}>
+                  {pedrasResults.map((p) => (
+                    <button key={p.id}
+                      onMouseDown={() => {
+                        setPecaPedras((prev) => [...prev, { _key: Math.random().toString(36).slice(2), produto: p, qtd: 1 }]);
+                        setPedrasBusca(""); setPedrasResults([]); setPedrasShowDropdown(false);
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-stone-50 text-sm border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate" style={{ color: "#1A1A1A" }}>{p.nome}</p>
+                          <p className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                            {p.sku ?? "—"}{p.tipo_de_pedra ? ` · ${p.tipo_de_pedra}` : ""}
+                          </p>
+                        </div>
+                        <span className="text-xs font-semibold tabular-nums ml-2" style={{ color: C.esmeralda }}>
+                          {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(p.preco)}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {pedrasShowDropdown && pedrasResults.length === 0 && pedrasBusca.length >= 2 && !pedrasLoading && (
+                <div className="absolute z-20 left-0 right-0 mt-1 bg-white rounded-xl border p-3 text-xs text-center text-gray-400" style={{ borderColor: C.cremeBorder }}>
+                  Nenhuma pedra encontrada
+                </div>
+              )}
+            </div>
+
+            {/* Lista de pedras selecionadas */}
+            {pecaPedras.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-2">Busque e selecione as pedras acima</p>
             ) : (
-              <div className="space-y-3">
-                {stoneEntries.map((se) => (
-                  <div key={se.id} className="rounded-lg border p-3 space-y-2" style={{ borderColor: C.cremeBorder }}>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      <div>
-                        <label className="text-[9px] text-gray-400 block">Tipo</label>
-                        <select value={se.tipo} onChange={(e) => updateStone(se.id, "tipo", e.target.value)}
-                          className="w-full text-xs border rounded px-2 py-1.5" style={{ borderColor: C.cremeBorder }}>
-                          {STONE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-gray-400 block">Corte</label>
-                        <select value={se.corte} onChange={(e) => updateStone(se.id, "corte", e.target.value)}
-                          className="w-full text-xs border rounded px-2 py-1.5" style={{ borderColor: C.cremeBorder }}>
-                          {STONE_CUTS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-gray-400 block">Tamanho (mm)</label>
-                        <select value={se.tamanho_mm} onChange={(e) => updateStone(se.id, "tamanho_mm", parseFloat(e.target.value))}
-                          className="w-full text-xs border rounded px-2 py-1.5 font-mono" style={{ borderColor: C.cremeBorder }}>
-                          {STONE_SIZES_MM.map((mm) => <option key={mm} value={mm}>{mm}mm</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-gray-400 block">Quantidade</label>
-                        <input type="number" min={1} value={se.qtd}
-                          onChange={(e) => updateStone(se.id, "qtd", parseInt(e.target.value) || 1)}
-                          className="w-full text-xs border rounded px-2 py-1.5 font-mono" style={{ borderColor: C.cremeBorder }} />
-                      </div>
+              <div className="space-y-2">
+                {pecaPedras.map((pp) => (
+                  <div key={pp._key} className="flex items-center gap-3 rounded-lg border p-3" style={{ borderColor: C.cremeBorder }}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate" style={{ color: "#1A1A1A" }}>{pp.produto.nome}</p>
+                      <p className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                        {pp.produto.sku ?? "—"} · R$ {pp.produto.preco.toFixed(2).replace(".", ",")}/un
+                      </p>
                     </div>
-                    <div className="flex items-center justify-between text-[10px]">
-                      <div className="flex gap-3 text-gray-500">
-                        <span>{se.ct_unitario.toFixed(3)}ct/un</span>
-                        <span>{se.ct_total.toFixed(3)}ct total</span>
-                        <span>{se.pt_total.toFixed(4)}g</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="font-mono text-gray-500">R$ {se.preco_unitario_rs.toFixed(2)}/un</span>
-                        <span className="font-bold" style={{ color: C.gold }}>R$ {se.preco_total_rs.toFixed(2)}</span>
-                        <button onClick={() => removeStone(se.id)} className="text-red-400 hover:text-red-600">
-                          <Minus size={14} />
-                        </button>
-                      </div>
-                    </div>
+                    <input type="number" min={1} value={pp.qtd}
+                      onChange={(e) => {
+                        const q = Math.max(1, parseInt(e.target.value) || 1);
+                        setPecaPedras((prev) => prev.map((x) => x._key === pp._key ? { ...x, qtd: q } : x));
+                      }}
+                      className="w-16 border rounded px-2 py-1 text-sm text-center font-mono" style={{ borderColor: C.cremeBorder }}
+                    />
+                    <span className="text-sm font-bold tabular-nums w-24 text-right" style={{ color: C.gold }}>
+                      {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(pp.produto.preco * pp.qtd)}
+                    </span>
+                    <button onClick={() => setPecaPedras((prev) => prev.filter((x) => x._key !== pp._key))}
+                      className="text-red-400 hover:text-red-600">
+                      <Minus size={14} />
+                    </button>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* Resultado */}
-          <div className="bg-white rounded-xl border p-5" style={{ borderColor: C.cremeBorder }}>
-            <div className="flex items-center justify-between gap-4">
-              <Pill label="Peso" value={`${pecaPeso.toFixed(1)}g`} />
-              <Pill label="Cat." value={pecaPricing.category} />
-              <Pill label="Mkp" value={`${pecaPricing.mkp.toFixed(2)}x`} />
-              <Pill label="Ouro" value={`R$${pecaPricing.discountPrice.toFixed(0)}`} />
-              {pedrasCost > 0 && <Pill label="Pedras" value={`R$${pedrasCost.toFixed(0)}`} />}
-              {gravacaoCost > 0 && <Pill label="Gravacao" value={`R$${gravacaoCost.toFixed(0)}`} />}
-              <div className="text-right">
-                <p className="text-[9px] uppercase tracking-wider" style={{ color: C.gold }}>Preco Final</p>
-                <p className="text-2xl font-black" style={{ color: C.esmeralda }}>
-                  R$ {pecaTotal.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}
-                </p>
+          {/* Total — Ouro + Pedras com desconto */}
+          <div className="bg-white rounded-xl border p-5 space-y-3" style={{ borderColor: C.cremeBorder }}>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Total</h3>
+            <div className="flex items-center justify-between text-sm">
+              <span style={{ color: "#6B7280" }}>Ouro</span>
+              <span className="font-mono tabular-nums" style={{ color: "#374151" }}>
+                {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(pecaValorOuro)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span style={{ color: "#6B7280" }}>Pedras</span>
+              <span className="font-mono tabular-nums" style={{ color: "#374151" }}>
+                {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(pecaPedrasTotalRS)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-sm pt-2 border-t" style={{ borderColor: C.cremeBorder }}>
+              <span style={{ color: "#6B7280" }}>Subtotal</span>
+              <span className="font-mono tabular-nums font-semibold" style={{ color: C.esmeralda }}>
+                {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(pecaSubtotal)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <label className="flex items-center gap-2" style={{ color: "#6B7280" }}>
+                Desconto
+                <span className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                  (máx {pecaMaxDesconto.toFixed(0)}%)
+                </span>
+              </label>
+              <div className="flex items-center gap-2">
+                <input type="number" min={0} max={pecaMaxDesconto} step={0.5}
+                  value={pecaDescontoPct}
+                  onChange={(e) => {
+                    const v = Math.max(0, Math.min(pecaMaxDesconto, parseFloat(e.target.value) || 0));
+                    setPecaDescontoPct(v);
+                  }}
+                  className="w-20 border rounded px-2 py-1 text-sm text-right font-mono outline-none"
+                  style={{ borderColor: C.cremeBorder }}
+                />
+                <span className="text-xs" style={{ color: "#9CA3AF" }}>%</span>
+                <span className="font-mono tabular-nums text-sm w-24 text-right" style={{ color: "#DC2626" }}>
+                  −{new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(pecaDescontoValor)}
+                </span>
               </div>
+            </div>
+            <div className="flex items-center justify-between pt-3 border-t-2" style={{ borderColor: C.esmeralda }}>
+              <span className="text-sm font-bold uppercase tracking-wider" style={{ color: C.esmeralda }}>Total</span>
+              <span className="text-2xl font-black tabular-nums" style={{ color: C.esmeralda }}>
+                {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(pecaTotal)}
+              </span>
             </div>
           </div>
 
@@ -1263,15 +1431,31 @@ export default function OrcamentoClient({
               try {
                 const body = {
                   nome_cliente: clientName.trim(), cliente_id: clienteId, tipo: "peca",
-                  peso: pecaPeso, valor: pecaTotal, markup: pecaPricing.mkp,
-                  desconto_pct: params.discountPercent, cotacao_ouro: cotacaoOuro,
-                  cotacao_dolar: cotacaoDolar, valor_ouro: pecaPricing.discountPrice,
-                  valor_pedras: stoneTotalRS,
-                  ficha: { peso_estimado: pecaPeso, cor_metal: pecaMetalColor, densidade_ouro: pecaGoldDensity, pedras_detalhadas: stoneEntries },
+                  peso: pecaPeso, valor: pecaTotal, markup: pecaFactors?.mkp ?? 0,
+                  desconto_pct: pecaDescontoPct, cotacao_ouro: cotacaoOuro,
+                  cotacao_dolar: cotacaoDolar, valor_ouro: pecaValorOuro,
+                  valor_pedras: pecaPedrasTotalRS,
+                  ficha: {
+                    peso_estimado: pecaPeso,
+                    cor_metal: pecaMetalColor,
+                    densidade_ouro: pecaGoldDensity,
+                    foto_referencia: pecaFotoRef,
+                    pedras_detalhadas: pecaPedras.map((p) => ({
+                      produto_id: p.produto.id,
+                      sku: p.produto.sku,
+                      nome: p.produto.nome,
+                      tipo_de_pedra: p.produto.tipo_de_pedra,
+                      preco_unitario: p.produto.preco,
+                      qtd: p.qtd,
+                      total: p.produto.preco * p.qtd,
+                    })),
+                  },
                 };
                 const res = await fetch("/api/orcamento", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
                 if (!res.ok) throw new Error();
-                setSaveMsg({ text: "Orçamento salvo!", type: "success" }); setClientName(""); setStoneEntries([]);
+                setSaveMsg({ text: "Orçamento salvo!", type: "success" });
+                setClientName(""); setClienteId(null);
+                setPecaPedras([]); setPecaDescontoPct(0); setPecaFotoRef(null);
               } catch { setSaveMsg({ text: "Erro ao salvar", type: "error" }); }
               finally { setIsSaving(false); }
             }}
@@ -1757,7 +1941,7 @@ export default function OrcamentoClient({
                 <button key={c.id_contato} onClick={() => selecionarCliente(c)}
                   className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
                   <span className="font-medium">{c.nome}</span>
-                  {c.cpf_cnpj && <span className="ml-2 text-[10px] text-gray-400">{c.cpf_cnpj}</span>}
+                  {c.cpf_cnpj && <span className="ml-2 text-[10px] text-gray-400">{maskCpfCnpj(c.cpf_cnpj)}</span>}
                 </button>
               ))}
             </div>
