@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isProdutosAccess } from "@/lib/roles";
+import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
 
@@ -17,7 +17,7 @@ async function authorize() {
   if (!user) return { error: "Não autenticado", status: 401, user: null };
 
   const role = user.user_metadata?.role as string | undefined;
-  if (!isProdutosAccess(role)) return { error: "Sem permissão", status: 403, user: null };
+  if (!(await temAcessoModulo(role ?? "", "produtos", "escrever"))) return { error: "Sem permissão", status: 403, user: null };
 
   return { error: null, status: 200, user };
 }
