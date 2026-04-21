@@ -213,13 +213,24 @@ export async function sendToTiny(vendaId: number): Promise<void> {
       .map(p => [Number(p.id_produto), Number(p.id_api_produto)])
   );
 
+  // Validar antes de chamar a API — evita erro críptico do Tiny
+  if (!Number(venda.cliente_id_tiny)) {
+    const clienteNome = venda.cliente_nome || `ID ${venda.cliente_id}`;
+    const msg = `Cliente "${clienteNome}" não está vinculado ao Tiny. Abra a ficha do cliente, adicione o ID Tiny e tente novamente.`;
+    await sql`
+      UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${msg}
+      WHERE id = ${vendaId}
+    `;
+    throw new Error(`Erro Tiny: ${msg}`);
+  }
+
   const dataVenda = venda.data_venda
     ? new Date(venda.data_venda).toISOString().slice(0, 10)
     : new Date().toISOString().slice(0, 10);
 
   const pedidoV3: Record<string, unknown> = {
     numeroPedido: venda.numero_venda,
-    idContato: Number(venda.cliente_id_tiny) || undefined,
+    idContato: Number(venda.cliente_id_tiny),
     situacao: SITUACAO_TINY["aprovado"],
     data: dataVenda,
     ...(Number(venda.total_frete) > 0 ? { valorFrete: Number(venda.total_frete) } : {}),
