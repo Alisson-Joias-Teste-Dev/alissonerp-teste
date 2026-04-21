@@ -368,6 +368,20 @@ export async function criarOrdemDoOrcamento(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (sql as any).begin(async (tx: typeof sql) => {
+    // C3: Lock no orçamento para evitar criação de ordens duplicadas em retries simultâneos
+    const [orcLock] = await tx`
+      SELECT id, ordem_gerada_id FROM alissonerp.orcamentos WHERE id = ${vendaOrc.orc_id} FOR UPDATE
+    `;
+    if (orcLock?.ordem_gerada_id) {
+      const [existenteTx] = await tx`
+        SELECT id, numero_ordem FROM alissonerp.ordens WHERE id = ${orcLock.ordem_gerada_id}
+      `;
+      if (existenteTx) {
+        ordemCriada = { id: Number(existenteTx.id), numero_ordem: String(existenteTx.numero_ordem) };
+        return;
+      }
+    }
+
     const perfilNomes: Record<string, string> = {
       Anatomica: "Anatômica", Boleada: "Boleada", BoleadaDouble: "Boleada Dupla",
       Chanfrada: "Chanfrada", Concava: "Côncava", FrisoUnico: "Friso Único",
@@ -709,9 +723,16 @@ export async function concluirVenda(
   `;
 
   // ── 2. MARCAR CONTAS_RECEBER COMO RECEBIDAS ──────────────────────────────
-  const [{ fn_cr_marcar_pago_mp: crQuitadas }] = await sql`
-    SELECT alissonerp.fn_cr_marcar_pago_mp(${vendaId}) AS fn_cr_marcar_pago_mp
-  `;
+  // M5: Se a função falhar (CR já cancelada, etc), a venda continua concluída
+  let crQuitadas: unknown = 0;
+  try {
+    const [crResult] = await sql`
+      SELECT alissonerp.fn_cr_marcar_pago_mp(${vendaId}) AS fn_cr_marcar_pago_mp
+    `;
+    crQuitadas = crResult?.fn_cr_marcar_pago_mp;
+  } catch (err) {
+    console.error(`[concluirVenda] fn_cr_marcar_pago_mp falhou p/ venda ${vendaId}:`, err);
+  }
 
   // ── 3. CRIAR ORDEM (orçamento ou serviço) — best-effort ─────────────────
   let ordemCriada: string | undefined;
