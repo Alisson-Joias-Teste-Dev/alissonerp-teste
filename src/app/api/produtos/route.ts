@@ -30,6 +30,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
+import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
 
 // ── Helpers para geração de variações ─────────────────────────────────────────
 
@@ -246,18 +247,32 @@ export async function GET(req: NextRequest) {
           p.situacao,
           p.categoria,
           NULL::text AS foto_produto,
-          COALESCE(
-            (SELECT e.saldo::int FROM public.estoque e WHERE e.sku = p.sku LIMIT 1),
-            (SELECT SUM(v.saldo)::int FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku),
-            -- Soma estoque dos filhos (variações) se for pai
-            (SELECT SUM(e_f.saldo)::int
-             FROM alissonerp.erp_produtos pai_e
-             INNER JOIN alissonerp.erp_produtos filho_e ON filho_e.parent_id = pai_e.id
-             INNER JOIN public.produtos prod_f ON prod_f.id_produto = filho_e.produto_id
-             INNER JOIN public.estoque e_f ON e_f.sku = prod_f.sku
-             WHERE pai_e.produto_id = p.id_produto),
-            0
+          -- Saldo consolidado: MAIOR valor entre 3 fontes (próprio, filhos, directus).
+          -- Usa GREATEST (não COALESCE) pra pais com linha em public.estoque = 0
+          -- não ficarem "presos" a esse 0 e sim mostrarem a soma dos filhos.
+          GREATEST(
+            COALESCE((SELECT e.saldo FROM public.estoque e WHERE e.sku = p.sku LIMIT 1), 0)::int,
+            COALESCE((SELECT SUM(v.saldo) FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku), 0)::int,
+            COALESCE((
+              SELECT SUM(e_f.saldo)::int
+              FROM alissonerp.erp_produtos pai_e
+              INNER JOIN alissonerp.erp_produtos filho_e ON filho_e.parent_id = pai_e.id
+              INNER JOIN public.produtos prod_f ON prod_f.id_produto = filho_e.produto_id
+              INNER JOIN public.estoque e_f ON e_f.sku = prod_f.sku
+              WHERE pai_e.produto_id = p.id_produto
+            ), 0)
           ) AS saldo_estoque,
+          -- Preço mínimo das variações filhas (quando pai com variable).
+          -- Se null, o produto é simples ou não tem filhos com preço.
+          (
+            SELECT MIN(prod_f.preco_tiny::numeric)::int
+            FROM alissonerp.erp_produtos pai_e2
+            INNER JOIN alissonerp.erp_produtos filho_e2 ON filho_e2.parent_id = pai_e2.id
+            INNER JOIN public.produtos prod_f ON prod_f.id_produto = filho_e2.produto_id
+            WHERE pai_e2.produto_id = p.id_produto
+              AND prod_f.preco_tiny IS NOT NULL
+              AND prod_f.preco_tiny::numeric > 0
+          ) AS preco_filhos_min,
           ARRAY_REMOVE(ARRAY[
             CASE WHEN ${wSemCat}   THEN 'sem_categoria' END,
             CASE WHEN ${wSemMetal} THEN 'sem_metal'     END,
@@ -337,11 +352,11 @@ export async function GET(req: NextRequest) {
         p.situacao,
         p.categoria,
         NULL::text    AS foto_produto,
-        COALESCE(
-          (SELECT e.saldo::int FROM public.estoque e WHERE e.sku = p.sku LIMIT 1),
-          (SELECT SUM(v.saldo)::int FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku),
-          0
+        GREATEST(
+          COALESCE((SELECT e.saldo FROM public.estoque e WHERE e.sku = p.sku LIMIT 1), 0)::int,
+          COALESCE((SELECT SUM(v.saldo) FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku), 0)::int
         ) AS saldo_estoque,
+        NULL::int AS preco_filhos_min,
         ARRAY_REMOVE(ARRAY[
           CASE WHEN ${wSemCat}   THEN 'sem_categoria' END,
           CASE WHEN ${wSemMetal} THEN 'sem_metal'     END,
@@ -435,6 +450,7 @@ export async function POST(req: NextRequest) {
     categoria_precificacao?: string;
     categoria_geral?: string | null;
     tem_pedra_preciosa?: boolean;
+    fornecedor?: string | null;
     medidas?: { largura_aro?: number; altura_aro?: number; base?: number };
     ficha_tecnica_ia?: {
       tipo_peca?: string | null;
@@ -461,7 +477,8 @@ export async function POST(req: NextRequest) {
   };
 
   const { nome, tipo_metal, cor_metal, peso_precificado, markup, fator,
-          categoria_precificacao, categoria_geral, tem_pedra_preciosa, medidas, ficha_tecnica_ia, composicao, variacoes, quantidades } = body;
+          categoria_precificacao, categoria_geral, tem_pedra_preciosa, fornecedor,
+          medidas, ficha_tecnica_ia, composicao, variacoes, quantidades } = body;
 
   if (!nome?.trim()) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
   if (!peso_precificado || peso_precificado <= 0) return NextResponse.json({ error: "peso_precificado inválido" }, { status: 400 });
@@ -526,19 +543,44 @@ export async function POST(req: NextRequest) {
         RETURNING id_produto, sku, nome, preco_sync
       `;
 
-      // INSERT pai em erp_produtos
-      const [erpPai] = await tx<{ id: number; produto_id: number; sku: string }[]>`
-        INSERT INTO alissonerp.erp_produtos
-          (produto_id, sku, nome, eh_pai, eh_variacao,
-           cor_metal, largura_aro, altura_aro, base)
-        VALUES
-          (${paiId}, ${sku}, ${nome.trim()}, ${temVariacoes}, false,
-           ${cor_metal ?? null},
-           ${medidas?.largura_aro ?? null},
-           ${medidas?.altura_aro  ?? null},
-           ${medidas?.base        ?? null})
-        RETURNING id, produto_id, sku
-      `;
+      // INSERT pai em erp_produtos — fornecedor só entra se a coluna existir
+      // (migration 159 pendente = não entra, silencioso).
+      const temColFornecedor = await colunaExiste("alissonerp", "erp_produtos", "fornecedor", tx);
+      const [erpPai] = temColFornecedor
+        ? await tx<{ id: number; produto_id: number; sku: string }[]>`
+            INSERT INTO alissonerp.erp_produtos
+              (produto_id, sku, nome, eh_pai, eh_variacao,
+               cor_metal, largura_aro, altura_aro, base, fornecedor)
+            VALUES
+              (${paiId}, ${sku}, ${nome.trim()}, ${temVariacoes}, false,
+               ${cor_metal ?? null},
+               ${medidas?.largura_aro ?? null},
+               ${medidas?.altura_aro  ?? null},
+               ${medidas?.base        ?? null},
+               ${fornecedor ?? null})
+            RETURNING id, produto_id, sku
+          `
+        : await tx<{ id: number; produto_id: number; sku: string }[]>`
+            INSERT INTO alissonerp.erp_produtos
+              (produto_id, sku, nome, eh_pai, eh_variacao,
+               cor_metal, largura_aro, altura_aro, base)
+            VALUES
+              (${paiId}, ${sku}, ${nome.trim()}, ${temVariacoes}, false,
+               ${cor_metal ?? null},
+               ${medidas?.largura_aro ?? null},
+               ${medidas?.altura_aro  ?? null},
+               ${medidas?.base        ?? null})
+            RETURNING id, produto_id, sku
+          `;
+
+      // Mestre de fornecedores: só UPSERT se a tabela existir.
+      if (fornecedor && fornecedor.trim() && await tabelaExiste("alissonerp", "fornecedores", tx)) {
+        await tx`
+          INSERT INTO alissonerp.fornecedores (nome)
+          VALUES (${fornecedor.trim()})
+          ON CONFLICT (nome) DO UPDATE SET ativo = true
+        `;
+      }
 
       // INSERT ficha técnica com medidas da IA (se disponível)
       if (ficha_tecnica_ia) {
@@ -628,26 +670,49 @@ export async function POST(req: NextRequest) {
              ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false})
         `;
 
-        // INSERT variação em erp_produtos
-        await tx`
-          INSERT INTO alissonerp.erp_produtos
-            (produto_id, sku, nome,
-             parent_sku, parent_id,
-             eh_variacao, eh_pai,
-             sufixo_variacao, numeracao, cor_metal, comprimento,
-             largura_aro, altura_aro, base)
-          VALUES
-            (${varId}, ${skuVar}, ${nomeVar},
-             ${sku}, ${erpPai.id},
-             true, false,
-             ${String(contador)},
-             ${combo.numeracao != null ? String(combo.numeracao) : null},
-             ${combo.cor_metal ?? cor_metal ?? null},
-             ${combo.comprimento ?? null},
-             ${medidas?.largura_aro ?? null},
-             ${medidas?.altura_aro  ?? null},
-             ${medidas?.base        ?? null})
-        `;
+        // INSERT variação em erp_produtos (fornecedor opcional)
+        if (temColFornecedor) {
+          await tx`
+            INSERT INTO alissonerp.erp_produtos
+              (produto_id, sku, nome,
+               parent_sku, parent_id,
+               eh_variacao, eh_pai,
+               sufixo_variacao, numeracao, cor_metal, comprimento,
+               largura_aro, altura_aro, base, fornecedor)
+            VALUES
+              (${varId}, ${skuVar}, ${nomeVar},
+               ${sku}, ${erpPai.id},
+               true, false,
+               ${String(contador)},
+               ${combo.numeracao != null ? String(combo.numeracao) : null},
+               ${combo.cor_metal ?? cor_metal ?? null},
+               ${combo.comprimento ?? null},
+               ${medidas?.largura_aro ?? null},
+               ${medidas?.altura_aro  ?? null},
+               ${medidas?.base        ?? null},
+               ${fornecedor ?? null})
+          `;
+        } else {
+          await tx`
+            INSERT INTO alissonerp.erp_produtos
+              (produto_id, sku, nome,
+               parent_sku, parent_id,
+               eh_variacao, eh_pai,
+               sufixo_variacao, numeracao, cor_metal, comprimento,
+               largura_aro, altura_aro, base)
+            VALUES
+              (${varId}, ${skuVar}, ${nomeVar},
+               ${sku}, ${erpPai.id},
+               true, false,
+               ${String(contador)},
+               ${combo.numeracao != null ? String(combo.numeracao) : null},
+               ${combo.cor_metal ?? cor_metal ?? null},
+               ${combo.comprimento ?? null},
+               ${medidas?.largura_aro ?? null},
+               ${medidas?.altura_aro  ?? null},
+               ${medidas?.base        ?? null})
+          `;
+        }
 
         // Copiar BOM do pai (metal = quantidade ajustada pelo peso da variação)
         for (const item of bomPai) {

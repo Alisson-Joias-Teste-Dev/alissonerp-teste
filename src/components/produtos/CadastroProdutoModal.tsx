@@ -545,6 +545,8 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   const [categoria, setCategoria] = useState("");
   const [categoriaGeral, setCategoriaGeral] = useState(""); // Anel, Pulseira, etc. — detectada pelo nome
   const [temPedra, setTemPedra] = useState(false);
+  const [fornecedor, setFornecedor] = useState("");
+  const [fornecedoresSugeridos, setFornecedoresSugeridos] = useState<string[]>([]);
 
   // Step 2: BOM
   const [bom, setBom] = useState<BomItemLocal[]>([]);
@@ -579,7 +581,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
     setStep(1);
     setGlobalErr(null);
     setNome(""); setTemVariacoes(true); setTipoMetal("Ouro Amarelo 18k"); setCorMetal("Amarelo");
-    setPeso(""); setMarkup(""); setCategoria(""); setTemPedra(false);
+    setPeso(""); setMarkup(""); setCategoria(""); setTemPedra(false); setFornecedor("");
     setBom([]); setShowBomForm(false);
     setLarguraAro(""); setAlturaAro(""); setBase("");
     setEixoNumeracao(false); setEixoCorMetal(false); setEixoComprimento(false);
@@ -592,9 +594,10 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   const loadSetup = useCallback(async () => {
     setLoadingSetup(true);
     try {
-      const [setupRes, insumoRes] = await Promise.all([
+      const [setupRes, insumoRes, fornRes] = await Promise.all([
         fetch("/api/produtos/setup"),
         fetch("/api/produtos/insumos"),
+        fetch("/api/fornecedores"),
       ]);
       if (setupRes.ok) {
         const d = await setupRes.json() as { nextSku: string; nextSkuAJ: string; categorias: Categoria[]; cotacao: { ouro: number; dollar: number } };
@@ -607,6 +610,10 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
       if (insumoRes.ok) {
         const d = await insumoRes.json() as { insumos: InsumoOpt[] };
         setInsumos(d.insumos ?? []);
+      }
+      if (fornRes.ok) {
+        const d = await fornRes.json() as { fornecedores: Array<{ nome: string }> };
+        setFornecedoresSugeridos((d.fornecedores ?? []).map((f) => f.nome).filter(Boolean));
       }
     } catch { /* non-critical */ }
     finally { setLoadingSetup(false); }
@@ -735,6 +742,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
         categoria_precificacao: categoria || null,
         categoria_geral: categoriaGeral || null,
         tem_pedra_preciosa: temPedra,
+        fornecedor: fornecedor.trim() || null,
         medidas: {
           largura_aro: larguraAro ? parseFloat(larguraAro) : null,
           altura_aro:  alturaAro  ? parseFloat(alturaAro)  : null,
@@ -924,6 +932,26 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                     <label htmlFor="temPedra" className="text-sm text-gray-700 select-none cursor-pointer">
                       Tem pedra preciosa
                     </label>
+                  </div>
+
+                  {/* Fornecedor — autocomplete via datalist */}
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-widest mb-1">
+                      Fornecedor
+                    </label>
+                    <input
+                      type="text"
+                      value={fornecedor}
+                      onChange={(e) => setFornecedor(e.target.value)}
+                      list="cadastro-fornecedores-options"
+                      placeholder="Nome do fornecedor (opcional)"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036] transition-colors"
+                    />
+                    <datalist id="cadastro-fornecedores-options">
+                      {fornecedoresSugeridos.map((f) => (
+                        <option key={f} value={f} />
+                      ))}
+                    </datalist>
                   </div>
                 </div>
               )}

@@ -42,6 +42,7 @@ import {
   Receipt,
   Building2,
   FileCheck2,
+  Globe,
 } from "lucide-react";
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
@@ -88,6 +89,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?
   Receipt,
   Building2,
   FileCheck2,
+  Globe,
 };
 
 function isGroup(entry: MenuEntry): entry is MenuGroup {
@@ -111,15 +113,18 @@ export default function Sidebar() {
   const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
   const ROLES_FISCAL_SIDEBAR = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
   const ROLES_GESTAO_ESTOQUE = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+  const ROLES_SITE = ["desenvolvedor", "admin", "gerente_loja"];
   const hasOrcamento = role && ROLES_ORCAMENTO.includes(role);
   const hasFiscal = role && ROLES_FISCAL_SIDEBAR.includes(role);
   const hasGestaoEstoque = role && ROLES_GESTAO_ESTOQUE.includes(role);
+  const hasSite = role && ROLES_SITE.includes(role);
   const modulosEfetivos = [...modulos_leitura];
   if (modulosEfetivos.length > 0) {
     if (hasServicePanel && !modulosEfetivos.includes("service_painel")) modulosEfetivos.push("service_painel");
     if (hasOrcamento && !modulosEfetivos.includes("orcamento")) modulosEfetivos.push("orcamento");
     if (hasFiscal && !modulosEfetivos.includes("fiscal")) modulosEfetivos.push("fiscal");
     if (hasGestaoEstoque && !modulosEfetivos.includes("gestao_estoque")) modulosEfetivos.push("gestao_estoque");
+    if (hasSite && !modulosEfetivos.includes("site")) modulosEfetivos.push("site");
   }
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)
