@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isProdutosAccess } from "@/lib/roles";
+import { temAcessoModulo } from "@/lib/permissoes";
 import ProdutosClient from "./ProdutosClient";
 
 export const metadata = { title: "Produtos" };
@@ -15,7 +15,7 @@ export default async function ProdutosPage() {
 
   const role = user.user_metadata?.role as string | undefined;
 
-  if (!isProdutosAccess(role)) redirect("/");
+  if (!(await temAcessoModulo(role ?? "", "produtos", "ler"))) redirect("/");
 
   return <ProdutosClient />;
 }

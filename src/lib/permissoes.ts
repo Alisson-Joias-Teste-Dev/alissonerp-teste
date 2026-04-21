@@ -22,3 +22,23 @@ export async function temPermissao(
 
   return row?.permitido === true;
 }
+
+/**
+ * Verifica acesso a um módulo via role_permissoes (configurável no painel).
+ * Admin/desenvolvedor sempre passam.
+ */
+export async function temAcessoModulo(
+  role: string,
+  modulo: string,
+  tipo: "ler" | "escrever" = "ler",
+): Promise<boolean> {
+  if (isFullAccess(role)) return true;
+
+  const [row] = await sql`
+    SELECT pode_ler, pode_escrever
+    FROM alissonerp.role_permissoes
+    WHERE role = ${role} AND modulo = ${modulo}
+  `;
+
+  return tipo === "ler" ? row?.pode_ler === true : row?.pode_escrever === true;
+}

@@ -93,6 +93,27 @@ export async function POST(
 
   const isDinheiro = body.forma === 'Dinheiro';
 
+  // Guard: não permitir adicionar pagamento se a venda já está totalmente paga
+  const [totais] = await sql`
+    SELECT
+      v.total_venda::numeric                                                               AS total_venda,
+      COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado'), 0)::numeric           AS soma_confirmados
+    FROM alissonerp.vendas_erp v
+    LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
+    WHERE v.id = ${vendaId}
+    GROUP BY v.total_venda
+  `;
+  if (totais && isDinheiro) {
+    const jaConfirmado = Number(totais.soma_confirmados);
+    const totalVenda   = Number(totais.total_venda);
+    if (jaConfirmado + 0.01 >= totalVenda) {
+      return NextResponse.json(
+        { error: "Venda já está totalmente paga por outro meio de pagamento" },
+        { status: 409 }
+      );
+    }
+  }
+
   const [novo] = await sql`
     INSERT INTO alissonerp.pagamentos_venda (
       venda_id, forma, gateway, valor, parcelas, status, data_confirmacao
