@@ -617,7 +617,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
         return isNaN(n) ? null : n;
       };
       if ((pesoEdit || "") !== (produto.peso_precificado ?? "")) body.peso_precificado = parseNum(pesoEdit);
-      if ((markupEdit || "") !== (produto.markup ?? "")) body.markup = parseNum(markupEdit);
+      // Markup é somente leitura aqui — só pode ser alterado em /precificação
       if ((fatorEdit || "") !== (produto.fator ?? "")) body.fator = parseNum(fatorEdit);
       if ((catPrecEdit || "") !== (produto.categoria ?? "")) body.categoria_precificacao = catPrecEdit || null;
       // preco_tiny: só é editável em pedras (que não têm peso/markup).
@@ -722,7 +722,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
       (categoriaEdit || "") !== (produto.categoria_geral ?? "") ||
       situacaoEdit !== (produto.situacao ?? "A") ||
       (pesoEdit || "")       !== (produto.peso_precificado ?? "") ||
-      (markupEdit || "")     !== (produto.markup ?? "") ||
+      // Markup readonly — não dispara dirty
       (fatorEdit || "")      !== (produto.fator ?? "") ||
       (catPrecEdit || "")    !== (produto.categoria ?? "") ||
       // preco_tiny só dirty para pedras (joia usa preço calculado)
@@ -1259,15 +1259,21 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                       />
                     </div>
                     <div>
-                      <p className={labelCls}>Markup</p>
+                      <p className={labelCls}>Markup <span className="text-gray-400 normal-case tracking-normal">(somente leitura)</span></p>
                       <input
                         type="text"
-                        inputMode="decimal"
-                        value={markupEdit}
-                        onChange={(e) => setMarkupEdit(e.target.value)}
-                        placeholder="—"
-                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                        value={markupEdit || "—"}
+                        readOnly
+                        disabled
+                        title="O markup só pode ser alterado na tela /precificação"
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-500 bg-gray-100 cursor-not-allowed"
                       />
+                      <a
+                        href="/precificacao"
+                        className="text-[10px] text-blue-600 hover:underline mt-0.5 inline-block"
+                      >
+                        Alterar em /precificação →
+                      </a>
                     </div>
                     {showAvancado && (
                       <div>
