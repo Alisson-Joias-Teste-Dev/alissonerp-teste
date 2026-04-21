@@ -150,6 +150,20 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await (sql as any).begin(async (tx: typeof sql) => {
+    // Guard: outros meios confirmados já cobrem o total? Não confirmar duas vezes.
+    const [totaisOthers] = await tx`
+      SELECT
+        COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado' AND p.id != ${pagamentoId}), 0)::numeric AS soma_outros,
+        v.total_venda::numeric AS total_venda_local
+      FROM alissonerp.vendas_erp v
+      LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
+      WHERE v.id = ${vendaId}
+      GROUP BY v.total_venda
+    `;
+    if (totaisOthers && Number(totaisOthers.soma_outros) + 0.01 >= Number(totaisOthers.total_venda_local)) {
+      return { quitada: true, ja_coberto: true };
+    }
+
     await tx`
       UPDATE alissonerp.pagamentos_venda
       SET status = 'confirmado', data_confirmacao = NOW(), gateway_id = ${paymentId},
@@ -373,6 +387,20 @@ export async function POST(req: NextRequest) {
   if (status === "approved") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await (sql as any).begin(async (tx: typeof sql) => {
+      // Guard: outros meios confirmados já cobrem o total? Não confirmar duas vezes.
+      const [totaisOthers] = await tx`
+        SELECT
+          COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado' AND p.id != ${pagamentoId}), 0)::numeric AS soma_outros,
+          v.total_venda::numeric AS total_venda_local
+        FROM alissonerp.vendas_erp v
+        LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
+        WHERE v.id = ${vendaId}
+        GROUP BY v.total_venda
+      `;
+      if (totaisOthers && Number(totaisOthers.soma_outros) + 0.01 >= Number(totaisOthers.total_venda_local)) {
+        return { quitada: true, ja_coberto: true, pago: Number(totaisOthers.soma_outros), total: Number(totaisOthers.total_venda_local) };
+      }
+
       // 7a. Marca pagamento como confirmado + grava valor líquido e taxas
       await tx`
         UPDATE alissonerp.pagamentos_venda
