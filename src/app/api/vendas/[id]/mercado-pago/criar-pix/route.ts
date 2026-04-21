@@ -84,7 +84,12 @@ export async function POST(
   `;
   const totalVenda = Number(venda.total_venda);
   const restante = Math.max(0, totalVenda - Number(soma_confirmados));
-  const valorCobranca = body.valor != null ? Number(body.valor) : restante;
+
+  if (!body.pagamento_id && Number(soma_confirmados) + 0.01 >= totalVenda) {
+    return NextResponse.json({ error: "Venda já está totalmente paga — não é possível gerar novo Pix" }, { status: 409 });
+  }
+
+  const valorCobranca = body.valor != null ? Math.min(Number(body.valor), restante) : restante;
 
   if (!valorCobranca || valorCobranca <= 0) {
     return NextResponse.json({ error: "Valor da cobrança deve ser > 0" }, { status: 400 });

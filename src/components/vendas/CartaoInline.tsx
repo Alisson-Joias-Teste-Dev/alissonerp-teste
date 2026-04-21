@@ -62,6 +62,8 @@ interface Props {
   obterVendaId?: () => Promise<{ id: number; numero_venda: string }>;
   onPagamentoConfirmado: (vendaId: number) => void;
   ocultar?: boolean;
+  /** ID do pagamento_venda pré-criado (Múltiplas). Garante que cada widget use seu próprio registro. */
+  pagamentoId?: number;
 }
 
 type Modo = "idle" | "link" | "maquininha";
@@ -74,6 +76,7 @@ export default function CartaoInline({
   obterVendaId,
   onPagamentoConfirmado,
   ocultar,
+  pagamentoId,
 }: Props) {
   const { role } = useAuth();
   const adminOuGerente = isFullAccess(role);
@@ -262,7 +265,7 @@ export default function CartaoInline({
       const res = await fetch(`/api/vendas/${id}/mercado-pago/criar-link`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ valor, installments: parcelasPoint }),
+        body: JSON.stringify({ valor, installments: parcelasPoint, ...(pagamentoId ? { pagamento_id: pagamentoId } : {}) }),
       });
       const ct = res.headers.get("content-type") ?? "";
       if (!ct.includes("application/json")) {
@@ -294,6 +297,7 @@ export default function CartaoInline({
           installments: parcelasPoint,
           payment_type: "credit_card",
           valor,
+          ...(pagamentoId ? { pagamento_id: pagamentoId } : {}),
         }),
       });
       const ct = res.headers.get("content-type") ?? "";
@@ -423,6 +427,7 @@ export default function CartaoInline({
           <CreditCard size={14} style={{ color: C.esmeralda }} />
           <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: C.esmeralda }}>
             Cartão de Crédito — Mercado Pago
+            <span className="ml-1 normal-case font-bold">· {fmt(valor)}</span>
           </p>
         </div>
         {modo !== "idle" && !pago && (
