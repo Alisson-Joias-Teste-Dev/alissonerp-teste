@@ -175,9 +175,23 @@ export default function PixQrInline({
 
   function copiarPix() {
     if (!pixCode) return;
-    navigator.clipboard.writeText(pixCode);
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(pixCode).catch(() => copiarFallback(pixCode));
+    } else {
+      copiarFallback(pixCode);
+    }
     setCopiado(true);
     setTimeout(() => setCopiado(false), 2000);
+  }
+
+  function copiarFallback(texto: string) {
+    const el = document.createElement("textarea");
+    el.value = texto;
+    el.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand("copy");
+    document.body.removeChild(el);
   }
 
   function abrirWhats() {
