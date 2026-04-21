@@ -5,6 +5,11 @@ const sql = postgres(process.env.DATABASE_URL!, {
   ssl: false,
   max: 5,
   idle_timeout: 20,
+  // search_path garante que triggers SECURITY DEFINER (migrations 141, 161)
+  // resolvam tabelas como 'vendas_erp' → 'alissonerp.vendas_erp'
+  connection: {
+    search_path: "alissonerp,public",
+  },
 });
 
 export default sql;

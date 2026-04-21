@@ -520,12 +520,6 @@ export async function criarOrdemDeServico(
   `;
   if (!venda) return null;
 
-  // Idempotência: já existe ordem vinculada
-  const [existente] = await sql`
-    SELECT id, numero_ordem FROM alissonerp.ordens WHERE venda_id = ${vendaId} LIMIT 1
-  `;
-  if (existente) return { id: Number(existente.id), numero_ordem: String(existente.numero_ordem) };
-
   const itens = await sql`
     SELECT produto_id, nome_produto, sku, quantidade, observacao
     FROM alissonerp.itens_venda_erp WHERE venda_id = ${vendaId} ORDER BY id
@@ -535,6 +529,18 @@ export async function criarOrdemDeServico(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (sql as any).begin(async (tx: typeof sql) => {
+    // C3: Lock na venda para evitar criação de ordens duplicadas em requests simultâneos
+    await tx`SELECT id FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE`;
+
+    // Idempotência dentro da tx: re-verifica após adquirir lock
+    const [existenteTx] = await tx`
+      SELECT id, numero_ordem FROM alissonerp.ordens WHERE venda_id = ${vendaId} LIMIT 1
+    `;
+    if (existenteTx) {
+      ordemCriada = { id: Number(existenteTx.id), numero_ordem: String(existenteTx.numero_ordem) };
+      return;
+    }
+
     const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
     const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
     const nextNum = Math.max(Number(max_id_ali), Number(max_id_dir)) + 1;
@@ -817,7 +823,8 @@ export async function estornarVenda(
 ): Promise<EstornarVendaResult> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return await (sql as any).begin(async (tx: typeof sql): Promise<EstornarVendaResult> => {
-    // 1. Bloqueia o pagamento pra evitar race com webhook simultâneo
+    // 1. Bloqueia pagamento + venda para evitar race entre dois estornos simultâneos
+    await tx`SELECT id FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE`;
     const [pag] = await tx`
       SELECT id, venda_id, status, gateway_payload
       FROM alissonerp.pagamentos_venda

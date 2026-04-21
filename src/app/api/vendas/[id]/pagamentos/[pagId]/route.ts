@@ -64,14 +64,16 @@ export async function DELETE(
   if (isNaN(vendaId) || isNaN(pId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [pag] = await sql`
-    SELECT p.id, v.bloqueado
+    SELECT p.id, p.status, v.bloqueado, v.situacao AS venda_situacao
     FROM alissonerp.pagamentos_venda p
     JOIN alissonerp.vendas_erp v ON v.id = p.venda_id
     WHERE p.id = ${pId} AND p.venda_id = ${vendaId}
   `;
   if (!pag) return NextResponse.json({ error: "Pagamento não encontrado" }, { status: 404 });
   if (pag.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
-  if (pag.situacao === "cancelado") return NextResponse.json({ error: "Venda cancelada" }, { status: 409 });
+  if (pag.venda_situacao === "cancelado") return NextResponse.json({ error: "Venda cancelada" }, { status: 409 });
+  if (pag.venda_situacao === "concluido") return NextResponse.json({ error: "Venda concluída não permite exclusão de pagamento" }, { status: 409 });
+  if (pag.status === "confirmado") return NextResponse.json({ error: "Pagamento confirmado não pode ser excluído — estorne primeiro" }, { status: 409 });
 
   await sql`DELETE FROM alissonerp.pagamentos_venda WHERE id = ${pId}`;
 
