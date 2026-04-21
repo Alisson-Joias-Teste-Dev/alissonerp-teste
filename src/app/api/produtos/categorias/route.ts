@@ -11,7 +11,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isProdutosAccess } from "@/lib/roles";
+import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { buildFiltrosProdutos } from "@/lib/produtos-filtros";
 
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   const role = user.user_metadata?.role as string | undefined;
-  if (!isProdutosAccess(role)) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  if (!(await temAcessoModulo(role ?? "", "produtos", "ler"))) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   try {
     const f = buildFiltrosProdutos(req.nextUrl.searchParams, {
