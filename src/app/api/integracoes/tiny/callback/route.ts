@@ -8,12 +8,13 @@ import { getPublicOrigin } from "@/lib/public-origin";
 // senão o Keycloak recusa com "redirect_uri doesn't match". Por isso ambos
 // usam getPublicOrigin() que respeita X-Forwarded-Host atrás de proxy.
 export async function GET(req: NextRequest) {
+  const origin = getPublicOrigin(req);
+  const redirect = (path: string) => NextResponse.redirect(`${origin}${path}`);
+
   const code = req.nextUrl.searchParams.get("code");
   if (!code) {
     const error = req.nextUrl.searchParams.get("error") ?? "Código de autorização não recebido";
-    return NextResponse.redirect(
-      new URL(`/configuracoes?tab=integracoes&tiny_error=${encodeURIComponent(error)}`, req.url)
-    );
+    return redirect(`/configuracoes?tab=integracoes&tiny_error=${encodeURIComponent(error)}`);
   }
 
   // Buscar client_id e client_secret
@@ -26,12 +27,8 @@ export async function GET(req: NextRequest) {
   const clientSecret = secretMap.get("tiny_client_secret") ?? "";
 
   if (!clientId || !clientSecret) {
-    return NextResponse.redirect(
-      new URL("/configuracoes?tab=integracoes&tiny_error=Client+ID+ou+Secret+não+configurados", req.url)
-    );
+    return redirect("/configuracoes?tab=integracoes&tiny_error=Client+ID+ou+Secret+não+configurados");
   }
-
-  const origin = getPublicOrigin(req);
   const redirectUri = `${origin}/api/integracoes/tiny/callback`;
 
   try {
@@ -56,9 +53,7 @@ export async function GET(req: NextRequest) {
       const errText = await tokenRes.text();
       let errMsg = `Tiny OAuth erro ${tokenRes.status}`;
       try { const j = JSON.parse(errText); errMsg = j.error_description || j.error || errMsg; } catch { /* */ }
-      return NextResponse.redirect(
-        new URL(`/configuracoes?tab=integracoes&tiny_error=${encodeURIComponent(errMsg)}`, req.url)
-      );
+      return redirect(`/configuracoes?tab=integracoes&tiny_error=${encodeURIComponent(errMsg)}`);
     }
 
     const tokens = await tokenRes.json() as {
@@ -97,14 +92,10 @@ export async function GET(req: NextRequest) {
       `;
     }
 
-    return NextResponse.redirect(
-      new URL("/configuracoes?tab=integracoes&tiny_ok=1", req.url)
-    );
+    return redirect("/configuracoes?tab=integracoes&tiny_ok=1");
 
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : "Erro na comunicação com o Tiny";
-    return NextResponse.redirect(
-      new URL(`/configuracoes?tab=integracoes&tiny_error=${encodeURIComponent(errMsg)}`, req.url)
-    );
+    return redirect(`/configuracoes?tab=integracoes&tiny_error=${encodeURIComponent(errMsg)}`);
   }
 }
