@@ -553,6 +553,13 @@ export async function PATCH(
     if (vendaOrc?.orc_id) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (sql as any).begin(async (tx: typeof sql) => {
+        // C3: Lock no orçamento para evitar criação de ordens duplicadas em requests simultâneos
+        const [orcLockPatch] = await tx`SELECT id, ordem_gerada_id FROM alissonerp.orcamentos WHERE id = ${vendaOrc.orc_id} FOR UPDATE`;
+        if (orcLockPatch?.ordem_gerada_id) {
+          const [existenteTxPatch] = await tx`SELECT id, numero_ordem FROM alissonerp.ordens WHERE id = ${orcLockPatch.ordem_gerada_id}`;
+          if (existenteTxPatch) { ordemCriada = { id: existenteTxPatch.id, numero_ordem: existenteTxPatch.numero_ordem }; return; }
+        }
+
         const perfilNomes: Record<string, string> = {
           Anatomica: "Anatômica", Boleada: "Boleada", BoleadaDouble: "Boleada Dupla",
           Chanfrada: "Chanfrada", Concava: "Côncava", FrisoUnico: "Friso Único",
@@ -656,11 +663,17 @@ export async function PATCH(
           }
         }
 
-        // Auditoria loja pendente
-        await tx`
+        // Auditoria loja — INSERT + UPDATE imediato para disparar fn_processar_auditoria (AFTER UPDATE)
+        const [auditPatch] = await tx`
           INSERT INTO alissonerp.auditorias (situacao, tipo_auditoria, rota_processo, ordem_id, peso_negociado, parecer, dados_ordem)
           VALUES ('pendente', 'loja', 'entrada_ordem', ${ordem.id}, ${pesoNeg}, NULL,
             ${JSON.stringify({ numero_ordem: numeroOrdem, tipo_ordem: "fabricacao", rota: "pcp", peso_negociado: pesoNeg, origem: "orcamento_venda", orcamento_id: vendaOrc.orc_id })}::jsonb)
+          RETURNING id
+        `;
+        await tx`
+          UPDATE alissonerp.auditorias
+          SET situacao = 'aprovado', data_conclusao = NOW(), parecer = 'Aprovação automática — ERP'
+          WHERE id = ${auditPatch.id}
         `;
 
         // Atualizar orçamento com ordem gerada
