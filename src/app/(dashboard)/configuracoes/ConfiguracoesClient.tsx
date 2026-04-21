@@ -3638,15 +3638,6 @@ function TabIntegracoes() {
             <Save size={13} /> Salvar Credenciais
           </button>
 
-          {tinyHasCredentials && (
-            <a
-              href="/api/integracoes/tiny/auth"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90 no-underline"
-              style={{ backgroundColor: tinyConfigured ? P.sage : "#2563EB", color: "#fff" }}
-            >
-              {tinyConfigured ? "Reconectar Tiny" : "Conectar ao Tiny"}
-            </a>
-          )}
         </div>
 
         {tinyConfigured && (
@@ -3657,9 +3648,19 @@ function TabIntegracoes() {
           </div>
         )}
 
-        {tinyConfigured && !tinyExpanded && (
-          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
-            <CheckCircle size={12} /> Tiny ERP ativo — pedidos sincronizados automaticamente
+        {tinyHasCredentials && (
+          <a
+            href="/api/integracoes/tiny/auth"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90 no-underline"
+            style={{ backgroundColor: tinyConfigured ? P.sage : "#2563EB", color: "#fff" }}
+          >
+            {tinyConfigured ? "Reconectar Tiny" : "Conectar ao Tiny"}
+          </a>
+        )}
+
+        {!tinyConfigured && !tinyHasCredentials && (
+          <p className="text-xs flex items-center gap-1" style={{ color: P.muted }}>
+            Configure as credenciais acima para conectar ao Tiny ERP
           </p>
         )}
 
