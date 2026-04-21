@@ -707,20 +707,28 @@ export default function ProdutosClient() {
                               )}
                             </td>
 
-                            {/* Preço Venda (preco_tiny) */}
+                            {/* Preço Venda — pedras: preco_tiny (manual); joias: preco_curva (cotação atual) */}
                             <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
-                              {p.preco_tiny != null && parseFloat(p.preco_tiny) > 0 ? (
-                                <span className="font-semibold" style={{ color: "#184036" }}>
-                                  {formatPreco(p.preco_tiny)}
-                                </span>
-                              ) : p.preco_filhos_min != null && p.preco_filhos_min > 0 ? (
-                                <span className="text-gray-700" title="Preço mínimo das variações (produto pai)">
-                                  {formatPreco(String(p.preco_filhos_min))}
-                                  <sup className="ml-0.5 text-[8px] font-bold">V</sup>
-                                </span>
-                              ) : (
-                                <span className="text-gray-400">—</span>
-                              )}
+                              {(() => {
+                                const precoExibir = isPedra
+                                  ? p.preco_tiny
+                                  : (p.preco_curva != null ? String(p.preco_curva) : (p.preco_sync ?? p.preco_tiny));
+                                if (precoExibir != null && parseFloat(precoExibir) > 0) {
+                                  return (
+                                    <span className="font-semibold" style={{ color: "#184036" }}>
+                                      {formatPreco(precoExibir)}
+                                    </span>
+                                  );
+                                } else if (p.preco_filhos_min != null && p.preco_filhos_min > 0) {
+                                  return (
+                                    <span className="text-gray-700" title="Preço mínimo das variações (produto pai)">
+                                      {formatPreco(String(p.preco_filhos_min))}
+                                      <sup className="ml-0.5 text-[8px] font-bold">V</sup>
+                                    </span>
+                                  );
+                                }
+                                return <span className="text-gray-400">—</span>;
+                              })()}
                             </td>
                           </>
                         );
