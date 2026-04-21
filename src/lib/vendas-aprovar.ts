@@ -112,7 +112,7 @@ async function refreshTinyToken(): Promise<string | null> {
   return null;
 }
 
-async function ensureTinyToken(): Promise<string> {
+export async function ensureTinyToken(): Promise<string> {
   let token = await readTinyToken();
   if (!token) {
     const refreshed = await refreshTinyToken();
@@ -213,13 +213,24 @@ export async function sendToTiny(vendaId: number): Promise<void> {
       .map(p => [Number(p.id_produto), Number(p.id_api_produto)])
   );
 
+  // Validar antes de chamar a API — evita erro críptico do Tiny
+  if (!Number(venda.cliente_id_tiny)) {
+    const clienteNome = venda.cliente_nome || `ID ${venda.cliente_id}`;
+    const msg = `Cliente "${clienteNome}" não está vinculado ao Tiny. Abra a ficha do cliente, adicione o ID Tiny e tente novamente.`;
+    await sql`
+      UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${msg}
+      WHERE id = ${vendaId}
+    `;
+    throw new Error(`Erro Tiny: ${msg}`);
+  }
+
   const dataVenda = venda.data_venda
     ? new Date(venda.data_venda).toISOString().slice(0, 10)
     : new Date().toISOString().slice(0, 10);
 
   const pedidoV3: Record<string, unknown> = {
     numeroPedido: venda.numero_venda,
-    idContato: Number(venda.cliente_id_tiny) || undefined,
+    idContato: Number(venda.cliente_id_tiny),
     situacao: SITUACAO_TINY["aprovado"],
     data: dataVenda,
     ...(Number(venda.total_frete) > 0 ? { valorFrete: Number(venda.total_frete) } : {}),
@@ -473,6 +484,81 @@ export async function criarOrdemDoOrcamento(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Criação automática de ordem de serviço (tipo_venda = 'servico')
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function criarOrdemDeServico(
+  vendaId: number,
+): Promise<{ id: number; numero_ordem: string } | null> {
+  const [venda] = await sql`
+    SELECT id, tipo_venda, orcamento_id, cliente_id, vendedor_id,
+           data_entrega, numero_venda
+    FROM alissonerp.vendas_erp
+    WHERE id = ${vendaId} AND tipo_venda = 'servico' AND orcamento_id IS NULL
+  `;
+  if (!venda) return null;
+
+  // Idempotência: já existe ordem vinculada
+  const [existente] = await sql`
+    SELECT id, numero_ordem FROM alissonerp.ordens WHERE venda_id = ${vendaId} LIMIT 1
+  `;
+  if (existente) return { id: Number(existente.id), numero_ordem: String(existente.numero_ordem) };
+
+  const itens = await sql`
+    SELECT produto_id, nome_produto, sku, quantidade, observacao
+    FROM alissonerp.itens_venda_erp WHERE venda_id = ${vendaId} ORDER BY id
+  `;
+
+  let ordemCriada: { id: number; numero_ordem: string } | null = null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (sql as any).begin(async (tx: typeof sql) => {
+    const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
+    const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
+    const nextNum = Math.max(Number(max_id_ali), Number(max_id_dir)) + 1;
+    const numeroOrdem = "C-" + String(nextNum).padStart(4, "0");
+
+    const detalhes = itens.map((i) => i.nome_produto).filter(Boolean).join(", ")
+      || `Venda V-${String(vendaId).padStart(5, "0")}`;
+
+    const [ordem] = await tx`
+      INSERT INTO alissonerp.ordens (
+        numero_ordem, tipo_ordem, situacao, status, rota,
+        cliente_id, vendedor_id, data_entrega, detalhes_ordem,
+        venda_id, numero_pedido, created_at
+      ) VALUES (
+        ${numeroOrdem},
+        'servico_venda'::alissonerp.enum_tipo_ordem,
+        'criado', 'aguardando', 'protocolo',
+        ${venda.cliente_id ?? null},
+        ${venda.vendedor_id ?? null},
+        ${venda.data_entrega ?? null},
+        ${detalhes},
+        ${vendaId},
+        ${venda.numero_venda ?? null},
+        NOW()
+      ) RETURNING id, numero_ordem
+    `;
+    ordemCriada = { id: Number(ordem.id), numero_ordem: String(ordem.numero_ordem) };
+
+    for (const item of itens) {
+      await tx`
+        INSERT INTO alissonerp.itens_ordem (ordem_id, produto_id, nome_produto, sku, quantidade)
+        VALUES (
+          ${ordem.id},
+          ${item.produto_id ?? null},
+          ${item.nome_produto},
+          ${item.sku ?? null},
+          ${Number(item.quantidade)}
+        )
+      `;
+    }
+  });
+
+  return ordemCriada;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // approveVenda — rascunho → aprovado (dispara Tiny)
 //
 // opts.tinyBestEffort: se true, falha do Tiny NÃO impede a aprovação. Erro
@@ -523,14 +609,21 @@ export async function approveVenda(
     WHERE id = ${vendaId} AND situacao NOT IN ('aprovado', 'concluido', 'confirmado', 'cancelado')
   `;
 
-  // 3. Criar ordem se veio de orçamento
+  // 3. Criar ordem (orçamento ou serviço) — best-effort
   let ordemCriada: string | undefined;
   try {
     const ordem = await criarOrdemDoOrcamento(vendaId, userId);
     if (ordem) ordemCriada = ordem.numero_ordem;
   } catch (err) {
-    // Criação de ordem é best-effort — não quebra aprovação
-    console.error(`[approveVenda] Erro ao criar ordem p/ venda ${vendaId}:`, err);
+    console.error(`[approveVenda] Erro ao criar ordem (orcamento) p/ venda ${vendaId}:`, err);
+  }
+  if (!ordemCriada) {
+    try {
+      const ordemSvc = await criarOrdemDeServico(vendaId);
+      if (ordemSvc) ordemCriada = ordemSvc.numero_ordem;
+    } catch (err) {
+      console.error(`[approveVenda] Erro ao criar ordem (servico) p/ venda ${vendaId}:`, err);
+    }
   }
 
   return {
@@ -620,13 +713,21 @@ export async function concluirVenda(
     SELECT alissonerp.fn_cr_marcar_pago_mp(${vendaId}) AS fn_cr_marcar_pago_mp
   `;
 
-  // ── 3. CRIAR ORDEM DE FABRICAÇÃO (se vier de orçamento) — best-effort ────
+  // ── 3. CRIAR ORDEM (orçamento ou serviço) — best-effort ─────────────────
   let ordemCriada: string | undefined;
   try {
     const ordem = await criarOrdemDoOrcamento(vendaId, userId);
     if (ordem) ordemCriada = ordem.numero_ordem;
   } catch (err) {
-    console.error(`[concluirVenda] Erro ao criar ordem p/ venda ${vendaId}:`, err);
+    console.error(`[concluirVenda] Erro ao criar ordem (orcamento) p/ venda ${vendaId}:`, err);
+  }
+  if (!ordemCriada) {
+    try {
+      const ordemSvc = await criarOrdemDeServico(vendaId);
+      if (ordemSvc) ordemCriada = ordemSvc.numero_ordem;
+    } catch (err) {
+      console.error(`[concluirVenda] Erro ao criar ordem (servico) p/ venda ${vendaId}:`, err);
+    }
   }
 
   // ── 4. SINCRONIZAR COM TINY (best-effort, DEPOIS do fechamento) ──────────

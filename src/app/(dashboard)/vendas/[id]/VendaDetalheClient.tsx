@@ -7,7 +7,7 @@ import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle,
   Truck, Video, RefreshCw, Share2, Download,
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
-  RotateCcw, ArrowRight,
+  RotateCcw, ArrowRight, PackageCheck,
 } from "lucide-react";
 import { maskCpfCnpj } from "@/lib/formatters";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
@@ -132,6 +132,7 @@ const SITUACAO_COLOR: Record<string, { bg: string; text: string }> = {
   rascunho:  { bg: "#F3F4F6", text: "#6B7280" },
   aprovado:  { bg: "#D1FAE5", text: "#065F46" },
   enviado:   { bg: "#DBEAFE", text: "#1D4ED8" },
+  entregue:  { bg: "#EDE9FE", text: "#5B21B6" },
   cancelado: { bg: "#FEE2E2", text: "#991B1B" },
   concluido: { bg: C.esmeraldaLt, text: C.esmeralda },
 };
@@ -143,9 +144,11 @@ const PAG_STATUS_COLOR: Record<string, { bg: string; text: string }> = {
 };
 
 const PROXIMA_SITUACAO: Record<string, { label: string; value: string; icon: typeof CheckCircle }[]> = {
-  rascunho:  [{ label: "Salvar Venda", value: "aprovado", icon: CheckCircle }],
-  aprovado:  [{ label: "Marcar Enviado", value: "enviado", icon: Truck }],
-  enviado:   [],
+  rascunho:  [{ label: "Salvar Venda",    value: "aprovado", icon: CheckCircle }],
+  aprovado:  [{ label: "Marcar Enviado",  value: "enviado",  icon: Truck },
+              { label: "Marcar Entregue", value: "entregue", icon: PackageCheck }],
+  enviado:   [{ label: "Marcar Entregue", value: "entregue", icon: PackageCheck }],
+  entregue:  [],
   cancelado: [],
   concluido: [],
 };
@@ -411,7 +414,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
       return { full: true, limited: true, metadata: true, readOnly: false };
     if (venda.situacao === "aprovado")
       return { full: false, limited: podeEditarAprovado, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
-    if (venda.situacao === "enviado")
+    if (venda.situacao === "enviado" || venda.situacao === "entregue")
       return { full: false, limited: false, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
     return { full: false, limited: false, metadata: false, readOnly: true };
   }, [venda, podeEditarAprovado]);
@@ -942,7 +945,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
 
   const situacaoStyle = SITUACAO_COLOR[venda.situacao] ?? SITUACAO_COLOR.rascunho;
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
-  const podeCancelar = isFullAccess && !["cancelado", "concluido"].includes(venda.situacao);
+  const podeCancelar = isFullAccess && !["cancelado", "concluido", "entregue"].includes(venda.situacao);
 
   // Validação para aprovar: cliente + vendedor + forma_envio + itens + pagamento obrigatórios
   const podeAprovar = !!(
