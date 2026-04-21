@@ -388,10 +388,12 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   // Match forma_envio/frete by name after ref data loads
   useEffect(() => {
     if (!venda || formaEnvioOpts.length === 0) return;
-    const envio = formaEnvioOpts.find(e => e.nome === venda.forma_envio);
+    const envioNome = venda.forma_envio?.toLowerCase();
+    const envio = formaEnvioOpts.find(e => e.nome.toLowerCase() === envioNome);
     if (envio) setFormaEnvioId(envio.id);
     if (venda.forma_frete && formaFreteAll.length > 0) {
-      const frete = formaFreteAll.find(f => f.nome === venda.forma_frete);
+      const freteNome = venda.forma_frete.toLowerCase();
+      const frete = formaFreteAll.find(f => f.nome.toLowerCase() === freteNome);
       if (frete) setFormaFreteId(frete.id);
     }
   }, [venda, formaEnvioOpts, formaFreteAll]);

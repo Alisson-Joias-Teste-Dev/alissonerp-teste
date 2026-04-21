@@ -745,7 +745,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       vendedor_id: selVendedorId || null,
       data_entrega: dataEntrega || null,
       total_frete: totalFrete,
-      forma_envio: modoEntrega === "loja" ? "Retirada na Loja" : modoEntrega === "correios" ? "Correios" : modoEntrega === "transportadora" ? "Transportadora" : modoEntrega === "motoboy" ? "Motoboy" : modoEntrega === "uber" ? "Uber" : null,
+      forma_envio: modoEntrega === "loja" ? "Retirada na loja" : modoEntrega === "correios" ? "Correios" : modoEntrega === "transportadora" ? "Transportadora" : modoEntrega === "motoboy" ? "Motoboy" : modoEntrega === "uber" ? "Uber" : null,
       numero_rastreio: numeroRastreio || null,
       tipo_venda: tipoVenda,
       venda_garantia_id: vendaGarantiaId || null,
