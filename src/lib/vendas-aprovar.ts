@@ -481,10 +481,18 @@ export async function criarOrdemDoOrcamento(
       }
     }
 
-    await tx`
+    const [auditLoja] = await tx`
       INSERT INTO alissonerp.auditorias (situacao, tipo_auditoria, rota_processo, ordem_id, peso_negociado, parecer, dados_ordem)
       VALUES ('pendente', 'loja', 'entrada_ordem', ${ordem.id}, ${pesoNeg}, NULL,
         ${JSON.stringify({ numero_ordem: numeroOrdem, tipo_ordem: "fabricacao", rota: "pcp", peso_negociado: pesoNeg, origem: "orcamento_venda", orcamento_id: vendaOrc.orc_id })}::text::jsonb)
+      RETURNING id
+    `;
+    // Aprovação automática: dispara fn_processar_auditoria que cria saida_ordem + pcp
+    // (trigger AFTER UPDATE — INSERT com pendente não dispara sozinho)
+    await tx`
+      UPDATE alissonerp.auditorias
+      SET situacao = 'aprovado', data_conclusao = NOW(), parecer = 'Aprovação automática — ERP'
+      WHERE id = ${auditLoja.id}
     `;
 
     await tx`
