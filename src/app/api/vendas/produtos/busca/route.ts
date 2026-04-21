@@ -19,7 +19,22 @@ export async function GET(req: NextRequest) {
       p.id_produto AS id,
       p.sku,
       p.nome,
-      COALESCE(p.preco_sync, p.preco_tiny) AS preco_venda,
+      -- Joias: preco_curva (cotação atual × peso × markup) | Pedras: preco_tiny (manual)
+      CASE
+        WHEN p.categoria ILIKE 'Pedras%'
+          THEN COALESCE(p.preco_tiny::numeric, 0)
+        WHEN p.peso_precificado > 0
+         AND COALESCE(p.markup::numeric, 0) > 0
+         AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
+          THEN ROUND(
+            p.peso_precificado::numeric
+            * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
+            * p.markup::numeric
+            * COALESCE(p.fator::numeric, 1)
+            / 10
+          )::int * 10
+        ELSE COALESCE(p.preco_sync::numeric, p.preco_tiny::numeric, 0)
+      END AS preco_venda,
       p.peso_precificado,
       p.unidade,
       ep.sufixo_variacao,
