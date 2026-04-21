@@ -552,7 +552,7 @@ export default function ProdutosClient() {
                 <SortHeader field="peso_precificado"     label="Peso"       current={order} dir={dir} onSort={handleSort} />
                 <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">Situação</th>
                 <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">Estoque</th>
-                <SortHeader field="preco_sync"           label="Preço Sync" current={order} dir={dir} onSort={handleSort} />
+                <SortHeader field="preco_sync"           label="Preço Venda" current={order} dir={dir} onSort={handleSort} />
               </tr>
             </thead>
             <tbody>
@@ -706,22 +706,11 @@ export default function ProdutosClient() {
                               )}
                             </td>
 
-                            {/* Preço — para pedras: preco_tiny (venda); para joias: preco_sync ou preco_curva */}
+                            {/* Preço Venda (preco_tiny) */}
                             <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
-                              {isPedra ? (
-                                p.preco_tiny != null && parseFloat(p.preco_tiny) > 0 ? (
-                                  <span className="font-semibold" style={{ color: "#184036" }}>
-                                    {formatPreco(p.preco_tiny)}
-                                  </span>
-                                ) : (
-                                  <span className="text-gray-400">—</span>
-                                )
-                              ) : p.preco_sync != null && parseFloat(p.preco_sync) > 0 ? (
-                                <span className="text-gray-800">{formatPreco(p.preco_sync)}</span>
-                              ) : p.preco_curva != null && p.preco_curva > 0 ? (
-                                <span className="text-emerald-700" title="Calculado pela curva (trigger não atualizou preco_sync — ver migration 157)">
-                                  {formatPreco(String(p.preco_curva))}
-                                  <sup className="ml-0.5 text-[8px] font-bold">C</sup>
+                              {p.preco_tiny != null && parseFloat(p.preco_tiny) > 0 ? (
+                                <span className="font-semibold" style={{ color: "#184036" }}>
+                                  {formatPreco(p.preco_tiny)}
                                 </span>
                               ) : (
                                 <span className="text-gray-400">—</span>
