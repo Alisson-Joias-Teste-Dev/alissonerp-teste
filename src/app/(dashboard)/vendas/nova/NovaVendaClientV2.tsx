@@ -2236,6 +2236,17 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               Próximo <ArrowRight size={14} />
             </button>
           )}
+          {step === 6 && (
+            <button
+              onClick={() => concluirVenda()}
+              disabled={concluindo || (pagForma === "Múltiplas" && !pagamentoCobre)}
+              className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+              style={{ backgroundColor: C.esmeralda, color: C.creme }}
+            >
+              {concluindo ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+              Salvar Venda
+            </button>
+          )}
         </div>
       </div>
 
