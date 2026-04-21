@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isProdutosAccess } from "@/lib/roles";
+import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
@@ -26,7 +26,7 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const role = user.user_metadata?.role as string | undefined;
-  if (!isProdutosAccess(role)) {
+  if (!(await temAcessoModulo(role ?? "", "produtos", "ler"))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -251,7 +251,7 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const role = user.user_metadata?.role as string | undefined;
-  if (!isProdutosAccess(role)) {
+  if (!(await temAcessoModulo(role ?? "", "produtos", "escrever"))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
