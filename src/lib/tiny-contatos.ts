@@ -15,8 +15,13 @@ function buildPayload(c: Record<string, unknown>) {
   if (c.email)          payload.email           = String(c.email);
   if (c.telefone)       payload.telefone        = String(c.telefone);
   if (c.celular)        payload.celular         = String(c.celular);
-  if (c.tipo_pessoa)    payload.tipoPessoa      = String(c.tipo_pessoa);
   if (c.inscricao_estadual) payload.inscricaoEstadual = String(c.inscricao_estadual);
+
+  // tipoPessoa: obrigatório no Tiny. Usa tipo_pessoa se preenchido; senão deriva do CPF/CNPJ.
+  const tipoPessoa = c.tipo_pessoa
+    ? String(c.tipo_pessoa)
+    : String(c.cpf_cnpj ?? "").replace(/\D/g, "").length === 14 ? "J" : "F";
+  payload.tipoPessoa = tipoPessoa;
 
   const temEndereco = c.endereco || c.municipio || c.cep;
   if (temEndereco) {
