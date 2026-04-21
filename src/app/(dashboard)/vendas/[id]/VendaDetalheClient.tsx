@@ -143,7 +143,7 @@ const PAG_STATUS_COLOR: Record<string, { bg: string; text: string }> = {
 };
 
 const PROXIMA_SITUACAO: Record<string, { label: string; value: string; icon: typeof CheckCircle }[]> = {
-  rascunho:  [],
+  rascunho:  [{ label: "Salvar Venda", value: "aprovado", icon: CheckCircle }],
   aprovado:  [{ label: "Marcar Enviado", value: "enviado", icon: Truck }],
   enviado:   [],
   cancelado: [],
