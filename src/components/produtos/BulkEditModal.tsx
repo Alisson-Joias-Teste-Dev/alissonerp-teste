@@ -12,7 +12,6 @@ type Campo =
   | "peso_precificado"
   | "markup"
   | "fator"
-  | "preco_tiny"
   | "categoria_precificacao";
 
 interface Props {
@@ -31,7 +30,6 @@ const CAMPO_LABELS: Record<Campo, string> = {
   peso_precificado: "Peso precificado (g)",
   markup: "Markup",
   fator: "Fator",
-  preco_tiny: "Preço Tiny (R$)",
   categoria_precificacao: "Categoria de precificação",
 };
 

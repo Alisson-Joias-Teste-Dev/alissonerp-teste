@@ -50,6 +50,7 @@ interface ProdutoDetalhe {
   numeracao?: string | null;
   cor_metal?: string | null;
   observacao_erp?: string | null;
+  fornecedor?: string | null;
   largura_aro?: string | null;
   altura_aro?: string | null;
   base?: string | null;
@@ -445,6 +446,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
   // Editable fields
   const [temPedra, setTemPedra] = useState(false);
   const [observacaoErp, setObservacaoErp] = useState("");
+  const [fornecedorEdit, setFornecedorEdit] = useState("");
+  const [fornecedoresOpts, setFornecedoresOpts] = useState<string[]>([]);
   const [larguraAro, setLarguraAro] = useState("");
   const [alturaAro, setAlturaAro] = useState("");
   const [baseVal, setBaseVal] = useState("");
@@ -460,6 +463,9 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
   const [tipoItemEdit, setTipoItemEdit] = useState<"" | "joia" | "insumo">("");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; texto: string } | null>(null);
+  // Modo simplificado é o padrão: mostra só nome/SKU/situação + peso + preço.
+  // Clicar "Ver dados avançados" expande metal/categoria/BOM/medidas/variações etc.
+  const [showAvancado, setShowAvancado] = useState(false);
 
   // Cotação do ouro (para cálculo de preview em runtime)
   const [cotacaoOuro, setCotacaoOuro] = useState<number>(0);
@@ -482,6 +488,12 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
     if (!produtoId) return;
     setLoading(true);
     setError(null);
+    // Fornecedores para autocomplete (não bloqueia o load principal)
+    fetch("/api/fornecedores").then(async (r) => {
+      if (!r.ok) return;
+      const j = await r.json() as { fornecedores: Array<{ nome: string }> };
+      setFornecedoresOpts((j.fornecedores ?? []).map((f) => f.nome).filter(Boolean));
+    }).catch(() => { /* ignore */ });
     try {
       const res = await fetch(`/api/produtos/${produtoId}`);
       if (!res.ok) {
@@ -495,6 +507,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
       setCotacaoOuro(Number(data.cotacao_ouro ?? 0));
       setTemPedra(data.produto.tem_pedra_preciosa);
       setObservacaoErp(data.produto.observacao_erp ?? "");
+      setFornecedorEdit(data.produto.fornecedor ?? "");
       setLarguraAro(data.produto.largura_aro ?? "");
       setAlturaAro(data.produto.altura_aro ?? "");
       setBaseVal(data.produto.base ?? "");
@@ -567,6 +580,9 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
       const obs = observacaoErp.trim() || null;
       const obsOriginal = produto.observacao_erp?.trim() || null;
       if (obs !== obsOriginal) body.observacao_erp = obs;
+      const fornAtual = fornecedorEdit.trim() || null;
+      const fornOriginal = (produto.fornecedor ?? "").trim() || null;
+      if (fornAtual !== fornOriginal) body.fornecedor = fornAtual;
       const larg = larguraAro ? parseFloat(larguraAro) : null;
       const alt  = alturaAro  ? parseFloat(alturaAro)  : null;
       const bas  = baseVal    ? parseFloat(baseVal)     : null;
@@ -604,7 +620,12 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
       if ((markupEdit || "") !== (produto.markup ?? "")) body.markup = parseNum(markupEdit);
       if ((fatorEdit || "") !== (produto.fator ?? "")) body.fator = parseNum(fatorEdit);
       if ((catPrecEdit || "") !== (produto.categoria ?? "")) body.categoria_precificacao = catPrecEdit || null;
-      if ((precoTinyEdit || "") !== (produto.preco_tiny ?? "")) body.preco_tiny = parseNum(precoTinyEdit);
+      // preco_tiny: só é editável em pedras (que não têm peso/markup).
+      // Joias têm o preço CALCULADO pelo ERP (peso × ouro × markup).
+      const ehPedra = (produto.categoria_geral ?? produto.categoria ?? "").toLowerCase().startsWith("pedras");
+      if (ehPedra && (precoTinyEdit || "") !== (produto.preco_tiny ?? "")) {
+        body.preco_tiny = parseNum(precoTinyEdit);
+      }
       if (tipoItemEdit !== (produto.tipo_item ?? "")) body.tipo_item = tipoItemEdit || null;
 
       if (Object.keys(body).length === 0) {
@@ -692,6 +713,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
     produto !== null &&
     (temPedra !== produto.tem_pedra_preciosa ||
       (observacaoErp.trim() || null) !== (produto.observacao_erp?.trim() || null) ||
+      (fornecedorEdit.trim() || null) !== ((produto.fornecedor ?? "").trim() || null) ||
       (larguraAro || "") !== (produto.largura_aro ?? "") ||
       (alturaAro  || "") !== (produto.altura_aro  ?? "") ||
       (baseVal    || "") !== (produto.base         ?? "") ||
@@ -703,7 +725,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
       (markupEdit || "")     !== (produto.markup ?? "") ||
       (fatorEdit || "")      !== (produto.fator ?? "") ||
       (catPrecEdit || "")    !== (produto.categoria ?? "") ||
-      (precoTinyEdit || "")  !== (produto.preco_tiny ?? "") ||
+      // preco_tiny só dirty para pedras (joia usa preço calculado)
+      ((((produto.categoria_geral ?? produto.categoria ?? "").toLowerCase().startsWith("pedras"))
+         ? (precoTinyEdit || "") !== (produto.preco_tiny ?? "")
+         : false)) ||
       tipoItemEdit           !== (produto.tipo_item ?? ""));
 
   return (
@@ -823,6 +848,20 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                           </select>
                         </div>
                       </div>
+                      <div>
+                        <p className={labelCls}>Fornecedor</p>
+                        <input
+                          type="text"
+                          value={fornecedorEdit}
+                          onChange={(e) => setFornecedorEdit(e.target.value)}
+                          placeholder="—"
+                          list="drawer-fornecedores-options-pedra"
+                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                        />
+                        <datalist id="drawer-fornecedores-options-pedra">
+                          {fornecedoresOpts.map((f) => <option key={f} value={f} />)}
+                        </datalist>
+                      </div>
                     </div>
                   </section>
 
@@ -922,6 +961,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                       </select>
                     </div>
                   </div>
+                  {showAvancado && (<>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <p className={labelCls}>Metal</p>
@@ -988,17 +1028,33 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                       </datalist>
                     </div>
                   </div>
-                  <div>
-                    <p className={labelCls}>Tipo de item</p>
-                    <select
-                      value={tipoItemEdit}
-                      onChange={(e) => setTipoItemEdit(e.target.value as "" | "joia" | "insumo")}
-                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
-                    >
-                      <option value="">— Sem classificação —</option>
-                      <option value="joia">Joia</option>
-                      <option value="insumo">Insumo</option>
-                    </select>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className={labelCls}>Tipo de item</p>
+                      <select
+                        value={tipoItemEdit}
+                        onChange={(e) => setTipoItemEdit(e.target.value as "" | "joia" | "insumo")}
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      >
+                        <option value="">— Sem classificação —</option>
+                        <option value="joia">Joia</option>
+                        <option value="insumo">Insumo</option>
+                      </select>
+                    </div>
+                    <div>
+                      <p className={labelCls}>Fornecedor</p>
+                      <input
+                        type="text"
+                        value={fornecedorEdit}
+                        onChange={(e) => setFornecedorEdit(e.target.value)}
+                        placeholder="—"
+                        list="drawer-fornecedores-options"
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      />
+                      <datalist id="drawer-fornecedores-options">
+                        {fornecedoresOpts.map((f) => <option key={f} value={f} />)}
+                      </datalist>
+                    </div>
                   </div>
                   {produto.referencia && (
                     <div>
@@ -1012,10 +1068,12 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                       <p className="text-sm text-gray-700">{produto.categoria}</p>
                     </div>
                   )}
+                  </>)}
                 </div>
               </section>
 
-              {/* ── BOM (COMPOSIÇÃO) ── */}
+              {/* ── BOM (COMPOSIÇÃO) ── (só modo avançado) */}
+              {showAvancado && (
               <section>
                 <div className="flex items-center justify-between mb-2">
                   <p className={sectionTitleCls}>Composição (BOM)</p>
@@ -1142,8 +1200,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                   </div>
                 )}
               </section>
+              )}
 
-              {/* ── MEDIDAS (ficha técnica) ── */}
+              {/* ── MEDIDAS (ficha técnica) ── (só modo avançado) */}
+              {showAvancado && (
               <section>
                 <p className={sectionTitleCls}>Medidas</p>
                 <div className="grid grid-cols-3 gap-2">
@@ -1179,14 +1239,16 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                   </div>
                 </div>
               </section>
+              )}
 
-              {/* ── PRECIFICAÇÃO (editável) ── */}
+              {/* ── PRECIFICAÇÃO (editável) ── sempre visível */}
               <section>
-                <p className={sectionTitleCls}>Precificação</p>
+                <p className={sectionTitleCls}>Ficha Técnica &amp; Preço</p>
                 <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-100">
-                  <div className="grid grid-cols-3 gap-3">
+                  {/* Peso e Markup — sempre visíveis (são o que altera o preço) */}
+                  <div className={`grid ${showAvancado ? "grid-cols-3" : "grid-cols-2"} gap-3`}>
                     <div>
-                      <p className={labelCls}>Peso precificado (g)</p>
+                      <p className={labelCls}>Peso aproximado (g)</p>
                       <input
                         type="text"
                         inputMode="decimal"
@@ -1207,18 +1269,21 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                         className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
                       />
                     </div>
-                    <div>
-                      <p className={labelCls}>Fator</p>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={fatorEdit}
-                        onChange={(e) => setFatorEdit(e.target.value)}
-                        placeholder="1"
-                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
-                      />
-                    </div>
+                    {showAvancado && (
+                      <div>
+                        <p className={labelCls}>Fator</p>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={fatorEdit}
+                          onChange={(e) => setFatorEdit(e.target.value)}
+                          placeholder="1"
+                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                        />
+                      </div>
+                    )}
                   </div>
+                  {showAvancado && (
                   <div>
                     <p className={labelCls}>Categoria de precificação</p>
                     <input
@@ -1229,119 +1294,84 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                       className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <p className={labelCls}>Preço Tiny (R$)</p>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={precoTinyEdit}
-                        onChange={(e) => setPrecoTinyEdit(e.target.value)}
-                        placeholder="—"
-                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
-                      />
-                    </div>
-                    <div>
-                      <p className={labelCls}>Preço Sync (ouro)</p>
-                      {(() => {
-                        // ── Preview em runtime: peso × cotação × markup × fator ──
-                        // parseNum aceita string OU number (DB retorna number em alguns casos)
-                        const parseNum = (v: string | number | null | undefined) => {
-                          if (v == null) return 0;
-                          if (typeof v === "number") return isNaN(v) ? 0 : v;
-                          let t = String(v).trim();
-                          if (!t) return 0;
-                          if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
-                          else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, "");
-                          const n = parseFloat(t);
-                          return isNaN(n) ? 0 : n;
-                        };
-                        const pesoLive   = parseNum(pesoEdit);
-                        const markupLive = parseNum(markupEdit);
-                        const fatorLive  = parseNum(fatorEdit) || 1;
-                        const podeCalc = pesoLive > 0 && markupLive > 0 && cotacaoOuro > 0;
-                        const precoLive = podeCalc
-                          ? Math.round((pesoLive * cotacaoOuro * markupLive * fatorLive) / 10) * 10
-                          : null;
+                  )}
+                  {/* ── PREÇO DE VENDA OFICIAL (calculado pelo ERP) ── */}
+                  {/* Não há mais input manual de preco_tiny. O preço oficial é
+                      SEMPRE o calculado via peso × cotação × markup × fator.
+                      Para ajustar, o usuário edita peso/markup acima. */}
+                  <div className="rounded-lg border-2 p-4" style={{ borderColor: "#A7F3D0", backgroundColor: "#ECFDF5" }}>
+                    <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: "#065F46" }}>
+                      Preço de Venda (oficial do ERP)
+                    </p>
+                    {(() => {
+                      const parseNum = (v: string | number | null | undefined) => {
+                        if (v == null) return 0;
+                        if (typeof v === "number") return isNaN(v) ? 0 : v;
+                        let t = String(v).trim();
+                        if (!t) return 0;
+                        if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+                        else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, "");
+                        const n = parseFloat(t);
+                        return isNaN(n) ? 0 : n;
+                      };
+                      const pesoLive   = parseNum(pesoEdit);
+                      const markupLive = parseNum(markupEdit);
+                      const fatorLive  = parseNum(fatorEdit) || 1;
+                      const podeCalc = pesoLive > 0 && markupLive > 0 && cotacaoOuro > 0;
+                      const precoLive = podeCalc
+                        ? Math.round((pesoLive * cotacaoOuro * markupLive * fatorLive) / 10) * 10
+                        : null;
+                      const editando =
+                        (pesoEdit || "")   !== (produto.peso_precificado ?? "") ||
+                        (markupEdit || "") !== (produto.markup ?? "") ||
+                        (fatorEdit || "")  !== (produto.fator ?? "");
 
-                        // Campos alterados vs valores gravados no banco
-                        const editando =
-                          (pesoEdit || "")   !== (produto.peso_precificado ?? "") ||
-                          (markupEdit || "") !== (produto.markup ?? "") ||
-                          (fatorEdit || "")  !== (produto.fator ?? "");
-
-                        // Prioridade de exibição:
-                        //   1. Se está editando e dá pra calcular → PREVIEW em azul (não salvo ainda)
-                        //   2. Se preco_sync do DB > 0 → valor oficial
-                        //   3. Se preco_curva calculado no SELECT > 0 → valor da curva (verde)
-                        //   4. Sem peso/markup → —
-                        if (editando && precoLive != null) {
-                          return (
-                            <>
-                              <p className="text-sm font-mono font-semibold text-blue-600 py-1.5">
-                                {formatPreco(String(precoLive))}
-                                <sup className="ml-0.5 text-[8px] font-bold">?</sup>
-                              </p>
-                              <p className="text-[10px] text-blue-500">preview · salve para aplicar</p>
-                            </>
-                          );
-                        }
-                        if (produto.preco_sync && parseFloat(produto.preco_sync) > 0) {
-                          return (
-                            <>
-                              <p className="text-sm font-mono font-semibold text-gray-800 py-1.5">
-                                {formatPreco(produto.preco_sync)}
-                              </p>
-                              <p className="text-[10px] text-gray-400">calculado pelo trigger</p>
-                            </>
-                          );
-                        }
-                        if (produto.preco_curva != null && produto.preco_curva > 0) {
-                          return (
-                            <>
-                              <p className="text-sm font-mono font-semibold text-emerald-700 py-1.5">
-                                {formatPreco(String(produto.preco_curva))}
-                                <sup className="ml-0.5 text-[8px] font-bold">C</sup>
-                              </p>
-                              <p className="text-[10px] text-emerald-600" title="peso × cotação_ouro × markup × fator">
-                                calculado pela curva
-                              </p>
-                            </>
-                          );
-                        }
+                      if (editando && precoLive != null) {
                         return (
                           <>
-                            <p className="text-sm font-mono text-gray-400 py-1.5">—</p>
-                            <p className="text-[10px] text-gray-400">preencha peso e markup</p>
+                            <p className="text-2xl font-mono font-bold" style={{ color: "#184036" }}>
+                              {formatPreco(String(precoLive))}
+                              <sup className="ml-1 text-[10px] font-bold text-blue-600">preview</sup>
+                            </p>
+                            <p className="text-[11px] text-blue-600 mt-1">Salve para aplicar o novo preço</p>
                           </>
                         );
-                      })()}
-                    </div>
+                      }
+                      if (produto.preco_sync && parseFloat(produto.preco_sync) > 0) {
+                        return (
+                          <>
+                            <p className="text-2xl font-mono font-bold" style={{ color: "#184036" }}>
+                              {formatPreco(produto.preco_sync)}
+                            </p>
+                            <p className="text-[11px] text-gray-500 mt-1">peso × cotação × markup × fator</p>
+                          </>
+                        );
+                      }
+                      if (produto.preco_curva != null && produto.preco_curva > 0) {
+                        return (
+                          <>
+                            <p className="text-2xl font-mono font-bold" style={{ color: "#184036" }}>
+                              {formatPreco(String(produto.preco_curva))}
+                              <sup className="ml-1 text-[10px] font-bold" style={{ color: "#059669" }}>C</sup>
+                            </p>
+                            <p className="text-[11px] text-gray-500 mt-1">peso × cotação × markup × fator (curva)</p>
+                          </>
+                        );
+                      }
+                      return (
+                        <>
+                          <p className="text-2xl font-mono text-gray-400">—</p>
+                          <p className="text-[11px] text-gray-500 mt-1">Preencha peso e markup acima</p>
+                        </>
+                      );
+                    })()}
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <p className={labelCls}>Preço Pedras</p>
-                      <p className="text-sm font-mono text-gray-700 py-1.5">
-                        {produto.tem_pedra_preciosa ? formatPreco(produto.preco_pedras) : "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className={labelCls}>Preço Total Sync</p>
-                      <p className="text-sm font-mono font-semibold text-gray-800 py-1.5">
-                        {formatPreco(produto.preco_total_sync)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className={labelCls}>Δ% (Tiny vs Sync)</p>
-                      <div className="py-1.5">
-                        <DeltaBadge pct={produto.diferenca_percentual} />
-                      </div>
-                    </div>
-                  </div>
+
                 </div>
               </section>
 
-              {/* ── CAMPOS EDITÁVEIS ── */}
+              {/* ── CAMPOS EDITÁVEIS ── (só modo avançado) */}
+              {showAvancado && (
               <section>
                 <p className={sectionTitleCls}>Dados ERP (editável)</p>
                 <div className="space-y-3">
@@ -1380,9 +1410,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                   </div>
                 </div>
               </section>
+              )}
 
-              {/* ── VARIAÇÕES (só se for pai) ── */}
-              {produto.eh_pai && variacoes.length > 0 && (
+              {/* ── VARIAÇÕES (só se for pai) ── (só modo avançado) */}
+              {showAvancado && produto.eh_pai && variacoes.length > 0 && (
                 <section>
                   <div className="flex items-center gap-2 mb-2">
                     <GitFork size={13} className="text-gray-400" />
@@ -1414,14 +1445,20 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                 </section>
               )}
 
-              {/* ── FICHA TÉCNICA (readonly placeholder) ── */}
-              <section>
-                <p className={sectionTitleCls}>Ficha Técnica</p>
-                <div className="border border-dashed border-gray-200 rounded-xl px-4 py-6 text-center">
-                  <p className="text-xs text-gray-400">
-                    Ficha técnica disponível na tela de Ordens.
-                  </p>
-                </div>
+              {/* ── Toggle "Ver dados avançados" ── */}
+              <section className="flex justify-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAvancado(v => !v)}
+                  className="text-xs font-semibold px-4 py-2 rounded-lg border hover:bg-gray-50 flex items-center gap-1.5"
+                  style={{ borderColor: C.cremeBorder, color: "#6b7280" }}
+                >
+                  {showAvancado ? (
+                    <>▴ Ocultar dados avançados</>
+                  ) : (
+                    <>▾ Ver dados avançados (metal, categoria, BOM, medidas, variações)</>
+                  )}
+                </button>
               </section>
               </>
             );

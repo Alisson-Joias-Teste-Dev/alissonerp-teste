@@ -377,7 +377,7 @@ export default function EstoqueProdutosClient() {
                   <ColHeader label="SKU" field="sku" currentField={order} currentDir={dir} onToggle={toggleOrder} />
                   <ColHeader label="Produto" field="nome" currentField={order} currentDir={dir} onToggle={toggleOrder} />
                   <ColHeader label="Saldo" field="saldo" currentField={order} currentDir={dir} onToggle={toggleOrder} align="right" />
-                  <ColHeader label="Preço Tiny" field="preco_tiny" currentField={order} currentDir={dir} onToggle={toggleOrder} align="right" />
+                  <ColHeader label="Preço" field="preco_tiny" currentField={order} currentDir={dir} onToggle={toggleOrder} align="right" />
                   <ColHeader label="Valor Total" field="valor_total" currentField={order} currentDir={dir} onToggle={toggleOrder} align="right" />
                   <ColHeader label="Última Compra" field="data_ultima_compra" currentField={order} currentDir={dir} onToggle={toggleOrder} align="right" />
                 </tr>

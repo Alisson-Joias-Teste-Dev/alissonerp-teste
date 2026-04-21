@@ -9,6 +9,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isProdutosAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
+import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
 
 export async function GET(
   _req: NextRequest,
@@ -158,6 +159,7 @@ export async function GET(
             NULL::numeric AS altura_aro,
             NULL::numeric AS base,
             NULL::text    AS observacao_erp,
+            NULL::text    AS fornecedor,
             0::integer    AS qtd_variacoes
           FROM public.produtos p
           WHERE p.id_produto = ${produtoId}
@@ -216,6 +218,16 @@ export async function GET(
     // Cotação atual do ouro (para cálculo em runtime no drawer)
     const [cot] = await sql<{ ouro: string | null }[]>`SELECT ouro FROM public.parametros LIMIT 1`;
     const cotacao_ouro = Number(cot?.ouro ?? 0);
+
+    // Fornecedor — leitura separada, só se a coluna existir (migration 159)
+    if (await colunaExiste("alissonerp", "erp_produtos", "fornecedor")) {
+      const [fr] = await sql<{ fornecedor: string | null }[]>`
+        SELECT fornecedor FROM alissonerp.erp_produtos WHERE produto_id = ${produtoId} LIMIT 1
+      `;
+      (produto as Record<string, unknown>).fornecedor = fr?.fornecedor ?? null;
+    } else {
+      (produto as Record<string, unknown>).fornecedor = null;
+    }
 
     return NextResponse.json({ produto, composicao, variacoes, cotacao_ouro });
   } catch (err) {
@@ -312,6 +324,11 @@ export async function PATCH(
   if (body.base !== undefined) {
     erpUpdate.base = body.base != null ? Number(body.base) : null;
   }
+  if (body.fornecedor !== undefined) {
+    erpUpdate.fornecedor = typeof body.fornecedor === "string"
+      ? (body.fornecedor.trim() || null)
+      : null;
+  }
 
   if (Object.keys(pubUpdate).length === 0 && Object.keys(erpUpdate).length === 0 && tipoItem === undefined) {
     return NextResponse.json({ error: "Nenhum campo editável informado" }, { status: 400 });
@@ -380,24 +397,58 @@ export async function PATCH(
       if (!tbl?.exists) {
         console.warn("[PATCH /api/produtos/[id]] erp_produtos não existe — campos ERP ignorados (migration 063 pendente)");
       } else {
-      await sql`
-        INSERT INTO alissonerp.erp_produtos (produto_id, sku, nome,
-          largura_aro, altura_aro, base, observacao_erp)
-        SELECT
-          id_produto, sku, nome,
-          ${erpUpdate.largura_aro    !== undefined ? (erpUpdate.largura_aro    as number | null) : null}::numeric,
-          ${erpUpdate.altura_aro     !== undefined ? (erpUpdate.altura_aro     as number | null) : null}::numeric,
-          ${erpUpdate.base           !== undefined ? (erpUpdate.base           as number | null) : null}::numeric,
-          ${erpUpdate.observacao_erp !== undefined ? (erpUpdate.observacao_erp as string | null) : null}::text
-        FROM public.produtos
-        WHERE id_produto = ${produtoId}
-        ON CONFLICT (produto_id) DO UPDATE SET
-          largura_aro    = CASE WHEN ${erpUpdate.largura_aro    !== undefined} THEN EXCLUDED.largura_aro    ELSE erp_produtos.largura_aro    END,
-          altura_aro     = CASE WHEN ${erpUpdate.altura_aro     !== undefined} THEN EXCLUDED.altura_aro     ELSE erp_produtos.altura_aro     END,
-          base           = CASE WHEN ${erpUpdate.base           !== undefined} THEN EXCLUDED.base           ELSE erp_produtos.base           END,
-          observacao_erp = CASE WHEN ${erpUpdate.observacao_erp !== undefined} THEN EXCLUDED.observacao_erp ELSE erp_produtos.observacao_erp END,
-          date_updated   = NOW()
-      `;
+      const temColForn = await colunaExiste("alissonerp", "erp_produtos", "fornecedor");
+      if (temColForn) {
+        await sql`
+          INSERT INTO alissonerp.erp_produtos (produto_id, sku, nome,
+            largura_aro, altura_aro, base, observacao_erp, fornecedor)
+          SELECT
+            id_produto, sku, nome,
+            ${erpUpdate.largura_aro    !== undefined ? (erpUpdate.largura_aro    as number | null) : null}::numeric,
+            ${erpUpdate.altura_aro     !== undefined ? (erpUpdate.altura_aro     as number | null) : null}::numeric,
+            ${erpUpdate.base           !== undefined ? (erpUpdate.base           as number | null) : null}::numeric,
+            ${erpUpdate.observacao_erp !== undefined ? (erpUpdate.observacao_erp as string | null) : null}::text,
+            ${erpUpdate.fornecedor     !== undefined ? (erpUpdate.fornecedor     as string | null) : null}::text
+          FROM public.produtos
+          WHERE id_produto = ${produtoId}
+          ON CONFLICT (produto_id) DO UPDATE SET
+            largura_aro    = CASE WHEN ${erpUpdate.largura_aro    !== undefined} THEN EXCLUDED.largura_aro    ELSE erp_produtos.largura_aro    END,
+            altura_aro     = CASE WHEN ${erpUpdate.altura_aro     !== undefined} THEN EXCLUDED.altura_aro     ELSE erp_produtos.altura_aro     END,
+            base           = CASE WHEN ${erpUpdate.base           !== undefined} THEN EXCLUDED.base           ELSE erp_produtos.base           END,
+            observacao_erp = CASE WHEN ${erpUpdate.observacao_erp !== undefined} THEN EXCLUDED.observacao_erp ELSE erp_produtos.observacao_erp END,
+            fornecedor     = CASE WHEN ${erpUpdate.fornecedor     !== undefined} THEN EXCLUDED.fornecedor     ELSE erp_produtos.fornecedor     END,
+            date_updated   = NOW()
+        `;
+      } else {
+        // Sem coluna fornecedor (migration 159 pendente) — fluxo antigo
+        await sql`
+          INSERT INTO alissonerp.erp_produtos (produto_id, sku, nome,
+            largura_aro, altura_aro, base, observacao_erp)
+          SELECT
+            id_produto, sku, nome,
+            ${erpUpdate.largura_aro    !== undefined ? (erpUpdate.largura_aro    as number | null) : null}::numeric,
+            ${erpUpdate.altura_aro     !== undefined ? (erpUpdate.altura_aro     as number | null) : null}::numeric,
+            ${erpUpdate.base           !== undefined ? (erpUpdate.base           as number | null) : null}::numeric,
+            ${erpUpdate.observacao_erp !== undefined ? (erpUpdate.observacao_erp as string | null) : null}::text
+          FROM public.produtos
+          WHERE id_produto = ${produtoId}
+          ON CONFLICT (produto_id) DO UPDATE SET
+            largura_aro    = CASE WHEN ${erpUpdate.largura_aro    !== undefined} THEN EXCLUDED.largura_aro    ELSE erp_produtos.largura_aro    END,
+            altura_aro     = CASE WHEN ${erpUpdate.altura_aro     !== undefined} THEN EXCLUDED.altura_aro     ELSE erp_produtos.altura_aro     END,
+            base           = CASE WHEN ${erpUpdate.base           !== undefined} THEN EXCLUDED.base           ELSE erp_produtos.base           END,
+            observacao_erp = CASE WHEN ${erpUpdate.observacao_erp !== undefined} THEN EXCLUDED.observacao_erp ELSE erp_produtos.observacao_erp END,
+            date_updated   = NOW()
+        `;
+      }
+      // Mestre de fornecedores (opcional)
+      if (body.fornecedor && typeof body.fornecedor === "string" && body.fornecedor.trim()
+          && await tabelaExiste("alissonerp", "fornecedores")) {
+        await sql`
+          INSERT INTO alissonerp.fornecedores (nome)
+          VALUES (${body.fornecedor.trim()})
+          ON CONFLICT (nome) DO UPDATE SET ativo = true
+        `;
+      }
       } // end if tbl?.exists
     }
 

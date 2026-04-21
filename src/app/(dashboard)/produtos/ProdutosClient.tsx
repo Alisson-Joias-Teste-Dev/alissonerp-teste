@@ -27,6 +27,7 @@ export interface Produto {
   preco_tiny: string | null;
   preco_sync: string | null;
   preco_curva: number | null;
+  preco_filhos_min: number | null;
   preco_pedras: string | null;
   preco_total_sync: string | null;
   diferenca_percentual: string | null;
@@ -711,6 +712,11 @@ export default function ProdutosClient() {
                               {p.preco_tiny != null && parseFloat(p.preco_tiny) > 0 ? (
                                 <span className="font-semibold" style={{ color: "#184036" }}>
                                   {formatPreco(p.preco_tiny)}
+                                </span>
+                              ) : p.preco_filhos_min != null && p.preco_filhos_min > 0 ? (
+                                <span className="text-gray-700" title="Preço mínimo das variações (produto pai)">
+                                  {formatPreco(String(p.preco_filhos_min))}
+                                  <sup className="ml-0.5 text-[8px] font-bold">V</sup>
                                 </span>
                               ) : (
                                 <span className="text-gray-400">—</span>
