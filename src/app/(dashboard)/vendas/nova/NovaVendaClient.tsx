@@ -8,6 +8,7 @@ import {
   Ticket, AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
+import { maskCpfCnpj } from "@/lib/formatters";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import CartaoInline from "@/components/vendas/CartaoInline";
 
@@ -780,16 +781,18 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
             <div>
               <Label required>Cliente</Label>
               <Autocomplete<Cliente>
-                placeholder="Digite para buscar cliente..."
+                placeholder="Digite para buscar cliente (nome, CPF/CNPJ, telefone)..."
                 onSearch={async q => { const r = await fetch(`/api/vendas/clientes/busca?q=${encodeURIComponent(q)}`); return r.json(); }}
                 renderItem={c => (
                   <div>
                     <p className="font-medium text-sm" style={{ color: "#1A1A1A" }}>{c.nome}</p>
-                    <p className="text-xs" style={{ color: "#9CA3AF" }}>{c.cpf_cnpj ?? c.telefone ?? "—"}</p>
+                    <p className="text-xs" style={{ color: "#9CA3AF" }}>
+                      {c.cpf_cnpj ? maskCpfCnpj(c.cpf_cnpj) : (c.telefone ?? "—")}
+                    </p>
                   </div>
                 )}
                 onSelect={setCliente}
-                selectedLabel={cliente ? `${cliente.nome}${cliente.cpf_cnpj ? ` · ${cliente.cpf_cnpj}` : ""}` : null}
+                selectedLabel={cliente ? `${cliente.nome}${cliente.cpf_cnpj ? ` · ${maskCpfCnpj(cliente.cpf_cnpj)}` : ""}` : null}
                 onClear={() => setCliente(null)}
               />
               {cliente && (
@@ -906,7 +909,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                   <div className="text-sm space-y-3">
                     <div className="grid grid-cols-2 gap-3">
                       <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Nome</span><p style={{ color: "#1A1A1A" }}>{cliente.nome}</p></div>
-                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CPF/CNPJ</span><p style={{ color: "#1A1A1A" }}>{cliente.cpf_cnpj || "—"}</p></div>
+                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CPF/CNPJ</span><p className="font-mono" style={{ color: "#1A1A1A" }}>{cliente.cpf_cnpj ? maskCpfCnpj(cliente.cpf_cnpj) : "—"}</p></div>
                       <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Email</span><p style={{ color: "#1A1A1A" }}>{cliente.email || "—"}</p></div>
                       <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Telefone</span><p style={{ color: "#1A1A1A" }}>{cliente.telefone || "—"}</p></div>
                     </div>
@@ -1381,6 +1384,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
               vendaId={null}
               numeroVenda="Nova"
               valor={totalVenda}
+              endpoint="criar-pix-instore"
               obterVendaId={salvarRascunhoParaPix}
               onPagamentoConfirmado={(vendaIdConfirmado) => {
                 router.push(`/vendas/${vendaIdConfirmado}`);
@@ -1521,6 +1525,7 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                       vendaId={null}
                       numeroVenda="Nova"
                       valor={pagamentos.find(p => p.forma === "Pix")!.valor}
+                      endpoint="criar-pix-instore"
                       obterVendaId={salvarRascunhoParaPix}
                       onPagamentoConfirmado={(vendaIdConfirmado) => {
                         router.push(`/vendas/${vendaIdConfirmado}`);

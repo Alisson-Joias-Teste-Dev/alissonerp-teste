@@ -11,6 +11,7 @@ import {
 import FichaTecnicaForm, {
   type FichaTecnicaDados, type TipoItem, TIPOS_ITEM, validarFichaTecnica,
 } from "./FichaTecnicaForm";
+import { maskCpfCnpj } from "@/lib/formatters";
 
 // ─── Cores ──────────────────────────────────────────────────────────────────
 const C = {
@@ -129,6 +130,7 @@ export default function NovaOrdemFabricacaoModal({
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [loadingVendas, setLoadingVendas] = useState(false);
   const [vendaSelecionada, setVendaSelecionada] = useState<Venda | null>(null);
+  const [numeroPedidoManual, setNumeroPedidoManual] = useState("");
 
   // Step 2: Itens
   const [itensVenda, setItensVenda] = useState<ItemVenda[]>([]);
@@ -159,7 +161,7 @@ export default function NovaOrdemFabricacaoModal({
   useEffect(() => {
     if (!isOpen) {
       setStep(0); setClienteBusca(""); setClienteResultados([]); setClienteSelecionado(null);
-      setVendas([]); setVendaSelecionada(null); setItensVenda([]); setItensSelecionados([]);
+      setVendas([]); setVendaSelecionada(null); setNumeroPedidoManual(""); setItensVenda([]); setItensSelecionados([]);
       setDataEntrega(""); setPrioridade(""); setRota("pcp"); setPesoNegociado("");
       setFotos([]); setFotoPreviews(prev => { prev.forEach(u => URL.revokeObjectURL(u)); return []; });
       setFichaDados({ tipo_item: "" as TipoItem });
@@ -248,8 +250,8 @@ export default function NovaOrdemFabricacaoModal({
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
     if (!clienteSelecionado) { setErro("Selecione um cliente."); return; }
-    if (!vendaSelecionada) { setErro("Selecione uma venda."); return; }
-    if (itensSelecionados.length === 0) { setErro("Selecione pelo menos um item."); return; }
+    if (!vendaSelecionada && !numeroPedidoManual.trim()) { setErro("Selecione uma venda ou informe o número do pedido."); return; }
+    if (vendaSelecionada && itensSelecionados.length === 0) { setErro("Selecione pelo menos um item."); return; }
     if (!prioridade) { setErro("Selecione a prioridade."); return; }
     const peso = parseFloat(pesoNegociado.replace(",", "."));
     if (isNaN(peso) || peso <= 0) { setErro("Informe o peso do metal negociado."); return; }
@@ -271,8 +273,9 @@ export default function NovaOrdemFabricacaoModal({
         peso_metal_negociado: peso,
         rota_override:       rota,
         detalhes_ordem:      `Prioridade: ${prioridade}`,
-        venda_id:            vendaSelecionada.id,
-        venda_item_ids:      itensSelecionados,
+        venda_id:             vendaSelecionada?.id,
+        venda_item_ids:       vendaSelecionada ? itensSelecionados : undefined,
+        numero_pedido_manual: vendaSelecionada ? undefined : (numeroPedidoManual.trim() || undefined),
         ficha_tecnica_dados: fichaDados,
         fotos_base64:        fotosBase64.length > 0 ? fotosBase64 : undefined,
         itens: itensSelecionadosData.map(i => ({
@@ -296,7 +299,7 @@ export default function NovaOrdemFabricacaoModal({
     } finally {
       setSalvando(false);
     }
-  }, [clienteSelecionado, vendaSelecionada, itensSelecionados, itensVenda, prioridade, pesoNegociado, dataEntrega, rota, fichaDados, fotos, onSuccess, onClose, pushError]);
+  }, [clienteSelecionado, vendaSelecionada, numeroPedidoManual, itensSelecionados, itensVenda, prioridade, pesoNegociado, dataEntrega, rota, fichaDados, fotos, onSuccess, onClose, pushError]);
 
   if (!isOpen) return null;
 
@@ -344,7 +347,7 @@ export default function NovaOrdemFabricacaoModal({
               {clienteSelecionado && (
                 <div className="rounded-xl p-3 border" style={{ borderColor: C.esmeralda, background: "#F0FDF4" }}>
                   <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>{clienteSelecionado.nome}</p>
-                  {clienteSelecionado.cpf_cnpj && <p className="text-xs text-gray-400 mt-0.5">{clienteSelecionado.cpf_cnpj}</p>}
+                  {clienteSelecionado.cpf_cnpj && <p className="text-xs text-gray-400 mt-0.5 font-mono">{maskCpfCnpj(clienteSelecionado.cpf_cnpj)}</p>}
                 </div>
               )}
               {clienteDropOpen && clienteResultados.length > 0 && dropRect && typeof document !== "undefined" &&
@@ -353,7 +356,7 @@ export default function NovaOrdemFabricacaoModal({
                     {clienteResultados.map(c => (
                       <button key={c.id} className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b last:border-0 text-sm" style={{ borderColor: C.cremeBorder }} onMouseDown={e => { e.preventDefault(); selecionarCliente(c); }}>
                         <span className="font-medium">{c.nome}</span>
-                        {c.cpf_cnpj && <span className="text-gray-400 ml-2 text-xs">{c.cpf_cnpj}</span>}
+                        {c.cpf_cnpj && <span className="text-gray-400 ml-2 text-xs font-mono">{maskCpfCnpj(c.cpf_cnpj)}</span>}
                       </button>
                     ))}
                   </div>,
@@ -370,7 +373,21 @@ export default function NovaOrdemFabricacaoModal({
               {loadingVendas ? (
                 <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin" style={{ color: C.esmeralda }} /></div>
               ) : vendas.length === 0 ? (
-                <p className="text-center text-sm text-gray-400 py-8">Nenhuma venda encontrada.</p>
+                <div className="space-y-3 py-4">
+                  <p className="text-center text-sm text-gray-400">Nenhuma venda encontrada.</p>
+                  <div className="pt-1">
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Número do pedido (manual)</label>
+                    <input
+                      type="text"
+                      className="w-full border rounded-xl px-3 py-2 text-sm outline-none"
+                      style={{ borderColor: C.cremeBorder }}
+                      placeholder="Ex: 14946"
+                      value={numeroPedidoManual}
+                      onChange={e => setNumeroPedidoManual(e.target.value)}
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">Use quando o pedido não está cadastrado no sistema.</p>
+                  </div>
+                </div>
               ) : (
                 <div className="space-y-2">
                   {vendas.map(v => {
@@ -551,7 +568,7 @@ export default function NovaOrdemFabricacaoModal({
                 </div>
                 <div className="flex justify-between items-center px-4 py-2.5">
                   <span className="text-xs text-gray-400">Pedido</span>
-                  <span className="font-medium text-xs" style={{ color: C.esmeralda }}>#{vendaSelecionada?.numero_venda}</span>
+                  <span className="font-medium text-xs" style={{ color: C.esmeralda }}>#{vendaSelecionada?.numero_venda ?? numeroPedidoManual}</span>
                 </div>
                 <div className="px-4 py-2.5">
                   <p className="text-xs text-gray-400 mb-1.5">Itens</p>
@@ -614,7 +631,12 @@ export default function NovaOrdemFabricacaoModal({
           )}
 
           {step === 1 && (
-            <button className="flex-1 py-2.5 rounded-xl text-sm font-medium" style={{ background: vendaSelecionada ? C.esmeralda : "#9CA3AF", color: C.creme }} disabled={!vendaSelecionada} onClick={() => { setErro(null); setStep(2); }}>
+            <button
+              className="flex-1 py-2.5 rounded-xl text-sm font-medium"
+              style={{ background: (vendaSelecionada || numeroPedidoManual.trim()) ? C.esmeralda : "#9CA3AF", color: C.creme }}
+              disabled={!vendaSelecionada && !numeroPedidoManual.trim()}
+              onClick={() => { setErro(null); setStep(vendaSelecionada ? 2 : 3); }}
+            >
               Continuar
             </button>
           )}

@@ -6,36 +6,37 @@ import sql from "@/lib/db";
 // Retorna id, sku, nome, preco_venda, peso_precificado e estoque agregado
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const q     = searchParams.get("q")?.trim() ?? "";
-  const limit = Math.min(Number(searchParams.get("limit") ?? "20"), 100);
+  const q       = searchParams.get("q")?.trim() ?? "";
+  const limit   = Math.min(Number(searchParams.get("limit") ?? "20"), 100);
+  const servico = searchParams.get("servico") === "1";
 
   if (q.length < 2) {
     return NextResponse.json([]);
   }
 
-  // Ordenação por relevância:
-  //   1. Produtos ATIVOS antes de inativos
-  //   2. Produtos com preço preenchido antes dos sem preço
-  //   3. Produtos simples (tipo='S') antes de pais com variação (tipo='V')
-  //   4. Match exato no SKU vem primeiro
-  //   5. Match no começo do nome antes de match no meio
-  //   6. Desempate: nome alfabético
   const produtos = await sql`
     SELECT
       p.id_produto AS id,
       p.sku,
       p.nome,
-      p.preco_sync        AS preco_venda,
+      COALESCE(p.preco_sync, p.preco_tiny) AS preco_venda,
       p.peso_precificado,
       p.unidade,
       ep.sufixo_variacao,
       ep.numeracao,
-      ep.largura_aro
+      ep.largura_aro,
+      COALESCE(est.saldo, 0) AS saldo_disponivel,
+      (ftp.id IS NOT NULL) AS tem_ficha_tecnica
     FROM public.produtos p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+    LEFT JOIN (
+      SELECT produto_id, SUM(saldo) AS saldo
+      FROM alissonerp.vw_saldo_estoque_comercial
+      GROUP BY produto_id
+    ) est ON est.produto_id = p.id_produto
+    LEFT JOIN alissonerp.fichas_tecnicas_produto ftp ON ftp.produto_id = p.id_produto
     WHERE
-      p.sku  ILIKE ${'%' + q + '%'}
-      OR p.nome ILIKE ${'%' + q + '%'}
+      ${servico ? sql`p.sku ILIKE 'AS%' AND (p.sku ILIKE ${'%' + q + '%'} OR p.nome ILIKE ${'%' + q + '%'})` : sql`(p.sku ILIKE ${'%' + q + '%'} OR p.nome ILIKE ${'%' + q + '%'})`}
     ORDER BY
       (p.situacao = 'A')                     DESC,
       (p.preco_sync IS NOT NULL AND p.preco_sync > 0) DESC,
@@ -49,8 +50,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(
     produtos.map((p) => ({
       ...p,
-      preco_venda:      p.preco_venda      != null ? Number(p.preco_venda)      : null,
-      peso_precificado: p.peso_precificado != null ? Number(p.peso_precificado) : null,
+      preco_venda:       p.preco_venda       != null ? Number(p.preco_venda)       : null,
+      peso_precificado:  p.peso_precificado  != null ? Number(p.peso_precificado)  : null,
+      saldo_disponivel:  Number(p.saldo_disponivel ?? 0),
+      tem_ficha_tecnica: Boolean(p.tem_ficha_tecnica),
     }))
   );
 }

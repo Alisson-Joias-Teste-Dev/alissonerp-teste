@@ -3,6 +3,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { isFullAccess } from "@/lib/roles";
 import OrcamentoClient from "./OrcamentoClient";
+import { normalizeConfigRow, normalizeCategoriaRow, type CurvaConfig, type CurvaCategoriaInput } from "@/lib/curva-precificacao";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,18 @@ export default async function OrcamentoPage() {
   // Pode gerenciar config: admin, desenvolvedor, gerente_loja
   const canManageConfig = isFullAccess(role) || role === "gerente_loja";
 
+  // ── Curva dinâmica de precificação (para peças personalizadas) ──────────
+  let curvaConfig: CurvaConfig | null = null;
+  let curvaCategorias: CurvaCategoriaInput[] = [];
+  try {
+    const [cfgRow] = await sql`SELECT * FROM alissonerp.curva_config WHERE id = 1 LIMIT 1`;
+    if (cfgRow) curvaConfig = normalizeConfigRow(cfgRow);
+    const catRows = await sql`SELECT * FROM alissonerp.curva_categorias WHERE ativo = true ORDER BY ordem`;
+    curvaCategorias = catRows.map((r) => normalizeCategoriaRow(r));
+  } catch {
+    // tabelas podem não existir ainda
+  }
+
   return (
     <OrcamentoClient
       cotacaoOuro={cotacaoOuro}
@@ -78,6 +91,8 @@ export default async function OrcamentoPage() {
       userId={user.id}
       vendedorId={caller.id_vendedor ? Number(caller.id_vendedor) : null}
       maxDesconto={Number(caller.mx_desconto_permitido ?? 0)}
+      curvaConfig={curvaConfig}
+      curvaCategorias={curvaCategorias}
     />
   );
 }

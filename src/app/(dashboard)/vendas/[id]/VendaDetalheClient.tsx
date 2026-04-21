@@ -9,6 +9,7 @@ import {
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
   RotateCcw, ArrowRight,
 } from "lucide-react";
+import { maskCpfCnpj } from "@/lib/formatters";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
 import MercadoPagoCobranca from "@/components/vendas/MercadoPagoCobranca";
@@ -142,9 +143,9 @@ const PAG_STATUS_COLOR: Record<string, { bg: string; text: string }> = {
 };
 
 const PROXIMA_SITUACAO: Record<string, { label: string; value: string; icon: typeof CheckCircle }[]> = {
-  rascunho:  [{ label: "Aprovar", value: "aprovado", icon: CheckCircle }],
-  aprovado:  [{ label: "Marcar Enviado", value: "enviado", icon: Truck }, { label: "Concluir", value: "concluido", icon: CheckCircle }],
-  enviado:   [{ label: "Concluir", value: "concluido", icon: CheckCircle }],
+  rascunho:  [],
+  aprovado:  [{ label: "Marcar Enviado", value: "enviado", icon: Truck }],
+  enviado:   [],
   cancelado: [],
   concluido: [],
 };
@@ -1087,16 +1088,18 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
             <div>
               <Label required>Cliente</Label>
               <Autocomplete<Cliente>
-                placeholder="Digite para buscar cliente..."
+                placeholder="Digite para buscar cliente (nome, CPF/CNPJ, telefone)..."
                 onSearch={async q => { const r = await fetch(`/api/vendas/clientes/busca?q=${encodeURIComponent(q)}`); return r.json(); }}
                 renderItem={c => (
                   <div>
                     <p className="font-medium text-sm" style={{ color: "#1A1A1A" }}>{c.nome}</p>
-                    <p className="text-xs" style={{ color: "#9CA3AF" }}>{c.cpf_cnpj ?? c.telefone ?? "—"}</p>
+                    <p className="text-xs" style={{ color: "#9CA3AF" }}>
+                      {c.cpf_cnpj ? maskCpfCnpj(c.cpf_cnpj) : (c.telefone ?? "—")}
+                    </p>
                   </div>
                 )}
                 onSelect={c => { setCliente(c); markDirty(); }}
-                selectedLabel={cliente ? `${cliente.nome}${cliente.cpf_cnpj ? ` · ${cliente.cpf_cnpj}` : ""}` : null}
+                selectedLabel={cliente ? `${cliente.nome}${cliente.cpf_cnpj ? ` · ${maskCpfCnpj(cliente.cpf_cnpj)}` : ""}` : null}
                 onClear={() => { setCliente(null); markDirty(); }}
                 disabled={!edit.full}
               />
@@ -1237,7 +1240,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                   <div className="text-sm space-y-3">
                     <div className="grid grid-cols-2 gap-3">
                       <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Nome</span><p style={{ color: "#1A1A1A" }}>{cliente.nome}</p></div>
-                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CPF/CNPJ</span><p style={{ color: "#1A1A1A" }}>{cliente.cpf_cnpj || "—"}</p></div>
+                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CPF/CNPJ</span><p className="font-mono" style={{ color: "#1A1A1A" }}>{cliente.cpf_cnpj ? maskCpfCnpj(cliente.cpf_cnpj) : "—"}</p></div>
                       <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Email</span><p style={{ color: "#1A1A1A" }}>{cliente.email || "—"}</p></div>
                       <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Telefone</span><p style={{ color: "#1A1A1A" }}>{cliente.telefone || "—"}</p></div>
                       {cliente.celular && <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Celular</span><p style={{ color: "#1A1A1A" }}>{cliente.celular}</p></div>}
@@ -1639,6 +1642,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                           vendaId={venda.id}
                           numeroVenda={venda.numero_venda}
                           valor={pag.valor}
+                          endpoint="criar-pix-instore"
                           onPagamentoConfirmado={() => load()}
                         />
                       </div>
@@ -1756,6 +1760,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                   vendaId={venda.id}
                   numeroVenda={venda.numero_venda}
                   valor={Math.max(0, venda.total_venda - venda.total_pago)}
+                  endpoint="criar-pix-instore"
                   onPagamentoConfirmado={() => load()}
                 />
               )}

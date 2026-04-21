@@ -127,7 +127,7 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-  const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "diretor", "gerente_fabrica", "gerente_loja"];
+  const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "diretor", "gerente_fabrica", "gerente_loja", "consultora"];
   if (!usuario || !ROLES_PERMITIDOS.includes(usuario.role)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
@@ -161,6 +161,9 @@ export async function PATCH(
     endereco_entrega_cidade?:      string | null;
     endereco_entrega_cep?:         string | null;
     endereco_entrega_uf?:          string | null;
+    tipo_venda?:           string | null;
+    numero_rastreio?:      string | null;
+    venda_garantia_id?:    number | null;
   };
 
   const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "cancelado", "concluido"];
@@ -473,7 +476,10 @@ export async function PATCH(
       endereco_entrega_bairro      = COALESCE(${body.endereco_entrega_bairro ?? null},      endereco_entrega_bairro),
       endereco_entrega_cidade      = COALESCE(${body.endereco_entrega_cidade ?? null},      endereco_entrega_cidade),
       endereco_entrega_cep         = COALESCE(${body.endereco_entrega_cep ?? null},         endereco_entrega_cep),
-      endereco_entrega_uf          = COALESCE(${body.endereco_entrega_uf ?? null},          endereco_entrega_uf)
+      endereco_entrega_uf          = COALESCE(${body.endereco_entrega_uf ?? null},          endereco_entrega_uf),
+      tipo_venda           = COALESCE(${body.tipo_venda ?? null},           tipo_venda),
+      numero_rastreio      = COALESCE(${body.numero_rastreio ?? null},      numero_rastreio),
+      venda_garantia_id    = COALESCE(${body.venda_garantia_id ?? null},    venda_garantia_id)
     WHERE id = ${vendaId}
   `;
 

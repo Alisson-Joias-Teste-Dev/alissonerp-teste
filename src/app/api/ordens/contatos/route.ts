@@ -28,11 +28,14 @@ export async function GET(req: NextRequest) {
   if (busca.length < 2) return NextResponse.json([]);
 
   const termo = `%${busca}%`;
+  const termoDigitos = `%${busca.replace(/\D/g, "")}%`;
   const contatos = await sql`
     SELECT id_contato, nome, telefone, email, cpf_cnpj
     FROM public.contatos
     WHERE nome ILIKE ${termo}
        OR telefone ILIKE ${termo}
+       OR celular ILIKE ${termo}
+       OR regexp_replace(COALESCE(cpf_cnpj, ''), '\D', '', 'g') ILIKE ${termoDigitos}
     ORDER BY nome
     LIMIT 20
   `;

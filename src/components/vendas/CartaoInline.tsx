@@ -262,7 +262,7 @@ export default function CartaoInline({
       const res = await fetch(`/api/vendas/${id}/mercado-pago/criar-link`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ valor }),
+        body: JSON.stringify({ valor, installments: parcelasPoint }),
       });
       const ct = res.headers.get("content-type") ?? "";
       if (!ct.includes("application/json")) {
@@ -346,14 +346,28 @@ export default function CartaoInline({
 
   function copiarLink() {
     if (!initPoint) return;
-    navigator.clipboard.writeText(initPoint);
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(initPoint).catch(() => copiarFallback(initPoint));
+    } else {
+      copiarFallback(initPoint);
+    }
     setCopiado(true);
     setTimeout(() => setCopiado(false), 2000);
   }
 
+  function copiarFallback(texto: string) {
+    const el = document.createElement("textarea");
+    el.value = texto;
+    el.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand("copy");
+    document.body.removeChild(el);
+  }
+
   function abrirWhats() {
     if (!initPoint) return;
-    const msg = `Olá! Segue o link de pagamento da sua compra na Alisson Joias (Venda ${numeroVenda}, ${fmt(valor)}).\n\nAcesse o link pra pagar com cartão de crédito ou PIX:\n\n${initPoint}`;
+    const msg = `Olá! Segue o link de pagamento da sua compra na Alisson Joias (Venda ${numeroVenda}, ${fmt(valor)}).\n\nAcesse o link para pagar com cartão de crédito:\n\n${initPoint}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
@@ -463,13 +477,30 @@ export default function CartaoInline({
       {modo === "link" && !pago && (
         <div>
           {!initPoint && !loading && (
-            <button
-              onClick={gerarLink}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90"
-              style={{ backgroundColor: C.esmeralda, color: C.creme }}
-            >
-              <LinkIcon size={13} /> Gerar Link ({fmt(valor)})
-            </button>
+            <>
+              <div className="mb-3">
+                <label className="text-[11px] uppercase tracking-wider block mb-1.5" style={{ color: "#6B7280" }}>
+                  Parcelas
+                </label>
+                <select
+                  value={parcelasPoint}
+                  onChange={e => setParcelasPoint(Number(e.target.value))}
+                  className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none bg-white"
+                  style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
+                >
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
+                    <option key={n} value={n}>{n}x de {fmt(valor / n)}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={gerarLink}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}
+              >
+                <LinkIcon size={13} /> Gerar Link ({parcelasPoint}x · {fmt(valor / parcelasPoint)})
+              </button>
+            </>
           )}
 
           {loading && !initPoint && (
@@ -480,49 +511,38 @@ export default function CartaoInline({
 
           {initPoint && (
             <div className="space-y-3">
-              <div className="flex flex-col md:flex-row gap-4">
-                {qrDataUrl && (
-                  <div
-                    className="flex-shrink-0 self-center p-2 rounded-lg"
-                    style={{ backgroundColor: "#fff", border: `1px solid ${C.cremeBorder}` }}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={qrDataUrl} alt="QR Link Pagamento" width={200} height={200} />
-                  </div>
-                )}
-                <div className="flex-1 flex flex-col gap-2 justify-center">
-                  <p className="text-xs mb-1" style={{ color: "#6B7280" }}>
-                    Escaneie o QR ou copie o link:
-                  </p>
-                  <div
-                    className="flex items-center gap-2 p-2 rounded-lg border text-xs break-all"
-                    style={{ borderColor: C.cremeBorder, color: "#374151", backgroundColor: "#fff" }}
-                  >
-                    <span className="flex-1 font-mono">{initPoint.slice(0, 36)}...</span>
-                    <button
-                      onClick={copiarLink}
-                      className="p-1.5 rounded hover:bg-stone-100"
-                      style={{ color: C.esmeralda }}
-                      title="Copiar link"
-                    >
-                      {copiado ? <Check size={13} /> : <Copy size={13} />}
-                    </button>
-                  </div>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs" style={{ color: "#6B7280" }}>
+                  Copie o link e envie ao cliente para pagar com cartão de crédito:
+                </p>
+                <div
+                  className="flex items-center gap-2 p-2 rounded-lg border text-xs break-all"
+                  style={{ borderColor: C.cremeBorder, color: "#374151", backgroundColor: "#fff" }}
+                >
+                  <span className="flex-1 font-mono">{initPoint.slice(0, 40)}...</span>
                   <button
-                    onClick={abrirWhats}
-                    className="flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90"
-                    style={{ backgroundColor: "#25D366", color: "#fff" }}
+                    onClick={copiarLink}
+                    className="p-1.5 rounded hover:bg-stone-100 flex-shrink-0"
+                    style={{ color: C.esmeralda }}
+                    title="Copiar link"
                   >
-                    <MessageCircle size={13} /> Enviar pelo WhatsApp
-                  </button>
-                  <button
-                    onClick={() => { setInitPoint(null); setQrDataUrl(null); gerarLink(); }}
-                    className="flex items-center justify-center gap-1.5 py-1.5 text-[11px]"
-                    style={{ color: "#6B7280" }}
-                  >
-                    <RefreshCw size={11} /> Regenerar link
+                    {copiado ? <Check size={13} /> : <Copy size={13} />}
                   </button>
                 </div>
+                <button
+                  onClick={abrirWhats}
+                  className="flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: "#25D366", color: "#fff" }}
+                >
+                  <MessageCircle size={13} /> Enviar pelo WhatsApp
+                </button>
+                <button
+                  onClick={() => { setInitPoint(null); setQrDataUrl(null); gerarLink(); }}
+                  className="flex items-center justify-center gap-1.5 py-1.5 text-[11px]"
+                  style={{ color: "#6B7280" }}
+                >
+                  <RefreshCw size={11} /> Regenerar link
+                </button>
               </div>
               <div
                 className="flex items-center justify-center gap-2 py-2 text-xs border-t"

@@ -86,6 +86,7 @@ export async function POST(
   const body = await req.json().catch(() => ({})) as {
     pagamento_id?: number;
     valor?: number;
+    installments?: number;
   };
 
   // ─── Calcula valor do pagamento MP ────────────────────────────────────────
@@ -191,6 +192,7 @@ export async function POST(
         : undefined,
       notificationUrl,
       backUrls,
+      installments: body.installments && body.installments >= 1 ? Math.round(body.installments) : undefined,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Erro ao criar preference MP";

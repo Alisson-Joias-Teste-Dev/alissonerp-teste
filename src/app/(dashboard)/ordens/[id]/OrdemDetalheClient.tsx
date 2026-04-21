@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import ComentariosOrdem from "@/components/ComentariosOrdem";
 import GaleriaFotosOrdem from "@/components/ordem/GaleriaFotosOrdem";
 import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
+import FichaTecnicaForm, { TIPOS_ITEM, type TipoItem, type FichaTecnicaDados, validarFichaTecnica } from "@/components/ordens/FichaTecnicaForm";
+import { Pencil, X, Save, Loader2, AlertCircle } from "lucide-react";
 
 const C = {
   esmeralda: "#184036",
@@ -181,12 +183,81 @@ interface Props {
   transferencias: any[];
   fichaTecnica: any | null;
   timeline: any[];
+  userRole: string | null;
 }
 
-export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline }: Props) {
+export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline, userRole }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("producao");
-  const [comentariosCount, setComentariosCount] = useState(0); // usado no header da seção
+  const [comentariosCount, setComentariosCount] = useState(0);
+
+  // ── Modal de edição (apenas desenvolvedor) ───────────────────────────────
+  const [editOpen,    setEditOpen]    = useState(false);
+  const [editSaving,  setEditSaving]  = useState(false);
+  const [editError,   setEditError]   = useState<string | null>(null);
+  const [editFields,  setEditFields]  = useState({
+    data_entrega:         ordem.data_entrega ? new Date(ordem.data_entrega).toISOString().slice(0, 10) : "",
+    detalhes_ordem:       ordem.detalhes_ordem ?? "",
+    situacao:             ordem.situacao       ?? "",
+    tipo_ordem:           ordem.tipo_ordem     ?? "",
+    peso_metal_negociado: ordem.peso_metal_negociado != null ? String(Number(ordem.peso_metal_negociado)) : "",
+  });
+
+  async function salvarEdicao() {
+    setEditSaving(true);
+    setEditError(null);
+    const body: Record<string, unknown> = {};
+    if (editFields.data_entrega)         body.data_entrega         = editFields.data_entrega;
+    if (editFields.detalhes_ordem !== "") body.detalhes_ordem       = editFields.detalhes_ordem;
+    if (editFields.situacao !== "")      body.situacao             = editFields.situacao;
+    if (editFields.tipo_ordem !== "")    body.tipo_ordem           = editFields.tipo_ordem;
+    if (editFields.peso_metal_negociado !== "") body.peso_metal_negociado = parseFloat(editFields.peso_metal_negociado);
+
+    const res = await fetch(`/api/ordens/${ordem.id}`, {
+      method:  "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    setEditSaving(false);
+    if (!res.ok) { setEditError(data?.error ?? "Erro ao salvar"); return; }
+    setEditOpen(false);
+    router.refresh();
+  }
+
+  // ── Ficha técnica pendente ──────────────────────────────────────────────────
+  const ROLES_FICHA = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
+  const podeEditarFicha = userRole ? ROLES_FICHA.includes(userRole) : false;
+  const [fichaEditOpen, setFichaEditOpen] = useState(false);
+  const [fichaDados, setFichaDados] = useState<FichaTecnicaDados | null>(() => {
+    if (fichaTecnica?._origem === "erp") return fichaTecnica.dados as FichaTecnicaDados ?? null;
+    return null;
+  });
+  const [fichaLocal, setFichaLocal] = useState<FichaTecnicaDados | null>(null);
+  const [fichaSaving, setFichaSaving] = useState(false);
+  const [fichaErr, setFichaErr] = useState<string | null>(null);
+  const [fichaPendente, setFichaPendente] = useState<boolean>(!!ordem.ficha_pendente);
+
+  async function salvarFicha() {
+    if (!fichaLocal) return;
+    setFichaSaving(true); setFichaErr(null);
+    try {
+      const res = await fetch(`/api/ordens/${ordem.id}/ficha-tecnica`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dados: fichaLocal }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao salvar");
+      setFichaDados(fichaLocal);
+      setFichaPendente(data.ficha_pendente);
+      setFichaEditOpen(false);
+    } catch (e) {
+      setFichaErr(e instanceof Error ? e.message : "Erro ao salvar");
+    } finally {
+      setFichaSaving(false);
+    }
+  }
 
   const temPcp = !!ordem.pcp_id;
   const pcpConcluido = ordem.pcp_etapas_cod === "5";
@@ -204,6 +275,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
   ];
 
   return (
+    <>
     <div className="px-3 md:px-6 py-4 md:py-8 max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3 mb-4 md:mb-6">
@@ -236,7 +308,92 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
             ID {ordem.id} · {ordem.tipo_ordem} · {ordem.rota}
           </p>
         </div>
+        {userRole === "desenvolvedor" && (
+          <button
+            onClick={() => setEditOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors hover:bg-amber-50"
+            style={{ borderColor: C.dourado, color: C.dourado }}
+          >
+            <Pencil size={13} /> Editar
+          </button>
+        )}
       </div>
+
+      {/* Banner ficha pendente */}
+      {fichaPendente && ordem.tipo_ordem === "fabricacao" && (
+        <div className="mb-4 flex items-start gap-3 p-4 rounded-xl border"
+          style={{ backgroundColor: "#FFFBEB", borderColor: "#FDE68A" }}>
+          <AlertCircle size={18} className="flex-shrink-0 mt-0.5" style={{ color: "#D97706" }} />
+          <div className="flex-1">
+            <p className="text-sm font-semibold" style={{ color: "#92400E" }}>Ficha técnica pendente</p>
+            <p className="text-xs mt-0.5" style={{ color: "#92400E" }}>
+              Esta ordem aguarda preenchimento da ficha técnica antes de ser liberada para o PCP.
+            </p>
+          </div>
+          {podeEditarFicha && (
+            <button
+              onClick={() => { setFichaLocal(fichaDados ?? undefined as unknown as FichaTecnicaDados); setFichaEditOpen(true); }}
+              className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold"
+              style={{ backgroundColor: "#D97706", color: "white" }}
+            >
+              Preencher ficha
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Modal edição ficha técnica */}
+      {fichaEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-12 px-3 bg-black/40">
+          <div className="bg-white rounded-2xl border shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col"
+            style={{ borderColor: "#E8DCC8" }}>
+            <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: "#E8DCC8" }}>
+              <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>Ficha Técnica</h3>
+              <button onClick={() => setFichaEditOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Tipo do item</label>
+                <select
+                  className="border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                  style={{ borderColor: "#E8DCC8", color: "#374151" }}
+                  value={fichaLocal?.tipo_item ?? ""}
+                  onChange={e => {
+                    const tipo = e.target.value as TipoItem;
+                    if (tipo) setFichaLocal({ tipo_item: tipo });
+                    else setFichaLocal(null);
+                  }}
+                >
+                  <option value="">— Selecionar tipo —</option>
+                  {TIPOS_ITEM.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              {fichaLocal && (
+                <FichaTecnicaForm dados={fichaLocal} onChange={setFichaLocal} />
+              )}
+              {fichaErr && (
+                <p className="text-xs text-red-600">{fichaErr}</p>
+              )}
+            </div>
+            <div className="flex items-center justify-between p-4 border-t" style={{ borderColor: "#E8DCC8" }}>
+              <span className="text-xs" style={{ color: "#6B7280" }}>
+                {fichaLocal && validarFichaTecnica(fichaLocal)
+                  ? "⚠ Campos incompletos — ordem continuará pendente"
+                  : "✓ Ficha completa — ordem será liberada para o PCP"}
+              </span>
+              <button
+                onClick={salvarFicha}
+                disabled={fichaSaving || !fichaLocal}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+                style={{ backgroundColor: "#184036", color: "#F3EADA" }}
+              >
+                {fichaSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Salvar ficha
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         {/* Coluna principal */}
@@ -780,5 +937,101 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
         </div>
       </div>
     </div>
+
+    {/* ── Modal de Edição (desenvolvedor) ──────────────────────────────── */}
+
+    {editOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+          <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: C.cremeBorder }}>
+            <h3 className="font-semibold text-base" style={{ color: C.esmeralda }}>
+              Editar {ordem.numero_ordem}
+            </h3>
+            <button onClick={() => setEditOpen(false)} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100">
+              <X size={16} style={{ color: "#6B7280" }} />
+            </button>
+          </div>
+
+          <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Data de Entrega</label>
+              <input
+                type="date"
+                value={editFields.data_entrega}
+                onChange={e => setEditFields(f => ({ ...f, data_entrega: e.target.value }))}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                style={{ borderColor: C.cremeBorder }}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Situação</label>
+              <input
+                type="text"
+                value={editFields.situacao}
+                onChange={e => setEditFields(f => ({ ...f, situacao: e.target.value }))}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                style={{ borderColor: C.cremeBorder }}
+                placeholder="ex: Em Andamento"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Tipo de Ordem</label>
+              <input
+                type="text"
+                value={editFields.tipo_ordem}
+                onChange={e => setEditFields(f => ({ ...f, tipo_ordem: e.target.value }))}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                style={{ borderColor: C.cremeBorder }}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Peso Metal Negociado (g)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={editFields.peso_metal_negociado}
+                onChange={e => setEditFields(f => ({ ...f, peso_metal_negociado: e.target.value }))}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none font-mono"
+                style={{ borderColor: C.cremeBorder }}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Detalhes / Observações</label>
+              <textarea
+                rows={3}
+                value={editFields.detalhes_ordem}
+                onChange={e => setEditFields(f => ({ ...f, detalhes_ordem: e.target.value }))}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none resize-none"
+                style={{ borderColor: C.cremeBorder }}
+              />
+            </div>
+            {editError && (
+              <p className="text-xs font-medium" style={{ color: C.danger }}>{editError}</p>
+            )}
+          </div>
+
+          <div className="flex gap-3 px-6 pb-5">
+            <button
+              onClick={() => setEditOpen(false)}
+              className="flex-1 py-2.5 rounded-xl border text-sm font-semibold"
+              style={{ borderColor: C.cremeBorder, color: "#6B7280" }}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={salvarEdicao}
+              disabled={editSaving}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+              style={{ backgroundColor: C.esmeralda, color: "#fff" }}
+            >
+              {editSaving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+              Salvar
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

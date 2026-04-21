@@ -22,8 +22,24 @@ import {
   normalizeConfigRow,
   normalizeCategoriaRow,
 } from "@/lib/curva-precificacao";
+import { buildFiltrosProdutos } from "@/lib/produtos-filtros";
 
-export async function POST(_req: NextRequest) {
+interface ApplyBody {
+  filtros?: {
+    situacao?: string;
+    esconder_insumos?: boolean;
+    apenas_com_estoque?: boolean;
+    categoria?: string;
+    subcategoria?: string;
+    tipo_metal?: string;
+    tem_pedra?: string;
+    busca?: string;
+    sku_prefix?: string;
+    pendencia?: string;
+  };
+}
+
+export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
@@ -57,13 +73,33 @@ export async function POST(_req: NextRequest) {
       return NextResponse.json({ error: "Nenhuma categoria ativa" }, { status: 400 });
     }
 
-    // ── Buscar produtos ──
+    // ── Montar filtros opcionais (body JSON) ──
+    const body = (await req.json().catch(() => ({}))) as ApplyBody;
+    const sp = new URLSearchParams();
+    const f = body.filtros ?? {};
+    sp.set("situacao", f.situacao ?? "A");
+    if (f.esconder_insumos)   sp.set("esconder_insumos", "true");
+    if (f.apenas_com_estoque) sp.set("apenas_com_estoque", "true");
+    if (f.categoria)    sp.set("categoria", f.categoria);
+    if (f.subcategoria) sp.set("subcategoria", f.subcategoria);
+    if (f.tipo_metal)   sp.set("tipo_metal", f.tipo_metal);
+    if (f.tem_pedra)    sp.set("tem_pedra", f.tem_pedra);
+    if (f.busca)        sp.set("busca", f.busca);
+    if (f.sku_prefix)   sp.set("sku_prefix", f.sku_prefix);
+    if (f.pendencia)    sp.set("pendencia", f.pendencia);
+    const w = buildFiltrosProdutos(sp, { exclude: ["tipo_item"] });
+
+    // ── Buscar produtos alvo (ativos com peso + filtros da tela) ──
     const produtos = (await sql`
-      SELECT id_produto, peso_precificado
-      FROM public.produtos
-      WHERE situacao = 'A'
-        AND peso_precificado IS NOT NULL
-        AND peso_precificado > 0
+      SELECT p.id_produto, p.peso_precificado
+      FROM public.produtos p
+      LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+      WHERE (ep.eh_variacao = false OR ep.id IS NULL)
+        AND p.peso_precificado IS NOT NULL
+        AND p.peso_precificado > 0
+        ${w.wBusca} ${w.wSkuPrefix} ${w.wPedra} ${w.wSituacao}
+        ${w.wCategoria} ${w.wTipoMetal} ${w.wEstoque}
+        ${w.wEsconderInsumos} ${w.wPendencia}
     `) as unknown as Array<{ id_produto: string | number; peso_precificado: string }>;
 
     if (produtos.length === 0) {
@@ -101,13 +137,13 @@ export async function POST(_req: NextRequest) {
     await sql`
       INSERT INTO alissonerp.produto_curva_aplicada
         (produto_id, comissao_pct, max_desconto_pct, markup_aplicado, updated_at)
-      SELECT * FROM UNNEST(
+      SELECT t.produto_id, t.comissao_pct, t.max_desconto_pct, t.markup_aplicado, NOW()
+      FROM UNNEST(
         ${ids}::bigint[],
         ${comissoes}::numeric[],
         ${maxDescontos}::numeric[],
-        ${markups}::numeric[],
-        ${ids.map(() => new Date())}::timestamptz[]
-      ) AS t(produto_id, comissao_pct, max_desconto_pct, markup_aplicado, updated_at)
+        ${markups}::numeric[]
+      ) AS t(produto_id, comissao_pct, max_desconto_pct, markup_aplicado)
       ON CONFLICT (produto_id) DO UPDATE SET
         comissao_pct     = EXCLUDED.comissao_pct,
         max_desconto_pct = EXCLUDED.max_desconto_pct,

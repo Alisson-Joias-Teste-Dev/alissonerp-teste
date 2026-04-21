@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, deleteFile } from "@/lib/storage";
+import { validarFichaTecnicaServer } from "@/lib/validar-ficha-tecnica";
 
 const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
 const ALL_TIPOS = [
@@ -28,17 +29,20 @@ export async function POST(req: NextRequest) {
     vendedor_id,
     data_entrega,
     peso_metal_negociado,
-    foto_peca_servico,   // storage path (já enviado pelo client)
+    foto_peca_servico,         // storage path (já enviado pelo client)
+    foto_peca_servico_base64,  // base64 — upload server-side
     peso_peca_servico,
-    peso_metal_externo,  // peso do metal do cliente (garantia)
-    video_observacao,    // storage path (já enviado pelo client)
-    detalhes_ordem,      // texto livre de observações
+    peso_metal_externo,        // peso do metal do cliente (garantia)
+    video_observacao,          // storage path (já enviado pelo client)
+    video_observacao_base64,   // base64 — upload server-side
+    detalhes_ordem,            // texto livre de observações
     fotos_base64,        // string[] — upload server-side para bucket ordem-fotos
     tipos_servico_ids,   // integer[] — tipos de serviço (servico_interno + garantia)
     venda_id,            // integer — referência à venda (garantia)
     venda_item_ids,      // integer[] — itens da venda em garantia
-    rota_override,       // "pcp" | "protocolo" — para fabricação (escolha do usuário)
-    ficha_tecnica_dados, // { tipo_item, ...dados } — ficha técnica (fabricação)
+    rota_override,          // "pcp" | "protocolo" — para fabricação (escolha do usuário)
+    ficha_tecnica_dados,    // { tipo_item, ...dados } — ficha técnica (fabricação)
+    numero_pedido_manual,   // string — pedido PDV sem venda no ERP (fallback manual)
     itens = [],
   } = body;
 
@@ -64,13 +68,13 @@ export async function POST(req: NextRequest) {
     if (!cliente_id) {
       return NextResponse.json({ error: `Cliente é obrigatório para ${label}` }, { status: 400 });
     }
-    if (!foto_peca_servico) {
+    if (!foto_peca_servico && !foto_peca_servico_base64) {
       return NextResponse.json({ error: `Foto da balança é obrigatória para ${label}` }, { status: 400 });
     }
     if (!peso_metal_externo && peso_metal_externo !== 0) {
       return NextResponse.json({ error: `Peso do metal externo é obrigatório para ${label}` }, { status: 400 });
     }
-    if (!Array.isArray(tipos_servico_ids) || tipos_servico_ids.length === 0) {
+    if (tipo_ordem === "garantia" && (!Array.isArray(tipos_servico_ids) || tipos_servico_ids.length === 0)) {
       return NextResponse.json({ error: "Selecione pelo menos um tipo de serviço" }, { status: 400 });
     }
   }
@@ -88,7 +92,7 @@ export async function POST(req: NextRequest) {
     if (!cliente_id) {
       return NextResponse.json({ error: "Cliente é obrigatório para fabricação" }, { status: 400 });
     }
-    if (!Array.isArray(itens) || itens.length === 0) {
+    if (!numero_pedido_manual && (!Array.isArray(itens) || itens.length === 0)) {
       return NextResponse.json({ error: "Selecione pelo menos um item para fabricação" }, { status: 400 });
     }
     if (!peso_metal_negociado && peso_metal_negociado !== 0) {
@@ -147,6 +151,24 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ── Upload foto_peca_servico/video_observacao de base64 se fornecido ────
+  let fotoPecaServicoFinal = foto_peca_servico ?? null;
+  if (foto_peca_servico_base64 && !fotoPecaServicoFinal) {
+    const mt = foto_peca_servico_base64.startsWith("data:image/png") ? "image/png" : "image/jpeg";
+    const fp = `servico-venda/${Date.now()}_peca.jpg`;
+    const fr = await uploadFile("service-fotos", fp, foto_peca_servico_base64, mt);
+    if ("error" in fr) return NextResponse.json({ error: `Erro ao enviar foto: ${fr.error}` }, { status: 500 });
+    fotoPecaServicoFinal = fr.path;
+  }
+
+  let videoObservacaoFinal = video_observacao ?? null;
+  if (video_observacao_base64 && !videoObservacaoFinal) {
+    const vp = `servico-venda/${Date.now()}_video.mp4`;
+    const vr = await uploadFile("service-fotos", vp, video_observacao_base64, "video/mp4");
+    if ("error" in vr) return NextResponse.json({ error: `Erro ao enviar vídeo: ${vr.error}` }, { status: 500 });
+    videoObservacaoFinal = vr.path;
+  }
+
   // ── Determinar rota ──────────────────────────────────────────────────────
   // Rota: fabricação permite override (PCP ou Protocolo), demais seguem regra padrão
   const rota = tipo_ordem === "fabricacao" && rota_override
@@ -187,11 +209,16 @@ export async function POST(req: NextRequest) {
 
     // Buscar numero_venda se venda_id foi informado — alimenta numero_pedido
     // na ordem pra aparecer na coluna "PEDIDO PDV" da listagem de ordens.
-    let numeroVendaLigada: string | null = null;
-    if (venda_id) {
+    let numeroVendaLigada: string | null = numero_pedido_manual ?? null;
+    if (venda_id && !numeroVendaLigada) {
       const [vRow] = await tx`SELECT numero_venda FROM alissonerp.vendas_erp WHERE id = ${venda_id}`;
       numeroVendaLigada = vRow?.numero_venda ?? null;
     }
+
+    // Determinar ficha_pendente para fabricação
+    const fichaPendente = tipo_ordem === "fabricacao"
+      ? (validarFichaTecnicaServer(ficha_tecnica_dados) !== null)
+      : false;
 
     const [ordem] = await tx`
       INSERT INTO alissonerp.ordens (
@@ -200,7 +227,7 @@ export async function POST(req: NextRequest) {
         foto_peca_servico, peso_peca_servico, video_observacao,
         detalhes_ordem, fotos_paths, tipos_servico_ids,
         venda_id, venda_item_ids, numero_pedido,
-        situacao, status, rota, origem, created_by
+        situacao, status, rota, origem, ficha_pendente, created_by
       ) VALUES (
         ${numeroOrdem},
         ${tipo_ordem}::alissonerp.enum_tipo_ordem,
@@ -209,9 +236,9 @@ export async function POST(req: NextRequest) {
         ${dataEntregaFinal},
         ${peso_metal_negociado ?? 0},
         ${peso_metal_externo ?? null},
-        ${foto_peca_servico ?? null},
+        ${fotoPecaServicoFinal},
         ${peso_peca_servico ?? null},
-        ${video_observacao ?? null},
+        ${videoObservacaoFinal},
         ${detalhes_ordem ?? null},
         ${fotosPathsVal},
         ${tiposIdsVal},
@@ -222,6 +249,7 @@ export async function POST(req: NextRequest) {
         'aguardando',
         ${rota}::alissonerp.enum_rota_ordem,
         'erp',
+        ${fichaPendente},
         ${user.id}::uuid
       )
       RETURNING id, numero_ordem

@@ -125,8 +125,16 @@ interface ServicoDetalhe extends ServicoConcluido {
   operador_nome: string | null;
 }
 
-type View     = "meus" | "receber" | "concluidos" | "concluir" | "devolver" | "transferir" | "transferir-fabrica" | "camera";
-type CameraCtx = "receber" | "peca" | "fio";
+interface ApontoInsumo {
+  insumo_id:   number;
+  insumo_nome: string;
+  sku:         string | null;
+  unidade:     string;
+  saldo:       number;
+}
+
+type View     = "meus" | "receber" | "concluidos" | "concluir" | "devolver" | "transferir" | "transferir-fabrica" | "camera" | "apontar" | "transferir-insumo";
+type CameraCtx = "receber" | "peca" | "fio" | "aponto" | "transf-ins";
 type Periodo   = "hoje" | "semana" | "mes";
 
 // ── Helpers visuais ───────────────────────────────────────────────────────────
@@ -320,6 +328,28 @@ export default function ServiceApp() {
   const [transportadorId, setTransportadorId]   = useState<string>("");
   const [loadingFabrica, setLoadingFabrica]     = useState(false);
 
+  // ── Transferência de insumo operador→operador ────────────────────────────
+  const [transfInsStep,       setTransfInsStep]       = useState(1);
+  const [transfInsInsumos,    setTransfInsInsumos]    = useState<ApontoInsumo[]>([]);
+  const [transfInsSel,        setTransfInsSel]        = useState<ApontoInsumo | null>(null);
+  const [transfInsQtd,        setTransfInsQtd]        = useState("");
+  const [transfInsDestId,     setTransfInsDestId]     = useState<number | null>(null);
+  const [transfInsFotoB64,    setTransfInsFotoB64]    = useState<string | null>(null);
+  const [transfInsFotoPreview,setTransfInsFotoPreview]= useState<string | null>(null);
+  const [loadingTransfIns,    setLoadingTransfIns]    = useState(false);
+  const [salvandoTransfIns,   setSalvandoTransfIns]   = useState(false);
+
+  // ── Apontamento intermediário ────────────────────────────────────────────
+  const [servicoApontando,    setServicoApontando]    = useState<ServicoMeu | null>(null);
+  const [apontoStep,          setApontoStep]          = useState(1);
+  const [apontoInsumos,       setApontoInsumos]       = useState<ApontoInsumo[]>([]);
+  const [apontoSel,           setApontoSel]           = useState<ApontoInsumo | null>(null);
+  const [apontoQtd,           setApontoQtd]           = useState("");
+  const [apontoFotoB64,       setApontoFotoB64]       = useState<string | null>(null);
+  const [apontoFotoPreview,   setApontoFotoPreview]   = useState<string | null>(null);
+  const [loadingApontoIns,    setLoadingApontoIns]    = useState(false);
+  const [salvandoAponto,      setSalvandoAponto]      = useState(false);
+
   // ── Carregar dados ────────────────────────────────────────────────────────
   const fetchPendentes = useCallback(async () => {
     setLoadingPend(true);
@@ -451,6 +481,12 @@ export default function ServiceApp() {
       setFotoFioB64(base64);
       setFotoFioPreview(preview);
       chamarValidarPesoIA(base64, pesoFioDepois, setValidandoFio, setValidacaoFio);
+    } else if (cameraCtx === "aponto") {
+      setApontoFotoB64(base64);
+      setApontoFotoPreview(preview);
+    } else if (cameraCtx === "transf-ins") {
+      setTransfInsFotoB64(base64);
+      setTransfInsFotoPreview(preview);
     }
     setView(prevView.current);
   }
@@ -700,6 +736,112 @@ export default function ServiceApp() {
     setView("meus");
   }
 
+  // ── Transferência insumo operador→operador ───────────────────────────────
+  function iniciarTransferirInsumo() {
+    setTransfInsStep(1);
+    setTransfInsInsumos([]);
+    setTransfInsSel(null);
+    setTransfInsQtd("");
+    setTransfInsDestId(null);
+    setTransfInsFotoB64(null);
+    setTransfInsFotoPreview(null);
+    fetchDepositos();
+    setView("transferir-insumo");
+  }
+
+  async function carregarEstoqueTransfIns() {
+    setLoadingTransfIns(true);
+    const res  = await fetch("/api/service/meu-estoque").catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => ({})) : {};
+    setTransfInsInsumos(data.insumos ?? []);
+    setLoadingTransfIns(false);
+  }
+
+  async function handleTransferirInsumo() {
+    if (!transfInsSel || !transfInsDestId) return;
+    if (!transfInsQtd || parseFloat(transfInsQtd) <= 0) { showToast("Informe a quantidade", false); return; }
+    if (!transfInsFotoB64) { showToast("Foto obrigatória", false); return; }
+    setSalvandoTransfIns(true);
+    let res: Response | null = null;
+    try {
+      res = await fetch("/api/service/transferir-insumo", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          dest_deposito_id: transfInsDestId,
+          insumo_id:        transfInsSel.insumo_id,
+          quantidade:       parseFloat(transfInsQtd),
+          foto_base64:      transfInsFotoB64,
+        }),
+      });
+    } catch {
+      setSalvandoTransfIns(false);
+      showToast("Sem conexão com o servidor", false);
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setSalvandoTransfIns(false);
+    if (!res.ok) {
+      showToast(data?.error ?? "Erro ao transferir", false);
+      return;
+    }
+    showToast("Transferência realizada!");
+    fetchSaldo();
+    setView("meus");
+  }
+
+  // ── Apontamento intermediário ────────────────────────────────────────────
+  function iniciarApontar(svc: ServicoMeu) {
+    setServicoApontando(svc);
+    setApontoStep(1);
+    setApontoInsumos([]);
+    setApontoSel(null);
+    setApontoQtd("");
+    setApontoFotoB64(null);
+    setApontoFotoPreview(null);
+    setView("apontar");
+  }
+
+  async function carregarEstoqueAponto() {
+    setLoadingApontoIns(true);
+    const res  = await fetch("/api/service/meu-estoque").catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => ({})) : {};
+    setApontoInsumos(data.insumos ?? []);
+    setLoadingApontoIns(false);
+  }
+
+  async function handleApontar() {
+    if (!servicoApontando || !apontoSel) return;
+    if (!apontoQtd || parseFloat(apontoQtd) <= 0) { showToast("Informe a quantidade", false); return; }
+    if (!apontoFotoB64) { showToast("Foto obrigatória", false); return; }
+    setSalvandoAponto(true);
+    let res: Response | null = null;
+    try {
+      res = await fetch(`/api/service/${servicoApontando.id}/apontar`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          insumo_id:   apontoSel.insumo_id,
+          quantidade:  parseFloat(apontoQtd),
+          foto_base64: apontoFotoB64,
+        }),
+      });
+    } catch {
+      setSalvandoAponto(false);
+      showToast("Sem conexão com o servidor", false);
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setSalvandoAponto(false);
+    if (!res.ok) {
+      showToast(data?.error ?? "Erro ao salvar apontamento", false);
+      return;
+    }
+    showToast("Apontamento registrado!");
+    setServicoApontando(null);
+    setView("meus");
+  }
+
   // ── Filtro dropdown pedras ────────────────────────────────────────────────
   const pedrasFiltradas = insumoPedras.filter(i =>
     i.insumo_nome?.toLowerCase().includes(buscarPedra.toLowerCase())
@@ -729,11 +871,15 @@ export default function ServiceApp() {
       receber: "Foto de Recebimento",
       peca:    "Foto da Peça na Balança",
       fio:     "Foto do Aditivo na Balança",
+      aponto:     "Foto do Material Usado",
+      "transf-ins": "Foto do Material na Balança",
     };
     const dicas: Record<CameraCtx, string> = {
-      receber: "Fotografe a peça ao receber",
-      peca:    "Enquadre o display e a peça",
-      fio:     "Enquadre o display da balança",
+      receber:    "Fotografe a peça ao receber",
+      peca:       "Enquadre o display e a peça",
+      fio:        "Enquadre o display da balança",
+      aponto:     "Fotografe o material que foi utilizado",
+      "transf-ins": "Enquadre o display da balança e o material",
     };
     return (
       <ServiceCamera
@@ -742,6 +888,434 @@ export default function ServiceApp() {
         onCapture={onCaptureCamera}
         onCancel={() => setView(prevView.current)}
       />
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // VIEW: APONTAR MATERIAL (apontamento intermediário sem concluir)
+  // ══════════════════════════════════════════════════════════════════════════
+  if (view === "apontar" && servicoApontando) {
+    const svc = servicoApontando;
+
+    return (
+      <div className="flex flex-col flex-1 overflow-hidden" style={{ paddingBottom: "calc(80px + env(safe-area-inset-bottom))" }}>
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 py-3 shrink-0" style={{ borderBottom: `1px solid ${S.border}` }}>
+          <button
+            onClick={() => { setServicoApontando(null); setView("meus"); }}
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ backgroundColor: S.cardBg }}
+          >
+            <ChevronLeft size={18} color={S.text} />
+          </button>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold truncate" style={{ color: S.text }}>
+              Apontar Material — {svc.numero_ordem ?? `#${svc.id}`}
+            </p>
+            <p className="text-[10px]" style={{ color: S.textMuted }}>
+              Passo {apontoStep} de 3
+            </p>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
+
+          {/* ── PASSO 1: É ouro? ── */}
+          {apontoStep === 1 && (
+            <div className="space-y-4">
+              <p className="text-sm font-semibold text-center" style={{ color: S.text }}>
+                Deseja fazer um apontamento?
+              </p>
+              <p className="text-xs text-center" style={{ color: S.textMuted }}>
+                Registre o uso de material (fecho, corrente, etc.) sem precisar concluir a ordem.
+              </p>
+              <div className="space-y-3 pt-2">
+                <button
+                  onClick={() => {
+                    setApontoStep(2);
+                    carregarEstoqueAponto();
+                  }}
+                  className="w-full py-4 rounded-2xl font-semibold text-sm"
+                  style={{ backgroundColor: "rgba(212,175,55,0.12)", color: S.gold, border: `1px solid rgba(212,175,55,0.35)` }}
+                >
+                  Sim, usar material de ouro
+                </button>
+                <button
+                  onClick={() => { setServicoApontando(null); setView("meus"); }}
+                  className="w-full py-3 rounded-2xl font-semibold text-sm"
+                  style={{ backgroundColor: S.cardBg, color: S.textMuted, border: `1px solid ${S.border}` }}
+                >
+                  Não, voltar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── PASSO 2: Selecionar insumo ── */}
+          {apontoStep === 2 && (
+            <div className="space-y-4">
+              <p className="text-sm font-semibold" style={{ color: S.text }}>Selecione o material usado:</p>
+
+              {loadingApontoIns ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 size={24} className="animate-spin" style={{ color: S.textMuted }} />
+                </div>
+              ) : apontoInsumos.length === 0 ? (
+                <div className="text-center py-8 space-y-2">
+                  <Package size={32} style={{ color: S.textMuted, margin: "0 auto" }} />
+                  <p className="text-sm" style={{ color: S.textMuted }}>Nenhum material em estoque</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {apontoInsumos.map(ins => (
+                    <button
+                      key={ins.insumo_id}
+                      onClick={() => { setApontoSel(ins); setApontoStep(3); }}
+                      className="w-full flex items-center justify-between p-3.5 rounded-xl transition-colors"
+                      style={{
+                        backgroundColor: apontoSel?.insumo_id === ins.insumo_id
+                          ? "rgba(212,175,55,0.15)"
+                          : S.cardBg,
+                        border: apontoSel?.insumo_id === ins.insumo_id
+                          ? `1px solid rgba(212,175,55,0.5)`
+                          : `1px solid ${S.border}`,
+                      }}
+                    >
+                      <span className="text-sm font-semibold" style={{ color: S.text }}>{ins.insumo_nome}</span>
+                      <span className="text-xs" style={{ color: S.textMuted }}>
+                        {ins.saldo.toFixed(4)} {ins.unidade}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={() => setApontoStep(1)}
+                className="w-full py-3 rounded-xl text-xs font-semibold"
+                style={{ backgroundColor: S.cardBg, color: S.textMuted, border: `1px solid ${S.border}` }}
+              >
+                Voltar
+              </button>
+            </div>
+          )}
+
+          {/* ── PASSO 3: Quantidade + Foto ── */}
+          {apontoStep === 3 && apontoSel && (
+            <div className="space-y-4">
+              <div className="rounded-xl p-3" style={{ backgroundColor: "rgba(212,175,55,0.08)", border: `1px solid rgba(212,175,55,0.25)` }}>
+                <p className="text-xs" style={{ color: S.textMuted }}>Material selecionado</p>
+                <p className="text-sm font-semibold" style={{ color: S.gold }}>{apontoSel.insumo_nome}</p>
+                <p className="text-xs" style={{ color: S.textMuted }}>
+                  Saldo disponível: {apontoSel.saldo.toFixed(4)} {apontoSel.unidade}
+                </p>
+              </div>
+
+              {/* Quantidade */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium" style={{ color: S.textMuted }}>
+                  Quantidade usada ({apontoSel.unidade})
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="0.0000"
+                  value={apontoQtd}
+                  onChange={e => setApontoQtd(e.target.value)}
+                  className="w-full rounded-xl px-4 py-3 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}`, color: S.text }}
+                />
+              </div>
+
+              {/* Foto */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium" style={{ color: S.textMuted }}>
+                  Foto do material utilizado
+                </label>
+                {apontoFotoPreview ? (
+                  <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "4/3" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={apontoFotoPreview} alt="preview" className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => { setApontoFotoB64(null); setApontoFotoPreview(null); }}
+                      className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
+                    >
+                      <X size={14} color="#fff" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { prevView.current = "apontar"; setCameraCtx("aponto"); setView("camera"); }}
+                    className="w-full py-10 rounded-xl flex flex-col items-center gap-2"
+                    style={{ backgroundColor: S.cardBg, border: `2px dashed ${S.border}` }}
+                  >
+                    <Camera size={28} style={{ color: S.textMuted }} />
+                    <span className="text-xs" style={{ color: S.textMuted }}>Tirar foto</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => { setApontoSel(null); setApontoQtd(""); setApontoFotoB64(null); setApontoFotoPreview(null); setApontoStep(2); }}
+                  className="flex-1 py-3 rounded-xl text-xs font-semibold"
+                  style={{ backgroundColor: S.cardBg, color: S.textMuted, border: `1px solid ${S.border}` }}
+                >
+                  Voltar
+                </button>
+                <button
+                  onClick={handleApontar}
+                  disabled={salvandoAponto || !apontoQtd || !apontoFotoB64}
+                  className="flex-2 px-6 py-3 rounded-xl text-sm font-semibold flex items-center gap-2 disabled:opacity-40"
+                  style={{ backgroundColor: S.gold, color: "#1a1a1a" }}
+                >
+                  {salvandoAponto ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // VIEW: TRANSFERIR INSUMO (operador → operador)
+  // ══════════════════════════════════════════════════════════════════════════
+  if (view === "transferir-insumo") {
+    const operadoresDisponiveis = depositos.filter(d => d.id !== undefined);
+
+    return (
+      <div className="flex flex-col flex-1 overflow-hidden" style={{ paddingBottom: "calc(80px + env(safe-area-inset-bottom))" }}>
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 py-3 shrink-0" style={{ borderBottom: `1px solid ${S.border}` }}>
+          <button
+            onClick={() => setView("meus")}
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ backgroundColor: S.cardBg }}
+          >
+            <ChevronLeft size={18} color={S.text} />
+          </button>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold" style={{ color: S.text }}>Transferir Insumo</p>
+            <p className="text-[10px]" style={{ color: S.textMuted }}>Passo {transfInsStep} de 4</p>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
+
+          {/* PASSO 1: Selecionar operador destino */}
+          {transfInsStep === 1 && (
+            <div className="space-y-4">
+              <p className="text-sm font-semibold" style={{ color: S.text }}>Para qual operador?</p>
+              {loadingDep ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 size={24} className="animate-spin" style={{ color: S.textMuted }} />
+                </div>
+              ) : operadoresDisponiveis.length === 0 ? (
+                <p className="text-sm text-center py-8" style={{ color: S.textMuted }}>Nenhum outro operador disponível</p>
+              ) : (
+                <div className="space-y-2">
+                  {operadoresDisponiveis.map(d => (
+                    <button
+                      key={d.id}
+                      onClick={() => setTransfInsDestId(d.id)}
+                      className="w-full flex items-center gap-3 p-3.5 rounded-xl transition-colors"
+                      style={{
+                        backgroundColor: transfInsDestId === d.id ? "rgba(55,138,221,0.12)" : S.cardBg,
+                        border: transfInsDestId === d.id ? "1px solid rgba(55,138,221,0.4)" : `1px solid ${S.border}`,
+                      }}
+                    >
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
+                        style={{ backgroundColor: "rgba(212,175,55,0.15)", color: S.gold }}>
+                        {d.nome.slice(0, 2).toUpperCase()}
+                      </div>
+                      <span className="text-sm font-medium flex-1 text-left" style={{ color: S.text }}>{d.nome}</span>
+                      {transfInsDestId === d.id && <CheckCircle2 size={18} color="#378ADD" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                disabled={!transfInsDestId}
+                onClick={() => { setTransfInsStep(2); carregarEstoqueTransfIns(); }}
+                className="w-full py-4 rounded-xl font-semibold text-sm disabled:opacity-40"
+                style={{ backgroundColor: S.btnBlue, color: "#fff" }}
+              >
+                Próximo
+              </button>
+            </div>
+          )}
+
+          {/* PASSO 2: Selecionar insumo do meu estoque */}
+          {transfInsStep === 2 && (
+            <div className="space-y-4">
+              <p className="text-sm font-semibold" style={{ color: S.text }}>Qual material?</p>
+              <p className="text-[10px]" style={{ color: S.textMuted }}>Apenas insumos com saldo no seu estoque.</p>
+              {loadingTransfIns ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 size={24} className="animate-spin" style={{ color: S.textMuted }} />
+                </div>
+              ) : transfInsInsumos.length === 0 ? (
+                <div className="text-center py-8 space-y-2">
+                  <Package size={32} style={{ color: S.textMuted, margin: "0 auto" }} />
+                  <p className="text-sm" style={{ color: S.textMuted }}>Sem estoque disponível para transferir</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {transfInsInsumos.map(ins => (
+                    <button
+                      key={ins.insumo_id}
+                      onClick={() => { setTransfInsSel(ins); setTransfInsStep(3); }}
+                      className="w-full flex items-center justify-between p-3.5 rounded-xl transition-colors"
+                      style={{
+                        backgroundColor: transfInsSel?.insumo_id === ins.insumo_id ? "rgba(212,175,55,0.15)" : S.cardBg,
+                        border: transfInsSel?.insumo_id === ins.insumo_id ? `1px solid rgba(212,175,55,0.5)` : `1px solid ${S.border}`,
+                      }}
+                    >
+                      <span className="text-sm font-semibold" style={{ color: S.text }}>{ins.insumo_nome}</span>
+                      <span className="text-xs" style={{ color: S.textMuted }}>
+                        {ins.saldo.toFixed(4)} {ins.unidade}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={() => { setTransfInsSel(null); setTransfInsStep(1); }}
+                className="w-full py-3 rounded-xl text-xs font-semibold"
+                style={{ backgroundColor: S.cardBg, color: S.textMuted, border: `1px solid ${S.border}` }}
+              >
+                Voltar
+              </button>
+            </div>
+          )}
+
+          {/* PASSO 3: Quantidade */}
+          {transfInsStep === 3 && transfInsSel && (
+            <div className="space-y-4">
+              <div className="rounded-xl p-3" style={{ backgroundColor: "rgba(212,175,55,0.08)", border: `1px solid rgba(212,175,55,0.25)` }}>
+                <p className="text-xs" style={{ color: S.textMuted }}>Material selecionado</p>
+                <p className="text-sm font-semibold" style={{ color: S.gold }}>{transfInsSel.insumo_nome}</p>
+                <p className="text-xs" style={{ color: S.textMuted }}>
+                  Disponível: {transfInsSel.saldo.toFixed(4)} {transfInsSel.unidade}
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium" style={{ color: S.textMuted }}>
+                  Quantidade a transferir ({transfInsSel.unidade})
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="0.0000"
+                  value={transfInsQtd}
+                  onChange={e => setTransfInsQtd(e.target.value)}
+                  className="w-full rounded-xl px-4 py-3 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}`, color: S.text }}
+                />
+                {transfInsQtd && parseFloat(transfInsQtd) > transfInsSel.saldo && (
+                  <p className="text-xs" style={{ color: "#EF4444" }}>
+                    Quantidade excede o saldo disponível
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setTransfInsQtd(""); setTransfInsStep(2); }}
+                  className="flex-1 py-3 rounded-xl text-xs font-semibold"
+                  style={{ backgroundColor: S.cardBg, color: S.textMuted, border: `1px solid ${S.border}` }}
+                >
+                  Voltar
+                </button>
+                <button
+                  disabled={!transfInsQtd || parseFloat(transfInsQtd) <= 0 || parseFloat(transfInsQtd) > transfInsSel.saldo}
+                  onClick={() => setTransfInsStep(4)}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
+                  style={{ backgroundColor: S.btnBlue, color: "#fff" }}
+                >
+                  Próximo
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* PASSO 4: Foto + Confirmar */}
+          {transfInsStep === 4 && transfInsSel && (
+            <div className="space-y-4">
+              <div className="rounded-xl p-3 space-y-1" style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}` }}>
+                <div className="flex justify-between text-xs">
+                  <span style={{ color: S.textMuted }}>Material</span>
+                  <span className="font-semibold" style={{ color: S.gold }}>{transfInsSel.insumo_nome}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span style={{ color: S.textMuted }}>Quantidade</span>
+                  <span className="font-semibold" style={{ color: S.text }}>{transfInsQtd} {transfInsSel.unidade}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span style={{ color: S.textMuted }}>Para</span>
+                  <span className="font-semibold" style={{ color: "#85B7EB" }}>
+                    {depositos.find(d => d.id === transfInsDestId)?.nome ?? `#${transfInsDestId}`}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium" style={{ color: S.textMuted }}>
+                  Foto do material na balança
+                </label>
+                {transfInsFotoPreview ? (
+                  <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "4/3" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={transfInsFotoPreview} alt="preview" className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => { setTransfInsFotoB64(null); setTransfInsFotoPreview(null); }}
+                      className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
+                    >
+                      <X size={14} color="#fff" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { prevView.current = "transferir-insumo"; setCameraCtx("transf-ins"); setView("camera"); }}
+                    className="w-full py-10 rounded-xl flex flex-col items-center gap-2"
+                    style={{ backgroundColor: S.cardBg, border: `2px dashed ${S.border}` }}
+                  >
+                    <Camera size={28} style={{ color: S.textMuted }} />
+                    <span className="text-xs" style={{ color: S.textMuted }}>Tirar foto na balança</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setTransfInsFotoB64(null); setTransfInsFotoPreview(null); setTransfInsStep(3); }}
+                  className="flex-1 py-3 rounded-xl text-xs font-semibold"
+                  style={{ backgroundColor: S.cardBg, color: S.textMuted, border: `1px solid ${S.border}` }}
+                >
+                  Voltar
+                </button>
+                <button
+                  onClick={handleTransferirInsumo}
+                  disabled={salvandoTransfIns || !transfInsFotoB64}
+                  className="flex-2 px-6 py-3 rounded-xl text-sm font-semibold flex items-center gap-2 disabled:opacity-40"
+                  style={{ backgroundColor: S.btnBlue, color: "#fff" }}
+                >
+                  {salvandoTransfIns ? <Loader2 size={16} className="animate-spin" /> : <ArrowLeftRight size={16} />}
+                  Transferir
+                </button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
     );
   }
 
@@ -1540,6 +2114,20 @@ export default function ServiceApp() {
         </button>
       </div>
 
+      {/* Ação rápida: Transferir Insumo (só na aba Meus) */}
+      {view === "meus" && (
+        <div className="px-4 pb-1 shrink-0">
+          <button
+            onClick={iniciarTransferirInsumo}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold transition-colors"
+            style={{ backgroundColor: "rgba(55,138,221,0.08)", color: "#85B7EB", border: "1px solid rgba(55,138,221,0.2)" }}
+          >
+            <ArrowLeftRight size={13} />
+            Transferir insumo para outro operador
+          </button>
+        </div>
+      )}
+
       {/* ── LISTA: RECEBER ──────────────────────────────────────────────────── */}
       {view === "receber" && (
         <div className="flex-1 overflow-y-auto px-4 py-2 space-y-3">
@@ -1731,6 +2319,15 @@ export default function ServiceApp() {
                   style={{ backgroundColor: "rgba(168,85,247,0.08)", color: "#C084FC", border: "1px solid rgba(168,85,247,0.3)" }}
                 >
                   Enviar p/ Fábrica
+                </button>
+              </div>
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={() => iniciarApontar(svc)}
+                  className="flex-1 py-2 rounded-xl text-[11px] font-semibold transition-colors"
+                  style={{ backgroundColor: "rgba(212,175,55,0.10)", color: S.gold, border: `1px solid rgba(212,175,55,0.35)` }}
+                >
+                  Apontar Material
                 </button>
               </div>
             </Card>
