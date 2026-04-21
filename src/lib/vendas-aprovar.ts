@@ -116,11 +116,11 @@ async function ensureTinyToken(): Promise<string> {
   let token = await readTinyToken();
   if (!token) {
     const refreshed = await refreshTinyToken();
-    if (!refreshed) throw new Error("Token do Tiny não configurado. Vá em Configurações > Integrações.");
+    if (!refreshed) throw new Error("Token do Tiny não configurado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.");
     token = refreshed;
   }
 
-  // Verificação proativa: token expira em < 2 min? Renova antes
+  // Verificação proativa: token expira em < 10 min? Renova antes
   const [expiresRow] = await sql`
     SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_token_expires_at'
   `;
@@ -129,9 +129,14 @@ async function ensureTinyToken(): Promise<string> {
     try { expiresAtIso = JSON.parse(expiresRow.valor_encrypted); } catch { expiresAtIso = String(expiresRow.valor_encrypted); }
     expiresAtIso = expiresAtIso.replace(/"/g, "").trim();
     const expiresAt = new Date(expiresAtIso);
-    if (!isNaN(expiresAt.getTime()) && expiresAt.getTime() - Date.now() < 2 * 60 * 1000) {
+    if (!isNaN(expiresAt.getTime()) && expiresAt.getTime() - Date.now() < 10 * 60 * 1000) {
       const newToken = await refreshTinyToken();
-      if (newToken) token = newToken;
+      if (newToken) {
+        token = newToken;
+      } else if (expiresAt.getTime() < Date.now()) {
+        // Token já expirou E o refresh falhou — não adianta tentar enviar
+        throw new Error("Token do Tiny expirado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.");
+      }
     }
   }
 

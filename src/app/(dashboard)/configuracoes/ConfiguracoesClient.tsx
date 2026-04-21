@@ -3079,6 +3079,8 @@ function TabIntegracoes() {
   const [wooExpanded, setWooExpanded] = useState(false);
   const [kommoExpanded, setKommoExpanded] = useState(false);
   const [tinyExpanded, setTinyExpanded] = useState(false);
+  const [retryingAllTiny, setRetryingAllTiny] = useState(false);
+  const [retryAllMsg, setRetryAllMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
   const [mpExpanded, setMpExpanded] = useState(false);
   const [interClientId, setInterClientId] = useState("");
   const [interClientSecret, setInterClientSecret] = useState("");
@@ -3659,6 +3661,44 @@ function TabIntegracoes() {
           <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
             <CheckCircle size={12} /> Tiny ERP ativo — pedidos sincronizados automaticamente
           </p>
+        )}
+
+        {tinyConfigured && (
+          <div className="flex items-center gap-3 flex-wrap pt-1">
+            <button
+              onClick={async () => {
+                setRetryingAllTiny(true); setRetryAllMsg(null);
+                const res = await fetch("/api/tiny/resync-erros", { method: "POST" });
+                setRetryingAllTiny(false);
+                if (res.ok) {
+                  const d = await res.json();
+                  if (d.total === 0) {
+                    setRetryAllMsg({ tipo: "ok", texto: "Nenhuma venda com erro para reenviar." });
+                  } else {
+                    setRetryAllMsg({
+                      tipo: d.erros === 0 ? "ok" : "erro",
+                      texto: `${d.sincronizados}/${d.total} vendas reenviadas.${d.erros > 0 ? ` ${d.erros} falharam.` : ""}`,
+                    });
+                  }
+                } else {
+                  const d = await res.json().catch(() => ({ error: "Erro" }));
+                  setRetryAllMsg({ tipo: "erro", texto: d.error ?? "Erro ao reenviar" });
+                }
+                setTimeout(() => setRetryAllMsg(null), 8000);
+              }}
+              disabled={retryingAllTiny}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity hover:opacity-80"
+              style={{ backgroundColor: P.card, border: `1px solid ${P.border}`, color: P.creme }}
+            >
+              {retryingAllTiny ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {retryingAllTiny ? "Reenviando..." : "Reenviar Pendentes"}
+            </button>
+            {retryAllMsg && (
+              <p className="text-xs" style={{ color: retryAllMsg.tipo === "ok" ? P.verde : "#ef4444" }}>
+                {retryAllMsg.texto}
+              </p>
+            )}
+          </div>
         )}
       </div>
 
