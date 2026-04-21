@@ -299,9 +299,23 @@ export default function MercadoPagoCobranca({
 
   function copiarLink() {
     if (!initPoint) return;
-    navigator.clipboard.writeText(initPoint);
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(initPoint).catch(() => copiarFallback(initPoint));
+    } else {
+      copiarFallback(initPoint);
+    }
     setCopiado(true);
     setTimeout(() => setCopiado(false), 2000);
+  }
+
+  function copiarFallback(texto: string) {
+    const el = document.createElement("textarea");
+    el.value = texto;
+    el.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand("copy");
+    document.body.removeChild(el);
   }
 
   function abrirWhats() {

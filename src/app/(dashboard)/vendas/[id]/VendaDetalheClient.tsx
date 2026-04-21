@@ -837,6 +837,16 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   }
 
   // ── Share ───────────────────────────────────────────────────────────────────
+  function copiarFallback(texto: string) {
+    const el = document.createElement("textarea");
+    el.value = texto;
+    el.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand("copy");
+    document.body.removeChild(el);
+  }
+
   async function compartilhar() {
     if (!venda) return;
     setSharing(true);
@@ -844,7 +854,12 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
       const res = await fetch(`/api/vendas/${venda.id}/compartilhar`, { method: "POST" });
       const data = await res.json() as { token?: string };
       if (!res.ok) throw new Error("Erro");
-      await navigator.clipboard.writeText(`${window.location.origin}/orcamento/${data.token}`);
+      const url = `${window.location.origin}/orcamento/${data.token}`;
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url).catch(() => copiarFallback(url));
+      } else {
+        copiarFallback(url);
+      }
       setCopied(true); setTimeout(() => setCopied(false), 3000);
     } catch { /* silent */ }
     finally { setSharing(false); }
