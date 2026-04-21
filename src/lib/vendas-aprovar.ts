@@ -112,7 +112,7 @@ async function refreshTinyToken(): Promise<string | null> {
   return null;
 }
 
-async function ensureTinyToken(): Promise<string> {
+export async function ensureTinyToken(): Promise<string> {
   let token = await readTinyToken();
   if (!token) {
     const refreshed = await refreshTinyToken();
