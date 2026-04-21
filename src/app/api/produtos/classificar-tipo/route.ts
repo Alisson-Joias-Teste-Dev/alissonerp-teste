@@ -8,15 +8,15 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isProdutosAccess } from "@/lib/roles";
+import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 
-async function auth() {
+async function auth(acao: "ler" | "escrever" = "ler") {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: NextResponse.json({ error: "Não autenticado" }, { status: 401 }) };
   const role = user.user_metadata?.role as string | undefined;
-  if (!isProdutosAccess(role)) {
+  if (!(await temAcessoModulo(role ?? "", "produtos", acao))) {
     return { error: NextResponse.json({ error: "Sem permissão" }, { status: 403 }) };
   }
   return { user };
@@ -53,7 +53,7 @@ function regraJoia() {
 }
 
 export async function GET() {
-  const a = await auth();
+  const a = await auth("ler");
   if ("error" in a) return a.error;
 
   const [contagem] = await sql<{ insumo: string; joia: string; semclass: string; total: string }[]>`
@@ -88,7 +88,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const a = await auth();
+  const a = await auth("escrever");
   if ("error" in a) return a.error;
 
   const body = await req.json().catch(() => ({}));
