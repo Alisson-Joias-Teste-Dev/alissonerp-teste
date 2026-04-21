@@ -73,6 +73,8 @@ export interface CreatePreferenceParams {
   payer?: PreferencePayer;
   notificationUrl: string;
   backUrls: { success: string; pending: string; failure: string };
+  /** Número de parcelas a travar. Se omitido, permite até 12x. */
+  installments?: number;
 }
 
 export async function createPreference(params: CreatePreferenceParams) {
@@ -94,14 +96,20 @@ export async function createPreference(params: CreatePreferenceParams) {
         ...(params.payer.cpf ? { identification: { type: "CPF", number: params.payer.cpf } } : {}),
       } : undefined,
       payment_methods: {
-        // Excluir boleto, débito, ticket — só PIX + cartão crédito
+        // Só cartão de crédito
         excluded_payment_types: [
           { id: "ticket" },
           { id: "atm" },
           { id: "debit_card" },
           { id: "prepaid_card" },
+          { id: "bank_transfer" },
         ],
-        installments: 12,
+        excluded_payment_methods: [
+          { id: "pix" },
+        ],
+        // installments = máximo permitido; default_installments = pré-selecionado
+        installments: params.installments ?? 12,
+        ...(params.installments ? { default_installments: params.installments } : {}),
       },
       external_reference: `venda:${params.vendaId}:pag:${params.pagamentoId}`,
       notification_url: params.notificationUrl,
