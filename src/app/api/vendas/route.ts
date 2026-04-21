@@ -215,8 +215,10 @@ export async function POST(req: NextRequest) {
     `;
 
     // 3. Inserir itens (trigger recalcula totais automaticamente)
-    if (Array.isArray(body.itens) && body.itens.length > 0) {
-      for (const item of body.itens) {
+    if (!Array.isArray(body.itens) || body.itens.length === 0) {
+      throw new Error("Venda deve ter pelo menos um item");
+    }
+    for (const item of body.itens) {
         if (item.produto_id !== null && item.produto_id !== undefined && Number(item.produto_id) <= 0) {
           throw new Error("produto_id inválido em item");
         }
@@ -258,7 +260,6 @@ export async function POST(req: NextRequest) {
             ${item.observacao ?? null}
           )
         `;
-      }
     }
 
     // 4. Inserir pagamentos
@@ -294,6 +295,11 @@ export async function POST(req: NextRequest) {
       FROM alissonerp.vendas_erp
       WHERE id = ${venda.id}
     `;
+
+    // M1: Bloqueia venda com total zero (desconto 100% em todos os itens)
+    if (Number(completa.total_venda) <= 0 && body.tipo_venda !== "servico") {
+      throw new Error("Total da venda não pode ser zero. Verifique os preços e descontos dos itens.");
+    }
 
     return completa;
   });
