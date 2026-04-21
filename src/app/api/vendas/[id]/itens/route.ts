@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import {
+  validarPersonalizacao,
+  normalizarPersonalizacao,
+  appendPersonalizacaoObservacao,
+  calcularPrecoPorLetra,
+  calcularPesoPorLetra,
+  type ConfigPersonalizacao,
+  type CaracteresPermitidos,
+} from "@/lib/personalizacao-validacao";
 
 // ─── GET /api/vendas/[id]/itens ────────────────────────────────────────────────
 export async function GET(
@@ -20,7 +29,7 @@ export async function GET(
       id, venda_id, produto_id, nome_produto, sku,
       quantidade, preco_lista, pct_desconto, preco_unitario,
       total_item, pct_comissao, valor_comissao,
-      desconto_autorizado_por, observacao, peso_estimado, created_at
+      desconto_autorizado_por, observacao, peso_estimado, personalizacao, created_at
     FROM alissonerp.itens_venda_erp
     WHERE venda_id = ${vendaId}
     ORDER BY id
@@ -79,6 +88,7 @@ export async function POST(
     valor_comissao: number;
     peso_estimado?: number | null;
     observacao?:   string | null;
+    personalizacao?: { valor?: string } | null;
   };
 
   if (!body.nome_produto) {
@@ -91,27 +101,104 @@ export async function POST(
     return NextResponse.json({ error: "Preços obrigatórios" }, { status: 400 });
   }
 
+  // ── Personalizacao: valida contra config do produto (se existir) ────────────
+  // Alem disso, se config tem preco_por_letra > 0, RECALCULA preco_unitario/
+  // total_item server-side (seguranca — body pode vir adulterado).
+  let personalizacaoJson: Record<string, unknown> | null = null;
+  let observacaoFinal = body.observacao ?? null;
+  let precoListaFinal    = body.preco_lista;
+  let precoUnitarioFinal = body.preco_unitario;
+  let totalItemFinal     = body.total_item;
+  let valorComissaoFinal = body.valor_comissao ?? 0;
+  let pesoEstimadoFinal: number | null = body.peso_estimado ?? null;
+
+  if (body.produto_id) {
+    const [cfg] = await sql`
+      SELECT
+        tipo, obrigatorio,
+        min_caracteres, max_caracteres, caracteres_permitidos,
+        label, preco_por_letra, peso_por_letra
+      FROM alissonerp.produto_personalizacao
+      WHERE produto_id = ${body.produto_id}
+        AND ativo = true
+    `;
+    if (cfg) {
+      const config: ConfigPersonalizacao = {
+        tipo: cfg.tipo as string,
+        obrigatorio: Boolean(cfg.obrigatorio),
+        min_caracteres: Number(cfg.min_caracteres),
+        max_caracteres: Number(cfg.max_caracteres),
+        caracteres_permitidos: cfg.caracteres_permitidos as CaracteresPermitidos,
+        label: cfg.label as string,
+      };
+      const valor = body.personalizacao?.valor;
+      const validacao = validarPersonalizacao(valor, config);
+      if (!validacao.ok) {
+        return NextResponse.json(
+          { error: `Personalizacao invalida: ${validacao.erro}` },
+          { status: 400 },
+        );
+      }
+      if (valor?.trim()) {
+        const norm = normalizarPersonalizacao(valor, config);
+        personalizacaoJson = { ...norm };
+        observacaoFinal = appendPersonalizacaoObservacao(observacaoFinal, norm);
+
+        // Recalculo server-side se preco_por_letra esta configurado
+        const precoPorLetra = cfg.preco_por_letra != null ? Number(cfg.preco_por_letra) : null;
+        if (precoPorLetra != null && precoPorLetra > 0) {
+          const calc = calcularPrecoPorLetra(
+            { ...config, preco_por_letra: precoPorLetra },
+            valor,
+            body.pct_desconto ?? 0,
+            body.quantidade ?? 1,
+            body.pct_comissao ?? 0,
+          );
+          if (calc) {
+            precoListaFinal    = calc.preco_lista;
+            precoUnitarioFinal = calc.preco_unitario;
+            totalItemFinal     = calc.total_item;
+            valorComissaoFinal = calc.valor_comissao;
+          }
+        }
+
+        // Recalculo server-side de peso_estimado se peso_por_letra esta configurado
+        const pesoPorLetra = cfg.peso_por_letra != null ? Number(cfg.peso_por_letra) : null;
+        if (pesoPorLetra != null && pesoPorLetra > 0) {
+          const pesoCalc = calcularPesoPorLetra(
+            { ...config, peso_por_letra: pesoPorLetra },
+            valor,
+          );
+          if (pesoCalc != null) {
+            pesoEstimadoFinal = pesoCalc;
+          }
+        }
+      }
+    }
+  }
+
   const [novoItem] = await sql`
     INSERT INTO alissonerp.itens_venda_erp (
       venda_id, produto_id, nome_produto, sku,
       quantidade, preco_lista,
       pct_desconto, preco_unitario, total_item,
       pct_comissao, valor_comissao,
-      peso_estimado, observacao
+      peso_estimado, observacao, personalizacao
     ) VALUES (
       ${vendaId},
       ${body.produto_id ?? null},
       ${body.nome_produto},
       ${body.sku ?? null},
       ${body.quantidade},
-      ${body.preco_lista},
+      ${precoListaFinal},
       ${body.pct_desconto ?? 0},
-      ${body.preco_unitario},
-      ${body.total_item},
+      ${precoUnitarioFinal},
+      ${totalItemFinal},
       ${body.pct_comissao ?? 0},
-      ${body.valor_comissao ?? 0},
-      ${body.peso_estimado ?? null},
-      ${body.observacao ?? null}
+      ${valorComissaoFinal},
+      ${pesoEstimadoFinal},
+      ${observacaoFinal},
+      ${personalizacaoJson ? sql.json(personalizacaoJson as never) : null}
     )
     RETURNING id
   `;

@@ -131,14 +131,23 @@ export async function GET(req: NextRequest) {
     : sql``;
 
   const pendencia = sp.get("pendencia")?.trim() ?? "";
+  // Produtos com personalizacao ativa (PZxxxx sob encomenda) — peso/preco sao
+  // calculados por letra. Nao contam como pendencia de peso/preco.
+  const wNaoPersonalizado = sql`NOT EXISTS (
+    SELECT 1 FROM alissonerp.produto_personalizacao pp
+    WHERE pp.produto_id = p.id_produto
+      AND pp.ativo = true
+  )`;
   const wSemCat   = sql`(p.categoria IS NULL OR TRIM(p.categoria) = '')`;
   const wSemMetal = sql`(p.tipo_metal IS NULL OR TRIM(p.tipo_metal) = '')`;
-  const wSemPeso  = sql`(p.peso_precificado IS NULL OR p.peso_precificado = 0)`;
+  const wSemPeso  = sql`(p.peso_precificado IS NULL OR p.peso_precificado = 0)
+                    AND ${wNaoPersonalizado}`;
   // "Sem preço" = TODOS os preços são nulos ou zero (comparação numérica).
   // Antes comparava ::text = '0' e falhava para "0.00" gravado como string.
   const wSemPreco = sql`COALESCE(p.preco_sync::numeric,       0) = 0
                     AND COALESCE(p.preco_total_sync::numeric, 0) = 0
-                    AND COALESCE(p.preco_tiny::numeric,       0) = 0`;
+                    AND COALESCE(p.preco_tiny::numeric,       0) = 0
+                    AND ${wNaoPersonalizado}`;
   const wPendencia =
     pendencia === "sem_categoria" ? sql`AND ${wSemCat}` :
     pendencia === "sem_metal"     ? sql`AND ${wSemMetal}` :

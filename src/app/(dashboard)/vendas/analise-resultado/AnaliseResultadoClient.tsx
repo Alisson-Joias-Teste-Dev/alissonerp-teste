@@ -35,6 +35,7 @@ interface RankingRow {
   vendedor_nome:   string;
   qtd_vendas:      number;
   total_venda:     number;
+  total_meta:      number;
   total_desconto:  number;
   total_comissao:  number;
   ticket_medio:    number;
@@ -235,7 +236,7 @@ export default function AnaliseResultadoClient({ vendedorId, podeGerenciar }: Pr
                   <tbody>
                     {dados.ranking.map((row, idx) => {
                       const esperado = row.meta_valor != null ? row.meta_valor * pctDiasDecorridos : null;
-                      const diferenca = row.meta_valor != null ? row.total_venda - row.meta_valor : null;
+                      const diferenca = row.meta_valor != null ? row.total_meta - row.meta_valor : null;
                       return (
                         <tr key={row.vendedor_id} className="border-t hover:bg-gray-50 transition-colors"
                           style={{ borderColor: C.cremeBorder }}>
@@ -248,7 +249,7 @@ export default function AnaliseResultadoClient({ vendedorId, podeGerenciar }: Pr
                           <td className="px-3 py-2.5 font-medium whitespace-nowrap" style={{ color: "#1A1A1A" }}>
                             {row.vendedor_nome.split(" ")[0]}
                           </td>
-                          <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(row.total_venda)}</td>
+                          <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(row.total_meta)}</td>
                           <td className="px-3 py-2.5 tabular-nums" style={{ color: "#6B7280" }}>{esperado != null ? fmt(esperado) : "—"}</td>
                           <td className="px-3 py-2.5 tabular-nums" style={{ color: diferenca != null ? (diferenca >= 0 ? "#059669" : "#EF4444") : "#6B7280" }}>
                             {diferenca != null ? (diferenca >= 0 ? "+" : "") + fmt(diferenca) : "—"}
@@ -284,18 +285,18 @@ export default function AnaliseResultadoClient({ vendedorId, podeGerenciar }: Pr
               {dados.ranking.length === 0 ? (
                 <p className="text-center text-sm py-4" style={{ color: "#9CA3AF" }}>Nenhuma venda no período</p>
               ) : (() => {
-                const maxVal = Math.max(...dados.ranking.map(r => r.total_venda), 1);
+                const maxVal = Math.max(...dados.ranking.map(r => r.total_meta), 1);
                 return (
                   <div className="space-y-3">
                     {dados.ranking.map((row) => (
                       <div key={row.vendedor_id}>
                         <div className="flex justify-between text-xs mb-1">
                           <span className="font-medium truncate max-w-[120px]" style={{ color: "#1A1A1A" }}>{row.vendedor_nome.split(" ")[0]}</span>
-                          <span className="tabular-nums font-bold" style={{ color: C.esmeralda }}>{fmt(row.total_venda)}</span>
+                          <span className="tabular-nums font-bold" style={{ color: C.esmeralda }}>{fmt(row.total_meta)}</span>
                         </div>
                         <div className="w-full rounded-full h-3 relative" style={{ backgroundColor: "#F3F4F6" }}>
                           <div className="h-3 rounded-full transition-all duration-500"
-                            style={{ width: `${(row.total_venda / maxVal) * 100}%`, backgroundColor: C.esmeralda }} />
+                            style={{ width: `${(row.total_meta / maxVal) * 100}%`, backgroundColor: C.esmeralda }} />
                           {row.meta_valor != null && (
                             <div className="absolute top-0 h-3 w-0.5 rounded"
                               style={{ left: `${Math.min(100, (row.meta_valor / maxVal) * 100)}%`, backgroundColor: "#EF4444", opacity: 0.7 }} />

@@ -104,15 +104,27 @@ export function buildFiltrosProdutos(sp: Sp, opts: FiltrosOpts = {}) {
   // vem de preco_tiny, e peso é cosmético — ct×0.2 muito pequeno).
   const wNaoPedra = sql`(p.categoria IS NULL OR p.categoria NOT ILIKE 'Pedras%')`;
 
+  // Produtos com personalização ativa (SKUs PZxxxx sob encomenda) têm peso/preço
+  // calculados dinamicamente por letra — não devem aparecer em "sem peso" nem
+  // "sem preço". Config em alissonerp.produto_personalizacao (migration 162+).
+  const wNaoPersonalizado = sql`NOT EXISTS (
+    SELECT 1 FROM alissonerp.produto_personalizacao pp
+    WHERE pp.produto_id = p.id_produto
+      AND pp.ativo = true
+  )`;
+
   const wSemCat   = sql`(p.categoria IS NULL OR TRIM(p.categoria) = '')`;
   const wSemMetal = sql`(p.tipo_metal IS NULL OR TRIM(p.tipo_metal) = '') AND ${wNaoPedra}`;
-  const wSemPeso  = sql`(p.peso_precificado IS NULL OR p.peso_precificado = 0) AND ${wNaoPedra}`;
+  const wSemPeso  = sql`(p.peso_precificado IS NULL OR p.peso_precificado = 0)
+                    AND ${wNaoPedra}
+                    AND ${wNaoPersonalizado}`;
   // "Sem preço" = TODOS os preços nulos ou zero (comparação numérica).
   // Antes comparava ::text = '0' que falhava para "0.00" gravado como string.
   const wSemPreco = sql`COALESCE(p.preco_sync::numeric,       0) = 0
                     AND COALESCE(p.preco_total_sync::numeric, 0) = 0
                     AND COALESCE(p.preco_tiny::numeric,       0) = 0
-                    AND ${wNaoPedra}`;
+                    AND ${wNaoPedra}
+                    AND ${wNaoPersonalizado}`;
   const wPendencia = has(opts, "pendencia") && (
     pendencia === "sem_categoria" ? sql`AND ${wSemCat}` :
     pendencia === "sem_metal"     ? sql`AND ${wSemMetal}` :
