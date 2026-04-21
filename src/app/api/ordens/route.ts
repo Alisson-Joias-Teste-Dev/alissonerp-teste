@@ -3,6 +3,10 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, deleteFile } from "@/lib/storage";
 import { validarFichaTecnicaServer } from "@/lib/validar-ficha-tecnica";
+import {
+  personalizacaoParaObservacao,
+  type PersonalizacaoAplicada,
+} from "@/lib/personalizacao-validacao";
 
 const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
 const ALL_TIPOS = [
@@ -256,6 +260,28 @@ export async function POST(req: NextRequest) {
     `;
 
     // 2. Inserir itens (se houver)
+    //    Personalizacao e propagada da venda (itens_venda_erp.personalizacao)
+    //    quando a ordem for criada com venda_item_ids. Caso contrario, pode vir
+    //    no body do item como { personalizacao: { valor, ... } }.
+    //    Se houver, o texto legivel e concatenado em observacao (ourives ler la).
+    let personalizacoesPorProdutoId: Map<number, PersonalizacaoAplicada> = new Map();
+    if (venda_id && vendaItemIdsVal.length > 0) {
+      const itensPersonalizados = await tx`
+        SELECT produto_id, personalizacao
+        FROM alissonerp.itens_venda_erp
+        WHERE id = ANY(${vendaItemIdsVal})
+          AND personalizacao IS NOT NULL
+      `;
+      for (const it of itensPersonalizados) {
+        if (it.produto_id != null && it.personalizacao) {
+          personalizacoesPorProdutoId.set(
+            Number(it.produto_id),
+            it.personalizacao as PersonalizacaoAplicada,
+          );
+        }
+      }
+    }
+
     for (const item of itens) {
       if (!item.produto_id) continue;
       const [produto] = await tx`
@@ -269,16 +295,36 @@ export async function POST(req: NextRequest) {
       const pesoEstimado = item.peso_estimado != null
         ? Number(item.peso_estimado)
         : (produto.peso_precificado != null ? Number(produto.peso_precificado) : null);
+
+      // Personalizacao: da venda vinculada (prioridade) ou do body direto
+      const produtoIdNum = Number(produto.id_produto);
+      const personalizacao: PersonalizacaoAplicada | null =
+        personalizacoesPorProdutoId.get(produtoIdNum) ??
+        (item.personalizacao && typeof item.personalizacao === "object" && item.personalizacao.valor
+          ? (item.personalizacao as PersonalizacaoAplicada)
+          : null);
+
+      // observacao: se houver personalizacao, append texto legivel
+      const observacaoFinal =
+        personalizacao
+          ? [item.observacao ?? null, personalizacaoParaObservacao(personalizacao)]
+              .filter(Boolean)
+              .join("\n")
+          : (item.observacao ?? null);
+
       await tx`
         INSERT INTO alissonerp.itens_ordem (
-          ordem_id, produto_id, nome_produto, sku, quantidade, peso_estimado
+          ordem_id, produto_id, nome_produto, sku, quantidade,
+          peso_estimado, observacao, personalizacao
         ) VALUES (
           ${ordem.id},
           ${produto.id_produto},
           ${produto.nome},
           ${produto.sku},
           ${item.quantidade ?? 1},
-          ${pesoEstimado}
+          ${pesoEstimado},
+          ${observacaoFinal},
+          ${personalizacao ? sql.json(personalizacao as never) : null}
         )
       `;
     }

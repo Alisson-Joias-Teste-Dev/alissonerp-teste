@@ -13,6 +13,7 @@ import {
 import { formatPeso } from "@/lib/formatters";
 import ProdutoDrawer from "@/components/produtos/ProdutoDrawer";
 import CadastroProdutoModal from "@/components/produtos/CadastroProdutoModal";
+import ModalPersonalizacao from "@/components/produtos/ModalPersonalizacao";
 import GerenciarPedrasModal from "@/components/produtos/GerenciarPedrasModal";
 import BulkEditModal from "@/components/produtos/BulkEditModal";
 
@@ -184,6 +185,7 @@ export default function ProdutosClient() {
 
   // Cadastro modal
   const [showCadastro, setShowCadastro] = useState(false);
+  const [showPersonalizado, setShowPersonalizado] = useState(false);
   const [showPedras, setShowPedras]     = useState(false);
 
   // Seleção em massa
@@ -381,6 +383,14 @@ export default function ProdutosClient() {
               style={{ borderColor: "#184036", color: "#184036" }}
             >
               💎 Pedras
+            </button>
+            <button
+              onClick={() => setShowPersonalizado(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border hover:bg-amber-50"
+              style={{ borderColor: "#D4A843", color: "#184036" }}
+              title="Cadastrar regras de personalização (nome gravado, preço por letra)"
+            >
+              🏷️ + Personalizado
             </button>
             <button
               onClick={() => setShowCadastro(true)}
@@ -846,6 +856,10 @@ export default function ProdutosClient() {
         onClose={() => setShowPedras(false)}
         onCreated={bumpRefresh}
       />
+
+      {showPersonalizado && (
+        <ModalPersonalizacao onClose={() => setShowPersonalizado(false)} />
+      )}
     </div>
   );
 }

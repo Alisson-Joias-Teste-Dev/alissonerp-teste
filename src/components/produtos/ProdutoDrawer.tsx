@@ -469,6 +469,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
 
   // Cotação do ouro (para cálculo de preview em runtime)
   const [cotacaoOuro, setCotacaoOuro] = useState<number>(0);
+  // Categorias de precificação (curva) para auto-preenchimento de markup pelo peso
+  // Shape ainda indefinido (WIP de auto-precificação) — tipar quando a feature for concluída.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [categoriasCurva, setCategoriasCurva] = useState<unknown[]>([]);
 
   // Variações (quando eh_pai)
   const [variacoes, setVariacoes] = useState<Variacao[]>([]);

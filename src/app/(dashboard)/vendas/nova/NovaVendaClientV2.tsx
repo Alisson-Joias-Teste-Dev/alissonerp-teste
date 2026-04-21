@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, ArrowRight, Search, X, Plus, Loader2, CheckCircle,
-  User, Package, Truck, CreditCard, FileText, Star,
-  MapPin, AlertCircle, Check, ChevronRight, Ticket, Pencil, Wrench, Video,
+  ArrowLeft, ArrowRight, Search, X, Plus, Loader2, CheckCircle, CheckCircle2,
+  User, Package, Truck, CreditCard, FileText, Star, Calculator, Scale,
+  MapPin, AlertCircle, AlertTriangle, Check, ChevronRight, Ticket, Pencil, Wrench, Video,
 } from "lucide-react";
 import Link from "next/link";
 import CartaoInline from "@/components/vendas/CartaoInline";
@@ -71,7 +71,44 @@ interface ItemVenda {
   valor_comissao: number;
   peso_estimado: number | null;
   saldo_disponivel: number;
+  personalizacao?: { valor: string };
 }
+
+// Config de personalizacao (config vinda de /api/produtos/[id]/personalizacao)
+type CaracteresPermitidos =
+  | "alfa"
+  | "alfa_acento"
+  | "alfa_acento_espaco"
+  | "alfanum"
+  | "alfanum_acento_espaco"
+  | "numero"
+  | "qualquer";
+
+interface ConfigPersonalizacao {
+  produto_id: number;
+  tipo: string;
+  obrigatorio: boolean;
+  min_caracteres: number;
+  max_caracteres: number;
+  caracteres_permitidos: CaracteresPermitidos;
+  label: string;
+  placeholder: string | null;
+  exemplo: string | null;
+  observacao: string | null;
+  ativo: boolean;
+  preco_por_letra?: number | null;
+  peso_por_letra?:  number | null;
+}
+
+const REGEX_PERSONALIZACAO: Record<CaracteresPermitidos, RegExp> = {
+  alfa:                  /^[A-Za-z]+$/,
+  alfa_acento:           /^[A-Za-zÀ-ÖØ-öø-ÿ]+$/,
+  alfa_acento_espaco:    /^[A-Za-zÀ-ÖØ-öø-ÿ ]+$/,
+  alfanum:               /^[A-Za-z0-9]+$/,
+  alfanum_acento_espaco: /^[A-Za-z0-9À-ÖØ-öø-ÿ ]+$/,
+  numero:                /^[0-9]+$/,
+  qualquer:              /^.+$/,
+};
 
 interface Pagamento {
   _key: string;
@@ -415,6 +452,12 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [pctDesconto, setPctDesconto] = useState(0);
   const [descontoErr, setDescontoErr] = useState("");
   const [addingItem, setAddingItem] = useState(false);
+  // Cache de configs de personalização por produto_id.
+  //   null  → ja consultado, produto NAO tem config
+  //   undefined → ainda nao consultado
+  const [personalizacoesCache, setPersonalizacoesCache] = useState<
+    Record<number, ConfigPersonalizacao | null>
+  >({});
   // For serviço/fabricação
   const [servDescricao, setServDescricao] = useState("");
   const [servValor, setServValor] = useState("");
@@ -717,17 +760,118 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         pct = item.preco_lista > 0 ? Math.min(maxDesconto, Math.max(0, (valorDesc / item.preco_lista) * 100)) : 0;
         pct = Math.round(pct * 100) / 100;
       }
-      const precoUnit = item.preco_lista * (1 - pct / 100);
+      // Se produto tem preco_por_letra, recalcula preco_lista pelo nome digitado
+      const cfg = item.produto_id != null ? personalizacoesCache[item.produto_id] : null;
+      const precoPorLetra = cfg?.preco_por_letra;
+      let precoLista = item.preco_lista;
+      if (precoPorLetra != null && precoPorLetra > 0) {
+        const qtdLetras = item.personalizacao?.valor?.trim().length ?? 0;
+        precoLista = qtdLetras === 0 ? 0 : Math.round(qtdLetras * precoPorLetra * 100) / 100;
+      }
+      const precoUnit = precoLista * (1 - pct / 100);
       const totalItem = precoUnit * q;
       const pctComissao = getComissao(pct);
-      return { ...item, quantidade: q, pct_desconto: pct, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
+      return { ...item, quantidade: q, pct_desconto: pct, preco_lista: precoLista, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
     }));
+  }
+
+  // ─── Personalização (produto_personalizacao) ─────────────────────────────
+  // Busca config do produto e cacheia. Retorna cedo se ja em cache.
+  const fetchPersonalizacaoConfig = useCallback(async (produtoId: number) => {
+    if (personalizacoesCache[produtoId] !== undefined) return;
+    try {
+      const res = await fetch(`/api/produtos/${produtoId}/personalizacao`);
+      if (!res.ok) {
+        setPersonalizacoesCache(prev => ({ ...prev, [produtoId]: null }));
+        return;
+      }
+      const data = (await res.json()) as { config: ConfigPersonalizacao | null };
+      setPersonalizacoesCache(prev => ({ ...prev, [produtoId]: data.config ?? null }));
+    } catch {
+      setPersonalizacoesCache(prev => ({ ...prev, [produtoId]: null }));
+    }
+  }, [personalizacoesCache]);
+
+  // Valida valor atual do item contra config. Retorna erro (string) ou null.
+  function validarItemPersonalizacao(
+    item: ItemVenda,
+    config: ConfigPersonalizacao | null | undefined,
+  ): string | null {
+    if (!config) return null;
+    const valor = item.personalizacao?.valor?.trim() ?? "";
+    if (config.obrigatorio && !valor) {
+      return `${config.label} é obrigatório`;
+    }
+    if (!valor) return null;
+    if (valor.length < config.min_caracteres) {
+      return `Mínimo ${config.min_caracteres} caractere${config.min_caracteres === 1 ? "" : "s"}`;
+    }
+    if (valor.length > config.max_caracteres) {
+      return `Máximo ${config.max_caracteres} caractere${config.max_caracteres === 1 ? "" : "s"}`;
+    }
+    const rx = REGEX_PERSONALIZACAO[config.caracteres_permitidos];
+    if (rx && !rx.test(valor)) {
+      return "Caracteres não permitidos";
+    }
+    return null;
+  }
+
+  function atualizarPersonalizacao(itemKey: string, valor: string) {
+    setItens(prev =>
+      prev.map(it => {
+        if (it._key !== itemKey) return it;
+        const novaPers = { valor };
+        const cfg = it.produto_id != null ? personalizacoesCache[it.produto_id] : null;
+        const precoPorLetra = cfg?.preco_por_letra;
+        const pesoPorLetra  = cfg?.peso_por_letra;
+        const r2 = (n: number) => Math.round(n * 100) / 100;
+        const qtdLetras = valor.trim().length;
+
+        // Recalcula peso_estimado se peso_por_letra configurado
+        let pesoEstimadoNovo: number | null = it.peso_estimado;
+        if (pesoPorLetra != null && pesoPorLetra > 0) {
+          pesoEstimadoNovo = qtdLetras === 0 ? null : r2(qtdLetras * pesoPorLetra);
+        }
+
+        // Se o produto tem preco_por_letra, RECALCULA preços em tempo real
+        if (precoPorLetra != null && precoPorLetra > 0) {
+          const pctDesc   = it.pct_desconto ?? 0;
+          const qtd       = Math.max(1, it.quantidade || 1);
+          const pctCom    = it.pct_comissao ?? 0;
+          const precoLista    = qtdLetras === 0 ? 0 : r2(qtdLetras * precoPorLetra);
+          const precoUnitario = r2(precoLista * (1 - pctDesc / 100));
+          const totalItem     = r2(precoUnitario * qtd);
+          const valorComissao = r2(totalItem * pctCom / 100);
+          return {
+            ...it,
+            personalizacao: novaPers,
+            preco_lista:    precoLista,
+            preco_unitario: precoUnitario,
+            total_item:     totalItem,
+            valor_comissao: valorComissao,
+            peso_estimado:  pesoEstimadoNovo,
+          };
+        }
+        return { ...it, personalizacao: novaPers, peso_estimado: pesoEstimadoNovo };
+      }),
+    );
   }
 
   function handleAddItem() {
     if (!produtoSel) return;
     if (pctDesconto > maxDesconto) { setDescontoErr(`Máximo: ${maxDesconto}%`); return; }
-    setItens(prev => [...prev, { _key: uid(), ...calcItem(produtoSel, qtd, pctDesconto) }]);
+    const novoItemBase = calcItem(produtoSel, qtd, pctDesconto);
+    // Se o produto ja tem config com preco_por_letra no cache, zera precos iniciais
+    // (serao calculados ao digitar o nome). Se ainda nao esta no cache, o fetch
+    // abaixo atualiza o cache e o render do form detecta automaticamente.
+    const cachedCfg = personalizacoesCache[produtoSel.id];
+    const precoPorLetra = cachedCfg?.preco_por_letra;
+    const novoItem = (precoPorLetra != null && precoPorLetra > 0)
+      ? { ...novoItemBase, preco_lista: 0, preco_unitario: 0, total_item: 0, valor_comissao: 0 }
+      : novoItemBase;
+    setItens(prev => [...prev, { _key: uid(), ...novoItem }]);
+    // Busca config de personalizacao do produto (async, nao bloqueia o add)
+    void fetchPersonalizacaoConfig(produtoSel.id);
     setProdutoSel(null); setQtd(1); setPctDesconto(0); setDescontoErr(""); setAddingItem(false);
   }
 
@@ -787,6 +931,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
         preco_unitario: i.preco_unitario, total_item: i.total_item,
         pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao, peso_estimado: i.peso_estimado,
+        personalizacao: i.personalizacao?.valor?.trim()
+          ? { valor: i.personalizacao.valor.trim() }
+          : null,
       })),
       pagamentos: pagamentosBody,
     };
@@ -902,6 +1049,21 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       if (itens.length === 0) { setSaveErr("Adicione pelo menos 1 serviço para faturamento"); return; }
     }
     if (step === 3 && tipoVenda !== "servico" && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
+    // Valida pendencias de personalizacao no passo 3
+    if (step === 3) {
+      const pendencias = itens
+        .map((it, idx) => {
+          const cfg = it.produto_id != null ? personalizacoesCache[it.produto_id] : null;
+          const erro = validarItemPersonalizacao(it, cfg);
+          if (!erro) return null;
+          return `Item ${idx + 1}${it.sku ? ` (SKU ${it.sku})` : ""} — ${erro}`;
+        })
+        .filter((x): x is string => x !== null);
+      if (pendencias.length > 0) {
+        setSaveErr(`Pendências de personalização:\n• ${pendencias.join("\n• ")}`);
+        return;
+      }
+    }
     if (step === 4 && tipoVenda !== "servico" && !modoEntrega) { setSaveErr("Selecione o modo de entrega"); return; }
     if (step === 4 && tipoVenda === "servico" && !modoEntrega) { setSaveErr("Selecione o modo de entrega"); return; }
 
@@ -1774,52 +1936,145 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                   {itens.length === 0 && (
                     <tr><td colSpan={10} className="px-3 py-8 text-center text-sm" style={{ color: "#9CA3AF" }}>Nenhum item adicionado</td></tr>
                   )}
-                  {itens.map((item, idx) => (
-                    <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
-                      <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
-                      <td className="px-3 py-2.5 max-w-[200px] font-medium" style={{ color: "#1A1A1A" }}>
-                        <span className="block truncate">{item.nome_produto}</span>
-                        {tipoVenda === "produto" && item.saldo_disponivel < item.quantidade && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded mt-0.5"
-                            style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
-                            Sob encomenda · estoque: {item.saldo_disponivel}
-                          </span>
+                  {itens.map((item, idx) => {
+                    const configPers = item.produto_id != null
+                      ? personalizacoesCache[item.produto_id]
+                      : null;
+                    const erroPers = validarItemPersonalizacao(item, configPers);
+                    const numCols = tipoVenda === "produto" || tipoVenda === "garantia" ? 10 : 7;
+                    return (
+                      <>
+                        <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
+                          <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
+                          <td className="px-3 py-2.5 max-w-[200px] font-medium" style={{ color: "#1A1A1A" }}>
+                            <span className="block truncate">{item.nome_produto}</span>
+                            {tipoVenda === "produto" && item.saldo_disponivel < item.quantidade && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded mt-0.5"
+                                style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                                Sob encomenda · estoque: {item.saldo_disponivel}
+                              </span>
+                            )}
+                          </td>
+                          {(tipoVenda === "produto" || tipoVenda === "garantia") && (
+                            <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku ?? "—"}</td>
+                          )}
+                          <td className="px-3 py-2.5">
+                            <input type="number" min={1} value={item.quantidade}
+                              onChange={e => updateItem(item._key, "quantidade", e.target.value)}
+                              className="w-14 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                          </td>
+                          <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
+                          {(tipoVenda === "produto" || tipoVenda === "garantia") && (<>
+                            <td className="px-3 py-2.5">
+                              <input type="number" min={0} max={maxDesconto} step={0.01}
+                                value={item.pct_desconto || ""}
+                                onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
+                                placeholder="0"
+                                className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <DescontoValorInput
+                                precoLista={item.preco_lista}
+                                pctDesconto={item.pct_desconto}
+                                onCommit={val => updateItem(item._key, "desconto_valor", val)}
+                              />
+                            </td>
+                          </>)}
+                          <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</td>
+                          <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
+                          <td className="px-3 py-2.5">
+                            <button onClick={() => setItens(prev => prev.filter(i => i._key !== item._key))} className="text-gray-300 hover:text-red-400 transition-colors">
+                              <X size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                        {configPers && (
+                          <tr key={item._key + "-pers"} style={{ backgroundColor: "#FFFCF5" }}>
+                            <td colSpan={numCols} className="px-3 py-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                              <div className="pl-4 border-l-2" style={{ borderColor: "#D4A843" }}>
+                                <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                                  <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.esmeralda }}>
+                                    🏷️ {configPers.label}
+                                    {configPers.obrigatorio && <span className="text-red-600 ml-0.5">*</span>}
+                                  </span>
+                                  <span className="text-[10px] font-normal normal-case text-gray-500">
+                                    (máximo {configPers.max_caracteres} caractere{configPers.max_caracteres === 1 ? "" : "s"})
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <input
+                                    type="text"
+                                    value={item.personalizacao?.valor ?? ""}
+                                    onChange={(e) => atualizarPersonalizacao(item._key, e.target.value)}
+                                    maxLength={configPers.max_caracteres}
+                                    placeholder={configPers.placeholder ?? "Ex: JOAO"}
+                                    className="flex-1 min-w-[200px] px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2"
+                                    style={{
+                                      borderColor: erroPers ? "#EF4444" : C.cremeBorder,
+                                      letterSpacing: "0.05em",
+                                      textTransform: "uppercase",
+                                    }}
+                                  />
+                                  <span
+                                    className={`text-xs font-mono tabular-nums px-2 py-1 rounded ${
+                                      erroPers ? "text-red-600" : "text-gray-600"
+                                    }`}
+                                    style={{ backgroundColor: erroPers ? "#FEE2E2" : "#F3F4F6" }}
+                                  >
+                                    {(item.personalizacao?.valor?.length ?? 0)}/{configPers.max_caracteres}
+                                  </span>
+                                  {!erroPers && item.personalizacao?.valor && (
+                                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                  )}
+                                </div>
+                                {erroPers && (
+                                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                                    <AlertCircle className="w-3 h-3" />
+                                    {erroPers}
+                                  </p>
+                                )}
+                                {configPers.exemplo && !item.personalizacao?.valor && !erroPers && (
+                                  <p className="text-[10px] text-gray-400 mt-1">
+                                    Exemplo: {configPers.exemplo}
+                                  </p>
+                                )}
+                                {/* Preview do calculo quando tem preco_por_letra */}
+                                {configPers.preco_por_letra != null && configPers.preco_por_letra > 0 && (
+                                  <div
+                                    className="mt-2 flex items-center gap-2 text-xs px-2 py-1.5 rounded"
+                                    style={{ backgroundColor: "#FFFBF0", borderLeft: "3px solid #D4A843" }}
+                                  >
+                                    <Calculator className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#D4A843" }} />
+                                    <span style={{ color: "#6B7280" }}>
+                                      {item.personalizacao?.valor?.trim().length ?? 0} letras × {fmt(configPers.preco_por_letra)} =
+                                    </span>
+                                    <span className="font-semibold tabular-nums" style={{ color: C.esmeralda }}>
+                                      {fmt((item.personalizacao?.valor?.trim().length ?? 0) * configPers.preco_por_letra)}
+                                    </span>
+                                  </div>
+                                )}
+                                {/* Preview do peso quando tem peso_por_letra */}
+                                {configPers.peso_por_letra != null && configPers.peso_por_letra > 0 && (
+                                  <div
+                                    className="mt-1 flex items-center gap-2 text-xs px-2 py-1.5 rounded"
+                                    style={{ backgroundColor: "#F0F7F4", borderLeft: "3px solid #059669" }}
+                                  >
+                                    <Scale className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#059669" }} />
+                                    <span style={{ color: "#6B7280" }}>
+                                      {item.personalizacao?.valor?.trim().length ?? 0} letras × {configPers.peso_por_letra.toFixed(2)} g =
+                                    </span>
+                                    <span className="font-semibold tabular-nums" style={{ color: "#065F46" }}>
+                                      {((item.personalizacao?.valor?.trim().length ?? 0) * configPers.peso_por_letra).toFixed(2)} g
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      {(tipoVenda === "produto" || tipoVenda === "garantia") && (
-                        <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku ?? "—"}</td>
-                      )}
-                      <td className="px-3 py-2.5">
-                        <input type="number" min={1} value={item.quantidade}
-                          onChange={e => updateItem(item._key, "quantidade", e.target.value)}
-                          className="w-14 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
-                      </td>
-                      <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
-                      {(tipoVenda === "produto" || tipoVenda === "garantia") && (<>
-                        <td className="px-3 py-2.5">
-                          <input type="number" min={0} max={maxDesconto} step={0.01}
-                            value={item.pct_desconto || ""}
-                            onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
-                            placeholder="0"
-                            className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <DescontoValorInput
-                            precoLista={item.preco_lista}
-                            pctDesconto={item.pct_desconto}
-                            onCommit={val => updateItem(item._key, "desconto_valor", val)}
-                          />
-                        </td>
-                      </>)}
-                      <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</td>
-                      <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
-                      <td className="px-3 py-2.5">
-                        <button onClick={() => setItens(prev => prev.filter(i => i._key !== item._key))} className="text-gray-300 hover:text-red-400 transition-colors">
-                          <X size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                      </>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2312,7 +2567,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
             </Link>
           </div>
 
-          {saveErr && <p className="text-sm text-red-600 flex-1 text-center">{saveErr}</p>}
+          {saveErr && <p className="text-sm text-red-600 flex-1 text-center whitespace-pre-line">{saveErr}</p>}
 
           {step < 6 && (
             <button
