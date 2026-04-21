@@ -27,7 +27,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isProdutosAccess } from "@/lib/roles";
+import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
 
@@ -70,8 +70,12 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const role = user.user_metadata?.role as string | undefined;
-  if (!isProdutosAccess(role)) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  if (!isFullAccess(role ?? "")) {
+    const [perm] = await sql`
+      SELECT pode_ler FROM alissonerp.role_permissoes
+      WHERE role = ${role ?? ""} AND modulo = 'produtos'
+    `;
+    if (!perm?.pode_ler) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
   const sp = req.nextUrl.searchParams;
@@ -412,8 +416,12 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const role = user.user_metadata?.role as string | undefined;
-  if (!isProdutosAccess(role)) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  if (!isFullAccess(role ?? "")) {
+    const [perm] = await sql`
+      SELECT pode_escrever FROM alissonerp.role_permissoes
+      WHERE role = ${role ?? ""} AND modulo = 'produtos'
+    `;
+    if (!perm?.pode_escrever) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
   const body = await req.json() as {
