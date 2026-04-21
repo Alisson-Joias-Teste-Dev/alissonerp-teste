@@ -68,7 +68,7 @@ interface Venda {
   situacao: string; forma_envio: string | null; forma_frete: string | null;
   observacoes: string | null; observacoes_internas: string | null;
   video_obs_interna: string | null; tiny_sync_status: string | null;
-  tiny_pedido_id: string | null; bloqueado: boolean; qtd_itens: number;
+  tiny_pedido_id: string | null; tiny_sync_erro: string | null; bloqueado: boolean; qtd_itens: number;
   created_at?: string | null;
   credito_gerente_usado?: number;
   aprovacao_credito_tipo?: string | null;
@@ -329,6 +329,8 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const handleSaveRef    = useRef<() => Promise<void>>(async () => {});
   const [updating, setUpdating] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [retryingTiny, setRetryingTiny] = useState(false);
+  const [tinyRetryMsg, setTinyRetryMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [abrirNfce, setAbrirNfce] = useState(false);
@@ -839,6 +841,23 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   }
 
   // ── Share ───────────────────────────────────────────────────────────────────
+  async function retryTiny() {
+    if (!venda) return;
+    setRetryingTiny(true);
+    setTinyRetryMsg(null);
+    try {
+      const res = await fetch(`/api/vendas/${venda.id}/tiny-resync`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao reenviar");
+      setTinyRetryMsg("Enviado para o Tiny com sucesso!");
+      load();
+    } catch (e) {
+      setTinyRetryMsg(e instanceof Error ? e.message : "Erro ao reenviar para o Tiny");
+    } finally {
+      setRetryingTiny(false);
+    }
+  }
+
   function copiarFallback(texto: string) {
     const el = document.createElement("textarea");
     el.value = texto;
@@ -964,6 +983,23 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
             {venda.tiny_pedido_id && (
               <span className="text-xs px-2.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: "#DBEAFE", color: "#1E40AF" }}>
                 Tiny #{venda.tiny_pedido_id}
+              </span>
+            )}
+            {venda.tiny_sync_status === "erro" && !venda.tiny_pedido_id && (
+              <button
+                onClick={retryTiny}
+                disabled={retryingTiny}
+                className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-80"
+                style={{ backgroundColor: "#FEE2E2", color: "#991B1B" }}
+                title={venda.tiny_sync_erro ?? "Erro na sincronização com o Tiny"}
+              >
+                {retryingTiny ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                {retryingTiny ? "Reenviando..." : "Erro Tiny — Retentar"}
+              </button>
+            )}
+            {tinyRetryMsg && (
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${tinyRetryMsg.includes("sucesso") ? "bg-green-100 text-green-800" : "bg-red-100 text-red-700"}`}>
+                {tinyRetryMsg}
               </span>
             )}
             {venda.bloqueado && (
