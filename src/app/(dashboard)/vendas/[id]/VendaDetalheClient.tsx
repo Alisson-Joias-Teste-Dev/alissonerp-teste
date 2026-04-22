@@ -1691,8 +1691,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
           {prodTab === "produtos" && (
             <>
-              <div className="rounded-lg border overflow-hidden mb-3" style={{ borderColor: C.cremeBorder }}>
-                <table className="w-full text-sm">
+              <div className="rounded-lg border overflow-x-auto mb-3" style={{ borderColor: C.cremeBorder }}>
+                <table className="w-full text-sm min-w-max">
                   <thead style={{ backgroundColor: C.cremeBg }}>
                     <tr>
                       {["Nº", "Descrição", "Código (SKU)", "Qtde", "UN", "Preço lista", "% Desc", ...(edit.limited ? ["R$ Desc"] : []), "Preço un", "Comissão", "Preço total", ...(edit.limited ? [""] : [])].map(h => (
@@ -1705,7 +1705,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                       <tr><td colSpan={10} className="px-3 py-8 text-center text-sm" style={{ color: "#9CA3AF" }}>Nenhum produto adicionado</td></tr>
                     )}
                     {itens.map((item, idx) => (
-                      <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
+                      <tr key={`${item._key}-${item.pct_desconto}-${item.preco_unitario}-${item.quantidade}`} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                         <td className="px-3 py-2.5 text-xs tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
                         <td className="px-3 py-2.5 max-w-[180px] truncate font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
                         <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku}</td>
