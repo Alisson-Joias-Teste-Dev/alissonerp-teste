@@ -365,7 +365,7 @@ export default function MercadoPagoCobranca({
     setReservaError(null);
   }
 
-  if (!visivel) return null;
+  if (!visivel || !adminOuGerente) return null;
 
   return (
     <>

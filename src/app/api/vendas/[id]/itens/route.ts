@@ -203,5 +203,23 @@ export async function POST(
     RETURNING id
   `;
 
+  // Se novo item tem desconto >30% numa venda em rascunho, invalida aprovação anterior
+  if (venda.situacao === "rascunho" && (body.pct_desconto ?? 0) > 30) {
+    await sql`
+      UPDATE alissonerp.vendas_erp
+      SET desconto_aprovado_por = NULL,
+          desconto_aprovado_em  = NULL,
+          updated_at            = NOW()
+      WHERE id = ${vendaId}
+    `;
+    await sql`
+      UPDATE alissonerp.tarefas
+      SET status = 'cancelado', updated_at = NOW()
+      WHERE venda_id = ${vendaId}
+        AND status = 'aguardando_aprovacao'
+        AND tags @> ARRAY['aprovacao_desconto']::text[]
+    `.catch(() => {});
+  }
+
   return NextResponse.json({ id: novoItem.id }, { status: 201 });
 }

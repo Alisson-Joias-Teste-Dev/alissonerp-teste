@@ -9,6 +9,7 @@ import {
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
   RotateCcw, ArrowRight, PackageCheck,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 import { maskCpfCnpj } from "@/lib/formatters";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
@@ -261,7 +262,7 @@ interface Props {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDesconto }: Props) {
+export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAccess, maxDesconto }: Props) {
   const router = useRouter();
 
   // ── Server data ─────────────────────────────────────────────────────────────
@@ -312,7 +313,23 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const [parcelasRows, setParcelasRows] = useState<ParcelaRow[]>([]);
   const [multPagForma, setMultPagForma] = useState("Dinheiro");
   const [multPagValor, setMultPagValor] = useState("");
-  const [multPagamentos, setMultPagamentos] = useState<Array<{ _key: string; forma: string; valor: number }>>([]);
+  const [multPagamentos, setMultPagamentos] = useState<Array<{ _key: string; forma: string; valor: number; ouro_peso?: number; ouro_valor_grama?: number; ouro_foto_path?: string }>>([]);
+
+  // ── Ouro ────────────────────────────────────────────────────────────────────
+  const [ouroPeso, setOuroPeso] = useState("");
+  const [ouroValorGrama, setOuroValorGrama] = useState("");
+  const [ouroFotoFile, setOuroFotoFile] = useState<File | null>(null);
+  const [ouroFotoPreview, setOuroFotoPreview] = useState<string | null>(null);
+  const [ouroValidacaoIA, setOuroValidacaoIA] = useState<{ match: boolean; mensagem: string } | null>(null);
+  const [ouroValidando, setOuroValidando] = useState(false);
+  const [ouroFotoPath, setOuroFotoPath] = useState<string | null>(null);
+  // Ouro no fluxo Múltiplas
+  const [multOuroPeso, setMultOuroPeso] = useState("");
+  const [multOuroValorGrama, setMultOuroValorGrama] = useState("");
+  const [multOuroFotoFile, setMultOuroFotoFile] = useState<File | null>(null);
+  const [multOuroFotoPreview, setMultOuroFotoPreview] = useState<string | null>(null);
+  const [multOuroValidacaoIA, setMultOuroValidacaoIA] = useState<{ match: boolean; mensagem: string } | null>(null);
+  const [multOuroValidando, setMultOuroValidando] = useState(false);
 
   // ── Modals & delivery address ────────────────────────────────────────────────
   const [showDadosCliente, setShowDadosCliente] = useState(false);
@@ -372,7 +389,10 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
       id: venda.cliente_id, nome: venda.cliente_nome ?? "",
       cpf_cnpj: venda.cliente_cpf_cnpj, email: venda.cliente_email, telefone: venda.cliente_telefone,
     } : null);
-    setVendedorSel(venda.vendedor_id ?? "");
+    const vendedorAutoFill = venda.vendedor_id ?? vendedorId ?? "";
+    setVendedorSel(vendedorAutoFill);
+    // Se a venda não tem vendedor mas o usuário logado tem um vinculado, marca dirty para salvar
+    if (!venda.vendedor_id && vendedorId) markDirty();
     setDataVenda(venda.data_venda?.slice(0, 10) ?? "");
     setDataEntrega(venda.data_entrega?.slice(0, 10) ?? "");
     setTotalFrete(venda.total_frete);
@@ -568,6 +588,51 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
       await load();
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao atualizar item"); }
+    finally { setUpdating(false); }
+  }
+
+  // ── Ouro helpers ─────────────────────────────────────────────────────────────
+  async function validarOuroIA(file: File, peso: number, setter: (r: { match: boolean; mensagem: string } | null) => void, loadingSetter: (v: boolean) => void) {
+    loadingSetter(true);
+    setter(null);
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("peso", String(peso));
+    const res = await fetch("/api/pcp/validar-peso", { method: "POST", body: fd });
+    const result = await res.json() as { match: boolean; mensagem: string };
+    setter(result);
+    loadingSetter(false);
+  }
+
+  async function uploadOuroFoto(file: File, vendaId: number): Promise<string | null> {
+    const supabase = createClient();
+    const ext = file.name.split(".").pop() ?? "jpg";
+    const path = `pagamentos/${vendaId}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from("pagamento-fotos").upload(path, file, { contentType: file.type });
+    if (error) { setSaveErr("Erro ao enviar foto: " + error.message); return null; }
+    return path;
+  }
+
+  async function handleAddPagamentoOuro() {
+    if (!venda) return;
+    const peso = parseFloat(ouroPeso.replace(",", "."));
+    const valorGrama = parseFloat(ouroValorGrama.replace(",", "."));
+    if (!peso || peso <= 0) { setSaveErr("Informe o peso do ouro."); return; }
+    if (!valorGrama || valorGrama <= 0) { setSaveErr("Informe o valor da grama."); return; }
+    if (!ouroFotoFile) { setSaveErr("Foto da balança obrigatória."); return; }
+    if (!ouroValidacaoIA?.match) { setSaveErr("O peso precisa ser confirmado pela IA antes de salvar."); return; }
+    setUpdating(true);
+    try {
+      const path = await uploadOuroFoto(ouroFotoFile, venda.id);
+      if (!path) { setUpdating(false); return; }
+      const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forma: "Ouro", valor: peso * valorGrama, ouro_peso: peso, ouro_valor_grama: valorGrama, ouro_foto_path: path }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+      await load();
+      setOuroPeso(""); setOuroValorGrama(""); setOuroFotoFile(null); setOuroFotoPreview(null); setOuroValidacaoIA(null); setOuroFotoPath(null); setAddingPag(false);
+    } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao adicionar pagamento"); }
     finally { setUpdating(false); }
   }
 
@@ -1812,10 +1877,56 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                 </Select>
               </div>
 
-              {/* Dinheiro */}
-              {["Dinheiro", "Ouro", "A Receber"].includes(newPagForma) && (
+              {/* Dinheiro / A Receber */}
+              {["Dinheiro", "A Receber"].includes(newPagForma) && (
                 <div className="rounded-lg border px-4 py-3 text-sm mb-4" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
                   Pagamento em {newPagForma.toLowerCase()}. Não há campos adicionais necessários.
+                </div>
+              )}
+
+              {/* Ouro */}
+              {newPagForma === "Ouro" && (
+                <div className="rounded-lg border p-4 mb-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Peso (g)</Label>
+                      <input type="number" step="0.001" value={ouroPeso}
+                        onChange={e => { setOuroPeso(e.target.value); setOuroValidacaoIA(null); setOuroFotoFile(null); setOuroFotoPreview(null); }}
+                        placeholder="0.000"
+                        className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                    </div>
+                    <div>
+                      <Label>Valor da grama (R$)</Label>
+                      <input type="number" step="0.01" value={ouroValorGrama}
+                        onChange={e => setOuroValorGrama(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                    </div>
+                  </div>
+                  {ouroPeso && ouroValorGrama && (() => {
+                    const p = parseFloat(ouroPeso.replace(",", ".")); const vg = parseFloat(ouroValorGrama.replace(",", "."));
+                    if (p > 0 && vg > 0) return <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>Total: {fmt(p * vg)}</p>;
+                    return null;
+                  })()}
+                  <div>
+                    <Label>Foto da balança (obrigatória)</Label>
+                    <input type="file" accept="image/*" capture="environment"
+                      onChange={async e => {
+                        const file = e.target.files?.[0]; if (!file) return;
+                        setOuroFotoFile(file); setOuroFotoPreview(URL.createObjectURL(file)); setOuroValidacaoIA(null);
+                        const p = parseFloat(ouroPeso.replace(",", "."));
+                        if (p > 0) await validarOuroIA(file, p, setOuroValidacaoIA, setOuroValidando);
+                      }}
+                      className="w-full text-sm" />
+                    {ouroValidando && <p className="text-xs mt-1" style={{ color: "#6B7280" }}>Validando com IA...</p>}
+                    {ouroFotoPreview && <img src={ouroFotoPreview} alt="Balança" className="mt-2 h-24 rounded object-cover" />}
+                    {ouroValidacaoIA && (
+                      <div className={`mt-2 flex items-center gap-2 text-xs rounded px-3 py-2 ${ouroValidacaoIA.match ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
+                        {ouroValidacaoIA.match ? <CheckCircle size={13} /> : <XCircle size={13} />}
+                        {ouroValidacaoIA.mensagem}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1881,39 +1992,104 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                     <div className="flex flex-wrap items-end gap-2 mb-3">
                       <div className="flex-1 min-w-36">
                         <Label>Forma</Label>
-                        <Select value={multPagForma} onChange={e => setMultPagForma(e.target.value)}>
+                        <Select value={multPagForma} onChange={e => { setMultPagForma(e.target.value); setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null); }}>
                           <optgroup label="Métodos de Pagamento">
                             {FORMAS_PAGAMENTO.filter(f => f !== "Múltiplas").map(f => <option key={f} value={f}>{f}</option>)}
                           </optgroup>
                         </Select>
                       </div>
-                      <div className="flex-1 min-w-28">
-                        <Label>Valor{restante > 0 && <span className="ml-1 font-normal text-xs" style={{ color: "#9CA3AF" }}>(restante: {fmt(restante)})</span>}</Label>
-                        <input type="text" value={multPagValor} onChange={e => setMultPagValor(e.target.value)}
-                          placeholder={restante > 0 ? restante.toFixed(2).replace(".", ",") : "0,00"}
-                          onKeyDown={e => {
-                            if (e.key === "Enter") {
-                              const v = parseFloat(multPagValor.replace(",", ".")) || 0;
-                              if (v > 0 && restante > 0) {
-                                setMultPagamentos(prev => [...prev, { _key: Math.random().toString(36).slice(2), forma: multPagForma, valor: Math.min(v, restante) }]);
-                                setMultPagValor("");
+                      {multPagForma !== "Ouro" && (
+                        <div className="flex-1 min-w-28">
+                          <Label>Valor{restante > 0 && <span className="ml-1 font-normal text-xs" style={{ color: "#9CA3AF" }}>(restante: {fmt(restante)})</span>}</Label>
+                          <input type="text" value={multPagValor} onChange={e => setMultPagValor(e.target.value)}
+                            placeholder={restante > 0 ? restante.toFixed(2).replace(".", ",") : "0,00"}
+                            onKeyDown={e => {
+                              if (e.key === "Enter") {
+                                const v = parseFloat(multPagValor.replace(",", ".")) || 0;
+                                if (v > 0 && restante > 0) {
+                                  setMultPagamentos(prev => [...prev, { _key: Math.random().toString(36).slice(2), forma: multPagForma, valor: Math.min(v, restante) }]);
+                                  setMultPagValor("");
+                                }
                               }
+                            }}
+                            className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                        </div>
+                      )}
+                      {multPagForma !== "Ouro" ? (
+                        <button onClick={() => {
+                            const v = parseFloat(multPagValor.replace(",", ".")) || 0;
+                            if (v > 0 && restante > 0) {
+                              setMultPagamentos(prev => [...prev, { _key: Math.random().toString(36).slice(2), forma: multPagForma, valor: Math.min(v, restante) }]);
+                              setMultPagValor("");
                             }
-                          }}
-                          className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
-                      </div>
-                      <button onClick={() => {
-                          const v = parseFloat(multPagValor.replace(",", ".")) || 0;
-                          if (v > 0 && restante > 0) {
-                            setMultPagamentos(prev => [...prev, { _key: Math.random().toString(36).slice(2), forma: multPagForma, valor: Math.min(v, restante) }]);
-                            setMultPagValor("");
-                          }
-                        }} disabled={restante <= 0}
-                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
-                        style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                        <Plus size={13} /> Adicionar
-                      </button>
+                          }} disabled={restante <= 0}
+                          className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
+                          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                          <Plus size={13} /> Adicionar
+                        </button>
+                      ) : null}
                     </div>
+                    {/* Ouro no fluxo Múltiplas */}
+                    {multPagForma === "Ouro" && (
+                      <div className="rounded-lg border p-3 mb-3 space-y-3" style={{ borderColor: C.cremeBorder }}>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label>Peso (g)</Label>
+                            <input type="number" step="0.001" value={multOuroPeso}
+                              onChange={e => { setMultOuroPeso(e.target.value); setMultOuroValidacaoIA(null); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); }}
+                              placeholder="0.000"
+                              className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                          </div>
+                          <div>
+                            <Label>Valor da grama (R$)</Label>
+                            <input type="number" step="0.01" value={multOuroValorGrama}
+                              onChange={e => setMultOuroValorGrama(e.target.value)}
+                              placeholder="0.00"
+                              className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                          </div>
+                        </div>
+                        {multOuroPeso && multOuroValorGrama && (() => {
+                          const p = parseFloat(multOuroPeso); const vg = parseFloat(multOuroValorGrama);
+                          if (p > 0 && vg > 0) return <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>Total: {fmt(p * vg)}</p>;
+                          return null;
+                        })()}
+                        <div>
+                          <Label>Foto da balança</Label>
+                          <input type="file" accept="image/*" capture="environment"
+                            onChange={async e => {
+                              const file = e.target.files?.[0]; if (!file) return;
+                              setMultOuroFotoFile(file); setMultOuroFotoPreview(URL.createObjectURL(file)); setMultOuroValidacaoIA(null);
+                              const p = parseFloat(multOuroPeso);
+                              if (p > 0) await validarOuroIA(file, p, setMultOuroValidacaoIA, setMultOuroValidando);
+                            }}
+                            className="w-full text-sm" />
+                          {multOuroValidando && <p className="text-xs mt-1" style={{ color: "#6B7280" }}>Validando com IA...</p>}
+                          {multOuroFotoPreview && <img src={multOuroFotoPreview} alt="Balança" className="mt-2 h-20 rounded object-cover" />}
+                          {multOuroValidacaoIA && (
+                            <div className={`mt-2 flex items-center gap-2 text-xs rounded px-3 py-2 ${multOuroValidacaoIA.match ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
+                              {multOuroValidacaoIA.match ? <CheckCircle size={13} /> : <XCircle size={13} />}
+                              {multOuroValidacaoIA.mensagem}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          disabled={restante <= 0 || !multOuroValidacaoIA?.match || !multOuroFotoFile || multOuroValidando}
+                          onClick={async () => {
+                            if (!venda || !multOuroFotoFile) return;
+                            const peso = parseFloat(multOuroPeso); const vg = parseFloat(multOuroValorGrama);
+                            if (!peso || !vg) return;
+                            const path = await uploadOuroFoto(multOuroFotoFile, venda.id);
+                            if (!path) return;
+                            const valorOuro = Math.min(+(peso * vg).toFixed(2), restante);
+                            setMultPagamentos(prev => [...prev, { _key: Math.random().toString(36).slice(2), forma: "Ouro", valor: valorOuro, ouro_peso: peso, ouro_valor_grama: vg, ouro_foto_path: path }]);
+                            setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null);
+                          }}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                          <Plus size={13} /> Adicionar Ouro
+                        </button>
+                      </div>
+                    )}
                     {multPagamentos.length > 0 && (
                       <div className="space-y-1.5">
                         {multPagamentos.map(p => (
@@ -1943,28 +2119,44 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
 
               {/* Botão registrar pagamento */}
               {newPagForma !== "Múltiplas" ? (
-                <button onClick={() => {
-                    setNewPagValor(totalVenda.toFixed(2).replace(".", ","));
-                    handleAddPagamento();
-                  }} disabled={updating || totalVenda <= 0}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
-                  style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                  {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamento
-                </button>
+                newPagForma === "Ouro" ? (
+                  <button onClick={handleAddPagamentoOuro}
+                    disabled={updating || !ouroValidacaoIA?.match || !ouroFotoFile}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                    style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                    {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamento em Ouro
+                  </button>
+                ) : (
+                  <button onClick={() => {
+                      setNewPagValor(totalVenda.toFixed(2).replace(".", ","));
+                      handleAddPagamento();
+                    }} disabled={updating || totalVenda <= 0}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                    style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                    {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamento
+                  </button>
+                )
               ) : (
                 <button onClick={async () => {
                     if (multPagamentos.length === 0) return;
                     setUpdating(true);
                     try {
                       for (const p of multPagamentos) {
+                        const body: Record<string, unknown> = { forma: p.forma, valor: p.valor, parcelas: 1 };
+                        if (p.forma === "Ouro") {
+                          body.ouro_peso = p.ouro_peso;
+                          body.ouro_valor_grama = p.ouro_valor_grama;
+                          body.ouro_foto_path = p.ouro_foto_path;
+                        }
                         const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
                           method: "POST", headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ forma: p.forma, valor: p.valor, parcelas: 1 }),
+                          body: JSON.stringify(body),
                         });
                         if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Erro"); }
                       }
                       await load();
                       setMultPagamentos([]);
+                      setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null);
                     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao registrar pagamentos"); }
                     finally { setUpdating(false); }
                   }} disabled={updating || multPagamentos.length === 0}

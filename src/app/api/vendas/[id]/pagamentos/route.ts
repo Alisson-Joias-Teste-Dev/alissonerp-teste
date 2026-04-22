@@ -63,16 +63,21 @@ export async function POST(
   }
 
   const body = await req.json() as {
-    forma:       string;
-    gateway?:    string | null;
-    valor:       number;
-    parcelas?:   number;
-    status?:     string;
-    vale_numero?: string;
+    forma:            string;
+    gateway?:         string | null;
+    valor:            number;
+    parcelas?:        number;
+    status?:          string;
+    vale_numero?:     string;
+    ouro_peso?:       number;
+    ouro_valor_grama?: number;
+    ouro_foto_path?:  string;
   };
 
   if (!body.forma) return NextResponse.json({ error: "forma obrigatória" }, { status: 400 });
-  if (!body.valor || body.valor <= 0) return NextResponse.json({ error: "valor inválido" }, { status: 400 });
+  // Ouro calcula o valor server-side — não valida o campo valor aqui
+  if (body.forma !== "Ouro" && (!body.valor || body.valor <= 0))
+    return NextResponse.json({ error: "valor inválido" }, { status: 400 });
 
   // ── Hook: Vale-Troca ─────────────────────────────────────────────────────
   if (body.forma === "Vale-Troca") {
@@ -103,6 +108,42 @@ export async function POST(
       const msg = err instanceof Error ? err.message : String(err);
       return NextResponse.json({ error: msg }, { status: 400 });
     }
+  }
+
+  // ── Hook: Ouro ───────────────────────────────────────────────────────────────
+  if (body.forma === "Ouro") {
+    if (!body.ouro_peso || body.ouro_peso <= 0)
+      return NextResponse.json({ error: "Peso do ouro obrigatório" }, { status: 400 });
+    if (!body.ouro_valor_grama || body.ouro_valor_grama <= 0)
+      return NextResponse.json({ error: "Valor da grama obrigatório" }, { status: 400 });
+    if (!body.ouro_foto_path)
+      return NextResponse.json({ error: "Foto da balança obrigatória para pagamento em ouro" }, { status: 400 });
+
+    const valorOuro = +(body.ouro_peso * body.ouro_valor_grama).toFixed(2);
+
+    // Guard: venda já totalmente paga
+    const [tot] = await sql`
+      SELECT v.total_venda::numeric AS total_venda,
+             COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado'), 0)::numeric AS soma_confirmados
+      FROM alissonerp.vendas_erp v
+      LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
+      WHERE v.id = ${vendaId}
+      GROUP BY v.total_venda
+    `;
+    if (tot && Number(tot.soma_confirmados) + 0.01 >= Number(tot.total_venda)) {
+      return NextResponse.json({ error: "Venda já está totalmente paga" }, { status: 409 });
+    }
+
+    const [novoOuro] = await sql`
+      INSERT INTO alissonerp.pagamentos_venda
+        (venda_id, forma, valor, parcelas, status, data_confirmacao,
+         ouro_peso, ouro_valor_grama, ouro_foto_path)
+      VALUES
+        (${vendaId}, 'Ouro', ${valorOuro}, 1, 'confirmado', now(),
+         ${body.ouro_peso}, ${body.ouro_valor_grama}, ${body.ouro_foto_path})
+      RETURNING id
+    `;
+    return NextResponse.json({ id: novoOuro.id, valor: valorOuro }, { status: 201 });
   }
 
   const isDinheiro = body.forma === 'Dinheiro';

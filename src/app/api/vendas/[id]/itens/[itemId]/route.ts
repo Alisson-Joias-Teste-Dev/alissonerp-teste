@@ -52,6 +52,35 @@ export async function PATCH(
     WHERE id = ${iId}
   `;
 
+  // Se desconto foi alterado numa venda em rascunho, invalida aprovação anterior
+  if (body.pct_desconto !== undefined && venda.situacao === "rascunho") {
+    const [vendaAtual] = await sql`
+      SELECT desconto_aprovado_por,
+        EXISTS(
+          SELECT 1 FROM alissonerp.itens_venda_erp
+          WHERE venda_id = ${vendaId} AND pct_desconto > 30
+        ) AS tem_desconto_alto
+      FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    `;
+    if (vendaAtual?.tem_desconto_alto) {
+      await sql`
+        UPDATE alissonerp.vendas_erp
+        SET desconto_aprovado_por = NULL,
+            desconto_aprovado_em  = NULL,
+            updated_at            = NOW()
+        WHERE id = ${vendaId}
+      `;
+      // Cancela tarefa de desconto pendente, se houver
+      await sql`
+        UPDATE alissonerp.tarefas
+        SET status = 'cancelado', updated_at = NOW()
+        WHERE venda_id = ${vendaId}
+          AND status = 'aguardando_aprovacao'
+          AND tags @> ARRAY['aprovacao_desconto']::text[]
+      `.catch(() => {});
+    }
+  }
+
   return NextResponse.json({ ok: true });
 }
 
