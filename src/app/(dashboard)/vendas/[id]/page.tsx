@@ -35,11 +35,15 @@ export default async function VendaDetalhePage({ params }: Props) {
       } else if (u.mx_desconto_permitido != null && Number(u.mx_desconto_permitido) > 0) {
         maxDesconto = Number(u.mx_desconto_permitido);
       } else {
-        const FULL_ROLES = ["gerente_fabrica", "gerente_loja", "financeiro"];
-        maxDesconto = FULL_ROLES.includes(role) ? 30 : 15;
+        const FULL_ROLES = ["gerente_fabrica", "financeiro"];
+        if (FULL_ROLES.includes(role)) maxDesconto = 30;
+        else if (role === "gerente_loja") maxDesconto = 50;
+        else maxDesconto = 15;
       }
     }
   }
+
+  const descontoAuthThreshold = role === "gerente_loja" ? 30 : undefined;
 
   return (
     <VendaDetalheClient
@@ -48,6 +52,7 @@ export default async function VendaDetalhePage({ params }: Props) {
       vendedorId={vendedorId}
       isFullAccess={FULL_ACCESS.includes(role)}
       maxDesconto={maxDesconto}
+      descontoAuthThreshold={descontoAuthThreshold}
     />
   );
 }
