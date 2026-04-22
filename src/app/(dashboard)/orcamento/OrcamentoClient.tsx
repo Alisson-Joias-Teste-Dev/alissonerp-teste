@@ -345,7 +345,7 @@ export default function OrcamentoClient({
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function selecionarCliente(c: any) {
-    setClienteId(c.id_contato);
+    setClienteId(c.id_contato ?? c.id);
     setClientName(c.nome);
     setShowClienteDropdown(false);
     setClienteResults([]);
@@ -1187,7 +1187,7 @@ export default function OrcamentoClient({
                   onBlur={() => setTimeout(() => setShowClienteDropdown(false), 150)}
                   placeholder="Buscar cliente pelo nome ou CPF..." className="flex-1 text-sm outline-none" />
                 {!clienteId && clientName.length >= 2 && clienteResults.length === 0 && (
-                  <button onClick={() => setShowCpfSearch(true)} className="text-[9px] text-blue-600 font-semibold hover:underline whitespace-nowrap">Buscar CPF</button>
+                  <button onClick={() => { const d = clientName.replace(/\D/g, ""); setCadastroCpf(d.length >= 11 ? d : ""); setCadastroNome(d.length < 11 ? clientName : ""); setShowCadastro(true); }} className="text-[9px] text-blue-600 font-semibold hover:underline whitespace-nowrap">+ Cadastrar</button>
                 )}
               </div>
               {showClienteDropdown && clienteResults.length > 0 && (
@@ -1932,7 +1932,7 @@ export default function OrcamentoClient({
               className="flex-1 text-sm outline-none bg-transparent text-gray-700 placeholder:text-gray-300" />
             {clienteId && <span className="text-[9px] text-green-600 font-semibold shrink-0">Vinculado</span>}
             {!clienteId && clientName.length >= 2 && clienteResults.length === 0 && (
-              <button onClick={() => setShowCpfSearch(true)} className="text-[9px] text-blue-600 font-semibold shrink-0 hover:underline">CPF?</button>
+              <button onClick={() => { const d = clientName.replace(/\D/g, ""); setCadastroCpf(d.length >= 11 ? d : ""); setCadastroNome(d.length < 11 ? clientName : ""); setShowCadastro(true); }} className="text-[9px] text-blue-600 font-semibold shrink-0 hover:underline">+ Cadastrar</button>
             )}
           </div>
           {showClienteDropdown && clienteResults.length > 0 && (
