@@ -1734,7 +1734,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                             : (localPct[item.id!] !== undefined ? localPct[item.id!] : item.pct_desconto);
                           const effPrecoUn = editandoPreco
                             ? (parseFloat((localPrecoUn[item.id!] || "0").replace(",", ".")) || item.preco_unitario)
-                            : item.preco_lista * (1 - effPct / 100);
+                            : localPct[item.id!] !== undefined
+                              ? item.preco_lista * (1 - localPct[item.id!] / 100)
+                              : item.preco_unitario;
                           const effTotal    = effPrecoUn * item.quantidade;
                           const effDescVal  = item.preco_lista * effPct / 100;
                           return (<>
