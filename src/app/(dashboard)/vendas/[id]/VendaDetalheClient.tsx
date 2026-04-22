@@ -545,14 +545,51 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   async function handleUpdateItem(itemId: number, field: "quantidade" | "pct_desconto" | "preco_unitario", raw: string) {
     if (!venda) return;
 
-    // Edição direta do "Preço Un": converte em desconto % e delega
+    // Edição direta do "Preço Un": preserva o valor digitado pelo gerente
+    // (sem round-trip por pct_desconto, que perde precisão: 2000 -> 2000,04).
     if (field === "preco_unitario") {
       const item = venda.itens.find(i => i.id === itemId);
       if (!item || item.preco_lista <= 0) return;
       const novoPreco = parseFloat(raw.replace(",", ".")) || 0;
       if (novoPreco < 0 || novoPreco > item.preco_lista) return;
-      const pct = Math.min(maxDesconto, Math.max(0, ((item.preco_lista - novoPreco) / item.preco_lista) * 100));
-      return handleUpdateItem(itemId, "pct_desconto", String(Math.round(pct * 100) / 100));
+      let pct = ((item.preco_lista - novoPreco) / item.preco_lista) * 100;
+      if (pct > maxDesconto) return;
+      pct = Math.round(pct * 100) / 100;
+
+      const authThr = descontoAuthThreshold ?? maxDesconto;
+      if (pct > authThr) {
+        setPendingAuths(prev => ({ ...prev, [itemId]: { solicitacaoId: null, pct, status: "local" } }));
+        return;
+      } else {
+        setPendingAuths(prev => {
+          if (!prev[itemId]) return prev;
+          const next = { ...prev };
+          delete next[itemId];
+          return next;
+        });
+      }
+
+      const newQtd        = item.quantidade;
+      const precoUnit     = novoPreco;                             // preserva precisão digitada
+      const totalItem     = precoUnit * newQtd;
+      const pctComissao   = getComissao(pct);
+      const valorComissao = totalItem * pctComissao / 100;
+
+      setUpdating(true);
+      try {
+        const res = await fetch(`/api/vendas/${venda.id}/itens/${itemId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            quantidade: newQtd, pct_desconto: pct,
+            preco_unitario: precoUnit, total_item: totalItem,
+            pct_comissao: pctComissao, valor_comissao: valorComissao,
+          }),
+        });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+        await load();
+      } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao atualizar item"); }
+      finally { setUpdating(false); }
+      return;
     }
 
     const val = Number(raw);
@@ -1525,7 +1562,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                 <table className="w-full text-sm">
                   <thead style={{ backgroundColor: C.cremeBg }}>
                     <tr>
-                      {["Nº", "Descrição", "Código (SKU)", "Qtde", "UN", "Preço lista", "% Desc", ...(edit.limited ? ["R$ Desc"] : []), "Preço un", "Preço total", ...(edit.limited ? [""] : [])].map(h => (
+                      {["Nº", "Descrição", "Código (SKU)", "Qtde", "UN", "Preço lista", "% Desc", ...(edit.limited ? ["R$ Desc"] : []), "Preço un", "Comissão", "Preço total", ...(edit.limited ? [""] : [])].map(h => (
                         <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>{h}</th>
                       ))}
                     </tr>
@@ -1597,6 +1634,17 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                           ) : (
                             <span className="tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</span>
                           )}
+                        </td>
+                        <td className="px-3 py-2.5 tabular-nums text-xs whitespace-nowrap"
+                          style={{ color: item.pct_comissao > 0 ? "#184036" : "#9CA3AF" }}>
+                          {item.pct_comissao > 0 ? (
+                            <span>
+                              <strong>{item.pct_comissao.toFixed(2)}%</strong>
+                              <span className="text-[10px] ml-1" style={{ color: "#6B7280" }}>
+                                ({fmt(item.valor_comissao)})
+                              </span>
+                            </span>
+                          ) : "—"}
                         </td>
                         <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
                         {edit.limited && (

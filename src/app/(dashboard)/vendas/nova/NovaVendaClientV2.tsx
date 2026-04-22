@@ -758,6 +758,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       if (item._key !== key) return item;
       let q = item.quantidade;
       let pct = item.pct_desconto;
+      let precoUnitDigitado: number | null = null;
+
       if (field === "quantidade") q = Math.max(1, parseInt(raw) || 1);
       if (field === "pct_desconto") pct = Math.min(maxDesconto, Math.max(0, parseFloat(raw.replace(",", ".")) || 0));
       if (field === "desconto_valor") {
@@ -770,10 +772,12 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         if (item.preco_lista > 0 && novoPreco >= 0 && novoPreco <= item.preco_lista) {
           pct = Math.min(maxDesconto, Math.max(0, ((item.preco_lista - novoPreco) / item.preco_lista) * 100));
           pct = Math.round(pct * 100) / 100;
+          precoUnitDigitado = novoPreco;
         }
       }
 
       // Auth threshold: se acima do limite livre, pende autorização
+      let authCapped = false;
       if (field !== "quantidade" && pct > authThr) {
         const requestedPct = pct;
         setPendingAuths(prev2 => {
@@ -782,6 +786,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
           return { ...prev2, [key]: { solicitacaoId: null, pct: requestedPct, status: "local" } };
         });
         pct = authThr; // aplica somente o máximo livre
+        authCapped = true;
       } else if (field !== "quantidade" && pct <= authThr) {
         setPendingAuths(prev2 => {
           if (!prev2[key]) return prev2;
@@ -798,7 +803,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         const qtdLetras = item.personalizacao?.valor?.trim().length ?? 0;
         precoLista = qtdLetras === 0 ? 0 : Math.round(qtdLetras * precoPorLetra * 100) / 100;
       }
-      const precoUnit = precoLista * (1 - pct / 100);
+      // Preço unitário: preserva valor digitado para evitar drift de arredondamento.
+      // Se auth cortou o desconto ou personalização mudou o preço_lista, recalcula.
+      const precoUnit = (precoUnitDigitado !== null && !authCapped && precoLista === item.preco_lista)
+        ? precoUnitDigitado
+        : precoLista * (1 - pct / 100);
       const totalItem = precoUnit * q;
       const pctComissao = getComissao(pct);
       return { ...item, quantidade: q, pct_desconto: pct, preco_lista: precoLista, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
@@ -1966,21 +1975,23 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                     {["Nº", "Descrição", tipoVenda === "produto" || tipoVenda === "garantia" ? "SKU" : "", "Qtde", "Preço Lista",
                       tipoVenda === "produto" || tipoVenda === "garantia" ? "% Desc" : "",
                       tipoVenda === "produto" || tipoVenda === "garantia" ? "R$ Desc" : "",
-                      "Preço Un", "Total", ""].filter(Boolean).map(h => (
+                      "Preço Un",
+                      tipoVenda === "produto" || tipoVenda === "garantia" ? "Comissão" : "",
+                      "Total", ""].filter(Boolean).map(h => (
                       <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {itens.length === 0 && (
-                    <tr><td colSpan={10} className="px-3 py-8 text-center text-sm" style={{ color: "#9CA3AF" }}>Nenhum item adicionado</td></tr>
+                    <tr><td colSpan={11} className="px-3 py-8 text-center text-sm" style={{ color: "#9CA3AF" }}>Nenhum item adicionado</td></tr>
                   )}
                   {itens.map((item, idx) => {
                     const configPers = item.produto_id != null
                       ? personalizacoesCache[item.produto_id]
                       : null;
                     const erroPers = validarItemPersonalizacao(item, configPers);
-                    const numCols = tipoVenda === "produto" || tipoVenda === "garantia" ? 10 : 7;
+                    const numCols = tipoVenda === "produto" || tipoVenda === "garantia" ? 11 : 7;
                     return (
                       <>
                         <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
@@ -2061,6 +2072,19 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                               <span className="tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</span>
                             )}
                           </td>
+                          {(tipoVenda === "produto" || tipoVenda === "garantia") && (
+                            <td className="px-3 py-2.5 tabular-nums text-xs whitespace-nowrap"
+                              style={{ color: item.pct_comissao > 0 ? "#184036" : "#9CA3AF" }}>
+                              {item.pct_comissao > 0 ? (
+                                <span>
+                                  <strong>{item.pct_comissao.toFixed(2)}%</strong>
+                                  <span className="text-[10px] ml-1" style={{ color: "#6B7280" }}>
+                                    ({fmt(item.valor_comissao)})
+                                  </span>
+                                </span>
+                              ) : "—"}
+                            </td>
+                          )}
                           <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
                           <td className="px-3 py-2.5">
                             <button onClick={() => setItens(prev => prev.filter(i => i._key !== item._key))} className="text-gray-300 hover:text-red-400 transition-colors">
