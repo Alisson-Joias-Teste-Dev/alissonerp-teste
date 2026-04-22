@@ -14,11 +14,11 @@ O workflow n8n roda e completa com sucesso (status: success), o banco de dados �
 | Serviço | URL/Endereço |
 |---------|-------------|
 | PostgreSQL | 72.60.55.140:5543, db: postgres, user: postgres |
-| Senha DB | V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA |
+| Senha DB | <ver .env.local → DATABASE_URL> |
 | Directus | https://base.alissonranyel.com.br |
-| Token Directus | JqEPp9fYa8Bzv9Xa_lUaqNRiDypaNQFr |
+| Token Directus | <ver painel Directus → Settings → API Tokens> |
 | n8n | https://etl.alissonranyel.com.br |
-| n8n API Key | eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2ZDBlNjAzOS1jYzMxLTQzY2QtYWFjMy1iODcwNzQ1NjY3MGUiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiZWJjNzBhNjYtM2IyOS00MzU3LWI2NmYtODIzMTk1YzZmNzY2IiwiaWF0IjoxNzcyNjUyMjY1LCJleHAiOjE3NzUxODg4MDB9.3r8oxU1narRKqSOvWo7B3GZac_eEcV7RYmNTNOH1CqM |
+| n8n API Key | <ver n8n → Settings → API Keys> |
 
 ## Workflows n8n
 
