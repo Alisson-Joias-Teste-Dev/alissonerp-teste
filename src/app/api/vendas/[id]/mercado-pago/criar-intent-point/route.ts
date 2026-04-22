@@ -44,6 +44,7 @@ export async function POST(
     valor?: number;
     installments?: number;
     payment_type?: "credit_card" | "debit_card" | "pix";
+    pagamento_id?: number;
   };
 
   if (!body.device_id) {
@@ -91,7 +92,12 @@ export async function POST(
   `;
   const totalVenda = Number(venda.total_venda);
   const restante = Math.max(0, totalVenda - Number(soma_confirmados));
-  const valorCobranca = body.valor != null ? Number(body.valor) : restante;
+
+  if (Number(soma_confirmados) + 0.01 >= totalVenda) {
+    return NextResponse.json({ error: "Venda já está totalmente paga — não é possível gerar cobrança na maquininha" }, { status: 409 });
+  }
+
+  const valorCobranca = body.valor != null ? Math.min(Number(body.valor), restante) : restante;
 
   if (!valorCobranca || valorCobranca <= 0) {
     return NextResponse.json({ error: "Valor da cobrança deve ser > 0" }, { status: 400 });
@@ -100,17 +106,42 @@ export async function POST(
     return NextResponse.json({ error: "Valor mínimo para cobrança na maquininha é R$ 1,00" }, { status: 400 });
   }
 
-  // ─── Cria pagamento pendente ──────────────────────────────────────────────
-  const [pag] = await sql`
-    INSERT INTO alissonerp.pagamentos_venda (
-      venda_id, forma, gateway, valor, parcelas, status
-    ) VALUES (
-      ${vendaId}, 'Mercado Pago', 'Mercado Pago Point',
-      ${valorCobranca}, ${body.installments ?? 1}, 'pendente'
-    )
-    RETURNING id
-  `;
-  const pagamentoId = Number(pag.id);
+  // ─── Cria ou reusa pagamento pendente ────────────────────────────────────
+  let pagamentoId: number;
+  if (body.pagamento_id) {
+    const [pre] = await sql`
+      SELECT id FROM alissonerp.pagamentos_venda
+      WHERE id = ${body.pagamento_id} AND venda_id = ${vendaId} AND status = 'pendente'
+      LIMIT 1
+    `;
+    if (pre) {
+      await sql`
+        UPDATE alissonerp.pagamentos_venda
+        SET forma = 'Mercado Pago', gateway = 'Mercado Pago Point',
+            valor = ${valorCobranca}, parcelas = ${body.installments ?? 1}
+        WHERE id = ${pre.id}
+      `;
+      pagamentoId = Number(pre.id);
+    } else {
+      const [pag] = await sql`
+        INSERT INTO alissonerp.pagamentos_venda (venda_id, forma, gateway, valor, parcelas, status)
+        VALUES (${vendaId}, 'Mercado Pago', 'Mercado Pago Point', ${valorCobranca}, ${body.installments ?? 1}, 'pendente')
+        RETURNING id
+      `;
+      pagamentoId = Number(pag.id);
+    }
+  } else {
+    const [pag] = await sql`
+      INSERT INTO alissonerp.pagamentos_venda (
+        venda_id, forma, gateway, valor, parcelas, status
+      ) VALUES (
+        ${vendaId}, 'Mercado Pago', 'Mercado Pago Point',
+        ${valorCobranca}, ${body.installments ?? 1}, 'pendente'
+      )
+      RETURNING id
+    `;
+    pagamentoId = Number(pag.id);
+  }
 
   // ─── Dispara intent na MP ─────────────────────────────────────────────────
   let intent;

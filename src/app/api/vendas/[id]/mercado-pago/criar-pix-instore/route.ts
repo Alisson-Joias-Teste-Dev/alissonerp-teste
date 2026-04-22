@@ -51,7 +51,7 @@ export async function POST(
     return NextResponse.json({ error: "Você só pode cobrar suas próprias vendas" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({})) as { valor?: number };
+  const body = await req.json().catch(() => ({})) as { valor?: number; pagamento_id?: number };
 
   // ─── Calcula valor ────────────────────────────────────────────────────────
   const [{ soma_confirmados }] = await sql`
@@ -61,33 +61,63 @@ export async function POST(
   `;
   const totalVenda = Number(venda.total_venda);
   const restante = Math.max(0, totalVenda - Number(soma_confirmados));
-  const valorCobranca = body.valor != null ? Number(body.valor) : restante;
+
+  if (Number(soma_confirmados) + 0.01 >= totalVenda) {
+    return NextResponse.json({ error: "Venda já está totalmente paga — não é possível gerar novo Pix" }, { status: 409 });
+  }
+
+  const valorCobranca = body.valor != null ? Math.min(Number(body.valor), restante) : restante;
 
   if (!valorCobranca || valorCobranca <= 0) {
     return NextResponse.json({ error: "Valor da cobrança deve ser > 0" }, { status: 400 });
   }
 
   // ─── Cria ou reusa pagamento pendente ─────────────────────────────────────
-  const [existente] = await sql`
-    SELECT id FROM alissonerp.pagamentos_venda
-    WHERE venda_id = ${vendaId} AND forma = 'Pix' AND status = 'pendente'
-      AND gateway = 'Mercado Pago Pix In-Store'
-    ORDER BY id LIMIT 1
-  `;
-
   let pagamentoId: number;
-  if (existente) {
-    await sql`
-      UPDATE alissonerp.pagamentos_venda SET valor = ${valorCobranca} WHERE id = ${existente.id}
+
+  if (body.pagamento_id) {
+    // Múltiplas: usa o registro pré-criado específico deste widget
+    const [pre] = await sql`
+      SELECT id FROM alissonerp.pagamentos_venda
+      WHERE id = ${body.pagamento_id} AND venda_id = ${vendaId} AND status = 'pendente'
+      LIMIT 1
     `;
-    pagamentoId = Number(existente.id);
+    if (pre) {
+      await sql`
+        UPDATE alissonerp.pagamentos_venda
+        SET forma = 'Pix', gateway = 'Mercado Pago Pix In-Store', valor = ${valorCobranca}
+        WHERE id = ${pre.id}
+      `;
+      pagamentoId = Number(pre.id);
+    } else {
+      // Registro não encontrado (removido ou já confirmado) — cria novo
+      const [pag] = await sql`
+        INSERT INTO alissonerp.pagamentos_venda (venda_id, forma, gateway, valor, parcelas, status)
+        VALUES (${vendaId}, 'Pix', 'Mercado Pago Pix In-Store', ${valorCobranca}, 1, 'pendente')
+        RETURNING id
+      `;
+      pagamentoId = Number(pag.id);
+    }
   } else {
-    const [pag] = await sql`
-      INSERT INTO alissonerp.pagamentos_venda (venda_id, forma, gateway, valor, parcelas, status)
-      VALUES (${vendaId}, 'Pix', 'Mercado Pago Pix In-Store', ${valorCobranca}, 1, 'pendente')
-      RETURNING id
+    const [existente] = await sql`
+      SELECT id FROM alissonerp.pagamentos_venda
+      WHERE venda_id = ${vendaId} AND forma = 'Pix' AND status = 'pendente'
+        AND gateway = 'Mercado Pago Pix In-Store'
+      ORDER BY id LIMIT 1
     `;
-    pagamentoId = Number(pag.id);
+    if (existente) {
+      await sql`
+        UPDATE alissonerp.pagamentos_venda SET valor = ${valorCobranca} WHERE id = ${existente.id}
+      `;
+      pagamentoId = Number(existente.id);
+    } else {
+      const [pag] = await sql`
+        INSERT INTO alissonerp.pagamentos_venda (venda_id, forma, gateway, valor, parcelas, status)
+        VALUES (${vendaId}, 'Pix', 'Mercado Pago Pix In-Store', ${valorCobranca}, 1, 'pendente')
+        RETURNING id
+      `;
+      pagamentoId = Number(pag.id);
+    }
   }
 
   // ─── Chama In-Store QR API ────────────────────────────────────────────────

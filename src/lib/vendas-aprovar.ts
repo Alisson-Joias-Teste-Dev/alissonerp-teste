@@ -368,6 +368,20 @@ export async function criarOrdemDoOrcamento(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (sql as any).begin(async (tx: typeof sql) => {
+    // C3: Lock no orçamento para evitar criação de ordens duplicadas em retries simultâneos
+    const [orcLock] = await tx`
+      SELECT id, ordem_gerada_id FROM alissonerp.orcamentos WHERE id = ${vendaOrc.orc_id} FOR UPDATE
+    `;
+    if (orcLock?.ordem_gerada_id) {
+      const [existenteTx] = await tx`
+        SELECT id, numero_ordem FROM alissonerp.ordens WHERE id = ${orcLock.ordem_gerada_id}
+      `;
+      if (existenteTx) {
+        ordemCriada = { id: Number(existenteTx.id), numero_ordem: String(existenteTx.numero_ordem) };
+        return;
+      }
+    }
+
     const perfilNomes: Record<string, string> = {
       Anatomica: "Anatômica", Boleada: "Boleada", BoleadaDouble: "Boleada Dupla",
       Chanfrada: "Chanfrada", Concava: "Côncava", FrisoUnico: "Friso Único",
@@ -467,10 +481,18 @@ export async function criarOrdemDoOrcamento(
       }
     }
 
-    await tx`
+    const [auditLoja] = await tx`
       INSERT INTO alissonerp.auditorias (situacao, tipo_auditoria, rota_processo, ordem_id, peso_negociado, parecer, dados_ordem)
       VALUES ('pendente', 'loja', 'entrada_ordem', ${ordem.id}, ${pesoNeg}, NULL,
         ${JSON.stringify({ numero_ordem: numeroOrdem, tipo_ordem: "fabricacao", rota: "pcp", peso_negociado: pesoNeg, origem: "orcamento_venda", orcamento_id: vendaOrc.orc_id })}::text::jsonb)
+      RETURNING id
+    `;
+    // Aprovação automática: dispara fn_processar_auditoria que cria saida_ordem + pcp
+    // (trigger AFTER UPDATE — INSERT com pendente não dispara sozinho)
+    await tx`
+      UPDATE alissonerp.auditorias
+      SET situacao = 'aprovado', data_conclusao = NOW(), parecer = 'Aprovação automática — ERP'
+      WHERE id = ${auditLoja.id}
     `;
 
     await tx`
@@ -498,12 +520,6 @@ export async function criarOrdemDeServico(
   `;
   if (!venda) return null;
 
-  // Idempotência: já existe ordem vinculada
-  const [existente] = await sql`
-    SELECT id, numero_ordem FROM alissonerp.ordens WHERE venda_id = ${vendaId} LIMIT 1
-  `;
-  if (existente) return { id: Number(existente.id), numero_ordem: String(existente.numero_ordem) };
-
   const itens = await sql`
     SELECT produto_id, nome_produto, sku, quantidade, observacao
     FROM alissonerp.itens_venda_erp WHERE venda_id = ${vendaId} ORDER BY id
@@ -513,6 +529,18 @@ export async function criarOrdemDeServico(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (sql as any).begin(async (tx: typeof sql) => {
+    // C3: Lock na venda para evitar criação de ordens duplicadas em requests simultâneos
+    await tx`SELECT id FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE`;
+
+    // Idempotência dentro da tx: re-verifica após adquirir lock
+    const [existenteTx] = await tx`
+      SELECT id, numero_ordem FROM alissonerp.ordens WHERE venda_id = ${vendaId} LIMIT 1
+    `;
+    if (existenteTx) {
+      ordemCriada = { id: Number(existenteTx.id), numero_ordem: String(existenteTx.numero_ordem) };
+      return;
+    }
+
     const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
     const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
     const nextNum = Math.max(Number(max_id_ali), Number(max_id_dir)) + 1;
@@ -709,9 +737,16 @@ export async function concluirVenda(
   `;
 
   // ── 2. MARCAR CONTAS_RECEBER COMO RECEBIDAS ──────────────────────────────
-  const [{ fn_cr_marcar_pago_mp: crQuitadas }] = await sql`
-    SELECT alissonerp.fn_cr_marcar_pago_mp(${vendaId}) AS fn_cr_marcar_pago_mp
-  `;
+  // M5: Se a função falhar (CR já cancelada, etc), a venda continua concluída
+  let crQuitadas: unknown = 0;
+  try {
+    const [crResult] = await sql`
+      SELECT alissonerp.fn_cr_marcar_pago_mp(${vendaId}) AS fn_cr_marcar_pago_mp
+    `;
+    crQuitadas = crResult?.fn_cr_marcar_pago_mp;
+  } catch (err) {
+    console.error(`[concluirVenda] fn_cr_marcar_pago_mp falhou p/ venda ${vendaId}:`, err);
+  }
 
   // ── 3. CRIAR ORDEM (orçamento ou serviço) — best-effort ─────────────────
   let ordemCriada: string | undefined;
@@ -788,7 +823,8 @@ export async function estornarVenda(
 ): Promise<EstornarVendaResult> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return await (sql as any).begin(async (tx: typeof sql): Promise<EstornarVendaResult> => {
-    // 1. Bloqueia o pagamento pra evitar race com webhook simultâneo
+    // 1. Bloqueia pagamento + venda para evitar race entre dois estornos simultâneos
+    await tx`SELECT id FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE`;
     const [pag] = await tx`
       SELECT id, venda_id, status, gateway_payload
       FROM alissonerp.pagamentos_venda

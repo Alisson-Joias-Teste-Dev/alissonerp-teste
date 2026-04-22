@@ -23,6 +23,7 @@ interface RankingRow {
   vendedor_nome:   string;
   qtd_vendas:      number;
   total_venda:     number;
+  total_meta:      number;
   total_pago:      number;
   total_comissao:  number;
   meta_valor:      number | null;
@@ -70,7 +71,7 @@ function Podium({ top3 }: { top3: RankingRow[] }) {
               {row.vendedor_nome.split(" ")[0]}
             </p>
             <p className="text-xs tabular-nums font-bold" style={{ color: C.esmeralda }}>
-              {fmt(row.total_venda)}
+              {fmt(row.total_meta)}
             </p>
             <div
               className={`w-full ${heights[pos]} rounded-t-lg flex items-center justify-center`}
@@ -151,8 +152,8 @@ export default function RankingClient({ vendedorId, podeGerenciarMetas }: Props)
     }
   }
 
-  // Totais do período
-  const totalPeriodo  = rows.reduce((s, r) => s + r.total_venda, 0);
+  // Totais do período — usa total_meta (líquido de vale-troca)
+  const totalPeriodo  = rows.reduce((s, r) => s + r.total_meta, 0);
   const totalRecebido = rows.reduce((s, r) => s + r.total_pago,  0);
   const totalVendas   = rows.reduce((s, r) => s + r.qtd_vendas,  0);
   const top3          = rows.slice(0, 3);
@@ -286,7 +287,7 @@ export default function RankingClient({ vendedorId, podeGerenciarMetas }: Props)
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="text-sm font-bold tabular-nums" style={{ color: C.esmeralda }}>
-                        {fmt(row.total_venda)}
+                        {fmt(row.total_meta)}
                       </p>
                       <p className="text-[11px]" style={{ color: "#9CA3AF" }}>
                         {row.qtd_vendas} venda{row.qtd_vendas !== 1 ? "s" : ""}

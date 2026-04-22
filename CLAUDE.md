@@ -3,7 +3,7 @@
 > **Todo agente DEVE ler este arquivo antes de qualquer task.**
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
-**Versao:** v2.19.87 | **Branch:** `homolog` (nunca main direto)
+**Versao:** v2.30.7 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
 
 ---
@@ -20,7 +20,9 @@
 **NUNCA** usar `supabase.from()` para schema alissonerp (PostgREST bug — retorna `[]` silenciosamente).
 `supabase.auth.getUser()` e `supabase.storage` funcionam normalmente.
 
-**Storage:** Buckets PUBLICOS, upload SEMPRE server-side via `src/lib/storage.ts`, `<img src={url}>` direto. NUNCA `createSignedUrl()`.
+**Storage:** Upload SEMPRE server-side via `src/lib/storage.ts`.
+- Buckets PUBLICOS (avatars, imagens): `<img src={url}>` direto, sem signed URL
+- Buckets PRIVADOS (protocolo-fotos, apontamento-fotos, ordem-fotos): signed URL via `supabase.storage.createSignedUrl()`, TTL 1h, NUNCA armazenar a URL gerada
 
 **Auth:** Supabase GoTrue. Role de `alissonerp.usuarios.role` (VARCHAR). Permissoes granulares: `src/lib/permissoes.ts`.
 
@@ -41,11 +43,18 @@
 
 ### Git — INVIOLAVEL
 ```
-NUNCA commit/push sem autorizacao EXPLICITA do Jonathan
-NUNCA merge ou push direto na main — alertar e confirmar
 SEMPRE branch homolog
 Formato: feat|fix|chore: descricao (vX.Y.Z)
-"Funcionou", "ok", "testei" NAO sao autorizacao
+
+FIXES PEQUENOS (bugs, ajustes UI, text, comportamento):
+  Apos tsc passar: commit → push homolog → merge+push main automaticamente
+  Sem necessidade de confirmacao adicional
+
+FEATURES / MIGRATIONS / MUDANCAS ESTRUTURAIS:
+  commit → push homolog → PARAR
+  Aguardar Jonathan testar → confirmacao separada para main
+
+"Funcionou", "ok", "testei" NAO sao autorizacao para features
 Autorizacao "subir pra homolog" = HOMOLOG only, main = confirmacao separada
 ```
 
@@ -198,9 +207,11 @@ Permissoes granulares: src/lib/permissoes.ts -> temPermissao()
 ```
 1. npx tsc --noEmit (ZERO erros obrigatorio)
 2. Reportar o que foi feito
-3. NAO fazer commit/push
-4. Aguardar Jonathan testar
-5. Atualizar: MEMORY.md (se mudou algo estrutural), arquitetura.md (se mudou arquitetura), CHANGELOG.md
+3. Commit/push: seguir regra Git secao 2 (fixes = auto, features = aguarda)
+4. Aguardar Jonathan testar (features e migrations)
+5. Atualizar: ~/.claude/projects/C--Users-Jonathan-Ara-jo-OneDrive-fabricaAJ/memory/ (se mudou algo estrutural)
+           docs/arquitetura.md (se mudou arquitetura)
+           docs/CHANGELOG.md
 ```
 
 ---
@@ -208,8 +219,9 @@ Permissoes granulares: src/lib/permissoes.ts -> temPermissao()
 ## 8. Referencias
 
 - **Arquitetura completa:** `docs/arquitetura.md` (140KB)
-- **Memory files:** `~/.claude/projects/C--Users-aliss/memory/`
+- **Dominio ERP (schemas, fluxos, tabelas):** `docs/claude-memory/MEMORY.md`
+- **Memory files:** `~/.claude/projects/C--Users-Jonathan-Ara-jo-OneDrive-fabricaAJ/memory/`
 - **API Routes (280+):** ver memory `project_api_routes.md`
 - **Modulo Service:** ver memory `project_modulo_service.md`
 - **Storage Buckets:** ver memory `project_storage_buckets.md`
-- **Usuarios teste:** ver MEMORY.md secao 21
+- **Usuarios teste:** ver `docs/claude-memory/MEMORY.md` secao 17

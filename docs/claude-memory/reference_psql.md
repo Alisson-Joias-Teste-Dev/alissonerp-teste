@@ -10,7 +10,7 @@ type: reference
 
 **Conexão via PowerShell (funciona):**
 ```powershell
-$env:PGPASSWORD = 'V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA'
+$env:PGPASSWORD = '<senha do .env.local → DATABASE_URL>'
 & 'C:\Program Files\pgAdmin 4\runtime\psql.exe' -h '72.60.55.140' -p 5543 -U 'postgres' -d postgres -c "SELECT ..."
 ```
 

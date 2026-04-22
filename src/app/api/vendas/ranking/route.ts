@@ -21,11 +21,18 @@ export async function GET(req: NextRequest) {
   const fim    = new Date(ano, mes, 0).toISOString().slice(0, 10);
 
   const rows = await sql`
+    WITH vale_por_venda AS (
+      SELECT venda_id, SUM(valor)::numeric AS vale_total
+      FROM alissonerp.pagamentos_venda
+      WHERE forma = 'Vale-Troca' AND status = 'confirmado'
+      GROUP BY venda_id
+    )
     SELECT
       vend.id_vendedor                                  AS vendedor_id,
       vend.nome                                         AS vendedor_nome,
       COUNT(v.id)::int                                  AS qtd_vendas,
-      COALESCE(SUM(v.total_venda),    0)::numeric       AS total_venda,
+      COALESCE(SUM(v.total_venda), 0)::numeric          AS total_venda,
+      COALESCE(SUM(v.total_venda - COALESCE(vpv.vale_total, 0)), 0)::numeric AS total_meta,
       COALESCE(SUM(v.total_comissao), 0)::numeric       AS total_comissao,
       COALESCE((
         SELECT SUM(p.valor)
@@ -33,9 +40,9 @@ export async function GET(req: NextRequest) {
         WHERE p.venda_id = ANY(ARRAY_AGG(v.id))
           AND p.status = 'confirmado'
       ), 0)::numeric                                    AS total_pago,
-      -- Vendas de hoje
-      COALESCE(SUM(CASE WHEN v.data_venda = CURRENT_DATE THEN v.total_venda ELSE 0 END), 0)::numeric AS total_venda_hoje,
-      COALESCE(SUM(CASE WHEN v.data_venda = CURRENT_DATE THEN 1 ELSE 0 END), 0)::int                 AS qtd_vendas_hoje,
+      -- Meta de hoje (líquido de vale)
+      COALESCE(SUM(CASE WHEN v.data_venda = CURRENT_DATE THEN v.total_venda - COALESCE(vpv.vale_total, 0) ELSE 0 END), 0)::numeric AS total_venda_hoje,
+      COALESCE(SUM(CASE WHEN v.data_venda = CURRENT_DATE THEN 1 ELSE 0 END), 0)::int AS qtd_vendas_hoje,
       -- Metas tiers
       m.meta_valor, m.meta_quantidade,
       m.meta_prata, m.meta_ouro, m.meta_diamante,
@@ -46,6 +53,7 @@ export async function GET(req: NextRequest) {
       AND v.data_venda >= ${inicio}::date
       AND v.data_venda <= ${fim}::date
       AND v.situacao   NOT IN ('rascunho','cancelado')
+    LEFT JOIN vale_por_venda vpv ON vpv.venda_id = v.id
     LEFT JOIN alissonerp.metas_vendedoras m
       ON  m.vendedor_id = vend.id_vendedor
       AND m.mes = ${mes}
@@ -55,7 +63,7 @@ export async function GET(req: NextRequest) {
              m.meta_valor, m.meta_quantidade,
              m.meta_prata, m.meta_ouro, m.meta_diamante,
              m.horario_inicio, m.horas_por_dia, m.dias_nao_trabalhados
-    ORDER BY total_venda DESC
+    ORDER BY total_meta DESC
   `;
 
   return NextResponse.json(
@@ -64,6 +72,7 @@ export async function GET(req: NextRequest) {
       vendedor_nome:        r.vendedor_nome as string,
       qtd_vendas:           Number(r.qtd_vendas),
       total_venda:          Number(r.total_venda),
+      total_meta:           Number(r.total_meta),
       total_pago:           Number(r.total_pago),
       total_comissao:       Number(r.total_comissao),
       total_venda_hoje:     Number(r.total_venda_hoje),
@@ -77,7 +86,7 @@ export async function GET(req: NextRequest) {
       horas_por_dia:        Number(r.horas_por_dia ?? 8),
       dias_nao_trabalhados: r.dias_nao_trabalhados ?? [],
       pct_meta:             r.meta_prata != null && Number(r.meta_prata) > 0
-                              ? Math.min(100, (Number(r.total_venda) / Number(r.meta_prata)) * 100)
+                              ? Math.min(100, (Number(r.total_meta) / Number(r.meta_prata)) * 100)
                               : null,
     }))
   );

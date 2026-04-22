@@ -116,6 +116,7 @@ interface Pagamento {
   valor: number;
   parcelas: number;
   vale_numero?: string;
+  db_id?: number; // ID do pagamentos_venda pré-criado (Pix/Cartão em Múltiplas)
 }
 
 interface ParcelaRow {
@@ -236,21 +237,49 @@ function Autocomplete<T>({
   const [results, setResults] = useState<T[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [highlighted, setHighlighted] = useState(-1);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const search = useCallback((val: string) => {
     if (timer.current) clearTimeout(timer.current);
-    if (val.length < 2) { setResults([]); setOpen(false); onClearResults?.(); return; }
+    if (val.length < 2) { setResults([]); setOpen(false); setHighlighted(-1); onClearResults?.(); return; }
     timer.current = setTimeout(async () => {
       setLoading(true);
       const r = await onSearch(val);
       setResults(r);
       setOpen(true);
+      setHighlighted(-1);
       setLoading(false);
       if (r.length === 0) onNoResults?.(val);
       else onClearResults?.();
     }, 400);
   }, [onSearch, onNoResults, onClearResults]);
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!open || results.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlighted(h => {
+        const next = Math.min(h + 1, results.length - 1);
+        listRef.current?.children[next]?.scrollIntoView({ block: "nearest" });
+        return next;
+      });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlighted(h => {
+        const prev = Math.max(h - 1, 0);
+        listRef.current?.children[prev]?.scrollIntoView({ block: "nearest" });
+        return prev;
+      });
+    } else if (e.key === "Enter" && highlighted >= 0) {
+      e.preventDefault();
+      onSelect(results[highlighted]);
+      setQ(""); setOpen(false); setResults([]); setHighlighted(-1);
+    } else if (e.key === "Escape") {
+      setOpen(false); setHighlighted(-1);
+    }
+  }
 
   if (selectedLabel) return (
     <div className="flex items-center justify-between rounded-lg px-3 py-2.5 border bg-white" style={{ borderColor: C.cremeBorder }}>
@@ -270,17 +299,19 @@ function Autocomplete<T>({
           onChange={e => { setQ(e.target.value); search(e.target.value); }}
           onFocus={() => results.length > 0 && setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onKeyDown={handleKeyDown}
         />
       </div>
       {open && results.length > 0 && (
         <div className="absolute z-50 w-full mt-1 rounded-xl border shadow-lg overflow-hidden bg-white" style={{ borderColor: C.cremeBorder, maxHeight: 240 }}>
-          <div className="overflow-y-auto" style={{ maxHeight: 240 }}>
+          <div ref={listRef} className="overflow-y-auto" style={{ maxHeight: 240 }}>
             {results.map((item, i) => (
               <button
                 key={i}
-                className="w-full text-left px-3 py-2.5 hover:bg-stone-50 text-sm border-b last:border-b-0"
-                style={{ borderColor: C.creme }}
-                onMouseDown={() => { onSelect(item); setQ(""); setOpen(false); setResults([]); }}
+                className="w-full text-left px-3 py-2.5 text-sm border-b last:border-b-0 transition-colors"
+                style={{ borderColor: C.creme, backgroundColor: i === highlighted ? C.esmeraldaLt : undefined }}
+                onMouseEnter={() => setHighlighted(i)}
+                onMouseDown={() => { onSelect(item); setQ(""); setOpen(false); setResults([]); setHighlighted(-1); }}
               >
                 {renderItem(item)}
               </button>
@@ -986,7 +1017,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   }
 
   // ─── Montar body da venda ────────────────────────────────────────────────
-  function montarBody(situacao?: string) {
+  function montarBody(situacao?: string, skipPagamentos = false) {
     const endEntregaFinal = !usarEnderecoCliente && modoEntrega !== "loja" ? {
       endereco_entrega: enderecoEntrega.logradouro || null,
       endereco_entrega_numero: enderecoEntrega.numero || null,
@@ -997,7 +1028,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       endereco_entrega_uf: enderecoEntrega.uf || null,
     } : {};
 
-    const pagamentosBody = pagForma === "Múltiplas"
+    const pagamentosBody = skipPagamentos ? [] : pagForma === "Múltiplas"
       ? pagamentos
           .filter(p => p.forma !== "Vale-Troca")
           .map(p => ({ forma: p.forma, valor: p.valor, parcelas: p.parcelas, status: "pendente" }))
@@ -1036,8 +1067,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   }
 
   // ─── Salvar/criar rascunho ────────────────────────────────────────────────
-  async function salvarRascunho(): Promise<{ id: number; numero_venda: string }> {
-    const body = montarBody();
+  async function salvarRascunho(opts?: { skipPagamentos?: boolean }): Promise<{ id: number; numero_venda: string }> {
+    const body = montarBody(undefined, opts?.skipPagamentos ?? false);
     if (vendaId) {
       // PATCH
       const res = await fetch(`/api/vendas/${vendaId}`, {
@@ -1095,13 +1126,39 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     finally { setValeValidando(false); }
   }
 
-  function handleAddPagamento() {
+  async function handleAddPagamento() {
     const restante = +(totalVenda - pagamentos.reduce((s, p) => s + p.valor, 0)).toFixed(2);
     const v = parseFloat(pagValor.replace(",", "."));
     if (!v || v <= 0 || restante <= 0) return;
     const valorFinal = Math.min(v, restante);
-    setPagamentos(prev => [...prev, { _key: uid(), forma: pagMultForma, valor: valorFinal, parcelas: pagMultForma === "Cartão de Crédito" ? pagMultParcelas : 1 }]);
+    const parcelas = pagMultForma === "Cartão de Crédito" ? pagMultParcelas : 1;
+    const key = uid();
+    setPagamentos(prev => [...prev, { _key: key, forma: pagMultForma, valor: valorFinal, parcelas }]);
     setPagValor("");
+
+    // Pré-cria registro DB para formas gateway, permitindo múltiplos widgets independentes
+    if (vendaId && ["Pix", "Cartão de Crédito"].includes(pagMultForma)) {
+      try {
+        const res = await fetch(`/api/vendas/${vendaId}/pagamentos`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ forma: pagMultForma, valor: valorFinal, parcelas }),
+        });
+        if (res.ok) {
+          const data = await res.json() as { id: number };
+          setPagamentos(prev => prev.map(p => p._key === key ? { ...p, db_id: data.id } : p));
+        }
+      } catch { /* ignora — widget funciona sem db_id (fallback para comportamento antigo) */ }
+    }
+  }
+
+  async function handleRemovePagamento(p: Pagamento) {
+    setPagamentos(prev => prev.filter(x => x._key !== p._key));
+    if (p.db_id && vendaId) {
+      try {
+        await fetch(`/api/vendas/${vendaId}/pagamentos/${p.db_id}`, { method: "DELETE" });
+      } catch { /* ignora */ }
+    }
   }
 
   // ─── Navigate between steps ───────────────────────────────────────────────
@@ -1154,11 +1211,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       }
     }
 
-    // Auto-save ao entrar no passo 5
+    // Auto-save ao entrar no passo 5 (sem pagamentos — forma é escolhida no passo 5)
     if (step === 4) {
       setSaving(true);
       try {
-        await salvarRascunho();
+        await salvarRascunho({ skipPagamentos: true });
       } catch (e) {
         setSaveErr(e instanceof Error ? e.message : "Erro ao salvar");
         setSaving(false);
@@ -1181,9 +1238,39 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     try {
       // Ensure we have a vendaId
       let idFinal = vendaIdOverride ?? vendaId;
+      const foiPresalva = !!idFinal;
       if (!idFinal) {
+        // Fresh venda: salvarRascunho cria com pagamentos incluídos
         const { id } = await salvarRascunho();
         idFinal = id;
+      }
+
+      // Se a venda foi pré-salva (step 4) sem pagamentos, criar agora os pagamentos não-gateway
+      if (foiPresalva) {
+        const formasGateway = ["Pix", "Cartão de Crédito", "Vale-Troca"];
+        const pagList: Array<{ forma: string; valor: number; parcelas: number }> = [];
+        if (pagForma === "Múltiplas") {
+          pagamentos
+            .filter(p => !formasGateway.includes(p.forma))
+            .forEach(p => pagList.push({ forma: p.forma, valor: p.valor, parcelas: p.parcelas || 1 }));
+        } else if (!formasGateway.includes(pagForma)) {
+          pagList.push({
+            forma: pagForma,
+            valor: totalVenda,
+            parcelas: pagCondicao === "À vista" ? 1 : parseInt(pagCondicao),
+          });
+        }
+        for (const p of pagList) {
+          const res = await fetch(`/api/vendas/${idFinal}/pagamentos`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(p),
+          });
+          if (!res.ok) {
+            const d = await res.json() as { error?: string };
+            throw new Error(d.error ?? "Erro ao registrar pagamento");
+          }
+        }
       }
 
       // Aplicar Vale-Troca se necessário
@@ -2311,7 +2398,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               </div>
             )}
 
-            {(pagForma === "A Receber" || pagForma === "Múltiplas") && (
+            {temAReceber && (
               <div className="rounded-lg border px-4 py-3 text-xs" style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
                 Vendas com &quot;A Receber&quot; requerem aprovação do gerente de loja.
               </div>
@@ -2506,7 +2593,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                           </span>
                           <div className="flex items-center gap-3">
                             <span className="tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(p.valor)}</span>
-                            <button onClick={() => setPagamentos(prev => prev.filter(x => x._key !== p._key))} className="text-gray-300 hover:text-red-400"><X size={13} /></button>
+                            <button onClick={() => handleRemovePagamento(p)} className="text-gray-300 hover:text-red-400"><X size={13} /></button>
                           </div>
                         </div>
                       ))}
@@ -2517,33 +2604,35 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                     </div>
                   )}
 
-                  {/* Pix dentro de Múltiplas */}
-                  {pagamentos.some(p => p.forma === "Pix") && totalVenda > 0 && (
-                    <div className="mt-3">
+                  {/* Pix dentro de Múltiplas — um widget por entrada */}
+                  {totalVenda > 0 && pagamentos.filter(p => p.forma === "Pix").map(pItem => (
+                    <div key={pItem._key} className="mt-3">
                       <PixQrInline
                         vendaId={vendaId ?? null}
                         numeroVenda={numeroVenda || "Nova"}
-                        valor={pagamentos.find(p => p.forma === "Pix")!.valor}
+                        valor={pItem.valor}
                         endpoint="criar-pix-instore"
+                        pagamentoId={pItem.db_id}
                         obterVendaId={!vendaId ? salvarRascunho : undefined}
-                        onPagamentoConfirmado={(id: number) => { if (tipoVenda === "servico") concluirVenda(id); else router.push(`/vendas/${id}`); }}
+                        onPagamentoConfirmado={(id: number) => concluirVenda(id)}
                       />
                     </div>
-                  )}
+                  ))}
 
-                  {/* Cartão dentro de Múltiplas */}
-                  {pagamentos.some(p => p.forma === "Cartão de Crédito") && totalVenda > 0 && (
-                    <div className="mt-3">
+                  {/* Cartão dentro de Múltiplas — um widget por entrada */}
+                  {totalVenda > 0 && pagamentos.filter(p => p.forma === "Cartão de Crédito").map(pItem => (
+                    <div key={pItem._key} className="mt-3">
                       <CartaoInline
                         vendaId={vendaId}
                         numeroVenda={numeroVenda || "Nova"}
-                        valor={pagamentos.find(p => p.forma === "Cartão de Crédito")!.valor}
-                        installments={pagamentos.find(p => p.forma === "Cartão de Crédito")!.parcelas || pagMultParcelas}
+                        valor={pItem.valor}
+                        installments={pItem.parcelas || pagMultParcelas}
+                        pagamentoId={pItem.db_id}
                         obterVendaId={vendaId ? undefined : salvarRascunho}
-                        onPagamentoConfirmado={(id) => { if (tipoVenda === "servico") concluirVenda(id); else router.push(`/vendas/${id}`); }}
+                        onPagamentoConfirmado={(id) => concluirVenda(id)}
                       />
                     </div>
-                  )}
+                  ))}
                 </div>
               );
             })()}

@@ -138,18 +138,19 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
     return NextResponse.json({ ok: true, pending: true });
   }
 
-  const [pag] = await sql`
-    SELECT id, venda_id, status FROM alissonerp.pagamentos_venda
-    WHERE id = ${pagamentoId} AND venda_id = ${vendaId} FOR UPDATE
-  `;
-  if (!pag) return NextResponse.json({ ok: true, ignored: "pagamento não encontrado" });
-  if (pag.status === "confirmado") return NextResponse.json({ ok: true, ja_processado: true });
-
   const transactionAmount = Number(aprovado.transaction_amount ?? 0);
   const paymentId = String(aprovado.id ?? "");
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await (sql as any).begin(async (tx: typeof sql) => {
+    // C2: SELECT FOR UPDATE dentro da tx previne race conditions com webhooks concorrentes
+    const [pagTx] = await tx`
+      SELECT id, venda_id, status FROM alissonerp.pagamentos_venda
+      WHERE id = ${pagamentoId} AND venda_id = ${vendaId} FOR UPDATE
+    `;
+    if (!pagTx) return { ignored: true };
+    if (pagTx.status === "confirmado") return { ja_processado: true };
+
     // Guard: outros meios confirmados já cobrem o total? Não confirmar duas vezes.
     const [totaisOthers] = await tx`
       SELECT
@@ -183,6 +184,9 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
     `;
     return { quitada: Number(soma_confirmados) + 0.01 >= Number(total_venda) };
   });
+
+  if (result?.ignored) return NextResponse.json({ ok: true, ignored: "pagamento não encontrado" });
+  if (result?.ja_processado) return NextResponse.json({ ok: true, ja_processado: true });
 
   if (result.quitada) {
     const systemUserId = await getSystemUserId(vendaId);
@@ -350,17 +354,17 @@ export async function POST(req: NextRequest) {
   const pagamentoId = Number(match[2]);
 
   // ─── 6. Busca pagamento ERP ──────────────────────────────────────────────
+  // FOR UPDATE é ineficaz fora de transação — o lock real é feito dentro de cada sql.begin()
   const [pag] = await sql`
     SELECT id, venda_id, status, valor, gateway_payload
     FROM alissonerp.pagamentos_venda
     WHERE id = ${pagamentoId} AND venda_id = ${vendaId}
-    FOR UPDATE
   `;
   if (!pag) {
     return NextResponse.json({ ok: true, ignored: "pagamento_id não encontrado" });
   }
 
-  // Idempotência: se já está confirmado e payment_id já foi registrado no payload
+  // Idempotência: pre-check rápido (não-transacional); verificação atômica ocorre dentro da tx
   const payloadAntigo = (pag.gateway_payload as Record<string, unknown> | null) ?? {};
   const paymentIdsProcessados = (payloadAntigo.payment_ids_processados as string[] | undefined) ?? [];
   if (pag.status === "confirmado" && paymentIdsProcessados.includes(paymentId)) {
@@ -387,6 +391,21 @@ export async function POST(req: NextRequest) {
   if (status === "approved") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await (sql as any).begin(async (tx: typeof sql) => {
+      // C2: SELECT FOR UPDATE dentro da tx — garante atomicidade contra webhooks concorrentes
+      const [pagTx] = await tx`
+        SELECT id, status, gateway_payload
+        FROM alissonerp.pagamentos_venda
+        WHERE id = ${pagamentoId} AND venda_id = ${vendaId}
+        FOR UPDATE
+      `;
+      if (!pagTx) return { ignored: true };
+      // Re-verifica idempotência com lock garantido (pre-check externo pode ter passado em race)
+      const payloadTx = (pagTx.gateway_payload as Record<string, unknown> | null) ?? {};
+      const idsTx = (payloadTx.payment_ids_processados as string[] | undefined) ?? [];
+      if (pagTx.status === "confirmado" && idsTx.includes(paymentId)) {
+        return { ja_processado: true };
+      }
+
       // Guard: outros meios confirmados já cobrem o total? Não confirmar duas vezes.
       const [totaisOthers] = await tx`
         SELECT
@@ -427,6 +446,9 @@ export async function POST(req: NextRequest) {
 
       return { quitada, pago, total };
     });
+
+    if (result?.ignored) return NextResponse.json({ ok: true, ignored: "pagamento_id não encontrado" });
+    if (result?.ja_processado) return NextResponse.json({ ok: true, ja_processado: true });
 
     // 7c-pre. Se não quitada mas crédito aprovado + todos os não-A Receber confirmados → aprovar venda
     if (!result.quitada) {

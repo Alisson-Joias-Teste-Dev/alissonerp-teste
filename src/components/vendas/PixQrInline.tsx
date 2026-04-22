@@ -50,6 +50,8 @@ interface Props {
   ocultar?: boolean;
   /** Endpoint alternativo. Default: "criar-pix". Use "criar-pix-instore" para taxa zero. */
   endpoint?: "criar-pix" | "criar-pix-instore";
+  /** ID do pagamento_venda pré-criado (Múltiplas). Garante que cada widget use seu próprio registro. */
+  pagamentoId?: number;
 }
 
 export default function PixQrInline({
@@ -60,6 +62,7 @@ export default function PixQrInline({
   onPagamentoConfirmado,
   ocultar,
   endpoint = "criar-pix",
+  pagamentoId,
 }: Props) {
   // vendaId "efetivo" — inicialmente o prop, mas pode ser atualizado quando
   // o componente salva rascunho via obterVendaId.
@@ -129,7 +132,7 @@ export default function PixQrInline({
       const res = await fetch(`/api/vendas/${idParaUsar}/mercado-pago/${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ valor }),
+        body: JSON.stringify({ valor, ...(pagamentoId ? { pagamento_id: pagamentoId } : {}) }),
       });
 
       // Detecta se resposta é HTML (404/500 do Next) antes de tentar parsear JSON

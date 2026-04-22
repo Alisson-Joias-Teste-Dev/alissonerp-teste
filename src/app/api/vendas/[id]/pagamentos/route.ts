@@ -103,12 +103,21 @@ export async function POST(
     WHERE v.id = ${vendaId}
     GROUP BY v.total_venda
   `;
-  if (totais && isDinheiro) {
+  if (totais) {
     const jaConfirmado = Number(totais.soma_confirmados);
     const totalVenda   = Number(totais.total_venda);
+    // A2: Bloqueia qualquer novo pagamento se a venda já está totalmente paga
     if (jaConfirmado + 0.01 >= totalVenda) {
       return NextResponse.json(
-        { error: "Venda já está totalmente paga por outro meio de pagamento" },
+        { error: "Venda já está totalmente paga" },
+        { status: 409 }
+      );
+    }
+    // Para formas auto-confirmadas (Dinheiro), impede ultrapassar o saldo restante
+    if (isDinheiro && jaConfirmado + body.valor > totalVenda + 0.01) {
+      const restante = (totalVenda - jaConfirmado).toFixed(2);
+      return NextResponse.json(
+        { error: `Pagamento ultrapassa o saldo restante da venda (R$${restante})` },
         { status: 409 }
       );
     }
