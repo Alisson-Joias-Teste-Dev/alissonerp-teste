@@ -1791,10 +1791,12 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                                 }
                               }}
                               onBlur={() => {
-                                const v = localPct[item.id!] ?? item.pct_desconto;
+                                const raw = localPrecoUn[item.id!];
                                 setLocalPct(prev => { const n = { ...prev }; delete n[item.id!]; return n; });
                                 setLocalPrecoUn(prev => { const n = { ...prev }; delete n[item.id!]; return n; });
-                                void handleUpdateItem(item.id!, "pct_desconto", String(v));
+                                if (raw !== undefined) {
+                                  void handleUpdateItem(item.id!, "preco_unitario", raw);
+                                }
                               }}
                               placeholder="0,00"
                               className="w-20 border rounded px-1 py-0.5 text-xs text-right outline-none tabular-nums"
