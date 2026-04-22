@@ -520,8 +520,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
   // ── Commission lookup ───────────────────────────────────────────────────────
   function getComissao(pct: number): number {
+    if (pct > 30) return 0.5;
     const faixa = faixas.find(f => f.desconto_pct === Math.round(pct));
-    if (!faixa || pct > 30) return 0;
+    if (!faixa) return 0;
     return faixa.comissao_pct;
   }
 

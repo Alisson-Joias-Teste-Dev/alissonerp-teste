@@ -788,8 +788,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
   // ─── Comissão ─────────────────────────────────────────────────────────────
   function getComissao(pct: number): number {
+    if (pct > 30) return 0.5;
     const faixa = faixas.find(f => f.desconto_pct === Math.round(pct));
-    if (!faixa || pct > 30) return 0;
+    if (!faixa) return 0;
     return faixa.comissao_pct;
   }
 
