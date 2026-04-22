@@ -38,11 +38,14 @@ export async function fetchTableData(
 
 export async function fetchDashboardData(
   _schema: SchemaName,
-  _table: string
+  _table: string,
+  localId?: number | null
 ): Promise<{ data: TableRow[] | null; error: unknown }> {
   try {
-    // Endpoint dedicado retorna tudo em 1 requisição (SQL direto no server)
-    const res = await fetch(`/api/gestao-estoque/produtos`);
+    const url = localId
+      ? `/api/gestao-estoque/produtos?local_id=${localId}`
+      : `/api/gestao-estoque/produtos`;
+    const res = await fetch(url);
     const j = await res.json();
     if (!res.ok) return { data: null, error: j?.error ?? "Erro" };
     return { data: j.produtos ?? [], error: null };

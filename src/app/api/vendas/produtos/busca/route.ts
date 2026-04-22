@@ -37,6 +37,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.fichas_tecnicas_produto ftp ON ftp.produto_id = p.id_produto
     WHERE
       ${servico ? sql`p.sku ILIKE 'AS%' AND (p.sku ILIKE ${'%' + q + '%'} OR p.nome ILIKE ${'%' + q + '%'})` : sql`(p.sku ILIKE ${'%' + q + '%'} OR p.nome ILIKE ${'%' + q + '%'})`}
+      AND (ep.eh_pai IS NULL OR ep.eh_pai = false)
     ORDER BY
       (p.situacao = 'A')                     DESC,
       (p.preco_sync IS NOT NULL AND p.preco_sync > 0) DESC,

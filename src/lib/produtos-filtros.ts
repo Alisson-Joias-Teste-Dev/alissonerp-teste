@@ -11,7 +11,7 @@ type Sp = URLSearchParams;
 export type FiltroKind =
   | "busca" | "sku_prefix" | "tem_pedra" | "situacao" | "categoria"
   | "subcategoria" | "tipo_metal" | "apenas_com_estoque" | "esconder_insumos"
-  | "pendencia" | "tipo_item";
+  | "pendencia" | "tipo_item" | "com_variacoes";
 
 /** Conjunto de predicados. Por default inclui todos; excluir os que são o "foco" da contagem. */
 export interface FiltrosOpts {
@@ -34,6 +34,7 @@ export function buildFiltrosProdutos(sp: Sp, opts: FiltrosOpts = {}) {
   const esconderInsumos  = sp.get("esconder_insumos") === "true";
   const pendencia    = sp.get("pendencia")?.trim() ?? "";
   const tipoItem     = sp.get("tipo_item")?.trim() ?? "";
+  const comVariacoes = sp.get("com_variacoes")?.trim() ?? "";
 
   const wBusca = has(opts, "busca") && busca
     ? sql`AND (p.nome ILIKE ${"%" + busca + "%"} OR p.sku ILIKE ${"%" + busca + "%"})`
@@ -140,9 +141,18 @@ export function buildFiltrosProdutos(sp: Sp, opts: FiltrosOpts = {}) {
     sql``
   );
 
+  // Filtro de produtos com/sem variacoes (usa erp_produtos.eh_pai).
+  // A query principal deve fazer LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+  // para este fragmento funcionar.
+  const wVariacoes = has(opts, "com_variacoes") && (
+    comVariacoes === "true"  ? sql`AND ep.eh_pai = true` :
+    comVariacoes === "false" ? sql`AND (ep.eh_pai IS NULL OR ep.eh_pai = false)` :
+    sql``
+  );
+
   return {
     wBusca, wSkuPrefix, wPedra, wSituacao, wCategoria,
-    wTipoMetal, wEstoque, wEsconderInsumos, wPendencia, wTipoItem,
+    wTipoMetal, wEstoque, wEsconderInsumos, wPendencia, wTipoItem, wVariacoes,
     // Para predicados reutilizáveis de pendência fora do filtro (ex: retorno array):
     wSemCat, wSemMetal, wSemPeso, wSemPreco,
   };

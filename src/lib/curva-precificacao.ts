@@ -355,3 +355,4 @@ export function normalizeCategoriaRow(row: Record<string, unknown>): CurvaCatego
     ordem: Number(row.ordem),
   };
 }
+

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   X, ChevronRight, ChevronLeft, Plus, Trash2, Search,
-  AlertCircle, Loader2, Check,
+  AlertCircle, Loader2, Check, Camera,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -547,6 +547,8 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   const [temPedra, setTemPedra] = useState(false);
   const [fornecedor, setFornecedor] = useState("");
   const [fornecedoresSugeridos, setFornecedoresSugeridos] = useState<string[]>([]);
+  const [foto, setFoto] = useState<string | null>(null);
+  const fotoInputRef = useRef<HTMLInputElement>(null);
 
   // Step 2: BOM
   const [bom, setBom] = useState<BomItemLocal[]>([]);
@@ -705,6 +707,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
     if (!sku.trim()) return "SKU obrigatório";
     if (!peso || parseNumericInput(peso) <= 0) return "Peso deve ser maior que 0";
     if (!catAuto) return "Peso fora das faixas de precificação cadastradas";
+    if (!foto) return "Foto do produto é obrigatória";
     return null;
   }
 
@@ -743,6 +746,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
         categoria_geral: categoriaGeral || null,
         tem_pedra_preciosa: temPedra,
         fornecedor: fornecedor.trim() || null,
+        foto_base64: foto,
         medidas: {
           largura_aro: larguraAro ? parseFloat(larguraAro) : null,
           altura_aro:  alturaAro  ? parseFloat(alturaAro)  : null,
@@ -952,6 +956,47 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                         <option key={f} value={f} />
                       ))}
                     </datalist>
+                  </div>
+
+                  {/* Foto do produto — obrigatória */}
+                  <div>
+                    <label className={labelCls}>Foto do Produto *</label>
+                    <input
+                      ref={fotoInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => setFoto(ev.target?.result as string);
+                        reader.readAsDataURL(f);
+                        e.target.value = "";
+                      }}
+                    />
+                    {foto ? (
+                      <div className="relative rounded-lg overflow-hidden border border-gray-200">
+                        <img src={foto} alt="Preview" className="w-full h-40 object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setFoto(null)}
+                          className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center bg-white rounded-full shadow border border-gray-200 hover:bg-gray-50"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => fotoInputRef.current?.click()}
+                        className="w-full border-2 border-dashed border-gray-200 rounded-lg px-4 py-6 flex flex-col items-center gap-1.5 text-gray-400 hover:border-[#184036] hover:text-[#184036] transition-colors"
+                      >
+                        <Camera size={20} />
+                        <span className="text-xs font-medium">Clique para adicionar foto</span>
+                        <span className="text-[10px]">JPG, PNG, WEBP</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
