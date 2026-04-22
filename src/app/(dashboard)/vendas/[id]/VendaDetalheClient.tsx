@@ -1041,6 +1041,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   })();
   const temPagamentoPendente = venda.pagamentos.some(p => p.status === "pendente");
   const podeAprovarConcluir = venda.situacao === "aprovado" && temPagamentoPendente;
+  const temDescontoAlto = venda.itens.some(i => Number(i.pct_desconto) > 30);
+  const precisaSolicitarDesconto = temDescontoAlto && !venda.desconto_aprovado_por_nome && !venda.aprovacao_credito_tarefa_id && venda.situacao === "rascunho";
 
   return (
     <>
@@ -1146,6 +1148,34 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
             Aguardando aprovação de crédito
             {venda.aprovacao_credito_tipo === "diretor" ? " (diretor — comissão será zerada)" : " (gerente de loja)"}
           </p>
+        </div>
+      )}
+
+      {/* ── Banner: desconto >30% sem aprovação solicitada ── */}
+      {precisaSolicitarDesconto && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-3"
+          style={{ backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#9A3412" }}>
+          <p className="text-sm font-medium">
+            Esta venda tem desconto acima de 30%. É necessário solicitar aprovação do administrador antes de prosseguir.
+          </p>
+          <button onClick={async () => {
+              setUpdating(true); setSaveErr("");
+              try {
+                const res = await fetch(`/api/vendas/${venda.id}/solicitar-aprovacao`, {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ tipo: "desconto" }),
+                });
+                const d = await res.json();
+                if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+                await load();
+              } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao solicitar aprovação"); }
+              finally { setUpdating(false); }
+            }} disabled={updating}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 whitespace-nowrap"
+            style={{ backgroundColor: "#C2410C", color: "#fff" }}>
+            {updating ? <Loader2 size={12} className="animate-spin" /> : null}
+            Solicitar Aprovação de Desconto
+          </button>
         </div>
       )}
 
