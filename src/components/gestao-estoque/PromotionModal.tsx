@@ -1,10 +1,36 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X, Tag, Loader2, FileText } from "lucide-react";
+import { X, Tag, Loader2, BookOpen } from "lucide-react";
 import { TableRow } from "@/lib/gestao-estoque/types";
 import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+
+// ── Identidade visual Alisson ──
+const COLOR_ESMERALDA = [24, 64, 54] as const;        // #184036
+const COLOR_DOURADO   = [219, 152, 100] as const;     // #DB9864
+const COLOR_DOURADO_LIGHT = [254, 221, 180] as const; // #FEDDB4
+const COLOR_CREME     = [250, 250, 247] as const;     // #FAFAF7
+const COLOR_TEXT      = [26, 26, 26] as const;        // #1A1A1A
+const COLOR_GRAY      = [120, 120, 120] as const;
+
+// Carrega imagem via proxy server-side (resolve CORS) e converte em dataURL
+// Retorna null se falhar (404 etc) — caller faz fallback visual
+async function imageUrlToDataUrl(url: string): Promise<{ dataUrl: string; format: 'PNG' | 'JPEG' } | null> {
+  try {
+    // Usa proxy server-side: o S3 do Tiny nao permite CORS direto no browser
+    const proxied = `/api/gestao-estoque/imagem-proxy?url=${encodeURIComponent(url)}`;
+    const res = await fetch(proxied);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    const isPng = blob.type.includes('png') || url.toLowerCase().endsWith('.png');
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve({ dataUrl: reader.result as string, format: isPng ? 'PNG' : 'JPEG' });
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch { return null; }
+}
 
 interface PromotionModalProps {
   isOpen: boolean;
@@ -27,11 +53,14 @@ const PromotionModal: React.FC<PromotionModalProps> = ({
   const [promoPrices, setPromoPrices] = useState<Record<string, string>>({});
   const [bulkValue, setBulkValue] = useState<string>('');
   const [bulkType, setBulkType] = useState<'discount' | 'markup'>('discount');
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportProgress, setExportProgress] = useState({ current: 0, total: 0 });
 
   // Detect columns
   const effectiveColumns = columns.length > 0 ? columns : (selectedItems.length > 0 ? Object.keys(selectedItems[0]) : []);
   
-  const priceCol = effectiveColumns.find(c => /price|preco|valor|venda|amount/i.test(c)) || 'price';
+  const priceCol = effectiveColumns.find(c => c === 'preco_curva') ||
+                   effectiveColumns.find(c => /price|preco|valor|venda|amount/i.test(c)) || 'price';
   const nameCol = effectiveColumns.find(c => /name|nome|title|titulo|desc/i.test(c)) || effectiveColumns[0];
   const skuCol = effectiveColumns.find(c => /sku|code|referencia|ref/i.test(c));
   const pkCol = effectiveColumns.find(c => /id|uuid|code|pk/i.test(c)) || 'id';
@@ -124,38 +153,284 @@ const PromotionModal: React.FC<PromotionModalProps> = ({
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(num);
   };
 
-  const handleExportPDF = () => {
-    const doc = new jsPDF();
-    
-    // Header
-    doc.setFontSize(18);
-    doc.text('Lista de Preços Promocionais - ALISSON', 14, 22);
+  const handleExportCatalog = async () => {
+    if (selectedItems.length === 0) return;
+    setExportLoading(true);
+    setExportProgress({ current: 0, total: selectedItems.length });
+
+    // 1. Pre-fetch das imagens em paralelo (com progress)
+    const imageField = (item: TableRow): string | null => {
+      const candidates = ['imagem_capa', 'imagem', 'url_drive', 'foto', 'image'];
+      for (const c of candidates) {
+        const v = item[c];
+        if (typeof v === 'string' && v.startsWith('http')) return v;
+      }
+      return null;
+    };
+    let done = 0;
+    const images = await Promise.all(selectedItems.map(async (item) => {
+      const url = imageField(item);
+      const result = url ? await imageUrlToDataUrl(url) : null;
+      done++;
+      setExportProgress({ current: done, total: selectedItems.length });
+      return result;
+    }));
+
+    // 2. Cria documento A4 retrato
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const PW = 210; // page width
+    const PH = 297; // page height
+
+    // ── CAPA ──
+    // Background creme
+    doc.setFillColor(...COLOR_CREME);
+    doc.rect(0, 0, PW, PH, 'F');
+
+    // Faixa esmeralda no topo (header)
+    doc.setFillColor(...COLOR_ESMERALDA);
+    doc.rect(0, 0, PW, 65, 'F');
+
+    // Linha dourada decorativa
+    doc.setFillColor(...COLOR_DOURADO);
+    doc.rect(0, 65, PW, 2, 'F');
+
+    // Logo "ALISSON" em serif (helvetica é o que jsPDF tem nativo)
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(36);
+    doc.text('ALISSON', PW / 2, 32, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...COLOR_DOURADO_LIGHT);
+    doc.text('J O A L H E R I A   ·   F A B R I C A   D E   E X C E L Ê N C I A', PW / 2, 42, { align: 'center' });
+
+    // Título do catálogo
+    doc.setTextColor(...COLOR_ESMERALDA);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(28);
+    doc.text('Catálogo de Promoções', PW / 2, 110, { align: 'center' });
+
+    doc.setDrawColor(...COLOR_DOURADO);
+    doc.setLineWidth(0.5);
+    doc.line(PW / 2 - 30, 116, PW / 2 + 30, 116);
+
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
-    doc.setTextColor(100);
-    doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 14, 30);
-    
-    const tableRows = selectedItems.map((item, idx) => {
+    doc.setTextColor(...COLOR_GRAY);
+    doc.text(`${selectedItems.length} ${selectedItems.length === 1 ? 'peça selecionada' : 'peças selecionadas'}`, PW / 2, 128, { align: 'center' });
+
+    const dataStr = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+    doc.text(dataStr, PW / 2, 135, { align: 'center' });
+
+    // Box de chamada no centro
+    doc.setFillColor(...COLOR_ESMERALDA);
+    doc.roundedRect(40, 165, PW - 80, 50, 4, 4, 'F');
+    doc.setTextColor(...COLOR_DOURADO_LIGHT);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('OFERTAS ESPECIAIS', PW / 2, 180, { align: 'center' });
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14);
+    doc.text('Peças selecionadas com preços', PW / 2, 192, { align: 'center' });
+    doc.text('exclusivos por tempo limitado', PW / 2, 201, { align: 'center' });
+
+    // Footer da capa
+    doc.setTextColor(...COLOR_GRAY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text('Documento gerado pelo sistema Alisson ERP', PW / 2, PH - 15, { align: 'center' });
+
+    // ── PÁGINAS DE PRODUTOS ──
+    // Layout: 2 colunas × 3 linhas = 6 produtos por página
+    // Card: largura 87mm × altura 78mm
+    const COLS = 2;
+    const ROWS = 3;
+    const PER_PAGE = COLS * ROWS;
+    const MARGIN_X = 12;
+    const MARGIN_Y_TOP = 30;
+    const CARD_W = 90;
+    const CARD_H = 80;
+    const GAP = 4;
+
+    selectedItems.forEach((item, idx) => {
+      const inPage = idx % PER_PAGE;
+      if (inPage === 0) {
+        doc.addPage();
+        // Background creme
+        doc.setFillColor(...COLOR_CREME);
+        doc.rect(0, 0, PW, PH, 'F');
+        // Header da página
+        doc.setFillColor(...COLOR_ESMERALDA);
+        doc.rect(0, 0, PW, 18, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.text('ALISSON', MARGIN_X, 11);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(...COLOR_DOURADO_LIGHT);
+        doc.text('Catálogo de Promoções', MARGIN_X, 15);
+        const pageNum = Math.floor(idx / PER_PAGE) + 1;
+        const totalPages = Math.ceil(selectedItems.length / PER_PAGE);
+        doc.setTextColor(...COLOR_DOURADO_LIGHT);
+        doc.setFontSize(9);
+        doc.text(`Página ${pageNum} de ${totalPages}`, PW - MARGIN_X, 11, { align: 'right' });
+        // Linha dourada
+        doc.setFillColor(...COLOR_DOURADO);
+        doc.rect(0, 18, PW, 0.8, 'F');
+      }
+
+      const col = inPage % COLS;
+      const row = Math.floor(inPage / COLS);
+      const x = MARGIN_X + col * (CARD_W + GAP);
+      const y = MARGIN_Y_TOP + row * (CARD_H + GAP);
+
+      // Card background branco com borda esmeralda
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(...COLOR_ESMERALDA);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(x, y, CARD_W, CARD_H, 2, 2, 'FD');
+
+      // Imagem (se carregou)
+      const imgData = images[idx];
+      const IMG_W = 38;
+      const IMG_H = 38;
+      const IMG_X = x + (CARD_W - IMG_W) / 2;
+      const IMG_Y = y + 4;
+      if (imgData) {
+        try {
+          doc.addImage(imgData.dataUrl, imgData.format, IMG_X, IMG_Y, IMG_W, IMG_H, undefined, 'FAST');
+        } catch {
+          // fallback
+          doc.setFillColor(245, 245, 240);
+          doc.rect(IMG_X, IMG_Y, IMG_W, IMG_H, 'F');
+        }
+      } else {
+        // Placeholder cinza estilizado com selo Alisson (sem caracteres especiais
+        // pois a fonte Helvetica padrao do jsPDF nao tem ◆/diamantes etc)
+        doc.setFillColor(245, 243, 238);
+        doc.rect(IMG_X, IMG_Y, IMG_W, IMG_H, 'F');
+        // Borda interna decorativa
+        doc.setDrawColor(...COLOR_DOURADO);
+        doc.setLineWidth(0.3);
+        doc.rect(IMG_X + 2, IMG_Y + 2, IMG_W - 4, IMG_H - 4);
+        // Texto "ALISSON" centralizado
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(...COLOR_DOURADO);
+        doc.text('ALISSON', IMG_X + IMG_W / 2, IMG_Y + IMG_H / 2 - 1, { align: 'center' });
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6);
+        doc.setTextColor(...COLOR_GRAY);
+        doc.text('SEM IMAGEM', IMG_X + IMG_W / 2, IMG_Y + IMG_H / 2 + 4, { align: 'center' });
+      }
+
+      // SKU pequeno acima do nome
       const id = String(item[pkCol] || idx);
+      const sku = skuCol ? String(item[skuCol] || '') : '';
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(...COLOR_DOURADO);
+      if (sku) doc.text(sku.toUpperCase(), x + CARD_W / 2, IMG_Y + IMG_H + 4, { align: 'center' });
+
+      // Nome (max 2 linhas)
       const name = String(item[nameCol] || `Item #${idx + 1}`);
-      const sku = skuCol ? String(item[skuCol] || '-') : '-';
-      const stockInfo = stockCol ? String(item[stockCol] || '0') : '-';
-      const weightInfo = weightCol ? `${item[weightCol]}g` : '-';
-      const base = basePrices[id] ? formatCurrency(basePrices[id]) : formatCurrency(item[priceCol]);
-      const promo = promoPrices[id] ? formatCurrency(promoPrices[id]) : 'Sem alteração';
-      
-      return [sku, name, stockInfo, weightInfo, base, promo];
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(...COLOR_TEXT);
+      const nameLines = doc.splitTextToSize(name, CARD_W - 6) as string[];
+      const truncated = nameLines.slice(0, 2);
+      truncated.forEach((line, li) => {
+        doc.text(line, x + CARD_W / 2, IMG_Y + IMG_H + 9 + li * 4, { align: 'center' });
+      });
+
+      // Linha divisória dourada
+      doc.setDrawColor(...COLOR_DOURADO);
+      doc.setLineWidth(0.2);
+      doc.line(x + CARD_W / 2 - 15, y + CARD_H - 22, x + CARD_W / 2 + 15, y + CARD_H - 22);
+
+      // Preços
+      const baseRaw = basePrices[id] || item[priceCol];
+      const promoRaw = promoPrices[id];
+      const baseNum = parseFloat(String(baseRaw));
+      const promoNum = parseFloat(String(promoRaw));
+      const hasPromo = !isNaN(promoNum) && promoNum > 0 && promoNum !== baseNum;
+      const finalPrice = hasPromo ? promoNum : (isNaN(baseNum) ? null : baseNum);
+
+      // DE: (tachado) — só se tem promo válido
+      if (hasPromo && !isNaN(baseNum)) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(...COLOR_GRAY);
+        const deTxt = `DE  ${formatCurrency(baseNum)}`;
+        const deW = doc.getTextWidth(deTxt);
+        const deX = x + CARD_W / 2;
+        doc.text(deTxt, deX, y + CARD_H - 16, { align: 'center' });
+        // Risco horizontal
+        doc.setDrawColor(...COLOR_GRAY);
+        doc.setLineWidth(0.25);
+        doc.line(deX - deW / 2, y + CARD_H - 17, deX + deW / 2, y + CARD_H - 17);
+      }
+
+      // POR: grande e dourado
+      if (finalPrice !== null) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.setTextColor(...COLOR_ESMERALDA);
+        const porTxt = formatCurrency(finalPrice);
+        doc.text(porTxt, x + CARD_W / 2, y + CARD_H - 8, { align: 'center' });
+
+        if (hasPromo && !isNaN(baseNum) && baseNum > 0) {
+          const economiaPct = Math.round(((baseNum - promoNum) / baseNum) * 100);
+          if (economiaPct > 0 && economiaPct < 100) {
+            // Badge de economia no canto superior direito do card
+            const badgeW = 22;
+            const badgeH = 8;
+            doc.setFillColor(...COLOR_DOURADO);
+            doc.roundedRect(x + CARD_W - badgeW - 2, y + 2, badgeW, badgeH, 1.5, 1.5, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8);
+            doc.text(`-${economiaPct}%`, x + CARD_W - badgeW / 2 - 2, y + 7.5, { align: 'center' });
+          }
+        }
+      } else {
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.setTextColor(...COLOR_GRAY);
+        doc.text('Sob consulta', x + CARD_W / 2, y + CARD_H - 8, { align: 'center' });
+      }
+
+      // Stock + peso (rodapé do card)
+      const stock = stockCol ? item[stockCol] : null;
+      const weight = weightCol ? item[weightCol] : null;
+      const meta: string[] = [];
+      if (stock !== null && stock !== undefined && stock !== '') meta.push(`${stock} un`);
+      if (weight !== null && weight !== undefined && weight !== '') meta.push(`${weight}g`);
+      if (meta.length > 0) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6.5);
+        doc.setTextColor(...COLOR_GRAY);
+        doc.text(meta.join(' · '), x + CARD_W / 2, y + CARD_H - 2, { align: 'center' });
+      }
     });
 
-    autoTable(doc, {
-      startY: 40,
-      head: [['SKU', 'Produto', 'Qtd', 'Peso', 'Preço Original', 'Preço Promocional']],
-      body: tableRows,
-      theme: 'grid',
-      headStyles: { fillColor: [212, 175, 55], textColor: [0, 0, 0] }, // Alisson Gold
-      styles: { fontSize: 9 },
-    });
+    // Footer da última página com data
+    const totalPages = doc.getNumberOfPages();
+    for (let p = 2; p <= totalPages; p++) {
+      doc.setPage(p);
+      doc.setFillColor(...COLOR_DOURADO);
+      doc.rect(0, PH - 8, PW, 0.5, 'F');
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(...COLOR_GRAY);
+      doc.text(`Catálogo gerado em ${new Date().toLocaleDateString('pt-BR')} · Alisson ERP`, PW / 2, PH - 4, { align: 'center' });
+    }
 
-    doc.save(`promocao_alisson_${new Date().getTime()}.pdf`);
+    doc.save(`catalogo_alisson_${new Date().toISOString().slice(0, 10)}.pdf`);
+    setExportLoading(false);
+    setExportProgress({ current: 0, total: 0 });
   };
 
   return (
@@ -311,11 +586,22 @@ const PromotionModal: React.FC<PromotionModalProps> = ({
           <div className="p-6 border-t border-creme-200 bg-white/80 flex gap-3">
             <button
               type="button"
-              onClick={handleExportPDF}
-              className="flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-widest text-alisson-gold border border-alisson-gold/20 hover:bg-alisson-gold/10 transition-all flex items-center justify-center gap-2"
+              onClick={handleExportCatalog}
+              disabled={exportLoading || selectedItems.length === 0}
+              className="flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-widest text-alisson-gold border border-alisson-gold/20 hover:bg-alisson-gold/10 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Gerar PDF estilizado com identidade Alisson"
             >
-              <FileText size={16} />
-              Exportar PDF
+              {exportLoading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  {exportProgress.total > 0 ? `Carregando ${exportProgress.current}/${exportProgress.total}...` : 'Gerando...'}
+                </>
+              ) : (
+                <>
+                  <BookOpen size={16} />
+                  Gerar Catálogo
+                </>
+              )}
             </button>
             <button
               type="button"

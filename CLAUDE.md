@@ -3,7 +3,7 @@
 > **Todo agente DEVE ler este arquivo antes de qualquer task.**
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
-**Versao:** v2.19.62 | **Branch:** `homolog` (nunca main direto)
+**Versao:** v2.19.87 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
 
 ---
@@ -109,6 +109,10 @@ Transferencia metal: foto + IA obrigatoria (tolerancia zero)
 peso_pedra_ct: salvar em quilates, trigger calcula gramas (1ct = 0.2g)
 camera mobile: navigator.mediaDevices undefined em HTTP — fallback input[type=file]
 movimentacoes_estoque.local_estoque_id: NOT NULL
+Estoque comercial: inserir item de venda CRIA RESERVA (nunca saida direta) — reserva vira saida ao APROVAR venda
+Curva precificacao: chamar aplicarCurvaProduto() apos criar/editar produto com peso+categoria (src/lib/aplicar-curva-produto.ts)
+Vale-troca: vale > total venda gera NOVO vale com troco (vale_origem_id rastreia cadeia) — cada vale usado UMA vez
+ABC: classificar por receita_total_12m (ultimos 12 meses), NUNCA por capital (estoque * preco) — produto sem venda em 12m = C automatico
 ```
 
 ---
@@ -204,8 +208,8 @@ Permissoes granulares: src/lib/permissoes.ts -> temPermissao()
 ## 8. Referencias
 
 - **Arquitetura completa:** `docs/arquitetura.md` (140KB)
-- **Memory files:** `~/.claude/projects/C--Users-jonat/memory/`
-- **API Routes (88):** ver memory `project_api_routes.md`
+- **Memory files:** `~/.claude/projects/C--Users-aliss/memory/`
+- **API Routes (280+):** ver memory `project_api_routes.md`
 - **Modulo Service:** ver memory `project_modulo_service.md`
 - **Storage Buckets:** ver memory `project_storage_buckets.md`
 - **Usuarios teste:** ver MEMORY.md secao 21

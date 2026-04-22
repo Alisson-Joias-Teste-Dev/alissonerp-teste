@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   X,
   Save,
@@ -13,6 +13,7 @@ import {
   Search,
   GitFork,
   ChevronRight,
+  Camera,
 } from "lucide-react";
 import { formatPeso } from "@/lib/formatters";
 
@@ -463,6 +464,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
   const [tipoItemEdit, setTipoItemEdit] = useState<"" | "joia" | "insumo">("");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; texto: string } | null>(null);
+  const [fotoEdit, setFotoEdit] = useState<string | null>(null);
+  const fotoInputRef = useRef<HTMLInputElement>(null);
   // Modo simplificado é o padrão: mostra só nome/SKU/situação + peso + preço.
   // Clicar "Ver dados avançados" expande metal/categoria/BOM/medidas/variações etc.
   const [showAvancado, setShowAvancado] = useState(false);
@@ -506,6 +509,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
       }
       const data = await res.json() as { produto: ProdutoDetalhe; composicao: BomItem[]; variacoes: Variacao[]; cotacao_ouro?: number };
       setProduto(data.produto);
+      setFotoEdit(null);
       setComposicao(data.composicao);
       setVariacoes(data.variacoes ?? []);
       setCotacaoOuro(Number(data.cotacao_ouro ?? 0));
@@ -631,6 +635,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
         body.preco_tiny = parseNum(precoTinyEdit);
       }
       if (tipoItemEdit !== (produto.tipo_item ?? "")) body.tipo_item = tipoItemEdit || null;
+
+      if (fotoEdit) body.foto_base64 = fotoEdit;
 
       if (Object.keys(body).length === 0) {
         setSaveMsg({ ok: true, texto: "Nenhuma alteração para salvar." });
@@ -939,6 +945,58 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
               <section>
                 <p className={sectionTitleCls}>Dados Básicos</p>
                 <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-100">
+                  {/* Foto */}
+                  <div>
+                    <p className={labelCls}>Foto</p>
+                    <input
+                      ref={fotoInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => setFotoEdit(ev.target?.result as string);
+                        reader.readAsDataURL(f);
+                        e.target.value = "";
+                      }}
+                    />
+                    {(fotoEdit ?? produto.foto_produto) ? (
+                      <div className="relative rounded-lg overflow-hidden border border-gray-200">
+                        <img
+                          src={fotoEdit ?? produto.foto_produto!}
+                          alt="Foto do produto"
+                          className="w-full h-36 object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => fotoInputRef.current?.click()}
+                          className="absolute bottom-2 right-2 inline-flex items-center gap-1 px-2.5 py-1 bg-white/90 rounded-md text-xs font-medium text-gray-700 border border-gray-200 shadow hover:bg-white"
+                        >
+                          <Camera size={11} /> Trocar foto
+                        </button>
+                        {fotoEdit && (
+                          <button
+                            type="button"
+                            onClick={() => setFotoEdit(null)}
+                            className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center bg-white rounded-full shadow border border-gray-200 hover:bg-gray-50"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => fotoInputRef.current?.click()}
+                        className="w-full border-2 border-dashed border-gray-200 rounded-lg px-4 py-4 flex items-center gap-2 text-gray-400 hover:border-[#184036] hover:text-[#184036] transition-colors"
+                      >
+                        <Camera size={16} />
+                        <span className="text-xs font-medium">Adicionar foto</span>
+                      </button>
+                    )}
+                  </div>
                   <div>
                     <p className={labelCls}>Nome</p>
                     <input

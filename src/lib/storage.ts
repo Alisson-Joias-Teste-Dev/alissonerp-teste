@@ -72,6 +72,17 @@ export async function deleteFile(
 }
 
 /**
+ * Cria o bucket se não existir (ignora erro de "already exists").
+ * Chamar antes do primeiro uploadFile em buckets dinâmicos.
+ */
+export async function ensureBucket(bucket: string): Promise<void> {
+  const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: true });
+  if (error && !error.message?.toLowerCase().includes('already exists')) {
+    console.warn(`[storage] ensureBucket(${bucket}):`, error.message);
+  }
+}
+
+/**
  * Gerar URL pública de um arquivo
  * (não precisa de signed URL — bucket é público)
  */
