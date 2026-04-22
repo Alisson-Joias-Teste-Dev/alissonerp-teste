@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import {
   CircleDot, ChevronDown, Gem, Type, Ruler, Minus, Plus, Save,
-  Printer, Download, Loader2, Settings2, RotateCcw, User, X,
+  Printer, Download, Loader2, Settings2, RotateCcw, User, X, Check,
 } from "lucide-react";
 import * as THREE from "three";
 import { ProfileType } from "./types";
@@ -312,14 +312,13 @@ export default function OrcamentoClient({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [clienteResults, setClienteResults] = useState<any[]>([]);
   const [showClienteDropdown, setShowClienteDropdown] = useState(false);
-  const [buscaCpf, setBuscaCpf] = useState("");
-  const [showCpfSearch, setShowCpfSearch] = useState(false);
-  const [showCadastro, setShowCadastro] = useState(false);
-  const [cadastroNome, setCadastroNome] = useState("");
-  const [cadastroCpf, setCadastroCpf] = useState("");
-  const [cadastroTel, setCadastroTel] = useState("");
-  const [cadastroEmail, setCadastroEmail] = useState("");
+  const [showNovoClienteForm, setShowNovoClienteForm] = useState(false);
+  const [novoClienteForm, setNovoClienteForm] = useState({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
+  const [savingCliente, setSavingCliente] = useState(false);
+  const [clienteErr, setClienteErr] = useState("");
+  const [cpfExistente, setCpfExistente] = useState<string | null>(null);
   const clienteDropdownRef = useRef<HTMLDivElement>(null);
+  const cpfTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const buscarClientes = useCallback(async (termo: string) => {
     if (termo.length < 2) { setClienteResults([]); return; }
@@ -327,20 +326,6 @@ export default function OrcamentoClient({
     const data = res?.ok ? await res.json().catch(() => []) : [];
     setClienteResults(Array.isArray(data) ? data : []);
     setShowClienteDropdown(true);
-  }, []);
-
-  const buscarPorCpf = useCallback(async (cpf: string) => {
-    if (cpf.replace(/\D/g, "").length < 6) return;
-    const res = await fetch(`/api/ordens/contatos?cpf=${encodeURIComponent(cpf)}`).catch(() => null);
-    const data = res?.ok ? await res.json().catch(() => []) : [];
-    if (Array.isArray(data) && data.length > 0) {
-      selecionarCliente(data[0]);
-      setShowCpfSearch(false);
-    } else {
-      setShowCadastro(true);
-      setCadastroCpf(cpf.replace(/\D/g, ""));
-      setShowCpfSearch(false);
-    }
   }, []);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -351,19 +336,51 @@ export default function OrcamentoClient({
     setClienteResults([]);
   }
 
-  async function cadastrarCliente() {
-    if (!cadastroNome.trim()) return;
-    const res = await fetch("/api/contatos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nome: cadastroNome.trim(), cpf_cnpj: cadastroCpf, telefone: cadastroTel, email: cadastroEmail }),
-    });
-    if (res.ok) {
-      const contato = await res.json();
-      selecionarCliente(contato);
-      setShowCadastro(false);
-      setCadastroNome(""); setCadastroCpf(""); setCadastroTel(""); setCadastroEmail("");
-    }
+  async function buscaCEP(cep: string) {
+    const limpo = cep.replace(/\D/g, "");
+    if (limpo.length !== 8) return;
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${limpo}/json/`);
+      const data = await res.json();
+      if (data.erro) return;
+      setNovoClienteForm(prev => ({ ...prev, endereco: data.logradouro ?? "", bairro: data.bairro ?? "", municipio: data.localidade ?? "", uf: data.uf ?? "" }));
+    } catch { /* silent */ }
+  }
+
+  function checkCpfDuplicado(cpf: string) {
+    setCpfExistente(null);
+    const limpo = cpf.replace(/\D/g, "");
+    if (limpo.length < 11) return;
+    if (cpfTimer.current) clearTimeout(cpfTimer.current);
+    cpfTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/ordens/contatos?cpf=${encodeURIComponent(limpo)}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = await res.json() as any[];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const found = data.find((c: any) => c.cpf_cnpj?.replace(/\D/g, "") === limpo);
+        setCpfExistente(found ? found.nome : null);
+      } catch { /* silent */ }
+    }, 400);
+  }
+
+  async function handleCriarCliente() {
+    if (!novoClienteForm.nome.trim()) { setClienteErr("Nome é obrigatório"); return; }
+    if (cpfExistente) { setClienteErr(`CPF/CNPJ já cadastrado para: ${cpfExistente}`); return; }
+    setSavingCliente(true); setClienteErr("");
+    try {
+      const res = await fetch("/api/contatos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(novoClienteForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      selecionarCliente(data);
+      setShowNovoClienteForm(false);
+      setNovoClienteForm({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
+    } catch (e) { setClienteErr(e instanceof Error ? e.message : "Erro ao criar cliente"); }
+    finally { setSavingCliente(false); }
   }
 
   useEffect(() => {
@@ -1073,38 +1090,76 @@ export default function OrcamentoClient({
         )}
 
         {/* Modal: Busca CPF */}
-        {showCpfSearch && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCpfSearch(false)}>
-            <div className="bg-white rounded-2xl p-6 w-80 space-y-4" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-sm font-bold" style={{ color: C.esmeralda }}>Buscar por CPF</h3>
-              <input type="text" value={buscaCpf} onChange={(e) => setBuscaCpf(e.target.value)}
-                placeholder="Digite o CPF..." className="w-full border rounded-lg px-3 py-2 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
-              <div className="flex gap-2">
-                <button onClick={() => buscarPorCpf(buscaCpf)}
-                  className="flex-1 py-2 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: C.esmeralda }}>Buscar</button>
-                <button onClick={() => setShowCpfSearch(false)} className="px-4 py-2 text-sm text-gray-500">Cancelar</button>
+        {/* Modal: Novo Cliente — igual à venda */}
+        {showNovoClienteForm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setShowNovoClienteForm(false); setClienteErr(""); setCpfExistente(null); }}>
+            <div className="bg-white rounded-2xl p-6 w-full max-w-lg mx-4 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold" style={{ color: "#374151" }}>Novo Cliente</p>
+                <button onClick={() => { setShowNovoClienteForm(false); setClienteErr(""); setCpfExistente(null); }} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* Modal: Cadastro novo cliente */}
-        {showCadastro && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCadastro(false)}>
-            <div className="bg-white rounded-2xl p-6 w-96 space-y-3" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-sm font-bold" style={{ color: C.esmeralda }}>Cadastrar Novo Cliente</h3>
-              <input type="text" value={cadastroNome} onChange={(e) => setCadastroNome(e.target.value)}
-                placeholder="Nome completo *" className="w-full border rounded-lg px-3 py-2 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
-              <input type="text" value={cadastroCpf} onChange={(e) => setCadastroCpf(e.target.value)}
-                placeholder="CPF" className="w-full border rounded-lg px-3 py-2 text-sm outline-none font-mono" style={{ borderColor: C.cremeBorder }} />
-              <input type="text" value={cadastroTel} onChange={(e) => setCadastroTel(e.target.value)}
-                placeholder="Telefone" className="w-full border rounded-lg px-3 py-2 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
-              <input type="text" value={cadastroEmail} onChange={(e) => setCadastroEmail(e.target.value)}
-                placeholder="Email" className="w-full border rounded-lg px-3 py-2 text-sm outline-none" style={{ borderColor: C.cremeBorder }} />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Nome <span className="text-red-500">*</span></label>
+                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" placeholder="Nome completo" value={novoClienteForm.nome} onChange={e => setNovoClienteForm(p => ({ ...p, nome: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>CPF/CNPJ</label>
+                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono" placeholder="000.000.000-00" value={novoClienteForm.cpf_cnpj} onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cpf_cnpj: v })); checkCpfDuplicado(v); }} style={{ borderColor: cpfExistente ? "#EF4444" : C.cremeBorder }} />
+                  {cpfExistente && <p className="text-xs text-red-500 mt-1">Já cadastrado: {cpfExistente} <button className="underline ml-1" onClick={() => setShowNovoClienteForm(false)}>Buscar</button></p>}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Email</label>
+                  <input type="email" className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.email} onChange={e => setNovoClienteForm(p => ({ ...p, email: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Telefone</label>
+                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.telefone} onChange={e => setNovoClienteForm(p => ({ ...p, telefone: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Celular</label>
+                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.celular} onChange={e => setNovoClienteForm(p => ({ ...p, celular: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+                </div>
+              </div>
+              <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>CEP</label>
+                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono" placeholder="00000-000" value={novoClienteForm.cep} onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cep: v })); if (v.replace(/\D/g, "").length === 8) buscaCEP(v); }} style={{ borderColor: C.cremeBorder }} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Logradouro</label>
+                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.endereco} onChange={e => setNovoClienteForm(p => ({ ...p, endereco: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Número</label>
+                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.numero} onChange={e => setNovoClienteForm(p => ({ ...p, numero: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Complemento</label>
+                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.complemento} onChange={e => setNovoClienteForm(p => ({ ...p, complemento: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Bairro</label>
+                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.bairro} onChange={e => setNovoClienteForm(p => ({ ...p, bairro: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Município</label>
+                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.municipio} onChange={e => setNovoClienteForm(p => ({ ...p, municipio: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>UF</label>
+                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" maxLength={2} value={novoClienteForm.uf} onChange={e => setNovoClienteForm(p => ({ ...p, uf: e.target.value.toUpperCase() }))} style={{ borderColor: C.cremeBorder }} />
+                  </div>
+                </div>
+              </div>
+              {clienteErr && <p className="text-sm text-red-600">{clienteErr}</p>}
               <div className="flex gap-2 pt-1">
-                <button onClick={cadastrarCliente} disabled={!cadastroNome.trim()}
-                  className="flex-1 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ backgroundColor: C.esmeralda }}>Cadastrar</button>
-                <button onClick={() => setShowCadastro(false)} className="px-4 py-2 text-sm text-gray-500">Cancelar</button>
+                <button onClick={() => { setShowNovoClienteForm(false); setClienteErr(""); setCpfExistente(null); }} className="px-4 py-2 rounded-lg text-sm border" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
+                <button onClick={handleCriarCliente} disabled={savingCliente} className="flex items-center gap-1.5 flex-1 justify-center py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ backgroundColor: C.esmeralda }}>
+                  {savingCliente ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Salvar Cliente
+                </button>
               </div>
             </div>
           </div>
@@ -1187,7 +1242,7 @@ export default function OrcamentoClient({
                   onBlur={() => setTimeout(() => setShowClienteDropdown(false), 150)}
                   placeholder="Buscar cliente pelo nome ou CPF..." className="flex-1 text-sm outline-none" />
                 {!clienteId && clientName.length >= 2 && clienteResults.length === 0 && (
-                  <button onClick={() => { const d = clientName.replace(/\D/g, ""); setCadastroCpf(d.length >= 11 ? d : ""); setCadastroNome(d.length < 11 ? clientName : ""); setShowCadastro(true); }} className="text-[9px] text-blue-600 font-semibold hover:underline whitespace-nowrap">+ Cadastrar</button>
+                  <button onClick={() => { const d = clientName.replace(/\D/g, ""); setNovoClienteForm(p => ({ ...p, cpf_cnpj: d.length >= 11 ? d : "", nome: d.length < 11 ? clientName : "" })); setShowNovoClienteForm(true); setClienteErr(""); }} className="text-[9px] text-blue-600 font-semibold hover:underline whitespace-nowrap">+ Cadastrar</button>
                 )}
               </div>
               {showClienteDropdown && clienteResults.length > 0 && (
@@ -1932,7 +1987,7 @@ export default function OrcamentoClient({
               className="flex-1 text-sm outline-none bg-transparent text-gray-700 placeholder:text-gray-300" />
             {clienteId && <span className="text-[9px] text-green-600 font-semibold shrink-0">Vinculado</span>}
             {!clienteId && clientName.length >= 2 && clienteResults.length === 0 && (
-              <button onClick={() => { const d = clientName.replace(/\D/g, ""); setCadastroCpf(d.length >= 11 ? d : ""); setCadastroNome(d.length < 11 ? clientName : ""); setShowCadastro(true); }} className="text-[9px] text-blue-600 font-semibold shrink-0 hover:underline">+ Cadastrar</button>
+              <button onClick={() => { const d = clientName.replace(/\D/g, ""); setNovoClienteForm(p => ({ ...p, cpf_cnpj: d.length >= 11 ? d : "", nome: d.length < 11 ? clientName : "" })); setShowNovoClienteForm(true); setClienteErr(""); }} className="text-[9px] text-blue-600 font-semibold shrink-0 hover:underline">+ Cadastrar</button>
             )}
           </div>
           {showClienteDropdown && clienteResults.length > 0 && (
