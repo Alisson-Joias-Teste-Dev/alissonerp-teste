@@ -1723,8 +1723,18 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                         <td className="px-2 py-2" style={{ color: "#9CA3AF" }}>{item.unidade ?? "un"}</td>
                         <td className="px-2 py-2 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
                         {(() => {
-                          const effPct      = localPct[item.id!] !== undefined ? localPct[item.id!] : item.pct_desconto;
-                          const effPrecoUn  = item.preco_lista * (1 - effPct / 100);
+                          const editandoPreco = localPrecoUn[item.id!] !== undefined;
+                          const effPct = editandoPreco
+                            ? (() => {
+                                const p = parseFloat((localPrecoUn[item.id!] || "0").replace(",", ".")) || 0;
+                                return p > 0 && item.preco_lista > 0
+                                  ? Math.round(((item.preco_lista - p) / item.preco_lista) * 10000) / 100
+                                  : item.pct_desconto;
+                              })()
+                            : (localPct[item.id!] !== undefined ? localPct[item.id!] : item.pct_desconto);
+                          const effPrecoUn = editandoPreco
+                            ? (parseFloat((localPrecoUn[item.id!] || "0").replace(",", ".")) || item.preco_unitario)
+                            : item.preco_lista * (1 - effPct / 100);
                           const effTotal    = effPrecoUn * item.quantidade;
                           const effDescVal  = item.preco_lista * effPct / 100;
                           return (<>
