@@ -317,7 +317,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
               ) : (
                 <>
                   {tarefa.descricao && (
-                    <p className="text-sm leading-relaxed" style={{ color: "#374151" }}>{tarefa.descricao}</p>
+                    <p className="text-sm leading-relaxed whitespace-pre-line" style={{ color: "#374151" }}>{tarefa.descricao}</p>
                   )}
 
                   <div className="space-y-2.5">

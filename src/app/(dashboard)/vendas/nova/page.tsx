@@ -35,7 +35,7 @@ export default async function NovaVendaPage() {
         maxDesconto = Number(u.mx_desconto_permitido);
       } else {
         const FULL = ["gerente_fabrica", "gerente_loja", "financeiro"];
-        maxDesconto = FULL.includes(role) ? 30 : 15;
+        maxDesconto = FULL.includes(role) ? 30 : 30;
       }
     }
   }

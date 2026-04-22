@@ -43,10 +43,24 @@ export async function POST(
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [venda] = await sql`
-    SELECT id, bloqueado, situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    SELECT v.id, v.bloqueado, v.situacao,
+           v.desconto_aprovado_por,
+           EXISTS(
+             SELECT 1 FROM alissonerp.itens_venda_erp
+             WHERE venda_id = ${vendaId} AND pct_desconto > 30
+           ) AS tem_desconto_alto
+    FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
+
+  // ── Travar venda: sem pagamento enquanto desconto >30% não aprovado ──────
+  if (venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
+    return NextResponse.json(
+      { error: "Venda travada — desconto acima de 30% aguarda aprovação do diretor. Pagamento só pode ser gerado após aprovação do desconto." },
+      { status: 409 }
+    );
+  }
 
   const body = await req.json() as {
     forma:       string;

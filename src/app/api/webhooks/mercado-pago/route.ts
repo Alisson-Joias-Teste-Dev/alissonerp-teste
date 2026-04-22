@@ -465,8 +465,10 @@ export async function POST(req: NextRequest) {
           if (Number(outrosPend.cnt) === 0) {
             const { approveVenda } = await import("@/lib/vendas-aprovar");
             const sysUser = await getSystemUserId(vendaId);
+            console.log(`[webhook-mp] auto-aprovando venda=${vendaId} tipo=${vendaCredito.aprovacao_credito_tipo} sysUser=${sysUser}`);
             if (sysUser) {
               await approveVenda(vendaId, sysUser, { tinyBestEffort: true });
+              console.log(`[webhook-mp] venda=${vendaId} aprovada automaticamente via pagamento parcial`);
             }
           }
         }
@@ -487,6 +489,7 @@ export async function POST(req: NextRequest) {
       }
 
       let resultadoConclusao;
+      console.log(`[webhook-mp] pagamento quitado venda=${vendaId} pago=${result.pago} total=${result.total} — concluindo`);
       try {
         // tinyBestEffort=true: se Tiny estiver fora (token expirado, etc),
         // a venda AINDA é concluída. O webhook de pagamento MP nunca pode

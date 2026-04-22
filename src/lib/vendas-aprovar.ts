@@ -605,7 +605,13 @@ export async function approveVenda(
   opts: ApproveVendaOpts = {}
 ): Promise<{ ok: true; ordem_criada?: string; ja_aprovada?: boolean; tiny_erro?: string }> {
   const [venda] = await sql`
-    SELECT id, situacao, bloqueado, tiny_pedido_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    SELECT v.id, v.situacao, v.bloqueado, v.tiny_pedido_id,
+           v.desconto_aprovado_por,
+           EXISTS(
+             SELECT 1 FROM alissonerp.itens_venda_erp
+             WHERE venda_id = ${vendaId} AND pct_desconto > 30
+           ) AS tem_desconto_alto
+    FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
   `;
   if (!venda) throw new Error(`Venda ${vendaId} não encontrada`);
   if (venda.bloqueado) throw new Error("Venda bloqueada");
@@ -613,6 +619,16 @@ export async function approveVenda(
   // Idempotência: já aprovada ou concluída
   if (venda.situacao === "aprovado" || venda.situacao === "concluido" || venda.situacao === "confirmado") {
     return { ok: true, ja_aprovada: true };
+  }
+
+  // ── Bloquear aprovação se desconto >30% não aprovado ─────────────────────
+  if (venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
+    console.error(`[approveVenda] BLOQUEADO venda=${vendaId}: desconto >30% sem aprovação (desconto_aprovado_por=NULL)`);
+    await sql`
+      INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
+      VALUES ('approveVenda_bloqueado', ${JSON.stringify({ vendaId, userId, motivo: "desconto_pendente" })}::text::jsonb, 409, 'desconto >30% sem aprovação')
+    `.catch(() => {});
+    throw new Error("Venda tem desconto acima de 30% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir.");
   }
 
   // 1. Envia pro Tiny (noop se tiny_pedido_id já existe)

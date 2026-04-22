@@ -74,6 +74,10 @@ interface Venda {
   aprovacao_credito_tipo?: string | null;
   aprovacao_credito_tarefa_id?: number | null;
   aprovacao_credito_status?: string | null;
+  aprovacao_tarefa_tags?: string[] | string | null;
+  aprovacao_desconto_aprov_id?: number | null;
+  desconto_aprovado_por_nome?: string | null;
+  desconto_aprovado_em?: string | null;
   endereco_entrega?: string | null; endereco_entrega_numero?: string | null;
   endereco_entrega_complemento?: string | null; endereco_entrega_bairro?: string | null;
   endereco_entrega_cidade?: string | null; endereco_entrega_cep?: string | null;
@@ -780,8 +784,12 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
-      if (d.ordem_criada) {
+      if (d.ordem_criada && d.tiny_warning) {
+        alert(`Ordem ${d.ordem_criada} criada!\n\nAtenção: falha ao sincronizar com Tiny — ${d.tiny_warning}\nA venda ficará pendente de sync no Tiny.`);
+      } else if (d.ordem_criada) {
         alert(`Ordem ${d.ordem_criada} aberta automaticamente!`);
+      } else if (d.tiny_warning) {
+        setSaveErr(`Aviso Tiny: ${d.tiny_warning}`);
       }
       await load();
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao atualizar status"); }
@@ -961,6 +969,11 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const creditoTarefaConcluida = venda.aprovacao_credito_status === "concluida";
   const aguardandoAprovacaoCredito = !!venda.aprovacao_credito_tarefa_id && venda.aprovacao_credito_status === "aguardando_aprovacao";
   const creditoFoiAprovado = !!venda.aprovacao_credito_tipo && creditoTarefaConcluida;
+  const isDescontoApproval = aguardandoAprovacaoCredito && (() => {
+    const t = venda.aprovacao_tarefa_tags;
+    const tags = Array.isArray(t) ? t : (typeof t === "string" ? t.replace(/[{}]/g, "").split(",") : []);
+    return tags.includes("aprovacao_desconto");
+  })();
   const temPagamentoPendente = venda.pagamentos.some(p => p.status === "pendente");
   const podeAprovarConcluir = venda.situacao === "aprovado" && temPagamentoPendente;
 
@@ -1060,13 +1073,37 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
       )}
 
       {/* ── Banner aprovação de crédito pendente ── */}
-      {aguardandoAprovacaoCredito && (
+      {aguardandoAprovacaoCredito && !isDescontoApproval && (
         <div className="mb-3 px-4 py-3 rounded-lg border flex items-center gap-2"
           style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
           <Loader2 size={16} className="animate-spin shrink-0" />
           <p className="text-sm font-medium">
             Aguardando aprovação de crédito
             {venda.aprovacao_credito_tipo === "diretor" ? " (diretor — comissão será zerada)" : " (gerente de loja)"}
+          </p>
+        </div>
+      )}
+
+      {/* ── Banner aprovação de desconto pendente ── */}
+      {isDescontoApproval && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center gap-2"
+          style={{ backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#9A3412" }}>
+          <Loader2 size={16} className="animate-spin shrink-0" />
+          <p className="text-sm font-medium">
+            Aguardando aprovação de desconto pelo administrador. Pagamento e conclusão bloqueados até a aprovação.
+          </p>
+        </div>
+      )}
+
+      {/* ── Badge desconto aprovado ── */}
+      {venda.desconto_aprovado_por_nome && venda.desconto_aprovado_em && (
+        <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
+          style={{ backgroundColor: "#F0FDF4", borderColor: "#86EFAC", color: "#166534" }}>
+          <CheckCircle size={14} className="shrink-0" />
+          <p className="text-xs font-medium">
+            Desconto liberado por <strong>{venda.desconto_aprovado_por_nome}</strong>{" "}
+            em {new Date(venda.desconto_aprovado_em).toLocaleDateString("pt-BR")}{" "}
+            às {new Date(venda.desconto_aprovado_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
           </p>
         </div>
       )}
@@ -1082,6 +1119,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
           </p>
         </div>
       )}
+
 
       {/* ── Alerta: concluir bloqueado por pagamentos pendentes ── */}
       {podeAprovarConcluir && (
@@ -1601,6 +1639,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
         </Secao>
 
         {/* ── 4. Pagamentos ── */}
+        <div style={isDescontoApproval ? { opacity: 0.4, pointerEvents: "none" } : undefined}>
         <Secao>
           <STitle>Pagamento</STitle>
 
@@ -2013,6 +2052,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
             </div>
           </div>
         </Secao>
+        </div>
 
         {/* ── 5. Transportador e Frete ── */}
         <Secao>

@@ -140,12 +140,14 @@ export async function POST(req: NextRequest) {
     tipo_venda?:          string | null;
     numero_rastreio?:     string | null;
     venda_garantia_id?:   number | null;
+    situacao?:            string | null;
     itens?:               ItemInput[];
     pagamentos?:          PagamentoInput[];
   };
 
   // ── Validação de desconto por produto (bloqueia vendedor comum) ───────────
-  if (Array.isArray(body.itens) && body.itens.length > 0) {
+  // Rascunhos com desconto alto vão pelo fluxo de aprovação — skip validação
+  if (body.situacao !== "rascunho" && Array.isArray(body.itens) && body.itens.length > 0) {
     const itensValidacao = body.itens
       .filter((it) => it.produto_id && (it.pct_desconto ?? 0) > 0)
       .map((it) => ({

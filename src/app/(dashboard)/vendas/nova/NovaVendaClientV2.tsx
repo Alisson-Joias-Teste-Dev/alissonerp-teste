@@ -396,6 +396,27 @@ function DescontoValorInput({ precoLista, pctDesconto, onCommit }: {
   );
 }
 
+// ─── PrecoListaInput ──────────────────────────────────────────────────────────
+function PrecoListaInput({ value, onCommit }: { value: number; onCommit: (val: string) => void }) {
+  const fmt2 = (n: number) => n.toFixed(2).replace(".", ",");
+  const [local, setLocal] = useState(fmt2(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => { if (!focused) setLocal(fmt2(value)); }, [value, focused]);
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={local}
+      onChange={e => setLocal(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => { setFocused(false); onCommit(local || "0"); }}
+      onKeyDown={e => { if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); } }}
+      className="w-24 border rounded px-1.5 py-1 text-sm text-right outline-none tabular-nums"
+      style={{ borderColor: C.cremeBorder, color: "#374151" }}
+    />
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -478,6 +499,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   } | null>(null);
   const [valeTrocoToast, setValeTrocoToast] = useState<{ numero: string; valor: number } | null>(null);
   const [aprovacaoEnviada, setAprovacaoEnviada] = useState(false);
+  const [aprovacaoDescontoEnviada, setAprovacaoDescontoEnviada] = useState(false);
+  const [pedindoAprovacao, setPedindoAprovacao] = useState(false);
 
   // ── Step 6: Finalizar ─────────────────────────────────────────────────────
   const [showModalFim, setShowModalFim] = useState(false);
@@ -508,6 +531,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const totalPago = pagamentos.reduce((s, p) => s + p.valor, 0);
   const pagamentoCobre = pagForma === "Múltiplas" ? Math.abs(totalPago - totalVenda) < 0.01 : true;
   const temAReceber = pagForma === "A Receber" || (pagForma === "Múltiplas" && pagamentos.some(p => p.forma === "A Receber"));
+  const LIMITE_DESCONTO_APROVACAO = 30;
+  // Admin/dev (maxDesconto=100) aprovar diretamente — sem tarefa de aprovação
+  const precisaAprovacaoDesconto = maxDesconto < 100 && itens.some(i => i.pct_desconto > LIMITE_DESCONTO_APROVACAO);
 
   // Reset parcelas se valor muda
   useEffect(() => {
@@ -748,17 +774,26 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     };
   }
 
-  function updateItem(key: string, field: "quantidade" | "pct_desconto" | "desconto_valor", raw: string) {
+  function updateItem(key: string, field: "quantidade" | "pct_desconto" | "desconto_valor" | "preco_lista", raw: string) {
     setItens(prev => prev.map(item => {
       if (item._key !== key) return item;
       let q = item.quantidade;
       let pct = item.pct_desconto;
       if (field === "quantidade") q = Math.max(1, parseInt(raw) || 1);
-      if (field === "pct_desconto") pct = Math.min(maxDesconto, Math.max(0, parseFloat(raw.replace(",", ".")) || 0));
+      if (field === "pct_desconto") pct = Math.max(0, parseFloat(raw.replace(",", ".")) || 0);
       if (field === "desconto_valor") {
         const valorDesc = parseFloat(raw.replace(",", ".")) || 0;
-        pct = item.preco_lista > 0 ? Math.min(maxDesconto, Math.max(0, (valorDesc / item.preco_lista) * 100)) : 0;
+        pct = item.preco_lista > 0 ? Math.max(0, (valorDesc / item.preco_lista) * 100) : 0;
         pct = Math.round(pct * 100) / 100;
+      }
+      if (field === "preco_lista") {
+        // Normaliza formato BR com separador de milhar: "1.500,99" → 1500.99
+        const normalized = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
+        const novaLista = Math.max(0, parseFloat(normalized) || 0);
+        const precoUnit = novaLista * (1 - pct / 100);
+        const totalItem = precoUnit * q;
+        const pctComissao = getComissao(pct);
+        return { ...item, preco_lista: novaLista, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
       }
       // Se produto tem preco_por_letra, recalcula preco_lista pelo nome digitado
       const cfg = item.produto_id != null ? personalizacoesCache[item.produto_id] : null;
@@ -859,7 +894,6 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
   function handleAddItem() {
     if (!produtoSel) return;
-    if (pctDesconto > maxDesconto) { setDescontoErr(`Máximo: ${maxDesconto}%`); return; }
     const novoItemBase = calcItem(produtoSel, qtd, pctDesconto);
     // Se o produto ja tem config com preco_por_letra no cache, zera precos iniciais
     // (serao calculados ao digitar o nome). Se ainda nao esta no cache, o fetch
@@ -1049,6 +1083,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       if (itens.length === 0) { setSaveErr("Adicione pelo menos 1 serviço para faturamento"); return; }
     }
     if (step === 3 && tipoVenda !== "servico" && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
+    if (step === 3 && precisaAprovacaoDesconto) { setSaveErr("Desconto acima de 30% requer aprovação. Clique em 'Solicitar Aprovação'."); return; }
     // Valida pendencias de personalizacao no passo 3
     if (step === 3) {
       const pendencias = itens
@@ -1097,9 +1132,39 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     setStep(s => Math.max(s - 1, 1));
   }
 
+  // ─── Solicitar aprovação de desconto (step 3) ────────────────────────────
+  async function pedirAprovacaoDesconto() {
+    setPedindoAprovacao(true); setSaveErr("");
+    try {
+      let idFinal = vendaId;
+      if (!idFinal) {
+        const { id } = await salvarRascunho({ skipPagamentos: true });
+        idFinal = id;
+      }
+      const apRes = await fetch(`/api/vendas/${idFinal}/solicitar-aprovacao`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tipo: "desconto" }),
+      });
+      const apData = await apRes.json();
+      if (!apRes.ok) throw new Error(apData.error ?? "Erro ao solicitar aprovação de desconto");
+      setAprovacaoDescontoEnviada(true);
+      setShowModalFim(true);
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Erro ao solicitar aprovação");
+    } finally {
+      setPedindoAprovacao(false);
+    }
+  }
+
   // ─── Concluir venda ───────────────────────────────────────────────────────
   async function concluirVenda(vendaIdOverride?: number) {
     setConcluindo(true); setSaveErr("");
+    if (precisaAprovacaoDesconto) {
+      setSaveErr("Esta venda tem desconto acima de 30% aguardando aprovação. Retorne ao passo 3 e clique em 'Solicitar Aprovação'.");
+      setConcluindo(false);
+      return;
+    }
     try {
       // Ensure we have a vendaId
       let idFinal = vendaIdOverride ?? vendaId;
@@ -1607,16 +1672,16 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                     </div>
                     <div>
                       <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Desconto %</label>
-                      <input type="number" min={0} max={maxDesconto} step={1} value={pctDesconto}
-                        onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(v > maxDesconto ? `Máximo: ${maxDesconto}%` : ""); }}
+                      <input type="number" min={0} step={1} value={pctDesconto}
+                        onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(""); }}
                         className="w-20 border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
-                        style={{ borderColor: descontoErr ? "#EF4444" : C.cremeBorder }} />
-                      {descontoErr && <p className="text-[11px] text-red-500 mt-0.5">{descontoErr}</p>}
+                        style={{ borderColor: pctDesconto > LIMITE_DESCONTO_APROVACAO ? "#F97316" : C.cremeBorder, color: pctDesconto > LIMITE_DESCONTO_APROVACAO ? "#EA580C" : undefined }} />
+                      {pctDesconto > LIMITE_DESCONTO_APROVACAO && <p className="text-[11px] mt-0.5" style={{ color: "#EA580C" }}>Precisa aprovação</p>}
                     </div>
                     <div className="text-xs" style={{ color: "#6B7280" }}>
                       = {produtoSel ? fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario) : "—"}
                     </div>
-                    <button onClick={handleAddItem} disabled={!!descontoErr || pctDesconto > maxDesconto}
+                    <button onClick={handleAddItem} disabled={false}
                       className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50"
                       style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                       <Plus size={14} /> Adicionar
@@ -1963,14 +2028,20 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                               onChange={e => updateItem(item._key, "quantidade", e.target.value)}
                               className="w-14 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
                           </td>
-                          <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
+                          <td className="px-3 py-2.5">
+                            <PrecoListaInput
+                              value={item.preco_lista}
+                              onCommit={val => updateItem(item._key, "preco_lista", val)}
+                            />
+                          </td>
                           {(tipoVenda === "produto" || tipoVenda === "garantia") && (<>
                             <td className="px-3 py-2.5">
-                              <input type="number" min={0} max={maxDesconto} step={0.01}
+                              <input type="number" min={0} step={0.01}
                                 value={item.pct_desconto || ""}
                                 onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
                                 placeholder="0"
-                                className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                                className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none"
+                                style={{ borderColor: item.pct_desconto > LIMITE_DESCONTO_APROVACAO ? "#F97316" : C.cremeBorder, color: item.pct_desconto > LIMITE_DESCONTO_APROVACAO ? "#EA580C" : undefined }} />
                             </td>
                             <td className="px-3 py-2.5">
                               <DescontoValorInput
@@ -2127,12 +2198,12 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                             className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center" style={{ borderColor: C.cremeBorder }} />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>% Desconto <span style={{ color: "#9CA3AF" }}>(máx {maxDesconto}%)</span></label>
-                          <input type="number" min={0} max={maxDesconto} step={1} value={pctDesconto}
-                            onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(v > maxDesconto ? `Máximo: ${maxDesconto}%` : ""); }}
+                          <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>% Desconto</label>
+                          <input type="number" min={0} step={1} value={pctDesconto}
+                            onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(""); }}
                             className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
-                            style={{ borderColor: descontoErr ? "#EF4444" : C.cremeBorder }} />
-                          {descontoErr && <p className="text-[11px] text-red-500 mt-0.5">{descontoErr}</p>}
+                            style={{ borderColor: pctDesconto > LIMITE_DESCONTO_APROVACAO ? "#F97316" : C.cremeBorder, color: pctDesconto > LIMITE_DESCONTO_APROVACAO ? "#EA580C" : undefined }} />
+                          {pctDesconto > LIMITE_DESCONTO_APROVACAO && <p className="text-[11px] mt-0.5" style={{ color: "#EA580C" }}>Precisa aprovação</p>}
                         </div>
                         <div>
                           <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Preço un</label>
@@ -2140,7 +2211,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                             {produtoSel ? fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario) : "—"}
                           </div>
                         </div>
-                        <button onClick={handleAddItem} disabled={!!descontoErr || pctDesconto > maxDesconto}
+                        <button onClick={handleAddItem} disabled={false}
                           className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium disabled:opacity-40"
                           style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                           <Plus size={14} /> Confirmar
@@ -2569,7 +2640,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
           {saveErr && <p className="text-sm text-red-600 flex-1 text-center whitespace-pre-line">{saveErr}</p>}
 
-          {step < 6 && (
+          {step < 6 && !(step === 3 && precisaAprovacaoDesconto) && (
             <button
               onClick={avancar}
               disabled={saving}
@@ -2578,6 +2649,17 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : null}
               Próximo <ArrowRight size={14} />
+            </button>
+          )}
+          {step === 3 && precisaAprovacaoDesconto && (
+            <button
+              onClick={pedirAprovacaoDesconto}
+              disabled={pedindoAprovacao || saving}
+              className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+              style={{ backgroundColor: "#EA580C", color: C.creme }}
+            >
+              {pedindoAprovacao ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+              Solicitar Aprovação
             </button>
           )}
           {step === 6 && (
@@ -2606,6 +2688,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                 <h3 className="text-xl font-bold" style={{ color: "#1A1A1A" }}>
                   Venda {numeroVenda} criada com sucesso!
                 </h3>
+                {aprovacaoDescontoEnviada && (
+                  <p className="text-sm mt-1" style={{ color: "#EA580C" }}>
+                    Aguardando aprovação de desconto pelo administrador
+                  </p>
+                )}
                 {aprovacaoEnviada && (
                   <p className="text-sm mt-1" style={{ color: "#D97706" }}>
                     Aguardando aprovação do gerente (A Receber)
@@ -2614,7 +2701,20 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               </div>
             </div>
 
-            {tipoVenda === "servico" ? (
+            {aprovacaoDescontoEnviada ? (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-center gap-2 py-3 text-sm rounded-xl" style={{ backgroundColor: "#FFF7ED", color: "#9A3412", border: "1px solid #FED7AA" }}>
+                  <AlertCircle size={16} className="flex-shrink-0" /> Venda salva como rascunho — aguardando aprovação do administrador para liberar.
+                </div>
+                <button
+                  onClick={() => router.push(`/vendas/${vendaId}`)}
+                  className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-semibold"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                >
+                  <ChevronRight size={16} /> Ver Venda
+                </button>
+              </div>
+            ) : tipoVenda === "servico" ? (
               <div className="flex flex-col gap-3">
                 {ordemCriada ? (
                   <div className="flex items-center justify-center gap-2 py-2 text-sm rounded-lg" style={{ backgroundColor: "#ECFDF5", color: "#065F46" }}>

@@ -101,11 +101,79 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     WHERE id = ${Number(id)}
   `;
 
-  // ── Hook: aprovação de crédito (venda vinculada à tarefa) ────────────────
+  // ── Fetch tarefa info e parse de tags ────────────────────────────────────
   const [tarefaInfo] = await sql`
     SELECT venda_id, tags FROM alissonerp.tarefas WHERE id = ${Number(id)}
   `;
-  if (tarefaInfo?.venda_id) {
+  const tagsRaw = tarefaInfo?.tags;
+  const tags: string[] = Array.isArray(tagsRaw)
+    ? tagsRaw
+    : (typeof tagsRaw === "string" ? tagsRaw.replace(/[{}"]/g, "").split(",").filter(Boolean) : []);
+
+  // ── Hook: aprovação de desconto ───────────────────────────────────────────
+  if (tags.includes("aprovacao_desconto") && tarefaInfo?.venda_id) {
+    const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };
+    console.log(`[desconto] inicio`, logCtx);
+    try {
+      if (body.decisao === "aprovado") {
+        // Libera o bloqueio de desconto mas NÃO aprova a venda —
+        // consultora ainda precisa configurar pagamento e passar pelo fluxo normal.
+        await sql`
+          UPDATE alissonerp.vendas_erp
+          SET aprovacao_credito_tarefa_id = NULL,
+              desconto_aprovado_por = ${user.id}::uuid,
+              desconto_aprovado_em  = NOW(),
+              updated_at = NOW()
+          WHERE id = ${tarefaInfo.venda_id}
+        `;
+        console.log(`[desconto] vendas_erp: lock removido, desconto_aprovado_por gravado`);
+        // Comissão cai para 0,5% em todos os itens quando desconto > 30%
+        await sql`
+          UPDATE alissonerp.itens_venda_erp
+          SET pct_comissao    = 0.5,
+              valor_comissao  = ROUND(total_item * 0.005, 2)
+          WHERE venda_id = ${tarefaInfo.venda_id}
+        `;
+        console.log(`[desconto] itens_venda_erp: comissão → 0,5%`);
+      } else {
+        // Rejeição: apenas limpa o lock para a consultora poder reeditar
+        await sql`
+          UPDATE alissonerp.vendas_erp
+          SET aprovacao_credito_tarefa_id = NULL,
+              updated_at = NOW()
+          WHERE id = ${tarefaInfo.venda_id}
+        `;
+        console.log(`[desconto] vendas_erp: lock removido (rejeição)`);
+      }
+      const [aprov] = await sql`SELECT solicitante_id FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${Number(id)} LIMIT 1`;
+      if (aprov?.solicitante_id) {
+        await sql`
+          INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id)
+          VALUES (${String(aprov.solicitante_id)}::uuid, 'aprovacao',
+            ${body.decisao === "aprovado" ? "Desconto liberado!" : "Desconto não aprovado"},
+            ${body.motivo ?? (body.decisao === "aprovado" ? "O desconto foi liberado. Finalize o pagamento para concluir a venda." : "O desconto solicitado foi recusado pelo administrador.")},
+            ${user.id}::uuid)
+        `.catch(() => {});
+      }
+      console.log(`[desconto] CONCLUÍDO ok`, logCtx);
+      await sql`
+        INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status)
+        VALUES ('aprovacao_desconto', ${JSON.stringify({ ...logCtx, resultado: "ok" })}::text::jsonb, 200)
+      `.catch(() => {});
+      return NextResponse.json({ ok: true, desconto: { decisao: body.decisao } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[desconto] ERRO`, { ...logCtx, erro: msg });
+      await sql`
+        INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
+        VALUES ('aprovacao_desconto', ${JSON.stringify({ ...logCtx, resultado: "erro" })}::text::jsonb, 500, ${msg})
+      `.catch(() => {});
+      return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    }
+  }
+
+  // ── Hook: aprovação de crédito (venda vinculada, excluindo desconto) ──────
+  if (tarefaInfo?.venda_id && !tags.includes("aprovacao_desconto")) {
     try {
       const { processarAprovacaoCredito } = await import("@/lib/vendas-credito-aprovar");
       const resultado = await processarAprovacaoCredito(
@@ -115,21 +183,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[aprovacao] Erro ao processar crédito:`, msg);
-      // Não falha silenciosamente — retorna erro pra UI mostrar
       return NextResponse.json({ ok: false, error: msg }, { status: 500 });
     }
   }
 
   // ── Hook: aprovação de devolução ───────────────────────────────────────────
-  // Detecta via FK direto (devolucoes_venda.tarefa_id) E também via tag 'devolucao'
-  // (redundante pra robustez caso um dos lados falhe)
   const [devLink] = await sql`
     SELECT id FROM alissonerp.devolucoes_venda WHERE tarefa_id = ${Number(id)} LIMIT 1
   `;
-  const tagsRaw = tarefaInfo?.tags;
-  const tags: string[] = Array.isArray(tagsRaw)
-    ? tagsRaw
-    : (typeof tagsRaw === "string" ? tagsRaw.replace(/[{}"]/g, "").split(",") : []);
   if (devLink || tags.includes("devolucao")) {
     try {
       const { processarAprovacaoDevolucao } = await import("@/lib/devolucoes");

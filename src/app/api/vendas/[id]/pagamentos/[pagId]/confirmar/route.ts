@@ -113,12 +113,14 @@ export async function POST(
         WHERE venda_id = ${vendaId} AND forma != 'A Receber' AND status = 'pendente'
       `;
       if (Number(outrosPend.cnt) === 0) {
+        console.log(`[confirmarPagamento] auto-aprovando venda=${vendaId} tipo=${vendaCredito.aprovacao_credito_tipo} user=${user.id}`);
         try {
           const { approveVenda } = await import("@/lib/vendas-aprovar");
           await approveVenda(vendaId, user.id, { tinyBestEffort: true });
           vendaAprovada = true;
+          console.log(`[confirmarPagamento] venda=${vendaId} aprovada automaticamente`);
         } catch (err) {
-          console.error(`[confirmarPagamento] Erro ao aprovar venda:`, err);
+          console.error(`[confirmarPagamento] Erro ao aprovar venda ${vendaId}:`, err);
         }
       }
     }

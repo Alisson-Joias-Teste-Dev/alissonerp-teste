@@ -31,6 +31,11 @@ export async function GET(
       ve.endereco_entrega_bairro, ve.endereco_entrega_cidade, ve.endereco_entrega_cep, ve.endereco_entrega_uf,
       ve.credito_gerente_usado, ve.aprovacao_credito_tipo, ve.aprovacao_credito_tarefa_id,
       (SELECT t.status FROM alissonerp.tarefas t WHERE t.id = ve.aprovacao_credito_tarefa_id) AS aprovacao_credito_status,
+      (SELECT t.tags FROM alissonerp.tarefas t WHERE t.id = ve.aprovacao_credito_tarefa_id) AS aprovacao_tarefa_tags,
+      (SELECT at.id FROM alissonerp.aprovacoes_tarefa at WHERE at.tarefa_id = ve.aprovacao_credito_tarefa_id AND at.status = 'pendente' LIMIT 1) AS aprovacao_desconto_aprov_id,
+      ve.desconto_aprovado_por,
+      ve.desconto_aprovado_em,
+      (SELECT u.nome FROM alissonerp.usuarios u WHERE u.id = ve.desconto_aprovado_por) AS desconto_aprovado_por_nome,
       c.endereco AS cliente_endereco, c.numero AS cliente_numero, c.complemento AS cliente_complemento,
       c.bairro AS cliente_bairro, c.municipio AS cliente_municipio, c.cep AS cliente_cep, c.uf AS cliente_uf
     FROM alissonerp.vw_vendas_erp_completa v
@@ -95,6 +100,10 @@ export async function GET(
     aprovacao_credito_tipo: venda.aprovacao_credito_tipo ?? null,
     aprovacao_credito_tarefa_id: venda.aprovacao_credito_tarefa_id ?? null,
     aprovacao_credito_status: venda.aprovacao_credito_status ?? null,
+    aprovacao_tarefa_tags: venda.aprovacao_tarefa_tags ?? null,
+    aprovacao_desconto_aprov_id: venda.aprovacao_desconto_aprov_id ?? null,
+    desconto_aprovado_por_nome: venda.desconto_aprovado_por_nome ?? null,
+    desconto_aprovado_em: venda.desconto_aprovado_em ?? null,
     itens: itens.map((i) => ({
       ...i,
       quantidade:     Number(i.quantidade),
@@ -137,7 +146,7 @@ export async function PATCH(
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [venda] = await sql`
-    SELECT id, situacao, bloqueado FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    SELECT id, situacao, bloqueado, aprovacao_credito_tarefa_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
@@ -178,7 +187,35 @@ export async function PATCH(
     }
   }
 
+  // ── Bloquear aprovação se lock pendente ──────────────────────────────────
+  if (body.situacao === "aprovado" && venda.aprovacao_credito_tarefa_id) {
+    return NextResponse.json(
+      { error: "Venda aguarda aprovação pendente. Aprove via aba Tarefas antes de prosseguir." },
+      { status: 409 }
+    );
+  }
+  // ── Bloquear aprovação se desconto >30% sem aprovação (não-admin/dev) ────
+  if (body.situacao === "aprovado" && !["desenvolvedor", "admin"].includes(usuario.role)) {
+    const [dcCheck] = await sql`
+      SELECT
+        EXISTS(
+          SELECT 1 FROM alissonerp.itens_venda_erp
+          WHERE venda_id = ${vendaId} AND pct_desconto > 30
+        ) AS tem_desconto_alto,
+        desconto_aprovado_por IS NOT NULL AS desconto_ja_aprovado
+      FROM alissonerp.vendas_erp
+      WHERE id = ${vendaId}
+    `;
+    if (dcCheck?.tem_desconto_alto && !dcCheck?.desconto_ja_aprovado) {
+      return NextResponse.json(
+        { error: "Venda tem desconto acima de 30% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir." },
+        { status: 409 }
+      );
+    }
+  }
+
   // ── Envio automático para Tiny ao aprovar ──────────────────────────────────
+  let tinyErroWarning: string | null = null;
   if (body.situacao === "aprovado") {
     // Mapa situacao ERP → situacao Tiny v3
     const SITUACAO_TINY: Record<string, number> = {
@@ -425,7 +462,7 @@ export async function PATCH(
           UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${erroMsg}
           WHERE id = ${vendaId}
         `;
-        return NextResponse.json({ error: `Erro Tiny: ${erroMsg}` }, { status: 502 });
+        tinyErroWarning = erroMsg;
       }
 
       const tinyData = await tinyRes.json() as { id?: number; numeroPedido?: string };
@@ -453,7 +490,7 @@ export async function PATCH(
         UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${erroMsg}
         WHERE id = ${vendaId}
       `;
-      return NextResponse.json({ error: `Erro Tiny: ${erroMsg}` }, { status: 502 });
+      tinyErroWarning = erroMsg;
     }
   }
 
@@ -689,5 +726,6 @@ export async function PATCH(
   return NextResponse.json({
     ok: true,
     ...(ordemCriada ? { ordem_criada: ordemCriada.numero_ordem } : {}),
+    ...(tinyErroWarning ? { tiny_warning: tinyErroWarning } : {}),
   });
 }
