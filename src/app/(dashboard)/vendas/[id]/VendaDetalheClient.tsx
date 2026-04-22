@@ -622,21 +622,23 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     if (field === "quantidade" && val < 1) return;
 
     const authThr = descontoAuthThreshold ?? maxDesconto;
-    if (field === "pct_desconto" && val > authThr) {
-      // Acima do limite livre — pende autorização da direção
-      setPendingAuths(prev => ({
-        ...prev,
-        [itemId]: { solicitacaoId: null, pct: val, status: "local" },
-      }));
-      return;
-    } else if (field === "pct_desconto" && val <= authThr) {
-      // Voltou ao limite livre — limpa pending
-      setPendingAuths(prev => {
-        if (!prev[itemId]) return prev;
-        const next = { ...prev };
-        delete next[itemId];
-        return next;
-      });
+    // Em rascunho, o fluxo de aprovação é no nível da venda (precisaAprovacaoDesconto),
+    // então não bloqueia o PATCH aqui — deixa salvar e o banner de aprovação cuida do resto.
+    if (venda.situacao !== "rascunho") {
+      if (field === "pct_desconto" && val > authThr) {
+        setPendingAuths(prev => ({
+          ...prev,
+          [itemId]: { solicitacaoId: null, pct: val, status: "local" },
+        }));
+        return;
+      } else if (field === "pct_desconto" && val <= authThr) {
+        setPendingAuths(prev => {
+          if (!prev[itemId]) return prev;
+          const next = { ...prev };
+          delete next[itemId];
+          return next;
+        });
+      }
     }
 
     const item = venda.itens.find(i => i.id === itemId);
@@ -1691,12 +1693,12 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
           {prodTab === "produtos" && (
             <>
-              <div className="rounded-lg border overflow-x-auto mb-3" style={{ borderColor: C.cremeBorder }}>
-                <table className="w-full text-sm min-w-max">
+              <div className="rounded-lg border overflow-hidden mb-3" style={{ borderColor: C.cremeBorder }}>
+                <table className="w-full text-xs">
                   <thead style={{ backgroundColor: C.cremeBg }}>
                     <tr>
                       {["Nº", "Descrição", "Código (SKU)", "Qtde", "UN", "Preço lista", "% Desc", ...(edit.limited ? ["R$ Desc"] : []), "Preço un", "Comissão", "Preço total", ...(edit.limited ? [""] : [])].map(h => (
-                        <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>{h}</th>
+                        <th key={h} className="px-2 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -1706,30 +1708,28 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                     )}
                     {itens.map((item, idx) => (
                       <tr key={`${item._key}-${item.pct_desconto}-${item.preco_unitario}-${item.quantidade}`} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
-                        <td className="px-3 py-2.5 text-xs tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
-                        <td className="px-3 py-2.5 max-w-[180px] truncate font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
-                        <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku}</td>
-                        <td className="px-3 py-2.5 text-center tabular-nums" style={{ color: "#374151" }}>
+                        <td className="px-2 py-2 tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
+                        <td className="px-2 py-2 max-w-[140px] truncate font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
+                        <td className="px-2 py-2 font-mono" style={{ color: "#6B7280" }}>{item.sku}</td>
+                        <td className="px-2 py-2 text-center tabular-nums" style={{ color: "#374151" }}>
                           {edit.limited && item.id ? (
                             <input type="number" min={1} defaultValue={item.quantidade}
                               onBlur={e => handleUpdateItem(item.id!, "quantidade", e.target.value)}
-                              className="w-14 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                              className="w-12 border rounded px-1 py-0.5 text-xs text-center outline-none" style={{ borderColor: C.cremeBorder }} />
                           ) : item.quantidade}
                         </td>
-                        <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{item.unidade ?? "un"}</td>
-                        <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
-                        <td className="px-3 py-2.5 tabular-nums text-center" style={{ color: item.pct_desconto > 0 ? "#D97706" : "#9CA3AF" }}>
+                        <td className="px-2 py-2" style={{ color: "#9CA3AF" }}>{item.unidade ?? "un"}</td>
+                        <td className="px-2 py-2 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
+                        <td className="px-2 py-2 tabular-nums text-center" style={{ color: item.pct_desconto > 0 ? "#D97706" : "#9CA3AF" }}>
                           {edit.limited && item.id ? (
                             <div className="flex items-center gap-1">
                               <input type="number" min={0} max={maxDesconto} step={1} defaultValue={item.pct_desconto}
                                 onBlur={e => handleUpdateItem(item.id!, "pct_desconto", e.target.value || "0")}
-                                className="w-16 border rounded px-1.5 py-1 text-sm text-center outline-none"
-                                style={{
-                                  borderColor: pendingAuths[item.id!]?.status === "local" || pendingAuths[item.id!]?.status === "pendente" ? "#D97706" : C.cremeBorder,
-                                }} />
+                                className="w-12 border rounded px-1 py-0.5 text-xs text-center outline-none"
+                                style={{ borderColor: C.cremeBorder }} />
                               {pendingAuths[item.id!]?.status === "local" && (
                                 <button onClick={() => void solicitarAutorizacaoItem(item.id!)}
-                                  className="text-[10px] px-1.5 py-0.5 rounded font-semibold whitespace-nowrap"
+                                  className="text-[10px] px-1 py-0.5 rounded font-semibold whitespace-nowrap"
                                   style={{ backgroundColor: "#FEF3C7", color: "#92400E", border: "1px solid #D97706" }}>
                                   Pedir
                                 </button>
@@ -1744,7 +1744,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           ) : (item.pct_desconto > 0 ? `${item.pct_desconto}%` : "—")}
                         </td>
                         {edit.limited && (
-                          <td className="px-3 py-2.5">
+                          <td className="px-2 py-2">
                             <input type="text"
                               defaultValue={item.pct_desconto > 0 ? (item.preco_lista * item.pct_desconto / 100).toFixed(2).replace(".", ",") : ""}
                               onBlur={e => {
@@ -1753,22 +1753,22 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                                 handleUpdateItem(item.id!, "pct_desconto", String(Math.round(pct * 100) / 100));
                               }}
                               placeholder="0,00"
-                              className="w-20 border rounded px-1.5 py-1 text-sm text-right outline-none" style={{ borderColor: C.cremeBorder }} />
+                              className="w-16 border rounded px-1 py-0.5 text-xs text-right outline-none" style={{ borderColor: C.cremeBorder }} />
                           </td>
                         )}
-                        <td className="px-3 py-2.5">
+                        <td className="px-2 py-2">
                           {edit.limited && item.id ? (
                             <input type="text"
                               defaultValue={item.preco_unitario > 0 ? item.preco_unitario.toFixed(2).replace(".", ",") : ""}
                               onBlur={e => handleUpdateItem(item.id!, "preco_unitario", e.target.value || "0")}
                               placeholder="0,00"
-                              className="w-24 border rounded px-1.5 py-1 text-sm text-right outline-none tabular-nums"
+                              className="w-20 border rounded px-1 py-0.5 text-xs text-right outline-none tabular-nums"
                               style={{ borderColor: C.cremeBorder, color: "#374151" }} />
                           ) : (
                             <span className="tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 tabular-nums text-xs whitespace-nowrap"
+                        <td className="px-2 py-2 tabular-nums whitespace-nowrap"
                           style={{ color: item.pct_comissao > 0 ? "#184036" : "#9CA3AF" }}>
                           {item.pct_comissao > 0 ? (
                             <span>
@@ -1779,9 +1779,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                             </span>
                           ) : "—"}
                         </td>
-                        <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
+                        <td className="px-2 py-2 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
                         {edit.limited && (
-                          <td className="px-3 py-2.5">
+                          <td className="px-2 py-2">
                             <button onClick={() => item.id && handleRemoveItem(item.id)} disabled={updating}
                               className="text-gray-300 hover:text-red-400 transition-colors disabled:opacity-40">
                               <X size={14} />
