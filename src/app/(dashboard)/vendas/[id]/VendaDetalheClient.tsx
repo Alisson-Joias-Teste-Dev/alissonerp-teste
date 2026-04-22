@@ -310,6 +310,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [prodTab, setProdTab] = useState<"produtos" | "comissoes">("produtos");
   const [pendingAuths, setPendingAuths] = useState<Record<number, PendingAuth>>({});
   const [localPct, setLocalPct] = useState<Record<number, number>>({});
+  const [localPrecoUn, setLocalPrecoUn] = useState<Record<number, string>>({});
 
   // ── Payment add ─────────────────────────────────────────────────────────────
   const [addingPag, setAddingPag] = useState(false);
@@ -1767,16 +1768,20 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                         <td className="px-2 py-2">
                           {edit.limited && item.id ? (
                             <input type="text"
-                              value={effPrecoUn > 0 ? effPrecoUn.toFixed(2).replace(".", ",") : ""}
+                              value={localPrecoUn[item.id!] !== undefined ? localPrecoUn[item.id!] : effPrecoUn.toFixed(2).replace(".", ",")}
                               onChange={e => {
-                                const novoPreco = parseFloat((e.target.value || "0").replace(",", ".")) || 0;
-                                if (novoPreco < 0 || novoPreco > item.preco_lista) return;
-                                const pct = Math.round(((item.preco_lista - novoPreco) / item.preco_lista) * 10000) / 100;
-                                setLocalPct(prev => ({ ...prev, [item.id!]: Math.min(maxDesconto, pct) }));
+                                const raw = e.target.value;
+                                setLocalPrecoUn(prev => ({ ...prev, [item.id!]: raw }));
+                                const novoPreco = parseFloat(raw.replace(",", ".")) || 0;
+                                if (novoPreco > 0 && novoPreco <= item.preco_lista) {
+                                  const pct = Math.round(((item.preco_lista - novoPreco) / item.preco_lista) * 10000) / 100;
+                                  setLocalPct(prev => ({ ...prev, [item.id!]: Math.min(maxDesconto, pct) }));
+                                }
                               }}
                               onBlur={() => {
                                 const v = localPct[item.id!] ?? item.pct_desconto;
                                 setLocalPct(prev => { const n = { ...prev }; delete n[item.id!]; return n; });
+                                setLocalPrecoUn(prev => { const n = { ...prev }; delete n[item.id!]; return n; });
                                 void handleUpdateItem(item.id!, "pct_desconto", String(v));
                               }}
                               placeholder="0,00"
