@@ -1740,6 +1740,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                               : item.preco_unitario;
                           const effTotal    = effPrecoUn * item.quantidade;
                           const effDescVal  = item.preco_lista * effPct / 100;
+                          const editandoDesc  = editandoPreco || localPct[item.id!] !== undefined;
+                          const effPctComissao = editandoDesc ? getComissao(effPct) : item.pct_comissao;
+                          const effValComissao = editandoDesc ? effTotal * effPctComissao / 100 : item.valor_comissao;
                           return (<>
                         <td className="px-2 py-2 tabular-nums text-center" style={{ color: effPct > 0 ? "#D97706" : "#9CA3AF" }}>
                           {edit.limited && item.id ? (
@@ -1807,12 +1810,12 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           )}
                         </td>
                         <td className="px-2 py-2 tabular-nums whitespace-nowrap"
-                          style={{ color: item.pct_comissao > 0 ? "#184036" : "#9CA3AF" }}>
-                          {item.pct_comissao > 0 ? (
+                          style={{ color: effPctComissao > 0 ? "#184036" : "#9CA3AF" }}>
+                          {effPctComissao > 0 ? (
                             <span>
-                              <strong>{item.pct_comissao.toFixed(2)}%</strong>
+                              <strong>{effPctComissao.toFixed(2)}%</strong>
                               <span className="text-[10px] ml-1" style={{ color: "#6B7280" }}>
-                                ({fmt(item.valor_comissao)})
+                                ({fmt(effValComissao)})
                               </span>
                             </span>
                           ) : "—"}
