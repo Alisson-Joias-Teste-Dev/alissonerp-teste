@@ -254,10 +254,17 @@ interface Props {
   vendedorId: number | null;
   isFullAccess: boolean;
   maxDesconto: number;
+  descontoAuthThreshold?: number;
+}
+
+interface PendingAuth {
+  solicitacaoId: number | null;
+  pct: number;
+  status: "local" | "pendente" | "aprovado" | "rejeitado";
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDesconto }: Props) {
+export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDesconto, descontoAuthThreshold }: Props) {
   const router = useRouter();
 
   // ── Server data ─────────────────────────────────────────────────────────────
@@ -296,6 +303,7 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
   const [descontoErr, setDescontoErr] = useState("");
   const [addingItem, setAddingItem] = useState(false);
   const [prodTab, setProdTab] = useState<"produtos" | "comissoes">("produtos");
+  const [pendingAuths, setPendingAuths] = useState<Record<number, PendingAuth>>({});
 
   // ── Payment add ─────────────────────────────────────────────────────────────
   const [addingPag, setAddingPag] = useState(false);
@@ -534,12 +542,41 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
     finally { setUpdating(false); }
   }
 
-  async function handleUpdateItem(itemId: number, field: "quantidade" | "pct_desconto", raw: string) {
+  async function handleUpdateItem(itemId: number, field: "quantidade" | "pct_desconto" | "preco_unitario", raw: string) {
     if (!venda) return;
+
+    // Edição direta do "Preço Un": converte em desconto % e delega
+    if (field === "preco_unitario") {
+      const item = venda.itens.find(i => i.id === itemId);
+      if (!item || item.preco_lista <= 0) return;
+      const novoPreco = parseFloat(raw.replace(",", ".")) || 0;
+      if (novoPreco < 0 || novoPreco > item.preco_lista) return;
+      const pct = Math.min(maxDesconto, Math.max(0, ((item.preco_lista - novoPreco) / item.preco_lista) * 100));
+      return handleUpdateItem(itemId, "pct_desconto", String(Math.round(pct * 100) / 100));
+    }
+
     const val = Number(raw);
     if (isNaN(val) || val < 0) return;
     if (field === "pct_desconto" && val > maxDesconto) return;
     if (field === "quantidade" && val < 1) return;
+
+    const authThr = descontoAuthThreshold ?? maxDesconto;
+    if (field === "pct_desconto" && val > authThr) {
+      // Acima do limite livre — pende autorização da direção
+      setPendingAuths(prev => ({
+        ...prev,
+        [itemId]: { solicitacaoId: null, pct: val, status: "local" },
+      }));
+      return;
+    } else if (field === "pct_desconto" && val <= authThr) {
+      // Voltou ao limite livre — limpa pending
+      setPendingAuths(prev => {
+        if (!prev[itemId]) return prev;
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+    }
 
     const item = venda.itens.find(i => i.id === itemId);
     if (!item) return;
@@ -566,6 +603,58 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao atualizar item"); }
     finally { setUpdating(false); }
   }
+
+  async function solicitarAutorizacaoItem(itemId: number) {
+    const pending = pendingAuths[itemId];
+    const item = venda?.itens.find(i => i.id === itemId);
+    if (!pending || !item || pending.status !== "local") return;
+    try {
+      const res = await fetch("/api/vendas/solicitar-desconto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          venda_id: vendaId,
+          item_id: itemId,
+          produto_nome: item.nome_produto,
+          preco_lista: item.preco_lista,
+          pct_desconto: pending.pct,
+          preco_solicitado: item.preco_lista * (1 - pending.pct / 100),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json() as { id: number };
+        setPendingAuths(prev => ({ ...prev, [itemId]: { ...prev[itemId], solicitacaoId: data.id, status: "pendente" } }));
+      }
+    } catch { /* ignora */ }
+  }
+
+  // Polling para autorizações pendentes no detalhe da venda (checa a cada 5s)
+  useEffect(() => {
+    const pending = Object.entries(pendingAuths).filter(([, a]) => a.status === "pendente" && a.solicitacaoId);
+    if (pending.length === 0) return;
+    const interval = setInterval(async () => {
+      for (const [key, auth] of pending) {
+        try {
+          const res = await fetch(`/api/vendas/solicitacoes-desconto/${auth.solicitacaoId}`);
+          if (!res.ok) continue;
+          const data = await res.json() as { status: string };
+          if (data.status === "aprovado") {
+            // API já aplicou o PATCH no item — recarrega
+            await load();
+            setPendingAuths(prev => {
+              const next = { ...prev };
+              delete next[Number(key)];
+              return next;
+            });
+          } else if (data.status === "rejeitado") {
+            setPendingAuths(prev => ({ ...prev, [Number(key)]: { ...prev[Number(key)], status: "rejeitado" } }));
+          }
+        } catch { /* ignora */ }
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAuths]);
 
   // ── Payment actions (immediate save) ────────────────────────────────────────
   async function handleAddPagamento() {
@@ -1461,9 +1550,27 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                         <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
                         <td className="px-3 py-2.5 tabular-nums text-center" style={{ color: item.pct_desconto > 0 ? "#D97706" : "#9CA3AF" }}>
                           {edit.limited && item.id ? (
-                            <input type="number" min={0} max={maxDesconto} step={1} defaultValue={item.pct_desconto}
-                              onBlur={e => handleUpdateItem(item.id!, "pct_desconto", e.target.value || "0")}
-                              className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                            <div className="flex items-center gap-1">
+                              <input type="number" min={0} max={maxDesconto} step={1} defaultValue={item.pct_desconto}
+                                onBlur={e => handleUpdateItem(item.id!, "pct_desconto", e.target.value || "0")}
+                                className="w-16 border rounded px-1.5 py-1 text-sm text-center outline-none"
+                                style={{
+                                  borderColor: pendingAuths[item.id!]?.status === "local" || pendingAuths[item.id!]?.status === "pendente" ? "#D97706" : C.cremeBorder,
+                                }} />
+                              {pendingAuths[item.id!]?.status === "local" && (
+                                <button onClick={() => void solicitarAutorizacaoItem(item.id!)}
+                                  className="text-[10px] px-1.5 py-0.5 rounded font-semibold whitespace-nowrap"
+                                  style={{ backgroundColor: "#FEF3C7", color: "#92400E", border: "1px solid #D97706" }}>
+                                  Pedir
+                                </button>
+                              )}
+                              {pendingAuths[item.id!]?.status === "pendente" && (
+                                <span className="text-[10px] font-medium whitespace-nowrap" style={{ color: "#D97706" }}>⏳</span>
+                              )}
+                              {pendingAuths[item.id!]?.status === "rejeitado" && (
+                                <span className="text-[10px] font-medium" style={{ color: "#EF4444" }}>✗</span>
+                              )}
+                            </div>
                           ) : (item.pct_desconto > 0 ? `${item.pct_desconto}%` : "—")}
                         </td>
                         {edit.limited && (
@@ -1479,7 +1586,18 @@ export default function VendaDetalheClient({ vendaId, role, isFullAccess, maxDes
                               className="w-20 border rounded px-1.5 py-1 text-sm text-right outline-none" style={{ borderColor: C.cremeBorder }} />
                           </td>
                         )}
-                        <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</td>
+                        <td className="px-3 py-2.5">
+                          {edit.limited && item.id ? (
+                            <input type="text"
+                              defaultValue={item.preco_unitario > 0 ? item.preco_unitario.toFixed(2).replace(".", ",") : ""}
+                              onBlur={e => handleUpdateItem(item.id!, "preco_unitario", e.target.value || "0")}
+                              placeholder="0,00"
+                              className="w-24 border rounded px-1.5 py-1 text-sm text-right outline-none tabular-nums"
+                              style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                          ) : (
+                            <span className="tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
                         {edit.limited && (
                           <td className="px-3 py-2.5">

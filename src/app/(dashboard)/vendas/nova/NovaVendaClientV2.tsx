@@ -149,9 +149,16 @@ interface Props {
   vendedorId: number | null;
   vendedorNome: string;
   maxDesconto: number;
+  descontoAuthThreshold?: number;
   vendedores?: { id: number; nome: string }[];
   userId: string;
   userName: string;
+}
+
+interface PendingAuth {
+  solicitacaoId: number | null;
+  pct: number;
+  status: "local" | "pendente" | "aprovado" | "rejeitado";
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -365,10 +372,36 @@ function DescontoValorInput({ precoLista, pctDesconto, onCommit }: {
   );
 }
 
+// Input para editar o "Preço Un" diretamente. Ao sair do campo (blur),
+// converte o preço digitado em desconto %. Útil para o gerente que quer
+// negociar direto o valor final da peça.
+function PrecoUnitarioInput({ precoUnit, onCommit }: {
+  precoUnit: number;
+  onCommit: (val: string) => void;
+}) {
+  const formatted = precoUnit > 0 ? precoUnit.toFixed(2).replace(".", ",") : "";
+  const [local, setLocal] = useState(formatted);
+  const [focused, setFocused] = useState(false);
+  useEffect(() => { if (!focused) setLocal(formatted); }, [formatted, focused]);
+  return (
+    <input
+      type="text"
+      value={local}
+      onChange={e => setLocal(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => { setFocused(false); onCommit(local || "0"); }}
+      onKeyDown={e => { if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); } }}
+      placeholder="0,00"
+      className="w-24 border rounded px-1.5 py-1 text-sm text-right outline-none tabular-nums"
+      style={{ borderColor: C.cremeBorder, color: "#374151" }}
+    />
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
-export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxDesconto, vendedores = [], userId, userName }: Props) {
+export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxDesconto, descontoAuthThreshold, vendedores = [], userId, userName }: Props) {
   const router = useRouter();
 
   // ── Wizard state ──────────────────────────────────────────────────────────
@@ -421,6 +454,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [pctDesconto, setPctDesconto] = useState(0);
   const [descontoErr, setDescontoErr] = useState("");
   const [addingItem, setAddingItem] = useState(false);
+  const [pendingAuths, setPendingAuths] = useState<Record<string, PendingAuth>>({});
   // Cache de configs de personalização por produto_id.
   //   null  → ja consultado, produto NAO tem config
   //   undefined → ainda nao consultado
@@ -717,7 +751,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     };
   }
 
-  function updateItem(key: string, field: "quantidade" | "pct_desconto" | "desconto_valor", raw: string) {
+  function updateItem(key: string, field: "quantidade" | "pct_desconto" | "desconto_valor" | "preco_unitario", raw: string) {
+    const authThr = descontoAuthThreshold ?? maxDesconto;
+
     setItens(prev => prev.map(item => {
       if (item._key !== key) return item;
       let q = item.quantidade;
@@ -728,6 +764,31 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         const valorDesc = parseFloat(raw.replace(",", ".")) || 0;
         pct = item.preco_lista > 0 ? Math.min(maxDesconto, Math.max(0, (valorDesc / item.preco_lista) * 100)) : 0;
         pct = Math.round(pct * 100) / 100;
+      }
+      if (field === "preco_unitario") {
+        const novoPreco = parseFloat(raw.replace(",", ".")) || 0;
+        if (item.preco_lista > 0 && novoPreco >= 0 && novoPreco <= item.preco_lista) {
+          pct = Math.min(maxDesconto, Math.max(0, ((item.preco_lista - novoPreco) / item.preco_lista) * 100));
+          pct = Math.round(pct * 100) / 100;
+        }
+      }
+
+      // Auth threshold: se acima do limite livre, pende autorização
+      if (field !== "quantidade" && pct > authThr) {
+        const requestedPct = pct;
+        setPendingAuths(prev2 => {
+          const existing = prev2[key];
+          if (existing?.status === "aprovado" && existing.pct >= requestedPct) return prev2;
+          return { ...prev2, [key]: { solicitacaoId: null, pct: requestedPct, status: "local" } };
+        });
+        pct = authThr; // aplica somente o máximo livre
+      } else if (field !== "quantidade" && pct <= authThr) {
+        setPendingAuths(prev2 => {
+          if (!prev2[key]) return prev2;
+          const next = { ...prev2 };
+          delete next[key];
+          return next;
+        });
       }
       // Se produto tem preco_por_letra, recalcula preco_lista pelo nome digitado
       const cfg = item.produto_id != null ? personalizacoesCache[item.produto_id] : null;
@@ -743,6 +804,63 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       return { ...item, quantidade: q, pct_desconto: pct, preco_lista: precoLista, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
     }));
   }
+
+  async function solicitarAutorizacao(key: string) {
+    const pending = pendingAuths[key];
+    const item = itens.find(i => i._key === key);
+    if (!pending || !item || pending.status !== "local") return;
+    const precoSolicitado = item.preco_lista * (1 - pending.pct / 100);
+    try {
+      const res = await fetch("/api/vendas/solicitar-desconto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          venda_id: vendaId ?? undefined,
+          produto_nome: item.nome_produto,
+          preco_lista: item.preco_lista,
+          pct_desconto: pending.pct,
+          preco_solicitado: precoSolicitado,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json() as { id: number };
+        setPendingAuths(prev => ({ ...prev, [key]: { ...prev[key], solicitacaoId: data.id, status: "pendente" } }));
+      }
+    } catch { /* ignora */ }
+  }
+
+  function applyApprovedDiscount(key: string, pct: number) {
+    setItens(prev => prev.map(item => {
+      if (item._key !== key) return item;
+      const precoUnit  = item.preco_lista * (1 - pct / 100);
+      const totalItem  = precoUnit * item.quantidade;
+      const pctComissao = getComissao(pct);
+      return { ...item, pct_desconto: pct, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
+    }));
+  }
+
+  // Polling para autorizações pendentes (checa a cada 5s)
+  useEffect(() => {
+    const pending = Object.entries(pendingAuths).filter(([, a]) => a.status === "pendente" && a.solicitacaoId);
+    if (pending.length === 0) return;
+    const interval = setInterval(async () => {
+      for (const [key, auth] of pending) {
+        try {
+          const res = await fetch(`/api/vendas/solicitacoes-desconto/${auth.solicitacaoId}`);
+          if (!res.ok) continue;
+          const data = await res.json() as { status: string };
+          if (data.status === "aprovado") {
+            applyApprovedDiscount(key, auth.pct);
+            setPendingAuths(prev => ({ ...prev, [key]: { ...prev[key], status: "aprovado" } }));
+          } else if (data.status === "rejeitado") {
+            setPendingAuths(prev => ({ ...prev, [key]: { ...prev[key], status: "rejeitado" } }));
+          }
+        } catch { /* ignora */ }
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAuths]);
 
   // ─── Personalização (produto_personalizacao) ─────────────────────────────
   // Busca config do produto e cacheia. Retorna cedo se ja em cache.
@@ -1004,6 +1122,14 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         .filter((x): x is string => x !== null);
       if (pendencias.length > 0) {
         setSaveErr(`Pendências de personalização:\n• ${pendencias.join("\n• ")}`);
+        return;
+      }
+    }
+    // Bloqueia avanço se há descontos aguardando autorização (step 3 = Produtos)
+    if (step === 3 && tipoVenda !== "servico") {
+      const authPendente = Object.values(pendingAuths).some(a => a.status === "local" || a.status === "pendente");
+      if (authPendente) {
+        setSaveErr("Existem descontos acima de 30% aguardando autorização da direção.");
         return;
       }
     }
@@ -1879,11 +2005,43 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                           <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
                           {(tipoVenda === "produto" || tipoVenda === "garantia") && (<>
                             <td className="px-3 py-2.5">
-                              <input type="number" min={0} max={maxDesconto} step={0.01}
-                                value={item.pct_desconto || ""}
-                                onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
-                                placeholder="0"
-                                className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                              {(() => {
+                                const auth = pendingAuths[item._key];
+                                const displayPct = auth?.pct ?? item.pct_desconto;
+                                const isPending = auth?.status === "local" || auth?.status === "pendente";
+                                const isApproved = auth?.status === "aprovado";
+                                const isRejected = auth?.status === "rejeitado";
+                                return (
+                                  <div className="flex items-center gap-1">
+                                    <input type="number" min={0} max={maxDesconto} step={0.01}
+                                      value={displayPct || ""}
+                                      onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
+                                      readOnly={auth?.status === "pendente"}
+                                      placeholder="0"
+                                      className="w-16 border rounded px-1.5 py-1 text-sm text-center outline-none"
+                                      style={{
+                                        borderColor: isPending ? "#D97706" : isApproved ? "#059669" : isRejected ? "#EF4444" : C.cremeBorder,
+                                        color: isPending ? "#D97706" : isApproved ? "#059669" : undefined,
+                                      }} />
+                                    {auth?.status === "local" && (
+                                      <button onClick={() => void solicitarAutorizacao(item._key)}
+                                        className="text-[10px] px-1.5 py-0.5 rounded font-semibold whitespace-nowrap"
+                                        style={{ backgroundColor: "#FEF3C7", color: "#92400E", border: "1px solid #D97706" }}>
+                                        Pedir
+                                      </button>
+                                    )}
+                                    {auth?.status === "pendente" && (
+                                      <span className="text-[10px] font-medium whitespace-nowrap" style={{ color: "#D97706" }}>⏳ Aguard.</span>
+                                    )}
+                                    {auth?.status === "aprovado" && (
+                                      <span className="text-[10px] font-medium" style={{ color: "#059669" }}>✓</span>
+                                    )}
+                                    {auth?.status === "rejeitado" && (
+                                      <span className="text-[10px] font-medium" style={{ color: "#EF4444" }}>✗ máx 30%</span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </td>
                             <td className="px-3 py-2.5">
                               <DescontoValorInput
@@ -1893,7 +2051,16 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                               />
                             </td>
                           </>)}
-                          <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</td>
+                          <td className="px-3 py-2.5">
+                            {(tipoVenda === "produto" || tipoVenda === "garantia") ? (
+                              <PrecoUnitarioInput
+                                precoUnit={item.preco_unitario}
+                                onCommit={val => updateItem(item._key, "preco_unitario", val)}
+                              />
+                            ) : (
+                              <span className="tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</span>
+                            )}
+                          </td>
                           <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
                           <td className="px-3 py-2.5">
                             <button onClick={() => setItens(prev => prev.filter(i => i._key !== item._key))} className="text-gray-300 hover:text-red-400 transition-colors">
