@@ -10,6 +10,8 @@ import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
+import { aplicarCurvaProduto } from "@/lib/aplicar-curva-produto";
+import { uploadFile, ensureBucket } from "@/lib/storage";
 
 export async function GET(
   _req: NextRequest,
@@ -56,7 +58,7 @@ export async function GET(
             p.diferenca_percentual,
             p.tem_pedra_preciosa,
             p.situacao,
-            NULL::text   AS foto_produto,
+            p.imagem     AS foto_produto,
             NULL::text   AS descricao,
             NULL::text   AS referencia,
             p.categoria_precificacao AS categoria,
@@ -119,7 +121,7 @@ export async function GET(
             p.diferenca_percentual,
             p.tem_pedra_preciosa,
             p.situacao,
-            NULL::text    AS foto_produto,
+            p.imagem      AS foto_produto,
             NULL::text    AS descricao,
             NULL::text    AS referencia,
             p.categoria_precificacao AS categoria,
@@ -257,6 +259,10 @@ export async function PATCH(
 
   const body = await req.json();
 
+  const fotoBase64 = typeof body.foto_base64 === "string" && body.foto_base64.startsWith("data:")
+    ? body.foto_base64
+    : null;
+
   // Campos que vão para public.produtos
   const pubUpdate: Record<string, unknown> = {};
   if (typeof body.tem_pedra_preciosa === "boolean") {
@@ -330,7 +336,7 @@ export async function PATCH(
       : null;
   }
 
-  if (Object.keys(pubUpdate).length === 0 && Object.keys(erpUpdate).length === 0 && tipoItem === undefined) {
+  if (Object.keys(pubUpdate).length === 0 && Object.keys(erpUpdate).length === 0 && tipoItem === undefined && !fotoBase64) {
     return NextResponse.json({ error: "Nenhum campo editável informado" }, { status: 400 });
   }
 
@@ -450,6 +456,37 @@ export async function PATCH(
         `;
       }
       } // end if tbl?.exists
+    }
+
+    // ── Upload de foto (opcional) ────────────────────────────────────────────
+    if (fotoBase64) {
+      await ensureBucket("produto-fotos");
+      const matches = fotoBase64.match(/^data:([^;]+);base64,/);
+      const mimeType = matches?.[1] ?? "image/jpeg";
+      const ext = mimeType.split("/")[1]?.split("+")[0] ?? "jpg";
+      const fileName = `produto-${produtoId}-${Date.now()}.${ext}`;
+      const uploaded = await uploadFile("produto-fotos", fileName, fotoBase64, mimeType);
+      if (!("error" in uploaded)) {
+        await sql`UPDATE public.produtos SET imagem = ${uploaded.url} WHERE id_produto = ${produtoId}`;
+      }
+    }
+
+    // ── Aplicar curva de precificacao automaticamente ────────────────────────
+    // Rodamos quando o usuario mexeu em campos que afetam a curva (peso,
+    // categoria_precificacao ou tipo_metal). Se o usuario esta editando markup
+    // manualmente (pubUpdate.markup !== undefined), NAO sobrescrevemos.
+    const alteraCurva =
+      pubUpdate.peso_precificado       !== undefined ||
+      pubUpdate.categoria_precificacao !== undefined ||
+      pubUpdate.tipo_metal             !== undefined;
+    const usuarioDefiniuMarkupManual = pubUpdate.markup !== undefined;
+
+    if (alteraCurva && !usuarioDefiniuMarkupManual) {
+      try {
+        await aplicarCurvaProduto(produtoId);
+      } catch (err) {
+        console.warn("[PATCH /api/produtos/[id]] falha ao aplicar curva:", err);
+      }
     }
 
     // SELECT de retorno — com ou sem erp_produtos

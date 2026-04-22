@@ -30,7 +30,9 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
+import { aplicarCurvaProduto } from "@/lib/aplicar-curva-produto";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
+import { uploadFile, ensureBucket } from "@/lib/storage";
 
 // ── Helpers para geração de variações ─────────────────────────────────────────
 
@@ -61,6 +63,9 @@ const ORDER_WHITELIST = [
   "preco_tiny",
   "peso_precificado",
   "id_produto",
+  "tipo_metal",
+  "situacao",
+  "qtd_estoque",
 ];
 
 export async function GET(req: NextRequest) {
@@ -161,6 +166,13 @@ export async function GET(req: NextRequest) {
     tem_pedra === "false" ? sql`AND p.tem_pedra_preciosa = false` :
     sql``;
 
+  // Filtro com/sem variacoes (usa erp_produtos.eh_pai; a query ja faz LEFT JOIN ep)
+  const comVariacoes = sp.get("com_variacoes")?.trim() ?? "";
+  const wVariacoes =
+    comVariacoes === "true"  ? sql`AND ep.eh_pai = true` :
+    comVariacoes === "false" ? sql`AND (ep.eh_pai IS NULL OR ep.eh_pai = false)` :
+    sql``;
+
   const wSituacao = situacao ? sql`AND p.situacao = ${situacao}` : sql``;
 
   // tipo_metal: "__sem__" = somente sem metal definido; valor = match exato
@@ -204,6 +216,9 @@ export async function GET(req: NextRequest) {
     orderField === "diferenca_percentual" ? sql`p.diferenca_percentual` :
     orderField === "preco_tiny"           ? sql`p.preco_tiny`         :
     orderField === "peso_precificado"     ? sql`p.peso_precificado`   :
+    orderField === "tipo_metal"           ? sql`p.tipo_metal`         :
+    orderField === "situacao"             ? sql`p.situacao`           :
+    orderField === "qtd_estoque"          ? sql`p.qtd_estoque`        :
     sql`p.id_produto`;
 
   try {
@@ -234,7 +249,7 @@ export async function GET(req: NextRequest) {
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
-        WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
+        WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wVariacoes} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
       `;
 
       const total      = Number(countRow?.total ?? 0);
@@ -255,7 +270,7 @@ export async function GET(req: NextRequest) {
           p.tem_pedra_preciosa,
           p.situacao,
           p.categoria,
-          NULL::text AS foto_produto,
+          p.imagem   AS foto_produto,
           -- Saldo consolidado: MAIOR valor entre 3 fontes (próprio, filhos, directus).
           -- Usa GREATEST (não COALESCE) pra pais com linha em public.estoque = 0
           -- não ficarem "presos" a esse 0 e sim mostrarem a soma dos filhos.
@@ -325,7 +340,7 @@ export async function GET(req: NextRequest) {
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
-        WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
+        WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wVariacoes} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
         ORDER BY ${orderVariacoes}
         LIMIT  ${limit}
         OFFSET ${offset}
@@ -360,7 +375,7 @@ export async function GET(req: NextRequest) {
         p.tem_pedra_preciosa,
         p.situacao,
         p.categoria,
-        NULL::text    AS foto_produto,
+        p.imagem      AS foto_produto,
         GREATEST(
           COALESCE((SELECT e.saldo FROM public.estoque e WHERE e.sku = p.sku LIMIT 1), 0)::int,
           COALESCE((SELECT SUM(v.saldo) FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku), 0)::int
@@ -480,14 +495,13 @@ export async function POST(req: NextRequest) {
     } | null;
     composicao?: ComposicaoItem[];
     variacoes?: VariacoesConfig;
-    // Quantidades iniciais em estoque por numeração (ex: {"16": 2, "18": 1}).
-    // Só tem efeito quando variacoes é gerado. Insere/atualiza public.estoque.
     quantidades?: Record<string, number>;
+    foto_base64?: string;
   };
 
   const { nome, tipo_metal, cor_metal, peso_precificado, markup, fator,
           categoria_precificacao, categoria_geral, tem_pedra_preciosa, fornecedor,
-          medidas, ficha_tecnica_ia, composicao, variacoes, quantidades } = body;
+          medidas, ficha_tecnica_ia, composicao, variacoes, quantidades, foto_base64 } = body;
 
   if (!nome?.trim()) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
   if (!peso_precificado || peso_precificado <= 0) return NextResponse.json({ error: "peso_precificado inválido" }, { status: 400 });
@@ -773,6 +787,34 @@ export async function POST(req: NextRequest) {
       await recalcularPrecoPedras(result.pai.id_produto);
       for (const v of result.variacoes) {
         await recalcularPrecoPedras(v.produto_id);
+      }
+    }
+
+    // ── Aplicar curva de precificacao (markup automatico) ─────────────────────
+    // Nao bloqueia a resposta — se falhar, registra no log e segue.
+    try {
+      await aplicarCurvaProduto(result.pai.id_produto);
+      for (const v of result.variacoes) {
+        await aplicarCurvaProduto(v.produto_id);
+      }
+    } catch (err) {
+      console.warn("[POST /api/produtos] falha ao aplicar curva:", err);
+    }
+
+    // ── Upload de foto ────────────────────────────────────────────────────────
+    if (foto_base64 && typeof foto_base64 === "string" && foto_base64.startsWith("data:")) {
+      try {
+        await ensureBucket("produto-fotos");
+        const matches = foto_base64.match(/^data:([^;]+);base64,/);
+        const mimeType = matches?.[1] ?? "image/jpeg";
+        const ext = mimeType.split("/")[1]?.split("+")[0] ?? "jpg";
+        const fileName = `produto-${result.pai.id_produto}-${Date.now()}.${ext}`;
+        const uploaded = await uploadFile("produto-fotos", fileName, foto_base64, mimeType);
+        if (!("error" in uploaded)) {
+          await sql`UPDATE public.produtos SET imagem = ${uploaded.url} WHERE id_produto = ${result.pai.id_produto}`;
+        }
+      } catch (err) {
+        console.warn("[POST /api/produtos] falha ao fazer upload da foto:", err);
       }
     }
 

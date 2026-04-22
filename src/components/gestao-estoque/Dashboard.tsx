@@ -40,7 +40,9 @@ import {
   Tag,
   Download,
   CheckSquare,
-  Square
+  Square,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 
 type FilterScope = 'positive' | 'all' | 'zero' | 'stale' | 'critical';
@@ -144,10 +146,153 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [bulkSelectCount, setBulkSelectCount] = useState<string>('');
 
+  // ───── Novos recursos Tier 1+2 ─────
+  // Cotacao do ouro (header)
+  type GoldPrice = {
+    preco_24k_g: number;
+    preco_18k_g: number;
+    variacao_pct_24h: number;
+    atualizado_em: string;
+    fonte: string;
+    estale?: boolean;
+  };
+  const [goldPrice, setGoldPrice] = useState<GoldPrice | null>(null);
+
+  // Vendas semanais (sparklines + delta)
+  type WeeklyPoint = { semana: string; qtd_vendas: number; qtd_itens: number; valor_total: number };
+  type WeeklyAgg = { total_vendas: number; total_itens: number; total_valor: number; media_semanal_valor: number; delta_pct_vs_4sem_anteriores: number };
+  const [weeklySeries, setWeeklySeries] = useState<WeeklyPoint[]>([]);
+  const [weeklyAgg, setWeeklyAgg] = useState<WeeklyAgg | null>(null);
+
+  // Modo de exibicao da distribuicao (classes de peso OU heatmap categoria x peso)
+  const [distributionMode, setDistributionMode] = useState<'weight' | 'heatmap'>('weight');
+
+  // Modo de exibicao da matriz (tabela OU galeria visual)
+  const [viewMode, setViewMode] = useState<'table' | 'gallery'>('table');
+  const [isMatrixFullscreen, setIsMatrixFullscreen] = useState(false);
+
+  // Vistas nomeadas (filtros salvos)
+  type SavedView = { id: number; nome: string; filtros: Record<string, unknown>; created_at: string; updated_at: string };
+  const [userViews, setUserViews] = useState<SavedView[]>([]);
+  const [isViewsDropdownOpen, setIsViewsDropdownOpen] = useState(false);
+  const [showSaveViewModal, setShowSaveViewModal] = useState(false);
+  const [newViewName, setNewViewName] = useState('');
+  const [isSavingView, setIsSavingView] = useState(false);
+  const [activeViewId, setActiveViewId] = useState<number | null>(null);
+  const viewsDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Oportunidades de fabricacao (produtos zerados/desativados que JA venderam)
+  type Oportunidade = {
+    id_produto: number; sku: string; nome: string; situacao: string | null;
+    imagem_capa: string | null; categoria: string | null; tipo_metal: string | null;
+    peso_precificado: number | null; preco_sync: number | null; markup: number | null;
+    saldo: number; qtd_vendida_total: number; qtd_vendas_distintas: number;
+    receita_total: number; data_ultima_venda: string | null;
+    vendas_365d: number; vendas_90d: number;
+  };
+  const [oportunidades, setOportunidades] = useState<Oportunidade[]>([]);
+  const [oportunidadesTotais, setOportunidadesTotais] = useState<{ qtd_skus: number; qtd_vendida_total_historica: number; receita_total_historica: number } | null>(null);
+  const [oppExpanded, setOppExpanded] = useState(false);
+  const [oppMinVendas, setOppMinVendas] = useState(3);
+  const [oppIncluirExcluidos, setOppIncluirExcluidos] = useState(false);
+  const [oppLoading, setOppLoading] = useState(false);
+
   // Reset selection when data changes or table changes
   useEffect(() => {
     setSelectedRows(new Set());
   }, [data, tableName]);
+
+  // Fetch cotacao do ouro ao montar + auto-refresh a cada 30 min
+  useEffect(() => {
+    let cancel = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/cotacao-ouro');
+        if (!res.ok) return;
+        const data = await res.json() as GoldPrice;
+        if (!cancel) setGoldPrice(data);
+      } catch { /* silent */ }
+    };
+    load();
+    const id = setInterval(load, 30 * 60 * 1000);
+    return () => { cancel = true; clearInterval(id); };
+  }, []);
+
+  // Fetch vendas semanais (12 sem) ao montar
+  useEffect(() => {
+    let cancel = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/gestao-estoque/vendas-semanais?semanas=12');
+        if (!res.ok) return;
+        const data = await res.json() as { semanas: WeeklyPoint[]; agregados: WeeklyAgg };
+        if (!cancel) {
+          setWeeklySeries(data.semanas ?? []);
+          setWeeklyAgg(data.agregados ?? null);
+        }
+      } catch { /* silent */ }
+    };
+    load();
+    return () => { cancel = true; };
+  }, []);
+
+  // Fetch vistas salvas do usuario
+  useEffect(() => {
+    let cancel = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/gestao-estoque/user-views');
+        if (!res.ok) return;
+        const data = await res.json() as { views: SavedView[] };
+        if (!cancel) setUserViews(data.views ?? []);
+      } catch { /* silent */ }
+    };
+    load();
+    return () => { cancel = true; };
+  }, []);
+
+  // ESC fecha modo fullscreen da matriz
+  useEffect(() => {
+    if (!isMatrixFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsMatrixFullscreen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    // Bloqueia scroll do body enquanto fullscreen
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isMatrixFullscreen]);
+
+  // Fetch oportunidades de fabricacao (re-fetch quando min_vendas ou incluir_excluidos mudam)
+  useEffect(() => {
+    let cancel = false;
+    const load = async () => {
+      setOppLoading(true);
+      try {
+        const params = new URLSearchParams();
+        params.set('min_vendas', String(oppMinVendas));
+        params.set('limit', oppExpanded ? '200' : '24');
+        if (oppIncluirExcluidos) params.set('incluir_excluidos', 'true');
+        const res = await fetch(`/api/gestao-estoque/oportunidades-fabricacao?${params.toString()}`);
+        if (!res.ok) return;
+        const data = await res.json() as {
+          produtos: Oportunidade[];
+          totais: { qtd_skus: number; qtd_vendida_total_historica: number; receita_total_historica: number };
+        };
+        if (!cancel) {
+          setOportunidades(data.produtos ?? []);
+          setOportunidadesTotais(data.totais ?? null);
+        }
+      } catch { /* silent */ }
+      finally { if (!cancel) setOppLoading(false); }
+    };
+    load();
+    return () => { cancel = true; };
+  }, [oppMinVendas, oppIncluirExcluidos, oppExpanded]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -164,6 +309,9 @@ const Dashboard: React.FC<DashboardProps> = ({
       if (supplierDropdownRef.current && !supplierDropdownRef.current.contains(event.target as Node)) {
         setIsSupplierDropdownOpen(false);
       }
+      if (viewsDropdownRef.current && !viewsDropdownRef.current.contains(event.target as Node)) {
+        setIsViewsDropdownOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -177,8 +325,9 @@ const Dashboard: React.FC<DashboardProps> = ({
     const keys = Object.keys(sample);
     const lowerTableName = tableName.toLowerCase();
 
-    // Heuristics to find columns
-    const priceKey = keys.find(k => /price|preco|valor|amount|custo|total/i.test(k));
+    // Heuristics to find columns — preco_curva tem prioridade (valor pela curva atual)
+    const priceKey = keys.find(k => k === 'preco_curva') ||
+                     keys.find(k => /price|preco|valor|amount|custo|total/i.test(k));
     
     const stockKey = keys.find(k => 
       (/qty|quantity|quantidade|items|itens|stock|estoque/i.test(k)) && 
@@ -263,9 +412,14 @@ const Dashboard: React.FC<DashboardProps> = ({
         initialColumns = Array.from(defaults);
       }
 
-      // Auto-inject data_ultima_venda if the dataset contains it, so the user can immediately see the requested column
-      if (mounted && metrics && metrics.allKeys.includes('data_ultima_venda') && !initialColumns.includes('data_ultima_venda')) {
-         initialColumns.push('data_ultima_venda');
+      // Auto-inject colunas de analise (3 separadas, cada uma com badge proprio)
+      const autoCols = ['qtd_vendas', 'data_ultima_venda', 'data_ultima_compra'];
+      if (mounted && metrics) {
+        for (const col of autoCols) {
+          if (metrics.allKeys.includes(col) && !initialColumns.includes(col)) {
+            initialColumns.push(col);
+          }
+        }
       }
 
       if (mounted && initialColumns.length > 0) {
@@ -366,8 +520,11 @@ const Dashboard: React.FC<DashboardProps> = ({
        // Unique ID for hiding logic (fallback to index if necessary, but stringified to match set)
        const uniqueId = idKey && row[idKey] ? String(row[idKey]) : `row-${idx}`;
 
-       const stock = stockKey ? (parseFloat(row[stockKey]) || 0) : 0; 
-       const price = priceKey ? (parseFloat(row[priceKey]) || 0) : 0;
+       const stock = stockKey ? (parseFloat(row[stockKey]) || 0) : 0;
+       // preco_curva pode ser null (sem peso/markup) → cai em preco_tiny
+       const price = priceKey
+         ? (parseFloat(String(row['preco_curva'] ?? row['preco_tiny'] ?? row[priceKey] ?? 0)) || 0)
+         : 0;
        const weight = weightKey ? (parseFloat(row[weightKey]) || 0) : 0;
        
        let totalValue = stock * price;
@@ -425,6 +582,15 @@ const Dashboard: React.FC<DashboardProps> = ({
        const name = row[nameKey] ? String(row[nameKey]) : 'Item Desconhecido';
        const sku = skuKey ? String(row[skuKey]) : '-';
 
+       // ── DIO (Dias de Inventario Outstanding) ──
+       // Formula: saldo_atual / (vendas_ultimos_90d / 90)
+       // null se nao vendeu nos ultimos 90d
+       const qtdVendida90d = Number(row['qtd_vendida_90d'] ?? 0);
+       const vendaDiariaMedia = qtdVendida90d > 0 ? qtdVendida90d / 90 : 0;
+       const dio = stock > 0 && vendaDiariaMedia > 0
+         ? Math.round(stock / vendaDiariaMedia)
+         : null;
+
        return {
          original: row,
          uniqueId,
@@ -444,6 +610,12 @@ const Dashboard: React.FC<DashboardProps> = ({
          diasSemVenda,
          criticScore,
          isCritical,
+         dio,
+         qtdVendida90d,
+         receita12m: Number(row['receita_total_12m'] ?? 0),
+         imagemCapa: (row['imagem_capa'] as string | undefined) ?? null,
+         // abcClass preenchido abaixo apos sort global (base = receita_total_12m)
+         abcClass: 'C' as 'A' | 'B' | 'C',
        };
     }).filter(item => {
        // 0. Hidden Rows Check
@@ -569,6 +741,60 @@ const Dashboard: React.FC<DashboardProps> = ({
         }))
         .filter(d => d.weight > 0 || d.value > 0);
 
+    // ── Classificacao ABC (Pareto sobre receita dos ultimos 12 meses) ──
+    // A = SKUs que concentram ate 80% da receita dos ultimos 12m
+    // B = proximos SKUs ate 95% da receita acumulada
+    // C = cauda (ultimos 5%) + TODOS que nao venderam em 12m
+    // Isso responde "quais produtos geram minha receita?" (ABC classico de varejo)
+    // Produtos sem venda em 12m sao C automaticamente (nao concorrem pelo topo).
+    const totalReceita12m = processedList.reduce((a, i) => a + (i.receita12m ?? 0), 0);
+    const vendidos12m = processedList.filter(i => (i.receita12m ?? 0) > 0)
+                                     .sort((a, b) => (b.receita12m ?? 0) - (a.receita12m ?? 0));
+    let acumulado = 0;
+    for (const item of vendidos12m) {
+      acumulado += item.receita12m ?? 0;
+      const perc = totalReceita12m > 0 ? (acumulado / totalReceita12m) * 100 : 0;
+      if (perc <= 80) item.abcClass = 'A';
+      else if (perc <= 95) item.abcClass = 'B';
+      else item.abcClass = 'C';
+    }
+    // (Os itens sem receita 12m ja foram inicializados como 'C' la em cima.)
+
+    // ── Heatmap Categoria × Classe de Peso ──
+    // Matriz: categoria (linhas) x classe de peso (colunas) → soma do totalValue
+    const heatmapMap = new Map<string, Map<string, { value: number; count: number; weight: number }>>();
+    const heatmapCategorias = new Set<string>();
+    for (const item of processedList) {
+      if (item.stock <= 0) continue;
+      let classeLabel = 'Outros';
+      for (let i = 0; i < WEIGHT_CLASSES.length; i++) {
+        const cls = WEIGHT_CLASSES[i];
+        const isFirst = i === 0;
+        const ok = isFirst ? (item.weight >= cls.min && item.weight <= cls.max) : (item.weight > cls.min && item.weight <= cls.max);
+        if (ok) { classeLabel = cls.label; break; }
+      }
+      heatmapCategorias.add(item.category);
+      if (!heatmapMap.has(item.category)) heatmapMap.set(item.category, new Map());
+      const row = heatmapMap.get(item.category)!;
+      if (!row.has(classeLabel)) row.set(classeLabel, { value: 0, count: 0, weight: 0 });
+      const cell = row.get(classeLabel)!;
+      cell.value += item.totalValue;
+      cell.count += item.stock;
+      cell.weight += item.weight * item.stock;
+    }
+    const heatmap = {
+      categorias: Array.from(heatmapCategorias).sort(),
+      classes: WEIGHT_CLASSES.map(w => w.label),
+      cells: heatmapMap,
+      maxValue: 0 as number,
+    };
+    // Calcula maior valor pra normalizar intensidade da cor
+    heatmapMap.forEach(row => {
+      row.forEach(cell => {
+        if (cell.value > heatmap.maxValue) heatmap.maxValue = cell.value;
+      });
+    });
+
     // Sort List based on Sort Config
     processedList.sort((a, b) => {
         let valA, valB;
@@ -579,6 +805,12 @@ const Dashboard: React.FC<DashboardProps> = ({
         else if (sortConfig.key === 'price') { valA = a.price; valB = b.price; }
         else if (sortConfig.key === 'weight') { valA = a.weight; valB = b.weight; }
         else if (sortConfig.key === 'criticScore') { valA = a.criticScore; valB = b.criticScore; }
+        else if (sortConfig.key === 'dio') {
+          // null (sem venda) sempre ultimo em asc, primeiro em desc — "pior" caso
+          valA = a.dio ?? Number.MAX_SAFE_INTEGER;
+          valB = b.dio ?? Number.MAX_SAFE_INTEGER;
+        }
+        else if (sortConfig.key === 'abcClass') { valA = a.abcClass; valB = b.abcClass; }
         else {
              // Generic column sort
              valA = a.original[sortConfig.key];
@@ -610,7 +842,8 @@ const Dashboard: React.FC<DashboardProps> = ({
       filteredCount: processedList.length,
       avgPricePerGram: totalWeight > 0 ? totalStockValue / totalWeight : 0,
       fullList: processedList,
-      distributionStats
+      distributionStats,
+      heatmap,
     };
   }, [data, metrics, filterScope, selectedCategories, selectedWeightClasses, selectedSuppliers, sortConfig, purchaseDateRange, hiddenRowIds]);
 
@@ -694,6 +927,65 @@ const Dashboard: React.FC<DashboardProps> = ({
           setConfigSaved(true);
           setTimeout(() => setConfigSaved(false), 2000);
       }
+  };
+
+  // ────── Vistas nomeadas (filtros salvos) ──────
+  const applySavedView = (view: SavedView) => {
+    const f = view.filtros ?? {};
+    setSelectedCategories(Array.isArray(f.categorias) ? f.categorias as string[] : []);
+    setSelectedSuppliers(Array.isArray(f.fornecedores) ? f.fornecedores as string[] : []);
+    setSelectedWeightClasses(Array.isArray(f.classes_peso) ? f.classes_peso as string[] : []);
+    setFilterScope((f.scope as FilterScope) ?? 'all');
+    setPurchaseDateRange({
+      start: (f.data_inicio as string) ?? '',
+      end: (f.data_fim as string) ?? ''
+    });
+    setActiveViewId(view.id);
+    setIsViewsDropdownOpen(false);
+  };
+
+  const saveAsView = async () => {
+    const nome = newViewName.trim();
+    if (!nome) return;
+    setIsSavingView(true);
+    try {
+      const res = await fetch('/api/gestao-estoque/user-views', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome,
+          filtros: {
+            categorias: selectedCategories,
+            fornecedores: selectedSuppliers,
+            classes_peso: selectedWeightClasses,
+            scope: filterScope,
+            data_inicio: purchaseDateRange.start,
+            data_fim: purchaseDateRange.end
+          }
+        })
+      });
+      if (res.ok) {
+        const { view } = await res.json() as { view: SavedView };
+        setUserViews(prev => {
+          const filtered = prev.filter(v => v.id !== view.id);
+          return [view, ...filtered];
+        });
+        setActiveViewId(view.id);
+        setShowSaveViewModal(false);
+        setNewViewName('');
+      }
+    } catch { /* silent */ }
+    finally { setIsSavingView(false); }
+  };
+
+  const deleteView = async (id: number) => {
+    try {
+      const res = await fetch(`/api/gestao-estoque/user-views?id=${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setUserViews(prev => prev.filter(v => v.id !== id));
+        if (activeViewId === id) setActiveViewId(null);
+      }
+    } catch { /* silent */ }
   };
 
   const toggleRow = (uniqueId: string) => {
@@ -878,854 +1170,1696 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   const formatNumber = (val: number) => new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(val);
+  // Moeda sem decimais: R$ 4.950 / R$ 12.300
+  const formatCurrencyFull = (val: number) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val);
+  // Moeda compacta pra cards/métricas: R$ 12,3k / R$ 1,2M
+  const formatCurrencyShort = (val: number) => {
+    if (!Number.isFinite(val)) return 'R$ 0';
+    const abs = Math.abs(val);
+    if (abs >= 1_000_000) return `R$ ${(val / 1_000_000).toFixed(1).replace('.', ',')}M`;
+    if (abs >= 10_000)    return `R$ ${(val / 1_000).toFixed(0)}k`;
+    if (abs >= 1_000)     return `R$ ${(val / 1_000).toFixed(1).replace('.', ',')}k`;
+    return `R$ ${Math.round(val)}`;
+  };
+
+  // Layout por tipo de coluna — largura, alinhamento, font mono
+  // Retorna classes pra <th> e <td> ficarem sincronizados em largura
+  const colLayout = (key: string): { cls: string; align: 'left' | 'center' | 'right'; mono: boolean; nowrap: boolean } => {
+    const k = key.toLowerCase();
+    // Nome / descrição: flex, truncate
+    if (k === 'nome' || k.includes('descri') || k === 'title' || k === 'titulo') return { cls: 'min-w-[200px] max-w-[320px]', align: 'left', mono: false, nowrap: false };
+    // SKU / código
+    if (k === 'sku' || k === 'codigo' || k === 'ref' || k === 'referencia' || k === 'model') return { cls: 'w-[92px]', align: 'left', mono: true, nowrap: true };
+    // Situação / status (usa bolinha visual)
+    if (k === 'situacao' || k === 'status' || k === 'ativo') return { cls: 'w-[42px]', align: 'center', mono: false, nowrap: true };
+    // Qtd vendas dedicada (badge próprio)
+    if (k === 'qtd_vendas') return { cls: 'w-[68px]', align: 'center', mono: true, nowrap: true };
+    // Preço / valor
+    if (k.match(/preco|valor|price/)) return { cls: 'w-[88px]', align: 'right', mono: true, nowrap: true };
+    // Saldo / estoque / quantidade
+    if (k.match(/saldo|estoque|qtd_|qty|quantidade|quant$/)) return { cls: 'w-[64px]', align: 'right', mono: true, nowrap: true };
+    // Peso / gramas
+    if (k.match(/peso|gram|weight/)) return { cls: 'w-[68px]', align: 'right', mono: true, nowrap: true };
+    // Datas (venda / compra / atualização)
+    if (k.match(/data|date|_at$|_em$/)) return { cls: 'w-[124px]', align: 'center', mono: false, nowrap: true };
+    // Markup / fator / percentual
+    if (k === 'markup' || k === 'fator' || k.includes('percent') || k.endsWith('_pct')) return { cls: 'w-[60px]', align: 'right', mono: true, nowrap: true };
+    // Booleanos
+    if (k.startsWith('tem_') || k.includes('eh_') || k === 'n8n') return { cls: 'w-[52px]', align: 'center', mono: false, nowrap: true };
+    // Categoria / tipo (texto curto)
+    if (k.includes('categoria') || k.includes('tipo') || k.includes('type')) return { cls: 'min-w-[100px] max-w-[180px]', align: 'left', mono: false, nowrap: false };
+    // Default
+    return { cls: 'min-w-[80px]', align: 'left', mono: false, nowrap: false };
+  };
+
+  // ── Sparkline SVG inline (zero deps) ──
+  const Sparkline = ({ values, color = '#184036', width = 140, height = 32 }: { values: number[]; color?: string; width?: number; height?: number }) => {
+    if (!values || values.length < 2) {
+      return <div style={{ width, height }} className="flex items-center justify-center text-[10px] text-gray-300">sem dados</div>;
+    }
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const pad = 2;
+    const stepX = (width - pad * 2) / (values.length - 1);
+    const pts = values.map((v, i) => {
+      const x = pad + i * stepX;
+      const y = height - pad - ((v - min) / range) * (height - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    const d = `M ${pts.join(' L ')}`;
+    const areaD = `${d} L ${(pad + (values.length - 1) * stepX).toFixed(1)},${height} L ${pad},${height} Z`;
+    const lastX = pad + (values.length - 1) * stepX;
+    const lastY = height - pad - ((values[values.length - 1] - min) / range) * (height - pad * 2);
+    return (
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
+        <path d={areaD} fill={color} opacity={0.08} />
+        <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={lastX} cy={lastY} r={2.5} fill={color} />
+      </svg>
+    );
+  };
+
+  // Progressive disclosure: só mostra Distribuição + Matriz quando algum filtro é aplicado.
+  // Default ('positive' + datas vazias + nada selecionado) = só KPIs.
+  const hasActiveFilter =
+    selectedCategories.length > 0 ||
+    selectedSuppliers.length > 0 ||
+    selectedWeightClasses.length > 0 ||
+    filterScope !== 'positive' ||
+    !!purchaseDateRange.start ||
+    !!purchaseDateRange.end ||
+    hiddenRowIds.size > 0;
 
   return (
-    <div className="flex-1 min-w-0 bg-creme-50 text-gray-900 overflow-y-auto overflow-x-hidden scrollbar-thin p-4 h-full">
-      {/* Header */}
-      <div className="mb-4 flex flex-col xl:flex-row justify-between items-start xl:items-end gap-6">
-        <div>
-          <h1 className="text-3xl font-serif font-bold text-alisson-gold mb-1">
-            Inteligência de Estoque
-          </h1>
-          <p className="text-gray-500 text-sm uppercase tracking-widest flex items-center gap-2">
-            Análise para: <span className="text-gray-900 font-semibold">{tableName}</span>
-          </p>
-        </div>
-        
-        <div className="flex flex-col md:flex-row items-start md:items-end gap-3 w-full xl:w-auto">
-          
-           {/* INVENTORY: PURCHASE DATE FILTER */}
-           {metrics.purchaseDateKey && (
-             <div className="flex flex-col">
-                <div className="flex items-center gap-2 mb-1 px-1">
-                   <CalendarDays size={12} className="text-gray-500" />
-                   <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Data Compra</span>
-                </div>
-                <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-creme-200">
-                  <input 
-                    type="date" 
-                    value={purchaseDateRange.start}
-                    onChange={(e) => setPurchaseDateRange(prev => ({ ...prev, start: e.target.value }))}
-                    className="bg-transparent text-gray-900 text-xs px-2 py-1.5 focus:outline-none focus:text-alisson-gold font-mono"
-                  />
-                  <span className="text-gray-600">-</span>
-                  <input 
-                    type="date" 
-                    value={purchaseDateRange.end}
-                    onChange={(e) => setPurchaseDateRange(prev => ({ ...prev, end: e.target.value }))}
-                    className="bg-transparent text-gray-900 text-xs px-2 py-1.5 focus:outline-none focus:text-alisson-gold font-mono"
-                  />
-                </div>
-             </div>
-          )}
+    <div className="flex-1 min-w-0 max-w-full bg-creme-50 text-gray-900 overflow-y-auto overflow-x-hidden scrollbar-thin h-full">
+      <div className="px-6 lg:px-10 py-6 lg:py-8 flex flex-col gap-6">
 
-          {/* Category Filter */}
-          {availableCategories.length > 0 && (
-              <div className="relative" ref={catDropdownRef}>
-                <div className="flex items-center gap-2 mb-1 px-1">
-                     <Gem size={12} className="text-gray-500" />
-                     <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Categorias</span>
+        {/* HERO HEADER */}
+        <header className="order-1 flex flex-col lg:flex-row justify-between items-start lg:items-end gap-4 pb-5 border-b border-creme-200">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.22em] text-gray-500 font-semibold mb-1.5">
+              {tableName}
+            </p>
+            <h1 className="text-3xl lg:text-4xl font-serif font-semibold text-esmeralda-500 tracking-tight leading-tight">
+              Inteligência de Estoque
+            </h1>
+            <p className="text-sm text-gray-600 mt-2 max-w-2xl">
+              Visão executiva do capital em joias · <span className="font-semibold text-gray-900">{analysis.filteredCount.toLocaleString('pt-BR')}</span> peças na seleção atual
+              {hiddenRowIds.size > 0 && (
+                <> · <span className="text-red-600 font-medium">{hiddenRowIds.size} ocultas</span></>
+              )}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Cotacao ouro — 24k e a referencia de mercado */}
+            {goldPrice && (
+              <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${goldPrice.estale ? 'bg-creme-50 border-creme-200' : 'bg-dourado-light/20 border-dourado-light'}`}
+                   title={`${goldPrice.fonte} · atualizado ${goldPrice.atualizado_em}${goldPrice.estale ? ' (cache estálico)' : ''}`}>
+                <div className="p-1.5 rounded-lg bg-dourado-light/50 text-dourado-dark">
+                  <Gem size={18} />
                 </div>
-                <button 
-                    onClick={() => setIsCatDropdownOpen(!isCatDropdownOpen)}
-                    className={`flex items-center justify-between gap-3 px-4 py-2 bg-white border rounded-lg min-w-[180px] transition-all ${
-                        selectedCategories.length > 0 
-                        ? 'border-alisson-gold/50 text-gray-900' 
-                        : 'border-creme-200 text-gray-600 hover:border-creme-200'
-                    }`}
-                >
-                    <span className="text-sm truncate max-w-[140px]">
-                        {selectedCategories.length === 0 
-                            ? 'Todas' 
-                            : `${selectedCategories.length} selecionada(s)`}
-                    </span>
-                    <ChevronDown size={14} className={`transition-transform ${isCatDropdownOpen ? 'rotate-180' : ''}`} />
-                </button>
-                
-                {isCatDropdownOpen && (
-                   /* Dropdown Content */
-                   <div className="absolute top-full left-0 mt-2 w-72 max-h-96 overflow-y-auto bg-white border border-creme-200 rounded-xl shadow-2xl z-50 scrollbar-thin flex flex-col">
-                        <div className="p-2 border-b border-creme-200 bg-white z-10 sticky top-0">
-                            <div className="flex justify-between items-center mb-2">
-                                <button onClick={() => setSelectedCategories(availableCategories)} className="text-[10px] uppercase font-bold text-gray-500 hover:text-gray-900 px-2 py-1 rounded">Todas</button>
-                                <button onClick={() => { setSelectedCategories([]); setCategorySearch(''); }} className="text-[10px] uppercase font-bold text-gray-500 hover:text-alisson-gold px-2 py-1 rounded">Limpar</button>
-                            </div>
-                            {availableCategories.length > 8 && (
-                                <div className="relative">
-                                    <Search size={12} className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-500" />
-                                    <input 
-                                        type="text" 
-                                        value={categorySearch}
-                                        onChange={(e) => setCategorySearch(e.target.value)}
-                                        placeholder="Filtrar..."
-                                        className="w-full bg-creme-50/50 border border-creme-200 rounded text-xs py-1.5 pl-7 pr-2 text-gray-700 focus:outline-none focus:border-alisson-gold/30"
-                                    />
-                                </div>
-                            )}
-                        </div>
-                        <div className="p-2 space-y-1">
-                            {filteredCategories.map(cat => (
-                                <button
-                                    key={cat}
-                                    onClick={() => toggleCategory(cat)}
-                                    className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-center justify-between group transition-colors ${selectedCategories.includes(cat) ? 'bg-alisson-gold/10 text-alisson-gold font-medium' : 'text-gray-600 hover:bg-creme-100'}`}
-                                >
-                                    <div className="flex items-center gap-2">
-                                        {getCategoryIcon(cat)}
-                                        <span className="truncate max-w-[180px]">{cat}</span>
-                                    </div>
-                                    {selectedCategories.includes(cat) && <Check size={14} />}
-                                </button>
-                            ))}
-                            {filteredCategories.length === 0 && (
-                                <p className="text-center text-xs text-gray-500 py-4">Nenhuma categoria encontrada.</p>
-                            )}
-                        </div>
-                    </div>
-                )}
+                <div className="text-right">
+                  <p className="text-[10px] uppercase tracking-widest text-dourado-dark font-bold leading-none">Ouro 24k hoje</p>
+                  <p className="text-lg font-mono font-bold text-gray-900 tabular-nums leading-tight mt-1">
+                    {formatCurrency(goldPrice.preco_24k_g)}<span className="text-xs font-sans text-gray-500">/g</span>
+                  </p>
+                  <p className={`text-[11px] font-mono leading-none mt-0.5 ${goldPrice.variacao_pct_24h > 0 ? 'text-emerald-600' : goldPrice.variacao_pct_24h < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                    {goldPrice.variacao_pct_24h > 0 ? '▲' : goldPrice.variacao_pct_24h < 0 ? '▼' : '—'} {Math.abs(goldPrice.variacao_pct_24h).toFixed(2)}% · 18k {formatCurrency(goldPrice.preco_18k_g)}
+                  </p>
+                </div>
               </div>
-          )}
+            )}
 
-          {/* Supplier Filter (New) */}
-          {availableSuppliers.length > 0 && (
-              <div className="relative" ref={supplierDropdownRef}>
-                <div className="flex items-center gap-2 mb-1 px-1">
-                     <Truck size={12} className="text-gray-500" />
-                     <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Fornecedor</span>
-                </div>
-                <button 
-                    onClick={() => setIsSupplierDropdownOpen(!isSupplierDropdownOpen)}
-                    className={`flex items-center justify-between gap-3 px-4 py-2 bg-white border rounded-lg min-w-[180px] transition-all ${
-                        selectedSuppliers.length > 0 
-                        ? 'border-purple-500/50 text-gray-900' 
-                        : 'border-creme-200 text-gray-600 hover:border-creme-200'
-                    }`}
-                >
-                    <span className="text-sm truncate max-w-[140px]">
-                        {selectedSuppliers.length === 0 
-                            ? 'Todos' 
-                            : `${selectedSuppliers.length} selecionado(s)`}
-                    </span>
-                    <ChevronDown size={14} className={`transition-transform ${isSupplierDropdownOpen ? 'rotate-180' : ''}`} />
-                </button>
-                
-                {isSupplierDropdownOpen && (
-                   <div className="absolute top-full left-0 mt-2 w-64 max-h-80 overflow-y-auto bg-white border border-creme-200 rounded-xl shadow-2xl z-50 scrollbar-thin flex flex-col">
-                        <div className="p-2 border-b border-creme-200 flex justify-between sticky top-0 bg-white z-10">
-                            <button onClick={() => setSelectedSuppliers(availableSuppliers)} className="text-[10px] uppercase font-bold text-gray-500 hover:text-gray-900 px-2 py-1 rounded">Todos</button>
-                            <button onClick={() => setSelectedSuppliers([])} className="text-[10px] uppercase font-bold text-gray-500 hover:text-purple-400 px-2 py-1 rounded">Limpar</button>
-                        </div>
-                        <div className="p-2 space-y-1">
-                            {availableSuppliers.map(sup => (
-                                <button
-                                    key={sup}
-                                    onClick={() => toggleSupplier(sup)}
-                                    className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-center justify-between group transition-colors ${selectedSuppliers.includes(sup) ? 'bg-purple-500/10 text-purple-400 font-medium' : 'text-gray-600 hover:bg-creme-100'}`}
-                                >
-                                    <span className="truncate">{sup}</span>
-                                    {selectedSuppliers.includes(sup) && <Check size={14} />}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                )}
-              </div>
-          )}
-
-          {/* Weight Class Filter */}
-          <div className="relative" ref={weightDropdownRef}>
-            <div className="flex items-center gap-2 mb-1 px-1">
-                 <Scale size={12} className="text-gray-500" />
-                 <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Peso</span>
+            <div className="text-right">
+              <p className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold">Capital exposto</p>
+              <p className="text-2xl lg:text-3xl font-mono font-bold text-esmeralda-500 tabular-nums leading-none mt-1">
+                {formatCurrency(analysis.totalStockValue)}
+              </p>
+              {goldPrice && analysis.totalWeight > 0 && (
+                <p className="text-[11px] text-gray-500 mt-1 font-mono">
+                  Metal bruto: {formatCurrency(analysis.totalWeight * goldPrice.preco_24k_g)}
+                </p>
+              )}
             </div>
-            <button 
-                onClick={() => setIsWeightDropdownOpen(!isWeightDropdownOpen)}
-                className={`flex items-center justify-between gap-3 px-4 py-2 bg-white border rounded-lg min-w-[180px] transition-all ${
-                    selectedWeightClasses.length > 0 
-                    ? 'border-blue-500/50 text-gray-900' 
-                    : 'border-creme-200 text-gray-600 hover:border-creme-200'
-                }`}
-            >
-                <span className="text-sm truncate max-w-[140px]">
-                    {selectedWeightClasses.length === 0 ? 'Todas as Classes' : `${selectedWeightClasses.length} selecionada(s)`}
-                </span>
-                <ChevronDown size={14} className={`transition-transform ${isWeightDropdownOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {isWeightDropdownOpen && (
-                <div className="absolute top-full left-0 mt-2 w-72 max-h-96 overflow-y-auto bg-white border border-creme-200 rounded-xl shadow-2xl z-50 scrollbar-thin flex flex-col">
-                    <div className="p-2 border-b border-creme-200 flex justify-between sticky top-0 bg-white z-10">
-                        <span className="text-[10px] uppercase font-bold text-gray-500 px-2 py-1">Classificação</span>
-                        <button onClick={() => setSelectedWeightClasses([])} className="text-[10px] uppercase font-bold text-gray-500 hover:text-blue-400 px-2 py-1 rounded hover:bg-creme-100">Limpar</button>
-                    </div>
-                    <div className="p-2 space-y-1">
-                        {WEIGHT_CLASSES.map(cls => (
-                            <button
-                                key={cls.label}
-                                onClick={() => toggleWeightClass(cls.label)}
-                                className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-center justify-between group transition-colors ${selectedWeightClasses.includes(cls.label) ? 'bg-blue-900/20 text-blue-400 font-medium' : 'text-gray-600 hover:bg-creme-100'}`}
-                            >
-                                <div className="flex flex-col"><span>{cls.label}</span><span className="text-[10px] text-gray-600 font-mono">{cls.min}g - {cls.max}g</span></div>
-                                {selectedWeightClasses.includes(cls.label) && <Check size={14} />}
-                            </button>
-                        ))}
-                    </div>
-                </div>
+            {onRefresh && (
+              <button
+                onClick={onRefresh}
+                className="p-3 rounded-xl bg-white border border-creme-200 text-gray-600 hover:text-esmeralda-500 hover:border-esmeralda-300 transition-colors"
+                title="Atualizar"
+              >
+                <RefreshCcw size={18} />
+              </button>
             )}
           </div>
+        </header>
 
-          {/* Filter Scope Controller */}
-          <div>
-            <div className="flex items-center gap-2 mb-1 px-1">
-                 <ListFilter size={12} className="text-gray-500" />
-                 <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Escopo</span>
-            </div>
-            <div className="flex gap-1 bg-white p-1 rounded-lg border border-creme-200">
-                <button onClick={() => setFilterScope('positive')} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all border ${filterScope === 'positive' ? 'bg-green-900/30 text-green-400 border-green-500/50 shadow-[0_0_10px_rgba(74,222,128,0.2)]' : 'text-gray-500 border-transparent hover:text-gray-700 hover:bg-creme-100'}`}>Em Estoque</button>
-                <button onClick={() => setFilterScope('all')} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all border ${filterScope === 'all' ? 'bg-blue-900/30 text-blue-400 border-blue-500/50 shadow-[0_0_10px_rgba(96,165,250,0.2)]' : 'text-gray-500 border-transparent hover:text-gray-700 hover:bg-creme-100'}`}>Todos</button>
-                <button onClick={() => setFilterScope('critical')} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all border ${filterScope === 'critical' ? 'bg-red-900/30 text-red-400 border-red-500/50 shadow-[0_0_10px_rgba(248,113,113,0.2)]' : 'text-gray-500 border-transparent hover:text-gray-700 hover:bg-creme-100'}`}>Crítico</button>
-                <button onClick={() => setFilterScope('zero')} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all border ${filterScope === 'zero' ? 'bg-red-900/30 text-red-400 border-red-500/50 shadow-[0_0_10px_rgba(248,113,113,0.2)]' : 'text-gray-500 border-transparent hover:text-gray-700 hover:bg-creme-100'}`}>Sem Estoque</button>
-             </div>
-          </div>
-          
-        </div>
-      </div>
-      
-      {/* Active Filters & Hidden Rows Alert */}
-      {(selectedCategories.length > 0 || selectedSuppliers.length > 0 || selectedWeightClasses.length > 0 || hiddenRowIds.size > 0) && (
-          <div className="mb-6 flex flex-wrap gap-2 items-center">
-              <span className="text-xs text-gray-500 mr-2 uppercase tracking-wide font-semibold">Filtros Ativos:</span>
-              
-              {/* Hidden Rows Badge */}
-              {hiddenRowIds.size > 0 && (
-                 <button onClick={resetHiddenRows} className="flex items-center gap-1.5 px-3 py-1 bg-red-500/10 border border-red-500/40 rounded-full text-xs text-red-400 hover:bg-red-500/20 transition-colors animate-fade-in">
-                    <EyeOff size={10} /> {hiddenRowIds.size} Itens Ocultos <RefreshCcw size={10} className="ml-1" />
-                 </button>
-              )}
+        {/* FILTERS BAR */}
+        <section className="order-2 bg-white border border-creme-200 rounded-2xl p-5">
+          <div className="flex flex-wrap items-end gap-4">
 
-              {selectedCategories.map(cat => (
-                  <button key={cat} onClick={() => toggleCategory(cat)} className="flex items-center gap-1.5 px-3 py-1 bg-alisson-gold/10 border border-alisson-gold/30 rounded-full text-xs text-alisson-gold hover:bg-red-900/20 hover:border-red-500/50 hover:text-red-400 transition-colors">
-                      {cat} <X size={10} />
-                  </button>
-              ))}
-              {selectedSuppliers.map(sup => (
-                  <button key={sup} onClick={() => toggleSupplier(sup)} className="flex items-center gap-1.5 px-3 py-1 bg-purple-500/10 border border-purple-500/30 rounded-full text-xs text-purple-400 hover:bg-red-900/20 hover:border-red-500/50 hover:text-red-400 transition-colors">
-                      <Truck size={10} /> {sup} <X size={10} />
-                  </button>
-              ))}
-              {selectedWeightClasses.map(cls => (
-                  <button key={cls} onClick={() => toggleWeightClass(cls)} className="flex items-center gap-1.5 px-3 py-1 bg-blue-900/20 border border-blue-500/30 rounded-full text-xs text-blue-400 hover:bg-red-900/20 hover:border-red-500/50 hover:text-red-400 transition-colors">
-                      <Weight size={10} /> {cls} <X size={10} />
-                  </button>
-              ))}
-              <button onClick={() => { setSelectedCategories([]); setSelectedSuppliers([]); setSelectedWeightClasses([]); resetHiddenRows(); }} className="text-xs text-gray-500 underline hover:text-gray-900 ml-2">Limpar tudo</button>
-          </div>
-      )}
-
-      {/* KPI Disclaimer */}
-      <div className="mb-4 px-4 py-2 bg-white border border-creme-200 rounded-lg flex items-center gap-3">
-          <Activity size={16} className="text-gray-500" />
-          <span className="text-xs text-gray-600">
-             <strong className="text-alisson-gold">Nota:</strong> As métricas abaixo refletem a análise da página atual ({analysis.filteredCount} itens visíveis). Itens ocultos não são contabilizados.
-          </span>
-      </div>
-
-      {/* KPI Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 mb-5">
-        {/* KPI 1: Valuation / Revenue */}
-        <div className="bg-white border border-creme-200 p-3 rounded-lg hover:border-alisson-gold/50 transition-colors group relative overflow-hidden">
-          <div className="flex items-start justify-between mb-4 relative z-10">
-            <div>
-              <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold">
-                Valuation ({filterScope})
-              </p>
-              <h3 className={`text-base font-bold mt-1 text-gray-900 group-hover:text-alisson-gold`}>
-                {formatCurrency(analysis.totalStockValue)}
-              </h3>
-            </div>
-            <div className="p-2 bg-alisson-gold/10 rounded-lg text-alisson-gold">
-              <DollarSign size={20} />
-            </div>
-          </div>
-          <div className="w-full bg-creme-100 h-1 rounded-full overflow-hidden relative z-10">
-            <div className="bg-alisson-gold h-full rounded-full" style={{ width: '100%' }}></div>
-          </div>
-        </div>
-
-        {/* KPI 2: Total Items / Volume */}
-        <div className="bg-white border border-creme-200 p-3 rounded-lg hover:border-green-500/50 transition-colors group">
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold">
-                Unidades
-              </p>
-              <h3 className="text-base font-bold text-gray-900 mt-1 group-hover:text-green-400 transition-colors">
-                {formatNumber(analysis.totalItems)}
-              </h3>
-            </div>
-            <div className="p-2 bg-green-500/10 rounded-lg text-green-400">
-              <Package size={20} />
-            </div>
-          </div>
-        </div>
-
-        {/* KPI 3: Products in Stock */}
-        <div className="bg-white border border-creme-200 p-3 rounded-lg hover:border-emerald-500/50 transition-colors group">
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold">
-                Em Estoque
-              </p>
-              <h3 className="text-base font-bold text-gray-900 mt-1 group-hover:text-emerald-400 transition-colors">
-                {formatNumber(analysis.productsInStock)}
-              </h3>
-            </div>
-            <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
-              <Check size={20} />
-            </div>
-          </div>
-        </div>
-
-        {/* KPI 4: Products in Replenishment */}
-        <div className="bg-white border border-creme-200 p-3 rounded-lg hover:border-red-500/50 transition-colors group">
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold">
-                Em Reposição
-              </p>
-              <h3 className="text-base font-bold text-gray-900 mt-1 group-hover:text-red-400 transition-colors">
-                {formatNumber(analysis.productsInReplenishment)}
-              </h3>
-            </div>
-            <div className="p-2 bg-red-500/10 rounded-lg text-red-400">
-              <AlertCircle size={20} />
-            </div>
-          </div>
-        </div>
-
-        {/* KPI 5: Weight (Conditional) */}
-        <div className="bg-white border border-creme-200 p-3 rounded-lg hover:border-blue-500/50 transition-colors group">
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold">
-                Peso Total
-              </p>
-              <h3 className="text-base font-bold text-gray-900 mt-1 group-hover:text-blue-400 transition-colors">
-                {analysis.totalWeight > 0 ? formatNumber(analysis.totalWeight) : '-'} <span className="text-sm text-gray-500">g</span>
-              </h3>
-            </div>
-            <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
-              <Scale size={20} />
-            </div>
-          </div>
-          <div className="w-full bg-creme-100 h-1 rounded-full overflow-hidden">
-             <div className="bg-blue-500 h-full rounded-full" style={{ width: '75%' }}></div>
-          </div>
-        </div>
-
-        {/* KPI 6: Average Ticket / Price */}
-        <div className="bg-white border border-creme-200 p-3 rounded-lg hover:border-purple-500/50 transition-colors group">
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold">
-                Preço / Grama
-              </p>
-              <h3 className="text-base font-bold text-gray-900 mt-1 group-hover:text-purple-400 transition-colors">
-                {formatCurrency(analysis.avgPricePerGram)}
-              </h3>
-            </div>
-            <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
-              <TrendingUp size={20} />
-            </div>
-          </div>
-        </div>
-
-        {/* KPI 7: Alerta Crítico (NEW) */}
-        <div 
-          onClick={handleCriticalClick}
-          className={`bg-white border p-5 rounded-xl transition-all group cursor-pointer ${filterScope === 'critical' ? 'border-red-500 shadow-[0_0_20px_rgba(248,113,113,0.2)] bg-red-900/20 scale-[1.02]' : 'border-creme-200 hover:border-red-500/50'}`}
-        >
-          <div className="flex items-start justify-between mb-2">
-            <div className="w-full">
-              <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-1.5">
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                      </span>
-                      <p className={`text-xs uppercase tracking-wider font-bold ${filterScope === 'critical' ? 'text-red-400' : 'text-gray-600'}`}>
-                        Alerta Crítico (score ≥ 60)
-                      </p>
-                  </div>
-                  <div className="p-1.5 bg-red-500/10 rounded-lg text-red-500">
-                    <AlertCircle size={16} />
-                  </div>
-              </div>
-              <h3 className={`text-base font-black mt-1 transition-colors ${filterScope === 'critical' ? 'text-red-400' : 'text-gray-900 group-hover:text-red-400'}`}>
-                {formatCurrency(analysis.criticalCapital)}
-              </h3>
-            </div>
-          </div>
-          
-          <div className="text-xs text-gray-600 mt-2 space-y-1.5 border-t border-creme-200 pt-2">
-             <div className="flex justify-between items-center">
-                 <span>Volume Total Parado:</span>
-                 <strong className="text-red-400">{analysis.criticalCount} peças</strong>
-             </div>
-             <div className="flex justify-between items-center" title="Valor Médio por Peça">
-                 <span>Valor Médio / Peça:</span>
-                 <strong className="text-gray-900">{formatCurrency(analysis.avgCriticalPrice)}</strong>
-             </div>
-             
-             {analysis.topCriticalItem && (
-                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">🔥 Maior Risco de Capital</span>
-                    <span className="text-[10px] font-bold text-white bg-red-600 rounded px-1.5 py-0.5">
-                      Score {analysis.topCriticalItem.criticScore}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center gap-2">
-                     <span className="truncate font-mono text-[11px] text-gray-800">{analysis.topCriticalItem.sku}</span>
-                     <span className="font-bold shrink-0 text-red-700">{formatCurrency(analysis.topCriticalItem.totalValue)}</span>
-                  </div>
-                  <span className="text-[10px] text-red-500 block mt-0.5">
-                    {analysis.topCriticalItem.stock} un. × {formatCurrency(analysis.topCriticalItem.price)}
-                    {analysis.topCriticalItem.idadeDias > 0 && ` · ${analysis.topCriticalItem.idadeDias}d em estoque`}
-                    {analysis.topCriticalItem.diasSemVenda === null
-                      ? " · nunca vendeu"
-                      : ` · ${analysis.topCriticalItem.diasSemVenda}d sem venda`}
-                  </span>
+            {/* Date range */}
+            {metrics.purchaseDateKey && (
+              <div className="flex flex-col">
+                <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">
+                  <CalendarDays size={14} /> Data da compra
+                </label>
+                <div className="flex items-center gap-2 h-10 px-3 bg-creme-50 rounded-lg border border-creme-200">
+                  <input
+                    type="date"
+                    value={purchaseDateRange.start}
+                    onChange={(e) => setPurchaseDateRange(prev => ({ ...prev, start: e.target.value }))}
+                    className="bg-transparent text-sm text-gray-900 font-mono focus:outline-none focus:text-esmeralda-500 w-[125px]"
+                  />
+                  <span className="text-gray-400">–</span>
+                  <input
+                    type="date"
+                    value={purchaseDateRange.end}
+                    onChange={(e) => setPurchaseDateRange(prev => ({ ...prev, end: e.target.value }))}
+                    className="bg-transparent text-sm text-gray-900 font-mono focus:outline-none focus:text-esmeralda-500 w-[125px]"
+                  />
                 </div>
-             )}
-          </div>
-        </div>
-
-        {/* KPI 8: Idle Capital */}
-        <div 
-          onClick={handleEstoqueParadoClick}
-          className={`bg-white border p-3 rounded-lg transition-colors group cursor-pointer ${filterScope === 'stale' ? 'border-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.15)] bg-orange-900/20' : 'border-creme-200 hover:border-orange-500/50'}`}
-        >
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <p className={`text-xs uppercase tracking-wider font-semibold ${filterScope === 'stale' ? 'text-orange-400' : 'text-gray-600'}`}>
-                Estoque Parado {'> 180d'}
-              </p>
-              <h3 className={`text-base font-bold mt-1 transition-colors ${filterScope === 'stale' ? 'text-orange-400' : 'text-gray-900 group-hover:text-orange-400'}`}>
-                {formatCurrency(analysis.idleCapital)}
-              </h3>
-              <p className="text-xs text-gray-500 mt-1"><span className="text-orange-400 font-semibold">{analysis.idleItemsCount}</span> peças sem giro</p>
-              {analysis.missingDateCount > 0 && (
-                <p className="text-[10px] text-red-400/80 mt-0.5">⚠️ {analysis.missingDateCount} un. s/ data (ponto cego)</p>
-              )}
-            </div>
-            <div className="p-2 bg-orange-500/10 rounded-lg text-orange-400">
-              <CalendarDays size={20} />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* WEIGHT DISTRIBUTION GRID (Only Inventory) */}
-      <div className="mb-5">
-        <h3 className="text-lg font-serif font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <PieChart size={18} className="text-alisson-gold" />
-          Distribuição por Classe de Peso
-        </h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
-          {analysis.distributionStats.map((stat) => {
-            const range = WEIGHT_CLASSES.find(w => w.label === stat.label);
-            const isSelected = selectedWeightClasses.includes(stat.label);
-            return (
-              <div 
-                key={stat.label} 
-                onClick={() => toggleWeightClass(stat.label)}
-                className={`bg-white border rounded-lg p-4 cursor-pointer transition-colors ${isSelected ? 'border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.2)]' : 'border-creme-200 hover:border-gray-600'}`}
-              >
-                 <div className="flex justify-between items-start mb-3">
-                    <div className="flex flex-col">
-                        <span className="text-sm font-medium text-gray-900">{stat.label}</span>
-                        {range && (
-                            <span className="text-[10px] text-gray-500 font-mono bg-creme-100 px-1.5 py-0.5 rounded mt-1 w-fit">
-                              {range.min}g - {range.max}g
-                            </span>
-                        )}
-                    </div>
-                    <span className="text-xs text-gray-500 font-medium bg-white border border-creme-200 px-2 py-1 rounded-full">
-                      {formatNumber(stat.count)} itens
-                    </span>
-                 </div>
-                 
-                 {/* Weight Progress */}
-                 <div className="mb-2">
-                   <div className="flex justify-between text-xs mb-1">
-                      <span className="text-blue-400">Peso</span>
-                      <span className="text-gray-600">{formatNumber(stat.weightShare)}%</span>
-                   </div>
-                   <div className="w-full bg-creme-100 h-1.5 rounded-full overflow-hidden">
-                      <div className="bg-blue-500 h-full rounded-full" style={{ width: `${stat.weightShare}%` }}></div>
-                   </div>
-                   <div className="text-[10px] text-gray-500 text-right mt-0.5">{formatNumber(stat.weight)}g</div>
-                 </div>
-
-                 {/* Value Progress */}
-                 <div>
-                   <div className="flex justify-between text-xs mb-1">
-                      <span className="text-alisson-gold">Valor</span>
-                      <span className="text-gray-600">{formatNumber(stat.valueShare)}%</span>
-                   </div>
-                   <div className="w-full bg-creme-100 h-1.5 rounded-full overflow-hidden">
-                      <div className="bg-alisson-gold h-full rounded-full" style={{ width: `${stat.valueShare}%` }}></div>
-                   </div>
-                   <div className="text-[10px] text-gray-500 text-right mt-0.5">{formatCurrency(stat.value)}</div>
-                 </div>
               </div>
-            );
-          })}
-        </div>
-      </div>
+            )}
 
-      {/* FULL INVENTORY TABLE (LEDGER) */}
-      <div id="detailed-matrix" className="bg-creme-50 border border-creme-200 rounded-xl overflow-hidden flex flex-col h-[600px] scroll-mt-6">
-        <div className="px-6 py-4 border-b border-creme-200 bg-white flex items-center justify-between">
-            <h3 className="text-lg font-serif font-semibold text-gray-900 flex items-center gap-2">
-              <ArrowDownWideNarrow size={18} className="text-alisson-gold" />
-              Matriz Detalhada de Ativos
-            </h3>
-            
-            {/* Table Controls (Pagination + Columns) */}
-            <div className="flex items-center gap-4">
-              
-              {selectedRows.size > 0 && (
-                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-4">
-                  {onPromotion && (
-                    <button
-                      onClick={() => onPromotion(analysis.fullList.filter(item => selectedRows.has(item.uniqueId)).map(item => item.original))}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-alisson-gold/30 bg-alisson-gold/10 text-alisson-gold text-xs font-bold hover:bg-alisson-gold/20 transition-all"
-                    >
-                      <Tag size={14} />
-                      Promoção ({selectedRows.size})
-                    </button>
-                  )}
-                  <button
-                    onClick={downloadCSV}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-alisson-gold text-black text-xs font-bold hover:opacity-90 transition-all shadow-lg"
-                  >
-                    <Download size={14} />
-                    Exportar
-                  </button>
-                </div>
-              )}
-
-              {/* Save View Button */}
-              <button
-                onClick={handleSaveConfig}
-                disabled={isSavingConfig}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${configSaved ? 'bg-green-500/20 text-green-400 border-green-500/50' : 'bg-white border-creme-200 text-gray-700 hover:text-gray-900 hover:border-alisson-gold/50'}`}
-                title="Salvar Colunas e Ordenação como Padrão"
-              >
-                 {isSavingConfig ? <Loader2 size={14} className="animate-spin" /> : configSaved ? <Check size={14} /> : <Bookmark size={14} />}
-                 <span className="hidden sm:inline">{configSaved ? 'Salvo!' : 'Salvar Padrão'}</span>
-              </button>
-              
-              {/* Column Selector */}
-              <div className="relative" ref={columnSelectorRef}>
+            {/* Categories */}
+            {availableCategories.length > 0 && (
+              <div className="relative flex flex-col" ref={catDropdownRef}>
+                <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">
+                  <Gem size={14} /> Categoria
+                </label>
                 <button
-                  onClick={() => setIsColumnSelectorOpen(!isColumnSelectorOpen)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${isColumnSelectorOpen ? 'bg-alisson-gold text-black border-alisson-gold' : 'bg-white border-creme-200 text-gray-700 hover:text-gray-900'}`}
+                  onClick={() => setIsCatDropdownOpen(!isCatDropdownOpen)}
+                  className={`h-10 flex items-center justify-between gap-3 px-4 bg-creme-50 border rounded-lg min-w-[180px] text-sm transition-all ${
+                    selectedCategories.length > 0
+                      ? 'border-esmeralda-300 text-esmeralda-500 font-semibold'
+                      : 'border-creme-200 text-gray-700 hover:border-gray-300'
+                  }`}
                 >
-                  <Columns size={14} />
-                  <span className="hidden sm:inline">Colunas</span>
-                  <ChevronDown size={12} className={`transition-transform ${isColumnSelectorOpen ? 'rotate-180' : ''}`} />
+                  <span className="truncate">
+                    {selectedCategories.length === 0 ? 'Todas' : `${selectedCategories.length} selecionada(s)`}
+                  </span>
+                  <ChevronDown size={14} className={`transition-transform shrink-0 ${isCatDropdownOpen ? 'rotate-180' : ''}`} />
                 </button>
-
-                {isColumnSelectorOpen && (
-                  <div className="absolute top-full right-0 mt-2 w-64 max-h-96 overflow-y-auto bg-white backdrop-blur-xl border border-creme-200 rounded-xl shadow-2xl z-50 scrollbar-thin">
-                    <div className="p-3 border-b border-creme-200 bg-white sticky top-0">
-                       <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Personalizar Visão</h4>
+                {isCatDropdownOpen && (
+                  <div className="absolute top-full left-0 mt-2 w-80 max-h-96 overflow-y-auto bg-white border border-creme-200 rounded-xl shadow-2xl z-50 scrollbar-thin flex flex-col">
+                    <div className="p-3 border-b border-creme-200 bg-white z-10 sticky top-0 space-y-2">
+                      <div className="flex justify-between items-center">
+                        <button onClick={() => setSelectedCategories(availableCategories)} className="text-[11px] uppercase font-bold tracking-wider text-gray-500 hover:text-esmeralda-500 px-2 py-1">Todas</button>
+                        <button onClick={() => { setSelectedCategories([]); setCategorySearch(''); }} className="text-[11px] uppercase font-bold tracking-wider text-gray-500 hover:text-red-500 px-2 py-1">Limpar</button>
+                      </div>
+                      {availableCategories.length > 8 && (
+                        <div className="relative">
+                          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input
+                            type="text"
+                            value={categorySearch}
+                            onChange={(e) => setCategorySearch(e.target.value)}
+                            placeholder="Filtrar..."
+                            className="w-full bg-creme-50 border border-creme-200 rounded-md text-sm py-2 pl-9 pr-3 text-gray-700 focus:outline-none focus:border-esmeralda-300"
+                          />
+                        </div>
+                      )}
                     </div>
                     <div className="p-2 space-y-1">
-                      {metrics.allKeys.map(key => (
+                      {filteredCategories.map(cat => (
                         <button
-                          key={key}
-                          onClick={() => toggleColumn(key)}
-                          className={`w-full text-left px-3 py-2 rounded-md text-xs flex items-center justify-between group transition-colors ${visibleColumns.includes(key) ? 'bg-creme-100 text-gray-900' : 'text-gray-500 hover:bg-creme-100'}`}
+                          key={cat}
+                          onClick={() => toggleCategory(cat)}
+                          className={`w-full text-left px-3 py-2.5 rounded-md text-sm flex items-center justify-between group transition-colors ${selectedCategories.includes(cat) ? 'bg-esmeralda-50 text-esmeralda-500 font-semibold' : 'text-gray-700 hover:bg-creme-100'}`}
                         >
-                          <span className="truncate">{key}</span>
-                          {visibleColumns.includes(key) && <Check size={12} className="text-alisson-gold" />}
+                          <div className="flex items-center gap-2">
+                            {getCategoryIcon(cat)}
+                            <span className="truncate max-w-[200px]">{cat}</span>
+                          </div>
+                          {selectedCategories.includes(cat) && <Check size={16} />}
+                        </button>
+                      ))}
+                      {filteredCategories.length === 0 && (
+                        <p className="text-center text-sm text-gray-500 py-4">Nenhuma encontrada.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Supplier */}
+            {availableSuppliers.length > 0 && (
+              <div className="relative flex flex-col" ref={supplierDropdownRef}>
+                <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">
+                  <Truck size={14} /> Fornecedor
+                </label>
+                <button
+                  onClick={() => setIsSupplierDropdownOpen(!isSupplierDropdownOpen)}
+                  className={`h-10 flex items-center justify-between gap-3 px-4 bg-creme-50 border rounded-lg min-w-[160px] text-sm transition-all ${
+                    selectedSuppliers.length > 0
+                      ? 'border-purple-400 text-purple-700 font-semibold'
+                      : 'border-creme-200 text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <span className="truncate">{selectedSuppliers.length === 0 ? 'Todos' : `${selectedSuppliers.length} sel.`}</span>
+                  <ChevronDown size={14} className={`transition-transform shrink-0 ${isSupplierDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {isSupplierDropdownOpen && (
+                  <div className="absolute top-full left-0 mt-2 w-72 max-h-80 overflow-y-auto bg-white border border-creme-200 rounded-xl shadow-2xl z-50 scrollbar-thin flex flex-col">
+                    <div className="p-3 border-b border-creme-200 flex justify-between sticky top-0 bg-white z-10">
+                      <button onClick={() => setSelectedSuppliers(availableSuppliers)} className="text-[11px] uppercase font-bold tracking-wider text-gray-500 hover:text-gray-900 px-2 py-1">Todos</button>
+                      <button onClick={() => setSelectedSuppliers([])} className="text-[11px] uppercase font-bold tracking-wider text-gray-500 hover:text-purple-500 px-2 py-1">Limpar</button>
+                    </div>
+                    <div className="p-2 space-y-1">
+                      {availableSuppliers.map(sup => (
+                        <button
+                          key={sup}
+                          onClick={() => toggleSupplier(sup)}
+                          className={`w-full text-left px-3 py-2.5 rounded-md text-sm flex items-center justify-between group transition-colors ${selectedSuppliers.includes(sup) ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-gray-700 hover:bg-creme-100'}`}
+                        >
+                          <span className="truncate">{sup}</span>
+                          {selectedSuppliers.includes(sup) && <Check size={16} />}
                         </button>
                       ))}
                     </div>
                   </div>
                 )}
               </div>
+            )}
 
-              {totalCount !== null && (
-                <span className="text-xs text-gray-500 font-mono hidden md:inline-block border-l border-creme-200 pl-4">
-                  Total Global: {totalCount}
-                </span>
+            {/* Weight class */}
+            <div className="relative flex flex-col" ref={weightDropdownRef}>
+              <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">
+                <Scale size={14} /> Classe de peso
+              </label>
+              <button
+                onClick={() => setIsWeightDropdownOpen(!isWeightDropdownOpen)}
+                className={`h-10 flex items-center justify-between gap-3 px-4 bg-creme-50 border rounded-lg min-w-[160px] text-sm transition-all ${
+                  selectedWeightClasses.length > 0
+                    ? 'border-blue-400 text-blue-700 font-semibold'
+                    : 'border-creme-200 text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                <span className="truncate">{selectedWeightClasses.length === 0 ? 'Todas' : `${selectedWeightClasses.length} sel.`}</span>
+                <ChevronDown size={14} className={`transition-transform shrink-0 ${isWeightDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {isWeightDropdownOpen && (
+                <div className="absolute top-full left-0 mt-2 w-80 max-h-96 overflow-y-auto bg-white border border-creme-200 rounded-xl shadow-2xl z-50 scrollbar-thin flex flex-col">
+                  <div className="p-3 border-b border-creme-200 flex justify-between sticky top-0 bg-white z-10">
+                    <span className="text-[11px] uppercase font-bold tracking-wider text-gray-500 px-2 py-1">Classificação</span>
+                    <button onClick={() => setSelectedWeightClasses([])} className="text-[11px] uppercase font-bold tracking-wider text-gray-500 hover:text-blue-500 px-2 py-1">Limpar</button>
+                  </div>
+                  <div className="p-2 space-y-1">
+                    {WEIGHT_CLASSES.map(cls => (
+                      <button
+                        key={cls.label}
+                        onClick={() => toggleWeightClass(cls.label)}
+                        className={`w-full text-left px-3 py-2.5 rounded-md text-sm flex items-center justify-between group transition-colors ${selectedWeightClasses.includes(cls.label) ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-creme-100'}`}
+                      >
+                        <div className="flex flex-col">
+                          <span>{cls.label}</span>
+                          <span className="text-xs text-gray-500 font-mono">{cls.min}g – {cls.max}g</span>
+                        </div>
+                        {selectedWeightClasses.includes(cls.label) && <Check size={16} />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
+            </div>
 
-              <div className="flex items-center gap-1 bg-white rounded-lg p-1 border border-creme-200">
-                <button
-                  onClick={handlePrev}
-                  disabled={currentPage === 0 || loading}
-                  className="p-1.5 rounded hover:bg-creme-100 text-gray-600 disabled:opacity-30 disabled:hover:bg-transparent"
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                <span className="text-xs font-mono w-16 text-center text-gray-500">
-                  Pág {currentPage + 1}
-                </span>
-                <button
-                  onClick={handleNext}
-                  disabled={loading || (analysis && (currentPage + 1) * PAGE_SIZE >= analysis.filteredCount)}
-                  className="p-1.5 rounded hover:bg-creme-100 text-gray-600 disabled:opacity-30 disabled:hover:bg-transparent"
-                >
-                  <ChevronRight size={16} />
-                </button>
+            {/* Scope segmented control */}
+            <div className="flex flex-col">
+              <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">
+                <ListFilter size={14} /> Escopo
+              </label>
+              <div className="flex h-10 bg-creme-50 p-1 rounded-lg border border-creme-200">
+                <button onClick={() => setFilterScope('positive')} className={`px-4 text-sm font-medium rounded-md transition-all ${filterScope === 'positive' ? 'bg-white text-esmeralda-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Em estoque</button>
+                <button onClick={() => setFilterScope('all')} className={`px-4 text-sm font-medium rounded-md transition-all ${filterScope === 'all' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Todos</button>
+                <button onClick={() => setFilterScope('critical')} className={`px-4 text-sm font-medium rounded-md transition-all ${filterScope === 'critical' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Críticos</button>
+                <button onClick={() => setFilterScope('zero')} className={`px-4 text-sm font-medium rounded-md transition-all ${filterScope === 'zero' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Zerados</button>
               </div>
             </div>
-        </div>
-        
-        <div className="flex-1 overflow-auto scrollbar-thin">
-           <table className="w-full text-left text-sm whitespace-nowrap">
-              <thead className="bg-white sticky top-0 z-10 text-xs uppercase tracking-wider font-semibold text-gray-600 backdrop-blur-md">
-                 <tr>
-                    <th className="px-4 py-3 border-b border-creme-200 w-12 text-center sticky left-0 z-30 bg-white/90 backdrop-blur">
-                       <div className="flex flex-col items-center gap-2">
-                         <button 
-                           onClick={toggleAll}
-                           className="p-1 rounded hover:bg-white/10 text-gray-600 hover:text-alisson-gold transition-colors"
-                           title="Selecionar Todos"
-                         >
-                           {selectedRows.size === analysis.fullList.length && analysis.fullList.length > 0 ? <CheckSquare size={16} className="text-alisson-gold" /> : <Square size={16} />}
-                         </button>
-                         
-                         <div className="flex flex-col items-center gap-1 mt-1">
-                           <input 
-                             type="number"
-                             value={bulkSelectCount}
-                             onChange={(e) => setBulkSelectCount(e.target.value)}
-                             placeholder="Qtd"
-                             className="w-10 bg-creme-50/40 border border-white/10 rounded py-0.5 px-1 text-[9px] text-center text-alisson-gold focus:outline-none focus:border-alisson-gold/50 transition-all placeholder-gray-700"
-                             title="Quantidade para selecionar em lote"
-                           />
-                           <button 
-                             onClick={handleBulkSelect}
-                             disabled={!bulkSelectCount}
-                             className="p-1 rounded bg-alisson-gold/10 text-alisson-gold hover:bg-alisson-gold hover:text-black transition-all disabled:opacity-30"
-                             title="Selecionar em Lote"
-                           >
-                             <Check size={10} />
-                           </button>
-                         </div>
-                       </div>
-                    </th>
-                    <th className="px-6 py-3 border-b border-creme-200 w-24 text-center sticky left-[48px] z-20 bg-white/90 backdrop-blur">
-                       <Settings2 size={12} className="mx-auto" />
-                    </th>
-                    <th className="px-6 py-3 border-b border-creme-200 w-12 text-center text-[10px]">#</th>
-                    
-                    {visibleColumns.map(colKey => (
-                      <th 
-                        key={colKey}
-                        className="px-6 py-3 border-b border-creme-200 cursor-pointer hover:text-gray-900 hover:bg-creme-100 transition-colors group"
-                        onClick={() => handleSort(colKey)}
+
+          </div>
+
+          {/* Active filter chips */}
+          {(selectedCategories.length > 0 || selectedSuppliers.length > 0 || selectedWeightClasses.length > 0 || hiddenRowIds.size > 0) && (
+            <div className="flex flex-wrap gap-2 items-center pt-4 mt-4 border-t border-creme-200">
+              <span className="text-xs text-gray-500 uppercase tracking-widest font-semibold">Ativos:</span>
+              {hiddenRowIds.size > 0 && (
+                <button onClick={resetHiddenRows} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 border border-red-200 rounded-full text-sm text-red-700 hover:bg-red-100 transition-colors font-medium">
+                  <EyeOff size={12} /> {hiddenRowIds.size} ocultos <RefreshCcw size={12} />
+                </button>
+              )}
+              {selectedCategories.map(cat => (
+                <button key={cat} onClick={() => toggleCategory(cat)} className="flex items-center gap-1.5 px-3 py-1.5 bg-esmeralda-50 border border-esmeralda-200 rounded-full text-sm text-esmeralda-500 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors font-medium">
+                  {cat} <X size={12} />
+                </button>
+              ))}
+              {selectedSuppliers.map(sup => (
+                <button key={sup} onClick={() => toggleSupplier(sup)} className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 border border-purple-200 rounded-full text-sm text-purple-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors font-medium">
+                  <Truck size={12} /> {sup} <X size={12} />
+                </button>
+              ))}
+              {selectedWeightClasses.map(cls => (
+                <button key={cls} onClick={() => toggleWeightClass(cls)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-full text-sm text-blue-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors font-medium">
+                  <Weight size={12} /> {cls} <X size={12} />
+                </button>
+              ))}
+              <button onClick={() => { setSelectedCategories([]); setSelectedSuppliers([]); setSelectedWeightClasses([]); resetHiddenRows(); }} className="text-sm text-gray-500 underline hover:text-gray-900 ml-2">Limpar tudo</button>
+            </div>
+          )}
+        </section>
+
+        {/* KPI HERO ROW — os quatro numeros que importam */}
+        <section className="order-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-5">
+          {/* Capital em estoque */}
+          <div className="bg-white border border-creme-200 rounded-2xl p-6 relative overflow-hidden hover:border-esmeralda-300 transition-colors">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs uppercase tracking-[0.15em] font-semibold text-gray-500">Capital em estoque</p>
+              <div className="p-2 rounded-lg bg-esmeralda-50 text-esmeralda-500">
+                <DollarSign size={20} />
+              </div>
+            </div>
+            <p className="text-3xl lg:text-4xl font-mono font-bold text-esmeralda-500 tabular-nums leading-none">
+              {formatCurrency(analysis.totalStockValue)}
+            </p>
+            <p className="text-sm text-gray-500 mt-3">
+              <span className="font-semibold text-gray-900">{formatNumber(analysis.totalItems)}</span> unidades em{' '}
+              <span className="font-semibold text-gray-900">{formatNumber(analysis.productsInStock)}</span> SKUs ativos
+            </p>
+          </div>
+
+          {/* Peso em ouro */}
+          <div className="bg-white border border-creme-200 rounded-2xl p-6 hover:border-dourado transition-colors">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs uppercase tracking-[0.15em] font-semibold text-gray-500">Peso em ouro</p>
+              <div className="p-2 rounded-lg bg-dourado-light/30 text-dourado-dark">
+                <Scale size={20} />
+              </div>
+            </div>
+            <p className="text-3xl lg:text-4xl font-mono font-bold text-gray-900 tabular-nums leading-none">
+              {analysis.totalWeight > 0 ? formatNumber(analysis.totalWeight) : '—'} <span className="text-xl text-gray-500 font-sans">g</span>
+            </p>
+            <p className="text-sm text-gray-500 mt-3">
+              Equivalente a <span className="font-semibold text-gray-900">{formatNumber(analysis.totalWeight / 1000)}&nbsp;kg</span> de metal
+            </p>
+          </div>
+
+          {/* Vendas 12 semanas (com sparkline) */}
+          <div className="bg-white border border-creme-200 rounded-2xl p-6 hover:border-emerald-300 transition-colors">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs uppercase tracking-[0.15em] font-semibold text-gray-500">Vendas · 12 sem</p>
+              <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
+                <TrendingUp size={20} />
+              </div>
+            </div>
+            <p className="text-3xl lg:text-4xl font-mono font-bold text-gray-900 tabular-nums leading-none">
+              {weeklyAgg ? formatCurrency(weeklyAgg.total_valor) : '—'}
+            </p>
+            <div className="flex items-end justify-between gap-2 mt-3">
+              <p className="text-sm text-gray-500">
+                {weeklyAgg ? (
+                  <>
+                    <span className={weeklyAgg.delta_pct_vs_4sem_anteriores >= 0 ? 'text-emerald-600 font-semibold' : 'text-red-600 font-semibold'}>
+                      {weeklyAgg.delta_pct_vs_4sem_anteriores >= 0 ? '▲' : '▼'} {Math.abs(weeklyAgg.delta_pct_vs_4sem_anteriores).toFixed(1)}%
+                    </span>
+                    {' '}vs 4 sem anteriores
+                  </>
+                ) : 'Carregando série…'}
+              </p>
+              <Sparkline values={weeklySeries.map(w => w.valor_total)} color="#059669" width={110} height={30} />
+            </div>
+          </div>
+
+          {/* Preço médio / grama */}
+          <div className="bg-white border border-creme-200 rounded-2xl p-6 hover:border-purple-300 transition-colors">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs uppercase tracking-[0.15em] font-semibold text-gray-500">Preço médio / grama</p>
+              <div className="p-2 rounded-lg bg-purple-50 text-purple-600">
+                <DollarSign size={20} />
+              </div>
+            </div>
+            <p className="text-3xl lg:text-4xl font-mono font-bold text-gray-900 tabular-nums leading-none">
+              {formatCurrency(analysis.avgPricePerGram)}
+            </p>
+            <p className="text-sm text-gray-500 mt-3">
+              {goldPrice && analysis.avgPricePerGram > 0 ? (
+                <>Multiplicador <span className="font-semibold text-gray-900">{(analysis.avgPricePerGram / goldPrice.preco_24k_g).toFixed(2)}×</span> sobre o ouro 24k</>
+              ) : 'Saída média por grama comercializada'}
+            </p>
+          </div>
+        </section>
+
+        {/* KPI ALERT ROW — tres cartoes de situacao (clicaveis) */}
+        <section className="order-4 grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5">
+          {/* Alerta crítico */}
+          <button
+            onClick={handleCriticalClick}
+            className={`text-left bg-white border rounded-2xl p-6 transition-all ${filterScope === 'critical' ? 'border-red-400 shadow-[0_0_30px_rgba(248,113,113,0.15)] ring-1 ring-red-200' : 'border-creme-200 hover:border-red-300'}`}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                </span>
+                <p className="text-xs uppercase tracking-widest font-bold text-red-600">Alerta crítico</p>
+              </div>
+              <AlertCircle size={18} className="text-red-500" />
+            </div>
+            <p className="text-3xl font-mono font-bold text-red-600 tabular-nums leading-none">
+              {formatCurrency(analysis.criticalCapital)}
+            </p>
+            <div className="flex items-center gap-4 mt-4 text-sm">
+              <span className="text-gray-600"><span className="font-semibold text-red-600">{analysis.criticalCount}</span> peças</span>
+              <span className="text-gray-400">·</span>
+              <span className="text-gray-600">Ticket <span className="font-semibold text-gray-900">{formatCurrency(analysis.avgCriticalPrice)}</span></span>
+            </div>
+            <p className="text-[11px] uppercase tracking-wider text-gray-400 mt-3">Score ≥ 60 · Clique para filtrar</p>
+          </button>
+
+          {/* Estoque parado */}
+          <button
+            onClick={handleEstoqueParadoClick}
+            className={`text-left bg-white border rounded-2xl p-6 transition-all ${filterScope === 'stale' ? 'border-orange-400 shadow-[0_0_30px_rgba(249,115,22,0.15)] ring-1 ring-orange-200' : 'border-creme-200 hover:border-orange-300'}`}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs uppercase tracking-widest font-bold text-orange-600">Parado &gt; 180 dias</p>
+              <CalendarDays size={18} className="text-orange-500" />
+            </div>
+            <p className="text-3xl font-mono font-bold text-orange-600 tabular-nums leading-none">
+              {formatCurrency(analysis.idleCapital)}
+            </p>
+            <div className="flex items-center gap-4 mt-4 text-sm">
+              <span className="text-gray-600"><span className="font-semibold text-orange-600">{formatNumber(analysis.idleItemsCount)}</span> peças sem giro</span>
+              {analysis.missingDateCount > 0 && (
+                <>
+                  <span className="text-gray-400">·</span>
+                  <span className="text-red-500 font-medium">{analysis.missingDateCount} sem data</span>
+                </>
+              )}
+            </div>
+            <p className="text-[11px] uppercase tracking-wider text-gray-400 mt-3">Capital congelado · Clique para filtrar</p>
+          </button>
+
+          {/* Em reposição */}
+          <div className="bg-white border border-creme-200 rounded-2xl p-6 hover:border-gray-300 transition-colors">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs uppercase tracking-widest font-bold text-gray-600">Em reposição</p>
+              <Package size={18} className="text-gray-500" />
+            </div>
+            <p className="text-3xl font-mono font-bold text-gray-900 tabular-nums leading-none">
+              {formatNumber(analysis.productsInReplenishment)}
+            </p>
+            <div className="flex items-center gap-4 mt-4 text-sm">
+              <span className="text-gray-600">SKUs com saldo zero ou negativo</span>
+            </div>
+            <p className="text-[11px] uppercase tracking-wider text-gray-400 mt-3">Oportunidade de produção</p>
+          </div>
+        </section>
+
+        {/* TOP CRITICAL ITEM — faixa destacada */}
+        {analysis.topCriticalItem && (
+          <section className="order-7 bg-gradient-to-r from-red-50 via-red-50 to-orange-50 border border-red-200 rounded-2xl p-5 lg:p-6">
+            <div className="flex items-center justify-between gap-6 flex-wrap">
+              <div className="flex items-start gap-4 min-w-0">
+                <div className="p-3 bg-red-100 rounded-xl text-red-600 shrink-0">
+                  <AlertCircle size={24} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] uppercase tracking-widest font-bold text-red-600 mb-1">Maior risco de capital</p>
+                  <p className="font-mono text-sm text-gray-900 font-semibold truncate">
+                    {analysis.topCriticalItem.sku} · {analysis.topCriticalItem.name}
+                  </p>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {analysis.topCriticalItem.stock} un × {formatCurrency(analysis.topCriticalItem.price)}
+                    {analysis.topCriticalItem.idadeDias > 0 && <> · <span className="text-orange-600 font-medium">{analysis.topCriticalItem.idadeDias}d em estoque</span></>}
+                    {' · '}
+                    {analysis.topCriticalItem.diasSemVenda === null
+                      ? <span className="text-red-600 font-semibold">nunca vendeu</span>
+                      : <span className="text-red-600 font-semibold">{analysis.topCriticalItem.diasSemVenda}d sem venda</span>}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-5">
+                <div className="text-right">
+                  <p className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold">Capital parado</p>
+                  <p className="text-2xl font-mono font-bold text-red-700 tabular-nums">{formatCurrency(analysis.topCriticalItem.totalValue)}</p>
+                </div>
+                <span className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-red-600 text-white font-mono font-bold text-xl shadow-lg">
+                  {analysis.topCriticalItem.criticScore}
+                </span>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* OPORTUNIDADES DE FABRICACAO — produtos zerados/desativados que JA venderam */}
+        {oportunidades.length > 0 && (
+          <section className="order-8 bg-white border border-esmeralda-200 rounded-2xl overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-5 border-b border-creme-200 bg-gradient-to-r from-esmeralda-50 via-white to-white">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 bg-emerald-100 rounded-xl text-emerald-700 shrink-0">
+                    <TrendingUp size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-serif font-semibold text-gray-900">
+                      Oportunidades de fabricação
+                    </h2>
+                    <p className="text-sm text-gray-600 mt-1 max-w-2xl">
+                      Peças <strong>que já venderam</strong> mas estão <strong>sem estoque</strong> ou desativadas.
+                      Possível "esquecimento" de re-fabricação.
+                    </p>
+                  </div>
+                </div>
+                {oportunidadesTotais && (
+                  <div className="flex gap-6 items-center flex-wrap">
+                    <div className="text-right">
+                      <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">SKUs candidatos</p>
+                      <p className="text-2xl font-mono font-bold text-emerald-700 tabular-nums leading-none mt-1">
+                        {formatNumber(oportunidadesTotais.qtd_skus)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Un vendidas (mostradas)</p>
+                      <p className="text-2xl font-mono font-bold text-gray-900 tabular-nums leading-none mt-1">
+                        {formatNumber(oportunidadesTotais.qtd_vendida_total_historica)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Receita histórica (mostradas)</p>
+                      <p className="text-2xl font-mono font-bold text-esmeralda-500 tabular-nums leading-none mt-1">
+                        {formatCurrency(oportunidadesTotais.receita_total_historica)}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Controles */}
+              <div className="flex items-center gap-4 mt-5 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-gray-500">Mínimo de vendas</label>
+                  <div className="flex h-9 bg-creme-50 p-1 rounded-lg border border-creme-200">
+                    {[3, 5, 10, 25, 50].map(n => (
+                      <button
+                        key={n}
+                        onClick={() => setOppMinVendas(n)}
+                        className={`px-3 text-xs font-semibold rounded-md transition-all ${oppMinVendas === n ? 'bg-white text-esmeralda-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
                       >
-                         <div className="flex items-center gap-1">
-                            {colKey}
-                            <SortIcon colKey={colKey} />
-                         </div>
-                      </th>
+                        ≥ {n}
+                      </button>
                     ))}
-                    
-                    {/* Fixed Computed Columns if needed, or rely purely on dynamic `visibleColumns` */}
-                    <th
-                        className="px-4 py-3 border-b border-creme-200 text-center text-red-500 cursor-pointer hover:text-gray-900 hover:bg-creme-100 transition-colors"
-                        onClick={() => handleSort('criticScore' as SortKey)}
-                        title="Score de criticidade 0-100 (idade + sem venda + quantidade + valor parado)"
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={oppIncluirExcluidos}
+                    onChange={(e) => setOppIncluirExcluidos(e.target.checked)}
+                    className="w-4 h-4 rounded border-creme-300 text-esmeralda-500 focus:ring-esmeralda-200"
+                  />
+                  <span className="text-sm text-gray-700">Incluir excluídos (situação &quot;E&quot;)</span>
+                </label>
+                {oppLoading && <Loader2 size={16} className="animate-spin text-esmeralda-500" />}
+              </div>
+            </div>
+
+            {/* Grid de cards */}
+            <div className="p-5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
+                {oportunidades.map((opp) => {
+                  const sitLabel = opp.situacao === 'A' ? 'Ativo · Zerado'
+                                 : opp.situacao === 'I' ? 'Inativo'
+                                 : opp.situacao === 'E' ? 'Excluído'
+                                 : 'Sem situação';
+                  const sitCor = opp.situacao === 'A' ? 'bg-amber-50 text-amber-700 border-amber-200'
+                               : opp.situacao === 'I' ? 'bg-gray-100 text-gray-700 border-gray-200'
+                                                       : 'bg-red-50 text-red-700 border-red-200';
+                  const diasUltVenda = opp.data_ultima_venda
+                    ? Math.floor((Date.now() - new Date(opp.data_ultima_venda).getTime()) / 86400000)
+                    : null;
+                  const isQuente = opp.vendas_90d > 0;
+                  return (
+                    <div
+                      key={opp.id_produto}
+                      className={`group relative flex flex-col bg-white border rounded-xl overflow-hidden transition-all hover:shadow-lg ${isQuente ? 'border-emerald-300 hover:border-emerald-400' : 'border-creme-200 hover:border-esmeralda-300'}`}
                     >
-                        <div className="flex items-center justify-center">
-                            Score
-                            <SortIcon colKey={'criticScore' as SortKey} />
+                      {/* Imagem */}
+                      <div className="relative w-full aspect-square bg-creme-100 overflow-hidden">
+                        {opp.imagem_capa ? (
+                          <img
+                            src={opp.imagem_capa}
+                            alt={opp.nome}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-gray-300">
+                            <Gem size={40} />
+                          </div>
+                        )}
+                        {/* Badge situacao */}
+                        <span className={`absolute top-2 left-2 px-2 py-0.5 text-[10px] font-bold rounded-md border backdrop-blur-sm bg-white/85 ${sitCor}`}>
+                          {sitLabel}
+                        </span>
+                        {/* Quantidade vendida — NUMERO GRANDE no canto dir */}
+                        <div className="absolute bottom-0 right-0 bg-gradient-to-bl from-esmeralda-600 to-esmeralda-500 text-white px-3 py-1.5 rounded-tl-xl">
+                          <p className="text-[9px] uppercase tracking-wider font-bold leading-none opacity-80">Vendidos</p>
+                          <p className="text-lg font-mono font-bold tabular-nums leading-tight">
+                            {formatNumber(opp.qtd_vendida_total)}
+                          </p>
                         </div>
+                        {/* Flag "ainda quente" (vendeu nos ultimos 90d) */}
+                        {isQuente && (
+                          <span className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-white bg-red-500 rounded-full shadow-md">
+                            🔥 {opp.vendas_90d} em 90d
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Info */}
+                      <div className="p-3 space-y-1">
+                        <p className="font-mono text-xs text-gray-500 truncate">{opp.sku}</p>
+                        <p className="text-sm font-semibold text-gray-900 line-clamp-2 leading-tight min-h-[2.5rem]">
+                          {opp.nome}
+                        </p>
+                        {opp.categoria && (
+                          <p className="text-[10px] text-gray-500 truncate uppercase tracking-wider">{opp.categoria}</p>
+                        )}
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-sm font-mono font-bold text-esmeralda-500 tabular-nums">
+                            {formatCurrency(opp.receita_total)}
+                          </span>
+                          {opp.peso_precificado && opp.peso_precificado > 0 && (
+                            <span className="text-[11px] text-gray-500 font-mono">
+                              {opp.peso_precificado.toFixed(2)}g
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-gray-500">
+                          {diasUltVenda === null
+                            ? 'sem data'
+                            : diasUltVenda < 30
+                            ? <span className="text-emerald-600 font-semibold">Vendeu há {diasUltVenda}d</span>
+                            : diasUltVenda < 180
+                            ? <span className="text-amber-600">Vendeu há {diasUltVenda}d</span>
+                            : <>Vendeu há {diasUltVenda >= 365 ? `${Math.floor(diasUltVenda / 365)}a` : `${diasUltVenda}d`}</>}
+                          {opp.vendas_365d > 0 && (
+                            <> · <span className="font-semibold text-gray-700">{opp.vendas_365d}</span> em 12m</>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Ver mais / menos */}
+              {oportunidadesTotais && oportunidadesTotais.qtd_skus > 0 && (
+                <div className="flex items-center justify-between mt-5 pt-5 border-t border-creme-200 flex-wrap gap-3">
+                  <p className="text-sm text-gray-600">
+                    Mostrando <strong className="text-gray-900">{oportunidades.length}</strong> de <strong className="text-esmeralda-500">{oportunidadesTotais.qtd_skus}</strong> candidatos.
+                    {(() => {
+                      const quentes = oportunidades.filter(o => o.vendas_90d > 0).length;
+                      return quentes > 0 ? (
+                        <> · <span className="text-red-600 font-semibold">{quentes} ainda vendendo em 90d 🔥</span></>
+                      ) : null;
+                    })()}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setOppExpanded(!oppExpanded)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-esmeralda-500 text-white hover:bg-esmeralda-600 transition-colors"
+                    >
+                      {oppExpanded ? 'Ver menos' : `Ver top 200`}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* DISTRIBUTION BY WEIGHT CLASS */}
+        {analysis.distributionStats.length > 0 && (
+          <section className="order-6">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+              <h2 className="text-xl font-serif font-semibold text-gray-900 flex items-center gap-2">
+                <PieChart size={20} className="text-esmeralda-500" />
+                {distributionMode === 'weight' ? 'Distribuição por classe de peso' : 'Heatmap Categoria × Peso'}
+              </h2>
+              <div className="flex items-center gap-3">
+                <p className="text-sm text-gray-500">
+                  {distributionMode === 'weight'
+                    ? `${analysis.distributionStats.length} classes com volume`
+                    : `${analysis.heatmap.categorias.length} categorias · ${analysis.heatmap.classes.length} classes`}
+                </p>
+                <div className="flex h-9 bg-creme-50 p-1 rounded-lg border border-creme-200">
+                  <button
+                    onClick={() => setDistributionMode('weight')}
+                    className={`px-3 text-xs font-semibold rounded-md transition-all ${distributionMode === 'weight' ? 'bg-white text-esmeralda-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                  >
+                    Cartões
+                  </button>
+                  <button
+                    onClick={() => setDistributionMode('heatmap')}
+                    className={`px-3 text-xs font-semibold rounded-md transition-all ${distributionMode === 'heatmap' ? 'bg-white text-esmeralda-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                  >
+                    Heatmap
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {distributionMode === 'weight' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {analysis.distributionStats.map((stat) => {
+                  const range = WEIGHT_CLASSES.find(w => w.label === stat.label);
+                  const isSelected = selectedWeightClasses.includes(stat.label);
+                  return (
+                    <button
+                      key={stat.label}
+                      onClick={() => toggleWeightClass(stat.label)}
+                      className={`text-left bg-white border rounded-xl p-5 cursor-pointer transition-all ${isSelected ? 'border-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.15)] ring-1 ring-blue-200' : 'border-creme-200 hover:border-gray-300'}`}
+                    >
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <p className="text-base font-semibold text-gray-900">{stat.label}</p>
+                          {range && (
+                            <p className="text-xs text-gray-500 font-mono mt-0.5">{range.min}g – {range.max}g</p>
+                          )}
+                        </div>
+                        <span className="text-xs font-semibold text-gray-700 bg-creme-100 px-2.5 py-1 rounded-full">
+                          {formatNumber(stat.count)} un
+                        </span>
+                      </div>
+                      <div className="mb-3">
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-blue-600 font-semibold">Peso</span>
+                          <span className="text-gray-500 font-mono">{formatNumber(stat.weightShare)}%</span>
+                        </div>
+                        <div className="w-full bg-creme-100 h-2 rounded-full overflow-hidden">
+                          <div className="bg-blue-500 h-full rounded-full" style={{ width: `${stat.weightShare}%` }} />
+                        </div>
+                        <p className="text-xs text-gray-500 text-right mt-1 font-mono">{formatNumber(stat.weight)}g</p>
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-esmeralda-500 font-semibold">Valor</span>
+                          <span className="text-gray-500 font-mono">{formatNumber(stat.valueShare)}%</span>
+                        </div>
+                        <div className="w-full bg-creme-100 h-2 rounded-full overflow-hidden">
+                          <div className="bg-esmeralda-500 h-full rounded-full" style={{ width: `${stat.valueShare}%` }} />
+                        </div>
+                        <p className="text-xs text-gray-500 text-right mt-1 font-mono">{formatCurrency(stat.value)}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              /* HEATMAP Categoria × Classe de Peso */
+              <div className="bg-white border border-creme-200 rounded-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-creme-50">
+                      <tr>
+                        <th className="px-4 py-3 border-b border-creme-200 text-xs uppercase tracking-widest font-bold text-gray-600 sticky left-0 bg-creme-50 z-10">
+                          Categoria
+                        </th>
+                        {analysis.heatmap.classes.map(cls => (
+                          <th key={cls} className="px-3 py-3 border-b border-creme-200 text-xs uppercase tracking-wider font-bold text-gray-600 text-center whitespace-nowrap">
+                            {cls}
+                          </th>
+                        ))}
+                        <th className="px-4 py-3 border-b border-creme-200 text-xs uppercase tracking-widest font-bold text-esmeralda-500 text-right">
+                          Total
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analysis.heatmap.categorias.map(cat => {
+                        const rowMap = analysis.heatmap.cells.get(cat);
+                        const rowTotal = rowMap ? Array.from(rowMap.values()).reduce((a, c) => a + c.value, 0) : 0;
+                        return (
+                          <tr key={cat} className="hover:bg-creme-50/50 transition-colors">
+                            <td className="px-4 py-3 border-b border-creme-200 font-semibold text-gray-900 text-sm sticky left-0 bg-white z-10 whitespace-nowrap">
+                              {cat}
+                            </td>
+                            {analysis.heatmap.classes.map(cls => {
+                              const cell = rowMap?.get(cls);
+                              const value = cell?.value ?? 0;
+                              const intensity = analysis.heatmap.maxValue > 0 ? value / analysis.heatmap.maxValue : 0;
+                              // Gradiente esmeralda: claro quando frio, saturado quando quente
+                              const alpha = intensity === 0 ? 0 : 0.15 + intensity * 0.75;
+                              const bg = `rgba(24, 64, 54, ${alpha})`;
+                              const textColor = intensity > 0.55 ? 'text-white' : 'text-gray-700';
+                              const isSelectable = cell && cell.count > 0;
+                              return (
+                                <td
+                                  key={cls}
+                                  className={`px-3 py-3 border-b border-creme-200 text-center text-xs font-mono tabular-nums transition-all ${textColor} ${isSelectable ? 'cursor-pointer hover:scale-[1.03]' : ''}`}
+                                  style={{ backgroundColor: bg }}
+                                  title={cell ? `${formatCurrency(cell.value)} · ${cell.count} un · ${formatNumber(cell.weight)}g` : '—'}
+                                  onClick={() => {
+                                    if (!isSelectable) return;
+                                    // Clique aplica filtro combinado: categoria + classe de peso
+                                    setSelectedCategories([cat]);
+                                    setSelectedWeightClasses([cls]);
+                                  }}
+                                >
+                                  {value > 0 ? (
+                                    <>
+                                      {value >= 1000 ? `R$ ${(value / 1000).toFixed(0)}k` : `R$ ${value.toFixed(0)}`}
+                                      <br />
+                                      <span className="opacity-70">{cell?.count} un</span>
+                                    </>
+                                  ) : <span className="text-gray-300">—</span>}
+                                </td>
+                              );
+                            })}
+                            <td className="px-4 py-3 border-b border-creme-200 text-right font-mono font-semibold text-esmeralda-500 tabular-nums text-sm whitespace-nowrap">
+                              {formatCurrency(rowTotal)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-4 py-2 bg-creme-50 border-t border-creme-200 flex items-center gap-2 text-xs text-gray-600">
+                  <span>Intensidade ∝ capital imobilizado.</span>
+                  <span>Clique em uma célula para filtrar categoria + classe de peso.</span>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* DETAILED MATRIX — sempre visivel, logo apos os KPIs via order-5. Suporta fullscreen. */}
+        {(
+          <section
+            id="detailed-matrix"
+            className={
+              isMatrixFullscreen
+                ? 'fixed inset-0 z-[55] bg-white border border-creme-200 overflow-hidden flex flex-col'
+                : 'order-5 bg-white border border-creme-200 rounded-2xl overflow-hidden flex flex-col scroll-mt-6'
+            }
+            style={isMatrixFullscreen ? undefined : { minHeight: '720px' }}
+          >
+            {/* Toolbar */}
+            <div className="px-6 py-4 border-b border-creme-200 flex flex-wrap items-center justify-between gap-4 bg-white">
+              <div className="flex items-center gap-4">
+                <h2 className="text-xl font-serif font-semibold text-gray-900 flex items-center gap-2">
+                  <ArrowDownWideNarrow size={20} className="text-esmeralda-500" />
+                  {viewMode === 'gallery' ? 'Galeria de ativos' : 'Matriz detalhada de ativos'}
+                </h2>
+                {/* Toggle tabela / galeria */}
+                <div className="flex h-9 bg-creme-50 p-1 rounded-lg border border-creme-200">
+                  <button
+                    onClick={() => setViewMode('table')}
+                    className={`px-3 text-xs font-semibold rounded-md transition-all ${viewMode === 'table' ? 'bg-white text-esmeralda-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                    title="Tabela"
+                  >
+                    Tabela
+                  </button>
+                  <button
+                    onClick={() => setViewMode('gallery')}
+                    className={`px-3 text-xs font-semibold rounded-md transition-all ${viewMode === 'gallery' ? 'bg-white text-esmeralda-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                    title="Galeria visual"
+                  >
+                    Galeria
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Seleção em massa (compacto) */}
+                <div className="flex items-center gap-1 bg-creme-50 rounded-lg border border-creme-200 px-1.5 h-9">
+                  <button
+                    onClick={toggleAll}
+                    className="p-1.5 rounded hover:bg-white text-gray-600 hover:text-esmeralda-500 transition-colors"
+                    title={selectedRows.size === analysis.fullList.length && analysis.fullList.length > 0 ? 'Limpar seleção' : 'Selecionar todos'}
+                  >
+                    {selectedRows.size === analysis.fullList.length && analysis.fullList.length > 0
+                      ? <CheckSquare size={16} className="text-esmeralda-500" />
+                      : <Square size={16} />}
+                  </button>
+                  <input
+                    type="number"
+                    value={bulkSelectCount}
+                    onChange={(e) => setBulkSelectCount(e.target.value)}
+                    placeholder="N"
+                    className="w-12 bg-transparent text-sm text-center text-gray-700 focus:outline-none placeholder-gray-400"
+                    title="Selecionar os primeiros N"
+                  />
+                  <button
+                    onClick={handleBulkSelect}
+                    disabled={!bulkSelectCount}
+                    className="p-1.5 rounded bg-esmeralda-50 text-esmeralda-500 hover:bg-esmeralda-500 hover:text-white disabled:opacity-30 transition-all"
+                    title="Selecionar os primeiros N itens"
+                  >
+                    <Check size={14} />
+                  </button>
+                  {selectedRows.size > 0 && (
+                    <span className="text-xs font-mono text-gray-600 px-2 border-l border-creme-200 ml-1">
+                      {selectedRows.size} sel.
+                    </span>
+                  )}
+                </div>
+
+                {selectedRows.size > 0 && (
+                  <div className="flex items-center gap-2">
+                    {onPromotion && (
+                      <button
+                        onClick={() => onPromotion(analysis.fullList.filter(item => selectedRows.has(item.uniqueId)).map(item => item.original))}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg border border-esmeralda-300 bg-esmeralda-50 text-esmeralda-500 text-sm font-semibold hover:bg-esmeralda-100 transition-colors"
+                      >
+                        <Tag size={14} />
+                        Promoção
+                      </button>
+                    )}
+                    <button
+                      onClick={downloadCSV}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-esmeralda-500 text-white text-sm font-semibold hover:bg-esmeralda-600 transition-colors shadow-sm"
+                    >
+                      <Download size={14} />
+                      Exportar
+                    </button>
+                  </div>
+                )}
+
+                {/* VISTAS NOMEADAS (filtros salvos) */}
+                <div className="relative" ref={viewsDropdownRef}>
+                  <button
+                    onClick={() => setIsViewsDropdownOpen(!isViewsDropdownOpen)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${activeViewId !== null ? 'bg-esmeralda-50 text-esmeralda-500 border-esmeralda-300' : 'bg-white border-creme-200 text-gray-700 hover:border-esmeralda-300'}`}
+                    title="Vistas salvas (filtros)"
+                  >
+                    <Bookmark size={14} />
+                    <span className="hidden sm:inline">
+                      {activeViewId !== null
+                        ? userViews.find(v => v.id === activeViewId)?.nome ?? 'Vistas'
+                        : 'Vistas'}
+                    </span>
+                    {userViews.length > 0 && (
+                      <span className="px-1.5 text-[10px] font-mono font-bold bg-esmeralda-500 text-white rounded-full">{userViews.length}</span>
+                    )}
+                    <ChevronDown size={12} className={`transition-transform ${isViewsDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {isViewsDropdownOpen && (
+                    <div className="absolute top-full right-0 mt-2 w-80 max-h-[450px] overflow-y-auto bg-white border border-creme-200 rounded-xl shadow-2xl z-50 scrollbar-thin">
+                      <div className="p-3 border-b border-creme-200 bg-white sticky top-0 flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Minhas vistas</h4>
+                        <button
+                          onClick={() => { setShowSaveViewModal(true); setIsViewsDropdownOpen(false); }}
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-esmeralda-500 text-white text-xs font-semibold hover:bg-esmeralda-600 transition-colors"
+                        >
+                          + Nova
+                        </button>
+                      </div>
+                      <div className="p-2 space-y-1">
+                        {userViews.length === 0 ? (
+                          <p className="text-center text-sm text-gray-500 py-6 px-3">
+                            Nenhuma vista salva ainda. Configure filtros e clique em <strong className="text-esmeralda-500">Nova</strong>.
+                          </p>
+                        ) : (
+                          userViews.map(v => (
+                            <div key={v.id} className={`group flex items-center justify-between gap-2 px-3 py-2.5 rounded-md transition-colors ${activeViewId === v.id ? 'bg-esmeralda-50' : 'hover:bg-creme-100'}`}>
+                              <button
+                                onClick={() => applySavedView(v)}
+                                className="flex-1 text-left min-w-0"
+                              >
+                                <p className={`text-sm font-semibold truncate ${activeViewId === v.id ? 'text-esmeralda-500' : 'text-gray-900'}`}>{v.nome}</p>
+                                <p className="text-xs text-gray-500 truncate">
+                                  {[
+                                    (v.filtros.scope as string) && (v.filtros.scope as string) !== 'all' ? `escopo: ${v.filtros.scope}` : null,
+                                    Array.isArray(v.filtros.categorias) && v.filtros.categorias.length ? `${v.filtros.categorias.length} cat.` : null,
+                                    Array.isArray(v.filtros.classes_peso) && v.filtros.classes_peso.length ? `${v.filtros.classes_peso.length} peso` : null,
+                                  ].filter(Boolean).join(' · ') || 'sem filtros'}
+                                </p>
+                              </button>
+                              <button
+                                onClick={() => deleteView(v.id)}
+                                className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="Excluir"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={handleSaveConfig}
+                  disabled={isSavingConfig}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${configSaved ? 'bg-green-50 text-green-700 border-green-300' : 'bg-white border-creme-200 text-gray-700 hover:border-esmeralda-300'}`}
+                  title="Salvar colunas e ordenação como padrão"
+                >
+                  {isSavingConfig ? <Loader2 size={14} className="animate-spin" /> : configSaved ? <Check size={14} /> : <Save size={14} />}
+                  <span className="hidden sm:inline">{configSaved ? 'Salvo' : 'Salvar colunas'}</span>
+                </button>
+
+                <div className="relative" ref={columnSelectorRef}>
+                  <button
+                    onClick={() => setIsColumnSelectorOpen(!isColumnSelectorOpen)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${isColumnSelectorOpen ? 'bg-esmeralda-500 text-white border-esmeralda-500' : 'bg-white border-creme-200 text-gray-700 hover:border-esmeralda-300'}`}
+                  >
+                    <Columns size={14} />
+                    <span className="hidden sm:inline">Colunas</span>
+                    <ChevronDown size={12} className={`transition-transform ${isColumnSelectorOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {isColumnSelectorOpen && (
+                    <div className="absolute top-full right-0 mt-2 w-72 max-h-96 overflow-y-auto bg-white border border-creme-200 rounded-xl shadow-2xl z-50 scrollbar-thin">
+                      <div className="p-3 border-b border-creme-200 bg-white sticky top-0">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Personalizar colunas</h4>
+                      </div>
+                      <div className="p-2 space-y-1">
+                        {metrics.allKeys.map(key => (
+                          <button
+                            key={key}
+                            onClick={() => toggleColumn(key)}
+                            className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-center justify-between group transition-colors ${visibleColumns.includes(key) ? 'bg-esmeralda-50 text-esmeralda-500 font-semibold' : 'text-gray-700 hover:bg-creme-100'}`}
+                          >
+                            <span className="truncate">{key}</span>
+                            {visibleColumns.includes(key) && <Check size={14} />}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Fullscreen toggle */}
+                <button
+                  onClick={() => setIsMatrixFullscreen(!isMatrixFullscreen)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all bg-white border-creme-200 text-gray-700 hover:border-esmeralda-300 hover:text-esmeralda-500"
+                  title={isMatrixFullscreen ? 'Sair da tela cheia (Esc)' : 'Expandir em tela cheia'}
+                >
+                  {isMatrixFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                  <span className="hidden lg:inline">{isMatrixFullscreen ? 'Sair' : 'Tela cheia'}</span>
+                </button>
+
+                {totalCount !== null && totalCount !== undefined && (
+                  <span className="text-sm text-gray-500 font-mono hidden md:inline-block border-l border-creme-200 pl-4">
+                    {totalCount.toLocaleString('pt-BR')} total
+                  </span>
+                )}
+
+                <div className="flex items-center gap-1 bg-creme-50 rounded-lg p-1 border border-creme-200">
+                  <button
+                    onClick={handlePrev}
+                    disabled={currentPage === 0 || loading}
+                    className="p-2 rounded hover:bg-white text-gray-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <span className="text-sm font-mono w-16 text-center text-gray-700">Pág {currentPage + 1}</span>
+                  <button
+                    onClick={handleNext}
+                    disabled={loading || (analysis && (currentPage + 1) * PAGE_SIZE >= analysis.filteredCount)}
+                    className="p-2 rounded hover:bg-white text-gray-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Table / Gallery */}
+            {viewMode === 'gallery' ? (
+              <div className="flex-1 min-w-0 overflow-auto scrollbar-thin p-5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4">
+                  {tableData.map((row) => {
+                    const img = row.imagemCapa ?? null;
+                    const scoreCor =
+                      (row.criticScore ?? 0) >= 80 ? 'bg-red-600' :
+                      (row.criticScore ?? 0) >= 60 ? 'bg-red-500' :
+                      (row.criticScore ?? 0) >= 40 ? 'bg-orange-400' :
+                      (row.criticScore ?? 0) >= 20 ? 'bg-yellow-400' :
+                                                    'bg-emerald-500';
+                    const abcCor =
+                      row.abcClass === 'A' ? 'bg-emerald-500 text-white' :
+                      row.abcClass === 'B' ? 'bg-yellow-400 text-yellow-900' :
+                                             'bg-gray-200 text-gray-600';
+                    return (
+                      <button
+                        key={row.uniqueId}
+                        onClick={() => toggleRow(row.uniqueId)}
+                        className={`group relative flex flex-col bg-white border rounded-xl overflow-hidden transition-all text-left ${selectedRows.has(row.uniqueId) ? 'border-esmeralda-400 shadow-[0_0_0_2px_rgba(24,64,54,0.2)]' : 'border-creme-200 hover:border-esmeralda-300 hover:shadow-md'}`}
+                      >
+                        {/* Imagem */}
+                        <div className="relative w-full aspect-square bg-creme-100 overflow-hidden">
+                          {img ? (
+                            <img
+                              src={img}
+                              alt={row.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-gray-300">
+                              <Gem size={48} />
+                            </div>
+                          )}
+                          {/* Badges sobrepostos */}
+                          <div className="absolute top-2 left-2 flex gap-1">
+                            <span className={`inline-flex items-center justify-center w-7 h-7 rounded-md text-xs font-bold font-mono shadow-md ${abcCor}`}>
+                              {row.abcClass}
+                            </span>
+                          </div>
+                          <div className="absolute top-2 right-2">
+                            <span className={`inline-flex items-center justify-center w-10 h-7 rounded-md text-xs font-bold font-mono text-white shadow-md ${scoreCor}`}>
+                              {row.criticScore ?? 0}
+                            </span>
+                          </div>
+                          {selectedRows.has(row.uniqueId) && (
+                            <div className="absolute inset-0 bg-esmeralda-500/20 flex items-center justify-center">
+                              <div className="bg-esmeralda-500 text-white p-2 rounded-full shadow-lg">
+                                <Check size={20} />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {/* Info */}
+                        <div className="p-3 space-y-1">
+                          <p className="font-mono text-xs text-gray-500 truncate">{row.sku}</p>
+                          <p className="text-sm font-semibold text-gray-900 line-clamp-2 leading-tight min-h-[2.5rem]">{row.name}</p>
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-sm font-mono font-bold text-esmeralda-500 tabular-nums">
+                              {formatCurrency(row.totalValue)}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              {row.stock}un
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-500">
+                            {row.diasSemVenda === null
+                              ? <span className="text-red-600 font-semibold">sem venda</span>
+                              : <>{row.diasSemVenda}d parado</>}
+                            {row.dio !== null && <> · DIO {row.dio > 999 ? '999+' : row.dio}d</>}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {tableData.length === 0 && (
+                  <div className="py-16 text-center text-gray-500 text-base">
+                    Nenhum registro encontrado para este filtro.
+                  </div>
+                )}
+              </div>
+            ) : (
+            <div className="flex-1 min-w-0 overflow-auto scrollbar-thin">
+              <table className="w-full text-left table-fixed">
+                <thead className="bg-creme-50 sticky top-0 z-10 text-xs uppercase tracking-widest font-bold text-gray-600">
+                  <tr>
+                    {/* Coluna única fixa: checkbox + ações on-hover */}
+                    <th className="px-2 py-3 border-b border-creme-200 w-[52px] text-center sticky left-0 z-30 bg-creme-50">
+                      <button
+                        onClick={toggleAll}
+                        className="p-1 rounded hover:bg-white text-gray-600 hover:text-esmeralda-500 transition-colors"
+                        title={selectedRows.size === analysis.fullList.length && analysis.fullList.length > 0 ? 'Limpar seleção' : 'Selecionar todos'}
+                      >
+                        {selectedRows.size === analysis.fullList.length && analysis.fullList.length > 0
+                          ? <CheckSquare size={16} className="text-esmeralda-500" />
+                          : <Square size={16} />}
+                      </button>
+                    </th>
+
+                    {visibleColumns.map(colKey => {
+                      const lay = colLayout(colKey);
+                      const alignCls = lay.align === 'right' ? 'text-right justify-end' : lay.align === 'center' ? 'text-center justify-center' : 'text-left';
+                      // Label amigavel — sem underscores
+                      const label = colKey
+                        .replace(/_/g, ' ')
+                        .replace(/\bdata ultima\b/gi, 'Últ.')
+                        .replace(/\bpreco tiny\b/gi, 'Preço')
+                        .replace(/\bpreco sync\b/gi, 'Preço calc')
+                        .replace(/\bsaldo estoque\b/gi, 'Estoque')
+                        .replace(/\bqtd vendas\b/gi, 'Vendas')
+                        .replace(/\btipo metal\b/gi, 'Metal')
+                        .replace(/\btem pedra preciosa\b/gi, 'Pedra')
+                        .replace(/\bpeso precificado\b/gi, 'Peso');
+                      return (
+                        <th
+                          key={colKey}
+                          className={`px-2 py-2.5 border-b border-creme-200 cursor-pointer hover:text-esmeralda-500 hover:bg-white transition-colors ${lay.cls} ${alignCls}`}
+                          onClick={() => handleSort(colKey)}
+                          title={colKey}
+                        >
+                          <div className={`flex items-center gap-1 ${alignCls}`}>
+                            <span className="truncate">{label}</span>
+                            <SortIcon colKey={colKey} />
+                          </div>
+                        </th>
+                      );
+                    })}
+
+                    <th
+                      className="px-1 py-2.5 border-b border-creme-200 text-center cursor-pointer hover:bg-white transition-colors w-[44px] whitespace-nowrap"
+                      onClick={() => handleSort('abcClass' as SortKey)}
+                      title="ABC · Pareto sobre a receita dos últimos 12 meses (sem venda em 12m = C)"
+                    >
+                      <div className="flex items-center justify-center gap-0.5">
+                        ABC
+                        <SortIcon colKey={'abcClass' as SortKey} />
+                      </div>
                     </th>
                     <th
-                        className="px-6 py-3 border-b border-creme-200 text-right text-alisson-gold cursor-pointer hover:text-gray-900 hover:bg-creme-100 transition-colors"
-                        onClick={() => handleSort('totalValue')}
+                      className="px-1 py-2.5 border-b border-creme-200 text-center cursor-pointer hover:bg-white transition-colors w-[56px] whitespace-nowrap"
+                      onClick={() => handleSort('dio' as SortKey)}
+                      title="DIO · dias até esgotar no ritmo atual (estoque / vendas 90d × 90)"
                     >
-                        <div className="flex items-center justify-end">
-                            Valor Total (Calc)
-                            <SortIcon colKey="totalValue" />
-                        </div>
+                      <div className="flex items-center justify-center gap-0.5">
+                        DIO
+                        <SortIcon colKey={'dio' as SortKey} />
+                      </div>
                     </th>
-                 </tr>
-              </thead>
-              <tbody className="divide-y divide-creme-200">
-                 {tableData.length === 0 ? (
+                    <th
+                      className="px-1 py-2.5 border-b border-creme-200 text-center text-red-600 cursor-pointer hover:bg-white transition-colors w-[56px] whitespace-nowrap"
+                      onClick={() => handleSort('criticScore' as SortKey)}
+                      title="Score de criticidade 0-100"
+                    >
+                      <div className="flex items-center justify-center gap-0.5">
+                        Score
+                        <SortIcon colKey={'criticScore' as SortKey} />
+                      </div>
+                    </th>
+                    <th
+                      className="px-2 py-2.5 border-b border-creme-200 text-right text-esmeralda-500 cursor-pointer hover:bg-white transition-colors w-[88px] whitespace-nowrap"
+                      onClick={() => handleSort('totalValue')}
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        Valor
+                        <SortIcon colKey="totalValue" />
+                      </div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-creme-200">
+                  {tableData.length === 0 ? (
                     <tr>
-                       <td colSpan={visibleColumns.length + 3} className="px-6 py-12 text-center text-gray-500">
-                          Nenhum registro encontrado para este filtro.
-                       </td>
+                      <td colSpan={visibleColumns.length + 5} className="px-6 py-16 text-center text-gray-500 text-base">
+                        Nenhum registro encontrado para este filtro.
+                      </td>
                     </tr>
-                 ) : (
+                  ) : (
                     tableData.map((row, idx) => {
-                       const isEditing = editingId === row.uniqueId;
-                       
-                       return (
-                       <tr key={idx} className={`transition-colors group ${isEditing ? 'bg-alisson-gold/5' : selectedRows.has(row.uniqueId) ? 'bg-alisson-gold/5' : 'hover:bg-creme-100'}`}>
-                          {/* Selection Checkbox */}
-                          <td className="px-4 py-3 text-center sticky left-0 z-20 bg-creme-50 group-hover:bg-creme-100 backdrop-blur-sm border-r border-creme-200">
-                            <button 
-                              onClick={() => toggleRow(row.uniqueId)}
-                              className={`p-1 rounded transition-colors ${selectedRows.has(row.uniqueId) ? 'text-alisson-gold' : 'text-gray-600 hover:text-gray-600'}`}
-                            >
-                              {selectedRows.has(row.uniqueId) ? <CheckSquare size={16} /> : <Square size={16} />}
-                            </button>
-                          </td>
-                          {/* Actions: Hide + Edit */}
-                          <td className="px-2 py-3 text-center sticky left-[48px] z-10 bg-creme-50 group-hover:bg-creme-100 backdrop-blur-sm border-r border-creme-200">
-                             <div className="flex items-center justify-center gap-1">
-                               {isEditing ? (
-                                 <>
-                                   <button 
+                      const isEditing = editingId === row.uniqueId;
+                      const isSelected = selectedRows.has(row.uniqueId);
+
+                      return (
+                        <tr key={idx} className={`transition-colors group ${isEditing ? 'bg-esmeralda-50/50' : isSelected ? 'bg-esmeralda-50/30' : 'hover:bg-creme-50'}`}>
+                          {/* Coluna única fixa: checkbox visível, ações aparecem on-hover à direita */}
+                          <td className="px-2 py-2 sticky left-0 z-20 bg-white group-hover:bg-creme-50 border-r border-creme-200 w-[52px]">
+                            <div className="flex items-center justify-center gap-0.5 relative">
+                              <button
+                                onClick={() => toggleRow(row.uniqueId)}
+                                className={`p-1 rounded transition-colors ${isSelected ? 'text-esmeralda-500' : 'text-gray-400 hover:text-gray-700'}`}
+                                title="Selecionar"
+                              >
+                                {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                              </button>
+                              {/* Ações flutuantes on-hover (não ocupam coluna) */}
+                              <div className="absolute left-full top-1/2 -translate-y-1/2 flex items-center gap-0.5 pl-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white group-hover:bg-creme-50 pr-1 rounded-r-md z-30">
+                                {isEditing ? (
+                                  <>
+                                    <button
                                       onClick={() => saveEditing(metrics.idKey!)}
-                                      className="p-1.5 rounded-md bg-alisson-gold/20 text-alisson-gold hover:bg-alisson-gold hover:text-black transition-colors"
-                                      title="Salvar Alterações"
+                                      className="p-1 rounded-md bg-esmeralda-50 text-esmeralda-500 hover:bg-esmeralda-500 hover:text-white transition-colors"
+                                      title="Salvar"
                                       disabled={isSaving}
-                                   >
-                                     {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                                   </button>
-                                   <button 
+                                    >
+                                      {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                                    </button>
+                                    <button
                                       onClick={cancelEditing}
-                                      className="p-1.5 rounded-md text-red-400 hover:bg-red-500/10 transition-colors"
+                                      className="p-1 rounded-md text-red-500 hover:bg-red-50 transition-colors"
                                       title="Cancelar"
                                       disabled={isSaving}
-                                   >
-                                     <X size={14} />
-                                   </button>
-                                 </>
-                               ) : (
-                                 <>
-                                   <button 
-                                      onClick={() => startEditing(row)}
-                                      className="p-1.5 rounded-md text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
-                                      title="Editar Produto"
-                                   >
-                                     <Pencil size={14} />
-                                   </button>
-                                   <button 
-                                      onClick={() => hideRow(row.uniqueId)}
-                                      className="p-1.5 rounded-md text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                                      title="Ocultar da Matriz"
-                                   >
-                                     <EyeOff size={14} />
-                                   </button>
-                                 </>
-                               )}
-                             </div>
-                          </td>
-                          <td className="px-6 py-3 text-center text-gray-600 font-mono text-xs">{(currentPage * PAGE_SIZE) + idx + 1}</td>
-                          
-                          {/* Dynamic Columns */}
-                          {visibleColumns.map(colKey => {
-                             const val = row.original[colKey];
-                             let display: React.ReactNode = val;
-                             
-                             // Editing Logic
-                             if (isEditing) {
-                               // Check data type for input
-                               const isNumber = typeof val === 'number';
-                               const isBoolean = typeof val === 'boolean';
-                               
-                               if (isBoolean) {
-                                  // Simple Toggle for booleans (or select if preferred, sticking to simple for now)
-                                  display = (
-                                    <select
-                                       value={String(editForm[colKey])}
-                                       onChange={(e) => handleEditChange(colKey, e.target.value)}
-                                       className="bg-creme-50 border border-alisson-gold/50 text-gray-900 text-xs rounded px-2 py-1 focus:outline-none"
                                     >
-                                      <option value="true">Sim</option>
-                                      <option value="false">Não</option>
-                                    </select>
-                                  );
-                               } else {
-                                  // Text/Number Input
+                                      <X size={12} />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => startEditing(row)}
+                                      className="p-1 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                      title="Editar"
+                                    >
+                                      <Pencil size={12} />
+                                    </button>
+                                    <button
+                                      onClick={() => hideRow(row.uniqueId)}
+                                      className="p-1 rounded-md text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                      title="Ocultar"
+                                    >
+                                      <EyeOff size={12} />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Dynamic columns */}
+                          {visibleColumns.map(colKey => {
+                            // preco_curva null → fallback preco_tiny para exibição
+                            const rawVal = row.original[colKey];
+                            const val = (colKey === 'preco_curva' && (rawVal === null || rawVal === undefined))
+                              ? (row.original['preco_tiny'] ?? null)
+                              : rawVal;
+                            let display: React.ReactNode = val;
+
+                            if (isEditing) {
+                              const isNumber = typeof val === 'number';
+                              const isBoolean = typeof val === 'boolean';
+                              if (isBoolean) {
+                                display = (
+                                  <select
+                                    value={String(editForm[colKey])}
+                                    onChange={(e) => handleEditChange(colKey, e.target.value)}
+                                    className="bg-white border border-esmeralda-300 text-gray-900 text-sm rounded px-2 py-1 focus:outline-none"
+                                  >
+                                    <option value="true">Sim</option>
+                                    <option value="false">Não</option>
+                                  </select>
+                                );
+                              } else {
+                                display = (
+                                  <input
+                                    type={isNumber ? "number" : "text"}
+                                    value={editForm[colKey] || ''}
+                                    onChange={(e) => handleEditChange(colKey, e.target.value)}
+                                    className="bg-white border border-esmeralda-300 text-gray-900 text-sm rounded px-2 py-1 w-full min-w-[80px] focus:border-esmeralda-500 focus:outline-none"
+                                  />
+                                );
+                              }
+                            } else {
+                              // ── data_ultima_venda: só data + cor por recência ──
+                              if (colKey === 'data_ultima_venda') {
+                                if (!val) {
+                                  display = <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">sem venda</span>;
+                                } else {
+                                  let dataFmt = String(val);
+                                  let dias = 0;
+                                  try {
+                                    const datePart = String(val).split('T')[0];
+                                    const [yyyy, mm, dd] = datePart.split('-');
+                                    dataFmt = `${dd}/${mm}/${yyyy}`;
+                                    dias = Math.floor((Date.now() - new Date(`${yyyy}-${mm}-${dd}`).getTime()) / 86400000);
+                                  } catch { /* keep raw */ }
+                                  const cls =
+                                    dias < 30  ? 'bg-emerald-50 text-emerald-700'  :
+                                    dias < 180 ? 'bg-creme-100 text-gray-700'       :
+                                    dias < 365 ? 'bg-orange-50 text-orange-700'    :
+                                                 'bg-red-50 text-red-600';
                                   display = (
-                                    <input 
-                                      type={isNumber ? "number" : "text"}
-                                      value={editForm[colKey] || ''}
-                                      onChange={(e) => handleEditChange(colKey, e.target.value)}
-                                      className="bg-creme-50/50 border border-alisson-gold/30 text-gray-900 text-xs rounded px-2 py-1 w-full min-w-[80px] focus:border-alisson-gold focus:outline-none"
-                                    />
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-mono ${cls}`} title={`Vendeu há ${dias} dias`}>
+                                      {dataFmt}
+                                    </span>
                                   );
-                               }
+                                }
+                              }
+                              // ── qtd_vendas: badge com saude propria ──
+                              else if (colKey === 'qtd_vendas') {
+                                const qtd = Number(val ?? 0);
+                                if (qtd === 0) {
+                                  display = <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">0</span>;
+                                } else {
+                                  const cls =
+                                    qtd >= 50 ? 'bg-emerald-500 text-white'        :
+                                    qtd >= 20 ? 'bg-emerald-100 text-emerald-700' :
+                                    qtd >= 6  ? 'bg-blue-50 text-blue-700'         :
+                                                'bg-creme-100 text-gray-700';
+                                  display = (
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold font-mono ${cls}`} title={`${qtd} venda${qtd === 1 ? '' : 's'} no histórico`}>
+                                      {qtd}
+                                    </span>
+                                  );
+                                }
+                              }
+                              // ── data_ultima_compra: badge de frescor do estoque ──
+                              else if (colKey === 'data_ultima_compra' || colKey === 'ultima_compra') {
+                                if (!val) {
+                                  display = <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-gray-100 text-gray-400">sem registro</span>;
+                                } else {
+                                  let dataFmt = String(val);
+                                  let dias = 0;
+                                  try {
+                                    const datePart = String(val).split('T')[0];
+                                    const [yyyy, mm, dd] = datePart.split('-');
+                                    dataFmt = `${dd}/${mm}/${yyyy}`;
+                                    dias = Math.floor((Date.now() - new Date(`${yyyy}-${mm}-${dd}`).getTime()) / 86400000);
+                                  } catch { /* keep raw */ }
+                                  const cls =
+                                    dias < 30  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                                    dias < 90  ? 'bg-blue-50 text-blue-700 border border-blue-200'           :
+                                    dias < 180 ? 'bg-creme-100 text-gray-700'                               :
+                                    dias < 365 ? 'bg-amber-50 text-amber-700'                               :
+                                                 'bg-red-50 text-red-600';
+                                  display = (
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-mono ${cls}`} title={`Entrou no estoque há ${dias} dias`}>
+                                      {dataFmt}
+                                    </span>
+                                  );
+                                }
+                              }
+                              // ── situacao: bolinha colorida ──
+                              else if (colKey === 'situacao' || colKey === 'status' || colKey === 'ativo') {
+                                const s = String(val ?? '').toUpperCase();
+                                const isAtivo = s === 'A' || val === true;
+                                const isInativo = s === 'I' || val === false;
+                                const cor = isAtivo ? 'bg-emerald-500' : isInativo ? 'bg-gray-400' : 'bg-red-500';
+                                const lbl = isAtivo ? 'Ativo' : isInativo ? 'Inativo' : s === 'E' ? 'Excluído' : (s || '—');
+                                display = <span className={`inline-block w-2.5 h-2.5 rounded-full ${cor}`} title={lbl} />;
+                              }
+                              // ── nome: truncate ──
+                              else if ((colKey === 'nome' || colKey.includes('descri')) && typeof val === 'string') {
+                                display = <span className="block truncate" title={val}>{val}</span>;
+                              }
+                              // ── sku: mono ──
+                              else if (colKey === 'sku' && typeof val === 'string') {
+                                display = <span className="font-mono text-gray-900">{val}</span>;
+                              }
+                              // ── precos: formato completo pt-BR sem decimais (R$ 4.950) ──
+                              else if (typeof val === 'number' && (colKey.includes('price') || colKey.includes('valor') || colKey.includes('preco'))) {
+                                display = <span className="font-mono tabular-nums text-gray-900">{formatCurrencyFull(val)}</span>;
+                              }
+                              // ── saldo/estoque: número simples ──
+                              else if (typeof val === 'number' && colKey.match(/saldo|estoque|qtd_|quantidade/)) {
+                                display = <span className="font-mono tabular-nums">{val}</span>;
+                              }
+                              // ── peso: com g ──
+                              else if (typeof val === 'number' && (colKey.includes('peso') || colKey.includes('weight') || colKey.includes('gram'))) {
+                                display = <span className="font-mono tabular-nums text-gray-700">{val.toFixed(2)}g</span>;
+                              }
+                              // ── markup / fator: 2 casas ──
+                              else if (typeof val === 'number' && (colKey === 'markup' || colKey === 'fator')) {
+                                display = <span className="font-mono tabular-nums">{val.toFixed(2)}</span>;
+                              }
+                              // ── número genérico ──
+                              else if (typeof val === 'number') {
+                                display = <span className="font-mono tabular-nums">{formatNumber(val)}</span>;
+                              } else if (typeof val === 'boolean') {
+                                display = val
+                                  ? <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500" title="Sim" />
+                                  : <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-300" title="Não" />;
+                              } else if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) {
+                                try {
+                                  const datePart = val.split('T')[0];
+                                  const [yyyy, mm, dd] = datePart.split('-');
+                                  display = <span className="font-mono text-xs">{`${dd}/${mm}/${yyyy}`}</span>;
+                                } catch { display = val; }
+                              } else if (typeof val === 'string') {
+                                display = <span className="block truncate" title={val}>{val}</span>;
+                              } else if (val === null || val === undefined) {
+                                display = <span className="text-gray-300">—</span>;
+                              } else if (typeof val === 'object') {
+                                display = '{…}';
+                              }
+                            }
 
-                             } else {
-                                 // Display Logic
-                                 if (typeof val === 'number') {
-                                   if (colKey.includes('price') || colKey.includes('valor')) display = formatCurrency(val);
-                                   else if (colKey.includes('weight') || colKey.includes('peso')) display = val + 'g';
-                                 } else if (typeof val === 'boolean') {
-                                   display = val ? 'Sim' : 'Não';
-                                 } else if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) {
-                                   // Date Formatting (YYYY-MM-DD or ISO)
-                                   try {
-                                     // Prevent timezone shift by splitting explicit YYYY-MM-DD
-                                     const datePart = val.split('T')[0];
-                                     const [yyyy, mm, dd] = datePart.split('-');
-                                     display = `${dd}/${mm}/${yyyy}`;
-                                   } catch(e) {
-                                     display = val;
-                                   }
-                                 } else if (val === null || val === undefined) {
-                                   display = '-';
-                                 } else if (typeof val === 'object') {
-                                   display = '{...}';
-                                 }
-                             }
-
-                             return (
-                               <td key={`${idx}-${colKey}`} className="px-6 py-3 text-gray-600 font-light text-xs">
-                                 {display}
-                               </td>
-                             )
+                            const lay = colLayout(colKey);
+                            const tdAlign = lay.align === 'right' ? 'text-right' : lay.align === 'center' ? 'text-center' : 'text-left';
+                            return (
+                              <td
+                                key={`${idx}-${colKey}`}
+                                className={`px-2 py-2 text-gray-700 text-sm ${lay.cls} ${tdAlign} ${lay.nowrap ? 'whitespace-nowrap' : ''} ${lay.mono && typeof display === 'string' ? 'font-mono' : ''} overflow-hidden`}
+                              >
+                                {display}
+                              </td>
+                            );
                           })}
 
-                          {/* Score de criticidade */}
-                          <td className="px-4 py-3 text-center">
-                             {(() => {
-                               const s = row.criticScore ?? 0;
-                               const cor =
-                                 s >= 80 ? "bg-red-600 text-white" :
-                                 s >= 60 ? "bg-red-400 text-white" :
-                                 s >= 40 ? "bg-orange-300 text-orange-900" :
-                                 s >= 20 ? "bg-yellow-200 text-yellow-800" :
-                                           "bg-emerald-100 text-emerald-700";
-                               return (
-                                 <span
-                                   className={`inline-flex items-center justify-center w-10 h-6 rounded text-[11px] font-bold font-mono ${cor}`}
-                                   title={`Idade: ${row.idadeDias ?? 0}d · Sem venda: ${row.diasSemVenda === null ? 'nunca' : `${row.diasSemVenda}d`}`}
-                                 >
-                                   {s}
-                                 </span>
-                               );
-                             })()}
+                          {/* ABC */}
+                          <td className="px-1 py-2 text-center">
+                            {(() => {
+                              const cor =
+                                row.abcClass === 'A' ? 'bg-emerald-500 text-white' :
+                                row.abcClass === 'B' ? 'bg-yellow-400 text-yellow-900' :
+                                                       'bg-gray-200 text-gray-600';
+                              return (
+                                <span
+                                  className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold font-mono ${cor}`}
+                                  title={
+                                    (row.receita12m ?? 0) === 0
+                                      ? `C · Sem venda em 12 meses`
+                                      : `${row.abcClass} · ${formatCurrency(row.receita12m ?? 0)} em 12m`
+                                  }
+                                >
+                                  {row.abcClass}
+                                </span>
+                              );
+                            })()}
                           </td>
-                          {/* Computed Total Value (Not Editable) */}
-                          <td className="px-6 py-3 text-right font-mono font-medium text-alisson-gold">
-                             {formatCurrency(row.totalValue)}
+                          {/* DIO */}
+                          <td className="px-1 py-2 text-center">
+                            {(() => {
+                              const d = row.dio;
+                              if (d === null) {
+                                return <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[11px] font-bold font-mono bg-red-100 text-red-700" title="Sem vendas em 90d">∞</span>;
+                              }
+                              const cor =
+                                d > 365 ? 'bg-red-500 text-white' :
+                                d > 180 ? 'bg-red-400 text-white' :
+                                d > 90 ?  'bg-orange-300 text-orange-900' :
+                                d > 45 ?  'bg-yellow-200 text-yellow-800' :
+                                          'bg-emerald-100 text-emerald-700';
+                              return (
+                                <span
+                                  className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[11px] font-bold font-mono ${cor}`}
+                                  title={`${d} dias pra esgotar (venda média: ${row.qtdVendida90d ? (row.qtdVendida90d / 90).toFixed(2) : 0} un/dia)`}
+                                >
+                                  {d > 999 ? '999+' : d}
+                                </span>
+                              );
+                            })()}
                           </td>
-                       </tr>
-                    );
-                  })
-                 )}
-              </tbody>
-           </table>
-        </div>
+                          {/* Score */}
+                          <td className="px-1 py-2 text-center">
+                            {(() => {
+                              const s = row.criticScore ?? 0;
+                              const cor =
+                                s >= 80 ? "bg-red-600 text-white" :
+                                s >= 60 ? "bg-red-500 text-white" :
+                                s >= 40 ? "bg-orange-400 text-white" :
+                                s >= 20 ? "bg-yellow-300 text-yellow-900" :
+                                          "bg-emerald-100 text-emerald-700";
+                              return (
+                                <span
+                                  className={`inline-flex items-center justify-center w-9 h-6 rounded text-xs font-bold font-mono ${cor}`}
+                                  title={`Idade: ${row.idadeDias ?? 0}d · Sem venda: ${row.diasSemVenda === null ? 'nunca' : `${row.diasSemVenda}d`}`}
+                                >
+                                  {s}
+                                </span>
+                              );
+                            })()}
+                          </td>
+                          {/* Total — compacto (R$ 12k) com tooltip valor cheio */}
+                          <td
+                            className="px-2 py-2 text-right font-mono font-semibold text-esmeralda-500 text-sm tabular-nums whitespace-nowrap"
+                            title={formatCurrency(row.totalValue)}
+                          >
+                            {formatCurrencyShort(row.totalValue)}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+            )}
+          </section>
+        )}
+
+        {/* Overlay escuro atrás da matriz em fullscreen (fora do flex-col) */}
+        {isMatrixFullscreen && (
+          <div
+            className="fixed inset-0 z-[54] bg-black/40 backdrop-blur-sm"
+            onClick={() => setIsMatrixFullscreen(false)}
+            aria-hidden
+          />
+        )}
+
       </div>
 
+      {/* MODAL: Nova vista */}
+      {showSaveViewModal && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => !isSavingView && setShowSaveViewModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 border border-creme-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 bg-esmeralda-50 rounded-xl text-esmeralda-500">
+                <Bookmark size={20} />
+              </div>
+              <div>
+                <h3 className="text-lg font-serif font-semibold text-gray-900">Nova vista</h3>
+                <p className="text-xs text-gray-500">Salva os filtros atuais com um nome</p>
+              </div>
+            </div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
+              Nome da vista
+            </label>
+            <input
+              type="text"
+              value={newViewName}
+              onChange={(e) => setNewViewName(e.target.value)}
+              autoFocus
+              maxLength={80}
+              placeholder='Ex: "Anéis pesados parados"'
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newViewName.trim()) saveAsView();
+                if (e.key === 'Escape') { setShowSaveViewModal(false); setNewViewName(''); }
+              }}
+              className="w-full h-11 px-4 bg-creme-50 border border-creme-200 rounded-lg text-sm text-gray-900 focus:outline-none focus:border-esmeralda-400 focus:ring-2 focus:ring-esmeralda-100"
+            />
+            <div className="mt-3 p-3 bg-creme-50 border border-creme-200 rounded-lg text-xs text-gray-600 space-y-1">
+              <p className="font-semibold text-gray-700 uppercase tracking-wider text-[10px] mb-1">Filtros que serão salvos:</p>
+              <p>Escopo: <span className="font-mono font-semibold text-gray-900">{filterScope}</span></p>
+              <p>Categorias: <span className="font-mono">{selectedCategories.length === 0 ? '—' : selectedCategories.join(', ')}</span></p>
+              <p>Fornecedores: <span className="font-mono">{selectedSuppliers.length === 0 ? '—' : selectedSuppliers.join(', ')}</span></p>
+              <p>Classes de peso: <span className="font-mono">{selectedWeightClasses.length === 0 ? '—' : selectedWeightClasses.join(', ')}</span></p>
+              <p>Data compra: <span className="font-mono">{purchaseDateRange.start || '—'} → {purchaseDateRange.end || '—'}</span></p>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                onClick={() => { setShowSaveViewModal(false); setNewViewName(''); }}
+                disabled={isSavingView}
+                className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-creme-100 rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={saveAsView}
+                disabled={isSavingView || !newViewName.trim()}
+                className="flex items-center gap-2 px-5 py-2 bg-esmeralda-500 text-white text-sm font-semibold rounded-lg hover:bg-esmeralda-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSavingView ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                Salvar vista
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

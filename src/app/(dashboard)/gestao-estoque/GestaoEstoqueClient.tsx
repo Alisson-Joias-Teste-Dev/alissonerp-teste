@@ -50,6 +50,16 @@ export default function GestaoEstoqueClient() {
 
   const [isAIOpen, setIsAIOpen] = useState(false);
 
+  const [locais, setLocais] = useState<{ id: number; nome: string }[]>([]);
+  const [selectedLocal, setSelectedLocal] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch("/api/gestao-estoque/locais")
+      .then(r => r.ok ? r.json() : [])
+      .then(data => Array.isArray(data) && data.length > 1 ? setLocais(data) : null)
+      .catch(() => null);
+  }, []);
+
   const getSearchableColumns = (cols: string[]) => {
     const likelyText = [
       "name", "title", "description", "email", "sku", "code", "slug",
@@ -102,7 +112,7 @@ export default function GestaoEstoqueClient() {
         }
       }
     } else {
-      const { data: dashData, error: dashError } = await fetchDashboardData(FIXED_SCHEMA, FIXED_TABLE);
+      const { data: dashData, error: dashError } = await fetchDashboardData(FIXED_SCHEMA, FIXED_TABLE, selectedLocal);
       if (dashError) {
         const msg = (dashError as { message?: string })?.message ?? JSON.stringify(dashError);
         setError(msg);
@@ -122,12 +132,12 @@ export default function GestaoEstoqueClient() {
       }
     }
     setLoading(false);
-  }, [page, viewMode, searchTerm, columns]);
+  }, [page, viewMode, searchTerm, columns, selectedLocal]);
 
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, viewMode, searchTerm]);
+  }, [page, viewMode, searchTerm, selectedLocal]);
 
   const handleViewChange = (mode: ViewMode) => {
     setViewMode(mode);
@@ -248,6 +258,33 @@ export default function GestaoEstoqueClient() {
         </div>
 
         <div className="flex items-center gap-3">
+          {locais.length > 1 && (
+            <div className="flex items-center gap-1 p-0.5 bg-creme-50 rounded-lg border border-creme-200">
+              <button
+                onClick={() => setSelectedLocal(null)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                  selectedLocal === null
+                    ? "bg-alisson-gold text-white shadow"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                Todos
+              </button>
+              {locais.map(l => (
+                <button
+                  key={l.id}
+                  onClick={() => setSelectedLocal(l.id)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                    selectedLocal === l.id
+                      ? "bg-alisson-gold text-white shadow"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  {l.nome}
+                </button>
+              ))}
+            </div>
+          )}
           <span className="text-[10px] uppercase tracking-wider text-gray-400 font-mono hidden md:inline">
             public.produtos
           </span>
