@@ -309,6 +309,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [addingItem, setAddingItem] = useState(false);
   const [prodTab, setProdTab] = useState<"produtos" | "comissoes">("produtos");
   const [pendingAuths, setPendingAuths] = useState<Record<number, PendingAuth>>({});
+  const [localPct, setLocalPct] = useState<Record<number, number>>({});
 
   // ── Payment add ─────────────────────────────────────────────────────────────
   const [addingPag, setAddingPag] = useState(false);
@@ -1720,11 +1721,26 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                         </td>
                         <td className="px-2 py-2" style={{ color: "#9CA3AF" }}>{item.unidade ?? "un"}</td>
                         <td className="px-2 py-2 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
-                        <td className="px-2 py-2 tabular-nums text-center" style={{ color: item.pct_desconto > 0 ? "#D97706" : "#9CA3AF" }}>
+                        {(() => {
+                          const effPct      = localPct[item.id!] !== undefined ? localPct[item.id!] : item.pct_desconto;
+                          const effPrecoUn  = item.preco_lista * (1 - effPct / 100);
+                          const effTotal    = effPrecoUn * item.quantidade;
+                          const effDescVal  = item.preco_lista * effPct / 100;
+                          return (<>
+                        <td className="px-2 py-2 tabular-nums text-center" style={{ color: effPct > 0 ? "#D97706" : "#9CA3AF" }}>
                           {edit.limited && item.id ? (
                             <div className="flex items-center gap-1">
-                              <input type="number" min={0} max={maxDesconto} step={1} defaultValue={item.pct_desconto}
-                                onBlur={e => handleUpdateItem(item.id!, "pct_desconto", e.target.value || "0")}
+                              <input type="number" min={0} max={maxDesconto} step={1}
+                                value={effPct}
+                                onChange={e => {
+                                  const v = Math.min(maxDesconto, Math.max(0, Number(e.target.value) || 0));
+                                  setLocalPct(prev => ({ ...prev, [item.id!]: v }));
+                                }}
+                                onBlur={() => {
+                                  const v = localPct[item.id!] ?? item.pct_desconto;
+                                  setLocalPct(prev => { const n = { ...prev }; delete n[item.id!]; return n; });
+                                  void handleUpdateItem(item.id!, "pct_desconto", String(v));
+                                }}
                                 className="w-12 border rounded px-1 py-0.5 text-xs text-center outline-none"
                                 style={{ borderColor: C.cremeBorder }} />
                               {pendingAuths[item.id!]?.status === "local" && (
@@ -1741,31 +1757,33 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                                 <span className="text-[10px] font-medium" style={{ color: "#EF4444" }}>✗</span>
                               )}
                             </div>
-                          ) : (item.pct_desconto > 0 ? `${item.pct_desconto}%` : "—")}
+                          ) : (effPct > 0 ? `${effPct}%` : "—")}
                         </td>
                         {edit.limited && (
-                          <td className="px-2 py-2">
-                            <input type="text"
-                              defaultValue={item.pct_desconto > 0 ? (item.preco_lista * item.pct_desconto / 100).toFixed(2).replace(".", ",") : ""}
-                              onBlur={e => {
-                                const valorDesc = parseFloat((e.target.value || "0").replace(",", ".")) || 0;
-                                const pct = item.preco_lista > 0 ? Math.min(maxDesconto, (valorDesc / item.preco_lista) * 100) : 0;
-                                handleUpdateItem(item.id!, "pct_desconto", String(Math.round(pct * 100) / 100));
-                              }}
-                              placeholder="0,00"
-                              className="w-16 border rounded px-1 py-0.5 text-xs text-right outline-none" style={{ borderColor: C.cremeBorder }} />
+                          <td className="px-2 py-2 tabular-nums text-right" style={{ color: "#374151" }}>
+                            {effDescVal > 0 ? effDescVal.toFixed(2).replace(".", ",") : "—"}
                           </td>
                         )}
                         <td className="px-2 py-2">
                           {edit.limited && item.id ? (
                             <input type="text"
-                              defaultValue={item.preco_unitario > 0 ? item.preco_unitario.toFixed(2).replace(".", ",") : ""}
-                              onBlur={e => handleUpdateItem(item.id!, "preco_unitario", e.target.value || "0")}
+                              value={effPrecoUn > 0 ? effPrecoUn.toFixed(2).replace(".", ",") : ""}
+                              onChange={e => {
+                                const novoPreco = parseFloat((e.target.value || "0").replace(",", ".")) || 0;
+                                if (novoPreco < 0 || novoPreco > item.preco_lista) return;
+                                const pct = Math.round(((item.preco_lista - novoPreco) / item.preco_lista) * 10000) / 100;
+                                setLocalPct(prev => ({ ...prev, [item.id!]: Math.min(maxDesconto, pct) }));
+                              }}
+                              onBlur={() => {
+                                const v = localPct[item.id!] ?? item.pct_desconto;
+                                setLocalPct(prev => { const n = { ...prev }; delete n[item.id!]; return n; });
+                                void handleUpdateItem(item.id!, "pct_desconto", String(v));
+                              }}
                               placeholder="0,00"
                               className="w-20 border rounded px-1 py-0.5 text-xs text-right outline-none tabular-nums"
                               style={{ borderColor: C.cremeBorder, color: "#374151" }} />
                           ) : (
-                            <span className="tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</span>
+                            <span className="tabular-nums" style={{ color: "#374151" }}>{fmt(effPrecoUn)}</span>
                           )}
                         </td>
                         <td className="px-2 py-2 tabular-nums whitespace-nowrap"
@@ -1779,7 +1797,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                             </span>
                           ) : "—"}
                         </td>
-                        <td className="px-2 py-2 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
+                        <td className="px-2 py-2 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(effTotal)}</td>
+                          </>);
+                        })()}
                         {edit.limited && (
                           <td className="px-2 py-2">
                             <button onClick={() => item.id && handleRemoveItem(item.id)} disabled={updating}
