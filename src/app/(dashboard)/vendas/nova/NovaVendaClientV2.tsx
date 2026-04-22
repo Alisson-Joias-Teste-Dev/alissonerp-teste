@@ -10,7 +10,7 @@ import {
 import Link from "next/link";
 import CartaoInline from "@/components/vendas/CartaoInline";
 import PixQrInline from "@/components/vendas/PixQrInline";
-import { maskCpfCnpj } from "@/lib/formatters";
+import { maskCpfCnpj, formatDateBR } from "@/lib/formatters";
 import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -1729,7 +1729,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                           <span className="text-sm font-semibold tabular-nums" style={{ color: C.esmeralda }}>{fmt(v.total_venda)}</span>
                         </div>
                         <p className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>
-                          {new Date(v.data_venda).toLocaleDateString("pt-BR")} · {v.itens_resumo}
+                          {formatDateBR(v.data_venda)} · {v.itens_resumo}
                         </p>
                       </button>
                     ))}

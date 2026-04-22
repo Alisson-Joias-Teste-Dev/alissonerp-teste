@@ -7,6 +7,7 @@ import GaleriaFotosOrdem from "@/components/ordem/GaleriaFotosOrdem";
 import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
 import FichaTecnicaForm, { TIPOS_ITEM, type TipoItem, type FichaTecnicaDados, validarFichaTecnica } from "@/components/ordens/FichaTecnicaForm";
 import { Pencil, X, Save, Loader2, AlertCircle } from "lucide-react";
+import { formatDateBR } from "@/lib/formatters";
 
 const C = {
   esmeralda: "#184036",
@@ -408,7 +409,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
               <InfoRow label="Cliente"        value={ordem.cliente_nome} />
               <InfoRow label="Vendedor(a)"    value={ordem.vendedor_nome ?? ordem.created_by_nome} />
               {ordem.data_entrega != null && (
-                <InfoRow label="Data Entrega" value={new Date(ordem.data_entrega).toLocaleDateString("pt-BR")} />
+                <InfoRow label="Data Entrega" value={formatDateBR(ordem.data_entrega)} />
               )}
               {Number(ordem.peso_metal_negociado) > 0 && (
                 <InfoRow label="Peso Negociado" value={`${Number(ordem.peso_metal_negociado).toFixed(2)}g`} mono />
@@ -893,7 +894,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
               <div className="flex justify-between">
                 <span style={{ color: "#9CA3AF" }}>Entrega</span>
                 <span className="font-mono" style={{ color: "#1A1A1A" }}>
-                  {ordem.data_entrega ? new Date(ordem.data_entrega).toLocaleDateString("pt-BR") : "—"}
+                  {formatDateBR(ordem.data_entrega)}
                 </span>
               </div>
               {ordem.pcp_data_conclusao && (

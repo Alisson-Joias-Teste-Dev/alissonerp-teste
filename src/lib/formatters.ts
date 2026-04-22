@@ -49,6 +49,20 @@ export function formatMoeda(valor: number | string | null | undefined): string {
 }
 
 /**
+ * Formata DATE (sem horário) como DD/MM/YYYY sem conversão de timezone.
+ * Colunas DATE do Postgres voltam como "2026-04-22" ou "2026-04-22T00:00:00.000Z".
+ * Usar `new Date(...).toLocaleDateString` desloca para UTC-3 e volta um dia atrás.
+ * Aqui fatiamos os 10 primeiros chars e reorganizamos.
+ */
+export function formatDateBR(iso: string | Date | null | undefined): string {
+  if (!iso) return '—';
+  const s = typeof iso === 'string' ? iso : iso.toISOString();
+  const [y, m, d] = s.slice(0, 10).split('-');
+  if (!y || !m || !d) return '—';
+  return `${d}/${m}/${y}`;
+}
+
+/**
  * Remove tudo que não for dígito. Útil para normalizar CPF/CNPJ/telefone/CEP
  * antes de comparar com valores armazenados sem máscara no banco (intencional).
  */

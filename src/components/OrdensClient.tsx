@@ -10,6 +10,7 @@ import {
 import NovaOrdemButton from "@/components/ordens/NovaOrdemButton";
 import { MobileCard } from "@/components/ui/MobileCard";
 import Paginacao from "@/components/ui/Paginacao";
+import { formatDateBR } from "@/lib/formatters";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -519,7 +520,7 @@ export default function OrdensClient({
             }]}
             campos={[
               { label: "Tipo",    valor: o.tipo_ordem ?? "—" },
-              { label: "Entrega", valor: o.data_entrega ? new Date(o.data_entrega).toLocaleDateString("pt-BR") : "—" },
+              { label: "Entrega", valor: o.data_entrega ? formatDateBR(o.data_entrega) : "—" },
               { label: "Vendedor",valor: o.vendedor_nome ?? "—" },
               { label: "Pedido",  valor: o.numero_pedido ? `#${o.numero_pedido}` : "—" },
             ]}
@@ -567,14 +568,14 @@ export default function OrdensClient({
                       isEntregaVencida(o.data_entrega, o.status) ? (
                         <span className="flex items-center gap-1.5">
                           <span style={{ color: "#DC2626", fontWeight: 600 }}>
-                            {new Date(o.data_entrega).toLocaleDateString("pt-BR")}
+                            {formatDateBR(o.data_entrega)}
                           </span>
                           <span className="px-1 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: "#FEE2E2", color: "#991B1B" }}>
                             VENCIDA
                           </span>
                         </span>
                       ) : (
-                        <span style={{ color: "#6B7280" }}>{new Date(o.data_entrega).toLocaleDateString("pt-BR")}</span>
+                        <span style={{ color: "#6B7280" }}>{formatDateBR(o.data_entrega)}</span>
                       )
                     ) : (
                       <span style={{ color: "#6B7280" }}>—</span>

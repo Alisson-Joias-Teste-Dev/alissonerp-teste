@@ -10,6 +10,7 @@ import {
 import ServiceCamera from "@/components/service/ServiceCamera";
 import { useGlobalError } from "@/stores/errorStore";
 import { S } from "@/components/layout/ServiceLayout";
+import { formatDateBR } from "@/lib/formatters";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 interface ProtocoloPendente {
@@ -2537,7 +2538,7 @@ export default function ServiceApp() {
                 )}
                 <DetalheRow label="Tipo" value={ordemDetalhe.tipo_ordem} />
                 {ordemDetalhe.data_entrega && (
-                  <DetalheRow label="Data entrega" value={new Date(ordemDetalhe.data_entrega).toLocaleDateString("pt-BR")} valueColor={S.gold} />
+                  <DetalheRow label="Data entrega" value={formatDateBR(ordemDetalhe.data_entrega)} valueColor={S.gold} />
                 )}
                 {ordemDetalhe.peso_peca_servico != null && (
                   <DetalheRow label="Peso peça" value={`${ordemDetalhe.peso_peca_servico}g`} />
