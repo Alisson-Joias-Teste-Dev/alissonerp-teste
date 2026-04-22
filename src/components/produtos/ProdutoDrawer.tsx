@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   X,
   Save,
@@ -13,6 +13,7 @@ import {
   Search,
   GitFork,
   ChevronRight,
+  Camera,
 } from "lucide-react";
 import { formatPeso } from "@/lib/formatters";
 
@@ -54,6 +55,9 @@ interface ProdutoDetalhe {
   largura_aro?: string | null;
   altura_aro?: string | null;
   base?: string | null;
+  // Pedra-produto (alissonerp.produto_pedra_extras)
+  preco_compra_usd?: string | number | null;
+  quantidade_pedra?: number | null;
 }
 
 interface Variacao {
@@ -463,12 +467,21 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
   const [tipoItemEdit, setTipoItemEdit] = useState<"" | "joia" | "insumo">("");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; texto: string } | null>(null);
+  const [fotoEdit, setFotoEdit] = useState<string | null>(null);
+  const fotoInputRef = useRef<HTMLInputElement>(null);
   // Modo simplificado é o padrão: mostra só nome/SKU/situação + peso + preço.
   // Clicar "Ver dados avançados" expande metal/categoria/BOM/medidas/variações etc.
   const [showAvancado, setShowAvancado] = useState(false);
 
-  // Cotação do ouro (para cálculo de preview em runtime)
+  // Cotação do ouro e dólar (para cálculo de preview em runtime)
   const [cotacaoOuro, setCotacaoOuro] = useState<number>(0);
+  const [cotacaoDolar, setCotacaoDolar] = useState<number>(0);
+
+  // Pedra-produto
+  const [precoCompraUsdEdit, setPrecoCompraUsdEdit] = useState("");
+  const [quantidadePedraEdit, setQuantidadePedraEdit] = useState("");
+  // Faixas de markup das pedras (para preview em runtime)
+  const [markupPedras, setMarkupPedras] = useState<Array<{ tamanho_min: number; tamanho_max: number; markup: number }>>([]);
   // Categorias de precificação (curva) para auto-preenchimento de markup pelo peso
   // Shape ainda indefinido (WIP de auto-precificação) — tipar quando a feature for concluída.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -504,11 +517,20 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
         const b = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(b.error ?? "Erro ao carregar produto");
       }
-      const data = await res.json() as { produto: ProdutoDetalhe; composicao: BomItem[]; variacoes: Variacao[]; cotacao_ouro?: number };
+      const data = await res.json() as { produto: ProdutoDetalhe; composicao: BomItem[]; variacoes: Variacao[]; cotacao_ouro?: number; cotacao_dolar?: number; markup_pedras?: Array<{ tamanho_min: string | number; tamanho_max: string | number; markup: string | number }> };
       setProduto(data.produto);
+      setFotoEdit(null);
       setComposicao(data.composicao);
       setVariacoes(data.variacoes ?? []);
       setCotacaoOuro(Number(data.cotacao_ouro ?? 0));
+      setCotacaoDolar(Number(data.cotacao_dolar ?? 0));
+      setPrecoCompraUsdEdit(data.produto.preco_compra_usd != null ? String(data.produto.preco_compra_usd) : "");
+      setQuantidadePedraEdit(data.produto.quantidade_pedra != null ? String(data.produto.quantidade_pedra) : "");
+      setMarkupPedras((data.markup_pedras ?? []).map(f => ({
+        tamanho_min: Number(f.tamanho_min),
+        tamanho_max: Number(f.tamanho_max),
+        markup:      Number(f.markup),
+      })));
       setTemPedra(data.produto.tem_pedra_preciosa);
       setObservacaoErp(data.produto.observacao_erp ?? "");
       setFornecedorEdit(data.produto.fornecedor ?? "");
@@ -624,13 +646,24 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
       // Markup é somente leitura aqui — só pode ser alterado em /precificação
       if ((fatorEdit || "") !== (produto.fator ?? "")) body.fator = parseNum(fatorEdit);
       if ((catPrecEdit || "") !== (produto.categoria ?? "")) body.categoria_precificacao = catPrecEdit || null;
-      // preco_tiny: só é editável em pedras (que não têm peso/markup).
-      // Joias têm o preço CALCULADO pelo ERP (peso × ouro × markup).
+      // preco_tiny: joias têm o preço CALCULADO pelo ERP (peso × ouro × markup).
+      // Pedras: preço calculado no backend a partir de preco_compra_usd × dólar × markup_faixa —
+      // não enviamos preco_tiny para pedras; enviamos os dois inputs novos.
       const ehPedra = (produto.categoria_geral ?? produto.categoria ?? "").toLowerCase().startsWith("pedras");
-      if (ehPedra && (precoTinyEdit || "") !== (produto.preco_tiny ?? "")) {
-        body.preco_tiny = parseNum(precoTinyEdit);
+      if (ehPedra) {
+        const precoUsdOriginal = produto.preco_compra_usd != null ? String(produto.preco_compra_usd) : "";
+        const qtdOriginal       = produto.quantidade_pedra != null ? String(produto.quantidade_pedra) : "";
+        if ((precoCompraUsdEdit || "") !== precoUsdOriginal) {
+          body.preco_compra_usd = parseNum(precoCompraUsdEdit);
+        }
+        if ((quantidadePedraEdit || "") !== qtdOriginal) {
+          const n = quantidadePedraEdit ? parseInt(quantidadePedraEdit, 10) : null;
+          body.quantidade_pedra = (n != null && !isNaN(n)) ? n : null;
+        }
       }
       if (tipoItemEdit !== (produto.tipo_item ?? "")) body.tipo_item = tipoItemEdit || null;
+
+      if (fotoEdit) body.foto_base64 = fotoEdit;
 
       if (Object.keys(body).length === 0) {
         setSaveMsg({ ok: true, texto: "Nenhuma alteração para salvar." });
@@ -729,9 +762,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
       // Markup readonly — não dispara dirty
       (fatorEdit || "")      !== (produto.fator ?? "") ||
       (catPrecEdit || "")    !== (produto.categoria ?? "") ||
-      // preco_tiny só dirty para pedras (joia usa preço calculado)
+      // Pedras: dirty se mudou preco_compra_usd ou quantidade (preco_tiny é calculado)
       ((((produto.categoria_geral ?? produto.categoria ?? "").toLowerCase().startsWith("pedras"))
-         ? (precoTinyEdit || "") !== (produto.preco_tiny ?? "")
+         ? ((precoCompraUsdEdit || "") !== (produto.preco_compra_usd != null ? String(produto.preco_compra_usd) : "") ||
+            (quantidadePedraEdit || "") !== (produto.quantidade_pedra != null ? String(produto.quantidade_pedra) : ""))
          : false)) ||
       tipoItemEdit           !== (produto.tipo_item ?? ""));
 
@@ -818,7 +852,21 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
               // Pontos: 1 ct = 100 pontos
               const pontos = ct * 100;
 
-              const precoPedra = parseNumPedra(precoTinyEdit) || parseNumPedra(produto.preco_tiny);
+              const precoCompraUsdLive = parseNumPedra(precoCompraUsdEdit);
+              // Markup baseado no tamanho em ct (1 ct = 0.2 g).
+              const faixa = markupPedras.find(f => ct >= f.tamanho_min && ct < f.tamanho_max);
+              const markupLive =
+                faixa ? faixa.markup
+                      : (markupPedras.length > 0
+                          ? [...markupPedras].sort((a, b) =>
+                              (ct >= a.tamanho_min ? a.tamanho_min : -Infinity) -
+                              (ct >= b.tamanho_min ? b.tamanho_min : -Infinity)
+                            ).reverse()[0]?.markup ?? 0
+                          : 0);
+              const precoCalc = precoCompraUsdLive > 0 && cotacaoDolar > 0 && markupLive > 0
+                ? precoCompraUsdLive * cotacaoDolar * markupLive
+                : parseNumPedra(produto.preco_tiny);
+              const precoPedra = precoCalc;
 
               return (
                 <>
@@ -902,25 +950,59 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                     </div>
                   </section>
 
-                  {/* ── VALOR DA PEDRA ── */}
+                  {/* ── ESTOQUE DA PEDRA ── */}
+                  <section>
+                    <p className={sectionTitleCls}>Estoque</p>
+                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                      <p className={labelCls}>Quantidade em estoque</p>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={quantidadePedraEdit}
+                        onChange={(e) => setQuantidadePedraEdit(e.target.value)}
+                        placeholder="0"
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      />
+                    </div>
+                  </section>
+
+                  {/* ── VALOR DA PEDRA (calculado pelo markup) ── */}
                   <section>
                     <p className={sectionTitleCls}>Valor</p>
                     <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 space-y-3">
                       <div>
-                        <p className={labelCls}>Preço de Venda (R$)</p>
+                        <p className={labelCls}>Preço de Compra (USD)</p>
                         <input
                           type="text"
                           inputMode="decimal"
-                          value={precoTinyEdit}
-                          onChange={(e) => setPrecoTinyEdit(e.target.value)}
-                          placeholder="—"
-                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono font-semibold text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
-                          style={{ color: "#184036" }}
+                          value={precoCompraUsdEdit}
+                          onChange={(e) => setPrecoCompraUsdEdit(e.target.value)}
+                          placeholder="0,00"
+                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
                         />
+                      </div>
+
+                      <div>
+                        <p className={labelCls}>Preço de Venda (R$) <span className="text-gray-400 normal-case tracking-normal">(calculado)</span></p>
+                        <div
+                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono font-semibold bg-gray-100 cursor-not-allowed"
+                          style={{ color: "#184036" }}
+                          title="Travado: calculado por preço USD × dólar × markup por tamanho"
+                        >
+                          {precoPedra > 0
+                            ? `R$ ${precoPedra.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : "—"}
+                        </div>
                         <p className="text-[10px] text-gray-400 mt-1">
-                          Cadastrado no momento da criação. Pode ser editado a qualquer momento.
+                          {precoCompraUsdLive > 0 && cotacaoDolar > 0 && markupLive > 0 ? (
+                            <>USD {precoCompraUsdLive.toFixed(2)} × R$ {cotacaoDolar.toFixed(2)} × {markupLive.toFixed(2)} (markup {ct.toFixed(3)}ct)</>
+                          ) : (
+                            "Preencha preço USD acima. Peso da pedra define a faixa de markup."
+                          )}
                         </p>
                       </div>
+
                       {precoPedra > 0 && pontos > 0 && (
                         <div className="text-[11px] text-gray-500 font-mono pt-2 border-t border-gray-200">
                           R$ {(precoPedra / pontos).toFixed(2)}/pt · R$ {(precoPedra / ct).toFixed(2)}/ct
@@ -939,6 +1021,58 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
               <section>
                 <p className={sectionTitleCls}>Dados Básicos</p>
                 <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-100">
+                  {/* Foto */}
+                  <div>
+                    <p className={labelCls}>Foto</p>
+                    <input
+                      ref={fotoInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => setFotoEdit(ev.target?.result as string);
+                        reader.readAsDataURL(f);
+                        e.target.value = "";
+                      }}
+                    />
+                    {(fotoEdit ?? produto.foto_produto) ? (
+                      <div className="relative rounded-lg overflow-hidden border border-gray-200">
+                        <img
+                          src={fotoEdit ?? produto.foto_produto!}
+                          alt="Foto do produto"
+                          className="w-full h-36 object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => fotoInputRef.current?.click()}
+                          className="absolute bottom-2 right-2 inline-flex items-center gap-1 px-2.5 py-1 bg-white/90 rounded-md text-xs font-medium text-gray-700 border border-gray-200 shadow hover:bg-white"
+                        >
+                          <Camera size={11} /> Trocar foto
+                        </button>
+                        {fotoEdit && (
+                          <button
+                            type="button"
+                            onClick={() => setFotoEdit(null)}
+                            className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center bg-white rounded-full shadow border border-gray-200 hover:bg-gray-50"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => fotoInputRef.current?.click()}
+                        className="w-full border-2 border-dashed border-gray-200 rounded-lg px-4 py-4 flex items-center gap-2 text-gray-400 hover:border-[#184036] hover:text-[#184036] transition-colors"
+                      >
+                        <Camera size={16} />
+                        <span className="text-xs font-medium">Adicionar foto</span>
+                      </button>
+                    )}
+                  </div>
                   <div>
                     <p className={labelCls}>Nome</p>
                     <input

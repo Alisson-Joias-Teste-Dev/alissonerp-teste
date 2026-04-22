@@ -55,7 +55,7 @@ interface CategoriaPai {
   filhos: { nome: string; total: number }[];
 }
 
-type OrderField = "nome" | "sku" | "preco_sync" | "peso_precificado" | "id_produto";
+type OrderField = "nome" | "sku" | "preco_sync" | "peso_precificado" | "id_produto" | "tipo_metal" | "situacao" | "qtd_estoque";
 type OrderDir = "asc" | "desc";
 
 // ─── Design constants ─────────────────────────────────────────────────────────
@@ -146,6 +146,7 @@ export default function ProdutosClient() {
   const [pendencia, setPendencia] = useState("");
   const [esconderInsumos, setEsconderInsumos] = useState(true);
   const [tipoItem, setTipoItem]   = useState("");
+  const [comVariacoes, setComVariacoes] = useState<string>("");
 
   // Categorias hierárquicas (do recorte ativo+saldo>=1)
   const [categorias, setCategorias] = useState<CategoriaPai[]>([]);
@@ -217,6 +218,7 @@ export default function ProdutosClient() {
     if (apenasComEstoque) p.set("apenas_com_estoque", "true");
     if (esconderInsumos) p.set("esconder_insumos", "true");
     if (pendencia && !extraExclude.includes("pendencia")) p.set("pendencia", pendencia);
+    if (comVariacoes) p.set("com_variacoes", comVariacoes);
     return p.toString();
   }
 
@@ -251,7 +253,7 @@ export default function ProdutosClient() {
     })();
     return () => { cancelado = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedBusca, tipoMetal, temPedra, situacao, categoriaPai, subcategoria, apenasComEstoque, esconderInsumos, pendencia, refreshTick]);
+  }, [debouncedBusca, tipoMetal, temPedra, situacao, categoriaPai, subcategoria, apenasComEstoque, esconderInsumos, pendencia, comVariacoes, refreshTick]);
 
   // Reseta subcategoria quando trocar a pai
   useEffect(() => { setSubcategoria(""); }, [categoriaPai]);
@@ -290,6 +292,7 @@ export default function ProdutosClient() {
       if (pendencia)         params.set("pendencia", pendencia);
       if (esconderInsumos)   params.set("esconder_insumos", "true");
       if (tipoItem)          params.set("tipo_item", tipoItem);
+      if (comVariacoes)      params.set("com_variacoes", comVariacoes);
 
       const res = await fetch(`/api/produtos?${params.toString()}`);
       if (!res.ok) {
@@ -308,7 +311,7 @@ export default function ProdutosClient() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedBusca, situacao, page, limit, order, dir, tipoMetal, temPedra, categoriaPai, subcategoria, apenasComEstoque, pendencia, tipoItem, esconderInsumos]);
+  }, [debouncedBusca, situacao, page, limit, order, dir, tipoMetal, temPedra, categoriaPai, subcategoria, apenasComEstoque, pendencia, tipoItem, esconderInsumos, comVariacoes]);
 
   useEffect(() => { fetchProdutos(); }, [fetchProdutos]);
 
@@ -429,6 +432,11 @@ export default function ProdutosClient() {
             <option value="">Com e sem pedra</option>
             <option value="true">Com pedra preciosa</option>
             <option value="false">Sem pedra preciosa</option>
+          </select>
+          <select value={comVariacoes} onChange={(e) => handleFilterChange(() => setComVariacoes(e.target.value))} className={selectCls}>
+            <option value="">Com e sem variações</option>
+            <option value="true">Somente com variações</option>
+            <option value="false">Somente sem variações</option>
           </select>
           <select value={situacao} onChange={(e) => handleFilterChange(() => setSituacao(e.target.value))} className={selectCls}>
             <option value="A">Somente ativos</option>
@@ -557,12 +565,12 @@ export default function ProdutosClient() {
                 </th>
                 {/* expand col */}
                 <th className="w-8" />
-                <SortHeader field="sku"                  label="SKU"        current={order} dir={dir} onSort={handleSort} />
-                <SortHeader field="nome"                 label="Nome"       current={order} dir={dir} onSort={handleSort} />
-                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">Metal</th>
-                <SortHeader field="peso_precificado"     label="Peso"       current={order} dir={dir} onSort={handleSort} />
-                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">Situação</th>
-                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">Estoque</th>
+                <SortHeader field="sku"                  label="SKU"         current={order} dir={dir} onSort={handleSort} />
+                <SortHeader field="nome"                 label="Nome"        current={order} dir={dir} onSort={handleSort} />
+                <SortHeader field="tipo_metal"           label="Metal"       current={order} dir={dir} onSort={handleSort} />
+                <SortHeader field="peso_precificado"     label="Peso"        current={order} dir={dir} onSort={handleSort} />
+                <SortHeader field="situacao"             label="Situação"    current={order} dir={dir} onSort={handleSort} />
+                <SortHeader field="qtd_estoque"          label="Estoque"     current={order} dir={dir} onSort={handleSort} />
                 <SortHeader field="preco_sync"           label="Preço Venda" current={order} dir={dir} onSort={handleSort} />
               </tr>
             </thead>

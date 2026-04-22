@@ -34,8 +34,10 @@ export default async function NovaVendaPage() {
       } else if (u.mx_desconto_permitido != null && Number(u.mx_desconto_permitido) > 0) {
         maxDesconto = Number(u.mx_desconto_permitido);
       } else {
-        const FULL = ["gerente_fabrica", "gerente_loja", "financeiro"];
-        maxDesconto = FULL.includes(role) ? 30 : 30;
+        const FULL = ["gerente_fabrica", "financeiro"];
+        if (FULL.includes(role)) maxDesconto = 30;
+        else if (role === "gerente_loja") maxDesconto = 50;
+        else maxDesconto = 15;
       }
     }
   }
@@ -57,12 +59,15 @@ export default async function NovaVendaPage() {
     vendedores = rows.map(r => ({ id: Number(r.id), nome: r.nome as string }));
   }
 
+  const descontoAuthThreshold = role === "gerente_loja" ? 30 : undefined;
+
   return (
     <NovaVendaClientV2
       role={role}
       vendedorId={vendedorId}
       vendedorNome={vendedorNome}
       maxDesconto={maxDesconto}
+      descontoAuthThreshold={descontoAuthThreshold}
       vendedores={vendedores}
       userId={userId}
       userName={userName}

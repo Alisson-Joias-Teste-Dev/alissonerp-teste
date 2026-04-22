@@ -10,6 +10,8 @@ import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
+import { aplicarCurvaProduto } from "@/lib/aplicar-curva-produto";
+import { uploadFile, ensureBucket } from "@/lib/storage";
 
 export async function GET(
   _req: NextRequest,
@@ -56,7 +58,7 @@ export async function GET(
             p.diferenca_percentual,
             p.tem_pedra_preciosa,
             p.situacao,
-            NULL::text   AS foto_produto,
+            p.imagem     AS foto_produto,
             NULL::text   AS descricao,
             NULL::text   AS referencia,
             p.categoria_precificacao AS categoria,
@@ -85,6 +87,8 @@ export async function GET(
             END AS preco_curva,
             (SELECT tipo_item FROM alissonerp.produto_tipo_item WHERE produto_id = p.id_produto) AS tipo_item,
             NULL::text   AS sub_categoria,
+            ppe.preco_compra_usd  AS preco_compra_usd,
+            ppe.quantidade        AS quantidade_pedra,
             ep.id        AS erp_id,
             ep.eh_pai,
             ep.eh_variacao,
@@ -103,6 +107,7 @@ export async function GET(
             ) ELSE 0 END AS qtd_variacoes
           FROM public.produtos p
           LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+          LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
           WHERE p.id_produto = ${produtoId}
         `
       : await sql`
@@ -119,7 +124,7 @@ export async function GET(
             p.diferenca_percentual,
             p.tem_pedra_preciosa,
             p.situacao,
-            NULL::text    AS foto_produto,
+            p.imagem      AS foto_produto,
             NULL::text    AS descricao,
             NULL::text    AS referencia,
             p.categoria_precificacao AS categoria,
@@ -148,6 +153,8 @@ export async function GET(
             END AS preco_curva,
             (SELECT tipo_item FROM alissonerp.produto_tipo_item WHERE produto_id = p.id_produto) AS tipo_item,
             NULL::text    AS sub_categoria,
+            ppe.preco_compra_usd  AS preco_compra_usd,
+            ppe.quantidade        AS quantidade_pedra,
             NULL::integer AS erp_id,
             NULL::boolean AS eh_pai,
             NULL::boolean AS eh_variacao,
@@ -162,6 +169,7 @@ export async function GET(
             NULL::text    AS fornecedor,
             0::integer    AS qtd_variacoes
           FROM public.produtos p
+          LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
           WHERE p.id_produto = ${produtoId}
         `;
 
@@ -215,9 +223,12 @@ export async function GET(
       `;
     }
 
-    // Cotação atual do ouro (para cálculo em runtime no drawer)
-    const [cot] = await sql<{ ouro: string | null }[]>`SELECT ouro FROM public.parametros LIMIT 1`;
-    const cotacao_ouro = Number(cot?.ouro ?? 0);
+    // Cotação atual do ouro e dólar (para cálculo em runtime no drawer)
+    const [cot] = await sql<{ ouro: string | null; dollar: string | null }[]>`
+      SELECT ouro, dollar FROM public.parametros LIMIT 1
+    `;
+    const cotacao_ouro  = Number(cot?.ouro ?? 0);
+    const cotacao_dolar = Number(cot?.dollar ?? 0);
 
     // Fornecedor — leitura separada, só se a coluna existir (migration 159)
     if (await colunaExiste("alissonerp", "erp_produtos", "fornecedor")) {
@@ -229,7 +240,15 @@ export async function GET(
       (produto as Record<string, unknown>).fornecedor = null;
     }
 
-    return NextResponse.json({ produto, composicao, variacoes, cotacao_ouro });
+    // Faixas de markup de pedra (para preview em runtime no drawer)
+    const markup_pedras = await sql<{ tamanho_min: string; tamanho_max: string; markup: string }[]>`
+      SELECT tamanho_min, tamanho_max, markup
+      FROM alissonerp.markup_pedras
+      WHERE ativo = true
+      ORDER BY tamanho_min ASC
+    `;
+
+    return NextResponse.json({ produto, composicao, variacoes, cotacao_ouro, cotacao_dolar, markup_pedras });
   } catch (err) {
     console.error("[GET /api/produtos/[id]]", err);
     return NextResponse.json({ error: "Erro ao buscar produto" }, { status: 500 });
@@ -256,6 +275,10 @@ export async function PATCH(
   }
 
   const body = await req.json();
+
+  const fotoBase64 = typeof body.foto_base64 === "string" && body.foto_base64.startsWith("data:")
+    ? body.foto_base64
+    : null;
 
   // Campos que vão para public.produtos
   const pubUpdate: Record<string, unknown> = {};
@@ -302,6 +325,20 @@ export async function PATCH(
     pubUpdate.preco_tiny = n;
   }
 
+  // Campos exclusivos de pedra-produto (alissonerp.produto_pedra_extras)
+  let precoCompraUsd: number | null | undefined = undefined;
+  if (body.preco_compra_usd !== undefined) {
+    const n = body.preco_compra_usd == null ? null : Number(body.preco_compra_usd);
+    if (n != null && (isNaN(n) || n < 0)) return NextResponse.json({ error: "preco_compra_usd inválido" }, { status: 400 });
+    precoCompraUsd = n;
+  }
+  let quantidadePedra: number | null | undefined = undefined;
+  if (body.quantidade_pedra !== undefined) {
+    const n = body.quantidade_pedra == null ? null : Number(body.quantidade_pedra);
+    if (n != null && (isNaN(n) || n < 0 || !Number.isInteger(n))) return NextResponse.json({ error: "quantidade_pedra inválida" }, { status: 400 });
+    quantidadePedra = n;
+  }
+
   // tipo_item vai para tabela auxiliar
   let tipoItem: "joia" | "insumo" | null | undefined = undefined;
   if (body.tipo_item !== undefined) {
@@ -330,7 +367,14 @@ export async function PATCH(
       : null;
   }
 
-  if (Object.keys(pubUpdate).length === 0 && Object.keys(erpUpdate).length === 0 && tipoItem === undefined) {
+  if (
+    Object.keys(pubUpdate).length === 0 &&
+    Object.keys(erpUpdate).length === 0 &&
+    tipoItem === undefined &&
+    !fotoBase64 &&
+    precoCompraUsd === undefined &&
+    quantidadePedra === undefined
+  ) {
     return NextResponse.json({ error: "Nenhum campo editável informado" }, { status: 400 });
   }
 
@@ -450,6 +494,86 @@ export async function PATCH(
         `;
       }
       } // end if tbl?.exists
+    }
+
+    // ── Upload de foto (opcional) ────────────────────────────────────────────
+    if (fotoBase64) {
+      await ensureBucket("produto-fotos");
+      const matches = fotoBase64.match(/^data:([^;]+);base64,/);
+      const mimeType = matches?.[1] ?? "image/jpeg";
+      const ext = mimeType.split("/")[1]?.split("+")[0] ?? "jpg";
+      const fileName = `produto-${produtoId}-${Date.now()}.${ext}`;
+      const uploaded = await uploadFile("produto-fotos", fileName, fotoBase64, mimeType);
+      if (!("error" in uploaded)) {
+        await sql`UPDATE public.produtos SET imagem = ${uploaded.url} WHERE id_produto = ${produtoId}`;
+      }
+    }
+
+    // ── Aplicar curva de precificacao automaticamente ────────────────────────
+    // Rodamos quando o usuario mexeu em campos que afetam a curva (peso,
+    // categoria_precificacao ou tipo_metal). Se o usuario esta editando markup
+    // manualmente (pubUpdate.markup !== undefined), NAO sobrescrevemos.
+    const alteraCurva =
+      pubUpdate.peso_precificado       !== undefined ||
+      pubUpdate.categoria_precificacao !== undefined ||
+      pubUpdate.tipo_metal             !== undefined;
+    const usuarioDefiniuMarkupManual = pubUpdate.markup !== undefined;
+
+    if (alteraCurva && !usuarioDefiniuMarkupManual) {
+      try {
+        await aplicarCurvaProduto(produtoId);
+      } catch (err) {
+        console.warn("[PATCH /api/produtos/[id]] falha ao aplicar curva:", err);
+      }
+    }
+
+    // ── Pedra-produto: preco_compra_usd e quantidade ─────────────────────────
+    // Upsert em alissonerp.produto_pedra_extras; se preco_compra_usd mudou e
+    // o produto é pedra, recalcula preco_tiny = preco_compra_usd × dolar × markup_faixa.
+    if (precoCompraUsd !== undefined || quantidadePedra !== undefined) {
+      await sql`
+        INSERT INTO alissonerp.produto_pedra_extras (produto_id, preco_compra_usd, quantidade)
+        VALUES (
+          ${produtoId},
+          ${precoCompraUsd ?? null},
+          ${quantidadePedra ?? null}
+        )
+        ON CONFLICT (produto_id) DO UPDATE SET
+          preco_compra_usd = CASE WHEN ${precoCompraUsd !== undefined} THEN EXCLUDED.preco_compra_usd ELSE produto_pedra_extras.preco_compra_usd END,
+          quantidade       = CASE WHEN ${quantidadePedra !== undefined} THEN EXCLUDED.quantidade       ELSE produto_pedra_extras.quantidade       END,
+          updated_at       = NOW()
+      `;
+
+      if (precoCompraUsd !== undefined) {
+        // Identifica pedra e recalcula preco_tiny
+        const [prodCat] = await sql<{ categoria: string | null; peso_precificado: string | null }[]>`
+          SELECT categoria, peso_precificado FROM public.produtos WHERE id_produto = ${produtoId} LIMIT 1
+        `;
+        const ehPedra = (prodCat?.categoria ?? "").toLowerCase().startsWith("pedras");
+        if (ehPedra && precoCompraUsd != null) {
+          const pesoG = Number(prodCat?.peso_precificado ?? 0);
+          const ct = pesoG / 0.2;
+          const [params] = await sql<{ dollar: string | null }[]>`SELECT dollar FROM public.parametros LIMIT 1`;
+          const cotDolar = Number(params?.dollar ?? 0);
+          const [faixa] = await sql<{ markup: string }[]>`
+            SELECT markup FROM alissonerp.markup_pedras
+            WHERE ${ct} >= tamanho_min AND ${ct} < tamanho_max AND ativo = true
+            ORDER BY tamanho_min LIMIT 1
+          `;
+          let markup = faixa ? Number(faixa.markup) : 0;
+          if (!markup) {
+            const [fb] = await sql<{ markup: string }[]>`
+              SELECT markup FROM alissonerp.markup_pedras
+              WHERE ativo = true
+              ORDER BY CASE WHEN ${ct} >= tamanho_min THEN tamanho_min END DESC NULLS LAST, tamanho_min ASC
+              LIMIT 1
+            `;
+            markup = Number(fb?.markup ?? 2.0);
+          }
+          const precoCalc = precoCompraUsd * cotDolar * markup;
+          await sql`UPDATE public.produtos SET preco_tiny = ${precoCalc} WHERE id_produto = ${produtoId}`;
+        }
+      }
     }
 
     // SELECT de retorno — com ou sem erp_produtos

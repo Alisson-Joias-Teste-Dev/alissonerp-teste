@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
       WHERE (ep.eh_variacao = false OR ep.id IS NULL)
         ${f.wBusca} ${f.wSkuPrefix} ${f.wPedra} ${f.wSituacao}
         ${f.wCategoria} ${f.wTipoMetal} ${f.wEstoque} ${f.wEsconderInsumos}
+        ${f.wVariacoes}
     `;
 
     return NextResponse.json({
