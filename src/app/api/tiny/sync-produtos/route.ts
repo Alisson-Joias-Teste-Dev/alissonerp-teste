@@ -98,16 +98,15 @@ export async function POST(req: NextRequest) {
       }
 
       // Montar payload Tiny v3 (produtos)
+      // Campos confirmados via GET /v3/produtos: descricao, sku, tipo ("S"=simples), situacao, unidade, precos
       const preco = Number(prod.preco_tiny ?? prod.preco_sync ?? 0);
       const payload: Record<string, unknown> = {
-        nome: prod.nome,
-        codigo: prod.sku,
-        tipo: "P",
+        descricao: prod.nome,
+        sku: prod.sku,
+        tipo: "S",
         situacao: prod.situacao === "A" ? "A" : "I",
-        unidadeMedida: prod.unidade ?? "UN",
-        ...(preco > 0 ? { preco } : {}),
-        ...(prod.peso_precificado ? { pesoBruto: Number(prod.peso_precificado) } : {}),
-        ...(prod.fornecedor ? { fornecedor: { nome: String(prod.fornecedor) } } : {}),
+        unidade: prod.unidade ?? "UN",
+        precos: { preco: preco > 0 ? preco : 0, precoPromocional: 0 },
       };
 
       const isUpdate = item.operacao === "update" && prod.id_api_produto;
