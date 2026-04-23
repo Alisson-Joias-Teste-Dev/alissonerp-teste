@@ -818,6 +818,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Enfileirar sincronização com Tiny ────────────────────────────────────
+    const todosSyncIds = [result.pai.id_produto, ...result.variacoes.map((v: { produto_id: number }) => v.produto_id)];
+    try {
+      for (const pid of todosSyncIds) {
+        await sql`
+          INSERT INTO alissonerp.tiny_sync_produtos (produto_id, operacao, status)
+          VALUES (${pid}, 'create', 'pendente')
+          ON CONFLICT (produto_id) DO UPDATE SET operacao = 'create', status = 'pendente', tentativas = 0, updated_at = NOW()
+        `;
+      }
+    } catch (err) {
+      console.warn("[POST /api/produtos] falha ao enfileirar sync Tiny:", err);
+    }
+
     return NextResponse.json(
       {
         ok: true,

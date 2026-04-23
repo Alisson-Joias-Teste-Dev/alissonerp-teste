@@ -58,6 +58,10 @@ interface ProdutoDetalhe {
   // Pedra-produto (alissonerp.produto_pedra_extras)
   preco_compra_usd?: string | number | null;
   quantidade_pedra?: number | null;
+  // Tiny sync
+  id_api_produto?: number | null;
+  tiny_sync_status?: string | null;
+  tiny_sync_erro?: string | null;
 }
 
 interface Variacao {
@@ -791,7 +795,18 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
             {produto ? (
               <>
                 <h2 className="text-base font-semibold text-gray-800 truncate">{produto.nome}</h2>
-                <p className="text-xs text-gray-400 mt-0.5 font-mono">{produto.sku}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <p className="text-xs text-gray-400 font-mono">{produto.sku}</p>
+                  {produto.tiny_sync_status === "pendente" && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium">Aguardando Tiny</span>
+                  )}
+                  {produto.tiny_sync_status === "erro" && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-medium" title={produto.tiny_sync_erro ?? ""}>Erro Tiny</span>
+                  )}
+                  {!produto.id_api_produto && !produto.tiny_sync_status && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">Sem ID Tiny</span>
+                  )}
+                </div>
               </>
             ) : (
               <h2 className="text-base font-semibold text-gray-800">Produto</h2>

@@ -104,10 +104,14 @@ export async function GET(
               SELECT count(*)::integer
               FROM alissonerp.erp_produtos filhos
               WHERE filhos.parent_id = ep.id
-            ) ELSE 0 END AS qtd_variacoes
+            ) ELSE 0 END AS qtd_variacoes,
+            p.id_api_produto,
+            ts.status AS tiny_sync_status,
+            ts.erro   AS tiny_sync_erro
           FROM public.produtos p
           LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
+          LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
           WHERE p.id_produto = ${produtoId}
         `
       : await sql`
@@ -167,9 +171,13 @@ export async function GET(
             NULL::numeric AS base,
             NULL::text    AS observacao_erp,
             NULL::text    AS fornecedor,
-            0::integer    AS qtd_variacoes
+            0::integer    AS qtd_variacoes,
+            p.id_api_produto,
+            ts.status AS tiny_sync_status,
+            ts.erro   AS tiny_sync_erro
           FROM public.produtos p
           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
+          LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
           WHERE p.id_produto = ${produtoId}
         `;
 
@@ -604,6 +612,21 @@ export async function PATCH(
           FROM public.produtos
           WHERE id_produto = ${produtoId}
         `;
+    // ── Enfileirar sincronização com Tiny ────────────────────────────────────
+    try {
+      await sql`
+        INSERT INTO alissonerp.tiny_sync_produtos (produto_id, operacao, status)
+        VALUES (${produtoId}, 'update', 'pendente')
+        ON CONFLICT (produto_id) DO UPDATE SET
+          operacao   = CASE WHEN alissonerp.tiny_sync_produtos.operacao = 'create' THEN 'create' ELSE 'update' END,
+          status     = 'pendente',
+          tentativas = 0,
+          updated_at = NOW()
+      `;
+    } catch (err) {
+      console.warn("[PATCH /api/produtos/[id]] falha ao enfileirar sync Tiny:", err);
+    }
+
     return NextResponse.json({ produto });
   } catch (err) {
     console.error("[PATCH /api/produtos/[id]]", err);
