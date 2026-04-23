@@ -75,6 +75,7 @@ interface Venda {
   aprovacao_credito_tipo?: string | null;
   aprovacao_credito_tarefa_id?: number | null;
   aprovacao_credito_status?: string | null;
+  aprovacao_credito_responsavel_nome?: string | null;
   aprovacao_tarefa_tags?: string[] | string | null;
   aprovacao_desconto_aprov_id?: number | null;
   desconto_aprovado_por_nome?: string | null;
@@ -113,7 +114,7 @@ interface Venda {
 
 const FORMAS_PAGAMENTO = [
   "Dinheiro", "Cartão de Crédito",
-  "Vale-Troca", "Pix", "Ouro", "A Receber", "Múltiplas",
+  "Vale-Troca", "Pix", "Ouro", "A Receber", "Múltiplas", "Manual (MP)",
 ];
 const GATEWAYS   = ["Mercado Pago", "PagSeguro", "Cielo", "Stone", "Getnet", "Rede", "Outro"];
 const BANDEIRAS  = ["Visa", "Mastercard", "Elo", "Amex", "Hipercard", "Outro"];
@@ -324,6 +325,11 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [multPagForma, setMultPagForma] = useState("Dinheiro");
   const [multPagValor, setMultPagValor] = useState("");
   const [multPagamentos, setMultPagamentos] = useState<Array<{ _key: string; forma: string; valor: number; ouro_peso?: number; ouro_valor_grama?: number; ouro_foto_path?: string }>>([]);
+
+  // ── Manual MP ───────────────────────────────────────────────────────────────
+  const [mpManualId, setMpManualId] = useState("");
+  const [mpManualLoading, setMpManualLoading] = useState(false);
+  const [mpManualMsg, setMpManualMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   // ── Ouro ────────────────────────────────────────────────────────────────────
   const [ouroPeso, setOuroPeso] = useState("");
@@ -784,9 +790,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
 
   // ── Payment actions (immediate save) ────────────────────────────────────────
-  async function handleAddPagamento() {
+  async function handleAddPagamento(valorOverride?: number) {
     if (!venda) return;
-    const v = parseFloat(newPagValor.replace(",", "."));
+    const v = valorOverride ?? parseFloat(newPagValor.replace(",", "."));
     if (!v || v <= 0) return;
     setUpdating(true);
     try {
@@ -804,6 +810,28 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       setNewPagValor(""); setAddingPag(false);
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao adicionar pagamento"); }
     finally { setUpdating(false); }
+  }
+
+  async function handleMpManual() {
+    if (!venda || !mpManualId.trim()) return;
+    setMpManualLoading(true);
+    setMpManualMsg(null);
+    try {
+      const res = await fetch(`/api/vendas/${venda.id}/mercado-pago/verificar-manual`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payment_id: mpManualId.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setMpManualMsg({ text: `Pagamento verificado e registrado! Valor: R$ ${Number(data.valor_registrado).toFixed(2).replace(".", ",")}${data.venda_concluida ? " — venda concluída." : ""}`, ok: true });
+      setMpManualId("");
+      await load();
+    } catch (e) {
+      setMpManualMsg({ text: e instanceof Error ? e.message : "Erro ao verificar pagamento", ok: false });
+    } finally {
+      setMpManualLoading(false);
+    }
   }
 
   async function handleRemovePagamento(pagId: number) {
@@ -1288,13 +1316,23 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
       {/* ── Banner aprovação de crédito pendente ── */}
       {aguardandoAprovacaoCredito && !isDescontoApproval && (
-        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center gap-2"
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-2"
           style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
-          <Loader2 size={16} className="animate-spin shrink-0" />
-          <p className="text-sm font-medium">
-            Aguardando aprovação de crédito
-            {venda.aprovacao_credito_tipo === "diretor" ? " (diretor — comissão será zerada)" : " (gerente de loja)"}
-          </p>
+          <div className="flex items-center gap-2">
+            <Loader2 size={16} className="animate-spin shrink-0" />
+            <p className="text-sm font-medium">
+              Aguardando aprovação de crédito
+              {venda.aprovacao_credito_tipo === "diretor" ? " (diretor — comissão será zerada)" : " (gerente de loja)"}
+              {venda.aprovacao_credito_responsavel_nome ? ` — ${venda.aprovacao_credito_responsavel_nome}` : ""}
+            </p>
+          </div>
+          {venda.aprovacao_credito_tarefa_id && (
+            <a href={`/tarefas/${venda.aprovacao_credito_tarefa_id}`}
+              className="text-xs font-semibold px-3 py-1 rounded-lg shrink-0"
+              style={{ backgroundColor: "#FDE68A", color: "#713F12" }}>
+              Ver Tarefa →
+            </a>
+          )}
         </div>
       )}
 
@@ -2226,6 +2264,40 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                 />
               )}
 
+              {/* Manual (MP) — verifica pagamento por ID */}
+              {newPagForma === "Manual (MP)" && (
+                <div className="rounded-xl border p-4 mb-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
+                  <p className="text-xs" style={{ color: "#6B7280" }}>
+                    Cole o ID do pagamento do Mercado Pago. O sistema vai consultar o MP e registrar automaticamente se estiver aprovado.
+                  </p>
+                  <div>
+                    <Label>ID do Pagamento (MP)</Label>
+                    <input
+                      type="text"
+                      value={mpManualId}
+                      onChange={e => { setMpManualId(e.target.value); setMpManualMsg(null); }}
+                      placeholder="ex: 123456789"
+                      className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono"
+                      style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                    />
+                  </div>
+                  {mpManualMsg && (
+                    <p className="text-xs font-medium" style={{ color: mpManualMsg.ok ? "#059669" : "#DC2626" }}>
+                      {mpManualMsg.text}
+                    </p>
+                  )}
+                  <button
+                    onClick={handleMpManual}
+                    disabled={mpManualLoading || !mpManualId.trim()}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                    style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                  >
+                    {mpManualLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckIcon size={14} />}
+                    Verificar e Registrar
+                  </button>
+                </div>
+              )}
+
               {/* Cartão de Crédito via Mercado Pago (link ou maquininha) */}
               {newPagForma === "Cartão de Crédito" && (
                 <CartaoInline
@@ -2249,7 +2321,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                         <Label>Forma</Label>
                         <Select value={multPagForma} onChange={e => { setMultPagForma(e.target.value); setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null); }}>
                           <optgroup label="Métodos de Pagamento">
-                            {FORMAS_PAGAMENTO.filter(f => f !== "Múltiplas").map(f => <option key={f} value={f}>{f}</option>)}
+                            {FORMAS_PAGAMENTO.filter(f => f !== "Múltiplas" && f !== "Manual (MP)").map(f => <option key={f} value={f}>{f}</option>)}
                           </optgroup>
                         </Select>
                       </div>
@@ -2373,7 +2445,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
               </div>
 
               {/* Botão registrar pagamento */}
-              {newPagForma !== "Múltiplas" ? (
+              {newPagForma !== "Múltiplas" && newPagForma !== "Manual (MP)" ? (
                 newPagForma === "Ouro" ? (
                   <button onClick={handleAddPagamentoOuro}
                     disabled={updating || !ouroValidacaoIA?.match || !ouroFotoFile}
@@ -2382,10 +2454,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                     {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamento em Ouro
                   </button>
                 ) : (
-                  <button onClick={() => {
-                      setNewPagValor(totalVenda.toFixed(2).replace(".", ","));
-                      handleAddPagamento();
-                    }} disabled={updating || totalVenda <= 0}
+                  <button onClick={() => handleAddPagamento(totalVenda)} disabled={updating || totalVenda <= 0}
                     className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
                     style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                     {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamento
@@ -2463,7 +2532,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                     </div>
                   </div>
                   <div className="flex justify-end mt-3">
-                    <button onClick={handleAddPagamento} disabled={updating}
+                    <button onClick={() => handleAddPagamento()} disabled={updating}
                       className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
                       style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                       {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Adicionar
