@@ -6,7 +6,7 @@ import sql from "@/lib/db";
 // Retorna id, sku, nome, preco_venda, peso_precificado e estoque agregado
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const q       = searchParams.get("q")?.trim() ?? "";
+  const q       = (searchParams.get("q")?.trim() ?? "").replace(",", ".");
   const limit   = Math.min(Number(searchParams.get("limit") ?? "20"), 100);
   const servico = searchParams.get("servico") === "1";
 
