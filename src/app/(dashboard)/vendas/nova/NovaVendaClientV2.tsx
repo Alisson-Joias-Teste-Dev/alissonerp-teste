@@ -2122,20 +2122,20 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
             {/* Tabela de itens */}
             <div className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-              <table className="w-full text-sm table-fixed">
+              <table className="w-full text-sm">
                 <thead style={{ backgroundColor: C.cremeBg }}>
                   <tr>
-                    <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "32px" }}>Nº</th>
-                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280" }}>Descrição</th>
-                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "80px" }}>SKU</th>}
-                    <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "56px" }}>Qtde</th>
-                    <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "84px" }}>Preço Lista</th>
-                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "72px" }}>% Desc</th>}
-                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "76px" }}>R$ Desc</th>}
-                    <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "84px" }}>Preço Un</th>
-                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "96px" }}>Comissão</th>}
-                    <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "72px" }}>Total</th>
-                    <th style={{ width: "36px" }}></th>
+                    <th className="px-2 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>Nº</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-semibold w-full" style={{ color: "#6B7280" }}>Descrição</th>
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>SKU</th>}
+                    <th className="px-2 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>Qtde</th>
+                    <th className="px-2 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>Preço Lista</th>
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>% Desc</th>}
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>R$ Desc</th>}
+                    <th className="px-2 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>Preço Un</th>
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>Comissão</th>}
+                    <th className="px-2 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>Total</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
