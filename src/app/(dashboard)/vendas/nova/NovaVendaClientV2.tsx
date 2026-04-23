@@ -567,7 +567,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const temAReceber = pagForma === "A Receber" || (pagForma === "Múltiplas" && pagamentos.some(p => p.forma === "A Receber"));
   const LIMITE_DESCONTO_APROVACAO = 30;
   // Admin/dev (maxDesconto=100) aprovar diretamente — sem tarefa de aprovação
-  const precisaAprovacaoDesconto = maxDesconto < 100 && itens.some(i => i.pct_desconto > LIMITE_DESCONTO_APROVACAO);
+  const precisaAprovacaoDesconto = role !== "admin" && itens.some(i => i.pct_desconto > LIMITE_DESCONTO_APROVACAO);
 
   // Reset parcelas se valor muda
   useEffect(() => {
