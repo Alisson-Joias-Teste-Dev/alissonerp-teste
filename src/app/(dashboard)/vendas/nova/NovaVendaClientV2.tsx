@@ -843,9 +843,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         }
       }
 
-      // Auth threshold: se acima do limite livre, pende autorização
+      // Auth threshold: só aplica cap/pendingAuths para roles com descontoAuthThreshold (ex: gerente_loja)
       let authCapped = false;
-      if (field !== "quantidade" && pct > authThr) {
+      if (descontoAuthThreshold != null && field !== "quantidade" && pct > authThr) {
         const requestedPct = pct;
         setPendingAuths(prev2 => {
           const existing = prev2[key];
@@ -854,7 +854,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         });
         pct = authThr;
         authCapped = true;
-      } else if (field !== "quantidade" && pct <= authThr) {
+      } else if (descontoAuthThreshold != null && field !== "quantidade" && pct <= authThr) {
         setPendingAuths(prev2 => {
           if (!prev2[key]) return prev2;
           const next = { ...prev2 };
