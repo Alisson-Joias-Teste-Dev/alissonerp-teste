@@ -2655,7 +2655,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
               const isDisabled = updating || saving || (needsValidation && !podeAprovar) || isConcluirBloqueado || aguardandoAprovacaoCredito;
 
               // Quando tem A Receber → usar solicitarAprovacao em vez de changeSituacao
-              const usarSolicitarAprovacao = acao.value === "aprovado" && (temAReceber || !isFullAccess && !["gerente_loja", "gerente_fabrica", "diretor"].includes(role));
+              // Consultora sem desconto alto aprova direto; só vai para aprovação se tiver A Receber ou desconto alto
+              const usarSolicitarAprovacao = acao.value === "aprovado" && (temAReceber || (!isFullAccess && !["gerente_loja", "gerente_fabrica", "diretor"].includes(role) && temDescontoAlto));
               const btnLabel = aguardandoAprovacaoCredito && acao.value === "aprovado"
                 ? "Aguardando Aprovação..."
                 : usarSolicitarAprovacao ? "Enviar para Aprovação" : acao.label;
