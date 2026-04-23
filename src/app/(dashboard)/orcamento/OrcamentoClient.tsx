@@ -215,20 +215,22 @@ export default function OrcamentoClient({
     if (orc.tipo === "alianca") {
       setOrcamentoTipo("alianca");
       setAllianceMode(orc.quantidade === 2 ? "par" : "unidade");
-      const perfil = orc.perfil as string | null;
+      // Campos de design ficam na ficha técnica, não no orçamento em si
+      const ft = (orc.ficha ?? orc) as Record<string, any>;
+      const perfil = ft.perfil as string | null;
       if (perfil === "FrisoUnico" || perfil === "FrisoLateral") setProfile(ProfileType.Simples);
       else if (perfil) setProfile(perfil as ProfileType);
-      const aroNum = orc.aro_numeracao ? Number(String(orc.aro_numeracao).replace("Aro ", "")) : null;
+      const aroNum = ft.aro_numeracao ? Number(String(ft.aro_numeracao).replace("Aro ", "")) : null;
       const aroSize = aroNum ? RING_SIZES.find(r => r.size === aroNum) : null;
       if (aroSize) setRingSize(aroSize);
-      const metalMatch = METAL_COLORS.find(m => m.label === orc.cor_metal || m.value === orc.cor_metal);
+      const metalMatch = METAL_COLORS.find(m => m.label === ft.cor_metal || m.value === ft.cor_metal);
       const metalHex = metalMatch?.value ?? "#FFD700";
       const metalDensity = metalMatch?.density ?? 14.69;
-      const hasGrooveLoaded = perfil === "FrisoUnico" || perfil === "FrisoLateral" || !!orc.has_friso;
-      const grooveKindLoaded = (orc.friso_kind || "friso") as "friso" | "risco";
+      const hasGrooveLoaded = perfil === "FrisoUnico" || perfil === "FrisoLateral" || !!ft.has_friso;
+      const grooveKindLoaded = (ft.friso_kind || "friso") as "friso" | "risco";
       const grooveTypeLoaded = perfil === "FrisoLateral" ? "duplo" as const
         : perfil === "FrisoUnico" ? "lateral" as const
-        : (orc.friso_tipo || "lateral") as "lateral" | "centro" | "duplo";
+        : (ft.friso_tipo || "lateral") as "lateral" | "centro" | "duplo";
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const applyRingParams = (p: any, src: Record<string, any>) => ({
         ...p,
@@ -253,8 +255,8 @@ export default function OrcamentoClient({
         textEnabled: !!src.texto, textContent: src.texto || "",
         textFontType: src.tipo_fonte === "Cursiva" ? 2 : 1,
       });
-      setParams(p => applyRingParams(p, orc));
-      if (orc.quantidade === 2 && orc.ficha2) setParams2(p => applyRingParams(p, orc.ficha2));
+      setParams(p => applyRingParams(p, ft));
+      if (orc.quantidade === 2 && orc.ficha2) setParams2(p => applyRingParams(p, orc.ficha2 as Record<string, any>));
     } else {
       setOrcamentoTipo("peca");
       if (orc.peso) setPecaPeso(Number(orc.peso));
