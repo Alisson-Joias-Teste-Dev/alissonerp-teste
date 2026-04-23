@@ -256,7 +256,19 @@ export default function OrcamentoClient({
         textFontType: src.tipo_fonte === "Cursiva" ? 2 : 1,
       });
       setParams(p => applyRingParams(p, ft));
-      if (orc.quantidade === 2 && orc.ficha2) setParams2(p => applyRingParams(p, orc.ficha2 as Record<string, any>));
+      if (orc.quantidade === 2 && orc.ficha2) {
+        const ft2 = orc.ficha2 as Record<string, any>;
+        const perfil2 = ft2.perfil as string | null;
+        if (perfil2 === "FrisoUnico" || perfil2 === "FrisoLateral") setProfile2(ProfileType.Simples);
+        else if (perfil2) setProfile2(perfil2 as ProfileType);
+        const aroNum2 = ft2.aro_numeracao ? Number(String(ft2.aro_numeracao).replace("Aro ", "")) : null;
+        const aroSize2 = aroNum2 ? RING_SIZES.find(r => r.size === aroNum2) : null;
+        if (aroSize2) setRingSize2(aroSize2);
+        const metalMatch2 = METAL_COLORS.find(m => m.label === ft2.cor_metal || m.value === ft2.cor_metal);
+        const metalHex2 = metalMatch2?.value ?? "#FFD700";
+        const metalDensity2 = metalMatch2?.density ?? 14.69;
+        setParams2(p => applyRingParams({ ...p, metalColor: metalHex2, goldDensity: metalDensity2 }, ft2));
+      }
 
       // Restaurar detalhamento de pedras
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
