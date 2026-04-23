@@ -2174,7 +2174,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                           </td>
                           {(tipoVenda === "produto" || tipoVenda === "garantia") && (<>
                             <td className="px-3 py-2.5">
-                              {(() => {
+                              {descontoAuthThreshold != null ? (() => {
                                 const auth = pendingAuths[item._key];
                                 const displayPct = auth?.pct ?? item.pct_desconto;
                                 const isPending = auth?.status === "local" || auth?.status === "pendente";
@@ -2182,7 +2182,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                 const isRejected = auth?.status === "rejeitado";
                                 return (
                                   <div className="flex items-center gap-1">
-                                    <input type="number" min={0} max={100} step={0.01}
+                                    <input type="number" min={0} max={maxDesconto} step={0.01}
                                       value={displayPct || ""}
                                       onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
                                       readOnly={auth?.status === "pendente"}
@@ -2210,7 +2210,14 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                     )}
                                   </div>
                                 );
-                              })()}
+                              })() : (
+                                <input type="number" min={0} max={maxDesconto} step={0.01}
+                                  value={item.pct_desconto || ""}
+                                  onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
+                                  placeholder="0"
+                                  className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none"
+                                  style={{ borderColor: item.pct_desconto > maxDesconto ? "#F97316" : C.cremeBorder, color: item.pct_desconto > maxDesconto ? "#EA580C" : undefined }} />
+                              )}
                             </td>
                             <td className="px-3 py-2.5">
                               <DescontoValorInput
