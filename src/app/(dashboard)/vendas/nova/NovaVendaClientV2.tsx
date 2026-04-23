@@ -1408,7 +1408,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   // JSX
   // ═══════════════════════════════════════════════════════════════════════════
   return (
-    <div className="px-3 md:px-6 py-4 md:py-6 max-w-5xl mx-auto">
+    <div className="px-3 md:px-6 py-4 md:py-6 max-w-7xl mx-auto">
 
       {/* Header */}
       <div className="flex items-center gap-3 mb-4">
