@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "consultora"] as const;
 
-export default async function OrcamentoDetalhePage({ params }: { params: { id: string } }) {
+export default async function OrcamentoDetalhePage({ params }: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -27,7 +27,8 @@ export default async function OrcamentoDetalhePage({ params }: { params: { id: s
   const hasAccess = isFullAccess(role) || ROLES_ORCAMENTO.includes(role as typeof ROLES_ORCAMENTO[number]);
   if (!hasAccess) redirect("/");
 
-  const orcId = Number(params.id);
+  const { id } = await params;
+  const orcId = Number(id);
   if (isNaN(orcId)) notFound();
 
   const [orc] = await sql`
