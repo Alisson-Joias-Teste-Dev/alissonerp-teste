@@ -172,7 +172,7 @@ const TIPOS_SERVICO = [
   { id: 6, nome: "Outros" },
 ];
 
-const FORMAS_PAGAMENTO = ["Dinheiro", "Cartão de Crédito", "Pix", "Vale-Troca", "A Receber", "Múltiplas"];
+const FORMAS_PAGAMENTO = ["Dinheiro", "Cartão de Crédito", "Pix", "Vale-Troca", "A Receber", "Manual (MP)", "Múltiplas"];
 const GATEWAYS = ["Mercado Pago", "PagSeguro", "Cielo", "Stone", "Getnet", "Rede", "Outro"];
 const CONDICOES = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
 const COM_CARTAO = ["Cartão de Crédito", "Pix"];
