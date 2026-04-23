@@ -331,6 +331,12 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [mpManualLoading, setMpManualLoading] = useState(false);
   const [mpManualMsg, setMpManualMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
+  // ── Manual MP inline (pagamento pendente na venda) ──────────────────────────
+  const [mpManualPagId, setMpManualPagId] = useState<number | null>(null);
+  const [mpManualPagIdValue, setMpManualPagIdValue] = useState("");
+  const [mpManualPagLoading, setMpManualPagLoading] = useState(false);
+  const [mpManualPagMsg, setMpManualPagMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
   // ── Registrar Recebimento A Receber ─────────────────────────────────────────
   const [recebimentoPagId, setRecebimentoPagId] = useState<number | null>(null);
   const [recebimentoTipo, setRecebimentoTipo] = useState<"dinheiro" | "mp" | null>(null);
@@ -841,6 +847,29 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     }
   }
 
+  async function handleMpManualPag() {
+    if (!venda || !mpManualPagId || !mpManualPagIdValue.trim()) return;
+    setMpManualPagLoading(true);
+    setMpManualPagMsg(null);
+    try {
+      const res = await fetch(`/api/vendas/${venda.id}/mercado-pago/verificar-manual`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payment_id: mpManualPagIdValue.trim(), pagamento_id: mpManualPagId }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      setMpManualPagMsg({ text: `Confirmado! R$ ${Number(d.valor_registrado).toFixed(2).replace(".", ",")}`, ok: true });
+      setMpManualPagId(null);
+      setMpManualPagIdValue("");
+      await load();
+    } catch (e) {
+      setMpManualPagMsg({ text: e instanceof Error ? e.message : "Erro ao verificar", ok: false });
+    } finally {
+      setMpManualPagLoading(false);
+    }
+  }
+
   async function handleRegistrarRecebimento() {
     if (!venda || !recebimentoPagId) return;
     setRecebimentoLoading(true);
@@ -1256,6 +1285,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     return tags.includes("aprovacao_desconto");
   })();
   const temPagamentoPendente = venda.pagamentos.some(p => p.status === "pendente");
+  const temManualMpPendente = venda.pagamentos.some(p => p.forma === "Manual (MP)" && p.status === "pendente");
   const podeAprovarConcluir = venda.situacao === "aprovado" && temPagamentoPendente;
   const temDescontoAlto = venda.itens.some(i => Number(i.pct_desconto) > 30);
   const precisaSolicitarDesconto = temDescontoAlto && !venda.desconto_aprovado_por_nome && !venda.aprovacao_credito_tarefa_id && venda.situacao === "rascunho";
@@ -1374,6 +1404,15 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
               Ver Tarefa →
             </a>
           )}
+        </div>
+      )}
+
+      {/* ── Banner: Manual (MP) pendente — bloqueia aprovação ── */}
+      {temManualMpPendente && venda.situacao === "rascunho" && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center gap-2"
+          style={{ backgroundColor: "#EFF6FF", borderColor: "#BFDBFE", color: "#1E40AF" }}>
+          <Loader2 size={16} className="animate-spin shrink-0" />
+          <p className="text-sm font-medium">Confirme o pagamento Manual (MP) antes de aprovar a venda.</p>
         </div>
       )}
 
@@ -2115,8 +2154,20 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           )
                         )}
 
+                        {/* Manual (MP) pendente → botão confirmar com ID (qualquer role) */}
+                        {pag.forma === "Manual (MP)" && pag.status === "pendente" && (
+                          mpManualPagId === pag.id ? null : (
+                            <button
+                              onClick={() => { setMpManualPagId(pag.id); setMpManualPagMsg(null); setMpManualPagIdValue(""); }}
+                              className="text-xs px-2.5 py-1 rounded-lg font-medium"
+                              style={{ backgroundColor: "#0070E0", color: "#fff" }}>
+                              Informar ID do MP
+                            </button>
+                          )
+                        )}
+
                         {/* Outros pagamentos pendentes → confirmar manual */}
-                        {!isAReceber && !isPix && !isCartao && pag.status === "pendente" &&
+                        {!isAReceber && pag.forma !== "Manual (MP)" && !isPix && !isCartao && pag.status === "pendente" &&
                           (isFullAccess || ["gerente_loja", "diretor"].includes(role)) && (
                           <button onClick={() => confirmarPagamento(pag.id, pag.forma)} disabled={updating}
                             className="text-xs px-2 py-1 rounded-lg font-medium disabled:opacity-50"
@@ -2191,6 +2242,35 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                             <button onClick={() => setRecebimentoTipo(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {/* Manual (MP) — campo ID inline */}
+                    {pag.forma === "Manual (MP)" && pag.status === "pendente" && mpManualPagId === pag.id && (
+                      <div className="px-3 pb-3 pt-2 border-t space-y-2" style={{ borderColor: C.cremeBorder }}>
+                        {mpManualPagMsg && (
+                          <p className="text-xs font-medium" style={{ color: mpManualPagMsg.ok ? "#059669" : "#DC2626" }}>
+                            {mpManualPagMsg.text}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="ID do pagamento Mercado Pago"
+                            value={mpManualPagIdValue}
+                            onChange={e => { setMpManualPagIdValue(e.target.value); setMpManualPagMsg(null); }}
+                            className="flex-1 text-xs border rounded-lg px-2 py-1.5 outline-none"
+                            style={{ borderColor: C.cremeBorder }}
+                          />
+                          <button
+                            onClick={handleMpManualPag}
+                            disabled={mpManualPagLoading || !mpManualPagIdValue.trim()}
+                            className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
+                            style={{ backgroundColor: "#0070E0", color: "#fff" }}>
+                            {mpManualPagLoading ? <Loader2 size={12} className="animate-spin inline" /> : "Verificar e Confirmar"}
+                          </button>
+                          <button onClick={() => setMpManualPagId(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                        </div>
                       </div>
                     )}
 
@@ -2827,7 +2907,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
             {proximasAcoes.map(acao => {
               const needsValidation = acao.value === "aprovado" || acao.value === "concluido";
               const isConcluirBloqueado = acao.value === "concluido" && temPagamentoPendente;
-              const isDisabled = updating || saving || (needsValidation && !podeAprovar) || isConcluirBloqueado || aguardandoAprovacaoCredito;
+              const isDisabled = updating || saving || (needsValidation && !podeAprovar) || isConcluirBloqueado || aguardandoAprovacaoCredito || (acao.value === "aprovado" && temManualMpPendente);
 
               // Quando tem A Receber → usar solicitarAprovacao em vez de changeSituacao
               // Consultora sem desconto alto aprova direto; só vai para aprovação se tiver A Receber ou desconto alto
