@@ -480,23 +480,23 @@ export async function PATCH(
           WHERE id = ${vendaId}
         `;
         tinyErroWarning = erroMsg;
-      }
+      } else {
+        const tinyData = await tinyRes.json() as { id?: number; numeroPedido?: string };
+        // Sucesso: atualizar situação + dados Tiny numa única query
+        await sql`
+          UPDATE alissonerp.vendas_erp SET
+            situacao = 'aprovado',
+            tiny_pedido_id = ${String(tinyData.id ?? "")},
+            tiny_sync_status = 'sincronizado',
+            tiny_sync_at = NOW(),
+            tiny_sync_erro = NULL
+          WHERE id = ${vendaId}
+        `;
 
-      const tinyData = await tinyRes.json() as { id?: number; numeroPedido?: string };
-      // Sucesso: atualizar situação + dados Tiny numa única query
-      await sql`
-        UPDATE alissonerp.vendas_erp SET
-          situacao = 'aprovado',
-          tiny_pedido_id = ${String(tinyData.id ?? "")},
-          tiny_sync_status = 'sincronizado',
-          tiny_sync_at = NOW(),
-          tiny_sync_erro = NULL
-        WHERE id = ${vendaId}
-      `;
-
-      // Recalcular total se frete mudou
-      if (body.total_frete !== undefined) {
-        await sql`UPDATE alissonerp.vendas_erp SET total_venda = total_produtos + ${body.total_frete} WHERE id = ${vendaId}`;
+        // Recalcular total se frete mudou
+        if (body.total_frete !== undefined) {
+          await sql`UPDATE alissonerp.vendas_erp SET total_venda = total_produtos + ${body.total_frete} WHERE id = ${vendaId}`;
+        }
       }
 
       // NÃO retornar aqui — continuar para criação de ordem se for orçamento
