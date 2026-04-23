@@ -475,12 +475,29 @@ export async function PATCH(
           }
           catch { erroMsg += errBody ? `: ${errBody.slice(0, 300)}` : ""; }
         }
-        console.error("[Tiny] Erro ao enviar pedido:", erroMsg, "| Body enviado:", JSON.stringify(pedidoV3).slice(0, 500));
-        await sql`
-          UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${erroMsg}
-          WHERE id = ${vendaId}
-        `;
-        tinyErroWarning = erroMsg;
+
+        // Se o Tiny diz "já existe" e já temos tiny_pedido_id, o pedido foi criado em execução anterior — tratar como sucesso
+        const jaExiste = erroMsg.toLowerCase().includes("já existe") || erroMsg.toLowerCase().includes("ja existe");
+        const [vendaAtual] = await sql`SELECT tiny_pedido_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
+        if (jaExiste && vendaAtual?.tiny_pedido_id) {
+          console.log("[Tiny] Pedido já existe no Tiny — tratando como sucesso, tiny_pedido_id:", vendaAtual.tiny_pedido_id);
+          await sql`
+            UPDATE alissonerp.vendas_erp SET
+              situacao = 'aprovado',
+              tiny_sync_status = 'sincronizado',
+              tiny_sync_at = NOW(),
+              tiny_sync_erro = NULL
+            WHERE id = ${vendaId}
+          `;
+          // não seta tinyErroWarning — continua fluxo normalmente
+        } else {
+          console.error("[Tiny] Erro ao enviar pedido:", erroMsg, "| Body enviado:", JSON.stringify(pedidoV3).slice(0, 500));
+          await sql`
+            UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${erroMsg}
+            WHERE id = ${vendaId}
+          `;
+          tinyErroWarning = erroMsg;
+        }
       } else {
         const tinyData = await tinyRes.json() as { id?: number; numeroPedido?: string };
         // Sucesso: atualizar situação + dados Tiny numa única query
