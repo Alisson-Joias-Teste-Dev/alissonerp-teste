@@ -317,6 +317,21 @@ export async function PATCH(
       ? new Date(vendaFull.data_venda).toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10);
 
+    // Verificar se venda veio de orçamento
+    const isOrcamento = !!vendaFull.orcamento_id;
+    const TINY_PRODUTO_GENERICO = 746056974; // Aliança Personalizada
+
+    // Se NÃO é orçamento, todos os itens DEVEM ter produto no Tiny — retornar 400 antes de montar payload
+    if (!isOrcamento) {
+      const semProduto = itens.filter(i => !i.produto_id || !tinyIdMap.has(Number(i.produto_id)));
+      if (semProduto.length > 0) {
+        return NextResponse.json(
+          { error: `Produto "${semProduto[0].nome_produto}" não está cadastrado no Tiny. Vincule o produto antes de aprovar.` },
+          { status: 400 }
+        );
+      }
+    }
+
     const pedidoV3: Record<string, unknown> = {
       numeroPedido: vendaFull.numero_venda,
       idContato: Number(vendaFull.cliente_id_tiny) || undefined,
@@ -329,36 +344,22 @@ export async function PATCH(
       ...(vendaFull.vendedor_id_tiny ? { vendedor: { id: Number(vendaFull.vendedor_id_tiny) } } : {}),
       // Pagamento — buscar IDs reais de public.forma_pagamento e public.meio_pagamento
       ...(tinyPagamento ? { pagamento: tinyPagamento } : {}),
-      itens: (() => {
-        // Verificar se venda veio de orçamento
-        const isOrcamento = !!vendaFull.orcamento_id;
-        const TINY_PRODUTO_GENERICO = 746056974; // Aliança Personalizada
-
-        // Se NÃO é orçamento, todos os itens DEVEM ter produto no Tiny
-        if (!isOrcamento) {
-          const semProduto = itens.filter(i => !i.produto_id || !tinyIdMap.has(Number(i.produto_id)));
-          if (semProduto.length > 0) {
-            throw new Error(`Produto "${semProduto[0].nome_produto}" não está cadastrado no Tiny. Vincule o produto antes de aprovar.`);
-          }
-        }
-
-        return itens.map((item) => {
-          const tinyProdId = tinyIdMap.get(Number(item.produto_id));
-          // Orçamento sem produto: usa produto genérico. Venda normal: obrigatório ter ID.
-          const prodId = tinyProdId || (isOrcamento ? TINY_PRODUTO_GENERICO : 0);
-          return {
-            produto: {
-              id: prodId,
-              ...(item.sku ? { codigo: item.sku } : {}),
-              descricao: item.nome_produto || "Produto",
-              tipo: "P",
-            },
-            quantidade: Number(item.quantidade),
-            valorUnitario: Number(item.preco_unitario),
-            ...(item.observacao ? { infoAdicional: item.observacao } : {}),
-          };
-        });
-      })(),
+      itens: itens.map((item) => {
+        const tinyProdId = tinyIdMap.get(Number(item.produto_id));
+        // Orçamento sem produto: usa produto genérico. Venda normal: obrigatório ter ID.
+        const prodId = tinyProdId || (isOrcamento ? TINY_PRODUTO_GENERICO : 0);
+        return {
+          produto: {
+            id: prodId,
+            ...(item.sku ? { codigo: item.sku } : {}),
+            descricao: item.nome_produto || "Produto",
+            tipo: "P",
+          },
+          quantidade: Number(item.quantidade),
+          valorUnitario: Number(item.preco_unitario),
+          ...(item.observacao ? { infoAdicional: item.observacao } : {}),
+        };
+      }),
     };
 
     // Função para renovar token OAuth2 (refresh_token ou re-auth com client_credentials)
