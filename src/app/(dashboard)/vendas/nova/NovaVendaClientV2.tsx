@@ -2125,17 +2125,17 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               <table className="w-full text-sm table-fixed">
                 <thead style={{ backgroundColor: C.cremeBg }}>
                   <tr>
-                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "36px" }}>Nº</th>
+                    <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "32px" }}>Nº</th>
                     <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280" }}>Descrição</th>
-                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "90px" }}>SKU</th>}
-                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "64px" }}>Qtde</th>
-                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "90px" }}>Preço Lista</th>
-                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "80px" }}>% Desc</th>}
-                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "80px" }}>R$ Desc</th>}
-                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "90px" }}>Preço Un</th>
-                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "100px" }}>Comissão</th>}
-                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "80px" }}>Total</th>
-                    <th style={{ width: "80px" }}></th>
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "80px" }}>SKU</th>}
+                    <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "56px" }}>Qtde</th>
+                    <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "84px" }}>Preço Lista</th>
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "72px" }}>% Desc</th>}
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "76px" }}>R$ Desc</th>}
+                    <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "84px" }}>Preço Un</th>
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "96px" }}>Comissão</th>}
+                    <th className="px-2 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "72px" }}>Total</th>
+                    <th style={{ width: "36px" }}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2256,9 +2256,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                           <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
                           <td className="px-3 py-2.5">
                             <button onClick={() => setItens(prev => prev.filter(i => i._key !== item._key))}
-                              className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg border transition-colors hover:bg-red-50"
-                              style={{ borderColor: "#FECACA", color: "#EF4444" }}>
-                              <X size={12} /> Remover
+                              className="text-gray-300 hover:text-red-400 transition-colors">
+                              <X size={15} />
                             </button>
                           </td>
                         </tr>
