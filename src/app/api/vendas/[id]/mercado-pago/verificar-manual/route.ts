@@ -33,9 +33,10 @@ export async function POST(
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json().catch(() => ({})) as { payment_id?: string };
+  const body = await req.json().catch(() => ({})) as { payment_id?: string; pagamento_id?: number };
   const mpPaymentId = String(body.payment_id ?? "").trim();
   if (!mpPaymentId) return NextResponse.json({ error: "Informe o ID do pagamento" }, { status: 400 });
+  const pagamentoIdExistente = body.pagamento_id ? Number(body.pagamento_id) : null;
 
   // Verificar se já está registrado
   const [duplicata] = await sql`
@@ -91,17 +92,30 @@ export async function POST(
 
   const valorRegistrar = Math.min(valorMp, restante);
 
-  // Registrar pagamento já confirmado
-  const [novoPag] = await sql`
-    INSERT INTO alissonerp.pagamentos_venda
-      (venda_id, forma, gateway, valor, parcelas, status, gateway_id, gateway_payload, data_confirmacao)
-    VALUES (
-      ${vendaId}, 'Pix', 'Mercado Pago Manual', ${valorRegistrar}, 1, 'confirmado',
-      ${mpPaymentId}, ${JSON.stringify({ mp_id: mpPaymentId, mp_status: mpData.status, mp_valor: valorMp, registrado_manualmente: true })}::jsonb,
-      NOW()
-    )
-    RETURNING id
-  `;
+  // Se veio pagamento_id existente (A Receber), atualiza o registro em vez de criar novo
+  let novoPagId: number;
+  if (pagamentoIdExistente) {
+    await sql`
+      UPDATE alissonerp.pagamentos_venda
+      SET status = 'confirmado', gateway = 'Mercado Pago Manual', gateway_id = ${mpPaymentId},
+          gateway_payload = ${JSON.stringify({ mp_id: mpPaymentId, mp_status: mpData.status, mp_valor: valorMp, registrado_manualmente: true })}::jsonb,
+          data_confirmacao = NOW(), valor = ${valorRegistrar}
+      WHERE id = ${pagamentoIdExistente} AND venda_id = ${vendaId}
+    `;
+    novoPagId = pagamentoIdExistente;
+  } else {
+    const [novoPag] = await sql`
+      INSERT INTO alissonerp.pagamentos_venda
+        (venda_id, forma, gateway, valor, parcelas, status, gateway_id, gateway_payload, data_confirmacao)
+      VALUES (
+        ${vendaId}, 'Pix', 'Mercado Pago Manual', ${valorRegistrar}, 1, 'confirmado',
+        ${mpPaymentId}, ${JSON.stringify({ mp_id: mpPaymentId, mp_status: mpData.status, mp_valor: valorMp, registrado_manualmente: true })}::jsonb,
+        NOW()
+      )
+      RETURNING id
+    `;
+    novoPagId = novoPag.id;
+  }
 
   // Concluir venda se totalmente paga
   const [{ nova_soma }] = await sql`
@@ -121,7 +135,7 @@ export async function POST(
 
   return NextResponse.json({
     ok: true,
-    pagamento_id: novoPag.id,
+    pagamento_id: novoPagId,
     valor_registrado: valorRegistrar,
     mp_status: mpData.status,
     venda_concluida: vendaConcluida,

@@ -331,6 +331,13 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [mpManualLoading, setMpManualLoading] = useState(false);
   const [mpManualMsg, setMpManualMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
+  // ── Registrar Recebimento A Receber ─────────────────────────────────────────
+  const [recebimentoPagId, setRecebimentoPagId] = useState<number | null>(null);
+  const [recebimentoTipo, setRecebimentoTipo] = useState<"dinheiro" | "mp" | null>(null);
+  const [recebimentoMpId, setRecebimentoMpId] = useState("");
+  const [recebimentoLoading, setRecebimentoLoading] = useState(false);
+  const [recebimentoMsg, setRecebimentoMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
   // ── Ouro ────────────────────────────────────────────────────────────────────
   const [ouroPeso, setOuroPeso] = useState("");
   const [ouroValorGrama, setOuroValorGrama] = useState("");
@@ -831,6 +838,40 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       setMpManualMsg({ text: e instanceof Error ? e.message : "Erro ao verificar pagamento", ok: false });
     } finally {
       setMpManualLoading(false);
+    }
+  }
+
+  async function handleRegistrarRecebimento() {
+    if (!venda || !recebimentoPagId) return;
+    setRecebimentoLoading(true);
+    setRecebimentoMsg(null);
+    try {
+      if (recebimentoTipo === "dinheiro") {
+        const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${recebimentoPagId}/confirmar`, { method: "POST" });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+        setRecebimentoPagId(null);
+        setRecebimentoTipo(null);
+        await load();
+      } else if (recebimentoTipo === "mp") {
+        if (!recebimentoMpId.trim()) { setRecebimentoMsg({ text: "Informe o ID do pagamento", ok: false }); return; }
+        const res = await fetch(`/api/vendas/${venda.id}/mercado-pago/verificar-manual`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payment_id: recebimentoMpId.trim(), pagamento_id: recebimentoPagId }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+        setRecebimentoMsg({ text: `Confirmado! R$ ${Number(d.valor_registrado).toFixed(2).replace(".", ",")}${d.venda_concluida ? " — venda concluída." : ""}`, ok: true });
+        setRecebimentoPagId(null);
+        setRecebimentoTipo(null);
+        setRecebimentoMpId("");
+        await load();
+      }
+    } catch (e) {
+      setRecebimentoMsg({ text: e instanceof Error ? e.message : "Erro ao confirmar recebimento", ok: false });
+    } finally {
+      setRecebimentoLoading(false);
     }
   }
 
@@ -2061,14 +2102,17 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           </button>
                         )}
 
-                        {/* A Receber com crédito aprovado → botão registrar recebimento (quando cliente pagar) */}
+                        {/* A Receber com crédito aprovado → fluxo registrar recebimento */}
                         {isAReceber && pag.status === "pendente" && creditoAprovado &&
                           (isFullAccess || ["gerente_loja", "diretor"].includes(role)) && (
-                          <button onClick={() => confirmarPagamento(pag.id, pag.forma)} disabled={updating}
-                            className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
-                            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                            Registrar Recebimento
-                          </button>
+                          recebimentoPagId === pag.id ? null : (
+                            <button
+                              onClick={() => { setRecebimentoPagId(pag.id); setRecebimentoTipo(null); setRecebimentoMsg(null); setRecebimentoMpId(""); }}
+                              className="text-xs px-2.5 py-1 rounded-lg font-medium"
+                              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                              Registrar Recebimento
+                            </button>
+                          )
                         )}
 
                         {/* Outros pagamentos pendentes → confirmar manual */}
@@ -2087,6 +2131,68 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                         )}
                       </div>
                     </div>
+
+                    {/* A Receber — fluxo de recebimento inline */}
+                    {isAReceber && pag.status === "pendente" && recebimentoPagId === pag.id && (
+                      <div className="px-3 pb-3 pt-2 border-t space-y-2" style={{ borderColor: C.cremeBorder }}>
+                        {recebimentoMsg && (
+                          <p className="text-xs font-medium" style={{ color: recebimentoMsg.ok ? "#059669" : "#DC2626" }}>
+                            {recebimentoMsg.text}
+                          </p>
+                        )}
+                        {recebimentoTipo === null && (
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-gray-500 mr-1">Como foi pago?</p>
+                            <button
+                              onClick={() => setRecebimentoTipo("dinheiro")}
+                              className="text-xs px-3 py-1.5 rounded-lg font-medium border"
+                              style={{ borderColor: C.esmeralda, color: C.esmeralda }}>
+                              Dinheiro
+                            </button>
+                            <button
+                              onClick={() => setRecebimentoTipo("mp")}
+                              className="text-xs px-3 py-1.5 rounded-lg font-medium border"
+                              style={{ borderColor: "#0070E0", color: "#0070E0" }}>
+                              Mercado Pago (ID)
+                            </button>
+                            <button onClick={() => setRecebimentoPagId(null)} className="text-gray-400 hover:text-gray-600 ml-auto"><X size={13} /></button>
+                          </div>
+                        )}
+                        {recebimentoTipo === "dinheiro" && (
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-gray-500">Confirmar recebimento em dinheiro de <strong>R$ {pag.valor.toFixed(2).replace(".", ",")}</strong>?</p>
+                            <button
+                              onClick={handleRegistrarRecebimento}
+                              disabled={recebimentoLoading}
+                              className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
+                              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                              {recebimentoLoading ? <Loader2 size={12} className="animate-spin inline" /> : "Confirmar"}
+                            </button>
+                            <button onClick={() => setRecebimentoTipo(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                          </div>
+                        )}
+                        {recebimentoTipo === "mp" && (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              placeholder="ID do pagamento Mercado Pago"
+                              value={recebimentoMpId}
+                              onChange={e => { setRecebimentoMpId(e.target.value); setRecebimentoMsg(null); }}
+                              className="flex-1 text-xs border rounded-lg px-2 py-1.5 outline-none"
+                              style={{ borderColor: C.cremeBorder }}
+                            />
+                            <button
+                              onClick={handleRegistrarRecebimento}
+                              disabled={recebimentoLoading || !recebimentoMpId.trim()}
+                              className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
+                              style={{ backgroundColor: "#0070E0", color: "#fff" }}>
+                              {recebimentoLoading ? <Loader2 size={12} className="animate-spin inline" /> : "Verificar"}
+                            </button>
+                            <button onClick={() => setRecebimentoTipo(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Pix inline — gerar QR direto nessa linha */}
                     {isPix && pag.status === "pendente" && (
