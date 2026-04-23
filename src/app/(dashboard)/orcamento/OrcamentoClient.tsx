@@ -806,7 +806,8 @@ export default function OrcamentoClient({
       };
       if (isPar) {
         const sc2 = computeStoneCapacity(params2.diameter, params2.height, params2.canalBorderHeight, params2.stoneSize, params2.stoneRows, profile2);
-        body.ficha2 = buildFicha(params2, profile2, ringSize2, pricing2.weight, sc2, stoneEntries2);
+        const derivedCount2 = params2.hasStones ? (params2.stoneFull ? sc2 : params2.stoneHalfMoon ? Math.floor(sc2 / 2) : params2.stoneCount) : 0;
+        body.ficha2 = buildFicha(params2, profile2, ringSize2, pricing2.weight, derivedCount2, stoneEntries2);
       }
 
       const url = editingOrcId ? `/api/orcamento/${editingOrcId}` : "/api/orcamento";
