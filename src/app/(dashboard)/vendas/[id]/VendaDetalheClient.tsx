@@ -481,8 +481,11 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       return { full: false, limited: false, metadata: false, readOnly: true };
     if (venda.situacao === "rascunho")
       return { full: true, limited: true, metadata: true, readOnly: false };
-    if (venda.situacao === "aprovado")
-      return { full: false, limited: podeEditarAprovado, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
+    if (venda.situacao === "aprovado") {
+      const temSaldoPendente = Number(venda.total_pago ?? 0) < Number(venda.total_venda ?? 0);
+      const podeAdicionarPag = podeEditarAprovado || temSaldoPendente;
+      return { full: false, limited: podeAdicionarPag, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
+    }
     if (venda.situacao === "enviado" || venda.situacao === "entregue")
       return { full: false, limited: false, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
     return { full: false, limited: false, metadata: false, readOnly: true };
@@ -2308,10 +2311,25 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                   <span className="tabular-nums" style={{ color: "#374151" }}>{fmt(venda.total_pago)}</span>
                 </div>
                 {venda.total_venda - venda.total_pago > 0.01 && (
-                  <div className="flex items-center justify-between text-sm font-medium">
-                    <span style={{ color: "#D97706" }}>Saldo pendente</span>
-                    <span className="tabular-nums" style={{ color: "#D97706" }}>{fmt(venda.total_venda - venda.total_pago)}</span>
-                  </div>
+                  <>
+                    <div className="flex items-center justify-between text-sm font-medium">
+                      <span style={{ color: "#D97706" }}>Saldo pendente</span>
+                      <span className="tabular-nums" style={{ color: "#D97706" }}>{fmt(venda.total_venda - venda.total_pago)}</span>
+                    </div>
+                    {edit.limited && !addingPag && (
+                      <button
+                        onClick={() => {
+                          const restante = (venda.total_venda - venda.total_pago).toFixed(2).replace(".", ",");
+                          setNewPagValor(restante);
+                          setNewPagForma("Dinheiro");
+                          setAddingPag(true);
+                        }}
+                        className="w-full mt-1 py-1.5 rounded-lg text-xs font-semibold border"
+                        style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB", color: "#92400E" }}>
+                        + Completar pagamento — {fmt(venda.total_venda - venda.total_pago)}
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </div>
