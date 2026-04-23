@@ -91,15 +91,18 @@ export async function POST(
   }
 
   const valorRegistrar = Math.min(valorMp, restante);
+  const dataConfirmacao = (mpData as { date_approved?: string }).date_approved
+    ? new Date((mpData as { date_approved: string }).date_approved)
+    : new Date();
 
-  // Se veio pagamento_id existente (A Receber), atualiza o registro em vez de criar novo
+  // Se veio pagamento_id existente (A Receber / Manual MP), atualiza o registro em vez de criar novo
   let novoPagId: number;
   if (pagamentoIdExistente) {
     await sql`
       UPDATE alissonerp.pagamentos_venda
       SET status = 'confirmado', gateway = 'Mercado Pago Manual', gateway_id = ${mpPaymentId},
           gateway_payload = ${JSON.stringify({ mp_id: mpPaymentId, mp_status: mpData.status, mp_valor: valorMp, registrado_manualmente: true })}::jsonb,
-          data_confirmacao = NOW(), valor = ${valorRegistrar}
+          data_confirmacao = ${dataConfirmacao}, valor = ${valorRegistrar}
       WHERE id = ${pagamentoIdExistente} AND venda_id = ${vendaId}
     `;
     novoPagId = pagamentoIdExistente;
