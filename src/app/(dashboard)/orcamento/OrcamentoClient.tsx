@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
   CircleDot, ChevronDown, Gem, Type, Ruler, Minus, Plus, Save,
@@ -103,6 +104,7 @@ export default function OrcamentoClient({
   cotacaoOuro, cotacaoDolar, config, canManageConfig, userName, userId, vendedorId, maxDesconto,
   curvaConfig, curvaCategorias,
 }: Props) {
+  const router = useRouter();
   const [orcamentoTipo, setOrcamentoTipo] = useState<OrcamentoTipo>(null);
 
   // Pedras (compartilhado aliança + peça)
@@ -811,10 +813,8 @@ export default function OrcamentoClient({
       const method = editingOrcId ? "PUT" : "POST";
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!res.ok) throw new Error();
-      setSaveMsg({ text: editingOrcId ? "Orçamento atualizado!" : "Orçamento salvo!", type: "success" });
-      setEditingOrcId(null); setClientName(""); setClienteId(null);
-      fetchOrcamentos();
-      setOrcamentoTipo(null);
+      const data = await res.json() as { ok: boolean; orcamento: { id: number } };
+      router.push(`/orcamento/${data.orcamento.id}`);
     } catch { setSaveMsg({ text: "Erro ao salvar", type: "error" }); }
     finally { setIsSaving(false); }
   };
