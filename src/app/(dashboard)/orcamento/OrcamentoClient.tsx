@@ -56,6 +56,10 @@ interface Props {
   maxDesconto: number;
   curvaConfig: CurvaConfig | null;
   curvaCategorias: CurvaCategoriaInput[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  initialOrcamento?: Record<string, any> | null;
+  readOnly?: boolean;
+  onShare?: () => void;
 }
 
 type OrcamentoTipo = "alianca" | "peca" | null;
@@ -103,6 +107,7 @@ function Slider({ label, value, min, max, step, unit, onChange }: {
 export default function OrcamentoClient({
   cotacaoOuro, cotacaoDolar, config, canManageConfig, userName, userId, vendedorId, maxDesconto,
   curvaConfig, curvaCategorias,
+  initialOrcamento, readOnly, onShare,
 }: Props) {
   const router = useRouter();
   const [orcamentoTipo, setOrcamentoTipo] = useState<OrcamentoTipo>(null);
@@ -201,6 +206,67 @@ export default function OrcamentoClient({
     setLoadingOrc(false);
   }, []);
   useEffect(() => { fetchOrcamentos(); }, [fetchOrcamentos]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function aplicarOrcamento(orc: Record<string, any>, orcId: number) {
+    setEditingOrcId(orcId);
+    setClientName(orc.cliente_nome_contato || orc.nome_cliente || "");
+    setClienteId(orc.cliente_id || null);
+    if (orc.tipo === "alianca") {
+      setOrcamentoTipo("alianca");
+      setAllianceMode(orc.quantidade === 2 ? "par" : "unidade");
+      const perfil = orc.perfil as string | null;
+      if (perfil === "FrisoUnico" || perfil === "FrisoLateral") setProfile(ProfileType.Simples);
+      else if (perfil) setProfile(perfil as ProfileType);
+      const aroNum = orc.aro_numeracao ? Number(String(orc.aro_numeracao).replace("Aro ", "")) : null;
+      const aroSize = aroNum ? RING_SIZES.find(r => r.size === aroNum) : null;
+      if (aroSize) setRingSize(aroSize);
+      const metalMatch = METAL_COLORS.find(m => m.label === orc.cor_metal || m.value === orc.cor_metal);
+      const metalHex = metalMatch?.value ?? "#FFD700";
+      const metalDensity = metalMatch?.density ?? 14.69;
+      const hasGrooveLoaded = perfil === "FrisoUnico" || perfil === "FrisoLateral" || !!orc.has_friso;
+      const grooveKindLoaded = (orc.friso_kind || "friso") as "friso" | "risco";
+      const grooveTypeLoaded = perfil === "FrisoLateral" ? "duplo" as const
+        : perfil === "FrisoUnico" ? "lateral" as const
+        : (orc.friso_tipo || "lateral") as "lateral" | "centro" | "duplo";
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const applyRingParams = (p: any, src: Record<string, any>) => ({
+        ...p,
+        diameter: aroSize?.diameter ?? p.diameter,
+        width: src.largura ? Number(src.largura) : p.width,
+        height: src.espessura ? Number(src.espessura) : p.height,
+        metalColor: metalHex, goldDensity: metalDensity,
+        concaveDepth: src.profundidade_concava ? Number(src.profundidade_concava) : p.concaveDepth,
+        hasGroove: hasGrooveLoaded, grooveKind: grooveKindLoaded, grooveType: grooveTypeLoaded,
+        grooveWidth: src.friso_largura ? Number(src.friso_largura) : p.grooveWidth,
+        grooveDepth: src.friso_profundidade ? Number(src.friso_profundidade) : p.grooveDepth,
+        grooveOffset: src.friso_offset ? Number(src.friso_offset) : p.grooveOffset,
+        canalWidth: src.canal_largura ? Number(src.canal_largura) : p.canalWidth,
+        canalBorderHeight: src.canal_borda_altura ? Number(src.canal_borda_altura) : p.canalBorderHeight,
+        chamferSize: src.chanfro_tamanho ? Number(src.chanfro_tamanho) : p.chamferSize,
+        domePercentage: src.dome_porcentagem != null ? Number(src.dome_porcentagem) : p.domePercentage,
+        hasStones: !!src.qtd_pedras,
+        stoneSize: src.tamanho_pedra ? Number(src.tamanho_pedra) : p.stoneSize,
+        stoneCount: src.qtd_pedras ? Number(src.qtd_pedras) : p.stoneCount,
+        stoneDrill: !!src.pedra_drill, stoneHalfMoon: !!src.pedra_meia_lua, stoneFull: !!src.pedra_volta_completa,
+        stoneRows: src.pedra_fileiras ? Number(src.pedra_fileiras) : p.stoneRows,
+        textEnabled: !!src.texto, textContent: src.texto || "",
+        textFontType: src.tipo_fonte === "Cursiva" ? 2 : 1,
+      });
+      setParams(p => applyRingParams(p, orc));
+      if (orc.quantidade === 2 && orc.ficha2) setParams2(p => applyRingParams(p, orc.ficha2));
+    } else {
+      setOrcamentoTipo("peca");
+      if (orc.peso) setPecaPeso(Number(orc.peso));
+    }
+    setTab("design");
+  }
+
+  // Quando initialOrcamento é passado (rota /orcamento/[id]), carrega direto
+  useEffect(() => {
+    if (initialOrcamento) aplicarOrcamento(initialOrcamento, initialOrcamento.id as number);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Peça personalizada
   const [pecaPeso, setPecaPeso] = useState(5.0);
@@ -815,7 +881,8 @@ export default function OrcamentoClient({
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json() as { ok?: boolean; orcamento?: { id: number; numero_orcamento?: string }; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      router.push(`/orcamento`);
+      const savedId = data.orcamento?.id ?? editingOrcId;
+      router.push(savedId ? `/orcamento/${savedId}` : `/orcamento`);
     } catch (e) { setSaveMsg({ text: e instanceof Error ? e.message : "Erro ao salvar", type: "error" }); }
     finally { setIsSaving(false); }
   };
@@ -992,77 +1059,11 @@ export default function OrcamentoClient({
                     <tr key={o.id} className="border-b cursor-pointer hover:bg-amber-50/30 transition-colors"
                       style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.cremeBg }}
                       onClick={async () => {
-                        // Carregar orçamento para edição
                         try {
-                          setEditingOrcId(o.id);
                           const res = await fetch(`/api/orcamento/${o.id}`);
-                          if (!res.ok) { setEditingOrcId(null); return; }
+                          if (!res.ok) return;
                           const data = await res.json();
-                          const orc = data.orcamento;
-                          if (!orc) return;
-                          // Preencher dados do editor
-                          setClientName(orc.cliente_nome_contato || orc.nome_cliente || "");
-                          setClienteId(orc.cliente_id || null);
-                          if (orc.tipo === "alianca") {
-                            setOrcamentoTipo("alianca");
-                            setAllianceMode(orc.quantidade === 2 ? "par" : "unidade");
-                            // Mapear perfis legados FrisoUnico/FrisoLateral
-                            if (orc.perfil === "FrisoUnico") {
-                              setProfile(ProfileType.Simples);
-                            } else if (orc.perfil === "FrisoLateral") {
-                              setProfile(ProfileType.Simples);
-                            } else if (orc.perfil) {
-                              setProfile(orc.perfil as ProfileType);
-                            }
-                            // Aro
-                            const aroNum = orc.aro_numeracao ? Number(String(orc.aro_numeracao).replace("Aro ", "")) : null;
-                            const aroSize = aroNum ? RING_SIZES.find(r => r.size === aroNum) : null;
-                            if (aroSize) setRingSize(aroSize);
-                            // Cor do metal — banco salva label ("Ouro Amarelo"), converter para hex
-                            const metalMatch = METAL_COLORS.find(m => m.label === orc.cor_metal || m.value === orc.cor_metal);
-                            const metalHex = metalMatch?.value ?? "#FFD700";
-                            const metalDensity = metalMatch?.density ?? 14.69;
-                            // Setar todos os params de uma vez
-                            // Groove — carregar do DB ou inferir de perfis legados
-                            const hasGrooveLoaded = orc.perfil === "FrisoUnico" || orc.perfil === "FrisoLateral" || !!orc.has_friso;
-                            const grooveKindLoaded = (orc.friso_kind || "friso") as "friso" | "risco";
-                            const grooveTypeLoaded = orc.perfil === "FrisoLateral" ? "duplo" as const
-                              : orc.perfil === "FrisoUnico" ? "lateral" as const
-                              : (orc.friso_tipo || "lateral") as "lateral" | "centro" | "duplo";
-                            setParams(p => ({
-                              ...p,
-                              diameter: aroSize?.diameter ?? p.diameter,
-                              width: orc.largura ? Number(orc.largura) : p.width,
-                              height: orc.espessura ? Number(orc.espessura) : p.height,
-                              metalColor: metalHex,
-                              goldDensity: metalDensity,
-                              concaveDepth: orc.profundidade_concava ? Number(orc.profundidade_concava) : p.concaveDepth,
-                              hasGroove: hasGrooveLoaded,
-                              grooveKind: grooveKindLoaded,
-                              grooveType: grooveTypeLoaded,
-                              grooveWidth: orc.friso_largura ? Number(orc.friso_largura) : p.grooveWidth,
-                              grooveDepth: orc.friso_profundidade ? Number(orc.friso_profundidade) : p.grooveDepth,
-                              grooveOffset: orc.friso_offset ? Number(orc.friso_offset) : p.grooveOffset,
-                              canalWidth: orc.canal_largura ? Number(orc.canal_largura) : p.canalWidth,
-                              canalBorderHeight: orc.canal_borda_altura ? Number(orc.canal_borda_altura) : p.canalBorderHeight,
-                              chamferSize: orc.chanfro_tamanho ? Number(orc.chanfro_tamanho) : p.chamferSize,
-                              domePercentage: orc.dome_porcentagem != null ? Number(orc.dome_porcentagem) : p.domePercentage,
-                              hasStones: !!orc.qtd_pedras,
-                              stoneSize: orc.tamanho_pedra ? Number(orc.tamanho_pedra) : p.stoneSize,
-                              stoneCount: orc.qtd_pedras ? Number(orc.qtd_pedras) : p.stoneCount,
-                              stoneDrill: !!orc.pedra_drill,
-                              stoneHalfMoon: !!orc.pedra_meia_lua,
-                              stoneFull: !!orc.pedra_volta_completa,
-                              stoneRows: orc.pedra_fileiras ? Number(orc.pedra_fileiras) : p.stoneRows,
-                              textEnabled: !!orc.texto,
-                              textContent: orc.texto || "",
-                              textFontType: orc.tipo_fonte === "Cursiva" ? 2 : 1,
-                            }));
-                          } else {
-                            setOrcamentoTipo("peca");
-                            if (orc.peso) setPecaPeso(Number(orc.peso));
-                          }
-                          setTab("design");
+                          if (data.orcamento) aplicarOrcamento(data.orcamento, o.id);
                         } catch { /* silent */ }
                       }}>
                       <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: C.esmeralda }}>{o.numero_orcamento}</td>
@@ -1526,46 +1527,54 @@ export default function OrcamentoClient({
             {saveMsg && (
               <span className={`text-xs ${saveMsg.type === "success" ? "text-green-600" : "text-red-500"}`}>{saveMsg.text}</span>
             )}
-            <button onClick={async () => {
-              if (!clientName.trim()) { setSaveMsg({ text: "Preencha o nome do cliente", type: "error" }); return; }
-              setIsSaving(true); setSaveMsg(null);
-              try {
-                const body = {
-                  nome_cliente: clientName.trim(), cliente_id: clienteId, tipo: "peca",
-                  peso: pecaPeso, valor: pecaTotal, markup: pecaFactors?.mkp ?? 0,
-                  desconto_pct: pecaDescontoPct, cotacao_ouro: cotacaoOuro,
-                  cotacao_dolar: cotacaoDolar, valor_ouro: pecaValorOuro,
-                  valor_pedras: pecaPedrasTotalRS,
-                  ficha: {
-                    peso_estimado: pecaPeso,
-                    cor_metal: pecaMetalColor,
-                    densidade_ouro: pecaGoldDensity,
-                    foto_referencia: pecaFotoRef,
-                    pedras_detalhadas: pecaPedras.map((p) => ({
-                      produto_id: p.produto.id,
-                      sku: p.produto.sku,
-                      nome: p.produto.nome,
-                      tipo_de_pedra: p.produto.tipo_de_pedra,
-                      preco_unitario: p.produto.preco,
-                      qtd: p.qtd,
-                      total: p.produto.preco * p.qtd,
-                    })),
-                  },
-                };
-                const res = await fetch("/api/orcamento", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-                if (!res.ok) throw new Error();
-                setSaveMsg({ text: "Orçamento salvo!", type: "success" });
-                setClientName(""); setClienteId(null);
-                setPecaPedras([]); setPecaDescontoPct(0); setPecaFotoRef(null);
-              } catch { setSaveMsg({ text: "Erro ao salvar", type: "error" }); }
-              finally { setIsSaving(false); }
-            }}
-              disabled={isSaving}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-              style={{ backgroundColor: C.esmeralda }}>
-              {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Salvar
-            </button>
+            {readOnly ? (
+              onShare && (
+                <button onClick={onShare} className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: C.esmeralda }}>
+                  Compartilhar
+                </button>
+              )
+            ) : (
+              <button onClick={async () => {
+                if (!clientName.trim()) { setSaveMsg({ text: "Preencha o nome do cliente", type: "error" }); return; }
+                setIsSaving(true); setSaveMsg(null);
+                try {
+                  const body = {
+                    nome_cliente: clientName.trim(), cliente_id: clienteId, tipo: "peca",
+                    peso: pecaPeso, valor: pecaTotal, markup: pecaFactors?.mkp ?? 0,
+                    desconto_pct: pecaDescontoPct, cotacao_ouro: cotacaoOuro,
+                    cotacao_dolar: cotacaoDolar, valor_ouro: pecaValorOuro,
+                    valor_pedras: pecaPedrasTotalRS,
+                    ficha: {
+                      peso_estimado: pecaPeso,
+                      cor_metal: pecaMetalColor,
+                      densidade_ouro: pecaGoldDensity,
+                      foto_referencia: pecaFotoRef,
+                      pedras_detalhadas: pecaPedras.map((p) => ({
+                        produto_id: p.produto.id,
+                        sku: p.produto.sku,
+                        nome: p.produto.nome,
+                        tipo_de_pedra: p.produto.tipo_de_pedra,
+                        preco_unitario: p.produto.preco,
+                        qtd: p.qtd,
+                        total: p.produto.preco * p.qtd,
+                      })),
+                    },
+                  };
+                  const res = await fetch("/api/orcamento", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                  if (!res.ok) throw new Error();
+                  setSaveMsg({ text: "Orçamento salvo!", type: "success" });
+                  setClientName(""); setClienteId(null);
+                  setPecaPedras([]); setPecaDescontoPct(0); setPecaFotoRef(null);
+                } catch { setSaveMsg({ text: "Erro ao salvar", type: "error" }); }
+                finally { setIsSaving(false); }
+              }}
+                disabled={isSaving}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+                style={{ backgroundColor: C.esmeralda }}>
+                {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Salvar
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -2055,15 +2064,27 @@ export default function OrcamentoClient({
               ⚠ {validationErrors[0].message}
             </span>
           )}
-          <button
-            onClick={handleSaveOrder}
-            disabled={isSaving || validationErrors.length > 0}
-            title={validationErrors.length > 0 ? validationErrors[0].message : "Salvar orcamento"}
-            className="flex items-center gap-1.5 px-4 py-2 text-[11px] font-bold rounded-lg text-white disabled:opacity-50 transition-colors"
-            style={{ backgroundColor: C.esmeralda }}
-          >
-            {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Salvar
-          </button>
+          {readOnly ? (
+            onShare && (
+              <button
+                onClick={onShare}
+                className="flex items-center gap-1.5 px-4 py-2 text-[11px] font-bold rounded-lg text-white transition-colors"
+                style={{ backgroundColor: C.esmeralda }}
+              >
+                Compartilhar
+              </button>
+            )
+          ) : (
+            <button
+              onClick={handleSaveOrder}
+              disabled={isSaving || validationErrors.length > 0}
+              title={validationErrors.length > 0 ? validationErrors[0].message : "Salvar orcamento"}
+              className="flex items-center gap-1.5 px-4 py-2 text-[11px] font-bold rounded-lg text-white disabled:opacity-50 transition-colors"
+              style={{ backgroundColor: C.esmeralda }}
+            >
+              {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Salvar
+            </button>
+          )}
           <button onClick={() => window.print()} className="p-2 rounded-lg border" style={{ borderColor: C.cremeBorder }} title="Imprimir">
             <Printer size={14} className="text-gray-500" />
           </button>
