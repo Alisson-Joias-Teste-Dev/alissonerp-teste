@@ -189,6 +189,21 @@ export async function PATCH(
     }
   }
 
+  // ── Bloquear aprovação se tem Manual (MP) pendente ───────────────────────
+  if (body.situacao === "aprovado") {
+    const [mpPendente] = await sql`
+      SELECT id FROM alissonerp.pagamentos_venda
+      WHERE venda_id = ${vendaId} AND forma = 'Manual (MP)' AND status = 'pendente'
+      LIMIT 1
+    `;
+    if (mpPendente) {
+      return NextResponse.json(
+        { error: "Confirme o pagamento Manual (MP) antes de aprovar a venda." },
+        { status: 409 }
+      );
+    }
+  }
+
   // ── Bloquear aprovação se lock pendente ──────────────────────────────────
   if (body.situacao === "aprovado" && venda.aprovacao_credito_tarefa_id) {
     return NextResponse.json(
