@@ -60,6 +60,7 @@ interface Props {
   initialOrcamento?: Record<string, any> | null;
   readOnly?: boolean;
   onShare?: () => void;
+  onSaved?: () => void;
 }
 
 type OrcamentoTipo = "alianca" | "peca" | null;
@@ -107,7 +108,7 @@ function Slider({ label, value, min, max, step, unit, onChange }: {
 export default function OrcamentoClient({
   cotacaoOuro, cotacaoDolar, config, canManageConfig, userName, userId, vendedorId, maxDesconto,
   curvaConfig, curvaCategorias,
-  initialOrcamento, readOnly, onShare,
+  initialOrcamento, readOnly, onShare, onSaved,
 }: Props) {
   const router = useRouter();
   const [orcamentoTipo, setOrcamentoTipo] = useState<OrcamentoTipo>(null);
@@ -914,7 +915,11 @@ export default function OrcamentoClient({
       const data = await res.json() as { ok?: boolean; orcamento?: { id: number; numero_orcamento?: string }; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       const savedId = data.orcamento?.id ?? editingOrcId;
-      router.push(savedId ? `/orcamento/detalhe/${savedId}` : `/orcamento`);
+      if (onSaved) {
+        onSaved();
+      } else {
+        router.push(savedId ? `/orcamento/detalhe/${savedId}` : `/orcamento`);
+      }
     } catch (e) { setSaveMsg({ text: e instanceof Error ? e.message : "Erro ao salvar", type: "error" }); }
     finally { setIsSaving(false); }
   };

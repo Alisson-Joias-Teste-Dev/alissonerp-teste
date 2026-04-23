@@ -113,6 +113,7 @@ export default async function OrcamentoDetalhePage({ params }: { params: Promise
   return (
     <OrcamentoDetalheClient
       orcamento={orcamento}
+      role={role}
       cotacaoOuro={cotacaoOuro}
       cotacaoDolar={cotacaoDolar}
       config={config}
