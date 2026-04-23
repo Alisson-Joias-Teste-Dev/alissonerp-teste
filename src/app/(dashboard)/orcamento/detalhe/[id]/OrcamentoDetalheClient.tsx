@@ -24,6 +24,14 @@ interface Props {
   curvaCategorias: CurvaCategoriaInput[];
 }
 
+const STATUS_COLORS: Record<string, string> = {
+  rascunho: "#6B7280",
+  enviado: "#2563EB",
+  aprovado: "#059669",
+  convertido: "#059669",
+  rejeitado: "#DC2626",
+};
+
 export default function OrcamentoDetalheClient({
   orcamento,
   role,
@@ -44,9 +52,8 @@ export default function OrcamentoDetalheClient({
   const [motivoRejeicao, setMotivoRejeicao] = useState("");
   const [showRejeitar, setShowRejeitar] = useState(false);
   const [msg, setMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
-  const [savedOk, setSavedOk] = useState(false);
 
-  const canAprovar = ROLES_APROVACAO.includes(role) && (status === "rascunho" || status === "enviado");
+  const canAprovar = ROLES_APROVACAO.includes(role) && ["rascunho", "enviado"].includes(status);
 
   const handleAprovar = async () => {
     setLoading("aprovar");
@@ -89,8 +96,6 @@ export default function OrcamentoDetalheClient({
     }
   };
 
-  const isRascunho = status === "rascunho";
-
   const token = orcamento.token_compartilhamento as string | null;
   const handleShare = () => {
     if (!token) return;
@@ -103,95 +108,94 @@ export default function OrcamentoDetalheClient({
     }
   };
 
-  const statusColors: Record<string, string> = {
-    rascunho: "#6B7280",
-    enviado: "#2563EB",
-    aprovado: "#059669",
-    convertido: "#059669",
-    rejeitado: "#DC2626",
-  };
+  const extraActions = (
+    <>
+      {/* Badge status */}
+      <span
+        className="text-[10px] font-semibold px-2 py-1 rounded-full text-white"
+        style={{ backgroundColor: STATUS_COLORS[status] ?? "#6B7280" }}
+      >
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </span>
 
-  return (
-    <div className="flex flex-col h-full">
-      {/* Barra de ações */}
-      {(canAprovar || savedOk || msg) && (
-        <div className="flex items-center gap-3 px-4 py-2 border-b flex-wrap" style={{ borderColor: "#E8DCC8", backgroundColor: "#FAFAF7" }}>
-          <span className="text-xs font-semibold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: statusColors[status] ?? "#6B7280" }}>
-            {status.charAt(0).toUpperCase() + status.slice(1)}
-          </span>
-
-          {msg && (
-            <span className={`text-xs font-medium ${msg.type === "success" ? "text-green-600" : "text-red-500"}`}>
-              {msg.text}
-            </span>
-          )}
-
-          <div className="flex-1" />
-
-          {canAprovar && !showRejeitar && !["rejeitado", "convertido"].includes(status) && (
-            <>
-              <button
-                onClick={() => setShowRejeitar(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border"
-                style={{ borderColor: "#FCA5A5", color: "#DC2626" }}
-              >
-                <X size={12} /> Rejeitar
-              </button>
-              <button
-                onClick={handleAprovar}
-                disabled={loading === "aprovar"}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
-                style={{ backgroundColor: "#184036" }}
-              >
-                {loading === "aprovar" ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                Aprovar
-              </button>
-            </>
-          )}
-
-          {showRejeitar && (
-            <div className="flex items-center gap-2 w-full mt-1">
-              <input
-                value={motivoRejeicao}
-                onChange={e => setMotivoRejeicao(e.target.value)}
-                placeholder="Motivo da rejeição (opcional)"
-                className="flex-1 text-xs border rounded-lg px-3 py-1.5 outline-none"
-                style={{ borderColor: "#E8DCC8" }}
-              />
-              <button onClick={() => setShowRejeitar(false)} className="text-xs text-gray-500 px-2">Cancelar</button>
-              <button
-                onClick={handleRejeitar}
-                disabled={loading === "rejeitar"}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
-                style={{ backgroundColor: "#DC2626" }}
-              >
-                {loading === "rejeitar" ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
-                Confirmar Rejeição
-              </button>
-            </div>
-          )}
-        </div>
+      {/* Mensagem feedback */}
+      {msg && (
+        <span className={`text-[10px] font-medium ${msg.type === "success" ? "text-green-600" : "text-red-500"}`}>
+          {msg.text}
+        </span>
       )}
 
-      {/* Formulário */}
-      <div className="flex-1 overflow-auto">
-        <OrcamentoClient
-          cotacaoOuro={cotacaoOuro}
-          cotacaoDolar={cotacaoDolar}
-          config={config}
-          canManageConfig={canManageConfig}
-          userName={userName}
-          userId={userId}
-          vendedorId={vendedorId}
-          maxDesconto={maxDesconto}
-          curvaConfig={curvaConfig}
-          curvaCategorias={curvaCategorias}
-          initialOrcamento={orcamento}
-          readOnly={!isRascunho}
-          onShare={token ? handleShare : undefined}
-          onSaved={() => { setSavedOk(true); setMsg({ text: "Orçamento salvo com sucesso!", type: "success" }); setTimeout(() => setMsg(null), 4000); }}
-        />
-      </div>
-    </div>
+      {/* Rejeitar inline */}
+      {showRejeitar ? (
+        <>
+          <input
+            value={motivoRejeicao}
+            onChange={e => setMotivoRejeicao(e.target.value)}
+            placeholder="Motivo (opcional)"
+            className="text-[10px] border rounded-lg px-2 py-1 outline-none w-36"
+            style={{ borderColor: "#E8DCC8" }}
+          />
+          <button
+            onClick={() => setShowRejeitar(false)}
+            className="text-[10px] text-gray-400 px-1"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleRejeitar}
+            disabled={loading === "rejeitar"}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-semibold text-white disabled:opacity-50"
+            style={{ backgroundColor: "#DC2626" }}
+          >
+            {loading === "rejeitar" ? <Loader2 size={10} className="animate-spin" /> : <X size={10} />}
+            Confirmar
+          </button>
+        </>
+      ) : canAprovar && !["rejeitado", "convertido"].includes(status) ? (
+        <>
+          <button
+            onClick={() => setShowRejeitar(true)}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-semibold border"
+            style={{ borderColor: "#FCA5A5", color: "#DC2626" }}
+          >
+            <X size={10} /> Rejeitar
+          </button>
+          <button
+            onClick={handleAprovar}
+            disabled={loading === "aprovar"}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-semibold text-white disabled:opacity-50"
+            style={{ backgroundColor: "#184036" }}
+          >
+            {loading === "aprovar" ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+            Aprovar
+          </button>
+        </>
+      ) : null}
+    </>
+  );
+
+  const isRascunho = status === "rascunho";
+
+  return (
+    <OrcamentoClient
+      cotacaoOuro={cotacaoOuro}
+      cotacaoDolar={cotacaoDolar}
+      config={config}
+      canManageConfig={canManageConfig}
+      userName={userName}
+      userId={userId}
+      vendedorId={vendedorId}
+      maxDesconto={maxDesconto}
+      curvaConfig={curvaConfig}
+      curvaCategorias={curvaCategorias}
+      initialOrcamento={orcamento}
+      readOnly={!isRascunho}
+      onShare={token ? handleShare : undefined}
+      onSaved={() => {
+        setMsg({ text: "Orçamento salvo com sucesso!", type: "success" });
+        setTimeout(() => setMsg(null), 4000);
+      }}
+      extraActions={extraActions}
+    />
   );
 }

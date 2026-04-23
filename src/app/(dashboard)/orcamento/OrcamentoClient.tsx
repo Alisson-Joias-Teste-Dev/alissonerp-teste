@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
@@ -61,6 +61,7 @@ interface Props {
   readOnly?: boolean;
   onShare?: () => void;
   onSaved?: () => void;
+  extraActions?: React.ReactNode;
 }
 
 type OrcamentoTipo = "alianca" | "peca" | null;
@@ -108,7 +109,7 @@ function Slider({ label, value, min, max, step, unit, onChange }: {
 export default function OrcamentoClient({
   cotacaoOuro, cotacaoDolar, config, canManageConfig, userName, userId, vendedorId, maxDesconto,
   curvaConfig, curvaCategorias,
-  initialOrcamento, readOnly, onShare, onSaved,
+  initialOrcamento, readOnly, onShare, onSaved, extraActions,
 }: Props) {
   const router = useRouter();
   const [orcamentoTipo, setOrcamentoTipo] = useState<OrcamentoTipo>(null);
@@ -2126,6 +2127,7 @@ export default function OrcamentoClient({
               <Settings2 size={14} className="text-gray-500" />
             </button>
           )}
+          {extraActions}
         </div>
         {saveMsg && <span className={`text-[11px] font-bold ${saveMsg.type === "success" ? "text-emerald-600" : "text-red-500"}`}>{saveMsg.text}</span>}
       </div>
