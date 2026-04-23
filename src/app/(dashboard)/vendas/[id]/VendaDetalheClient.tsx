@@ -789,9 +789,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
 
   // ── Payment actions (immediate save) ────────────────────────────────────────
-  async function handleAddPagamento() {
+  async function handleAddPagamento(valorOverride?: number) {
     if (!venda) return;
-    const v = parseFloat(newPagValor.replace(",", "."));
+    const v = valorOverride ?? parseFloat(newPagValor.replace(",", "."));
     if (!v || v <= 0) return;
     setUpdating(true);
     try {
@@ -2443,10 +2443,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                     {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamento em Ouro
                   </button>
                 ) : (
-                  <button onClick={() => {
-                      setNewPagValor(totalVenda.toFixed(2).replace(".", ","));
-                      handleAddPagamento();
-                    }} disabled={updating || totalVenda <= 0}
+                  <button onClick={() => handleAddPagamento(totalVenda)} disabled={updating || totalVenda <= 0}
                     className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
                     style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                     {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamento
@@ -2524,7 +2521,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                     </div>
                   </div>
                   <div className="flex justify-end mt-3">
-                    <button onClick={handleAddPagamento} disabled={updating}
+                    <button onClick={() => handleAddPagamento()} disabled={updating}
                       className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
                       style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                       {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Adicionar

@@ -41,17 +41,22 @@ export async function submeterVendaParaAprovacaoCredito(
   vendaId: number,
   userId: string,
 ): Promise<SubmissaoResult> {
-  // 1. Calcular total "A Receber" pendente
-  const [aReceber] = await sql`
-    SELECT COALESCE(SUM(valor), 0) AS total
-    FROM alissonerp.pagamentos_venda
-    WHERE venda_id = ${vendaId} AND forma = 'A Receber' AND status = 'pendente'
+  // 1. Calcular valor real a receber: total_venda - já confirmados (não depende do valor digitado pelo usuário)
+  const [totais] = await sql`
+    SELECT
+      v.total_venda::numeric AS total_venda,
+      COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado'), 0)::numeric AS confirmados,
+      COALESCE(SUM(p.valor) FILTER (WHERE p.forma = 'A Receber' AND p.status = 'pendente'), 0)::numeric AS a_receber_pendente
+    FROM alissonerp.vendas_erp v
+    LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
+    WHERE v.id = ${vendaId}
+    GROUP BY v.total_venda
   `;
-  const valorAReceber = parseFloat(aReceber.total);
-
-  if (valorAReceber <= 0) {
+  if (!totais || Number(totais.a_receber_pendente) <= 0) {
     return { precisa_aprovacao: false };
   }
+  // Usar total_venda - confirmados como valor real do crédito solicitado
+  const valorAReceber = Math.max(0, Number(totais.total_venda) - Number(totais.confirmados));
 
   // 2. Verificar se já existe tarefa de aprovação pendente
   const [jaExiste] = await sql`
