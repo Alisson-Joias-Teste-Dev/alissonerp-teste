@@ -655,6 +655,9 @@ export async function PATCH(
           if (vendaOrc.qtd_pedras) dadosFicha.qtd_pedras = vendaOrc.qtd_pedras;
           if (vendaOrc.tamanho_pedra) dadosFicha.tamanho_pedra = vendaOrc.tamanho_pedra;
           if (vendaOrc.tipo_aplicacao_pedra) dadosFicha.tipo_aplicacao_pedra = vendaOrc.tipo_aplicacao_pedra;
+          if (Array.isArray(vendaOrc.pedras_detalhadas) && vendaOrc.pedras_detalhadas.length > 0) {
+            dadosFicha.pedras_detalhadas = vendaOrc.pedras_detalhadas;
+          }
         } else {
           if (vendaOrc.peso_estimado) dadosFicha.peso_estimado = vendaOrc.peso_estimado;
           if (vendaOrc.cor_metal) dadosFicha.cor_metal = vendaOrc.cor_metal;
@@ -693,6 +696,9 @@ export async function PATCH(
             if (ft2.qtd_pedras) dadosFicha2.qtd_pedras = ft2.qtd_pedras;
             if (ft2.tamanho_pedra) dadosFicha2.tamanho_pedra = ft2.tamanho_pedra;
             if (ft2.tipo_aplicacao_pedra) dadosFicha2.tipo_aplicacao_pedra = ft2.tipo_aplicacao_pedra;
+            if (Array.isArray(ft2.pedras_detalhadas) && ft2.pedras_detalhadas.length > 0) {
+              dadosFicha2.pedras_detalhadas = ft2.pedras_detalhadas;
+            }
             await tx`
               INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
               VALUES (${ordem.id}, 'alianca', ${JSON.stringify(dadosFicha2)}::jsonb, ${user.id}::uuid)

@@ -44,6 +44,7 @@ const FICHA_LABELS: Record<string, string> = {
   espessura_chapa: "Espessura Chapa",
   nome_chapa: "Nome Chapa",
   tipo_tarraxa: "Tipo Tarraxa",
+  pedras_detalhadas: "Pedras",
 };
 const TIPO_ITEM_LABELS: Record<string, string> = {
   alianca: "Aliança", par_alianca: "Par de Alianças", corrente: "Corrente",
@@ -671,9 +672,16 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                 <div className="space-y-6">
                   {(fichaTecnica.fichas as Array<{ ficha_id: number; dados: unknown; _label: string }>).map((f, idx) => {
                     const dados = typeof f.dados === "string" ? JSON.parse(f.dados) : f.dados;
+                    const formatFichaValue = (key: string, value: unknown): string => {
+                      if (key === "pedras_detalhadas" && Array.isArray(value)) {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        return value.map((p: any) => `${p.tipo ?? ""}${p.qtd ? ` (${p.qtd}x)` : ""}`).filter(Boolean).join(", ") || "—";
+                      }
+                      return String(value);
+                    };
                     const entries = Object.entries(dados ?? {}).filter(
-                      ([k, v]) => k !== "tipo_item" && v != null && v !== ""
-                    ) as [string, string][];
+                      ([k, v]) => k !== "tipo_item" && v != null && v !== "" && (!Array.isArray(v) || v.length > 0)
+                    ) as [string, unknown][];
                     return (
                       <div key={idx}>
                         <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: C.esmeralda }}>
@@ -681,7 +689,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                         </p>
                         <div className="grid grid-cols-2 gap-x-8">
                           {entries.map(([key, value]) => (
-                            <InfoRow key={key} label={fichaErpLabel(key)} value={String(value)} />
+                            <InfoRow key={key} label={fichaErpLabel(key)} value={formatFichaValue(key, value)} />
                           ))}
                         </div>
                         <p className="text-[10px] text-right mt-1" style={{ color: "#C4B5A0" }}>Ficha #{f.ficha_id}</p>
