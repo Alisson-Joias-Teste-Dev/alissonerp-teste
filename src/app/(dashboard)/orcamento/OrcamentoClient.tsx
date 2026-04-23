@@ -1072,9 +1072,15 @@ export default function OrcamentoClient({
                             </button>
                           </div>
                         ) : o.status === "convertido" && o.venda_gerada_id ? (
-                          <span className="text-[10px] text-blue-600 font-semibold">
-                            Venda #{o.venda_gerada_id}
-                            {o.ordem_gerada_id && <span className="text-green-600 ml-1">· Ordem #{o.ordem_gerada_id}</span>}
+                          <span className="text-[10px] font-semibold flex flex-wrap gap-x-1 items-center">
+                            <a href={`/vendas/${o.venda_gerada_id}`} className="text-blue-600 hover:underline">
+                              Venda #{o.venda_numero_pedido ?? o.venda_gerada_id}
+                            </a>
+                            {o.ordem_gerada_id && (
+                              <a href={`/ordens/${o.ordem_gerada_id}`} className="text-green-600 hover:underline">
+                                · Ordem #{o.ordem_numero ?? o.ordem_gerada_id}
+                              </a>
+                            )}
                           </span>
                         ) : (
                           <span className="text-[10px] text-gray-300">—</span>
