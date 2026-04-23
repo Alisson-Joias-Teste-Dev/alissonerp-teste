@@ -75,6 +75,7 @@ interface Venda {
   aprovacao_credito_tipo?: string | null;
   aprovacao_credito_tarefa_id?: number | null;
   aprovacao_credito_status?: string | null;
+  aprovacao_credito_responsavel_nome?: string | null;
   aprovacao_tarefa_tags?: string[] | string | null;
   aprovacao_desconto_aprov_id?: number | null;
   desconto_aprovado_por_nome?: string | null;
@@ -1315,13 +1316,23 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
       {/* ── Banner aprovação de crédito pendente ── */}
       {aguardandoAprovacaoCredito && !isDescontoApproval && (
-        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center gap-2"
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-2"
           style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
-          <Loader2 size={16} className="animate-spin shrink-0" />
-          <p className="text-sm font-medium">
-            Aguardando aprovação de crédito
-            {venda.aprovacao_credito_tipo === "diretor" ? " (diretor — comissão será zerada)" : " (gerente de loja)"}
-          </p>
+          <div className="flex items-center gap-2">
+            <Loader2 size={16} className="animate-spin shrink-0" />
+            <p className="text-sm font-medium">
+              Aguardando aprovação de crédito
+              {venda.aprovacao_credito_tipo === "diretor" ? " (diretor — comissão será zerada)" : " (gerente de loja)"}
+              {venda.aprovacao_credito_responsavel_nome ? ` — ${venda.aprovacao_credito_responsavel_nome}` : ""}
+            </p>
+          </div>
+          {venda.aprovacao_credito_tarefa_id && (
+            <a href={`/tarefas/${venda.aprovacao_credito_tarefa_id}`}
+              className="text-xs font-semibold px-3 py-1 rounded-lg shrink-0"
+              style={{ backgroundColor: "#FDE68A", color: "#713F12" }}>
+              Ver Tarefa →
+            </a>
+          )}
         </div>
       )}
 

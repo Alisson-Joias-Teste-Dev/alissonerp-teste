@@ -175,7 +175,7 @@ export async function submeterVendaParaAprovacaoCredito(
        ${tituloTarefa},
        ${tipo === "gerente" ? descGerente : descDiretor},
        ${userId}::uuid,
-       ${`/vendas/${vendaId}`})
+       ${`/tarefas/${tarefa.id}`})
   `.catch(() => {});
 
   return {
