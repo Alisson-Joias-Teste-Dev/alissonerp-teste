@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isFullAccess, hasRole } from "@/lib/roles";
 import { submeterVendaParaAprovacaoCredito } from "@/lib/vendas-credito-aprovar";
 import { approveVenda } from "@/lib/vendas-aprovar";
 
@@ -145,73 +144,20 @@ export async function POST(
     }
   }
 
-  // Sem "A Receber" — fluxo normal
-  const ROLES_APROVAR_DIRETO = ["desenvolvedor", "admin", "diretor", "gerente_fabrica", "gerente_loja"];
-  if (isFullAccess(usuario.role) || hasRole(usuario.role, ROLES_APROVAR_DIRETO)) {
-    // Aprovar diretamente
-    try {
-      const result = await approveVenda(vendaId, user.id, { tinyBestEffort: false });
-      return NextResponse.json({
-        ok: true,
-        aguardando_aprovacao_credito: false,
-        ordem_criada: result.ordem_criada,
-        tiny_erro: result.tiny_erro,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return NextResponse.json({ error: msg }, { status: 502 });
-    }
+  // Sem "A Receber" — aprovar direto (qualquer role, incluindo consultora).
+  // Dinheiro/Cartão/Pix não precisam aprovação do gerente de loja — essa
+  // aprovação só é necessária quando há crédito (A Receber) envolvido.
+  void usuario;
+  try {
+    const result = await approveVenda(vendaId, user.id, { tinyBestEffort: true });
+    return NextResponse.json({
+      ok: true,
+      aguardando_aprovacao_credito: false,
+      ordem_criada: result.ordem_criada,
+      tiny_erro: result.tiny_erro,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
-
-  // Consultora sem A Receber — criar tarefa de aprovação simples para gerente
-  const [gerente] = await sql`
-    SELECT id FROM alissonerp.usuarios
-    WHERE role = 'gerente_loja' AND ativo = true
-    ORDER BY id LIMIT 1
-  `;
-  if (!gerente) {
-    return NextResponse.json({ error: "Nenhum gerente de loja ativo encontrado" }, { status: 500 });
-  }
-
-  const [vendaInfo] = await sql`
-    SELECT numero_venda, total_venda FROM alissonerp.vendas_erp WHERE id = ${vendaId}
-  `;
-
-  const [tarefa] = await sql`
-    INSERT INTO alissonerp.tarefas
-      (titulo, descricao, responsavel_id, criado_por, prioridade, status, venda_id, tags)
-    VALUES
-      (${"Aprovar venda — " + vendaInfo.numero_venda},
-       ${"Venda " + vendaInfo.numero_venda + " — R$ " + Number(vendaInfo.total_venda).toFixed(2)},
-       ${gerente.id}::uuid, ${user.id}::uuid,
-       'alta', 'aguardando_aprovacao', ${vendaId},
-       ${sql.array(["aprovacao_venda"])})
-    RETURNING id
-  `;
-
-  await sql`
-    INSERT INTO alissonerp.aprovacoes_tarefa (tarefa_id, solicitante_id, aprovador_id, status)
-    VALUES (${tarefa.id}, ${user.id}::uuid, ${gerente.id}::uuid, 'pendente')
-  `;
-
-  await sql`
-    UPDATE alissonerp.vendas_erp
-    SET aprovacao_credito_tarefa_id = ${tarefa.id}, updated_at = NOW()
-    WHERE id = ${vendaId}
-  `;
-
-  await sql`
-    INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-    VALUES (${gerente.id}::uuid, 'aprovacao', ${"Aprovar venda — " + vendaInfo.numero_venda},
-      ${"Venda " + vendaInfo.numero_venda + " aguardando aprovação"},
-      ${user.id}::uuid, ${`/vendas/${vendaId}`})
-  `.catch(() => {});
-
-  return NextResponse.json({
-    ok: true,
-    aguardando_aprovacao_credito: true,
-    tipo_aprovacao: "gerente",
-    tarefa_id: tarefa.id,
-    message: "Venda enviada para aprovação do gerente",
-  });
 }
