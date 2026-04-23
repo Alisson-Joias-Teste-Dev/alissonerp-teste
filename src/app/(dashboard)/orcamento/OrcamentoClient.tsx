@@ -257,6 +257,24 @@ export default function OrcamentoClient({
       });
       setParams(p => applyRingParams(p, ft));
       if (orc.quantidade === 2 && orc.ficha2) setParams2(p => applyRingParams(p, orc.ficha2 as Record<string, any>));
+
+      // Restaurar detalhamento de pedras
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const toEntries = (pedras: any[]): StoneEntry[] =>
+        (pedras ?? []).map((p: any, i: number) => ({
+          id: Date.now() + i,
+          tipo: p.tipo as StoneType,
+          corte: p.corte as StoneCut,
+          tamanho_mm: Number(p.tamanho_mm ?? 0),
+          qtd: Number(p.qtd ?? 0),
+          ct_unitario: Number(p.ct_unitario ?? 0),
+          ct_total: Number(p.ct_total ?? 0),
+          pt_total: Number(p.pt_total ?? 0),
+          preco_unitario_rs: Number(p.preco_unitario_rs ?? 0),
+          preco_total_rs: Number(p.preco_total_rs ?? 0),
+        }));
+      setStoneEntries(toEntries(ft.pedras_detalhadas));
+      if (orc.quantidade === 2 && orc.ficha2) setStoneEntries2(toEntries((orc.ficha2 as Record<string, any>).pedras_detalhadas));
     } else {
       setOrcamentoTipo("peca");
       if (orc.peso) setPecaPeso(Number(orc.peso));
