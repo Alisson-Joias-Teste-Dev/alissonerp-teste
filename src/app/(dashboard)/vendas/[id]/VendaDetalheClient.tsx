@@ -2225,7 +2225,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
               {/* Múltiplas */}
               {newPagForma === "Múltiplas" && (() => {
                 const totalMult = multPagamentos.reduce((s, p) => s + p.valor, 0);
-                const restante = +(totalVenda - totalMult).toFixed(2);
+                const restante = +(totalVenda - (venda?.total_pago ?? 0) - totalMult).toFixed(2);
                 return (
                   <div className="mb-4">
                     <div className="flex flex-wrap items-end gap-2 mb-3">
