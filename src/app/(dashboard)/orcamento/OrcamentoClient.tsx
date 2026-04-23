@@ -813,9 +813,9 @@ export default function OrcamentoClient({
       const url = editingOrcId ? `/api/orcamento/${editingOrcId}` : "/api/orcamento";
       const method = editingOrcId ? "PUT" : "POST";
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await res.json() as { ok?: boolean; orcamento?: { id: number }; error?: string };
+      const data = await res.json() as { ok?: boolean; orcamento?: { id: number; numero_orcamento?: string }; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      router.push(`/orcamento/${data.orcamento!.id}`);
+      router.push(`/orcamento`);
     } catch (e) { setSaveMsg({ text: e instanceof Error ? e.message : "Erro ao salvar", type: "error" }); }
     finally { setIsSaving(false); }
   };
