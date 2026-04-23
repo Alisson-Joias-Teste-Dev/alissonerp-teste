@@ -669,7 +669,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                 </div>
               ) : fichaTecnica._origem === "erp_multi" ? (
                 /* ── Múltiplas fichas ERP (par de alianças) ── */
-                <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {(fichaTecnica.fichas as Array<{ ficha_id: number; dados: unknown; _label: string }>).map((f, idx) => {
                     const dados = typeof f.dados === "string" ? JSON.parse(f.dados) : f.dados;
                     const formatFichaValue = (key: string, value: unknown): string => {
@@ -683,19 +683,16 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                       ([k, v]) => k !== "tipo_item" && v != null && v !== "" && (!Array.isArray(v) || v.length > 0)
                     ) as [string, unknown][];
                     return (
-                      <div key={idx}>
-                        <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: C.esmeralda }}>
+                      <div key={idx} className="bg-white rounded-xl border p-4" style={{ borderColor: C.cremeBorder }}>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider mb-3" style={{ color: C.esmeralda }}>
                           {f._label}
                         </p>
-                        <div className="grid grid-cols-2 gap-x-8">
+                        <div>
                           {entries.map(([key, value]) => (
                             <InfoRow key={key} label={fichaErpLabel(key)} value={formatFichaValue(key, value)} />
                           ))}
                         </div>
-                        <p className="text-[10px] text-right mt-1" style={{ color: "#C4B5A0" }}>Ficha #{f.ficha_id}</p>
-                        {idx < (fichaTecnica.fichas as unknown[]).length - 1 && (
-                          <div className="border-t mt-4" style={{ borderColor: C.cremeBorder }} />
-                        )}
+                        <p className="text-[10px] text-right mt-2" style={{ color: "#C4B5A0" }}>Ficha #{f.ficha_id}</p>
                       </div>
                     );
                   })}
