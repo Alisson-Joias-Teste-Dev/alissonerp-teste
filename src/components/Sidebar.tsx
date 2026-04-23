@@ -47,9 +47,9 @@ import {
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
 import { useAuth } from "@/hooks/useAuth";
+import { createClient } from "@/lib/supabase/client";
 import { getMenuGroupsForRole, getMenuGroupsForModulos, type MenuGroup, type MenuEntry, type MenuItem } from "@/lib/auth/permissions";
 import { ROLES_SERVICE_PANEL } from "@/lib/roles";
-import { createClient } from "@/lib/supabase/client";
 import UserAvatar from "@/components/UserAvatar";
 import { useSidebar } from "@/contexts/SidebarContext";
 
@@ -172,6 +172,29 @@ export default function Sidebar() {
 
   useEffect(() => {
     fetchContagem();
+  }, [fetchContagem]);
+
+  // Realtime: atualiza badge imediatamente ao receber nova notificação
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel("notificacoes-badge")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .on("postgres_changes" as any, {
+        event: "INSERT",
+        schema: "alissonerp",
+        table: "notificacoes",
+      }, () => {
+        fetchContagem();
+        // Se drawer estiver aberto, recarrega lista
+        setDrawerAberto((prev) => {
+          if (prev) abrirDrawer();
+          return prev;
+        });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchContagem]);
 
   useEffect(() => {

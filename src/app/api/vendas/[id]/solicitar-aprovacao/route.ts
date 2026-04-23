@@ -102,10 +102,10 @@ export async function POST(
       WHERE id = ${vendaId}
     `;
     await sql`
-      INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id, link)
+      INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id, link, venda_id)
       VALUES (${admin.id}::uuid, 'aprovacao', ${"Aprovar desconto — " + vendaInfo.numero_venda},
-        ${"Venda " + vendaInfo.numero_venda + " aguarda aprovação de desconto acima de 30%"},
-        ${user.id}::uuid, ${`/vendas/${vendaId}`})
+        ${descricao},
+        ${user.id}::uuid, ${`/vendas/${vendaId}`}, ${vendaId})
     `.catch(() => {});
     return NextResponse.json({ ok: true, aguardando_aprovacao_desconto: true, tarefa_id: tarefa.id });
   }
