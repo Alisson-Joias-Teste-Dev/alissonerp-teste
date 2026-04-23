@@ -2121,18 +2121,21 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
             </h3>
 
             {/* Tabela de itens */}
-            <div className="rounded-lg border overflow-x-auto" style={{ borderColor: C.cremeBorder }}>
-              <table className="text-sm" style={{ minWidth: "900px", width: "100%" }}>
+            <div className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+              <table className="w-full text-sm table-fixed">
                 <thead style={{ backgroundColor: C.cremeBg }}>
                   <tr>
-                    {["Nº", "Descrição", tipoVenda === "produto" || tipoVenda === "garantia" ? "SKU" : "", "Qtde", "Preço Lista",
-                      tipoVenda === "produto" || tipoVenda === "garantia" ? "% Desc" : "",
-                      tipoVenda === "produto" || tipoVenda === "garantia" ? "R$ Desc" : "",
-                      "Preço Un",
-                      tipoVenda === "produto" || tipoVenda === "garantia" ? "Comissão" : "",
-                      "Total", ""].filter(Boolean).map(h => (
-                      <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: "#6B7280" }}>{h}</th>
-                    ))}
+                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "36px" }}>Nº</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280" }}>Descrição</th>
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "90px" }}>SKU</th>}
+                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "64px" }}>Qtde</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "90px" }}>Preço Lista</th>
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "80px" }}>% Desc</th>}
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "80px" }}>R$ Desc</th>}
+                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "90px" }}>Preço Un</th>
+                    {(tipoVenda === "produto" || tipoVenda === "garantia") && <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "100px" }}>Comissão</th>}
+                    <th className="px-3 py-2.5 text-left text-xs font-semibold" style={{ color: "#6B7280", width: "80px" }}>Total</th>
+                    <th style={{ width: "80px" }}></th>
                   </tr>
                 </thead>
                 <tbody>
