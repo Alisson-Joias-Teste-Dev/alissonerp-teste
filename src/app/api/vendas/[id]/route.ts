@@ -479,7 +479,7 @@ export async function PATCH(
 
       // Recalcular total se frete mudou
       if (body.total_frete !== undefined) {
-        await sql`UPDATE alissonerp.vendas_erp SET total_venda = total_produtos - total_desconto + ${body.total_frete} WHERE id = ${vendaId}`;
+        await sql`UPDATE alissonerp.vendas_erp SET total_venda = total_produtos + ${body.total_frete} WHERE id = ${vendaId}`;
       }
 
       // NÃO retornar aqui — continuar para criação de ordem se for orçamento
@@ -524,7 +524,7 @@ export async function PATCH(
   if (body.total_frete !== undefined) {
     await sql`
       UPDATE alissonerp.vendas_erp
-      SET total_venda = total_produtos - total_desconto + ${body.total_frete}
+      SET total_venda = total_produtos + ${body.total_frete}
       WHERE id = ${vendaId}
     `;
   }
