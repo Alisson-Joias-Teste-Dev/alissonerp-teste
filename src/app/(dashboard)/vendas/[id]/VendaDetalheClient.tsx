@@ -580,7 +580,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       const novoPreco = parseFloat(raw.replace(",", ".")) || 0;
       if (novoPreco < 0 || novoPreco > item.preco_lista) return;
       let pct = ((item.preco_lista - novoPreco) / item.preco_lista) * 100;
-      if (pct > maxDesconto) return;
+      if (pct > maxDesconto && venda.situacao !== "rascunho") return;
       pct = Math.round(pct * 100) / 100;
 
       const authThr = descontoAuthThreshold ?? maxDesconto;
