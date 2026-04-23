@@ -2149,8 +2149,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                       <>
                         <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                           <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
-                          <td className="px-3 py-2.5 max-w-[200px] font-medium" style={{ color: "#1A1A1A" }}>
-                            <span className="block truncate">{item.nome_produto}</span>
+                          <td className="px-3 py-2.5 font-medium" style={{ color: "#1A1A1A", minWidth: "160px" }}>
+                            <span className="block">{item.nome_produto}</span>
                             {tipoVenda === "produto" && item.saldo_disponivel < item.quantidade && (
                               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded mt-0.5"
                                 style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
@@ -2252,8 +2252,10 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                           )}
                           <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
                           <td className="px-3 py-2.5">
-                            <button onClick={() => setItens(prev => prev.filter(i => i._key !== item._key))} className="text-gray-300 hover:text-red-400 transition-colors">
-                              <X size={14} />
+                            <button onClick={() => setItens(prev => prev.filter(i => i._key !== item._key))}
+                              className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg border transition-colors hover:bg-red-50"
+                              style={{ borderColor: "#FECACA", color: "#EF4444" }}>
+                              <X size={12} /> Remover
                             </button>
                           </td>
                         </tr>
