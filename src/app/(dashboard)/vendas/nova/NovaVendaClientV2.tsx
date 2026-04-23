@@ -2182,7 +2182,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                 const isRejected = auth?.status === "rejeitado";
                                 return (
                                   <div className="flex items-center gap-1">
-                                    <input type="number" min={0} max={maxDesconto} step={0.01}
+                                    <input type="number" min={0} max={100} step={0.01}
                                       value={displayPct || ""}
                                       onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
                                       readOnly={auth?.status === "pendente"}
