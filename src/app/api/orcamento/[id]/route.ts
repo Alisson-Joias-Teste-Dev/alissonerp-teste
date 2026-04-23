@@ -31,7 +31,14 @@ export async function GET(
   `;
   if (!orc) return NextResponse.json({ error: "Orçamento não encontrado" }, { status: 404 });
 
-  return NextResponse.json({ orcamento: orc });
+  // Busca ficha2 separadamente para evitar conflito de colunas no JOIN
+  let ficha2 = null;
+  if (orc.ficha_tecnica_2_id) {
+    const [ft2] = await sql`SELECT * FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${orc.ficha_tecnica_2_id}`;
+    ficha2 = ft2 ?? null;
+  }
+
+  return NextResponse.json({ orcamento: { ...orc, ficha2 } });
 }
 
 // PATCH /api/orcamento/[id] — atualizar status (aprovar/rejeitar/enviar)
