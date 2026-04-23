@@ -740,6 +740,33 @@ export default function OrcamentoClient({
       return;
     }
 
+    // Validação: pedras obrigatórias quando "Incluir pedras" marcado
+    const validarPedras = (p: typeof params, entries: typeof stoneEntries, cap: number, label: string) => {
+      if (!p.hasStones) return null;
+      if (entries.length === 0) return `${label}: selecione ao menos um tipo de pedra no detalhamento.`;
+      const isPontual = !p.stoneFull && !p.stoneHalfMoon;
+      if (isPontual) {
+        const totalEntries = entries.reduce((s, e) => s + (e.qtd ?? 0), 0);
+        const dCount = p.stoneFull ? cap : p.stoneHalfMoon ? Math.floor(cap / 2) : p.stoneCount;
+        if (totalEntries !== dCount) return `${label}: a soma das pedras no detalhamento (${totalEntries}) deve ser igual à quantidade definida (${dCount}).`;
+      }
+      return null;
+    };
+    const errPedras1 = validarPedras(params, stoneEntries, stoneCapacity, allianceMode === "par" ? "Anel 1" : "Pedras");
+    if (errPedras1) { setSaveMsg({ text: errPedras1, type: "error" }); return; }
+    if (allianceMode === "par") {
+      const errPedras2 = validarPedras(params2, stoneEntries2, stoneCapacity2, "Anel 2");
+      if (errPedras2) { setSaveMsg({ text: errPedras2, type: "error" }); return; }
+    }
+
+    // Validação: texto obrigatório quando "Gravar texto" marcado
+    if (params.textEnabled && !params.textContent.trim()) {
+      setSaveMsg({ text: "Gravação: preencha o texto principal antes de salvar.", type: "error" }); return;
+    }
+    if (allianceMode === "par" && params2.textEnabled && !params2.textContent.trim()) {
+      setSaveMsg({ text: "Gravação (Anel 2): preencha o texto principal antes de salvar.", type: "error" }); return;
+    }
+
     setIsSaving(true); setSaveMsg(null);
     try {
       const foto3d = capture3DScreenshot();
