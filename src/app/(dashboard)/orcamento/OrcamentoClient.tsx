@@ -312,6 +312,7 @@ export default function OrcamentoClient({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [clienteResults, setClienteResults] = useState<any[]>([]);
   const [showClienteDropdown, setShowClienteDropdown] = useState(false);
+  const [clienteSemResultados, setClienteSemResultados] = useState(false);
   const [showNovoClienteForm, setShowNovoClienteForm] = useState(false);
   const [novoClienteForm, setNovoClienteForm] = useState({ nome: "", cpf_cnpj: "", email: "", telefone: "", celular: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "" });
   const [savingCliente, setSavingCliente] = useState(false);
@@ -321,11 +322,13 @@ export default function OrcamentoClient({
   const cpfTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const buscarClientes = useCallback(async (termo: string) => {
-    if (termo.length < 2) { setClienteResults([]); return; }
-    const res = await fetch(`/api/ordens/contatos?busca=${encodeURIComponent(termo)}`).catch(() => null);
+    if (termo.length < 2) { setClienteResults([]); setClienteSemResultados(false); return; }
+    const res = await fetch(`/api/vendas/clientes/busca?q=${encodeURIComponent(termo)}`).catch(() => null);
     const data = res?.ok ? await res.json().catch(() => []) : [];
-    setClienteResults(Array.isArray(data) ? data : []);
-    setShowClienteDropdown(true);
+    const lista = Array.isArray(data) ? data : [];
+    setClienteResults(lista);
+    setShowClienteDropdown(lista.length > 0);
+    setClienteSemResultados(lista.length === 0);
   }, []);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -334,6 +337,7 @@ export default function OrcamentoClient({
     setClientName(c.nome);
     setShowClienteDropdown(false);
     setClienteResults([]);
+    setClienteSemResultados(false);
   }
 
   async function buscaCEP(cep: string) {
@@ -354,7 +358,7 @@ export default function OrcamentoClient({
     if (cpfTimer.current) clearTimeout(cpfTimer.current);
     cpfTimer.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/ordens/contatos?cpf=${encodeURIComponent(limpo)}`);
+        const res = await fetch(`/api/vendas/clientes/busca?q=${encodeURIComponent(limpo)}`);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = await res.json() as any[];
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1256,38 +1260,46 @@ export default function OrcamentoClient({
             <div className="flex items-center justify-between rounded-xl border px-4 py-3 bg-white" style={{ borderColor: "#059669" }}>
               <div className="flex items-center gap-2">
                 <User size={14} className="text-green-600" />
-                <div>
-                  <p className="text-sm font-medium" style={{ color: "#1A1A1A" }}>{clientName}</p>
-                </div>
+                <p className="text-sm font-medium" style={{ color: "#1A1A1A" }}>{clientName}</p>
               </div>
-              <button onClick={() => { setClienteId(null); setClientName(""); setClienteResults([]); }}
+              <button onClick={() => { setClienteId(null); setClientName(""); setClienteResults([]); setClienteSemResultados(false); }}
                 className="text-gray-400 hover:text-gray-600 ml-2">
                 <X size={14} />
               </button>
             </div>
           ) : (
-            <div className="bg-white rounded-xl border p-4 relative" style={{ borderColor: C.cremeBorder }}>
-              <div className="flex items-center gap-2">
-                <User size={14} className="text-gray-400" />
-                <input type="text" value={clientName}
-                  onChange={(e) => { setClientName(e.target.value); setClienteId(null); buscarClientes(e.target.value); }}
-                  onFocus={() => { if (clienteResults.length > 0) setShowClienteDropdown(true); }}
-                  onBlur={() => setTimeout(() => setShowClienteDropdown(false), 150)}
-                  placeholder="Buscar cliente pelo nome ou CPF..." className="flex-1 text-sm outline-none" />
-                {!clienteId && clientName.length >= 2 && clienteResults.length === 0 && (
-                  <button onClick={() => { const d = clientName.replace(/\D/g, ""); setNovoClienteForm(p => ({ ...p, cpf_cnpj: d.length >= 11 ? d : "", nome: d.length < 11 ? clientName : "" })); setShowNovoClienteForm(true); setClienteErr(""); }} className="text-[9px] text-blue-600 font-semibold hover:underline whitespace-nowrap">+ Cadastrar</button>
+            <div className="space-y-2">
+              <div className="bg-white rounded-xl border p-4 relative" style={{ borderColor: C.cremeBorder }}>
+                <div className="flex items-center gap-2">
+                  <User size={14} className="text-gray-400" />
+                  <input type="text" value={clientName}
+                    onChange={(e) => { setClientName(e.target.value); setClienteId(null); buscarClientes(e.target.value); }}
+                    onFocus={() => { if (clienteResults.length > 0) setShowClienteDropdown(true); }}
+                    onBlur={() => setTimeout(() => setShowClienteDropdown(false), 150)}
+                    placeholder="Buscar cliente pelo nome ou CPF..." className="flex-1 text-sm outline-none" />
+                </div>
+                {showClienteDropdown && clienteResults.length > 0 && (
+                  <div className="absolute z-20 left-0 right-0 mt-2 bg-white rounded-xl border shadow-lg max-h-48 overflow-y-auto" style={{ borderColor: C.cremeBorder }}>
+                    {clienteResults.map((c) => (
+                      <button key={c.id} onMouseDown={() => selecionarCliente(c)}
+                        className="w-full text-left px-3 py-2.5 hover:bg-stone-50 text-sm border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                        <p className="font-medium" style={{ color: "#1A1A1A" }}>{c.nome}</p>
+                        <p className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                          {c.cpf_cnpj ? maskCpfCnpj(c.cpf_cnpj) : (c.telefone ?? c.celular ?? "—")}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
-              {showClienteDropdown && clienteResults.length > 0 && (
-                <div className="absolute z-20 left-0 right-0 mt-2 bg-white rounded-xl border shadow-lg max-h-48 overflow-y-auto" style={{ borderColor: C.cremeBorder }}>
-                  {clienteResults.map((c) => (
-                    <button key={c.id_contato} onMouseDown={() => selecionarCliente(c)}
-                      className="w-full text-left px-3 py-2.5 hover:bg-stone-50 text-sm border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
-                      <p className="font-medium" style={{ color: "#1A1A1A" }}>{c.nome}</p>
-                      {c.cpf_cnpj && <p className="text-[10px]" style={{ color: "#9CA3AF" }}>{maskCpfCnpj(c.cpf_cnpj)}</p>}
-                    </button>
-                  ))}
-                </div>
+              {!clienteId && clienteSemResultados && (
+                <button
+                  onClick={() => { const d = clientName.replace(/\D/g, ""); setNovoClienteForm(p => ({ ...p, cpf_cnpj: d.length >= 11 ? d : "", nome: d.length < 11 ? clientName : "" })); setShowNovoClienteForm(true); setClienteErr(""); }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium border hover:bg-stone-50 transition-colors"
+                  style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+                >
+                  <Plus size={14} /> Cadastrar novo cliente
+                </button>
               )}
             </div>
           )}
@@ -2019,17 +2031,17 @@ export default function OrcamentoClient({
               placeholder="Buscar cliente..."
               className="flex-1 text-sm outline-none bg-transparent text-gray-700 placeholder:text-gray-300" />
             {clienteId && <span className="text-[9px] text-green-600 font-semibold shrink-0">Vinculado</span>}
-            {!clienteId && clientName.length >= 2 && clienteResults.length === 0 && (
+            {!clienteId && clienteSemResultados && (
               <button onClick={() => { const d = clientName.replace(/\D/g, ""); setNovoClienteForm(p => ({ ...p, cpf_cnpj: d.length >= 11 ? d : "", nome: d.length < 11 ? clientName : "" })); setShowNovoClienteForm(true); setClienteErr(""); }} className="text-[9px] text-blue-600 font-semibold shrink-0 hover:underline">+ Cadastrar</button>
             )}
           </div>
           {showClienteDropdown && clienteResults.length > 0 && (
             <div className="absolute z-20 mt-1 w-full bg-white rounded-xl border shadow-lg max-h-48 overflow-y-auto" style={{ borderColor: C.cremeBorder }}>
               {clienteResults.map((c) => (
-                <button key={c.id_contato} onClick={() => selecionarCliente(c)}
+                <button key={c.id} onClick={() => selecionarCliente(c)}
                   className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
-                  <span className="font-medium">{c.nome}</span>
-                  {c.cpf_cnpj && <span className="ml-2 text-[10px] text-gray-400">{maskCpfCnpj(c.cpf_cnpj)}</span>}
+                  <p className="font-medium">{c.nome}</p>
+                  <p className="text-[10px] text-gray-400">{c.cpf_cnpj ? maskCpfCnpj(c.cpf_cnpj) : (c.telefone ?? c.celular ?? "—")}</p>
                 </button>
               ))}
             </div>
