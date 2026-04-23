@@ -816,7 +816,7 @@ export default function OrcamentoClient({
 
   function buildFicha(p: RingParams, pf: ProfileType, rs: RingSize, w: number, sc: number, entries: StoneEntry[]) {
     return {
-      modelo: PROFILE_OPTIONS.find((o) => o.id === pf)?.label ?? pf,
+      modelo: (() => { const o = PROFILE_OPTIONS.find((o) => o.id === pf); return o?.fichaLabel ?? o?.label ?? pf; })(),
       aro_numeracao: `Aro ${rs.size}`, largura: p.width, espessura: p.height,
       peso_estimado: w, perfil: pf, diametro: p.diameter,
       densidade_ouro: p.goldDensity, cor_metal: METAL_COLORS.find(m => m.value === p.metalColor)?.label ?? p.metalColor,

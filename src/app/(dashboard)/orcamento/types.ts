@@ -83,6 +83,7 @@ export interface PricingResult {
 export interface ProfileOption {
   id: ProfileType;
   label: string;
+  fichaLabel?: string;
 }
 
 export interface ConfigOrcamento {

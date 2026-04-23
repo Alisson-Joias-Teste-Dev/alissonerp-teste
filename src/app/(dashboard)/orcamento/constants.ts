@@ -98,7 +98,7 @@ export const DEFAULT_PARAMS: RingParams = {
 export const PROFILE_OPTIONS: ProfileOption[] = [
   { id: ProfileType.Anatomica, label: "Anatomica" },
   { id: ProfileType.Boleada, label: "Boleada" },
-  { id: ProfileType.BoleadaDouble, label: "Boleada Dupla" },
+  { id: ProfileType.BoleadaDouble, label: "Boleada DF", fichaLabel: "Boleada Dentro e Fora" },
   { id: ProfileType.Chanfrada, label: "Chanfrada" },
   { id: ProfileType.Concava, label: "Concava" },
   { id: ProfileType.QuadradoCanal, label: "Bordas Elevadas" },
