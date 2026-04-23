@@ -584,7 +584,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       pct = Math.round(pct * 100) / 100;
 
       const authThr = descontoAuthThreshold ?? maxDesconto;
-      if (pct > authThr) {
+      if (pct > authThr && venda.situacao !== "rascunho") {
         setPendingAuths(prev => ({ ...prev, [itemId]: { solicitacaoId: null, pct, status: "local" } }));
         return;
       } else {
