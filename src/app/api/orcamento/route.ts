@@ -30,17 +30,25 @@ export async function GET(req: NextRequest) {
 
   const rows = isRestricted
     ? await sql`
-        SELECT o.*, ft.modelo, ft.aro_numeracao
+        SELECT o.*, ft.modelo, ft.aro_numeracao,
+               v.numero_pedido AS venda_numero_pedido,
+               ord.numero_ordem AS ordem_numero
         FROM alissonerp.orcamentos o
         LEFT JOIN alissonerp.orcamento_fichas_tecnicas ft ON ft.id = o.ficha_tecnica_id
+        LEFT JOIN public.vendas v ON v.id = o.venda_gerada_id
+        LEFT JOIN alissonerp.ordens ord ON ord.id = o.ordem_gerada_id
         WHERE o.usuario_id = ${user.id}::uuid
         ORDER BY o.created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `
     : await sql`
-        SELECT o.*, ft.modelo, ft.aro_numeracao
+        SELECT o.*, ft.modelo, ft.aro_numeracao,
+               v.numero_pedido AS venda_numero_pedido,
+               ord.numero_ordem AS ordem_numero
         FROM alissonerp.orcamentos o
         LEFT JOIN alissonerp.orcamento_fichas_tecnicas ft ON ft.id = o.ficha_tecnica_id
+        LEFT JOIN public.vendas v ON v.id = o.venda_gerada_id
+        LEFT JOIN alissonerp.ordens ord ON ord.id = o.ordem_gerada_id
         ORDER BY o.created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `;

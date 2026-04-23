@@ -383,6 +383,22 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
   useEffect(() => { load(); }, [load]);
 
+  // Realtime: recarrega quando desconto_aprovado_por ou situacao mudam
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`venda-${vendaId}-changes`)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .on("postgres_changes" as any, {
+        event: "UPDATE",
+        schema: "alissonerp",
+        table: "vendas_erp",
+        filter: `id=eq.${vendaId}`,
+      }, () => { load(); })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [vendaId, load]);
+
   // Load ref data
   useEffect(() => {
     fetch("/api/vendas/faixas-comissao").then(r => r.json()).then(setFaixas).catch(() => {});
