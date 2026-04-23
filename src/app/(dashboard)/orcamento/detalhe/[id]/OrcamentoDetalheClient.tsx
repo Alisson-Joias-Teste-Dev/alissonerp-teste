@@ -1,6 +1,6 @@
 "use client";
 
-import OrcamentoClient from "../OrcamentoClient";
+import OrcamentoClient from "../../OrcamentoClient";
 import type { CurvaConfig, CurvaCategoriaInput } from "@/lib/curva-precificacao";
 import type { ConfigOrcamento } from "@/app/(dashboard)/orcamento/types";
 
