@@ -1058,14 +1058,7 @@ export default function OrcamentoClient({
                   ) : searched.map((o, i) => (
                     <tr key={o.id} className="border-b cursor-pointer hover:bg-amber-50/30 transition-colors"
                       style={{ borderColor: C.creme, backgroundColor: i % 2 === 0 ? "#fff" : C.cremeBg }}
-                      onClick={async () => {
-                        try {
-                          const res = await fetch(`/api/orcamento/${o.id}`);
-                          if (!res.ok) return;
-                          const data = await res.json();
-                          if (data.orcamento) aplicarOrcamento(data.orcamento, o.id);
-                        } catch { /* silent */ }
-                      }}>
+                      onClick={() => router.push(`/orcamento/detalhe/${o.id}`)}>
                       <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: C.esmeralda }}>{o.numero_orcamento}</td>
                       <td className="px-4 py-2.5">{statusBadge(o.status)}</td>
                       <td className="px-4 py-2.5">
