@@ -2121,8 +2121,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
             </h3>
 
             {/* Tabela de itens */}
-            <div className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-              <table className="w-full text-sm">
+            <div className="rounded-lg border overflow-x-auto" style={{ borderColor: C.cremeBorder }}>
+              <table className="text-sm" style={{ minWidth: "900px", width: "100%" }}>
                 <thead style={{ backgroundColor: C.cremeBg }}>
                   <tr>
                     {["Nº", "Descrição", tipoVenda === "produto" || tipoVenda === "garantia" ? "SKU" : "", "Qtde", "Preço Lista",
