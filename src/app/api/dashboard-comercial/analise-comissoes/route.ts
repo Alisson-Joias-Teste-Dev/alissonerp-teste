@@ -177,7 +177,7 @@ export async function GET(req: NextRequest) {
 
     // Usa total do pedido (igual à Performance) para total_realizado e vale_troca
     for (const r of resumoMap.values()) {
-      const pedido = totaisPedidoMap.get(r.id_vendedor);
+      const pedido = totaisPedidoMap.get(Number(r.id_vendedor));
       r.valor_vale_troca = pedido?.vale ?? 0;
       r.total_realizado = (pedido?.bruto ?? 0) - r.valor_vale_troca;
       r.media_desconto = safeDiv(r.media_desconto, r.qtd_itens);
