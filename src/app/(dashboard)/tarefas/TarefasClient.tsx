@@ -197,6 +197,11 @@ export default function TarefasClient() {
   const [responsavelId, setResponsavelId] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [temOrdem, setTemOrdem] = useState<boolean | null>(null);
+  const [numeroOrdem, setNumeroOrdem] = useState("");
+  const [ordemIdResolvido, setOrdemIdResolvido] = useState<number | null>(null);
+  const [ordemBuscando, setOrdemBuscando] = useState(false);
+  const [ordemErro, setOrdemErro] = useState("");
 
   // DnD state
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -272,6 +277,22 @@ export default function TarefasClient() {
   }
 
   // ─── Nova Tarefa ────────────────────────────────────────────────────────────
+  async function buscarOrdem(numero: string) {
+    if (!numero.trim()) { setOrdemIdResolvido(null); setOrdemErro(""); return; }
+    setOrdemBuscando(true);
+    setOrdemErro("");
+    setOrdemIdResolvido(null);
+    try {
+      const data = await apiFetch(`/api/ordens/busca?q=${encodeURIComponent(numero.trim())}`);
+      const found = (data as { id: number; numero_ordem: string }[]).find(
+        o => o.numero_ordem.toLowerCase() === numero.trim().toLowerCase()
+      );
+      if (found) { setOrdemIdResolvido(found.id); setOrdemErro(""); }
+      else { setOrdemIdResolvido(null); setOrdemErro("Ordem não encontrada"); }
+    } catch { setOrdemErro("Erro ao buscar ordem"); }
+    setOrdemBuscando(false);
+  }
+
   async function criarTarefa() {
     if (!novaForm.titulo.trim()) return;
     setSalvando(true);
@@ -287,11 +308,13 @@ export default function TarefasClient() {
           responsavel_id: responsavelId || undefined,
           tags: novaForm.tags ? novaForm.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
           tipo: novaForm.tipo || undefined,
+          ordem_id: ordemIdResolvido ?? undefined,
         }),
       });
       setShowNova(false);
       setNovaForm({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "", tipo: "" });
       setResponsavelId("");
+      setTemOrdem(null); setNumeroOrdem(""); setOrdemIdResolvido(null); setOrdemErro("");
       carregar();
     } catch { /* silencioso */ }
     setSalvando(false);
@@ -436,6 +459,39 @@ export default function TarefasClient() {
               <option value="protocolo_metal">Protocolo de Metal</option>
               <option value="geral">Geral</option>
             </select>
+            {novaForm.tipo === "protocolo_metal" && (
+              <div className="rounded-xl border p-3 space-y-2" style={{ borderColor: C.cremeBorder, backgroundColor: "#f9f6f1" }}>
+                <p className="text-xs font-semibold" style={{ color: C.esmeralda }}>Esta entrega tem uma ordem vinculada?</p>
+                <div className="flex gap-2">
+                  <button type="button"
+                    onClick={() => { setTemOrdem(true); }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${temOrdem === true ? "text-white" : "text-gray-500 bg-white"}`}
+                    style={temOrdem === true ? { backgroundColor: C.esmeralda, borderColor: C.esmeralda } : { borderColor: C.cremeBorder }}>
+                    Sim
+                  </button>
+                  <button type="button"
+                    onClick={() => { setTemOrdem(false); setNumeroOrdem(""); setOrdemIdResolvido(null); setOrdemErro(""); }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${temOrdem === false ? "text-white" : "text-gray-500 bg-white"}`}
+                    style={temOrdem === false ? { backgroundColor: "#6B7280", borderColor: "#6B7280" } : { borderColor: C.cremeBorder }}>
+                    Não
+                  </button>
+                </div>
+                {temOrdem === true && (
+                  <div className="flex gap-2 items-center">
+                    <input type="text" placeholder="Nº da ordem (ex: C-1865)"
+                      value={numeroOrdem}
+                      onChange={e => { setNumeroOrdem(e.target.value); setOrdemIdResolvido(null); setOrdemErro(""); }}
+                      onBlur={() => buscarOrdem(numeroOrdem)}
+                      className="flex-1 px-3 py-2 border rounded-lg text-sm outline-none"
+                      style={{ borderColor: ordemErro ? "#EF4444" : ordemIdResolvido ? "#10B981" : C.cremeBorder }}
+                    />
+                    {ordemBuscando && <span className="text-xs text-gray-400">Buscando...</span>}
+                    {ordemIdResolvido && <span className="text-xs font-semibold text-green-600">✓ ID {ordemIdResolvido}</span>}
+                    {ordemErro && <span className="text-xs text-red-500">{ordemErro}</span>}
+                  </div>
+                )}
+              </div>
+            )}
             <textarea placeholder="Descrição (opcional)" rows={2}
               value={novaForm.descricao} onChange={e => setNovaForm({ ...novaForm, descricao: e.target.value })}
               className="w-full px-3 py-2.5 border rounded-xl text-sm outline-none resize-none"
