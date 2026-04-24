@@ -101,17 +101,6 @@ export async function POST(
     return NextResponse.json({ error: "Preços obrigatórios" }, { status: 400 });
   }
 
-  // ── Validação de desconto por role ─────────────────────────────────────────
-  const [usuarioItem] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-  const roleItem = usuarioItem?.role ?? "";
-  const pctDescItem = body.pct_desconto ?? 0;
-  if (roleItem === "consultora" && pctDescItem > 15) {
-    return NextResponse.json({ error: "Consultora pode conceder no máximo 15% de desconto." }, { status: 400 });
-  }
-  if (!["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "diretor"].includes(roleItem) && pctDescItem > 30) {
-    return NextResponse.json({ error: "Desconto acima de 30% requer aprovação de admin ou gerente." }, { status: 400 });
-  }
-
   // ── Personalizacao: valida contra config do produto (se existir) ────────────
   // Alem disso, se config tem preco_por_letra > 0, RECALCULA preco_unitario/
   // total_item server-side (seguranca — body pode vir adulterado).
