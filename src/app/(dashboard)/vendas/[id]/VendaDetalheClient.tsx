@@ -321,6 +321,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [newPagBandeira, setNewPagBandeira] = useState("Outro");
   const [newPagParcelas, setNewPagParcelas] = useState(1);
   const [newPagCondicao, setNewPagCondicao] = useState("À vista");
+  const [newPagValeNumero, setNewPagValeNumero] = useState("");
   const [parcelasRows, setParcelasRows] = useState<ParcelaRow[]>([]);
   const [multPagForma, setMultPagForma] = useState("Dinheiro");
   const [multPagValor, setMultPagValor] = useState("");
@@ -816,6 +817,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas };
       if (newPagForma === "Cartão de Crédito") {
         body.gateway = newPagGateway;
+      }
+      if (newPagForma === "Vale-Troca") {
+        body.vale_numero = newPagValeNumero.trim();
       }
       const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2721,6 +2725,19 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           </Select>
                         </div>
                       </>
+                    )}
+                    {newPagForma === "Vale-Troca" && (
+                      <div>
+                        <Label>Número do Vale</Label>
+                        <input
+                          type="text"
+                          value={newPagValeNumero}
+                          onChange={e => setNewPagValeNumero(e.target.value.toUpperCase())}
+                          placeholder="VT-00001"
+                          className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none"
+                          style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                        />
+                      </div>
                     )}
                     <div>
                       <Label>Valor</Label>
