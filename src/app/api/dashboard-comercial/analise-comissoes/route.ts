@@ -74,18 +74,29 @@ export async function GET(req: NextRequest) {
       tabelaMap.set(c.id, Array.isArray(t) ? (t as DashComissaoFaixa[]) : []);
     }
 
-    // 3. Vale-troca agregado por consultora no período
-    const valesPorConsultora = await sql<Array<{ vendedor_id: number; total: string }>>`
-      SELECT v.vendedor_id, COALESCE(SUM(p.valor), 0)::text AS total
+    // 3. Total realizado por consultora no nível do pedido (igual à Performance)
+    const totaisPedido = await sql<Array<{ vendedor_id: number; total_venda: string; vale_troca: string }>>`
+      SELECT
+        v.vendedor_id,
+        SUM(v.total_venda)::text          AS total_venda,
+        SUM(v.valor_vale_troca)::text     AS vale_troca
       FROM alissonerp.vw_dash_vendas_todas v
-      JOIN alissonerp.vw_dash_parcelas_pedidos p ON p.pedido_id_api = v.id_api_tiny
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status = 2
-        AND p.forma_pagamento = 'Vale-troca'
+        AND v.vendedor_id IS NOT NULL
       GROUP BY v.vendedor_id
     `;
+    const totaisPedidoMap = new Map<number, { bruto: number; vale: number }>();
+    totaisPedido.forEach((v) =>
+      totaisPedidoMap.set(Number(v.vendedor_id), {
+        bruto: Number(v.total_venda),
+        vale: Number(v.vale_troca),
+      }),
+    );
+
+    // vale-troca já vem dentro de totaisPedidoMap
     const valesMap = new Map<number, number>();
-    valesPorConsultora.forEach((v) => valesMap.set(v.vendedor_id, Number(v.total)));
+    totaisPedido.forEach((v) => valesMap.set(Number(v.vendedor_id), Number(v.vale_troca)));
 
     // 4. Meta Prata por consultora do período (para verificar se está dentro da meta)
     const metasPrata = await sql<Array<{ consultora: string; total: string }>>`
@@ -157,7 +168,6 @@ export async function GET(req: NextRequest) {
       }
       const r = resumoMap.get(i.id_vendedor)!;
       r.total_desejado += precoCheio;
-      r.total_realizado += precoTotal;
       r.comissao_ganha += comissaoGanha;
       r.comissao_perdida += comissaoPerdida;
       r.media_desconto += descontoPerc;
@@ -165,15 +175,16 @@ export async function GET(req: NextRequest) {
       r.qtd_itens += 1;
     }
 
-    // Subtrai vale-troca, calcula médias, verifica meta
+    // Usa total do pedido (igual à Performance) para total_realizado e vale_troca
     for (const r of resumoMap.values()) {
-      r.valor_vale_troca = valesMap.get(r.id_vendedor) ?? 0;
-      r.total_realizado -= r.valor_vale_troca;
+      const pedido = totaisPedidoMap.get(r.id_vendedor);
+      r.valor_vale_troca = pedido?.vale ?? 0;
+      r.total_realizado = (pedido?.bruto ?? 0) - r.valor_vale_troca;
       r.media_desconto = safeDiv(r.media_desconto, r.qtd_itens);
       r.media_comissao = safeDiv(r.media_comissao, r.qtd_itens);
       r.esta_dentro_meta = r.meta_prata > 0 && r.total_realizado >= r.meta_prata;
       r.comissao_na_meta = r.esta_dentro_meta ? r.comissao_ganha : 0;
-      r.comissao_fora_meta = r.comissao_ganha * 0.5; // regra 50% fora da meta
+      r.comissao_fora_meta = r.comissao_ganha * 0.5;
     }
 
     const resumo = Array.from(resumoMap.values()).sort((a, b) => b.total_realizado - a.total_realizado);
