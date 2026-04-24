@@ -17,5 +17,7 @@ export default async function ProdutosPage() {
 
   if (!(await temAcessoModulo(role ?? "", "produtos", "ler"))) redirect("/");
 
-  return <ProdutosClient />;
+  const podeEditar = await temAcessoModulo(role ?? "", "produtos", "escrever");
+
+  return <ProdutosClient podeEditar={podeEditar} />;
 }

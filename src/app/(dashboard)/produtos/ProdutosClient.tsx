@@ -134,7 +134,7 @@ function SortHeader({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ProdutosClient() {
+export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boolean }) {
   // Filters
   const [busca, setBusca] = useState("");
   const [tipoMetal, setTipoMetal] = useState("");
@@ -845,6 +845,7 @@ export default function ProdutosClient() {
         produtoId={selectedId}
         onClose={() => setSelectedId(null)}
         onSaved={() => { fetchProdutos(); bumpRefresh(); }}
+        podeEditar={podeEditar}
       />
 
       {/* Modal de Cadastro */}

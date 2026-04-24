@@ -104,6 +104,7 @@ interface Props {
   produtoId: number | null;
   onClose: () => void;
   onSaved?: () => void;
+  podeEditar?: boolean;
 }
 
 // ─── Design constants ─────────────────────────────────────────────────────────
@@ -442,7 +443,7 @@ function BomRowForm({ produtoId, item, insumos, onSaved, onCancel }: BomRowFormP
 
 // ─── Main Drawer ──────────────────────────────────────────────────────────────
 
-export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
+export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar = true }: Props) {
   const aberto = produtoId !== null;
 
   const [produto, setProduto] = useState<ProdutoDetalhe | null>(null);
@@ -832,6 +833,13 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
             <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 rounded-lg px-3 py-2.5 border border-red-100">
               <AlertCircle size={14} />
               {error}
+            </div>
+          )}
+
+          {produto && !podeEditar && (
+            <div className="mx-5 mt-3 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2"
+              style={{ backgroundColor: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" }}>
+              <span>🔒</span> Acesso somente leitura — você não pode editar produtos.
             </div>
           )}
 
@@ -1625,7 +1633,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
         </div>
 
         {/* Footer — Save */}
-        {produto && (
+        {produto && podeEditar && (
           <div
             className="shrink-0 px-5 py-4 border-t bg-white"
             style={{ borderColor: C.cremeBorder }}
