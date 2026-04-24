@@ -296,7 +296,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
             >
               {ordem.numero_ordem || `Ordem #${ordem.id}`}
             </h2>
-            <Badge label={ordem.status} size="lg" />
+            <Badge label={ordem.situacao === "cancelado" ? "cancelado" : ordem.status} size="lg" />
             {ordem.pcp_bloqueado && (
               <span
                 className="px-2 py-0.5 rounded text-[11px] font-semibold"
