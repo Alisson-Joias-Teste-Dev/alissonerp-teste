@@ -99,15 +99,17 @@ export async function GET(req: NextRequest) {
     const consultorasMap = new Map<number, ResumoConsultora>();
 
     // Agregar vendas por consultora
+    // Normaliza vendedor_id para Number() — bigint do postgres.js chega como string
     for (const v of vendas) {
       if (!v.vendedor_id) continue;
+      const vid = Number(v.vendedor_id);
       const totalBruto = Number(v.total_venda ?? 0);
       const valorVale = Number(v.valor_vale_troca ?? 0);
       const totalLiquido = totalBruto - valorVale;
 
-      if (!consultorasMap.has(v.vendedor_id)) {
-        consultorasMap.set(v.vendedor_id, {
-          id_vendedor: v.vendedor_id,
+      if (!consultorasMap.has(vid)) {
+        consultorasMap.set(vid, {
+          id_vendedor: vid,
           nome: v.vendedor_nome ?? "Não informada",
           foto: v.vendedor_foto,
           alcancado_periodo: 0,
@@ -122,7 +124,7 @@ export async function GET(req: NextRequest) {
           },
         });
       }
-      const c = consultorasMap.get(v.vendedor_id)!;
+      const c = consultorasMap.get(vid)!;
       c.alcancado_bruto += totalBruto;
       c.alcancado_periodo += totalLiquido;
       c.valor_vale_troca += valorVale;

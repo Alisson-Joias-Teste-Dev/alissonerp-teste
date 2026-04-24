@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
         const totalVale = Number(v.total_vale_troca);
         const liquido = totalBruto - totalVale;
         const qtd = Number(v.qtd);
-        const meta = metasMap.get(v.vendedor_id) ?? { Prata: 0, Ouro: 0, Diamante: 0 };
+        const meta = metasMap.get(Number(v.vendedor_id)) ?? { Prata: 0, Ouro: 0, Diamante: 0 };
         const percPrata = safeDiv(liquido, meta.Prata) * 100;
         const percOuro = safeDiv(liquido, meta.Ouro) * 100;
         const percDiamante = safeDiv(liquido, meta.Diamante) * 100;
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
 
         return {
           posicao: 0, // preenchido após ordenação
-          id_vendedor: v.vendedor_id,
+          id_vendedor: Number(v.vendedor_id),
           nome: v.nome ?? "Não informada",
           foto: v.foto,
           total_vendas: totalBruto,

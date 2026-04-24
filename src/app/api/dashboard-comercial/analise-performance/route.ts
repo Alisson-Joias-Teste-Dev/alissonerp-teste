@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
       GROUP BY v.vendedor_id
     `;
     const vendasHojeMap = new Map<number, number>();
-    for (const v of vendasHoje) vendasHojeMap.set(v.vendedor_id, Number(v.total));
+    for (const v of vendasHoje) vendasHojeMap.set(Number(v.vendedor_id), Number(v.total));
 
     // ---------- Metas: 4 agregações ----------
     // 1. Acumulada até refDate (agora) dentro do mês → cenário mensal-acumulado
@@ -64,8 +64,9 @@ export async function GET(req: NextRequest) {
     const metasHojeTotal = await aggMetasDia(sql, refDate, "dia_total");
 
     // Monta Map base com todas consultoras com vendas OU metas
+    // Normaliza para Number() — bigint do postgres.js chega como string
     const idsConsultoras = new Set<number>();
-    vendasPeriodo.forEach((v) => idsConsultoras.add(v.vendedor_id));
+    vendasPeriodo.forEach((v) => idsConsultoras.add(Number(v.vendedor_id)));
     [metasMesAcumulado, metasMesTotal, metasHojeAcumulado, metasHojeTotal].forEach((group) =>
       group.forEach((m) => idsConsultoras.add(Number(m.consultora))),
     );
@@ -77,7 +78,7 @@ export async function GET(req: NextRequest) {
       WHERE id_vendedor = ANY(${Array.from(idsConsultoras)}::bigint[])
     `;
     const infoMap = new Map<number, { nome: string | null; foto: string | null }>();
-    vendedoresInfo.forEach((v) => infoMap.set(v.id_vendedor, { nome: v.nome, foto: v.foto }));
+    vendedoresInfo.forEach((v) => infoMap.set(Number(v.id_vendedor), { nome: v.nome, foto: v.foto }));
 
     // Monta os 4 cenários
     const cenarios: Record<string, ResumoPerformance[]> = {
@@ -88,7 +89,7 @@ export async function GET(req: NextRequest) {
     };
 
     for (const id of idsConsultoras) {
-      const vendaLinha = vendasPeriodo.find((v) => v.vendedor_id === id);
+      const vendaLinha = vendasPeriodo.find((v) => Number(v.vendedor_id) === id);
       const alcancadoPeriodo = vendaLinha ? Number(vendaLinha.total) : 0;
       const qtd = vendaLinha ? Number(vendaLinha.qtd) : 0;
       const vendasHoje = vendasHojeMap.get(id) ?? 0;
