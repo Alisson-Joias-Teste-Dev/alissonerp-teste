@@ -39,6 +39,13 @@ SELECT
   ), 0)::numeric                                      AS valor_vale_troca
 
 FROM public.vendas v
+-- Exclui entradas que já existem no ERP (evita dupla contagem quando Tiny sincroniza de volta)
+WHERE NOT EXISTS (
+  SELECT 1 FROM alissonerp.vendas_erp ve
+  WHERE ve.tiny_pedido_id = v.id_api_tiny
+    AND ve.situacao IN ('aprovado', 'enviado', 'concluido')
+    AND ve.tiny_pedido_id IS NOT NULL
+)
 
 UNION ALL
 
