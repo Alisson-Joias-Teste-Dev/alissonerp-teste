@@ -68,6 +68,7 @@ SELECT
   SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE 0 END) AS total_entradas,
   SUM(CASE WHEN m.tipo = 'saida'   THEN m.quantidade ELSE 0 END) AS total_saidas,
   SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END) AS saldo_atual,
+  SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END) AS saldo,
   COALESCE((
     SELECT SUM(r.quantidade) FROM alissonerp.reservas_estoque_comercial r
     WHERE r.produto_id = m.produto_id AND r.status = 'ativo'
