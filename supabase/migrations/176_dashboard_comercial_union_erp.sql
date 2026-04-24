@@ -75,10 +75,12 @@ SELECT
 
 FROM alissonerp.vendas_erp ve
 WHERE ve.situacao IN ('aprovado', 'enviado', 'concluido')
+  AND ve.data_venda >= '2026-04-23'
 ;
 
 GRANT SELECT ON alissonerp.vw_dash_vendas_todas TO anon, authenticated, service_role;
 
 COMMENT ON VIEW alissonerp.vw_dash_vendas_todas IS
   'Dashboard Comercial: vendas unificadas legado (public.vendas) + ERP (vendas_erp). '
+  'ERP inclui apenas vendas >= 2026-04-23 (data em que o ERP tornou-se sistema primário). '
   'valor_vale_troca pré-computado por fonte. ERP inclui situacao aprovado/enviado/concluido.';
