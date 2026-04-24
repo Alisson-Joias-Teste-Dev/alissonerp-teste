@@ -42,11 +42,12 @@ export async function GET(req: NextRequest) {
         comissao_tabela_id: number | null;
       }>
     >`
+      -- Itens legado
       SELECT
         i.id,
         i.venda_id,
         v.data_venda::text,
-        v.numero_pedido::text,
+        v.numero_pedido_tiny AS numero_pedido,
         i.sku,
         COALESCE(i.quantidade, 0)::text AS quantidade,
         i.preco_tabela,
@@ -62,6 +63,31 @@ export async function GET(req: NextRequest) {
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status = 2
         AND v.vendedor_id IS NOT NULL
+
+      UNION ALL
+
+      -- Itens ERP (a partir de 23/04/2026)
+      SELECT
+        ie.id,
+        ie.venda_id,
+        ve.data_venda::text,
+        COALESCE(ve.tiny_pedido_id::text, ve.numero_venda) AS numero_pedido,
+        ie.sku,
+        ie.quantidade::text,
+        ie.preco_lista AS preco_tabela,
+        ie.total_item::text AS preco_total,
+        ie.pct_comissao::text AS comissao_percentual,
+        ve.vendedor_id AS id_vendedor,
+        vd.nome AS consultora,
+        vd.foto,
+        vd.comissao AS comissao_tabela_id
+      FROM alissonerp.itens_venda_erp ie
+      JOIN alissonerp.vendas_erp ve ON ve.id = ie.venda_id
+        AND ve.situacao IN ('aprovado', 'enviado', 'concluido')
+        AND ve.data_venda >= '2026-04-23'
+      LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = ve.vendedor_id
+      WHERE ve.data_venda BETWEEN ${from}::date AND ${to}::date
+        AND ve.vendedor_id IS NOT NULL
     `;
 
     // 2. Tabelas de comissão disponíveis
