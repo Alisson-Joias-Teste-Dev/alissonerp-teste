@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     // Vendas realizadas no período (para calcular conversão)
     const vendasPorConsultora = await sql<Array<{ vendedor_id: number; qtd: number }>>`
       SELECT vendedor_id, COUNT(*)::int AS qtd
-      FROM alissonerp.vw_dash_vendas
+      FROM alissonerp.vw_dash_vendas_todas
       WHERE data_venda BETWEEN ${from}::date AND ${to}::date
         AND status = 2
         AND vendedor_id IS NOT NULL

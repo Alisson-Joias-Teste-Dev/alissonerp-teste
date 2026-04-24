@@ -25,12 +25,9 @@ export async function GET(req: NextRequest) {
 
     const [atual] = await sql<Array<{ total: string; qtd: string }>>`
       SELECT
-        COALESCE(SUM(v.total_venda - COALESCE((
-          SELECT SUM(p.valor) FROM alissonerp.vw_dash_parcelas_pedidos p
-          WHERE p.pedido_id_api = v.id_api_tiny AND p.forma_pagamento = 'Vale-troca'
-        ), 0)), 0)::text AS total,
+        COALESCE(SUM(v.total_venda - v.valor_vale_troca), 0)::text AS total,
         COUNT(*)::text AS qtd
-      FROM alissonerp.vw_dash_vendas v
+      FROM alissonerp.vw_dash_vendas_todas v
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status = 2
     `;
