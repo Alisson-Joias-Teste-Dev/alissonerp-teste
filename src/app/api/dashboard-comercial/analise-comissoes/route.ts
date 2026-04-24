@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
         vd.foto,
         vd.comissao AS comissao_tabela_id
       FROM alissonerp.vw_dash_itens_venda i
-      JOIN alissonerp.vw_dash_vendas v ON v.id = i.venda_id
+      JOIN alissonerp.vw_dash_vendas_todas v ON v.id = i.venda_id AND v.fonte = 'legado'
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = v.vendedor_id
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status = 2
@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
     // 3. Vale-troca agregado por consultora no período
     const valesPorConsultora = await sql<Array<{ vendedor_id: number; total: string }>>`
       SELECT v.vendedor_id, COALESCE(SUM(p.valor), 0)::text AS total
-      FROM alissonerp.vw_dash_vendas v
+      FROM alissonerp.vw_dash_vendas_todas v
       JOIN alissonerp.vw_dash_parcelas_pedidos p ON p.pedido_id_api = v.id_api_tiny
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status = 2
@@ -108,7 +108,8 @@ export async function GET(req: NextRequest) {
       const precoTabela = Number(i.preco_tabela ?? 0);
       const precoTotal = Number(i.preco_total);
       const precoCheio = precoTabela * qtd;
-      const descontoPerc = precoCheio > 0 ? ((precoCheio - precoTotal) / precoCheio) * 100 : 0;
+      // Se preco_tabela está desatualizado (menor que o vendido), ignora o desconto
+      const descontoPerc = precoCheio > 0 && precoCheio >= precoTotal ? ((precoCheio - precoTotal) / precoCheio) * 100 : 0;
       const comissaoPerc = Number(i.comissao_percentual);
       const comissaoGanha = (precoTotal * comissaoPerc) / 100;
 
