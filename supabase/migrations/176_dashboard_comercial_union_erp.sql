@@ -40,12 +40,21 @@ SELECT
 
 FROM public.vendas v
 -- Exclui entradas que já existem no ERP (evita dupla contagem quando Tiny sincroniza de volta)
+-- Exclui também vendas legado pendentes (status≠2) cujo pedido foi concluído pelo ERP
 WHERE NOT EXISTS (
   SELECT 1 FROM alissonerp.vendas_erp ve
-  WHERE ve.tiny_pedido_id = v.id_api_tiny
-    AND ve.situacao IN ('aprovado', 'enviado', 'concluido')
+  WHERE ve.situacao IN ('aprovado', 'enviado', 'concluido')
     AND ve.tiny_pedido_id IS NOT NULL
+    AND ve.tiny_pedido_id = v.id_api_tiny
     AND ve.data_venda >= '2026-04-23'
+)
+AND NOT EXISTS (
+  SELECT 1 FROM alissonerp.vendas_erp ve2
+  WHERE ve2.situacao IN ('aprovado', 'enviado', 'concluido')
+    AND ve2.tiny_pedido_id IS NULL
+    AND ve2.numero_venda = v.numero_pedido::text
+    AND ve2.data_venda < '2026-04-23'
+    AND v.status != 2
 )
 
 UNION ALL
@@ -76,7 +85,21 @@ SELECT
 
 FROM alissonerp.vendas_erp ve
 WHERE ve.situacao IN ('aprovado', 'enviado', 'concluido')
-  AND ve.data_venda >= '2026-04-23'
+  AND (
+    ve.data_venda >= '2026-04-23'
+    OR (
+      -- Vendas antes de 23/04 cujo pedido no legado ficou pendente (status≠2)
+      -- Sem tiny_pedido_id = não sincronizou ao Tiny, pedido gerado internamente
+      ve.data_venda < '2026-04-23'
+      AND ve.tiny_pedido_id IS NULL
+      AND ve.total_venda > 0
+      AND EXISTS (
+        SELECT 1 FROM public.vendas v2
+        WHERE v2.numero_pedido::text = ve.numero_venda
+          AND v2.status != 2
+      )
+    )
+  )
 ;
 
 GRANT SELECT ON alissonerp.vw_dash_vendas_todas TO anon, authenticated, service_role;
