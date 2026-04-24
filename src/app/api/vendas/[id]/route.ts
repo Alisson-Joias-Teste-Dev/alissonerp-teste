@@ -189,6 +189,20 @@ export async function PATCH(
     }
   }
 
+  // ── data_entrega obrigatória para aprovar ou confirmar ───────────────────
+  if (body.situacao === "aprovado" || body.situacao === "confirmado") {
+    const [vendaEntrega] = await sql`
+      SELECT data_entrega FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    `;
+    const dataEntregaFinal = body.data_entrega ?? vendaEntrega?.data_entrega;
+    if (!dataEntregaFinal) {
+      return NextResponse.json(
+        { error: "Data de entrega é obrigatória para aprovar a venda." },
+        { status: 400 }
+      );
+    }
+  }
+
   // ── Bloquear aprovação se tem Manual (MP) pendente ───────────────────────
   if (body.situacao === "aprovado") {
     const [mpPendente] = await sql`
@@ -210,6 +224,25 @@ export async function PATCH(
       { error: "Venda aguarda aprovação pendente. Aprove via aba Tarefas antes de prosseguir." },
       { status: 409 }
     );
+  }
+  // ── Bloquear aprovação se há pagamento A Receber sem aprovação de crédito ──
+  if (body.situacao === "aprovado") {
+    const [aReceberPend] = await sql`
+      SELECT COALESCE(SUM(valor), 0)::numeric AS total
+      FROM alissonerp.pagamentos_venda
+      WHERE venda_id = ${vendaId} AND forma = 'A Receber' AND status = 'pendente'
+    `;
+    const [vendaCredTipo] = await sql`
+      SELECT aprovacao_credito_tipo FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    `;
+    const totalAReceber = Number(aReceberPend?.total ?? 0);
+    const aprovacaoTipo = vendaCredTipo?.aprovacao_credito_tipo;
+    if (totalAReceber > 0 && (!aprovacaoTipo || aprovacaoTipo === "pendente")) {
+      return NextResponse.json(
+        { error: "Venda com crédito a receber precisa de aprovação antes de ser aprovada." },
+        { status: 400 }
+      );
+    }
   }
   // ── Bloquear aprovação se desconto >30% sem aprovação (não-admin/dev) ────
   if (body.situacao === "aprovado" && !["desenvolvedor", "admin"].includes(usuario.role)) {

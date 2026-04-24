@@ -119,31 +119,43 @@ export async function POST(
     if (!body.ouro_foto_path)
       return NextResponse.json({ error: "Foto da balança obrigatória para pagamento em ouro" }, { status: 400 });
 
-    const valorOuro = +(body.ouro_peso * body.ouro_valor_grama).toFixed(2);
+    const ouroPeso      = body.ouro_peso!;
+    const ouroValGrama  = body.ouro_valor_grama!;
+    const ouroFotoPath  = body.ouro_foto_path!;
+    const valorOuro = +(ouroPeso * ouroValGrama).toFixed(2);
 
-    // Guard: venda já totalmente paga
-    const [tot] = await sql`
-      SELECT v.total_venda::numeric AS total_venda,
-             COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado'), 0)::numeric AS soma_confirmados
-      FROM alissonerp.vendas_erp v
-      LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
-      WHERE v.id = ${vendaId}
-      GROUP BY v.total_venda
-    `;
-    if (tot && Number(tot.soma_confirmados) + 0.01 >= Number(tot.total_venda)) {
-      return NextResponse.json({ error: "Venda já está totalmente paga" }, { status: 409 });
+    let novoOuroId!: number;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (sql as any).begin(async (tx: typeof sql) => {
+        const [vendaLock] = await tx`
+          SELECT total_venda,
+                 COALESCE((
+                   SELECT SUM(p.valor) FROM alissonerp.pagamentos_venda p
+                   WHERE p.venda_id = ${vendaId} AND p.status = 'confirmado'
+                 ), 0)::numeric AS soma_confirmados
+          FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+          FOR UPDATE
+        `;
+        if (Number(vendaLock.soma_confirmados) + valorOuro > Number(vendaLock.total_venda) + 0.01) {
+          throw new Error("Pagamento em ouro ultrapassa o total da venda");
+        }
+        const [novoOuro] = await tx`
+          INSERT INTO alissonerp.pagamentos_venda
+            (venda_id, forma, valor, parcelas, status, data_confirmacao,
+             ouro_peso, ouro_valor_grama, ouro_foto_path)
+          VALUES
+            (${vendaId}, 'Ouro', ${valorOuro}, 1, 'confirmado', now(),
+             ${ouroPeso}, ${ouroValGrama}, ${ouroFotoPath})
+          RETURNING id
+        `;
+        novoOuroId = novoOuro.id;
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro ao registrar pagamento em ouro";
+      return NextResponse.json({ error: msg }, { status: 409 });
     }
-
-    const [novoOuro] = await sql`
-      INSERT INTO alissonerp.pagamentos_venda
-        (venda_id, forma, valor, parcelas, status, data_confirmacao,
-         ouro_peso, ouro_valor_grama, ouro_foto_path)
-      VALUES
-        (${vendaId}, 'Ouro', ${valorOuro}, 1, 'confirmado', now(),
-         ${body.ouro_peso}, ${body.ouro_valor_grama}, ${body.ouro_foto_path})
-      RETURNING id
-    `;
-    return NextResponse.json({ id: novoOuro.id, valor: valorOuro }, { status: 201 });
+    return NextResponse.json({ id: novoOuroId, valor: valorOuro }, { status: 201 });
   }
 
   const isDinheiro = body.forma === 'Dinheiro';
