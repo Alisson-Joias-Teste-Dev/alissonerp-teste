@@ -33,6 +33,7 @@ import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
 import { aplicarCurvaProduto } from "@/lib/aplicar-curva-produto";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
 import { uploadFile, ensureBucket } from "@/lib/storage";
+import { dispararWebhookBackground } from "@/lib/webhooks-server";
 
 // ── Helpers para geração de variações ─────────────────────────────────────────
 
@@ -831,6 +832,15 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.warn("[POST /api/produtos] falha ao enfileirar sync Tiny:", err);
     }
+
+    // Notifica o site em background
+    dispararWebhookBackground("produto_criado_site", {
+      evento: "produto.criado",
+      produto_id: result.pai?.id_produto,
+      nome: result.pai?.nome,
+      situacao: result.pai?.situacao,
+      timestamp: new Date().toISOString(),
+    });
 
     return NextResponse.json(
       {

@@ -12,6 +12,7 @@ import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
 import { aplicarCurvaProduto } from "@/lib/aplicar-curva-produto";
 import { uploadFile, ensureBucket } from "@/lib/storage";
+import { dispararWebhookBackground } from "@/lib/webhooks-server";
 
 export async function GET(
   _req: NextRequest,
@@ -626,6 +627,15 @@ export async function PATCH(
     } catch (err) {
       console.warn("[PATCH /api/produtos/[id]] falha ao enfileirar sync Tiny:", err);
     }
+
+    // Notifica o site em background (não bloqueia resposta)
+    dispararWebhookBackground("produto_atualizado_site", {
+      evento: "produto.atualizado",
+      produto_id: produtoId,
+      nome: produto?.nome,
+      situacao: produto?.situacao,
+      timestamp: new Date().toISOString(),
+    });
 
     return NextResponse.json({ produto });
   } catch (err) {
