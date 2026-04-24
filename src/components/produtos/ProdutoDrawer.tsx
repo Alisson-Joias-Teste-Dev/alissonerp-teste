@@ -822,7 +822,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6 pb-28">
+        <div className={`flex-1 overflow-y-auto px-5 py-5 space-y-6 pb-28 ${!podeEditar ? "pointer-events-none select-none" : ""}`}>
           {loading && (
             <div className="flex items-center justify-center py-16">
               <Loader2 size={24} className="animate-spin text-gray-300" />
