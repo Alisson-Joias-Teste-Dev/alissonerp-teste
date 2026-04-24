@@ -45,6 +45,7 @@ WHERE NOT EXISTS (
   WHERE ve.tiny_pedido_id = v.id_api_tiny
     AND ve.situacao IN ('aprovado', 'enviado', 'concluido')
     AND ve.tiny_pedido_id IS NOT NULL
+    AND ve.data_venda >= '2026-04-23'
 )
 
 UNION ALL
