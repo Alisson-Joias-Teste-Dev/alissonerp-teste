@@ -16,6 +16,7 @@ export interface DashVendedor {
 }
 
 export interface DashVenda {
+  fonte: string;
   id: number;
   data_venda: string | null;
   status: number | null;

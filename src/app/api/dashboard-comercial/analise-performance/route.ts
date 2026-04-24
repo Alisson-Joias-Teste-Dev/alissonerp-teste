@@ -26,17 +26,14 @@ export async function GET(req: NextRequest) {
   const refDate = params.get("refDate") ?? hoje.toISOString().slice(0, 10);
 
   try {
-    // ---------- Vendas do período (mês) e de hoje (por consultora) ----------
+    // ---------- Vendas do período (mês) e de hoje (legado + ERP, vale-troca pré-computado) ----------
     const vendasPeriodo = await sql<
       Array<{ vendedor_id: number; nome: string | null; foto: string | null; total: string; qtd: string }>
     >`
       SELECT v.vendedor_id, vd.nome, vd.foto,
-             SUM(v.total_venda - COALESCE((
-               SELECT SUM(p.valor) FROM alissonerp.vw_dash_parcelas_pedidos p
-               WHERE p.pedido_id_api = v.id_api_tiny AND p.forma_pagamento = 'Vale-troca'
-             ), 0))::text AS total,
+             SUM(v.total_venda - v.valor_vale_troca)::text AS total,
              COUNT(*)::text AS qtd
-      FROM alissonerp.vw_dash_vendas v
+      FROM alissonerp.vw_dash_vendas_todas v
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = v.vendedor_id
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status = 2 AND v.vendedor_id IS NOT NULL
@@ -47,11 +44,8 @@ export async function GET(req: NextRequest) {
       Array<{ vendedor_id: number; total: string }>
     >`
       SELECT v.vendedor_id,
-             SUM(v.total_venda - COALESCE((
-               SELECT SUM(p.valor) FROM alissonerp.vw_dash_parcelas_pedidos p
-               WHERE p.pedido_id_api = v.id_api_tiny AND p.forma_pagamento = 'Vale-troca'
-             ), 0))::text AS total
-      FROM alissonerp.vw_dash_vendas v
+             SUM(v.total_venda - v.valor_vale_troca)::text AS total
+      FROM alissonerp.vw_dash_vendas_todas v
       WHERE v.data_venda = ${refDate}::date
         AND v.status = 2 AND v.vendedor_id IS NOT NULL
       GROUP BY v.vendedor_id

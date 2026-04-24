@@ -25,9 +25,10 @@ export async function GET(req: NextRequest) {
   const to = params.get("to") ?? hoje.toISOString().slice(0, 10);
 
   try {
-    // ---------------- 1. Vendas do período (com vale-troca agregado) ----------------
+    // ---------------- 1. Vendas do período (legado + ERP, vale-troca pré-computado) ----------------
     const vendas = await sql<
       Array<{
+        fonte: string;
         id: number;
         data_venda: string | null;
         status: number | null;
@@ -36,7 +37,6 @@ export async function GET(req: NextRequest) {
         total_venda: string | null;
         frete_pago_cliente: string | null;
         forma_envio_id: number | null;
-        numero_pedido: string | null;
         numero_pedido_tiny: string | null;
         id_api_tiny: string | null;
         vendedor_nome: string | null;
@@ -46,6 +46,7 @@ export async function GET(req: NextRequest) {
       }>
     >`
       SELECT
+        v.fonte,
         v.id,
         v.data_venda::text,
         v.status,
@@ -54,19 +55,13 @@ export async function GET(req: NextRequest) {
         v.total_venda,
         v.frete_pago_cliente,
         v.forma_envio_id,
-        v.numero_pedido::text,
         v.numero_pedido_tiny,
         v.id_api_tiny::text,
         vd.nome  AS vendedor_nome,
         vd.foto  AS vendedor_foto,
         c.nome   AS cliente_nome,
-        COALESCE((
-          SELECT SUM(p.valor)
-          FROM alissonerp.vw_dash_parcelas_pedidos p
-          WHERE p.pedido_id_api = v.id_api_tiny
-            AND p.forma_pagamento = 'Vale-troca'
-        ), 0) AS valor_vale_troca
-      FROM alissonerp.vw_dash_vendas v
+        v.valor_vale_troca
+      FROM alissonerp.vw_dash_vendas_todas v
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = v.vendedor_id
       LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
@@ -225,6 +220,7 @@ export async function GET(req: NextRequest) {
       },
       tabelaConsultoras,
       vendasBrutas: vendas.map<DashVendaComVendedor>((v) => ({
+        fonte: v.fonte,
         id: v.id,
         data_venda: v.data_venda,
         status: v.status,
@@ -235,7 +231,7 @@ export async function GET(req: NextRequest) {
         frete_pago_cliente: Number(v.frete_pago_cliente ?? 0),
         forma_envio_id: v.forma_envio_id,
         forma_frete_id: null,
-        numero_pedido: v.numero_pedido ? Number(v.numero_pedido) : null,
+        numero_pedido: null,
         numero_pedido_tiny: v.numero_pedido_tiny,
         id_api_tiny: v.id_api_tiny ? Number(v.id_api_tiny) : null,
         entregue: false,

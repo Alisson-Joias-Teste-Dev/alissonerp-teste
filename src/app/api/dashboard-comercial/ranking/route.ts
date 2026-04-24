@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const to = params.get("to") ?? hoje.toISOString().slice(0, 10);
 
   try {
-    // Vendas agregadas por consultora, com vale-troca descontado
+    // Vendas agregadas por consultora (legado + ERP), vale-troca pré-computado na view
     const vendas = await sql<
       Array<{
         vendedor_id: number;
@@ -31,15 +31,10 @@ export async function GET(req: NextRequest) {
         v.vendedor_id,
         vd.nome,
         vd.foto,
-        SUM(v.total_venda)::text AS total_bruto,
-        COALESCE(SUM((
-          SELECT COALESCE(SUM(p.valor), 0)
-          FROM alissonerp.vw_dash_parcelas_pedidos p
-          WHERE p.pedido_id_api = v.id_api_tiny
-            AND p.forma_pagamento = 'Vale-troca'
-        )), 0)::text AS total_vale_troca,
-        COUNT(*)::text AS qtd
-      FROM alissonerp.vw_dash_vendas v
+        SUM(v.total_venda)::text                AS total_bruto,
+        SUM(v.valor_vale_troca)::text           AS total_vale_troca,
+        COUNT(*)::text                          AS qtd
+      FROM alissonerp.vw_dash_vendas_todas v
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = v.vendedor_id
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status = 2

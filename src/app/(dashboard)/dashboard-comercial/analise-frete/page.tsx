@@ -83,8 +83,8 @@ export default function AnaliseFretePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {frete.data.vendas.map((v) => (
-                    <tr key={v.id} className="border-t" style={{ borderColor: P.cremeMuted }}>
+                  {frete.data.vendas.map((v, idx) => (
+                    <tr key={idx} className="border-t" style={{ borderColor: P.cremeMuted }}>
                       <td className="px-4 py-1.5" style={{ color: P.esmeralda }}>
                         {formatDateBR(v.data_venda)}
                       </td>
