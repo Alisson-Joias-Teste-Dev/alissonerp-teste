@@ -21,9 +21,10 @@ export async function GET(req: NextRequest) {
   try {
     const vendas = await sql<
       Array<{
+        fonte: string;
         id: number;
         data_venda: string;
-        numero_pedido: string | null;
+        numero_pedido_tiny: string | null;
         consultora: string | null;
         forma_envio: string | null;
         total_venda: string;
@@ -31,14 +32,15 @@ export async function GET(req: NextRequest) {
       }>
     >`
       SELECT
+        v.fonte,
         v.id,
         v.data_venda::text,
-        v.numero_pedido::text,
+        v.numero_pedido_tiny,
         vd.nome AS consultora,
-        fe.nome AS forma_envio,
+        COALESCE(fe.nome, v.forma_envio_texto, '—') AS forma_envio,
         COALESCE(v.total_venda, 0)::text AS total_venda,
         COALESCE(v.frete_pago_cliente, 0)::text AS frete_pago_cliente
-      FROM alissonerp.vw_dash_vendas v
+      FROM alissonerp.vw_dash_vendas_todas v
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = v.vendedor_id
       LEFT JOIN alissonerp.vw_dash_forma_envio fe ON fe.id = v.forma_envio_id
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
@@ -84,7 +86,7 @@ export async function GET(req: NextRequest) {
       vendas: vendas.map((v) => ({
         id: v.id,
         data_venda: v.data_venda,
-        numero_pedido: v.numero_pedido,
+        numero_pedido: v.numero_pedido_tiny,
         consultora: v.consultora ?? "Não informada",
         forma_envio: v.forma_envio ?? "N/A",
         total_venda: Number(v.total_venda),
