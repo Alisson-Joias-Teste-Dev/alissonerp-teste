@@ -53,10 +53,7 @@ export async function GET(req: NextRequest) {
     ) est ON est.produto_id = p.id_produto
     LEFT JOIN alissonerp.fichas_tecnicas_produto ftp ON ftp.produto_id = p.id_produto
     WHERE
-      ${servico
-        ? sql`p.sku ILIKE 'AS%' AND (p.sku ILIKE ${'%' + q + '%'} OR ${termos.map(t => sql`p.nome ILIKE ${'%' + t + '%'}`).reduce((a, b) => sql`${a} AND ${b}`)})`
-        : sql`(p.sku ILIKE ${'%' + q + '%'} OR ${termos.map(t => sql`p.nome ILIKE ${'%' + t + '%'}`).reduce((a, b) => sql`${a} AND ${b}`)})`
-      }
+      (p.sku ILIKE ${'%' + q + '%'} OR ${termos.map(t => sql`p.nome ILIKE ${'%' + t + '%'}`).reduce((a, b) => sql`${a} AND ${b}`)})
       AND (ep.eh_pai IS NULL OR ep.eh_pai = false)
     ORDER BY
       (p.situacao = 'A')                     DESC,
