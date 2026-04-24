@@ -342,6 +342,20 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
                         <span style={{ color: "#6B7280" }}>{tarefa.criador_nome}</span>
                       </div>
                     )}
+                    {tarefa.peso_metal != null && (
+                      <div className="flex items-center gap-3 text-sm">
+                        <span style={{ color: "#9CA3AF", fontSize: 14 }}>⚖</span>
+                        <span style={{ color: "#6B7280" }}>Metal enviado:</span>
+                        <span className="font-medium" style={{ color: "#1A1A1A" }}>{Number(tarefa.peso_metal).toFixed(2)}g</span>
+                      </div>
+                    )}
+                    {tarefa.ordem_ids && tarefa.ordem_ids.length > 0 && (
+                      <div className="flex items-start gap-3 text-sm">
+                        <span style={{ color: "#9CA3AF", fontSize: 14 }}>📋</span>
+                        <span style={{ color: "#6B7280" }}>Ordens:</span>
+                        <span className="font-medium" style={{ color: "#1A1A1A" }}>IDs: {tarefa.ordem_ids.join(", ")}</span>
+                      </div>
+                    )}
                     {tarefa.tags.length > 0 && (
                       <div className="flex items-start gap-3">
                         <Tag size={14} style={{ color: "#9CA3AF", marginTop: 2 }} />
@@ -356,6 +370,24 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
                       </div>
                     )}
                   </div>
+
+                  {/* Confirmar Recebimento — protocolo de metal */}
+                  {tarefa.tipo === "protocolo_metal"
+                    && tarefa.responsavel_id === currentUserId
+                    && tarefa.status !== "concluida" && (
+                    <div className="rounded-xl border p-4 space-y-2" style={{ borderColor: "#10B98133", backgroundColor: "#F0FDF4" }}>
+                      <p className="text-sm font-semibold" style={{ color: "#065F46" }}>📦 Confirmar Recebimento</p>
+                      <p className="text-xs" style={{ color: "#6B7280" }}>
+                        Você é o responsável por receber este metal.
+                        {tarefa.peso_metal != null && ` Peso esperado: ${Number(tarefa.peso_metal).toFixed(2)}g.`}
+                      </p>
+                      <button onClick={() => moverStatus("concluida")}
+                        className="w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
+                        style={{ backgroundColor: "#059669", color: "#fff" }}>
+                        <Check size={15} /> Confirmar Recebimento
+                      </button>
+                    </div>
+                  )}
 
                   {/* Ações de status rápido */}
                   <div className="pt-2 border-t" style={{ borderColor: C.cremeBorder }}>
