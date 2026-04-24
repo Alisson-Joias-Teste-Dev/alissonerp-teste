@@ -2451,8 +2451,24 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                 </div>
               )}
 
-              {/* Ouro / A Receber / Pix / Vale-Troca — só condição */}
-              {COM_PARCELAS.includes(newPagForma) && !COM_CARTAO.includes(newPagForma) && newPagForma !== "Dinheiro" && (
+              {/* Vale-Troca — número do vale */}
+              {newPagForma === "Vale-Troca" && (
+                <div className="mb-4">
+                  <Label>Número do Vale</Label>
+                  <input
+                    type="text"
+                    value={newPagValeNumero}
+                    onChange={e => setNewPagValeNumero(e.target.value.toUpperCase())}
+                    placeholder="VT-00001"
+                    className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none"
+                    style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                  />
+                  <p className="text-xs mt-1" style={{ color: "#9CA3AF" }}>Informe o número do vale gerado na devolução</p>
+                </div>
+              )}
+
+              {/* Ouro / A Receber / Pix — só condição */}
+              {COM_PARCELAS.includes(newPagForma) && !COM_CARTAO.includes(newPagForma) && newPagForma !== "Dinheiro" && newPagForma !== "Vale-Troca" && (
                 <div className="mb-4 w-56">
                   <Label>Condição de Pagamento</Label>
                   <Select value={newPagCondicao} onChange={e => setNewPagCondicao(e.target.value)}>
