@@ -193,7 +193,7 @@ export default function TarefasClient() {
   // Drawer state
   const [drawerTarefa, setDrawerTarefa] = useState<Tarefa | null>(null);
   const [showNova, setShowNova] = useState(false);
-  const [novaForm, setNovaForm] = useState({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "" });
+  const [novaForm, setNovaForm] = useState({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "", tipo: "" });
   const [responsavelId, setResponsavelId] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
@@ -286,10 +286,11 @@ export default function TarefasClient() {
           data_limite: novaForm.data_limite || undefined,
           responsavel_id: responsavelId || undefined,
           tags: novaForm.tags ? novaForm.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
+          tipo: novaForm.tipo || undefined,
         }),
       });
       setShowNova(false);
-      setNovaForm({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "" });
+      setNovaForm({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "", tipo: "" });
       setResponsavelId("");
       carregar();
     } catch { /* silencioso */ }
@@ -427,6 +428,14 @@ export default function TarefasClient() {
               style={{ borderColor: C.cremeBorder }}
               onKeyDown={e => { if (e.key === "Enter") criarTarefa(); }}
             />
+            <select value={novaForm.tipo} onChange={e => setNovaForm({ ...novaForm, tipo: e.target.value })}
+              className="w-full px-3 py-2.5 border rounded-xl text-sm outline-none"
+              style={{ borderColor: C.cremeBorder }}>
+              <option value="">Tipo (opcional)</option>
+              <option value="sangria">Sangria</option>
+              <option value="protocolo_metal">Protocolo de Metal</option>
+              <option value="geral">Geral</option>
+            </select>
             <textarea placeholder="Descrição (opcional)" rows={2}
               value={novaForm.descricao} onChange={e => setNovaForm({ ...novaForm, descricao: e.target.value })}
               className="w-full px-3 py-2.5 border rounded-xl text-sm outline-none resize-none"
