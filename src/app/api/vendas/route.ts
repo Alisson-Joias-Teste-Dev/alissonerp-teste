@@ -35,7 +35,9 @@ export async function GET(req: NextRequest) {
   // ≥3 dígitos), comparamos contra o cpf_cnpj normalizado (sem máscara) no SQL —
   // o banco guarda sem máscara e a UI permite digitar com pontuação.
   const qDigits = q ? q.replace(/\D+/g, "") : "";
-  const isDocSearch = !!q && qDigits.length >= 3 && /^[\d.\-\/\s]+$/.test(q);
+  // Mínimo 8 dígitos para busca por documento (CPF tem 11, CNPJ tem 14)
+  // Evita confundir número de pedido (5 dígitos) com CPF/CNPJ
+  const isDocSearch = !!q && qDigits.length >= 8 && /^[\d.\-\/\s]+$/.test(q);
 
   const vendas = await sql`
     SELECT
