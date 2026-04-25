@@ -231,7 +231,7 @@ export function simularLucratividade(
 
 /**
  * Gera pontos da curva para o accordion da UI.
- * Passo dinamico: 0.1g ate 29.95g, depois 1.0g.
+ * Passo dinamico: 0.1g ate 20g, depois 1.0g.
  */
 export function gerarPontosCurva(
   rangeStart: number,
@@ -246,7 +246,7 @@ export function gerarPontosCurva(
   let count = 0;
 
   while (w <= rangeEnd + 0.001 && count < 2000) {
-    const step = w >= 29.95 ? 1.0 : 0.1;
+    const step = w >= 19.95 ? 1.0 : 0.1;
     const peso = step >= 1.0 ? Math.round(w * 10) / 10 : Math.round(w * 100) / 100;
     if (peso > rangeEnd + 0.001) break;
 
@@ -282,7 +282,7 @@ export interface PontoCategoriaChip {
 
 /**
  * Gera os chips de pontos de curva para uma categoria especifica.
- * Passo dinamico: 0.1g ate 29.95g, depois 1.0g.
+ * Passo dinamico: 0.1g ate 20g, depois 1.0g.
  */
 export function getCategoryPoints(
   category: CurvaCategoriaPreparada,
@@ -299,7 +299,7 @@ export function getCategoryPoints(
   let count = 0;
 
   while (count < 1000) {
-    const step = w >= 29.95 ? 1.0 : 0.1;
+    const step = w >= 19.95 ? 1.0 : 0.1;
     const peso = step >= 1.0 ? Math.round(w * 10) / 10 : Math.round(w * 100) / 100;
     if (peso > rangeEnd + 0.001) break;
 

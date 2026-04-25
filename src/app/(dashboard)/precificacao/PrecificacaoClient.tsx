@@ -1477,7 +1477,7 @@ function TabCurvaDinamica({
           <div>
             <h3 className="font-semibold text-sm" style={{ color: P.text }}>Categorias da Curva</h3>
             <span className="text-[11px]" style={{ color: P.muted }}>
-              {categoriasPreparadas.length} ativa{categoriasPreparadas.length !== 1 ? "s" : ""} · passo 0.1g / &gt;30g: 1.0g
+              {categoriasPreparadas.length} ativa{categoriasPreparadas.length !== 1 ? "s" : ""} · passo 0.1g / &gt;20g: 1.0g
             </span>
           </div>
 
