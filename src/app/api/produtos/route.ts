@@ -263,6 +263,10 @@ export async function GET(req: NextRequest) {
           p.sku,
           p.tipo_metal,
           p.peso_precificado,
+          -- Pedras: peso fiel em ct vem de produto_pedra_extras (peso_precificado
+          -- é arredondado pelo trigger arredondar_peso_para_cima).
+          (SELECT peso_ct FROM alissonerp.produto_pedra_extras
+            WHERE produto_id = p.id_produto LIMIT 1) AS peso_ct,
           p.preco_tiny,
           p.preco_sync,
           p.preco_pedras,
@@ -368,6 +372,9 @@ export async function GET(req: NextRequest) {
         p.sku,
         p.tipo_metal,
         p.peso_precificado,
+        -- Pedras: peso fiel em ct (ver branch erp_produtos acima).
+        (SELECT peso_ct FROM alissonerp.produto_pedra_extras
+          WHERE produto_id = p.id_produto LIMIT 1) AS peso_ct,
         p.preco_tiny,
         p.preco_sync,
         p.preco_pedras,

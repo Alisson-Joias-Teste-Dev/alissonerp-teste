@@ -79,6 +79,30 @@ export async function POST(
     return NextResponse.json({ error: "Valor do pagamento inválido" }, { status: 422 });
   }
 
+  // Mapear método MP → forma do ERP. payment_type_id pode ser:
+  // credit_card | debit_card | pix | ticket (boleto) | bank_transfer | account_money
+  const mpData2 = mpData as {
+    payment_type_id?: string;
+    payment_method_id?: string;
+    transaction_details?: { net_received_amount?: number };
+    fee_details?: Array<{ amount?: number }>;
+    installments?: number;
+  };
+  const ptype = String(mpData2.payment_type_id ?? "").toLowerCase();
+  const formaErp =
+    ptype === "credit_card"   ? "Cartão de Crédito" :
+    ptype === "debit_card"    ? "Cartão de Crédito" :  // ERP não tem Débito separado
+    ptype === "pix"           ? "Pix" :
+    ptype === "bank_transfer" ? "Pix" :
+    ptype === "account_money" ? "Pix" :
+    ptype === "ticket"        ? "A Receber" :          // boleto = a receber
+    "Pix";                                              // fallback
+
+  const netReceived = Number(mpData2.transaction_details?.net_received_amount ?? 0);
+  const taxasMp = netReceived > 0 ? +(valorMp - netReceived).toFixed(2) : null;
+  const valorLiquido = netReceived > 0 ? netReceived : null;
+  const parcelasMp = Number(mpData2.installments ?? 1);
+
   // Calcular restante da venda
   const [{ soma_confirmados }] = await sql`
     SELECT COALESCE(SUM(valor), 0)::numeric AS soma_confirmados
@@ -95,25 +119,53 @@ export async function POST(
     ? new Date((mpData as { date_approved: string }).date_approved)
     : new Date();
 
+  const gatewayPayload = {
+    mp_id: mpPaymentId,
+    mp_status: mpData.status,
+    mp_valor: valorMp,
+    mp_payment_type: ptype,
+    mp_payment_method: mpData2.payment_method_id ?? null,
+    mp_net_received: netReceived || null,
+    mp_installments: parcelasMp,
+    registrado_manualmente: true,
+  };
+
   // Se veio pagamento_id existente (A Receber / Manual MP), atualiza o registro em vez de criar novo
   let novoPagId: number;
   if (pagamentoIdExistente) {
-    await sql`
+    // RETURNING id pra detectar 404 — antes, se o pagamento_id pertencesse
+    // a outra venda, o UPDATE não atualizava nada e a rota retornava 200.
+    const updRows = await sql`
       UPDATE alissonerp.pagamentos_venda
-      SET status = 'confirmado', gateway = 'Mercado Pago Manual', gateway_id = ${mpPaymentId},
-          gateway_payload = ${JSON.stringify({ mp_id: mpPaymentId, mp_status: mpData.status, mp_valor: valorMp, registrado_manualmente: true })}::jsonb,
-          data_confirmacao = ${dataConfirmacao}, valor = ${valorRegistrar}
+      SET status = 'confirmado',
+          forma = ${formaErp},
+          gateway = 'Mercado Pago Manual',
+          gateway_id = ${mpPaymentId},
+          gateway_payload = ${JSON.stringify(gatewayPayload)}::jsonb,
+          data_confirmacao = ${dataConfirmacao},
+          valor = ${valorRegistrar},
+          valor_liquido = ${valorLiquido},
+          taxas_mp = ${taxasMp},
+          parcelas = ${parcelasMp}
       WHERE id = ${pagamentoIdExistente} AND venda_id = ${vendaId}
+      RETURNING id
     `;
+    if (updRows.length === 0) {
+      return NextResponse.json(
+        { error: "Pagamento não encontrado nesta venda" },
+        { status: 404 },
+      );
+    }
     novoPagId = pagamentoIdExistente;
   } else {
     const [novoPag] = await sql`
       INSERT INTO alissonerp.pagamentos_venda
-        (venda_id, forma, gateway, valor, parcelas, status, gateway_id, gateway_payload, data_confirmacao)
+        (venda_id, forma, gateway, valor, parcelas, status, gateway_id, gateway_payload,
+         data_confirmacao, valor_liquido, taxas_mp)
       VALUES (
-        ${vendaId}, 'Pix', 'Mercado Pago Manual', ${valorRegistrar}, 1, 'confirmado',
-        ${mpPaymentId}, ${JSON.stringify({ mp_id: mpPaymentId, mp_status: mpData.status, mp_valor: valorMp, registrado_manualmente: true })}::jsonb,
-        NOW()
+        ${vendaId}, ${formaErp}, 'Mercado Pago Manual', ${valorRegistrar}, ${parcelasMp}, 'confirmado',
+        ${mpPaymentId}, ${JSON.stringify(gatewayPayload)}::jsonb,
+        ${dataConfirmacao}, ${valorLiquido}, ${taxasMp}
       )
       RETURNING id
     `;

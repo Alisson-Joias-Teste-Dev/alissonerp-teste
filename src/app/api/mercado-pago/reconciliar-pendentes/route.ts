@@ -76,6 +76,7 @@ export async function POST() {
         await tx`
           UPDATE alissonerp.pagamentos_venda
           SET status = 'confirmado',
+              source = 'webhook_mp',
               data_confirmacao = NOW(),
               gateway_id = ${paymentId},
               valor_liquido = ${netReceived},

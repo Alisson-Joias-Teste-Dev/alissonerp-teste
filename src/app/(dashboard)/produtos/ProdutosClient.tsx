@@ -14,7 +14,6 @@ import { formatPeso } from "@/lib/formatters";
 import ProdutoDrawer from "@/components/produtos/ProdutoDrawer";
 import CadastroProdutoModal from "@/components/produtos/CadastroProdutoModal";
 import ModalPersonalizacao from "@/components/produtos/ModalPersonalizacao";
-import GerenciarPedrasModal from "@/components/produtos/GerenciarPedrasModal";
 import BulkEditModal from "@/components/produtos/BulkEditModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -25,6 +24,7 @@ export interface Produto {
   sku: string;
   tipo_metal: string | null;
   peso_precificado: string | null;
+  peso_ct: string | number | null;
   preco_tiny: string | null;
   preco_sync: string | null;
   preco_curva: number | null;
@@ -187,7 +187,6 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
   // Cadastro modal
   const [showCadastro, setShowCadastro] = useState(false);
   const [showPersonalizado, setShowPersonalizado] = useState(false);
-  const [showPedras, setShowPedras]     = useState(false);
 
   // Seleção em massa
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
@@ -380,13 +379,8 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowPedras(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border hover:bg-gray-50"
-              style={{ borderColor: "#184036", color: "#184036" }}
-            >
-              💎 Pedras
-            </button>
+            {/* Botão "💎 Pedras" removido — gerenciamento agora vive em
+                /precificacao > Markup Pedras (mesmo modal renderizado inline). */}
             <button
               onClick={() => setShowPersonalizado(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border hover:bg-amber-50"
@@ -691,11 +685,17 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
                       </td>
 
                       {(() => {
-                        // Pedras: colunas Metal e Preço Sync ficam em branco; Peso em ct;
+                        // Pedras: colunas Metal e Preço Sync ficam em branco; Peso em ct + pontos;
                         // a coluna "Preço Sync" passa a exibir preco_tiny (preço de venda cadastrado).
                         const isPedra = (p.categoria ?? "").toLowerCase().startsWith("pedras");
                         const pesoG = parseFloat(p.peso_precificado ?? "0") || 0;
-                        const ct    = pesoG / 0.2;
+                        // Para pedras, peso_ct é a fonte de verdade (peso_precificado é
+                        // arredondado pelo trigger arredondar_peso_para_cima). Fallback: pesoG/0.2.
+                        const ctFromExtras = p.peso_ct != null ? Number(p.peso_ct) : NaN;
+                        const ct = isPedra && Number.isFinite(ctFromExtras) && ctFromExtras > 0
+                          ? ctFromExtras
+                          : pesoG / 0.2;
+                        const pontos = ct * 100;
 
                         return (
                           <>
@@ -704,10 +704,12 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
                               {isPedra ? <span className="text-gray-300">—</span> : (p.tipo_metal || "—")}
                             </td>
 
-                            {/* Peso — em ct para pedras, em g para joias */}
+                            {/* Peso — em ct + pontos para pedras, em g para joias */}
                             <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap">
                               {isPedra
-                                ? (ct > 0 ? `${ct.toFixed(3)} ct` : "—")
+                                ? (ct > 0
+                                    ? <span>{ct.toFixed(2).replace(".", ",")} ct <span className="text-gray-400">· {pontos.toFixed(1).replace(".", ",")} pt</span></span>
+                                    : "—")
                                 : `${formatPeso(p.peso_precificado)}g`}
                             </td>
 
@@ -858,12 +860,6 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
           bumpRefresh();
           setSelectedId(produtoId);
         }}
-      />
-
-      <GerenciarPedrasModal
-        open={showPedras}
-        onClose={() => setShowPedras(false)}
-        onCreated={bumpRefresh}
       />
 
       {showPersonalizado && (

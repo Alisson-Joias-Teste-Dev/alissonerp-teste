@@ -18,6 +18,35 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url);
   const situacao = url.searchParams.get("situacao");
+  const mode = url.searchParams.get("mode"); // 'summary' | 'detail' | null (=detail)
+
+  // Cláusula WHERE base — usada por ambos os modos para garantir consistência
+  // entre o card de totais (summary) e o drill-down (detail)
+  if (mode === "summary") {
+    const [resumo] = await sql`
+      SELECT
+        COUNT(*)::integer            AS total,
+        COALESCE(SUM(cr.valor), 0)   AS valor_total,
+        COALESCE(
+          SUM(
+            COALESCE(
+              (SELECT SUM(pv.valor_liquido)
+               FROM alissonerp.pagamentos_venda pv
+               WHERE pv.venda_id = cr.venda_erp_id AND pv.status = 'confirmado'),
+              cr.valor
+            )
+          ), 0
+        ) AS valor_liquido_total
+      FROM alissonerp.contas_receber cr
+      WHERE 1=1
+        ${situacao ? sql`AND cr.situacao = ${situacao}` : sql``}
+    `;
+    return NextResponse.json({
+      total: resumo.total,
+      valor_total: Number(resumo.valor_total),
+      valor_liquido_total: Number(resumo.valor_liquido_total),
+    });
+  }
 
   const contas = await sql`
     SELECT cr.*,

@@ -47,7 +47,11 @@ export async function GET(req: NextRequest) {
     FROM public.produtos p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
     LEFT JOIN (
-      SELECT produto_id, SUM(saldo) AS saldo
+      -- vw_saldo_estoque_comercial expõe: total_entradas, total_saidas,
+      -- saldo_atual, reservado, disponivel. Para venda interessa o disponível
+      -- (saldo_atual − reservado). Mantemos SUM+GROUP BY por segurança caso
+      -- a view venha a devolver mais de uma linha por produto.
+      SELECT produto_id, SUM(disponivel) AS saldo
       FROM alissonerp.vw_saldo_estoque_comercial
       GROUP BY produto_id
     ) est ON est.produto_id = p.id_produto

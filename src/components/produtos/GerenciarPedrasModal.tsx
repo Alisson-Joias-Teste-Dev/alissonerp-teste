@@ -14,7 +14,7 @@
  *       /api/produtos/pedras-bulk.
  */
 import { useEffect, useMemo, useState } from "react";
-import { X, RotateCcw, Save, Loader2, Check, Diamond, CheckCircle2, Trash2, AlertTriangle } from "lucide-react";
+import { X, RotateCcw, Save, Loader2, Check, Diamond, CheckCircle2, Trash2, AlertTriangle, ChevronDown, Plus } from "lucide-react";
 import {
   DEFAULT_STONE_PRICES,
   STONE_TYPES,
@@ -26,6 +26,8 @@ interface StonePrice {
   tipo: string;
   preco_usd_ct: number;
   preco_rs_un?: number;
+  // Label customizado (para categorias criadas pelo usuário, não em STONE_TYPES)
+  label?: string;
 }
 
 /**
@@ -39,6 +41,10 @@ interface TabelaSalva {
   min: number;
   max: number;
   markups: Record<string, number>;
+  // Custo da pedra associado a essa tabela (pode variar por range/qualidade).
+  // Para Zirconia usa preco_rs_un (R$/un); para demais, preco_usd_ct (USD/ct).
+  preco_usd_ct?: number;
+  preco_rs_un?: number;
 }
 
 const TABELAS_KEY = "_multi_tables";   // chave reservada dentro de stone_markups_table
@@ -55,9 +61,12 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onCreated?: () => void;
+  // Quando true, renderiza inline (sem overlay, sem cabeçalho, sem botão de
+  // fechar) — pra usar dentro de uma página/aba como /precificacao.
+  inline?: boolean;
 }
 
-export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props) {
+export default function GerenciarPedrasModal({ open, onClose, onCreated, inline = false }: Props) {
   const [loading, setLoading]   = useState(false);
   const [saving, setSaving]     = useState(false);
   const [cadastrando, setCadastrando] = useState(false);
@@ -75,12 +84,15 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
   // Multi-tabela: lista de tabelas salvas por tipo + id da tabela ativa.
   const [tabelasPorTipo, setTabelasPorTipo] = useState<Record<string, TabelaSalva[]>>({});
   const [tabelaAtivaId,  setTabelaAtivaId]  = useState<string>("new"); // "new" = criando/editando range livre
+  // Categorias expandidas (UX accordion na seção "Categorias")
+  const [categoriasExpandidas, setCategoriasExpandidas] = useState<Record<string, boolean>>({});
   // Quantidade inicial em estoque é sempre 0 no cadastro em massa — o usuário
   // imputa a quantidade manualmente depois na ficha de cada pedra-produto.
   const qtdInicial = 0;
   const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
   const [sucesso, setSucesso]         = useState<{
     criados: number;
+    atualizados: number;
     pulados: number;
     pedra: string;
     qtd_inicial: number;
@@ -197,22 +209,48 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
   }, [tamanhoInicial, tamanhoFinal]);
 
   // ───────────── Multi-tabela: sincroniza state com tipo selecionado ─────────────
-  // Ao trocar de pedra: tenta eleger a primeira tabela salva como ativa e puxa
-  // seu range para os inputs. Se não houver tabelas, entra em modo "new".
+  // Ao trocar de pedra: se a tabelaAtivaId existe na lista do novo tipo, mantém
+  // (e puxa o range dela). Caso contrário, elege a primeira ou entra em "new".
+  // Importante: respeita "new" — usuário clicou "+ Nova Tabela", não pode reverter.
   useEffect(() => {
+    if (tabelaAtivaId === "new") return;
     const tipo = stonePrices[simPedra]?.tipo;
     if (!tipo) return;
     const lista = tabelasPorTipo[tipo] ?? [];
-    if (lista.length > 0) {
-      const t = lista[0];
-      setTabelaAtivaId(t.id);
+    const ativa = lista.find(t => t.id === tabelaAtivaId);
+
+    // Helper: aplica range + custo da tabela em stonePrices[simPedra]
+    const aplicar = (t: TabelaSalva) => {
       setTamanhoInicial(t.min);
       setTamanhoFinal(t.max);
+      // Custo da tabela tem prioridade sobre o stonePrices atual (por tipo)
+      if (t.preco_usd_ct != null || t.preco_rs_un != null) {
+        setStonePrices(prev => {
+          const next = [...prev];
+          const cur = next[simPedra];
+          if (cur) {
+            next[simPedra] = {
+              ...cur,
+              preco_usd_ct: t.preco_usd_ct ?? cur.preco_usd_ct ?? 0,
+              preco_rs_un:  t.preco_rs_un  ?? cur.preco_rs_un,
+            };
+          }
+          return next;
+        });
+      }
+    };
+
+    if (ativa) {
+      aplicar(ativa);
+    } else if (lista.length > 0) {
+      const t = lista[0];
+      setTabelaAtivaId(t.id);
+      aplicar(t);
     } else {
       setTabelaAtivaId("new");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [simPedra, stonePrices, tabelasPorTipo]);
+  }, [simPedra, stonePrices.length, tabelasPorTipo, tabelaAtivaId]);
 
   // Recalcular rowMarkups ao trocar pedra/tabela OU ao mudar a faixa (modo "new").
   useEffect(() => {
@@ -278,8 +316,10 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
     setRowMarkups(newMkps);
   };
 
-  async function salvarTabela() {
-    if (!sp) return;
+  // Quando chamado pelo fluxo unificado (salvar+cadastrar), suprime o toast
+  // de sucesso individual para não conflitar com o overlay final.
+  async function salvarTabela(opts: { silent?: boolean } = {}) {
+    if (!sp) return false;
     setSaving(true);
     try {
       // Monta a tabela atual (markups keyed por mm-string a partir de STONE_CT + rowMarkups).
@@ -289,16 +329,21 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
         if (v != null && !isNaN(v) && v > 0) markupsByMm[row.mm.toFixed(1)] = v;
       });
 
+      // Custo associado a esta tabela (salvo dentro da própria tabela).
+      const custo: Pick<TabelaSalva, "preco_usd_ct" | "preco_rs_un"> = isZirc
+        ? { preco_rs_un:  Number(sp.preco_rs_un  ?? 0) }
+        : { preco_usd_ct: Number(sp.preco_usd_ct ?? 0) };
+
       // Upsert na lista de tabelas do tipo: se for "new" adiciona; senão atualiza.
       const lista = [...(tabelasPorTipo[sp.tipo] ?? [])];
       let idParaAtivar = tabelaAtivaId;
       if (tabelaAtivaId === "new") {
         const novaId = mkId();
-        lista.push({ id: novaId, min: tamanhoInicial, max: tamanhoFinal, markups: markupsByMm });
+        lista.push({ id: novaId, min: tamanhoInicial, max: tamanhoFinal, markups: markupsByMm, ...custo });
         idParaAtivar = novaId;
       } else {
         const idx = lista.findIndex(t => t.id === tabelaAtivaId);
-        if (idx >= 0) lista[idx] = { ...lista[idx], min: tamanhoInicial, max: tamanhoFinal, markups: markupsByMm };
+        if (idx >= 0) lista[idx] = { ...lista[idx], min: tamanhoInicial, max: tamanhoFinal, markups: markupsByMm, ...custo };
       }
       const novasTabelas = { ...tabelasPorTipo, [sp.tipo]: lista };
 
@@ -325,25 +370,143 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
       setAllMarkups(legacyFlat);
       setTabelasPorTipo(novasTabelas);
       setTabelaAtivaId(idParaAtivar);
-      const label = STONE_TYPES.find(t => t.value === sp.tipo)?.label;
-      setToast({ msg: `Tabela ${tamanhoInicial.toFixed(1)}–${tamanhoFinal.toFixed(1)}mm de ${label} salva.`, ok: true });
+      if (!opts.silent) {
+        const label = STONE_TYPES.find(t => t.value === sp.tipo)?.label;
+        setToast({ msg: `Tabela ${tamanhoInicial.toFixed(1)}–${tamanhoFinal.toFixed(1)}mm de ${label} salva.`, ok: true });
+        setTimeout(() => setToast(null), 3500);
+      }
+      return true;
     } catch (err) {
       setToast({ msg: err instanceof Error ? err.message : "Erro", ok: false });
+      setTimeout(() => setToast(null), 3500);
+      return false;
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Persiste imediatamente o estado atual de tabelasPorTipo (sem mexer em
+  // markups/range — só faz UPDATE no JSONB de stone_markups_table).
+  async function persistirTabelas(novasTabelas: Record<string, TabelaSalva[]>) {
+    const payload: Record<string, unknown> = { ...allMarkups, [TABELAS_KEY]: novasTabelas };
+    const res = await fetch("/api/orcamento/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stone_markups_table: payload, stone_prices: stonePrices }),
+    });
+    if (!res.ok) throw new Error("Falha ao persistir");
+  }
+
+  // Exclui uma tabela específica (por tipo + id) — persiste no banco imediatamente.
+  async function excluirTabela(tipo: string, id: string) {
+    if (id === "new") return;
+    const lista = (tabelasPorTipo[tipo] ?? []).filter(t => t.id !== id);
+    const novas = { ...tabelasPorTipo, [tipo]: lista };
+    try {
+      await persistirTabelas(novas);
+      setTabelasPorTipo(novas);
+      // Se estava ativa, troca para outra (ou "new")
+      if (tipo === sp?.tipo && tabelaAtivaId === id) {
+        setTabelaAtivaId(lista[0]?.id ?? "new");
+      }
+      const label = STONE_TYPES.find(t => t.value === tipo)?.label ?? tipo;
+      setToast({ msg: `Tabela de ${label} excluída.`, ok: true });
+    } catch (err) {
+      setToast({ msg: err instanceof Error ? err.message : "Erro ao excluir", ok: false });
+    } finally {
       setTimeout(() => setToast(null), 3500);
+    }
+  }
+
+  // Resolve o label de uma pedra: primeiro busca em STONE_TYPES (canônico),
+  // senão em stonePrices.label (categoria customizada), senão usa o tipo cru.
+  function labelDoTipo(tipo: string): string {
+    return STONE_TYPES.find(t => t.value === tipo)?.label
+      ?? stonePrices.find(s => s.tipo === tipo)?.label
+      ?? tipo;
+  }
+
+  // Adiciona uma nova categoria customizada. Slugifica o nome e insere
+  // em stonePrices — fica disponível no select e no card "Categorias".
+  function novaCategoria() {
+    const nome = window.prompt("Nome da nova categoria de pedra (ex: Topázio):");
+    if (!nome) return;
+    const trim = nome.trim();
+    if (!trim) return;
+    const slug = trim.toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    if (!slug) return;
+    if (stonePrices.some(s => s.tipo === slug)) {
+      setToast({ msg: `Categoria "${trim}" já existe.`, ok: false });
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+    setStonePrices(prev => [...prev, { tipo: slug, preco_usd_ct: 0, label: trim }]);
+    setCategoriasExpandidas(prev => ({ ...prev, [slug]: true }));
+    setToast({ msg: `Categoria "${trim}" criada. Configure markup/custo e crie tabelas.`, ok: true });
+    setTimeout(() => setToast(null), 4000);
+  }
+
+  // Limpa todos os campos editáveis para criar tabela do zero (Dólar é automático).
+  function resetParaNovaTabela() {
+    setTabelaAtivaId("new");
+    setTamanhoInicial(0);
+    setTamanhoFinal(0);
+    setMkpInicial(0);
+    setMkpFinal(0);
+    setMkpDecr(0);
+    setRowMarkups({});
+    setStonePrices(prev => {
+      const next = [...prev];
+      const cur = next[simPedra];
+      if (cur) {
+        next[simPedra] = { ...cur, preco_usd_ct: 0, preco_rs_un: 0 };
+      }
+      return next;
+    });
+  }
+
+  // Carrega uma tabela específica no editor — troca pedra + ativa a tabela
+  // + ajusta o range + carrega o CUSTO específico daquela tabela.
+  function editarTabela(tipo: string, id: string) {
+    const idx = stonePrices.findIndex(s => s.tipo === tipo);
+    if (idx >= 0 && idx !== simPedra) setSimPedra(idx);
+    setTabelaAtivaId(id);
+    const t = (tabelasPorTipo[tipo] ?? []).find(x => x.id === id);
+    if (t) {
+      setTamanhoInicial(t.min);
+      setTamanhoFinal(t.max);
+      if (t.preco_usd_ct != null || t.preco_rs_un != null) {
+        setStonePrices(prev => {
+          const next = [...prev];
+          const targetIdx = idx >= 0 ? idx : simPedra;
+          const cur = next[targetIdx];
+          if (cur) {
+            next[targetIdx] = {
+              ...cur,
+              preco_usd_ct: t.preco_usd_ct ?? cur.preco_usd_ct ?? 0,
+              preco_rs_un:  t.preco_rs_un  ?? cur.preco_rs_un,
+            };
+          }
+          return next;
+        });
+      }
     }
   }
 
   function excluirTabelaAtiva() {
     if (!sp || tabelaAtivaId === "new") return;
-    const lista = (tabelasPorTipo[sp.tipo] ?? []).filter(t => t.id !== tabelaAtivaId);
-    const novas = { ...tabelasPorTipo, [sp.tipo]: lista };
-    setTabelasPorTipo(novas);
-    setTabelaAtivaId(lista[0]?.id ?? "new");
-    // Persistência fica pendente até próximo "Salvar". Avisa:
-    setToast({ msg: "Tabela removida localmente. Clique em Salvar para persistir.", ok: true });
-    setTimeout(() => setToast(null), 4000);
+    void excluirTabela(sp.tipo, tabelaAtivaId);
+  }
+
+  // Fluxo unificado: salva a tabela primeiro, depois cadastra/atualiza pedras.
+  // Garante que toda pedra cadastrada tenha uma tabela associada.
+  async function salvarECadastrar() {
+    if (saving || cadastrando) return;
+    const ok = await salvarTabela({ silent: true });
+    if (!ok) return;
+    await cadastrarEmMassa();
   }
 
   // Cadastra 1 produto por linha da tabela (16 pedras) usando os preços atuais.
@@ -382,6 +545,7 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
 
       setSucesso({
         criados: Number(data?.criados ?? 0),
+        atualizados: Number(data?.atualizados ?? 0),
         pulados: Array.isArray(data?.pulados) ? data.pulados.length : 0,
         pedra: label,
         qtd_inicial: qtdInicial,
@@ -431,13 +595,19 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Falha ao excluir");
 
-      const qtd = Number(data?.excluidos ?? 0);
-      setToast({
-        msg: qtd === 0
-          ? "Nenhuma pedra correspondente encontrada."
-          : `${qtd} pedra${qtd === 1 ? "" : "s"} excluída${qtd === 1 ? "" : "s"} com sucesso.`,
-        ok: qtd > 0,
-      });
+      const del = Number(data?.excluidos ?? 0);
+      const ina = Number(data?.inativados ?? 0);
+      let msg: string;
+      if (del === 0 && ina === 0) {
+        msg = "Nenhuma pedra correspondente encontrada.";
+      } else if (ina === 0) {
+        msg = `${del} pedra${del === 1 ? "" : "s"} excluída${del === 1 ? "" : "s"} com sucesso.`;
+      } else if (del === 0) {
+        msg = `${ina} pedra${ina === 1 ? "" : "s"} inativada${ina === 1 ? "" : "s"} (já vendida${ina === 1 ? "" : "s"} — preservadas para histórico).`;
+      } else {
+        msg = `${del} excluída${del === 1 ? "" : "s"} + ${ina} inativada${ina === 1 ? "" : "s"} (já vendida${ina === 1 ? "" : "s"}).`;
+      }
+      setToast({ msg, ok: (del + ina) > 0 });
       setConfExcluir(null);
       await recarregarTotais();
       onCreated?.(); // força refresh da listagem
@@ -456,17 +626,33 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
-          <h2 className="text-base font-semibold text-gray-800">Gerenciar Pedras Preciosas</h2>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100">
-            <X size={16} />
-          </button>
+  // Wrapper externo: modal com overlay OU inline dentro do fluxo da página.
+  const Wrapper = inline
+    ? ({ children }: { children: React.ReactNode }) => (
+        <div className="bg-white rounded-2xl border w-full" style={{ borderColor: C.cremeBorder }}>
+          <div className="flex flex-col overflow-hidden relative">{children}</div>
         </div>
+      )
+    : ({ children }: { children: React.ReactNode }) => (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+          <div className="relative bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            {children}
+          </div>
+        </div>
+      );
+
+  return (
+    <Wrapper>
+        {/* Header — escondido em modo inline (a página já tem título) */}
+        {!inline && (
+          <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
+            <h2 className="text-base font-semibold text-gray-800">Gerenciar Pedras Preciosas</h2>
+            <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100">
+              <X size={16} />
+            </button>
+          </div>
+        )}
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-5">
@@ -475,6 +661,135 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
               <Loader2 size={20} className="animate-spin mr-2" /> Carregando...
             </div>
           ) : (
+            <div className="space-y-4">
+            {/* ── Categorias (accordion) com tabelas salvas por pedra ── */}
+            {(() => {
+              // Lista de tipos = canônicos (STONE_TYPES) + customizados (que estão em
+              // stonePrices mas não em STONE_TYPES). Cada categoria pode ter 0+ tabelas.
+              const canonicos = STONE_TYPES.map(t => ({ value: t.value, label: t.label }));
+              const customizados = stonePrices
+                .filter(s => !STONE_TYPES.some(c => c.value === s.tipo))
+                .map(s => ({ value: s.tipo, label: s.label ?? s.tipo }));
+              const todasCategorias = [...canonicos, ...customizados];
+              return (
+                <div className="bg-white rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-gray-800">Categorias</h3>
+                    <button
+                      onClick={novaCategoria}
+                      className="text-[10px] font-semibold px-2.5 py-1.5 rounded border flex items-center gap-1 hover:bg-gray-50"
+                      style={{ borderColor: C.esmeralda, color: C.esmeralda }}
+                      title="Adicionar nova categoria de pedra"
+                    >
+                      <Plus size={11} /> Nova Categoria
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {todasCategorias.map(cat => {
+                      const tabs = tabelasPorTipo[cat.value] ?? [];
+                      const expanded = !!categoriasExpandidas[cat.value];
+                      const isAtual = sp?.tipo === cat.value;
+                      return (
+                        <div key={cat.value} className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+                          <button
+                            onClick={() => setCategoriasExpandidas(prev => ({ ...prev, [cat.value]: !prev[cat.value] }))}
+                            className="w-full px-3 py-2.5 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                            style={{ backgroundColor: isAtual ? "#F0F9F4" : "#fff" }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <ChevronDown size={14} className={`transition-transform ${expanded ? "rotate-180" : ""}`} style={{ color: "#6b7280" }} />
+                              <span className="text-[13px] font-bold" style={{ color: isAtual ? C.esmeralda : "#1f2937" }}>
+                                {cat.label}
+                              </span>
+                              <span className="text-[10px] text-gray-400 font-mono">
+                                ({tabs.length} {tabs.length === 1 ? "tabela" : "tabelas"})
+                              </span>
+                              {isAtual && (
+                                <span className="text-[8px] font-bold uppercase px-1 py-0.5 rounded"
+                                      style={{ backgroundColor: C.esmeralda, color: "#fff" }}>
+                                  Atual
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                          {expanded && (
+                            <div className="px-3 pb-3 space-y-2">
+                              {tabs.length === 0 ? (
+                                <p className="text-[11px] text-gray-400 italic px-1 py-2">
+                                  Nenhuma tabela cadastrada. Selecione esta pedra abaixo e crie uma tabela no simulador.
+                                </p>
+                              ) : (
+                                tabs.map(tab => {
+                                  const ativa = sp?.tipo === cat.value && tabelaAtivaId === tab.id;
+                                  const mks = Object.values(tab.markups);
+                                  const mkRange = mks.length > 0 ? `${Math.max(...mks)} → ${Math.min(...mks)}` : "—";
+                                  return (
+                                    <div key={tab.id}
+                                      className="flex items-center gap-2 p-2 rounded-lg border transition-colors"
+                                      style={{
+                                        borderColor: ativa ? C.esmeralda : C.cremeBorder,
+                                        backgroundColor: ativa ? "#F0F9F4" : "#fff",
+                                      }}>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                          {tab.id === "default" && (
+                                            <span className="text-[8px] font-bold uppercase px-1 py-0.5 rounded"
+                                                  style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                                              Padrão
+                                            </span>
+                                          )}
+                                          {ativa && (
+                                            <span className="text-[8px] font-bold uppercase px-1 py-0.5 rounded"
+                                                  style={{ backgroundColor: C.esmeralda, color: "#fff" }}>
+                                              Em edição
+                                            </span>
+                                          )}
+                                          <span className="text-[10px] text-gray-500 font-mono">
+                                            {rangeLabel(tab)} · markup {mkRange}
+                                            {tab.preco_usd_ct != null && tab.preco_usd_ct > 0 && (
+                                              <> · USD {tab.preco_usd_ct.toFixed(2)}/ct</>
+                                            )}
+                                            {tab.preco_rs_un != null && tab.preco_rs_un > 0 && (
+                                              <> · R$ {tab.preco_rs_un.toFixed(2)}/un</>
+                                            )}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <button
+                                        onClick={() => editarTabela(cat.value, tab.id)}
+                                        disabled={ativa}
+                                        className="text-[10px] font-semibold px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-40"
+                                        style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                                        title="Carregar esta tabela no editor"
+                                      >
+                                        Editar
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          if (confirm(`Excluir tabela ${rangeLabel(tab)} de ${cat.label}?\n\nA exclusão é permanente.`)) {
+                                            void excluirTabela(cat.value, tab.id);
+                                          }
+                                        }}
+                                        className="text-[10px] font-semibold px-2 py-1 rounded border hover:bg-red-50"
+                                        style={{ borderColor: "#FCA5A5", color: "#B91C1C" }}
+                                        title="Excluir esta tabela"
+                                      >
+                                        <Trash2 size={11} />
+                                      </button>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-gray-800">Simulador e Editor de Pedras</h3>
@@ -493,7 +808,11 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                   <label className="text-[10px] font-bold uppercase text-gray-500">Tabela</label>
                   <select
                     value={tabelaAtivaId}
-                    onChange={(e) => setTabelaAtivaId(e.target.value)}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "new") resetParaNovaTabela();
+                      else setTabelaAtivaId(v);
+                    }}
                     className="flex-1 min-w-[180px] px-2 py-1.5 text-xs rounded border outline-none bg-white font-mono"
                     style={{ borderColor: C.cremeBorder }}
                   >
@@ -534,7 +853,7 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                   >
                     {stonePrices.map((s, i) => (
                       <option key={s.tipo} value={i}>
-                        {STONE_TYPES.find((t) => t.value === s.tipo)?.label ?? s.tipo}
+                        {labelDoTipo(s.tipo)}
                       </option>
                     ))}
                   </select>
@@ -544,10 +863,14 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                     {isZirc ? "Preço (R$/un)" : "Custo ($)"}
                   </label>
                   <input
-                    type="number" min={0} step={isZirc ? 1 : 10}
-                    value={isZirc ? (sp?.preco_rs_un ?? 0) : (sp?.preco_usd_ct ?? 0)}
+                    type="number" step={isZirc ? 1 : 10}
+                    value={(() => {
+                      const v = isZirc ? (sp?.preco_rs_un ?? 0) : (sp?.preco_usd_ct ?? 0);
+                      return v === 0 ? "" : v;
+                    })()}
                     onChange={(e) => {
-                      const v = parseFloat(e.target.value) || 0;
+                      const raw = e.target.value;
+                      const v = raw === "" ? 0 : (parseFloat(raw) || 0);
                       const upd = [...stonePrices];
                       if (isZirc) upd[simPedra] = { ...upd[simPedra], preco_rs_un: v };
                       else upd[simPedra] = { ...upd[simPedra], preco_usd_ct: v };
@@ -567,44 +890,65 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                     </div>
                     <div>
                       <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Tam. Inicial (mm)</label>
-                      <input type="number" min={0.1} step={0.1} value={tamanhoInicial}
+                      <input type="number" step={0.1}
+                        value={tamanhoInicial === 0 ? "" : tamanhoInicial}
                         disabled={tabelaAtivaId !== "new"}
                         onChange={(e) => {
-                          const v = parseFloat(e.target.value);
-                          if (!isNaN(v) && v >= 0.1) setTamanhoInicial(Math.round(v * 10) / 10);
+                          const raw = e.target.value;
+                          if (raw === "") { setTamanhoInicial(0); return; }
+                          const v = parseFloat(raw);
+                          if (!isNaN(v) && v >= 0) setTamanhoInicial(Math.round(v * 10) / 10);
                         }}
                         className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono disabled:bg-gray-50 disabled:text-gray-400"
                         style={{ borderColor: C.cremeBorder }} />
                     </div>
                     <div>
                       <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Tam. Final (mm)</label>
-                      <input type="number" min={0.1} step={0.1} value={tamanhoFinal}
+                      <input type="number" step={0.1}
+                        value={tamanhoFinal === 0 ? "" : tamanhoFinal}
                         disabled={tabelaAtivaId !== "new"}
                         onChange={(e) => {
-                          const v = parseFloat(e.target.value);
-                          if (!isNaN(v) && v >= tamanhoInicial) setTamanhoFinal(Math.round(v * 10) / 10);
+                          const raw = e.target.value;
+                          if (raw === "") { setTamanhoFinal(0); return; }
+                          const v = parseFloat(raw);
+                          if (!isNaN(v) && v >= 0) setTamanhoFinal(Math.round(v * 10) / 10);
                         }}
                         className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono disabled:bg-gray-50 disabled:text-gray-400"
                         style={{ borderColor: C.cremeBorder }} />
                     </div>
                     <div>
-                      <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Mkp {tamanhoInicial}mm</label>
-                      <input type="number" min={1} step={0.1} value={mkpInicial}
-                        onChange={(e) => atualizarMkpInicial(parseFloat(e.target.value))}
+                      <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Mkp {tamanhoInicial || "—"}mm</label>
+                      <input type="number" step={0.1}
+                        value={mkpInicial === 0 ? "" : mkpInicial}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === "") { setMkpInicial(0); return; }
+                          atualizarMkpInicial(parseFloat(raw));
+                        }}
                         className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono"
                         style={{ borderColor: C.cremeBorder }} />
                     </div>
                     <div>
                       <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Decremento</label>
-                      <input type="number" min={0} step={0.1} value={mkpDecremento}
-                        onChange={(e) => atualizarDec(parseFloat(e.target.value))}
+                      <input type="number" step={0.1}
+                        value={mkpDecremento === 0 ? "" : mkpDecremento}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === "") { setMkpDecr(0); return; }
+                          atualizarDec(parseFloat(raw));
+                        }}
                         className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono"
                         style={{ borderColor: C.cremeBorder }} />
                     </div>
                     <div>
-                      <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Mkp {tamanhoFinal}mm</label>
-                      <input type="number" min={1} step={0.1} value={mkpFinal}
-                        onChange={(e) => atualizarMkpFinal(parseFloat(e.target.value))}
+                      <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Mkp {tamanhoFinal || "—"}mm</label>
+                      <input type="number" step={0.1}
+                        value={mkpFinal === 0 ? "" : mkpFinal}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === "") { setMkpFinal(0); return; }
+                          atualizarMkpFinal(parseFloat(raw));
+                        }}
                         className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono"
                         style={{ borderColor: C.cremeBorder }} />
                     </div>
@@ -623,7 +967,8 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                       <thead>
                         <tr className="border-b" style={{ borderColor: C.cremeBorder, backgroundColor: "#FAFAF7" }}>
                           <th className="text-left px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Tam</th>
-                          <th className="text-left px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Peso</th>
+                          <th className="text-left px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Peso (ct)</th>
+                          <th className="text-left px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Pontos</th>
                           <th className="text-right px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Custo (R$)</th>
                           <th className="text-right px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Markup</th>
                           <th className="text-right px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Venda (R$)</th>
@@ -639,7 +984,8 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                           return (
                             <tr key={row.mm} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
                               <td className="px-3 py-1.5 font-mono font-bold text-[11px]">{row.mm}mm</td>
-                              <td className="px-3 py-1.5 text-[11px] text-gray-500">{row.ct.toFixed(3)} ct</td>
+                              <td className="px-3 py-1.5 text-[11px] text-gray-500">{row.ct.toFixed(2).replace(".", ",")} ct</td>
+                              <td className="px-3 py-1.5 text-[11px] text-gray-500 font-mono">{(row.ct * 100).toFixed(1).replace(".", ",")} pt</td>
                               <td className="px-3 py-1.5 text-right font-mono text-[11px] text-gray-500">{fmtCusto(custoRS)}</td>
                               <td className="px-1 py-0.5 text-right">
                                 <input type="number" min={1} step={0.1} value={rowMkp}
@@ -667,31 +1013,23 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                 </div>
               )}
 
-              {/* Botões: salvar tabela + cadastrar em massa */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <button
-                  onClick={salvarTabela}
-                  disabled={saving || cadastrando}
-                  className="py-2.5 rounded-lg text-sm font-semibold border flex items-center justify-center gap-2 hover:bg-gray-50 disabled:opacity-60"
-                  style={{ borderColor: C.esmeralda, color: C.esmeralda }}
-                >
-                  {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  Salvar Tabela — {STONE_TYPES.find((t) => t.value === sp?.tipo)?.label ?? "Pedra"}
-                </button>
-                <button
-                  onClick={cadastrarEmMassa}
-                  disabled={saving || cadastrando}
-                  className="py-2.5 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-60"
-                  style={{ backgroundColor: C.esmeralda }}
-                >
-                  {cadastrando ? <Loader2 size={14} className="animate-spin" /> : <Diamond size={14} />}
-                  Cadastrar Pedras em Massa
-                </button>
-              </div>
+              {/* Ação unificada: salva a tabela e cadastra/atualiza as pedras
+                  numa única operação — toda pedra cadastrada precisa ter tabela. */}
+              <button
+                onClick={salvarECadastrar}
+                disabled={saving || cadastrando}
+                className="w-full py-3 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-60"
+                style={{ backgroundColor: C.esmeralda }}
+              >
+                {(saving || cadastrando) ? <Loader2 size={14} className="animate-spin" /> : <><Save size={14} /><Diamond size={14} /></>}
+                Salvar Tabela e Cadastrar Pedras
+              </button>
 
               <p className="text-[10px] text-gray-400 text-center">
-                O cadastro em massa cria <strong>{STONE_CT.length}</strong> produto{STONE_CT.length === 1 ? "" : "s"} (categoria <strong>Pedras</strong>)
-                — um por tamanho entre <strong>{tamanhoInicial}mm</strong> e <strong>{tamanhoFinal}mm</strong> (passo 0.1mm).
+                Salva a tabela de markup acima e cria/atualiza{" "}
+                <strong>{STONE_CT.length}</strong> pedra{STONE_CT.length === 1 ? "" : "s"} (categoria <strong>Pedras</strong>)
+                entre <strong>{tamanhoInicial}mm</strong> e <strong>{tamanhoFinal}mm</strong> (passo 0.1mm).
+                Pedras já cadastradas têm preço/peso atualizados.
               </p>
 
               {/* Status do catálogo removido — quantidade é imputada manualmente na
@@ -741,6 +1079,7 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                   <Check size={12} /> {toast.msg}
                 </div>
               )}
+            </div>
             </div>
           )}
         </div>
@@ -799,25 +1138,25 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
               <div className="mx-auto w-16 h-16 rounded-full flex items-center justify-center" style={{ backgroundColor: "#ECFDF5" }}>
                 <CheckCircle2 size={40} style={{ color: "#059669" }} />
               </div>
-              <h3 className="text-lg font-bold text-gray-800">Pedras cadastradas!</h3>
+              <h3 className="text-lg font-bold text-gray-800">
+                {sucesso.criados > 0 ? "Pedras cadastradas!" : "Pedras atualizadas!"}
+              </h3>
               <p className="text-sm text-gray-600">
                 {sucesso.criados > 0 && (
                   <>
-                    <strong>{sucesso.criados}</strong> pedra{sucesso.criados === 1 ? "" : "s"} de{" "}
-                    <strong>{sucesso.pedra}</strong> {sucesso.criados === 1 ? "foi cadastrada" : "foram cadastradas"} no catálogo.
+                    <strong>{sucesso.criados}</strong> nova{sucesso.criados === 1 ? "" : "s"} pedra{sucesso.criados === 1 ? "" : "s"} de{" "}
+                    <strong>{sucesso.pedra}</strong> {sucesso.criados === 1 ? "criada" : "criadas"}.
                   </>
                 )}
-                {sucesso.criados === 0 && sucesso.pulados > 0 && (
+                {sucesso.atualizados > 0 && (
                   <>
-                    Nenhuma pedra nova — todas as {sucesso.pulados} já estavam cadastradas.
+                    {sucesso.criados > 0 && <br />}
+                    <strong>{sucesso.atualizados}</strong> pedra{sucesso.atualizados === 1 ? "" : "s"} já existente{sucesso.atualizados === 1 ? "" : "s"} {sucesso.atualizados === 1 ? "atualizada" : "atualizadas"} (preço/peso).
                   </>
                 )}
-                {sucesso.pulados > 0 && sucesso.criados > 0 && (
+                {sucesso.criados === 0 && sucesso.atualizados === 0 && sucesso.pulados > 0 && (
                   <>
-                    <br />
-                    <span className="text-xs text-gray-400">
-                      ({sucesso.pulados} já {sucesso.pulados === 1 ? "existia" : "existiam"} — pulada{sucesso.pulados === 1 ? "" : "s"})
-                    </span>
+                    Nenhuma pedra processada — todas as {sucesso.pulados} já estavam idênticas.
                   </>
                 )}
               </p>
@@ -861,7 +1200,6 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Wrapper>
   );
 }

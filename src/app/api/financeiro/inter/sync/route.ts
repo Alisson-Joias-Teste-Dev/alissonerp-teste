@@ -8,23 +8,27 @@ export async function POST(req: NextRequest) {
   // Auth: cron secret (DB) OU usuario com full access
   const cronSecret = req.headers.get("x-cron-secret");
   const expected = (await inter.getInterCronSecret()) ?? process.env.INTER_CRON_SECRET ?? null;
-  let autorizado = false;
 
+  // Caso 1: cron com secret válido → autorizado direto (sem user)
   if (cronSecret && expected && cronSecret === expected) {
-    autorizado = true;
+    // segue
   } else {
     const supabase = await createServerSupabase();
     const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const [u] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-      if (u && isFullAccess(u.role)) autorizado = true;
+    // 401 quando não há cron_secret válido nem usuário autenticado.
+    // Antes: caía direto em 403 (semanticamente errado: "não autenticado", não "sem permissão").
+    if (!user) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+    const [u] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
+    if (!u || !isFullAccess(u.role)) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
     }
   }
 
-  if (!autorizado) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
-  }
-
+  // Excluir também 'ERRO' (mapearStatusInter trata como rejeitado terminal).
+  // Antes, contas com inter_status='ERRO' eram re-consultadas em cada sync
+  // sem nunca sair do loop.
   const pendentes = await sql<
     { id: number; inter_pagamento_id: string; inter_tipo: string; inter_status: string | null; valor: string }[]
   >`
@@ -32,7 +36,7 @@ export async function POST(req: NextRequest) {
     FROM alissonerp.contas_pagar
     WHERE inter_pagamento_id IS NOT NULL
       AND situacao = 'pendente'
-      AND (inter_status IS NULL OR inter_status NOT IN ('PAGO','EXECUTADO','CANCELADO','REJEITADO'))
+      AND (inter_status IS NULL OR inter_status NOT IN ('PAGO','EXECUTADO','CANCELADO','REJEITADO','ERRO'))
     ORDER BY inter_atualizado_em ASC NULLS FIRST
     LIMIT 200
   `;

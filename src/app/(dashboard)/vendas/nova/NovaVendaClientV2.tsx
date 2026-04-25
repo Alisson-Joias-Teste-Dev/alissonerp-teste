@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, ArrowRight, Search, X, Plus, Loader2, CheckCircle, CheckCircle2,
   User, Package, Truck, CreditCard, FileText, Star, Calculator, Scale,
-  MapPin, AlertCircle, AlertTriangle, Check, ChevronRight, Ticket, Pencil, Wrench, Video,
+  MapPin, AlertCircle, AlertTriangle, Check, ChevronRight, Ticket, Pencil, Wrench, Video, Save,
 } from "lucide-react";
 import Link from "next/link";
 import CartaoInline from "@/components/vendas/CartaoInline";
@@ -461,6 +461,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [vendaId, setVendaId] = useState<number | null>(null);
   const [numeroVenda, setNumeroVenda] = useState<string>("");
   const [saving, setSaving] = useState(false);
+  const [salvandoRascunho, setSalvandoRascunho] = useState(false);
   const [saveErr, setSaveErr] = useState("");
 
   // ── Step 1: Cliente ───────────────────────────────────────────────────────
@@ -492,6 +493,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     cep: "", logradouro: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "",
   });
   const [totalFrete, setTotalFrete] = useState(0);
+  const [freteInput, setFreteInput] = useState("");
   const [fretePersonalizado, setFretePersonalizado] = useState(false);
   const [freteCalculado, setFreteCalculado] = useState<number | null>(null);
   const [loadingFrete, setLoadingFrete] = useState(false);
@@ -1266,6 +1268,21 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   function voltar() {
     setSaveErr("");
     setStep(s => Math.max(s - 1, 1));
+  }
+
+  // ─── Salvar como rascunho e sair ──────────────────────────────────────────
+  async function handleSalvarRascunho() {
+    if (salvandoRascunho || saving) return;
+    setSaveErr("");
+    if (!cliente) { setSaveErr("Selecione um cliente para salvar o rascunho"); return; }
+    setSalvandoRascunho(true);
+    try {
+      await salvarRascunho({ skipPagamentos: true });
+      router.push("/vendas");
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Erro ao salvar rascunho");
+      setSalvandoRascunho(false);
+    }
   }
 
   // ─── Solicitar aprovação de desconto (step 3) ────────────────────────────
@@ -2052,14 +2069,21 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                     <div className="flex items-center gap-2 text-sm" style={{ color: "#9CA3AF" }}>
                       <Loader2 size={13} className="animate-spin" /> Calculando frete...
                     </div>
-                  ) : fretePersonalizado ? (
+                  ) : (fretePersonalizado || freteCalculado === 0) ? (
                     <div className="flex items-center gap-3">
                       <Input
-                        type="number"
-                        min={0}
-                        step={0.01}
-                        value={totalFrete || ""}
-                        onChange={e => setTotalFrete(Number(e.target.value) || 0)}
+                        type="text"
+                        inputMode="decimal"
+                        value={freteInput}
+                        onChange={e => {
+                          const v = e.target.value.replace(/[^\d.,]/g, "");
+                          setFreteInput(v);
+                          const num = parseFloat(v.replace(",", "."));
+                          setTotalFrete(isNaN(num) ? 0 : num);
+                        }}
+                        onBlur={() => {
+                          if (totalFrete > 0) setFreteInput(totalFrete.toFixed(2).replace(".", ","));
+                        }}
                         placeholder="0,00"
                         className="max-w-[180px]"
                       />
@@ -2149,7 +2173,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                     const erroPers = validarItemPersonalizacao(item, configPers);
                     const numCols = tipoVenda === "produto" || tipoVenda === "garantia" ? 11 : 7;
                     return (
-                      <>
+                      <Fragment key={item._key}>
                         <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                           <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
                           <td className="px-3 py-2.5 font-medium" style={{ color: "#1A1A1A", minWidth: "160px" }}>
@@ -2345,7 +2369,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                             </td>
                           </tr>
                         )}
-                      </>
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -2770,6 +2794,17 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               </div>
             )}
 
+            {/* Alerta Manual (MP) — exige ID da transação */}
+            {pagForma === "Manual (MP)" && (
+              <div className="flex items-start gap-2 px-4 py-3 rounded-xl border text-sm" style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB", color: "#92400E" }}>
+                <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="font-semibold">Pagamento Manual (MP) — venda só pode ser concluída com o ID da transação.</p>
+                  <p className="mt-0.5 opacity-90">Salve como rascunho agora e, assim que tiver o ID do pagamento, abra a venda e confirme para concluir.</p>
+                </div>
+              </div>
+            )}
+
             {/* Card resumo */}
             <div className="rounded-xl border divide-y" style={{ borderColor: C.cremeBorder }}>
               <div className="px-4 py-3 flex items-center justify-between">
@@ -2843,15 +2878,29 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
           {saveErr && <p className="text-sm text-red-600 flex-1 text-center whitespace-pre-line">{saveErr}</p>}
 
           {step < 6 && !(step === 3 && precisaAprovacaoDesconto) && (
-            <button
-              onClick={avancar}
-              disabled={saving}
-              className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
-              style={{ backgroundColor: C.esmeralda, color: C.creme }}
-            >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-              Próximo <ArrowRight size={14} />
-            </button>
+            <div className="flex items-center gap-2">
+              {step >= 2 && (
+                <button
+                  onClick={handleSalvarRascunho}
+                  disabled={salvandoRascunho || saving}
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium border disabled:opacity-40 transition-opacity hover:opacity-90"
+                  style={{ borderColor: C.esmeralda, color: C.esmeralda, backgroundColor: "white" }}
+                  title="Salva o que já foi preenchido como rascunho e volta para a lista"
+                >
+                  {salvandoRascunho ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  Salvar como Rascunho
+                </button>
+              )}
+              <button
+                onClick={avancar}
+                disabled={saving || salvandoRascunho}
+                className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}
+              >
+                {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+                Próximo <ArrowRight size={14} />
+              </button>
+            </div>
           )}
           {step === 3 && precisaAprovacaoDesconto && (
             <button
@@ -2865,15 +2914,30 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
             </button>
           )}
           {step === 6 && (
-            <button
-              onClick={() => concluirVenda()}
-              disabled={concluindo || (pagForma === "Múltiplas" && !pagamentoCobre)}
-              className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
-              style={{ backgroundColor: C.esmeralda, color: C.creme }}
-            >
-              {concluindo ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-              Salvar Venda
-            </button>
+            <div className="flex items-center gap-2">
+              {pagForma === "Manual (MP)" ? (
+                <button
+                  onClick={handleSalvarRascunho}
+                  disabled={salvandoRascunho}
+                  className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                  title="Pagamento Manual (MP) precisa do ID da transação para ser concluído. Salve como rascunho e confirme depois."
+                >
+                  {salvandoRascunho ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  Salvar como Rascunho
+                </button>
+              ) : (
+                <button
+                  onClick={() => concluirVenda()}
+                  disabled={concluindo || (pagForma === "Múltiplas" && !pagamentoCobre)}
+                  className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                >
+                  {concluindo ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                  Salvar Venda
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>

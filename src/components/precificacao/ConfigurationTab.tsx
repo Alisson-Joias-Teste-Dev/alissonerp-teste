@@ -164,7 +164,7 @@ const ConfigurationTab: React.FC<ConfigurationTabProps> = ({
 
     while (w < category.maxWeight && count < 1000) {
       let step = 0.1;
-      if (w >= 29.95) step = 1.0;
+      if (w >= 19.95) step = 1.0;
 
       w += step;
 

@@ -26,6 +26,7 @@ import {
   PlayCircle,
 } from "lucide-react";
 import type { FaixaPedra } from "./page";
+import GerenciarPedrasModal from "@/components/produtos/GerenciarPedrasModal";
 import {
   getPricingFactors,
   prepareCategories,
@@ -1476,7 +1477,7 @@ function TabCurvaDinamica({
           <div>
             <h3 className="font-semibold text-sm" style={{ color: P.text }}>Categorias da Curva</h3>
             <span className="text-[11px]" style={{ color: P.muted }}>
-              {categoriasPreparadas.length} ativa{categoriasPreparadas.length !== 1 ? "s" : ""} · passo 0.1g / &gt;30g: 1.0g
+              {categoriasPreparadas.length} ativa{categoriasPreparadas.length !== 1 ? "s" : ""} · passo 0.1g / &gt;20g: 1.0g
             </span>
           </div>
 
@@ -2277,7 +2278,13 @@ export default function PrecificacaoClient({ faixasPedrasInicial, configInicial,
             canEdit={canEditCurva}
           />
         )}
-        {tab === "markup-pedras" && <TabMarkupPedras faixasInicial={faixasPedrasInicial} onAbrirSimulacao={abrirSimulacaoPedra} />}
+        {tab === "markup-pedras" && (
+          <GerenciarPedrasModal
+            open
+            inline
+            onClose={() => { /* inline: não fecha */ }}
+          />
+        )}
         {tab === "cotacoes"      && <TabCotacoes cotacao={cotacaoInicial} />}
         {tab === "regras"        && <TabRegras configInicial={configInicial} />}
         {tab === "pendentes"     && <TabPendentes currentUserId={currentUserId} canAprovar={canAprovar} onCountChange={setPendentesCount} />}
