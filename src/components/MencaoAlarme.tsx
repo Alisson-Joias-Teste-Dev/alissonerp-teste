@@ -64,10 +64,19 @@ export default function MencaoAlarme() {
     && new Date(silenciadoAte).getTime() > Date.now();
 
   // ── Fetch das pendências ───────────────────────────────────────────────
+  // Guard: se a request anterior ainda não terminou, aborta antes de iniciar nova.
+  // Sem isso, em rede lenta os polls de 10s empilham e saturam o limite de 6 conexões do browser.
+  const inflightCtrlRef = useRef<AbortController | null>(null);
   const fetchPendentes = useCallback(async () => {
+    if (inflightCtrlRef.current) {
+      inflightCtrlRef.current.abort();
+    }
+    const ctrl = new AbortController();
+    inflightCtrlRef.current = ctrl;
     try {
       const r = await fetch("/api/notificacoes/pendentes-resposta", {
         cache: "no-store",
+        signal: ctrl.signal,
       });
       if (!r.ok) {
         setPendentes([]);
@@ -78,7 +87,9 @@ export default function MencaoAlarme() {
       setPendentes(Array.isArray(data.itens) ? data.itens : []);
       setSilenciadoAte(data.silenciado_ate ?? null);
     } catch {
-      // Rede caiu — próxima tentativa em 10s
+      // Rede caiu / aborted — próxima tentativa em 10s
+    } finally {
+      if (inflightCtrlRef.current === ctrl) inflightCtrlRef.current = null;
     }
   }, []);
 

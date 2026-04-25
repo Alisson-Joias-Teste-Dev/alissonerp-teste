@@ -16,17 +16,71 @@ interface AuthState {
   isOperadorService: boolean;
 }
 
-export function useAuth(): AuthState {
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    role: null,
-    nome: null,
-    fotoUrl: null,
-    loading: true,
-    modulos_leitura: [],
-    modulos_escrita: [],
-    isOperadorService: false,
+// Cache module-global: deduplica fetch entre os 17+ componentes que usam useAuth()
+// Sem isso, cada componente faz 2 fetches paralelos → satura limite de 6 conexões do browser
+let cachedState: AuthState | null = null;
+let inflightPromise: Promise<AuthState> | null = null;
+const subscribers = new Set<(s: AuthState) => void>();
+
+async function fetchAuthData(): Promise<AuthState> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return { user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false };
+  }
+  const roleFromToken = user.user_metadata?.role as Role ?? null;
+  const nome = user.user_metadata?.nome as string ?? null;
+  const [profileRes, permRes] = await Promise.all([
+    fetch(`/api/user/role?user_id=${user.id}`).catch(() => null),
+    fetch(`/api/user/permissoes?user_id=${user.id}`).catch(() => null),
+  ]);
+  const profile = profileRes?.ok ? await profileRes.json() : null;
+  const perm    = permRes?.ok    ? await permRes.json()    : null;
+  return {
+    user,
+    role:              (perm?.role ?? roleFromToken) as Role | null,
+    nome:              profile?.name ?? nome,
+    fotoUrl:           profile?.avatar_url ?? null,
+    loading:           false,
+    modulos_leitura:   perm?.modulos_leitura ?? [],
+    modulos_escrita:   perm?.modulos_escrita ?? [],
+    isOperadorService: perm?.is_operador_service ?? false,
+  };
+}
+
+function notifyAll(s: AuthState) {
+  cachedState = s;
+  subscribers.forEach((cb) => cb(s));
+}
+
+async function ensureLoaded(): Promise<AuthState> {
+  if (cachedState && !cachedState.loading) return cachedState;
+  if (inflightPromise) return inflightPromise;
+  inflightPromise = fetchAuthData()
+    .then((s) => { notifyAll(s); inflightPromise = null; return s; })
+    .catch((e) => { inflightPromise = null; throw e; });
+  return inflightPromise;
+}
+
+let authChangeHooked = false;
+function hookAuthChangeOnce() {
+  if (authChangeHooked) return;
+  authChangeHooked = true;
+  const supabase = createClient();
+  supabase.auth.onAuthStateChange(() => {
+    cachedState = null;
+    inflightPromise = null;
+    ensureLoaded().catch(() => {});
   });
+}
+
+export function useAuth(): AuthState {
+  const [state, setState] = useState<AuthState>(
+    cachedState ?? {
+      user: null, role: null, nome: null, fotoUrl: null,
+      loading: true, modulos_leitura: [], modulos_escrita: [], isOperadorService: false,
+    }
+  );
 
   useEffect(() => {
     function handleFotoAtualizada(e: Event) {
@@ -38,63 +92,15 @@ export function useAuth(): AuthState {
   }, []);
 
   useEffect(() => {
-    const supabase = createClient();
-
-    async function loadUser() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const roleFromToken = user.user_metadata?.role as Role ?? null;
-        const nome = user.user_metadata?.nome as string ?? null;
-        // Buscar perfil (nome/avatar) e permissões em paralelo
-        const [profileRes, permRes] = await Promise.all([
-          fetch(`/api/user/role?user_id=${user.id}`).catch(() => null),
-          fetch(`/api/user/permissoes?user_id=${user.id}`).catch(() => null),
-        ]);
-        const profile = profileRes?.ok ? await profileRes.json() : null;
-        const perm    = permRes?.ok    ? await permRes.json()    : null;
-        setState({
-          user,
-          role:              (perm?.role ?? roleFromToken) as Role | null,
-          nome:              profile?.name ?? nome,
-          fotoUrl:           profile?.avatar_url ?? null,
-          loading:           false,
-          modulos_leitura:   perm?.modulos_leitura ?? [],
-          modulos_escrita:   perm?.modulos_escrita ?? [],
-          isOperadorService: perm?.is_operador_service ?? false,
-        });
-      } else {
-        setState({ user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false });
-      }
+    hookAuthChangeOnce();
+    const sub = (s: AuthState) => setState(s);
+    subscribers.add(sub);
+    if (cachedState && !cachedState.loading) {
+      setState(cachedState);
+    } else {
+      ensureLoaded().then((s) => setState(s)).catch(() => {});
     }
-
-    loadUser();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      const user = session?.user ?? null;
-      const roleFromToken = user?.user_metadata?.role as Role ?? null;
-      const nome = user?.user_metadata?.nome as string ?? null;
-      if (user) {
-        Promise.all([
-          fetch(`/api/user/role?user_id=${user.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
-          fetch(`/api/user/permissoes?user_id=${user.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
-        ]).then(([profile, perm]) => {
-          setState({
-            user,
-            role:              (perm?.role ?? roleFromToken) as Role | null,
-            nome:              profile?.name ?? nome,
-            fotoUrl:           profile?.avatar_url ?? null,
-            loading:           false,
-            modulos_leitura:   perm?.modulos_leitura ?? [],
-            modulos_escrita:   perm?.modulos_escrita ?? [],
-            isOperadorService: perm?.is_operador_service ?? false,
-          });
-        }).catch(() => setState({ user, role: roleFromToken, nome, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false }));
-      } else {
-        setState({ user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false });
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    return () => { subscribers.delete(sub); };
   }, []);
 
   return state;
