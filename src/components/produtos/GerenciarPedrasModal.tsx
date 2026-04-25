@@ -197,13 +197,19 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
   }, [tamanhoInicial, tamanhoFinal]);
 
   // ───────────── Multi-tabela: sincroniza state com tipo selecionado ─────────────
-  // Ao trocar de pedra: tenta eleger a primeira tabela salva como ativa e puxa
-  // seu range para os inputs. Se não houver tabelas, entra em modo "new".
+  // Ao trocar de pedra: se a tabelaAtivaId existe na lista do novo tipo, mantém
+  // (e puxa o range dela). Caso contrário, elege a primeira ou entra em "new".
   useEffect(() => {
     const tipo = stonePrices[simPedra]?.tipo;
     if (!tipo) return;
     const lista = tabelasPorTipo[tipo] ?? [];
-    if (lista.length > 0) {
+    const ativa = lista.find(t => t.id === tabelaAtivaId);
+    if (ativa) {
+      // Tabela ativa válida pro tipo atual — só puxa o range dela.
+      setTamanhoInicial(ativa.min);
+      setTamanhoFinal(ativa.max);
+    } else if (lista.length > 0) {
+      // Tabela ativa não existe nesse tipo — pula pra primeira.
       const t = lista[0];
       setTabelaAtivaId(t.id);
       setTamanhoInicial(t.min);
@@ -212,7 +218,7 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
       setTabelaAtivaId("new");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [simPedra, stonePrices, tabelasPorTipo]);
+  }, [simPedra, stonePrices, tabelasPorTipo, tabelaAtivaId]);
 
   // Recalcular rowMarkups ao trocar pedra/tabela OU ao mudar a faixa (modo "new").
   useEffect(() => {
@@ -368,11 +374,17 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
     }
   }
 
-  // Carrega uma tabela específica no editor — troca pedra + ativa a tabela.
+  // Carrega uma tabela específica no editor — troca pedra + ativa a tabela
+  // + ajusta o range (Tam. Inicial/Final) pra refletir os limites da tabela.
   function editarTabela(tipo: string, id: string) {
     const idx = stonePrices.findIndex(s => s.tipo === tipo);
     if (idx >= 0 && idx !== simPedra) setSimPedra(idx);
     setTabelaAtivaId(id);
+    const t = (tabelasPorTipo[tipo] ?? []).find(x => x.id === id);
+    if (t) {
+      setTamanhoInicial(t.min);
+      setTamanhoFinal(t.max);
+    }
   }
 
   function excluirTabelaAtiva() {
