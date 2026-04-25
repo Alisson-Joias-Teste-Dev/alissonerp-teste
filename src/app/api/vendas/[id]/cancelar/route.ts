@@ -58,19 +58,24 @@ export async function POST(
   `;
   const creditoUsado = parseFloat(vendaCredito?.credito_gerente_usado ?? "0");
 
-  await sql`
-    UPDATE alissonerp.vendas_erp
-    SET situacao = 'cancelado', bloqueado = true
-    WHERE id = ${vendaId}
-  `;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (sql as any).begin(async (tx: typeof sql) => {
+      await tx`
+        UPDATE alissonerp.vendas_erp
+        SET situacao = 'cancelado', bloqueado = true
+        WHERE id = ${vendaId}
+      `;
 
-  if (creditoUsado > 0) {
-    try {
-      const { creditarSaldo } = await import("@/lib/saldo-credito");
-      await creditarSaldo(creditoUsado, vendaId, null, user.id);
-    } catch (err) {
-      console.error(`[cancelar] Erro ao devolver saldo de crédito:`, err);
-    }
+      if (creditoUsado > 0) {
+        const { creditarSaldo } = await import("@/lib/saldo-credito");
+        await creditarSaldo(creditoUsado, vendaId, null, user.id);
+      }
+    });
+  } catch (err) {
+    console.error("[cancelar] Falha ao cancelar venda:", err);
+    const msg = err instanceof Error ? err.message : "Falha ao cancelar. Tente novamente.";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });

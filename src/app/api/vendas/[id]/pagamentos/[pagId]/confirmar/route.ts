@@ -123,14 +123,30 @@ export async function POST(
         WHERE venda_id = ${vendaId} AND forma != 'A Receber' AND status = 'pendente'
       `;
       if (Number(outrosPend.cnt) === 0) {
-        console.log(`[confirmarPagamento] auto-aprovando venda=${vendaId} tipo=${vendaCredito.aprovacao_credito_tipo} user=${user.id}`);
-        try {
-          const { approveVenda } = await import("@/lib/vendas-aprovar");
-          await approveVenda(vendaId, user.id, { tinyBestEffort: true });
-          vendaAprovada = true;
-          console.log(`[confirmarPagamento] venda=${vendaId} aprovada automaticamente`);
-        } catch (err) {
-          console.error(`[confirmarPagamento] Erro ao aprovar venda ${vendaId}:`, err);
+        const [vendaDesconto] = await sql`
+          SELECT desconto_revalidacao_necessaria, desconto_aprovado_por
+          FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+        `;
+        const [temAltoDesc] = await sql`
+          SELECT EXISTS(
+            SELECT 1 FROM alissonerp.itens_venda_erp
+            WHERE venda_id = ${vendaId} AND pct_desconto > 30
+          ) AS tem
+        `;
+        const bloqueadoPorDesconto =
+          vendaDesconto?.desconto_revalidacao_necessaria === true ||
+          (temAltoDesc?.tem && !vendaDesconto?.desconto_aprovado_por);
+
+        if (!bloqueadoPorDesconto) {
+          console.log(`[confirmarPagamento] auto-aprovando venda=${vendaId} tipo=${vendaCredito.aprovacao_credito_tipo} user=${user.id}`);
+          try {
+            const { approveVenda } = await import("@/lib/vendas-aprovar");
+            await approveVenda(vendaId, user.id, { tinyBestEffort: true });
+            vendaAprovada = true;
+            console.log(`[confirmarPagamento] venda=${vendaId} aprovada automaticamente`);
+          } catch (err) {
+            console.error(`[confirmarPagamento] Erro ao aprovar venda ${vendaId}:`, err);
+          }
         }
       }
     }

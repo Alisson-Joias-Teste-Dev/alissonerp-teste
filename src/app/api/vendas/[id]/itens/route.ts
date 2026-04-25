@@ -207,9 +207,10 @@ export async function POST(
   if (venda.situacao === "rascunho" && (body.pct_desconto ?? 0) > 30) {
     await sql`
       UPDATE alissonerp.vendas_erp
-      SET desconto_aprovado_por = NULL,
-          desconto_aprovado_em  = NULL,
-          updated_at            = NOW()
+      SET desconto_aprovado_por           = NULL,
+          desconto_aprovado_em            = NULL,
+          desconto_revalidacao_necessaria = true,
+          updated_at                      = NOW()
       WHERE id = ${vendaId}
     `;
     await sql`
