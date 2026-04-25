@@ -871,7 +871,7 @@ export default function ProdutosClient() {
       <GerenciarPedrasModal
         open={showPedras}
         onClose={() => setShowPedras(false)}
-        onCreated={bumpRefresh}
+        onCreated={() => { fetchProdutos(); bumpRefresh(); }}
       />
 
       {showPersonalizado && (
