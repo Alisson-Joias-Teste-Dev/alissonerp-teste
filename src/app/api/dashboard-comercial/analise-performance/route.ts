@@ -25,6 +25,12 @@ export async function GET(req: NextRequest) {
   const to = params.get("to") ?? fimMes.toISOString().slice(0, 10);
   const refDate = params.get("refDate") ?? hoje.toISOString().slice(0, 10);
 
+  // Para projecao_mensal sempre usar fim do mês de `from`, independente do `to` recebido
+  const fromDate = new Date(from + "T12:00:00");
+  const fimMesFrom = new Date(fromDate.getFullYear(), fromDate.getMonth() + 1, 0)
+    .toISOString()
+    .slice(0, 10);
+
   try {
     // ---------- Vendas do período (mês) e de hoje (legado + ERP, vale-troca pré-computado) ----------
     const vendasPeriodo = await sql<
@@ -56,8 +62,8 @@ export async function GET(req: NextRequest) {
     // ---------- Metas: 4 agregações ----------
     // 1. Acumulada até refDate (agora) dentro do mês → cenário mensal-acumulado
     const metasMesAcumulado = await aggMetas(sql, from, to, refDate, "ate_now");
-    // 2. Valor total do mês → cenário projeção mensal
-    const metasMesTotal = await aggMetas(sql, from, to, refDate, "mes_total");
+    // 2. Valor total do mês → cenário projeção mensal (sempre até fim do mês de `from`)
+    const metasMesTotal = await aggMetas(sql, from, fimMesFrom, refDate, "mes_total");
     // 3. Acumulada até hora atual do dia refDate → cenário horario-acumulado
     const metasHojeAcumulado = await aggMetasDia(sql, refDate, "ate_now");
     // 4. Total do dia refDate → cenário horario-diario
