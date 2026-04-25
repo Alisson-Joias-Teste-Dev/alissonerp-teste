@@ -428,62 +428,101 @@ export async function DELETE(req: NextRequest) {
           `;
 
       if (alvos.length === 0) {
-        return { excluidos: 0, skus: [] as string[] };
+        return { excluidos: 0, inativados: 0, skus: [] as string[] };
       }
 
-      const skus = alvos.map((a: { sku: string }) => a.sku);
-      const ids  = alvos.map((a: { id_produto: number }) => a.id_produto);
+      const allIds  = alvos.map((a: { id_produto: number }) => a.id_produto);
+      const allSkus = alvos.map((a: { sku: string }) => a.sku);
 
+      // Identifica quais alvos têm referência em vendas (não dá pra deletar — só inativar).
+      const referenciados = await tx<{ id_produto: number }[]>`
+        SELECT DISTINCT produto_id AS id_produto
+        FROM alissonerp.itens_venda_erp
+        WHERE produto_id = ANY(${allIds})
+      `.catch(() =>
+        tx<{ id_produto: number }[]>`
+          SELECT DISTINCT produto_id AS id_produto
+          FROM public.itens_venda
+          WHERE produto_id = ANY(${allIds})
+        `.catch(() => [] as { id_produto: number }[])
+      );
+      const idsRef = new Set(referenciados.map((r: { id_produto: number }) => Number(r.id_produto)));
+      const idsDel = allIds.filter((id: number) => !idsRef.has(Number(id)));
+      const idsInativar = allIds.filter((id: number) => idsRef.has(Number(id)));
+      const skusDel = alvos.filter((a: { id_produto: number; sku: string }) => !idsRef.has(Number(a.id_produto))).map((a: { sku: string }) => a.sku);
       const etapas: string[] = [];
 
-      // 1. Remove saldo em public.estoque
-      try {
-        await tx`DELETE FROM public.estoque WHERE sku = ANY(${skus})`;
-        etapas.push("estoque ok");
-      } catch (e) {
-        etapas.push(`estoque: ${e instanceof Error ? e.message : "erro"}`);
-        throw new Error(`Falha em public.estoque: ${e instanceof Error ? e.message : e}`);
+      // ── Inativar pedras com referência em vendas (preserva FK) ────────────
+      if (idsInativar.length > 0) {
+        try {
+          await tx`
+            UPDATE public.produtos
+            SET situacao = 'I'
+            WHERE id_produto = ANY(${idsInativar})
+              AND categoria ILIKE 'Pedras%'
+          `;
+          etapas.push(`inativadas: ${idsInativar.length}`);
+        } catch (e) {
+          etapas.push(`inativar: ${e instanceof Error ? e.message : "erro"}`);
+          throw new Error(`Falha ao inativar: ${e instanceof Error ? e.message : e}`);
+        }
       }
 
-      // 2. Remove composição (BOM), se houver — tolerante
-      try {
-        await tx`DELETE FROM alissonerp.produto_composicao WHERE produto_id = ANY(${ids})`;
-        etapas.push("composicao ok");
-      } catch (e) {
-        etapas.push(`composicao: ${e instanceof Error ? e.message : "erro"}`);
+      // ── Deletar pedras sem referência ──────────────────────────────────────
+      if (idsDel.length > 0) {
+        // 1. Saldo em public.estoque
+        try {
+          await tx`DELETE FROM public.estoque WHERE sku = ANY(${skusDel})`;
+          etapas.push("estoque ok");
+        } catch (e) {
+          etapas.push(`estoque: ${e instanceof Error ? e.message : "erro"}`);
+          throw new Error(`Falha em public.estoque: ${e instanceof Error ? e.message : e}`);
+        }
+
+        // 2. Extras de pedra
+        try {
+          await tx`DELETE FROM alissonerp.produto_pedra_extras WHERE produto_id = ANY(${idsDel})`;
+        } catch { /* tolerante */ }
+
+        // 3. Composição (BOM) — tolerante
+        try {
+          await tx`DELETE FROM alissonerp.produto_composicao WHERE produto_id = ANY(${idsDel})`;
+        } catch { /* tolerante */ }
+
+        // 4. Ficha técnica — tolerante
+        try {
+          await tx`DELETE FROM alissonerp.fichas_tecnicas_produto WHERE produto_id = ANY(${idsDel})`;
+        } catch { /* tolerante */ }
+
+        // 5. erp_produtos
+        try {
+          await tx`DELETE FROM alissonerp.erp_produtos WHERE produto_id = ANY(${idsDel})`;
+          etapas.push("erp_produtos ok");
+        } catch (e) {
+          etapas.push(`erp_produtos: ${e instanceof Error ? e.message : "erro"}`);
+          throw new Error(`Falha em alissonerp.erp_produtos: ${e instanceof Error ? e.message : e}`);
+        }
+
+        // 6. public.produtos (com proteção dupla: só Pedras)
+        try {
+          await tx`
+            DELETE FROM public.produtos
+            WHERE id_produto = ANY(${idsDel})
+              AND categoria ILIKE 'Pedras%'
+          `;
+          etapas.push(`deletadas: ${idsDel.length}`);
+        } catch (e) {
+          etapas.push(`produtos: ${e instanceof Error ? e.message : "erro"}`);
+          throw new Error(`Falha em public.produtos: ${e instanceof Error ? e.message : e}`);
+        }
       }
 
-      // 3. Remove ficha técnica, se houver — tolerante
-      try {
-        await tx`DELETE FROM alissonerp.fichas_tecnicas_produto WHERE produto_id = ANY(${ids})`;
-        etapas.push("ficha ok");
-      } catch (e) {
-        etapas.push(`ficha: ${e instanceof Error ? e.message : "erro"}`);
-      }
-
-      // 4. Remove erp_produtos
-      try {
-        await tx`DELETE FROM alissonerp.erp_produtos WHERE produto_id = ANY(${ids})`;
-        etapas.push("erp_produtos ok");
-      } catch (e) {
-        etapas.push(`erp_produtos: ${e instanceof Error ? e.message : "erro"}`);
-        throw new Error(`Falha em alissonerp.erp_produtos: ${e instanceof Error ? e.message : e}`);
-      }
-
-      // 5. Remove public.produtos (proteção dupla: categoria Pedras)
-      try {
-        await tx`
-          DELETE FROM public.produtos
-          WHERE id_produto = ANY(${ids})
-            AND categoria ILIKE 'Pedras%'
-        `;
-        etapas.push("produtos ok");
-      } catch (e) {
-        etapas.push(`produtos: ${e instanceof Error ? e.message : "erro"}`);
-        throw new Error(`Falha em public.produtos: ${e instanceof Error ? e.message : e}`);
-      }
-
-      return { excluidos: alvos.length, skus, etapas };
+      return {
+        excluidos: idsDel.length,
+        inativados: idsInativar.length,
+        skus: allSkus,
+        etapas,
+      };
     });
 
     return NextResponse.json({ ok: true, ...result });

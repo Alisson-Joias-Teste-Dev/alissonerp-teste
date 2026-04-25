@@ -516,13 +516,19 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Falha ao excluir");
 
-      const qtd = Number(data?.excluidos ?? 0);
-      setToast({
-        msg: qtd === 0
-          ? "Nenhuma pedra correspondente encontrada."
-          : `${qtd} pedra${qtd === 1 ? "" : "s"} excluída${qtd === 1 ? "" : "s"} com sucesso.`,
-        ok: qtd > 0,
-      });
+      const del = Number(data?.excluidos ?? 0);
+      const ina = Number(data?.inativados ?? 0);
+      let msg: string;
+      if (del === 0 && ina === 0) {
+        msg = "Nenhuma pedra correspondente encontrada.";
+      } else if (ina === 0) {
+        msg = `${del} pedra${del === 1 ? "" : "s"} excluída${del === 1 ? "" : "s"} com sucesso.`;
+      } else if (del === 0) {
+        msg = `${ina} pedra${ina === 1 ? "" : "s"} inativada${ina === 1 ? "" : "s"} (já vendida${ina === 1 ? "" : "s"} — preservadas para histórico).`;
+      } else {
+        msg = `${del} excluída${del === 1 ? "" : "s"} + ${ina} inativada${ina === 1 ? "" : "s"} (já vendida${ina === 1 ? "" : "s"}).`;
+      }
+      setToast({ msg, ok: (del + ina) > 0 });
       setConfExcluir(null);
       await recarregarTotais();
       onCreated?.(); // força refresh da listagem
