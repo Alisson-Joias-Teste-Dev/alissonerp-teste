@@ -59,9 +59,12 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onCreated?: () => void;
+  // Quando true, renderiza inline (sem overlay, sem cabeçalho, sem botão de
+  // fechar) — pra usar dentro de uma página/aba como /precificacao.
+  inline?: boolean;
 }
 
-export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props) {
+export default function GerenciarPedrasModal({ open, onClose, onCreated, inline = false }: Props) {
   const [loading, setLoading]   = useState(false);
   const [saving, setSaving]     = useState(false);
   const [cadastrando, setCadastrando] = useState(false);
@@ -589,17 +592,33 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
-          <h2 className="text-base font-semibold text-gray-800">Gerenciar Pedras Preciosas</h2>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100">
-            <X size={16} />
-          </button>
+  // Wrapper externo: modal com overlay OU inline dentro do fluxo da página.
+  const Wrapper = inline
+    ? ({ children }: { children: React.ReactNode }) => (
+        <div className="bg-white rounded-2xl border w-full" style={{ borderColor: C.cremeBorder }}>
+          <div className="flex flex-col overflow-hidden relative">{children}</div>
         </div>
+      )
+    : ({ children }: { children: React.ReactNode }) => (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+          <div className="relative bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            {children}
+          </div>
+        </div>
+      );
+
+  return (
+    <Wrapper>
+        {/* Header — escondido em modo inline (a página já tem título) */}
+        {!inline && (
+          <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
+            <h2 className="text-base font-semibold text-gray-800">Gerenciar Pedras Preciosas</h2>
+            <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100">
+              <X size={16} />
+            </button>
+          </div>
+        )}
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-5">
@@ -1095,7 +1114,6 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Wrapper>
   );
 }

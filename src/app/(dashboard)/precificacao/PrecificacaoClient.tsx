@@ -26,6 +26,7 @@ import {
   PlayCircle,
 } from "lucide-react";
 import type { FaixaPedra } from "./page";
+import GerenciarPedrasModal from "@/components/produtos/GerenciarPedrasModal";
 import {
   getPricingFactors,
   prepareCategories,
@@ -2277,7 +2278,13 @@ export default function PrecificacaoClient({ faixasPedrasInicial, configInicial,
             canEdit={canEditCurva}
           />
         )}
-        {tab === "markup-pedras" && <TabMarkupPedras faixasInicial={faixasPedrasInicial} onAbrirSimulacao={abrirSimulacaoPedra} />}
+        {tab === "markup-pedras" && (
+          <GerenciarPedrasModal
+            open
+            inline
+            onClose={() => { /* inline: não fecha */ }}
+          />
+        )}
         {tab === "cotacoes"      && <TabCotacoes cotacao={cotacaoInicial} />}
         {tab === "regras"        && <TabRegras configInicial={configInicial} />}
         {tab === "pendentes"     && <TabPendentes currentUserId={currentUserId} canAprovar={canAprovar} onCountChange={setPendentesCount} />}
