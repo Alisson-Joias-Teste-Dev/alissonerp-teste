@@ -291,7 +291,12 @@ export function getCategoryPoints(
   config: Pick<CurvaConfig, "startMkp" | "startCommission" | "goldCostPercentage" | "arredondamento">,
 ): PontoCategoriaChip[] {
   const idx = sortedCategories.findIndex((c) => c.id === category.id);
-  const rangeStart = idx === 0 ? 0.1 : sortedCategories[idx - 1].maxWeight + 0.1;
+  // Quando o limite anterior já está no regime de 1g (>=20g), o próximo ponto
+  // pula para o próximo grama inteiro (ex: prev=40g → start=41g, não 40.1g).
+  const prevMax = idx === 0 ? 0 : sortedCategories[idx - 1].maxWeight;
+  const rangeStart = idx === 0
+    ? 0.1
+    : prevMax >= 19.95 ? prevMax + 1.0 : prevMax + 0.1;
   const rangeEnd = category.maxWeight;
 
   const points: PontoCategoriaChip[] = [];
