@@ -13,6 +13,7 @@ import { useDateRange, useAnaliseComissoes } from "@/hooks/dashboard-comercial/u
 export default function AnaliseComissoesPage() {
   const { from, to, setRange } = useDateRange();
   const [view, setView] = useState<"resumo" | "detalhe">("resumo");
+  const [filtroConsultora, setFiltroConsultora] = useState<number | null>(null);
   const dados = useAnaliseComissoes(from, to);
 
   return (
@@ -117,8 +118,17 @@ export default function AnaliseComissoesPage() {
                         <td className="px-4 py-2 text-right tabular-nums" style={{ color: P.dourado }}>
                           {formatPercent(c.media_comissao)}
                         </td>
-                        <td className="px-4 py-2 text-right tabular-nums font-medium" style={{ color: P.sucesso }}>
-                          {formatBRL(c.esta_dentro_meta ? c.comissao_ganha : c.comissao_fora_meta)}
+                        <td className="px-4 py-2 text-right tabular-nums font-medium">
+                          {c.esta_dentro_meta ? (
+                            <span style={{ color: P.sucesso }}>{formatBRL(c.comissao_ganha)}</span>
+                          ) : (
+                            <div>
+                              <span style={{ color: P.erro }}>{formatBRL(c.comissao_fora_meta)}</span>
+                              <p className="text-[10px] tabular-nums" style={{ color: P.sucesso }}>
+                                {formatBRL(c.comissao_ganha)} se bater
+                              </p>
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-2 text-right tabular-nums" style={{ color: P.erro }}>
                           {formatBRL(c.comissao_perdida)}
@@ -147,6 +157,35 @@ export default function AnaliseComissoesPage() {
               className="overflow-hidden rounded-xl"
               style={{ backgroundColor: P.creme, border: `1px solid ${P.cremeMuted}` }}
             >
+              {/* Filtro por consultora */}
+              <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: P.cremeMuted }}>
+                <span className="text-sm font-medium" style={{ color: P.esmeralda }}>Consultora:</span>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setFiltroConsultora(null)}
+                    className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
+                    style={{
+                      backgroundColor: filtroConsultora === null ? P.esmeralda : P.cremeSoft,
+                      color: filtroConsultora === null ? P.creme : P.esmeralda,
+                    }}
+                  >
+                    Todas
+                  </button>
+                  {dados.data.resumo_consultoras.map((c) => (
+                    <button
+                      key={c.id_vendedor}
+                      onClick={() => setFiltroConsultora(c.id_vendedor)}
+                      className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
+                      style={{
+                        backgroundColor: filtroConsultora === c.id_vendedor ? P.esmeralda : P.cremeSoft,
+                        color: filtroConsultora === c.id_vendedor ? P.creme : P.esmeralda,
+                      }}
+                    >
+                      {c.nome.split(" ")[0]}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="max-h-[70vh] overflow-auto">
                 <table className="w-full text-sm">
                   <thead style={{ backgroundColor: P.cremeSoft }} className="sticky top-0">
@@ -165,7 +204,9 @@ export default function AnaliseComissoesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {dados.data.itens_detalhados.slice(0, 500).map((i) => (
+                    {dados.data.itens_detalhados
+                      .filter((i) => filtroConsultora === null || i.id_vendedor === filtroConsultora)
+                      .slice(0, 500).map((i) => (
                       <tr key={i.id} className="border-t" style={{ borderColor: P.cremeMuted }}>
                         <td className="px-4 py-1.5" style={{ color: P.esmeralda }}>
                           {formatDateBR(i.data_venda)}
