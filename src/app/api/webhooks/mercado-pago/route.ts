@@ -189,7 +189,7 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
     // ambos). Antes este UPDATE não populava o array → re-execução.
     await tx`
       UPDATE alissonerp.pagamentos_venda
-      SET status = 'confirmado', data_confirmacao = NOW(), gateway_id = ${paymentId},
+      SET status = 'confirmado', source = 'webhook_mp', data_confirmacao = NOW(), gateway_id = ${paymentId},
           valor_liquido = ${transactionAmount}, taxas_mp = 0,
           gateway_payload = gateway_payload || ${JSON.stringify({
             merchant_order_id: orderId,
@@ -465,6 +465,7 @@ export async function POST(req: NextRequest) {
         UPDATE alissonerp.pagamentos_venda
         SET
           status           = 'confirmado',
+          source           = 'webhook_mp',
           data_confirmacao = NOW(),
           gateway_id       = ${paymentId},
           valor_liquido    = ${valorLiquido},
