@@ -404,16 +404,15 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
     }
   }
 
-  // Limpa todos os campos editáveis para criar tabela do zero.
+  // Limpa todos os campos editáveis para criar tabela do zero (Dólar é automático).
   function resetParaNovaTabela() {
     setTabelaAtivaId("new");
-    setTamanhoInicial(1.0);
-    setTamanhoFinal(1.0);
-    setMkpInicial(1);
-    setMkpFinal(1);
+    setTamanhoInicial(0);
+    setTamanhoFinal(0);
+    setMkpInicial(0);
+    setMkpFinal(0);
     setMkpDecr(0);
     setRowMarkups({});
-    // Zera o custo da pedra atual (vai ser definido na nova tabela)
     setStonePrices(prev => {
       const next = [...prev];
       const cur = next[simPedra];
@@ -794,10 +793,14 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                     {isZirc ? "Preço (R$/un)" : "Custo ($)"}
                   </label>
                   <input
-                    type="number" min={0} step={isZirc ? 1 : 10}
-                    value={isZirc ? (sp?.preco_rs_un ?? 0) : (sp?.preco_usd_ct ?? 0)}
+                    type="number" step={isZirc ? 1 : 10}
+                    value={(() => {
+                      const v = isZirc ? (sp?.preco_rs_un ?? 0) : (sp?.preco_usd_ct ?? 0);
+                      return v === 0 ? "" : v;
+                    })()}
                     onChange={(e) => {
-                      const v = parseFloat(e.target.value) || 0;
+                      const raw = e.target.value;
+                      const v = raw === "" ? 0 : (parseFloat(raw) || 0);
                       const upd = [...stonePrices];
                       if (isZirc) upd[simPedra] = { ...upd[simPedra], preco_rs_un: v };
                       else upd[simPedra] = { ...upd[simPedra], preco_usd_ct: v };
@@ -817,44 +820,65 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                     </div>
                     <div>
                       <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Tam. Inicial (mm)</label>
-                      <input type="number" min={0.1} step={0.1} value={tamanhoInicial}
+                      <input type="number" step={0.1}
+                        value={tamanhoInicial === 0 ? "" : tamanhoInicial}
                         disabled={tabelaAtivaId !== "new"}
                         onChange={(e) => {
-                          const v = parseFloat(e.target.value);
-                          if (!isNaN(v) && v >= 0.1) setTamanhoInicial(Math.round(v * 10) / 10);
+                          const raw = e.target.value;
+                          if (raw === "") { setTamanhoInicial(0); return; }
+                          const v = parseFloat(raw);
+                          if (!isNaN(v) && v >= 0) setTamanhoInicial(Math.round(v * 10) / 10);
                         }}
                         className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono disabled:bg-gray-50 disabled:text-gray-400"
                         style={{ borderColor: C.cremeBorder }} />
                     </div>
                     <div>
                       <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Tam. Final (mm)</label>
-                      <input type="number" min={0.1} step={0.1} value={tamanhoFinal}
+                      <input type="number" step={0.1}
+                        value={tamanhoFinal === 0 ? "" : tamanhoFinal}
                         disabled={tabelaAtivaId !== "new"}
                         onChange={(e) => {
-                          const v = parseFloat(e.target.value);
-                          if (!isNaN(v) && v >= tamanhoInicial) setTamanhoFinal(Math.round(v * 10) / 10);
+                          const raw = e.target.value;
+                          if (raw === "") { setTamanhoFinal(0); return; }
+                          const v = parseFloat(raw);
+                          if (!isNaN(v) && v >= 0) setTamanhoFinal(Math.round(v * 10) / 10);
                         }}
                         className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono disabled:bg-gray-50 disabled:text-gray-400"
                         style={{ borderColor: C.cremeBorder }} />
                     </div>
                     <div>
-                      <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Mkp {tamanhoInicial}mm</label>
-                      <input type="number" min={1} step={0.1} value={mkpInicial}
-                        onChange={(e) => atualizarMkpInicial(parseFloat(e.target.value))}
+                      <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Mkp {tamanhoInicial || "—"}mm</label>
+                      <input type="number" step={0.1}
+                        value={mkpInicial === 0 ? "" : mkpInicial}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === "") { setMkpInicial(0); return; }
+                          atualizarMkpInicial(parseFloat(raw));
+                        }}
                         className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono"
                         style={{ borderColor: C.cremeBorder }} />
                     </div>
                     <div>
                       <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Decremento</label>
-                      <input type="number" min={0} step={0.1} value={mkpDecremento}
-                        onChange={(e) => atualizarDec(parseFloat(e.target.value))}
+                      <input type="number" step={0.1}
+                        value={mkpDecremento === 0 ? "" : mkpDecremento}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === "") { setMkpDecr(0); return; }
+                          atualizarDec(parseFloat(raw));
+                        }}
                         className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono"
                         style={{ borderColor: C.cremeBorder }} />
                     </div>
                     <div>
-                      <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Mkp {tamanhoFinal}mm</label>
-                      <input type="number" min={1} step={0.1} value={mkpFinal}
-                        onChange={(e) => atualizarMkpFinal(parseFloat(e.target.value))}
+                      <label className="text-[9px] text-gray-400 block mb-1 font-bold uppercase">Mkp {tamanhoFinal || "—"}mm</label>
+                      <input type="number" step={0.1}
+                        value={mkpFinal === 0 ? "" : mkpFinal}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === "") { setMkpFinal(0); return; }
+                          atualizarMkpFinal(parseFloat(raw));
+                        }}
                         className="w-full px-2 py-2 text-sm rounded-lg border outline-none font-mono"
                         style={{ borderColor: C.cremeBorder }} />
                     </div>
