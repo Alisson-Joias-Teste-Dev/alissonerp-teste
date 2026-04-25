@@ -39,6 +39,10 @@ interface TabelaSalva {
   min: number;
   max: number;
   markups: Record<string, number>;
+  // Custo da pedra associado a essa tabela (pode variar por range/qualidade).
+  // Para Zirconia usa preco_rs_un (R$/un); para demais, preco_usd_ct (USD/ct).
+  preco_usd_ct?: number;
+  preco_rs_un?: number;
 }
 
 const TABELAS_KEY = "_multi_tables";   // chave reservada dentro de stone_markups_table
@@ -207,21 +211,39 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
     if (!tipo) return;
     const lista = tabelasPorTipo[tipo] ?? [];
     const ativa = lista.find(t => t.id === tabelaAtivaId);
-    if (ativa) {
-      // Tabela ativa válida pro tipo atual — só puxa o range dela.
-      setTamanhoInicial(ativa.min);
-      setTamanhoFinal(ativa.max);
-    } else if (lista.length > 0) {
-      // Tabela ativa não existe nesse tipo — pula pra primeira.
-      const t = lista[0];
-      setTabelaAtivaId(t.id);
+
+    // Helper: aplica range + custo da tabela em stonePrices[simPedra]
+    const aplicar = (t: TabelaSalva) => {
       setTamanhoInicial(t.min);
       setTamanhoFinal(t.max);
+      // Custo da tabela tem prioridade sobre o stonePrices atual (por tipo)
+      if (t.preco_usd_ct != null || t.preco_rs_un != null) {
+        setStonePrices(prev => {
+          const next = [...prev];
+          const cur = next[simPedra];
+          if (cur) {
+            next[simPedra] = {
+              ...cur,
+              preco_usd_ct: t.preco_usd_ct ?? cur.preco_usd_ct ?? 0,
+              preco_rs_un:  t.preco_rs_un  ?? cur.preco_rs_un,
+            };
+          }
+          return next;
+        });
+      }
+    };
+
+    if (ativa) {
+      aplicar(ativa);
+    } else if (lista.length > 0) {
+      const t = lista[0];
+      setTabelaAtivaId(t.id);
+      aplicar(t);
     } else {
       setTabelaAtivaId("new");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [simPedra, stonePrices, tabelasPorTipo, tabelaAtivaId]);
+  }, [simPedra, stonePrices.length, tabelasPorTipo, tabelaAtivaId]);
 
   // Recalcular rowMarkups ao trocar pedra/tabela OU ao mudar a faixa (modo "new").
   useEffect(() => {
@@ -298,16 +320,21 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
         if (v != null && !isNaN(v) && v > 0) markupsByMm[row.mm.toFixed(1)] = v;
       });
 
+      // Custo associado a esta tabela (salvo dentro da própria tabela).
+      const custo: Pick<TabelaSalva, "preco_usd_ct" | "preco_rs_un"> = isZirc
+        ? { preco_rs_un:  Number(sp.preco_rs_un  ?? 0) }
+        : { preco_usd_ct: Number(sp.preco_usd_ct ?? 0) };
+
       // Upsert na lista de tabelas do tipo: se for "new" adiciona; senão atualiza.
       const lista = [...(tabelasPorTipo[sp.tipo] ?? [])];
       let idParaAtivar = tabelaAtivaId;
       if (tabelaAtivaId === "new") {
         const novaId = mkId();
-        lista.push({ id: novaId, min: tamanhoInicial, max: tamanhoFinal, markups: markupsByMm });
+        lista.push({ id: novaId, min: tamanhoInicial, max: tamanhoFinal, markups: markupsByMm, ...custo });
         idParaAtivar = novaId;
       } else {
         const idx = lista.findIndex(t => t.id === tabelaAtivaId);
-        if (idx >= 0) lista[idx] = { ...lista[idx], min: tamanhoInicial, max: tamanhoFinal, markups: markupsByMm };
+        if (idx >= 0) lista[idx] = { ...lista[idx], min: tamanhoInicial, max: tamanhoFinal, markups: markupsByMm, ...custo };
       }
       const novasTabelas = { ...tabelasPorTipo, [sp.tipo]: lista };
 
@@ -378,7 +405,7 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
   }
 
   // Carrega uma tabela específica no editor — troca pedra + ativa a tabela
-  // + ajusta o range (Tam. Inicial/Final) pra refletir os limites da tabela.
+  // + ajusta o range + carrega o CUSTO específico daquela tabela.
   function editarTabela(tipo: string, id: string) {
     const idx = stonePrices.findIndex(s => s.tipo === tipo);
     if (idx >= 0 && idx !== simPedra) setSimPedra(idx);
@@ -387,6 +414,21 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
     if (t) {
       setTamanhoInicial(t.min);
       setTamanhoFinal(t.max);
+      if (t.preco_usd_ct != null || t.preco_rs_un != null) {
+        setStonePrices(prev => {
+          const next = [...prev];
+          const targetIdx = idx >= 0 ? idx : simPedra;
+          const cur = next[targetIdx];
+          if (cur) {
+            next[targetIdx] = {
+              ...cur,
+              preco_usd_ct: t.preco_usd_ct ?? cur.preco_usd_ct ?? 0,
+              preco_rs_un:  t.preco_rs_un  ?? cur.preco_rs_un,
+            };
+          }
+          return next;
+        });
+      }
     }
   }
 
@@ -622,6 +664,12 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                             </div>
                             <div className="text-[10px] text-gray-500 font-mono">
                               {rangeLabel(tab)} · markup {mkRange}
+                              {tab.preco_usd_ct != null && tab.preco_usd_ct > 0 && (
+                                <> · USD {tab.preco_usd_ct.toFixed(2)}/ct</>
+                              )}
+                              {tab.preco_rs_un != null && tab.preco_rs_un > 0 && (
+                                <> · R$ {tab.preco_rs_un.toFixed(2)}/un</>
+                              )}
                             </div>
                           </div>
                           <button
