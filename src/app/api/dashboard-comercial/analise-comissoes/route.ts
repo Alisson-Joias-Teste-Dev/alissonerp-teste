@@ -173,10 +173,11 @@ export async function GET(req: NextRequest) {
         comissao_perdida: comissaoPerdida,
       });
 
-      // Agregado por consultora
-      if (!resumoMap.has(i.id_vendedor)) {
-        resumoMap.set(i.id_vendedor, {
-          id_vendedor: i.id_vendedor,
+      // Agregado por consultora — normaliza id_vendedor para number (postgres bigint → string)
+      const idVendedor = Number(i.id_vendedor);
+      if (!resumoMap.has(idVendedor)) {
+        resumoMap.set(idVendedor, {
+          id_vendedor: idVendedor,
           nome: i.consultora ?? "Não informada",
           foto: i.foto,
           total_desejado: 0,
@@ -188,12 +189,12 @@ export async function GET(req: NextRequest) {
           comissao_perdida: 0,
           comissao_na_meta: 0,
           comissao_fora_meta: 0,
-          meta_prata: metaPrataMap.get(i.id_vendedor) ?? 0,
+          meta_prata: metaPrataMap.get(idVendedor) ?? 0,
           esta_dentro_meta: false,
           qtd_itens: 0,
         });
       }
-      const r = resumoMap.get(i.id_vendedor)!;
+      const r = resumoMap.get(idVendedor)!;
       r.total_desejado += precoCheio;
       r.comissao_ganha += comissaoGanha;
       r.comissao_perdida += comissaoPerdida;
