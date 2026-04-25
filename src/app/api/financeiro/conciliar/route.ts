@@ -123,37 +123,44 @@ export async function POST(req: NextRequest) {
   if (!lanc) return NextResponse.json({ error: "Lançamento não encontrado" }, { status: 404 });
   if (lanc.conciliado) return NextResponse.json({ error: "Lançamento já conciliado" }, { status: 409 });
 
-  // Inserir conciliação
-  await sql`
-    INSERT INTO alissonerp.fin_conciliacoes
-      (lancamento_id, conta_pagar_id, conta_receber_id, tipo, status)
-    VALUES (
-      ${body.lancamento_id},
-      ${body.conta_pagar_id ?? null},
-      ${body.conta_receber_id ?? null},
-      'manual',
-      'confirmado'
-    )
-  `;
-
-  // Marcar lançamento como conciliado
-  await sql`
-    UPDATE alissonerp.fin_lancamentos_bancarios
-    SET conciliado = true
-    WHERE id = ${body.lancamento_id}
-  `;
-
-  // Marcar conta como paga/recebida
-  if (body.conta_pagar_id) {
-    await sql`
-      UPDATE alissonerp.contas_pagar SET situacao = 'pago' WHERE id = ${body.conta_pagar_id}
+  // Operação atômica — antes eram 4 statements soltos; se o UPDATE da conta
+  // falhasse no fim, a conciliação ficava registrada mas a conta nunca era
+  // marcada como paga, gerando inconsistência permanente.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (sql as any).begin(async (tx: typeof sql) => {
+    await tx`
+      INSERT INTO alissonerp.fin_conciliacoes
+        (lancamento_id, conta_pagar_id, conta_receber_id, tipo, status)
+      VALUES (
+        ${body.lancamento_id},
+        ${body.conta_pagar_id ?? null},
+        ${body.conta_receber_id ?? null},
+        'manual',
+        'confirmado'
+      )
     `;
-  }
-  if (body.conta_receber_id) {
-    await sql`
-      UPDATE alissonerp.contas_receber SET situacao = 'recebido' WHERE id = ${body.conta_receber_id}
+
+    await tx`
+      UPDATE alissonerp.fin_lancamentos_bancarios
+      SET conciliado = true
+      WHERE id = ${body.lancamento_id}
     `;
-  }
+
+    if (body.conta_pagar_id) {
+      await tx`
+        UPDATE alissonerp.contas_pagar
+        SET situacao = 'pago', data_pagamento = COALESCE(data_pagamento, CURRENT_DATE), updated_at = NOW()
+        WHERE id = ${body.conta_pagar_id}
+      `;
+    }
+    if (body.conta_receber_id) {
+      await tx`
+        UPDATE alissonerp.contas_receber
+        SET situacao = 'recebido', data_recebimento = COALESCE(data_recebimento, CURRENT_DATE), updated_at = NOW()
+        WHERE id = ${body.conta_receber_id}
+      `;
+    }
+  });
 
   return NextResponse.json({ ok: true });
 }
