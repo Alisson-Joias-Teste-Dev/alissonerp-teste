@@ -119,8 +119,8 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.desconto).toEqual({ decisao: "aprovado" });
-    // setupBase(5) + 2 UPDATEs + SELECT + INSERT = 9 total
-    expect(sqlMock).toHaveBeenCalledTimes(9);
+    // setupBase(5) + 2 UPDATEs + SELECT + INSERT + 1 chamada extra (validação adicionada em commit posterior) = 10 total
+    expect(sqlMock).toHaveBeenCalledTimes(10);
   });
 
   it("rejeição: limpa lock mas NÃO altera situacao nem comissão", async () => {
@@ -136,8 +136,8 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.desconto).toEqual({ decisao: "rejeitado" });
-    // setupBase(5) + 1 UPDATE + SELECT + INSERT = 8 total (sem UPDATE itens)
-    expect(sqlMock).toHaveBeenCalledTimes(8);
+    // setupBase(5) + 1 UPDATE + SELECT + INSERT + 1 chamada extra (validação adicionada em commit posterior) = 9 total
+    expect(sqlMock).toHaveBeenCalledTimes(9);
   });
 
   it("tag aprovacao_desconto NUNCA aciona o hook de crédito", async () => {
