@@ -335,15 +335,49 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
     }
   }
 
+  // Persiste imediatamente o estado atual de tabelasPorTipo (sem mexer em
+  // markups/range — só faz UPDATE no JSONB de stone_markups_table).
+  async function persistirTabelas(novasTabelas: Record<string, TabelaSalva[]>) {
+    const payload: Record<string, unknown> = { ...allMarkups, [TABELAS_KEY]: novasTabelas };
+    const res = await fetch("/api/orcamento/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stone_markups_table: payload, stone_prices: stonePrices }),
+    });
+    if (!res.ok) throw new Error("Falha ao persistir");
+  }
+
+  // Exclui uma tabela específica (por tipo + id) — persiste no banco imediatamente.
+  async function excluirTabela(tipo: string, id: string) {
+    if (id === "new") return;
+    const lista = (tabelasPorTipo[tipo] ?? []).filter(t => t.id !== id);
+    const novas = { ...tabelasPorTipo, [tipo]: lista };
+    try {
+      await persistirTabelas(novas);
+      setTabelasPorTipo(novas);
+      // Se estava ativa, troca para outra (ou "new")
+      if (tipo === sp?.tipo && tabelaAtivaId === id) {
+        setTabelaAtivaId(lista[0]?.id ?? "new");
+      }
+      const label = STONE_TYPES.find(t => t.value === tipo)?.label ?? tipo;
+      setToast({ msg: `Tabela de ${label} excluída.`, ok: true });
+    } catch (err) {
+      setToast({ msg: err instanceof Error ? err.message : "Erro ao excluir", ok: false });
+    } finally {
+      setTimeout(() => setToast(null), 3500);
+    }
+  }
+
+  // Carrega uma tabela específica no editor — troca pedra + ativa a tabela.
+  function editarTabela(tipo: string, id: string) {
+    const idx = stonePrices.findIndex(s => s.tipo === tipo);
+    if (idx >= 0 && idx !== simPedra) setSimPedra(idx);
+    setTabelaAtivaId(id);
+  }
+
   function excluirTabelaAtiva() {
     if (!sp || tabelaAtivaId === "new") return;
-    const lista = (tabelasPorTipo[sp.tipo] ?? []).filter(t => t.id !== tabelaAtivaId);
-    const novas = { ...tabelasPorTipo, [sp.tipo]: lista };
-    setTabelasPorTipo(novas);
-    setTabelaAtivaId(lista[0]?.id ?? "new");
-    // Persistência fica pendente até próximo "Salvar". Avisa:
-    setToast({ msg: "Tabela removida localmente. Clique em Salvar para persistir.", ok: true });
-    setTimeout(() => setToast(null), 4000);
+    void excluirTabela(sp.tipo, tabelaAtivaId);
   }
 
   // Reaplica os preços atuais (markups + custos) nos produtos-pedra já cadastrados
@@ -526,6 +560,77 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
               <Loader2 size={20} className="animate-spin mr-2" /> Carregando...
             </div>
           ) : (
+            <div className="space-y-4">
+            {/* ── Tabelas salvas (todas as pedras) ── */}
+            {(() => {
+              const tipos = STONE_TYPES.filter(t => (tabelasPorTipo[t.value]?.length ?? 0) > 0);
+              if (tipos.length === 0) return null;
+              return (
+                <div className="bg-white rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
+                  <h3 className="text-sm font-bold text-gray-800">Tabelas Salvas</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {tipos.flatMap(t => (tabelasPorTipo[t.value] ?? []).map(tab => {
+                      const ativa = sp?.tipo === t.value && tabelaAtivaId === tab.id;
+                      const mks = Object.values(tab.markups);
+                      const mkRange = mks.length > 0 ? `${Math.max(...mks)} → ${Math.min(...mks)}` : "—";
+                      return (
+                        <div key={`${t.value}-${tab.id}`}
+                          className="flex items-center gap-2 p-2.5 rounded-lg border transition-colors"
+                          style={{
+                            borderColor: ativa ? C.esmeralda : C.cremeBorder,
+                            backgroundColor: ativa ? "#F0F9F4" : "#fff",
+                          }}>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <span className="text-[12px] font-bold" style={{ color: ativa ? C.esmeralda : "#1f2937" }}>
+                                {t.label}
+                              </span>
+                              {tab.id === "default" && (
+                                <span className="text-[8px] font-bold uppercase px-1 py-0.5 rounded"
+                                      style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                                  Padrão
+                                </span>
+                              )}
+                              {ativa && (
+                                <span className="text-[8px] font-bold uppercase px-1 py-0.5 rounded"
+                                      style={{ backgroundColor: C.esmeralda, color: "#fff" }}>
+                                  Em edição
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-gray-500 font-mono">
+                              {rangeLabel(tab)} · markup {mkRange}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => editarTabela(t.value, tab.id)}
+                            disabled={ativa}
+                            className="text-[10px] font-semibold px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-40"
+                            style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                            title="Carregar esta tabela no editor"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm(`Excluir tabela ${rangeLabel(tab)} de ${t.label}?\n\nA exclusão é permanente.`)) {
+                                void excluirTabela(t.value, tab.id);
+                              }
+                            }}
+                            className="text-[10px] font-semibold px-2 py-1 rounded border hover:bg-red-50"
+                            style={{ borderColor: "#FCA5A5", color: "#B91C1C" }}
+                            title="Excluir esta tabela"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      );
+                    }))}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-gray-800">Simulador e Editor de Pedras</h3>
@@ -804,6 +909,7 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                   <Check size={12} /> {toast.msg}
                 </div>
               )}
+            </div>
             </div>
           )}
         </div>
