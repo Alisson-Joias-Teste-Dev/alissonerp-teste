@@ -2196,7 +2196,6 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
 
   const isFinanceiro = ["admin", "desenvolvedor", "gerente_fabrica", "gerente_loja"].includes(userRole ?? "");
 
-  const totalPagar   = pagar.filter(p => p.situacao === "pendente").reduce((s, p) => s + Number(p.valor), 0);
   const totalReceber = receber.filter(r => r.situacao === "pendente").reduce((s, r) => s + Number(r.valor), 0);
 
   const tabs: { key: Tab; label: string; icon: any; badge?: string }[] = [
