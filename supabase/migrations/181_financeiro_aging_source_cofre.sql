@@ -107,11 +107,11 @@ FROM alissonerp.contas_receber cr;
 CREATE OR REPLACE VIEW alissonerp.vw_cofre_ouro AS
 SELECT
   COUNT(*)::integer                                                 AS total_transacoes,
-  COALESCE(SUM(COALESCE(pv.ouro_peso, pv.ouro_gramas)), 0)         AS total_gramas,
+  COALESCE(SUM(pv.ouro_gramas), 0)                                  AS total_gramas,
   COALESCE(SUM(pv.valor), 0)                                        AS total_valor_brl,
   COALESCE(AVG(pv.ouro_valor_grama), 0)                             AS preco_medio_grama,
   COUNT(*) FILTER (WHERE pv.created_at >= NOW() - INTERVAL '30 days')::integer AS transacoes_30d,
-  COALESCE(SUM(COALESCE(pv.ouro_peso, pv.ouro_gramas))
+  COALESCE(SUM(pv.ouro_gramas)
     FILTER (WHERE pv.created_at >= NOW() - INTERVAL '30 days'), 0) AS gramas_30d,
   COALESCE(SUM(pv.valor)
     FILTER (WHERE pv.created_at >= NOW() - INTERVAL '30 days'), 0) AS valor_brl_30d
