@@ -715,7 +715,7 @@ export default function ProdutosClient() {
                             <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap">
                               {isPedra
                                 ? (ct > 0
-                                    ? <span>{ct.toFixed(3)} ct <span className="text-gray-400">· {pontos.toFixed(1)} pt</span></span>
+                                    ? <span>{ct.toFixed(2).replace(".", ",")} ct <span className="text-gray-400">· {pontos.toFixed(1).replace(".", ",")} pt</span></span>
                                     : "—")
                                 : `${formatPeso(p.peso_precificado)}g`}
                             </td>

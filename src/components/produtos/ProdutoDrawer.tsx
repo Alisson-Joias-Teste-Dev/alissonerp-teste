@@ -938,14 +938,14 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                         <div className="text-center py-3 rounded-lg bg-white border border-gray-100">
                           <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">Peso</p>
                           <p className="text-xl font-mono font-bold text-gray-800 mt-1">
-                            {ct > 0 ? ct.toFixed(3) : "—"}
+                            {ct > 0 ? ct.toFixed(2).replace(".", ",") : "—"}
                             <span className="text-xs text-gray-400 ml-1">ct</span>
                           </p>
                         </div>
                         <div className="text-center py-3 rounded-lg bg-white border border-gray-100">
                           <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">Pontos</p>
                           <p className="text-xl font-mono font-bold text-gray-800 mt-1">
-                            {pontos > 0 ? pontos.toFixed(1) : "—"}
+                            {pontos > 0 ? pontos.toFixed(1).replace(".", ",") : "—"}
                             <span className="text-xs text-gray-400 ml-1">pt</span>
                           </p>
                         </div>
@@ -1002,7 +1002,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
                         </div>
                         <p className="text-[10px] text-gray-400 mt-1">
                           {precoCompraUsdLive > 0 && cotacaoDolar > 0 && markupLive > 0 ? (
-                            <>USD {precoCompraUsdLive.toFixed(2)} × R$ {cotacaoDolar.toFixed(2)} × {markupLive.toFixed(2)} (markup {ct.toFixed(3)}ct)</>
+                            <>USD {precoCompraUsdLive.toFixed(2)} × R$ {cotacaoDolar.toFixed(2)} × {markupLive.toFixed(2)} (markup {ct.toFixed(2).replace(".", ",")}ct)</>
                           ) : (
                             "Preencha preço USD acima. Peso da pedra define a faixa de markup."
                           )}

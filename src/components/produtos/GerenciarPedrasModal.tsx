@@ -802,8 +802,8 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                           return (
                             <tr key={row.mm} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
                               <td className="px-3 py-1.5 font-mono font-bold text-[11px]">{row.mm}mm</td>
-                              <td className="px-3 py-1.5 text-[11px] text-gray-500">{row.ct.toFixed(3)} ct</td>
-                              <td className="px-3 py-1.5 text-[11px] text-gray-500 font-mono">{(row.ct * 100).toFixed(1)} pt</td>
+                              <td className="px-3 py-1.5 text-[11px] text-gray-500">{row.ct.toFixed(2).replace(".", ",")} ct</td>
+                              <td className="px-3 py-1.5 text-[11px] text-gray-500 font-mono">{(row.ct * 100).toFixed(1).replace(".", ",")} pt</td>
                               <td className="px-3 py-1.5 text-right font-mono text-[11px] text-gray-500">{fmtCusto(custoRS)}</td>
                               <td className="px-1 py-0.5 text-right">
                                 <input type="number" min={1} step={0.1} value={rowMkp}
