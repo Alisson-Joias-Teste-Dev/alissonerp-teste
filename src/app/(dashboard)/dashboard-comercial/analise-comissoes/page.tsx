@@ -14,6 +14,7 @@ export default function AnaliseComissoesPage() {
   const { from, to, setRange } = useDateRange();
   const [view, setView] = useState<"resumo" | "detalhe">("resumo");
   const [filtroConsultora, setFiltroConsultora] = useState<number | null>(null);
+  const [filtroPedido, setFiltroPedido] = useState<string>("");
   const dados = useAnaliseComissoes(from, to);
 
   return (
@@ -157,8 +158,8 @@ export default function AnaliseComissoesPage() {
               className="overflow-hidden rounded-xl"
               style={{ backgroundColor: P.creme, border: `1px solid ${P.cremeMuted}` }}
             >
-              {/* Filtro por consultora */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: P.cremeMuted }}>
+              {/* Filtros */}
+              <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b" style={{ borderColor: P.cremeMuted }}>
                 <span className="text-sm font-medium" style={{ color: P.esmeralda }}>Consultora:</span>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -185,6 +186,29 @@ export default function AnaliseComissoesPage() {
                     </button>
                   ))}
                 </div>
+                <span className="text-sm font-medium ml-2" style={{ color: P.esmeralda }}>Pedido:</span>
+                <input
+                  type="text"
+                  value={filtroPedido}
+                  onChange={(e) => setFiltroPedido(e.target.value)}
+                  placeholder="Nº do pedido"
+                  className="rounded-md px-3 py-1 text-xs outline-none"
+                  style={{
+                    backgroundColor: P.cremeSoft,
+                    color: P.esmeralda,
+                    border: `1px solid ${P.cremeMuted}`,
+                    width: "160px",
+                  }}
+                />
+                {filtroPedido && (
+                  <button
+                    onClick={() => setFiltroPedido("")}
+                    className="rounded-md px-2 py-1 text-xs font-medium"
+                    style={{ backgroundColor: P.cremeSoft, color: P.esmeralda }}
+                  >
+                    Limpar
+                  </button>
+                )}
               </div>
               <div className="max-h-[70vh] overflow-auto">
                 <table className="w-full text-sm">
@@ -206,6 +230,7 @@ export default function AnaliseComissoesPage() {
                   <tbody>
                     {dados.data.itens_detalhados
                       .filter((i) => filtroConsultora === null || i.id_vendedor === filtroConsultora)
+                      .filter((i) => !filtroPedido || String(i.numero_pedido ?? "").toLowerCase().includes(filtroPedido.toLowerCase()))
                       .slice(0, 500).map((i) => (
                       <tr key={i.id} className="border-t" style={{ borderColor: P.cremeMuted }}>
                         <td className="px-4 py-1.5" style={{ color: P.esmeralda }}>
