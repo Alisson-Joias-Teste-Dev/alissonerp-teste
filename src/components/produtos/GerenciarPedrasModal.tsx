@@ -199,7 +199,9 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
   // ───────────── Multi-tabela: sincroniza state com tipo selecionado ─────────────
   // Ao trocar de pedra: se a tabelaAtivaId existe na lista do novo tipo, mantém
   // (e puxa o range dela). Caso contrário, elege a primeira ou entra em "new".
+  // Importante: respeita "new" — usuário clicou "+ Nova Tabela", não pode reverter.
   useEffect(() => {
+    if (tabelaAtivaId === "new") return;
     const tipo = stonePrices[simPedra]?.tipo;
     if (!tipo) return;
     const lista = tabelasPorTipo[tipo] ?? [];
