@@ -58,6 +58,7 @@ interface ProdutoDetalhe {
   // Pedra-produto (alissonerp.produto_pedra_extras)
   preco_compra_usd?: string | number | null;
   quantidade_pedra?: number | null;
+  peso_ct?: string | number | null;
 }
 
 interface Variacao {
@@ -846,9 +847,14 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
               const mmMatch = (produto.nome ?? "").match(/([\d.,]+)\s*mm\b/i);
               const mm = mmMatch ? parseNumPedra(mmMatch[1]) : 0;
 
-              // Peso em g → ct (1ct = 0.2g, então ct = g / 0.2 = g × 5)
+              // Peso fiel em ct vem de produto_pedra_extras.peso_ct (peso_precificado
+              // é arredondado pelo trigger). Fallback: peso_precificado / 0.2.
               const pesoG = parseNumPedra(produto.peso_precificado);
-              const ct = pesoG / 0.2;
+              const ctFromExtras = produto.peso_ct;
+              const ctFromExtrasNum = ctFromExtras != null ? Number(ctFromExtras) : NaN;
+              const ct = Number.isFinite(ctFromExtrasNum) && ctFromExtrasNum > 0
+                ? ctFromExtrasNum
+                : pesoG / 0.2;
               // Pontos: 1 ct = 100 pontos
               const pontos = ct * 100;
 

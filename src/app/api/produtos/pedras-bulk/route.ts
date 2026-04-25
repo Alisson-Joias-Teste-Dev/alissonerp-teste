@@ -182,6 +182,14 @@ export async function POST(req: NextRequest) {
             (${paiId}, ${sku}, ${nome}, false, false)
         `;
 
+        // Peso real (em ct) — public.produtos.peso_precificado é arredondado
+        // pelo trigger arredondar_peso_para_cima; guardamos o ct fiel aqui.
+        await tx`
+          INSERT INTO alissonerp.produto_pedra_extras (produto_id, peso_ct)
+          VALUES (${paiId}, ${Number(it.ct.toFixed(4))})
+          ON CONFLICT (produto_id) DO UPDATE SET peso_ct = EXCLUDED.peso_ct, updated_at = NOW()
+        `;
+
         // Saldo inicial em public.estoque (se solicitado).
         // Necessário para a pedra aparecer na listagem /produtos com
         // o filtro "Apenas com estoque" ligado (padrão da UI).

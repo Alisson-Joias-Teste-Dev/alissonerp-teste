@@ -346,6 +346,57 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
     setTimeout(() => setToast(null), 4000);
   }
 
+  // Reaplica os preços atuais (markups + custos) nos produtos-pedra já cadastrados
+  // que tenham nome "<label> <mm>mm" — sem criar novos.
+  async function atualizarPrecosExistentes() {
+    if (!sp) return;
+    const label = STONE_TYPES.find((t) => t.value === sp.tipo)?.label ?? sp.tipo;
+    const itens = STONE_CT.map((row, rowIdx) => {
+      // Zirconia: preço fixo em R$/un (mesmo valor pra todos os tamanhos).
+      // Demais: preço = ct × USD/ct × dólar × markup_da_linha.
+      const venda = isZirc
+        ? (sp.preco_rs_un ?? 0)
+        : row.ct * (sp.preco_usd_ct ?? 0) * cotacaoDolar * (rowMarkups[rowIdx] ?? 1);
+      return {
+        tipo: sp.tipo,
+        label,
+        mm: row.mm,
+        ct: row.ct,
+        preco_venda: Math.ceil(venda),
+      };
+    }).filter((it) => it.preco_venda > 0);
+    if (itens.length === 0) {
+      setToast({ msg: "Configure preço/markup antes de atualizar.", ok: false });
+      setTimeout(() => setToast(null), 3500);
+      return;
+    }
+
+    setCadastrando(true);
+    try {
+      const res = await fetch("/api/produtos/pedras-bulk/reprice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itens }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Falha ao atualizar preços");
+      const ok = Number(data?.atualizados ?? 0);
+      const nao = Array.isArray(data?.nao_encontrados) ? data.nao_encontrados.length : 0;
+      setToast({
+        msg: ok === 0
+          ? `Nada para atualizar (preços já correspondem) — ${nao} pedra(s) não cadastrada(s).`
+          : `${ok} pedra${ok === 1 ? "" : "s"} atualizada${ok === 1 ? "" : "s"} de ${label}.${nao ? ` ${nao} não cadastradas.` : ""}`,
+        ok: ok > 0 || nao === 0,
+      });
+      onCreated?.();
+    } catch (err) {
+      setToast({ msg: err instanceof Error ? err.message : "Erro", ok: false });
+    } finally {
+      setCadastrando(false);
+      setTimeout(() => setToast(null), 5000);
+    }
+  }
+
   // Cadastra 1 produto por linha da tabela (16 pedras) usando os preços atuais.
   async function cadastrarEmMassa() {
     if (!sp) return;
@@ -623,7 +674,8 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                       <thead>
                         <tr className="border-b" style={{ borderColor: C.cremeBorder, backgroundColor: "#FAFAF7" }}>
                           <th className="text-left px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Tam</th>
-                          <th className="text-left px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Peso</th>
+                          <th className="text-left px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Peso (ct)</th>
+                          <th className="text-left px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Pontos</th>
                           <th className="text-right px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Custo (R$)</th>
                           <th className="text-right px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Markup</th>
                           <th className="text-right px-3 py-1.5 text-[10px] text-gray-500 font-semibold">Venda (R$)</th>
@@ -640,6 +692,7 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                             <tr key={row.mm} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
                               <td className="px-3 py-1.5 font-mono font-bold text-[11px]">{row.mm}mm</td>
                               <td className="px-3 py-1.5 text-[11px] text-gray-500">{row.ct.toFixed(3)} ct</td>
+                              <td className="px-3 py-1.5 text-[11px] text-gray-500 font-mono">{(row.ct * 100).toFixed(1)} pt</td>
                               <td className="px-3 py-1.5 text-right font-mono text-[11px] text-gray-500">{fmtCusto(custoRS)}</td>
                               <td className="px-1 py-0.5 text-right">
                                 <input type="number" min={1} step={0.1} value={rowMkp}
@@ -667,8 +720,8 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                 </div>
               )}
 
-              {/* Botões: salvar tabela + cadastrar em massa */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {/* Botões: salvar tabela + atualizar preços + cadastrar em massa */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                 <button
                   onClick={salvarTabela}
                   disabled={saving || cadastrando}
@@ -676,7 +729,17 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                   style={{ borderColor: C.esmeralda, color: C.esmeralda }}
                 >
                   {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  Salvar Tabela — {STONE_TYPES.find((t) => t.value === sp?.tipo)?.label ?? "Pedra"}
+                  Salvar Tabela
+                </button>
+                <button
+                  onClick={atualizarPrecosExistentes}
+                  disabled={saving || cadastrando}
+                  title="Aplica os preços calculados na tabela acima nos produtos-pedra já cadastrados deste tipo."
+                  className="py-2.5 rounded-lg text-sm font-semibold border flex items-center justify-center gap-2 hover:bg-gray-50 disabled:opacity-60"
+                  style={{ borderColor: "#0F766E", color: "#0F766E" }}
+                >
+                  {cadastrando ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                  Atualizar Preços
                 </button>
                 <button
                   onClick={cadastrarEmMassa}
@@ -685,7 +748,7 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                   style={{ backgroundColor: C.esmeralda }}
                 >
                   {cadastrando ? <Loader2 size={14} className="animate-spin" /> : <Diamond size={14} />}
-                  Cadastrar Pedras em Massa
+                  Cadastrar em Massa
                 </button>
               </div>
 

@@ -25,6 +25,7 @@ export interface Produto {
   sku: string;
   tipo_metal: string | null;
   peso_precificado: string | null;
+  peso_ct: string | number | null;
   preco_tiny: string | null;
   preco_sync: string | null;
   preco_curva: number | null;
@@ -691,11 +692,17 @@ export default function ProdutosClient() {
                       </td>
 
                       {(() => {
-                        // Pedras: colunas Metal e Preço Sync ficam em branco; Peso em ct;
+                        // Pedras: colunas Metal e Preço Sync ficam em branco; Peso em ct + pontos;
                         // a coluna "Preço Sync" passa a exibir preco_tiny (preço de venda cadastrado).
                         const isPedra = (p.categoria ?? "").toLowerCase().startsWith("pedras");
                         const pesoG = parseFloat(p.peso_precificado ?? "0") || 0;
-                        const ct    = pesoG / 0.2;
+                        // Para pedras, peso_ct é a fonte de verdade (peso_precificado é
+                        // arredondado pelo trigger arredondar_peso_para_cima). Fallback: pesoG/0.2.
+                        const ctFromExtras = p.peso_ct != null ? Number(p.peso_ct) : NaN;
+                        const ct = isPedra && Number.isFinite(ctFromExtras) && ctFromExtras > 0
+                          ? ctFromExtras
+                          : pesoG / 0.2;
+                        const pontos = ct * 100;
 
                         return (
                           <>
@@ -704,10 +711,12 @@ export default function ProdutosClient() {
                               {isPedra ? <span className="text-gray-300">—</span> : (p.tipo_metal || "—")}
                             </td>
 
-                            {/* Peso — em ct para pedras, em g para joias */}
+                            {/* Peso — em ct + pontos para pedras, em g para joias */}
                             <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap">
                               {isPedra
-                                ? (ct > 0 ? `${ct.toFixed(3)} ct` : "—")
+                                ? (ct > 0
+                                    ? <span>{ct.toFixed(3)} ct <span className="text-gray-400">· {pontos.toFixed(1)} pt</span></span>
+                                    : "—")
                                 : `${formatPeso(p.peso_precificado)}g`}
                             </td>
 
