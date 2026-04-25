@@ -404,6 +404,26 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
     }
   }
 
+  // Limpa todos os campos editáveis para criar tabela do zero.
+  function resetParaNovaTabela() {
+    setTabelaAtivaId("new");
+    setTamanhoInicial(1.0);
+    setTamanhoFinal(1.0);
+    setMkpInicial(1);
+    setMkpFinal(1);
+    setMkpDecr(0);
+    setRowMarkups({});
+    // Zera o custo da pedra atual (vai ser definido na nova tabela)
+    setStonePrices(prev => {
+      const next = [...prev];
+      const cur = next[simPedra];
+      if (cur) {
+        next[simPedra] = { ...cur, preco_usd_ct: 0, preco_rs_un: 0 };
+      }
+      return next;
+    });
+  }
+
   // Carrega uma tabela específica no editor — troca pedra + ativa a tabela
   // + ajusta o range + carrega o CUSTO específico daquela tabela.
   function editarTabela(tipo: string, id: string) {
@@ -719,7 +739,11 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                   <label className="text-[10px] font-bold uppercase text-gray-500">Tabela</label>
                   <select
                     value={tabelaAtivaId}
-                    onChange={(e) => setTabelaAtivaId(e.target.value)}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "new") resetParaNovaTabela();
+                      else setTabelaAtivaId(v);
+                    }}
                     className="flex-1 min-w-[180px] px-2 py-1.5 text-xs rounded border outline-none bg-white font-mono"
                     style={{ borderColor: C.cremeBorder }}
                   >
