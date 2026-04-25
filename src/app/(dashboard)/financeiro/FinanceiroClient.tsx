@@ -22,6 +22,8 @@ import {
   Banknote,
   CreditCard,
   Smartphone,
+  CircleDollarSign,
+  ShieldCheck,
 } from "lucide-react";
 import { dispararWebhook } from "@/lib/webhooks";
 
@@ -120,6 +122,28 @@ interface Lancamento {
   conciliado: boolean;
   extrato_id: number | null;
   banco: string | null;
+}
+
+interface CofreOuro {
+  total_transacoes: number;
+  total_gramas: number;
+  total_valor_brl: number;
+  preco_medio_grama: number;
+  transacoes_30d: number;
+  gramas_30d: number;
+  valor_brl_30d: number;
+}
+
+interface ConciliacaoPendente {
+  id: number;
+  venda_id: number | null;
+  numero_venda: string | null;
+  valor: number;
+  gateway_id: string | null;
+  gateway: string | null;
+  data_confirmacao: string | null;
+  created_at: string;
+  cliente_nome: string | null;
 }
 
 interface Props {
@@ -686,8 +710,14 @@ function TabPagar({ pagar }: { pagar: ContaPagar[] }) {
   const total15 = lista.filter(p => p.situacao === "pendente" && diasAte(p.data_vencimento) >= 0 && diasAte(p.data_vencimento) <= 15).reduce((s, p) => s + Number(p.valor), 0);
   const total30 = lista.filter(p => p.situacao === "pendente" && diasAte(p.data_vencimento) >= 0 && diasAte(p.data_vencimento) <= 30).reduce((s, p) => s + Number(p.valor), 0);
 
+  const qtdAtrasado  = lista.filter(p => isVencido(p.data_vencimento, p.situacao)).length;
+  const qtdVenceHoje = lista.filter(p => p.situacao === "pendente" && diasAte(p.data_vencimento) === 0).length;
+  const qtdAVencer   = lista.filter(p => p.situacao === "pendente" && diasAte(p.data_vencimento) > 0).length;
+
   const filtradas = useMemo(() => {
-    if (filtro === "vencido") return lista.filter(p => isVencido(p.data_vencimento, p.situacao));
+    if (filtro === "atrasado")   return lista.filter(p => isVencido(p.data_vencimento, p.situacao));
+    if (filtro === "vence_hoje") return lista.filter(p => p.situacao === "pendente" && diasAte(p.data_vencimento) === 0);
+    if (filtro === "a_vencer")   return lista.filter(p => p.situacao === "pendente" && diasAte(p.data_vencimento) > 0);
     if (filtro === "todos") return lista;
     return lista.filter(p => p.situacao === filtro);
   }, [lista, filtro]);
@@ -765,18 +795,26 @@ function TabPagar({ pagar }: { pagar: ContaPagar[] }) {
         </button>
 
         <div className="flex gap-1.5 flex-wrap">
-          {["todos", "pendente", "pago", "cancelado", "vencido"].map(s => (
+          {([
+            { key: "todos",      label: "Todos" },
+            { key: "atrasado",   label: `Atrasado${qtdAtrasado > 0 ? ` (${qtdAtrasado})` : ""}`,     color: C.vermelho },
+            { key: "vence_hoje", label: `Vence Hoje${qtdVenceHoje > 0 ? ` (${qtdVenceHoje})` : ""}`, color: C.ambar },
+            { key: "a_vencer",   label: `A Vencer${qtdAVencer > 0 ? ` (${qtdAVencer})` : ""}` },
+            { key: "pago",       label: "Pago" },
+            { key: "cancelado",  label: "Cancelado" },
+          ] as { key: string; label: string; color?: string }[]).map(({ key, label, color }) => (
             <button
-              key={s}
-              onClick={() => setFiltro(s)}
-              className="text-xs px-3 py-1.5 rounded-full capitalize transition-colors border"
+              key={key}
+              onClick={() => setFiltro(key)}
+              className="text-xs px-3 py-1.5 rounded-full transition-colors border"
               style={{
-                backgroundColor: filtro === s ? C.esmeralda : "white",
-                borderColor: filtro === s ? C.esmeralda : C.cremeBorder,
-                color: filtro === s ? C.creme : C.cinza,
+                backgroundColor: filtro === key ? (color ?? C.esmeralda) : "white",
+                borderColor: filtro === key ? (color ?? C.esmeralda) : (color ? `${color}44` : C.cremeBorder),
+                color: filtro === key ? "white" : (color ?? C.cinza),
+                fontWeight: filtro === key ? 600 : 400,
               }}
             >
-              {s}
+              {label}
             </button>
           ))}
         </div>
@@ -926,13 +964,18 @@ function TabReceber({ receber, saldoLiquido }: { receber: ContaReceber[]; saldoL
   const total15 = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) >= 0 && diasAte(r.data_vencimento) <= 15).reduce((s, r) => s + Number(r.valor), 0);
   const total30 = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) >= 0 && diasAte(r.data_vencimento) <= 30).reduce((s, r) => s + Number(r.valor), 0);
 
+  const qtdAtrasadoR  = lista.filter(r => isVencido(r.data_vencimento, r.situacao)).length;
+  const qtdVenceHojeR = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) === 0).length;
+  const qtdAVencerR   = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) > 0).length;
+
   const filtradas = useMemo(() => {
     let base: ContaReceber[];
-    if (filtro === "vencido") base = lista.filter(r => isVencido(r.data_vencimento, r.situacao));
+    if (filtro === "atrasado")   base = lista.filter(r => isVencido(r.data_vencimento, r.situacao));
+    else if (filtro === "vence_hoje") base = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) === 0);
+    else if (filtro === "a_vencer")   base = lista.filter(r => r.situacao === "pendente" && diasAte(r.data_vencimento) > 0);
     else if (filtro === "todos") base = lista;
     else if (filtro === "recebido") base = lista.filter(r => isRecebido(r.situacao));
     else base = lista.filter(r => r.situacao === filtro);
-    // Aplica filtro de período ao data_recebimento nos registros já recebidos
     return base.filter(r => {
       if (!isRecebido(r.situacao)) return true;
       if (!r.data_recebimento) return true;
@@ -1159,18 +1202,26 @@ function TabReceber({ receber, saldoLiquido }: { receber: ContaReceber[]; saldoL
         </button>
 
         <div className="flex gap-1.5 flex-wrap">
-          {["todos", "pendente", "recebido", "cancelado", "vencido"].map(s => (
+          {([
+            { key: "todos",      label: "Todos" },
+            { key: "atrasado",   label: `Atrasado${qtdAtrasadoR > 0 ? ` (${qtdAtrasadoR})` : ""}`,     color: C.vermelho },
+            { key: "vence_hoje", label: `Vence Hoje${qtdVenceHojeR > 0 ? ` (${qtdVenceHojeR})` : ""}`, color: C.ambar },
+            { key: "a_vencer",   label: `A Vencer${qtdAVencerR > 0 ? ` (${qtdAVencerR})` : ""}` },
+            { key: "recebido",   label: "Recebido" },
+            { key: "cancelado",  label: "Cancelado" },
+          ] as { key: string; label: string; color?: string }[]).map(({ key, label, color }) => (
             <button
-              key={s}
-              onClick={() => setFiltro(s)}
-              className="text-xs px-3 py-1.5 rounded-full capitalize transition-colors border"
+              key={key}
+              onClick={() => setFiltro(key)}
+              className="text-xs px-3 py-1.5 rounded-full transition-colors border"
               style={{
-                backgroundColor: filtro === s ? C.esmeralda : "white",
-                borderColor: filtro === s ? C.esmeralda : C.cremeBorder,
-                color: filtro === s ? C.creme : C.cinza,
+                backgroundColor: filtro === key ? (color ?? C.esmeralda) : "white",
+                borderColor: filtro === key ? (color ?? C.esmeralda) : (color ? `${color}44` : C.cremeBorder),
+                color: filtro === key ? "white" : (color ?? C.cinza),
+                fontWeight: filtro === key ? 600 : 400,
               }}
             >
-              {s}
+              {label}
             </button>
           ))}
         </div>
@@ -1580,6 +1631,190 @@ function TabConciliacao({ extratos: extratosInit, lancamentos: lancamentosInit }
   );
 }
 
+// ─── TabConciliacaoPendente ───────────────────────────────────────────────────
+
+function TabConciliacaoPendente() {
+  const [lista, setLista] = useState<ConciliacaoPendente[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [confirmandoId, setConfirmandoId] = useState<number | null>(null);
+  const [modalItem, setModalItem] = useState<ConciliacaoPendente | null>(null);
+  const [obs, setObs] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/financeiro/conciliacao-pendente?periodo=30")
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d)) setLista(d); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function marcarConciliado() {
+    if (!modalItem) return;
+    setSalvando(true);
+    setErro(null);
+    try {
+      const res = await fetch("/api/financeiro/conciliacao-pendente", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pagamento_id: modalItem.id, obs: obs.trim() || undefined }),
+      });
+      if (res.ok) {
+        setLista(prev => prev.filter(p => p.id !== modalItem.id));
+        setModalItem(null);
+        setObs("");
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setErro(d.error || "Erro ao conciliar");
+      }
+    } catch { setErro("Erro de rede"); }
+    setSalvando(false);
+    setConfirmandoId(null);
+  }
+
+  const fmtDatetime = (d: string | null) => {
+    if (!d) return "—";
+    return new Date(d).toLocaleString("pt-BR", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Cabeçalho explicativo */}
+      <div className="rounded-xl border p-4 flex items-start gap-3" style={{ borderColor: C.ambarLt, backgroundColor: "#FFFBEB" }}>
+        <ShieldCheck size={18} style={{ color: C.ambar, flexShrink: 0, marginTop: 1 }} />
+        <div>
+          <p className="text-sm font-semibold" style={{ color: "#92400E" }}>Pagamentos Manuais Aguardando Verificação</p>
+          <p className="text-xs mt-0.5" style={{ color: "#B45309" }}>
+            Estes pagamentos foram confirmados manualmente (ID MP digitado pelo vendedor). Verifique cada ID no site do Mercado Pago e marque como conciliado após conferência.
+          </p>
+        </div>
+      </div>
+
+      {/* Tabela */}
+      <div className="rounded-xl bg-white overflow-hidden border" style={{ borderColor: C.cremeBorder }}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
+                {["Venda", "Cliente", "Valor", "ID MP", "Gateway", "Confirmado em", ""].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-[11px] uppercase tracking-wider font-semibold" style={{ color: C.cinza }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={7} className="px-4 py-10 text-center">
+                  <Loader2 size={18} className="animate-spin mx-auto" style={{ color: C.cinza }} />
+                </td></tr>
+              ) : lista.length === 0 ? (
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm" style={{ color: C.cinza }}>
+                  Nenhuma conciliação pendente — tudo conferido! ✓
+                </td></tr>
+              ) : lista.map(p => (
+                <tr key={p.id} className="hover:bg-stone-50 transition-colors border-b" style={{ borderColor: C.cremeBorder }}>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {p.venda_id ? (
+                      <a href={`/vendas/${p.venda_id}`} className="text-sm font-medium hover:underline" style={{ color: C.esmeralda }}>
+                        {p.numero_venda ? `#${p.numero_venda}` : `Venda ${p.venda_id}`}
+                      </a>
+                    ) : <span className="text-sm" style={{ color: C.cinza }}>—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-sm max-w-[160px] truncate" style={{ color: "#374151" }}>
+                    {p.cliente_nome ?? "—"}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums font-semibold whitespace-nowrap" style={{ color: "#374151" }}>
+                    {fmt(p.valor)}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-[11px] max-w-[140px] truncate" style={{ color: C.cinza }} title={p.gateway_id ?? ""}>
+                    {p.gateway_id ?? "—"}
+                  </td>
+                  <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{p.gateway ?? "—"}</td>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: C.cinza }}>{fmtDatetime(p.data_confirmacao)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => { setModalItem(p); setObs(""); setErro(null); }}
+                      disabled={confirmandoId === p.id}
+                      className="text-[11px] px-2.5 py-1 rounded-lg font-medium inline-flex items-center gap-1 whitespace-nowrap transition-opacity hover:opacity-90"
+                      style={{ backgroundColor: C.verdeLt, color: C.verde }}
+                    >
+                      <CheckCircle size={10} />
+                      Marcar Conciliado
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+          <p className="text-xs" style={{ color: C.cinza }}>{lista.length} pendente{lista.length !== 1 ? "s" : ""}</p>
+          <p className="text-xs tabular-nums font-medium" style={{ color: C.ambar }}>
+            Total: {fmt(lista.reduce((s, p) => s + p.valor, 0))}
+          </p>
+        </div>
+      </div>
+
+      {/* Modal confirmar conciliação */}
+      {modalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => { setModalItem(null); setObs(""); }}>
+          <div
+            className="bg-white rounded-2xl border w-full max-w-[420px]"
+            style={{ borderColor: C.cremeBorder }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+              <div>
+                <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>Confirmar Conciliação</h3>
+                <p className="text-[11px] mt-0.5" style={{ color: C.cinza }}>
+                  ID MP: {modalItem.gateway_id ?? "—"} · {fmt(modalItem.valor)}
+                </p>
+              </div>
+              <button onClick={() => { setModalItem(null); setObs(""); }} className="p-1 rounded-lg hover:bg-stone-100">
+                <X size={16} style={{ color: C.cinza }} />
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-xs" style={{ color: C.cinza }}>
+                Confirme que verificou este ID no Mercado Pago e o pagamento foi recebido corretamente.
+              </p>
+              {erro && (
+                <div className="rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>{erro}</div>
+              )}
+              <Field label="Observação (opcional)">
+                <Input
+                  value={obs}
+                  onChange={e => setObs(e.target.value)}
+                  placeholder="Ex: Conferido no painel MP às 14h"
+                />
+              </Field>
+            </div>
+            <div className="px-5 py-4 border-t flex items-center justify-end gap-2" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+              <button
+                onClick={() => { setModalItem(null); setObs(""); }}
+                disabled={salvando}
+                className="px-4 py-2 rounded-lg text-sm border font-medium disabled:opacity-40"
+                style={{ borderColor: C.cremeBorder, color: C.cinza, backgroundColor: "white" }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={marcarConciliado}
+                disabled={salvando}
+                className="px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center gap-2 disabled:opacity-40"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}
+              >
+                {salvando ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Field + Input helpers ────────────────────────────────────────────────────
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -1946,19 +2181,30 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
   );
 }
 
-type Tab = "pagar" | "receber" | "caixa";
+type Tab = "pagar" | "receber" | "caixa" | "conciliacao_pendente" | "bancario";
 
 export default function FinanceiroClient({ pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas, userRole }: Props) {
   const [tab, setTab] = useState<Tab>("pagar");
+  const [cofre, setCofre] = useState<CofreOuro | null>(null);
+
+  useEffect(() => {
+    fetch("/api/financeiro/cofre-ouro")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && d.total_transacoes > 0) setCofre(d); })
+      .catch(() => {});
+  }, []);
+
+  const isFinanceiro = ["admin", "desenvolvedor", "gerente_fabrica", "gerente_loja"].includes(userRole ?? "");
 
   const totalPagar   = pagar.filter(p => p.situacao === "pendente").reduce((s, p) => s + Number(p.valor), 0);
   const totalReceber = receber.filter(r => r.situacao === "pendente").reduce((s, r) => s + Number(r.valor), 0);
-  const saldoLiquido = totalReceber - totalPagar;
 
   const tabs: { key: Tab; label: string; icon: any; badge?: string }[] = [
-    { key: "pagar",   label: "Contas a Pagar",   icon: ArrowUpCircle,   badge: pagar.filter(p => p.situacao === "pendente").length > 0 ? String(pagar.filter(p => p.situacao === "pendente").length) : undefined },
-    { key: "receber", label: "Contas a Receber", icon: ArrowDownCircle, badge: receber.filter(r => r.situacao === "pendente").length > 0 ? String(receber.filter(r => r.situacao === "pendente").length) : undefined },
-    { key: "caixa",   label: "Caixa",             icon: Banknote,        badge: caixaPagamentos.filter(r => r.forma === "Dinheiro" && r.caixa_baixa_id == null).length > 0 ? String(caixaPagamentos.filter(r => r.forma === "Dinheiro" && r.caixa_baixa_id == null).length) : undefined },
+    { key: "pagar",   label: "A Pagar",   icon: ArrowUpCircle,   badge: pagar.filter(p => p.situacao === "pendente").length > 0 ? String(pagar.filter(p => p.situacao === "pendente").length) : undefined },
+    { key: "receber", label: "A Receber", icon: ArrowDownCircle, badge: receber.filter(r => r.situacao === "pendente").length > 0 ? String(receber.filter(r => r.situacao === "pendente").length) : undefined },
+    { key: "caixa",   label: "Caixa",     icon: Banknote,        badge: caixaPagamentos.filter(r => r.forma === "Dinheiro" && r.caixa_baixa_id == null).length > 0 ? String(caixaPagamentos.filter(r => r.forma === "Dinheiro" && r.caixa_baixa_id == null).length) : undefined },
+    { key: "bancario", label: "Bancário", icon: Landmark },
+    ...(isFinanceiro ? [{ key: "conciliacao_pendente" as Tab, label: "Conciliação MP", icon: ShieldCheck }] : []),
   ];
 
   return (
@@ -1976,16 +2222,51 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
         </div>
       </div>
 
+      {/* Card Cofre de Ouro (só aparece se há transações em ouro) */}
+      {cofre && (
+        <div className="rounded-xl border p-4" style={{ borderColor: "#D97706", backgroundColor: "#FFFBEB" }}>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2">
+              <CircleDollarSign size={18} style={{ color: "#D97706" }} />
+              <p className="text-sm font-semibold" style={{ color: "#92400E" }}>Cofre de Ouro</p>
+            </div>
+            <div className="flex items-center gap-6 flex-wrap">
+              <div className="text-right">
+                <p className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>Últimos 30d</p>
+                <p className="text-base font-bold tabular-nums" style={{ color: "#92400E" }}>
+                  {cofre.gramas_30d.toFixed(2)}g
+                </p>
+                <p className="text-[11px]" style={{ color: "#B45309" }}>{fmt(cofre.valor_brl_30d)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>Total acumulado</p>
+                <p className="text-base font-bold tabular-nums" style={{ color: "#92400E" }}>
+                  {cofre.total_gramas.toFixed(2)}g
+                </p>
+                <p className="text-[11px]" style={{ color: "#B45309" }}>{fmt(cofre.total_valor_brl)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>Preço médio/g</p>
+                <p className="text-base font-bold tabular-nums" style={{ color: "#92400E" }}>
+                  {fmt(cofre.preco_medio_grama)}
+                </p>
+                <p className="text-[11px]" style={{ color: "#B45309" }}>{cofre.total_transacoes} transação(ões)</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Gráfico evolução */}
       <EvolucaoMensal pagar={pagar} receber={receber} />
 
       {/* Tabs */}
-      <div className="flex gap-1 rounded-xl p-1 border" style={{ backgroundColor: C.cremeBg, borderColor: C.cremeBorder }}>
+      <div className="flex gap-1 rounded-xl p-1 border overflow-x-auto" style={{ backgroundColor: C.cremeBg, borderColor: C.cremeBorder }}>
         {tabs.map(({ key, label, icon: Icon, badge }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
-            className="flex-1 flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
+            className="flex-shrink-0 flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
             style={{
               backgroundColor: tab === key ? C.esmeralda : "transparent",
               color: tab === key ? C.creme : C.cinza,
@@ -2009,9 +2290,11 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
       </div>
 
       {/* Content */}
-      {tab === "pagar"   && <TabPagar pagar={pagar} />}
-      {tab === "receber" && <TabReceber receber={receber} saldoLiquido={totalReceber} />}
-      {tab === "caixa"   && <TabCaixa caixa={caixaPagamentos} baixas={caixaBaixas} podeBaixar={["admin","desenvolvedor","gerente_loja","gerente_fabrica"].includes(userRole ?? "")} />}
+      {tab === "pagar"                && <TabPagar pagar={pagar} />}
+      {tab === "receber"              && <TabReceber receber={receber} saldoLiquido={totalReceber} />}
+      {tab === "caixa"                && <TabCaixa caixa={caixaPagamentos} baixas={caixaBaixas} podeBaixar={["admin","desenvolvedor","gerente_loja","gerente_fabrica"].includes(userRole ?? "")} />}
+      {tab === "bancario"             && <TabConciliacao extratos={extratos} lancamentos={lancamentos} />}
+      {tab === "conciliacao_pendente" && <TabConciliacaoPendente />}
     </div>
   );
 }
