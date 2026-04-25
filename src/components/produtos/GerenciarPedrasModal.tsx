@@ -14,7 +14,7 @@
  *       /api/produtos/pedras-bulk.
  */
 import { useEffect, useMemo, useState } from "react";
-import { X, RotateCcw, Save, Loader2, Check, Diamond, CheckCircle2, Trash2, AlertTriangle } from "lucide-react";
+import { X, RotateCcw, Save, Loader2, Check, Diamond, CheckCircle2, Trash2, AlertTriangle, ChevronDown, Plus } from "lucide-react";
 import {
   DEFAULT_STONE_PRICES,
   STONE_TYPES,
@@ -26,6 +26,8 @@ interface StonePrice {
   tipo: string;
   preco_usd_ct: number;
   preco_rs_un?: number;
+  // Label customizado (para categorias criadas pelo usuário, não em STONE_TYPES)
+  label?: string;
 }
 
 /**
@@ -82,6 +84,8 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated, inline 
   // Multi-tabela: lista de tabelas salvas por tipo + id da tabela ativa.
   const [tabelasPorTipo, setTabelasPorTipo] = useState<Record<string, TabelaSalva[]>>({});
   const [tabelaAtivaId,  setTabelaAtivaId]  = useState<string>("new"); // "new" = criando/editando range livre
+  // Categorias expandidas (UX accordion na seção "Categorias")
+  const [categoriasExpandidas, setCategoriasExpandidas] = useState<Record<string, boolean>>({});
   // Quantidade inicial em estoque é sempre 0 no cadastro em massa — o usuário
   // imputa a quantidade manualmente depois na ficha de cada pedra-produto.
   const qtdInicial = 0;
@@ -414,6 +418,36 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated, inline 
     }
   }
 
+  // Resolve o label de uma pedra: primeiro busca em STONE_TYPES (canônico),
+  // senão em stonePrices.label (categoria customizada), senão usa o tipo cru.
+  function labelDoTipo(tipo: string): string {
+    return STONE_TYPES.find(t => t.value === tipo)?.label
+      ?? stonePrices.find(s => s.tipo === tipo)?.label
+      ?? tipo;
+  }
+
+  // Adiciona uma nova categoria customizada. Slugifica o nome e insere
+  // em stonePrices — fica disponível no select e no card "Categorias".
+  function novaCategoria() {
+    const nome = window.prompt("Nome da nova categoria de pedra (ex: Topázio):");
+    if (!nome) return;
+    const trim = nome.trim();
+    if (!trim) return;
+    const slug = trim.toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    if (!slug) return;
+    if (stonePrices.some(s => s.tipo === slug)) {
+      setToast({ msg: `Categoria "${trim}" já existe.`, ok: false });
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+    setStonePrices(prev => [...prev, { tipo: slug, preco_usd_ct: 0, label: trim }]);
+    setCategoriasExpandidas(prev => ({ ...prev, [slug]: true }));
+    setToast({ msg: `Categoria "${trim}" criada. Configure markup/custo e crie tabelas.`, ok: true });
+    setTimeout(() => setToast(null), 4000);
+  }
+
   // Limpa todos os campos editáveis para criar tabela do zero (Dólar é automático).
   function resetParaNovaTabela() {
     setTabelaAtivaId("new");
@@ -628,77 +662,129 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated, inline 
             </div>
           ) : (
             <div className="space-y-4">
-            {/* ── Tabelas salvas (todas as pedras) ── */}
+            {/* ── Categorias (accordion) com tabelas salvas por pedra ── */}
             {(() => {
-              const tipos = STONE_TYPES.filter(t => (tabelasPorTipo[t.value]?.length ?? 0) > 0);
-              if (tipos.length === 0) return null;
+              // Lista de tipos = canônicos (STONE_TYPES) + customizados (que estão em
+              // stonePrices mas não em STONE_TYPES). Cada categoria pode ter 0+ tabelas.
+              const canonicos = STONE_TYPES.map(t => ({ value: t.value, label: t.label }));
+              const customizados = stonePrices
+                .filter(s => !STONE_TYPES.some(c => c.value === s.tipo))
+                .map(s => ({ value: s.tipo, label: s.label ?? s.tipo }));
+              const todasCategorias = [...canonicos, ...customizados];
               return (
                 <div className="bg-white rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
-                  <h3 className="text-sm font-bold text-gray-800">Tabelas Salvas</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {tipos.flatMap(t => (tabelasPorTipo[t.value] ?? []).map(tab => {
-                      const ativa = sp?.tipo === t.value && tabelaAtivaId === tab.id;
-                      const mks = Object.values(tab.markups);
-                      const mkRange = mks.length > 0 ? `${Math.max(...mks)} → ${Math.min(...mks)}` : "—";
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-gray-800">Categorias</h3>
+                    <button
+                      onClick={novaCategoria}
+                      className="text-[10px] font-semibold px-2.5 py-1.5 rounded border flex items-center gap-1 hover:bg-gray-50"
+                      style={{ borderColor: C.esmeralda, color: C.esmeralda }}
+                      title="Adicionar nova categoria de pedra"
+                    >
+                      <Plus size={11} /> Nova Categoria
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {todasCategorias.map(cat => {
+                      const tabs = tabelasPorTipo[cat.value] ?? [];
+                      const expanded = !!categoriasExpandidas[cat.value];
+                      const isAtual = sp?.tipo === cat.value;
                       return (
-                        <div key={`${t.value}-${tab.id}`}
-                          className="flex items-center gap-2 p-2.5 rounded-lg border transition-colors"
-                          style={{
-                            borderColor: ativa ? C.esmeralda : C.cremeBorder,
-                            backgroundColor: ativa ? "#F0F9F4" : "#fff",
-                          }}>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 mb-0.5">
-                              <span className="text-[12px] font-bold" style={{ color: ativa ? C.esmeralda : "#1f2937" }}>
-                                {t.label}
+                        <div key={cat.value} className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+                          <button
+                            onClick={() => setCategoriasExpandidas(prev => ({ ...prev, [cat.value]: !prev[cat.value] }))}
+                            className="w-full px-3 py-2.5 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                            style={{ backgroundColor: isAtual ? "#F0F9F4" : "#fff" }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <ChevronDown size={14} className={`transition-transform ${expanded ? "rotate-180" : ""}`} style={{ color: "#6b7280" }} />
+                              <span className="text-[13px] font-bold" style={{ color: isAtual ? C.esmeralda : "#1f2937" }}>
+                                {cat.label}
                               </span>
-                              {tab.id === "default" && (
-                                <span className="text-[8px] font-bold uppercase px-1 py-0.5 rounded"
-                                      style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
-                                  Padrão
-                                </span>
-                              )}
-                              {ativa && (
+                              <span className="text-[10px] text-gray-400 font-mono">
+                                ({tabs.length} {tabs.length === 1 ? "tabela" : "tabelas"})
+                              </span>
+                              {isAtual && (
                                 <span className="text-[8px] font-bold uppercase px-1 py-0.5 rounded"
                                       style={{ backgroundColor: C.esmeralda, color: "#fff" }}>
-                                  Em edição
+                                  Atual
                                 </span>
                               )}
                             </div>
-                            <div className="text-[10px] text-gray-500 font-mono">
-                              {rangeLabel(tab)} · markup {mkRange}
-                              {tab.preco_usd_ct != null && tab.preco_usd_ct > 0 && (
-                                <> · USD {tab.preco_usd_ct.toFixed(2)}/ct</>
-                              )}
-                              {tab.preco_rs_un != null && tab.preco_rs_un > 0 && (
-                                <> · R$ {tab.preco_rs_un.toFixed(2)}/un</>
+                          </button>
+                          {expanded && (
+                            <div className="px-3 pb-3 space-y-2">
+                              {tabs.length === 0 ? (
+                                <p className="text-[11px] text-gray-400 italic px-1 py-2">
+                                  Nenhuma tabela cadastrada. Selecione esta pedra abaixo e crie uma tabela no simulador.
+                                </p>
+                              ) : (
+                                tabs.map(tab => {
+                                  const ativa = sp?.tipo === cat.value && tabelaAtivaId === tab.id;
+                                  const mks = Object.values(tab.markups);
+                                  const mkRange = mks.length > 0 ? `${Math.max(...mks)} → ${Math.min(...mks)}` : "—";
+                                  return (
+                                    <div key={tab.id}
+                                      className="flex items-center gap-2 p-2 rounded-lg border transition-colors"
+                                      style={{
+                                        borderColor: ativa ? C.esmeralda : C.cremeBorder,
+                                        backgroundColor: ativa ? "#F0F9F4" : "#fff",
+                                      }}>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                          {tab.id === "default" && (
+                                            <span className="text-[8px] font-bold uppercase px-1 py-0.5 rounded"
+                                                  style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                                              Padrão
+                                            </span>
+                                          )}
+                                          {ativa && (
+                                            <span className="text-[8px] font-bold uppercase px-1 py-0.5 rounded"
+                                                  style={{ backgroundColor: C.esmeralda, color: "#fff" }}>
+                                              Em edição
+                                            </span>
+                                          )}
+                                          <span className="text-[10px] text-gray-500 font-mono">
+                                            {rangeLabel(tab)} · markup {mkRange}
+                                            {tab.preco_usd_ct != null && tab.preco_usd_ct > 0 && (
+                                              <> · USD {tab.preco_usd_ct.toFixed(2)}/ct</>
+                                            )}
+                                            {tab.preco_rs_un != null && tab.preco_rs_un > 0 && (
+                                              <> · R$ {tab.preco_rs_un.toFixed(2)}/un</>
+                                            )}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <button
+                                        onClick={() => editarTabela(cat.value, tab.id)}
+                                        disabled={ativa}
+                                        className="text-[10px] font-semibold px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-40"
+                                        style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                                        title="Carregar esta tabela no editor"
+                                      >
+                                        Editar
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          if (confirm(`Excluir tabela ${rangeLabel(tab)} de ${cat.label}?\n\nA exclusão é permanente.`)) {
+                                            void excluirTabela(cat.value, tab.id);
+                                          }
+                                        }}
+                                        className="text-[10px] font-semibold px-2 py-1 rounded border hover:bg-red-50"
+                                        style={{ borderColor: "#FCA5A5", color: "#B91C1C" }}
+                                        title="Excluir esta tabela"
+                                      >
+                                        <Trash2 size={11} />
+                                      </button>
+                                    </div>
+                                  );
+                                })
                               )}
                             </div>
-                          </div>
-                          <button
-                            onClick={() => editarTabela(t.value, tab.id)}
-                            disabled={ativa}
-                            className="text-[10px] font-semibold px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-40"
-                            style={{ borderColor: C.cremeBorder, color: "#374151" }}
-                            title="Carregar esta tabela no editor"
-                          >
-                            Editar
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (confirm(`Excluir tabela ${rangeLabel(tab)} de ${t.label}?\n\nA exclusão é permanente.`)) {
-                                void excluirTabela(t.value, tab.id);
-                              }
-                            }}
-                            className="text-[10px] font-semibold px-2 py-1 rounded border hover:bg-red-50"
-                            style={{ borderColor: "#FCA5A5", color: "#B91C1C" }}
-                            title="Excluir esta tabela"
-                          >
-                            <Trash2 size={11} />
-                          </button>
+                          )}
                         </div>
                       );
-                    }))}
+                    })}
                   </div>
                 </div>
               );
@@ -767,7 +853,7 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated, inline 
                   >
                     {stonePrices.map((s, i) => (
                       <option key={s.tipo} value={i}>
-                        {STONE_TYPES.find((t) => t.value === s.tipo)?.label ?? s.tipo}
+                        {labelDoTipo(s.tipo)}
                       </option>
                     ))}
                   </select>
