@@ -10,6 +10,13 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
+  // Mesma checagem do POST — antes qualquer usuário autenticado via
+  // sugestões financeiras (match lançamento ↔ conta).
+  const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
+  if (!usuario || !isFullAccess(usuario.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   // Buscar lançamentos não conciliados
   const lancamentos = await sql`
     SELECT id, fitid, tipo, valor, data_transacao, descricao

@@ -124,7 +124,9 @@ function setupHappyPath(opts: {
     .mockResolvedValueOnce([{ soma_confirmados: somaConfirmados }]);
 
   if (isUpdate) {
-    sqlMock.mockResolvedValueOnce([]); // UPDATE não retorna nada relevante
+    // UPDATE agora tem RETURNING id — precisa retornar o id atualizado pra
+    // não cair no 404 que detecta pagamento de outra venda.
+    sqlMock.mockResolvedValueOnce([{ id: pagamentoId }]);
   } else {
     sqlMock.mockResolvedValueOnce([{ id: pagamentoId }]); // INSERT RETURNING id
   }

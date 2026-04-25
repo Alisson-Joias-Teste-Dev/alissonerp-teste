@@ -145,47 +145,46 @@ describe("POST /api/financeiro/inter/sync", () => {
     expect(mockGetUser).not.toHaveBeenCalled();
   });
 
-  it("rejeita header x-cron-secret errado e exige usuário", async () => {
+  it("rejeita header x-cron-secret errado e exige usuário (401 sem user)", async () => {
     mockGetUser.mockResolvedValueOnce({ data: { user: null } });
 
     const res = await POST(
       makeRequest({ "x-cron-secret": "secret-errado" }),
     );
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     expect(mockGetUser).toHaveBeenCalled();
   });
 
-  it("sem header x-cron-secret: cai no fluxo de user", async () => {
+  it("sem header x-cron-secret + user null: retorna 401", async () => {
     mockGetUser.mockResolvedValueOnce({ data: { user: null } });
 
     const res = await POST(makeRequest());
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     expect(mockGetUser).toHaveBeenCalled();
   });
 
-  it("não autoriza por cron secret quando expected é null (DB e env vazios)", async () => {
+  it("não autoriza por cron secret quando expected é null (DB e env vazios) — 401 sem user", async () => {
     mockGetInterCronSecret.mockResolvedValueOnce(null);
     delete process.env.INTER_CRON_SECRET;
     mockGetUser.mockResolvedValueOnce({ data: { user: null } });
 
-    // Mesmo enviando "" como header, expected é null → não autoriza
     const res = await POST(makeRequest({ "x-cron-secret": "" }));
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 
   // ── Auth: user ────────────────────────────────────────────────────────────
 
-  it("retorna 403 quando não autenticado e sem cron secret", async () => {
+  it("retorna 401 quando não autenticado e sem cron secret", async () => {
     mockGetUser.mockResolvedValueOnce({ data: { user: null } });
 
     const res = await POST(makeRequest());
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     const data = await res.json();
-    expect(data.error).toMatch(/permiss/i);
+    expect(data.error).toMatch(/autenticado/i);
   });
 
   it.each(["consultora", "ourives", "motoboy", "pcp", "gerente_fabrica", "gerente_loja"])(

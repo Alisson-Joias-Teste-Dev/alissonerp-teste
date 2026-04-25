@@ -79,14 +79,25 @@ describe("GET /api/financeiro/caixa/baixa", () => {
     expect(data.error).toMatch(/autenticado/i);
   });
 
+  it.each(["consultora", "motoboy", "ourives", "pcp"])(
+    "retorna 403 quando role é %s (GET agora exige role)",
+    async (role) => {
+      sqlMock.mockResolvedValueOnce([{ role }]);
+      const res = await GET(makeGetRequest());
+      expect(res.status).toBe(403);
+    },
+  );
+
   it("retorna baixas, pendentes e total_pendente calculado", async () => {
     sqlMock
-      // 1. baixas
+      // 1. SELECT role
+      .mockResolvedValueOnce([{ role: "admin" }])
+      // 2. baixas
       .mockResolvedValueOnce([
         { id: 2, total: "750.00", qtd_pagamentos: 3, realizado_nome: "João",  obs: null,    created_at: "2026-04-25 10:00:00" },
         { id: 1, total: "200.00", qtd_pagamentos: 1, realizado_nome: "Maria", obs: "teste", created_at: "2026-04-24 09:00:00" },
       ])
-      // 2. pendentes
+      // 3. pendentes
       .mockResolvedValueOnce([
         { id: 10, valor: "100.50", data_confirmacao: "2026-04-25 11:00:00", numero_venda: 555, venda_id: 50, vendedor_nome: "Ana" },
         { id: 11, valor: "250.00", data_confirmacao: "2026-04-25 12:00:00", numero_venda: 556, venda_id: 51, vendedor_nome: "Bia" },
@@ -110,6 +121,7 @@ describe("GET /api/financeiro/caixa/baixa", () => {
   });
 
   it("query de baixas tem LIMIT 50", async () => {
+    sqlMock.mockResolvedValueOnce([{ role: "admin" }]);
     sqlMock.mockResolvedValue([]);
     await GET(makeGetRequest());
 
@@ -123,6 +135,7 @@ describe("GET /api/financeiro/caixa/baixa", () => {
   });
 
   it("query de pendentes filtra forma=Dinheiro, status=confirmado, caixa_baixa_id IS NULL", async () => {
+    sqlMock.mockResolvedValueOnce([{ role: "admin" }]);
     sqlMock.mockResolvedValue([]);
     await GET(makeGetRequest());
 
@@ -139,6 +152,7 @@ describe("GET /api/financeiro/caixa/baixa", () => {
 
   it("lista vazia: total_pendente = 0 e arrays vazios", async () => {
     sqlMock
+      .mockResolvedValueOnce([{ role: "admin" }]) // SELECT role
       .mockResolvedValueOnce([]) // baixas
       .mockResolvedValueOnce([]); // pendentes
 
@@ -152,6 +166,7 @@ describe("GET /api/financeiro/caixa/baixa", () => {
 
   it("converte total e valor para Number (mesmo vindo como string do pg)", async () => {
     sqlMock
+      .mockResolvedValueOnce([{ role: "admin" }]) // SELECT role
       .mockResolvedValueOnce([
         { id: 1, total: "1234.56", qtd_pagamentos: 2, realizado_nome: "X", obs: null, created_at: "ts" },
       ])

@@ -184,6 +184,9 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
       return { quitada: true, ja_coberto: true };
     }
 
+    // payment_ids_processados garante idempotência se o mesmo pagamento
+    // chegar depois via webhook tipo 'payment' (cenário comum: MP envia
+    // ambos). Antes este UPDATE não populava o array → re-execução.
     await tx`
       UPDATE alissonerp.pagamentos_venda
       SET status = 'confirmado', data_confirmacao = NOW(), gateway_id = ${paymentId},
@@ -193,6 +196,7 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
             ultimo_payment_id: paymentId,
             ultimo_status: "approved",
             ultimo_update: new Date().toISOString(),
+            payment_ids_processados: [paymentId],
           })}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
@@ -408,6 +412,23 @@ export async function POST(req: NextRequest) {
   };
 
   if (status === "approved") {
+    // Defesa: se MP retornar approved sem transaction_amount (raro mas
+    // documentado em alguns bursts da API), grava 0 em valor_liquido/taxas_mp
+    // mascarando os dados reais. Loga e ignora — webhook entrega de novo.
+    if (!Number.isFinite(transactionAmount) || transactionAmount <= 0) {
+      await sql`
+        INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
+        VALUES (${WEBHOOK_NOME}, ${JSON.stringify({
+          venda_id: vendaId,
+          pagamento_id: pagamentoId,
+          payment_id: paymentId,
+          status,
+          transaction_amount: payment.transaction_amount,
+          motivo: "transaction_amount inválido — webhook ignorado",
+        })}::text::jsonb, 200, 'transaction_amount inválido')
+      `;
+      return NextResponse.json({ ok: false, ignored: "transaction_amount inválido" });
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await (sql as any).begin(async (tx: typeof sql) => {
       // C2: SELECT FOR UPDATE dentro da tx — garante atomicidade contra webhooks concorrentes

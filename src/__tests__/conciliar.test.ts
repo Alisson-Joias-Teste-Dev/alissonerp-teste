@@ -68,6 +68,11 @@ describe("GET /api/financeiro/conciliar", () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
   });
 
+  // Helper: mock SELECT role before user mocks
+  function mockRole(role = "admin") {
+    sqlMock.mockResolvedValueOnce([{ role }]);
+  }
+
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   it("retorna 401 quando não autenticado", async () => {
@@ -84,9 +89,19 @@ describe("GET /api/financeiro/conciliar", () => {
     expect(sqlMock).not.toHaveBeenCalled();
   });
 
+  it.each(["consultora", "motoboy", "ourives", "pcp", "gerente_loja", "gerente_fabrica"])(
+    "retorna 403 quando role é %s (GET agora exige fullAccess)",
+    async (role) => {
+      mockRole(role);
+      const res = await GET();
+      expect(res.status).toBe(403);
+    },
+  );
+
   // ── Sem lançamentos pendentes ─────────────────────────────────────────────
 
   it("sem lançamentos pendentes: retorna total_nao_conciliados=0 e sugestoes vazias", async () => {
+    mockRole();
     sqlMock.mockResolvedValueOnce([]); // SELECT lancamentos
     const res = await GET();
     expect(res.status).toBe(200);
@@ -96,16 +111,18 @@ describe("GET /api/financeiro/conciliar", () => {
   });
 
   it("sem lançamentos: NÃO consulta contas_pagar nem contas_receber", async () => {
+    mockRole();
     sqlMock.mockResolvedValueOnce([]);
     await GET();
-    // Apenas o SELECT inicial deve ter sido chamado
-    expect(sqlMock).toHaveBeenCalledTimes(1);
+    // 1 SELECT role + 1 SELECT lancamentos = 2
+    expect(sqlMock).toHaveBeenCalledTimes(2);
   });
 
   // ── Match débito → contas_pagar ───────────────────────────────────────────
 
   it("lançamento débito (D): match com conta_pagar com mesmo valor e data próxima", async () => {
     const dataLanc = "2026-04-20";
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 1, fitid: "x1", tipo: "D", valor: "100.00", data_transacao: dataLanc, descricao: "Pgto fornecedor" },
@@ -130,6 +147,7 @@ describe("GET /api/financeiro/conciliar", () => {
 
   it("lançamento crédito (C): match com conta_receber", async () => {
     const dataLanc = "2026-04-20";
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 2, fitid: "y1", tipo: "C", valor: "250.00", data_transacao: dataLanc, descricao: "Recebimento" },
@@ -151,6 +169,7 @@ describe("GET /api/financeiro/conciliar", () => {
 
   it("algoritmo: aceita diferença de valor < 1% + R$0.01 (ex.: 100.00 vs 100.50)", async () => {
     // 100 * 0.01 + 0.01 = 1.01 → 0.50 < 1.01 → match
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 1, fitid: "a", tipo: "D", valor: "100.00", data_transacao: "2026-04-20", descricao: "" },
@@ -168,6 +187,7 @@ describe("GET /api/financeiro/conciliar", () => {
     // ANY com valor exato não traria 102 — então simulamos rota com valor "ANY" liberal
     // Mas como ANY usa o valor exato do lançamento, o DB nem retornaria 102.
     // Aqui força-se a vinda do match para testar o filtro JS:
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 1, fitid: "a", tipo: "D", valor: "100.00", data_transacao: "2026-04-20", descricao: "" },
@@ -183,6 +203,7 @@ describe("GET /api/financeiro/conciliar", () => {
 
   it("algoritmo: REJEITA diferença de data >= 3 dias (259200000 ms)", async () => {
     // 4 dias de diferença → rejeita
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 1, fitid: "a", tipo: "D", valor: "100.00", data_transacao: "2026-04-20", descricao: "" },
@@ -196,6 +217,7 @@ describe("GET /api/financeiro/conciliar", () => {
   });
 
   it("algoritmo: ACEITA diferença de data < 3 dias (ex.: 2 dias)", async () => {
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 1, fitid: "a", tipo: "D", valor: "100.00", data_transacao: "2026-04-20", descricao: "" },
@@ -209,6 +231,7 @@ describe("GET /api/financeiro/conciliar", () => {
   });
 
   it("algoritmo: limita matches a no máximo 3", async () => {
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 1, fitid: "a", tipo: "D", valor: "100.00", data_transacao: "2026-04-20", descricao: "" },
@@ -226,6 +249,7 @@ describe("GET /api/financeiro/conciliar", () => {
   });
 
   it("lançamento sem match NÃO aparece em sugestoes (mas conta no total)", async () => {
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 1, fitid: "a", tipo: "D", valor: "100.00", data_transacao: "2026-04-20", descricao: "" },
@@ -238,6 +262,7 @@ describe("GET /api/financeiro/conciliar", () => {
   });
 
   it("data_transacao null não bloqueia o match (filtro de data ignorado)", async () => {
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 1, fitid: "a", tipo: "D", valor: "100.00", data_transacao: null, descricao: "" },
@@ -251,6 +276,7 @@ describe("GET /api/financeiro/conciliar", () => {
   });
 
   it("data_vencimento null no match: filtro de data ignorado, match passa", async () => {
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 1, fitid: "a", tipo: "D", valor: "100.00", data_transacao: "2026-04-20", descricao: "" },
@@ -264,6 +290,7 @@ describe("GET /api/financeiro/conciliar", () => {
   });
 
   it("converte valor (string numeric) para Number na resposta", async () => {
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 1, fitid: "a", tipo: "D", valor: "100.00", data_transacao: "2026-04-20", descricao: "" },
@@ -278,6 +305,7 @@ describe("GET /api/financeiro/conciliar", () => {
   });
 
   it("mistura D e C: cada lançamento bate em sua tabela respectiva", async () => {
+    mockRole();
     sqlMock
       .mockResolvedValueOnce([
         { id: 1, fitid: "a", tipo: "D", valor: "100.00", data_transacao: "2026-04-20", descricao: "" },

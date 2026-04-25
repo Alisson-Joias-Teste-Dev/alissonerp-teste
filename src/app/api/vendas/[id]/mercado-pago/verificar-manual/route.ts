@@ -133,7 +133,9 @@ export async function POST(
   // Se veio pagamento_id existente (A Receber / Manual MP), atualiza o registro em vez de criar novo
   let novoPagId: number;
   if (pagamentoIdExistente) {
-    await sql`
+    // RETURNING id pra detectar 404 — antes, se o pagamento_id pertencesse
+    // a outra venda, o UPDATE não atualizava nada e a rota retornava 200.
+    const updRows = await sql`
       UPDATE alissonerp.pagamentos_venda
       SET status = 'confirmado',
           forma = ${formaErp},
@@ -146,7 +148,14 @@ export async function POST(
           taxas_mp = ${taxasMp},
           parcelas = ${parcelasMp}
       WHERE id = ${pagamentoIdExistente} AND venda_id = ${vendaId}
+      RETURNING id
     `;
+    if (updRows.length === 0) {
+      return NextResponse.json(
+        { error: "Pagamento não encontrado nesta venda" },
+        { status: 404 },
+      );
+    }
     novoPagId = pagamentoIdExistente;
   } else {
     const [novoPag] = await sql`
