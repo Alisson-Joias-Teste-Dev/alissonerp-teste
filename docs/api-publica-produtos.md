@@ -2,7 +2,7 @@
 
 Endpoint aberto para uso no site externo. Não requer autenticação.
 
-**Base URL:** `https://erp.alisson.com.br/api/public/produtos`  
+**Base URL:** `https://erp.alissonjoias.com.br/api/public/produtos`  
 **Método:** `GET`  
 **CORS:** Aberto (`*`)  
 **Cache:** 60 segundos (stale-while-revalidate 300s)
@@ -28,42 +28,42 @@ Endpoint aberto para uso no site externo. Não requer autenticação.
 
 ### Listar todos os produtos ativos
 ```
-GET https://erp.alisson.com.br/api/public/produtos?page=1&limit=50
+GET https://erp.alissonjoias.com.br/api/public/produtos?page=1&limit=50
 ```
 
 ### Buscar por nome ou SKU
 ```
-GET https://erp.alisson.com.br/api/public/produtos?busca=anel
+GET https://erp.alissonjoias.com.br/api/public/produtos?busca=anel
 ```
 
 ### Filtrar por categoria
 ```
-GET https://erp.alisson.com.br/api/public/produtos?categoria=Anel
+GET https://erp.alissonjoias.com.br/api/public/produtos?categoria=Anel
 ```
 
 ### Filtrar por categoria e metal
 ```
-GET https://erp.alisson.com.br/api/public/produtos?categoria=Anel&tipo_metal=Ouro+18k
+GET https://erp.alissonjoias.com.br/api/public/produtos?categoria=Anel&tipo_metal=Ouro+18k
 ```
 
 ### Apenas produtos com estoque disponível
 ```
-GET https://erp.alisson.com.br/api/public/produtos?com_estoque=true
+GET https://erp.alissonjoias.com.br/api/public/produtos?com_estoque=true
 ```
 
 ### Produto específico por SKU
 ```
-GET https://erp.alisson.com.br/api/public/produtos?sku=AN001
+GET https://erp.alissonjoias.com.br/api/public/produtos?sku=AN001
 ```
 
 ### Ordenar por preço
 ```
-GET https://erp.alisson.com.br/api/public/produtos?order=preco&limit=20
+GET https://erp.alissonjoias.com.br/api/public/produtos?order=preco&limit=20
 ```
 
 ### Combinando filtros com paginação
 ```
-GET https://erp.alisson.com.br/api/public/produtos?categoria=Pulseira&com_estoque=true&order=preco&page=1&limit=24
+GET https://erp.alissonjoias.com.br/api/public/produtos?categoria=Pulseira&com_estoque=true&order=preco&page=1&limit=24
 ```
 
 ---
@@ -125,7 +125,7 @@ Produtos como anéis (por numeração) ou correntes (por comprimento) são estru
 O endpoint retorna apenas os **pais** por padrão. Para buscar as variações de um produto pai:
 
 ```
-GET https://erp.alisson.com.br/api/public/produtos?sku=AN042-17
+GET https://erp.alissonjoias.com.br/api/public/produtos?sku=AN042-17
 ```
 
 Ou itere pelos filhos filtrando por `parent_sku` na sua aplicação.
@@ -137,14 +137,14 @@ Ou itere pelos filhos filtrando por `parent_sku` na sua aplicação.
 ### Fetch nativo
 ```js
 const res = await fetch(
-  'https://erp.alisson.com.br/api/public/produtos?categoria=Anel&com_estoque=true&limit=24'
+  'https://erp.alissonjoias.com.br/api/public/produtos?categoria=Anel&com_estoque=true&limit=24'
 )
 const { produtos, total, totalPages } = await res.json()
 ```
 
 ### Axios
 ```js
-const { data } = await axios.get('https://erp.alisson.com.br/api/public/produtos', {
+const { data } = await axios.get('https://erp.alissonjoias.com.br/api/public/produtos', {
   params: {
     categoria: 'Anel',
     com_estoque: true,
