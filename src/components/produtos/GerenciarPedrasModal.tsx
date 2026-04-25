@@ -309,8 +309,10 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
     setRowMarkups(newMkps);
   };
 
-  async function salvarTabela() {
-    if (!sp) return;
+  // Quando chamado pelo fluxo unificado (salvar+cadastrar), suprime o toast
+  // de sucesso individual para não conflitar com o overlay final.
+  async function salvarTabela(opts: { silent?: boolean } = {}) {
+    if (!sp) return false;
     setSaving(true);
     try {
       // Monta a tabela atual (markups keyed por mm-string a partir de STONE_CT + rowMarkups).
@@ -361,13 +363,18 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
       setAllMarkups(legacyFlat);
       setTabelasPorTipo(novasTabelas);
       setTabelaAtivaId(idParaAtivar);
-      const label = STONE_TYPES.find(t => t.value === sp.tipo)?.label;
-      setToast({ msg: `Tabela ${tamanhoInicial.toFixed(1)}–${tamanhoFinal.toFixed(1)}mm de ${label} salva.`, ok: true });
+      if (!opts.silent) {
+        const label = STONE_TYPES.find(t => t.value === sp.tipo)?.label;
+        setToast({ msg: `Tabela ${tamanhoInicial.toFixed(1)}–${tamanhoFinal.toFixed(1)}mm de ${label} salva.`, ok: true });
+        setTimeout(() => setToast(null), 3500);
+      }
+      return true;
     } catch (err) {
       setToast({ msg: err instanceof Error ? err.message : "Erro", ok: false });
+      setTimeout(() => setToast(null), 3500);
+      return false;
     } finally {
       setSaving(false);
-      setTimeout(() => setToast(null), 3500);
     }
   }
 
@@ -456,55 +463,13 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
     void excluirTabela(sp.tipo, tabelaAtivaId);
   }
 
-  // Reaplica os preços atuais (markups + custos) nos produtos-pedra já cadastrados
-  // que tenham nome "<label> <mm>mm" — sem criar novos.
-  async function atualizarPrecosExistentes() {
-    if (!sp) return;
-    const label = STONE_TYPES.find((t) => t.value === sp.tipo)?.label ?? sp.tipo;
-    const itens = STONE_CT.map((row, rowIdx) => {
-      // Zirconia: preço fixo em R$/un (mesmo valor pra todos os tamanhos).
-      // Demais: preço = ct × USD/ct × dólar × markup_da_linha.
-      const venda = isZirc
-        ? (sp.preco_rs_un ?? 0)
-        : row.ct * (sp.preco_usd_ct ?? 0) * cotacaoDolar * (rowMarkups[rowIdx] ?? 1);
-      return {
-        tipo: sp.tipo,
-        label,
-        mm: row.mm,
-        ct: row.ct,
-        preco_venda: Math.ceil(venda),
-      };
-    }).filter((it) => it.preco_venda > 0);
-    if (itens.length === 0) {
-      setToast({ msg: "Configure preço/markup antes de atualizar.", ok: false });
-      setTimeout(() => setToast(null), 3500);
-      return;
-    }
-
-    setCadastrando(true);
-    try {
-      const res = await fetch("/api/produtos/pedras-bulk/reprice", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itens }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Falha ao atualizar preços");
-      const ok = Number(data?.atualizados ?? 0);
-      const nao = Array.isArray(data?.nao_encontrados) ? data.nao_encontrados.length : 0;
-      setToast({
-        msg: ok === 0
-          ? `Nada para atualizar (preços já correspondem) — ${nao} pedra(s) não cadastrada(s).`
-          : `${ok} pedra${ok === 1 ? "" : "s"} atualizada${ok === 1 ? "" : "s"} de ${label}.${nao ? ` ${nao} não cadastradas.` : ""}`,
-        ok: ok > 0 || nao === 0,
-      });
-      onCreated?.();
-    } catch (err) {
-      setToast({ msg: err instanceof Error ? err.message : "Erro", ok: false });
-    } finally {
-      setCadastrando(false);
-      setTimeout(() => setToast(null), 5000);
-    }
+  // Fluxo unificado: salva a tabela primeiro, depois cadastra/atualiza pedras.
+  // Garante que toda pedra cadastrada tenha uma tabela associada.
+  async function salvarECadastrar() {
+    if (saving || cadastrando) return;
+    const ok = await salvarTabela({ silent: true });
+    if (!ok) return;
+    await cadastrarEmMassa();
   }
 
   // Cadastra 1 produto por linha da tabela (16 pedras) usando os preços atuais.
@@ -943,41 +908,23 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
                 </div>
               )}
 
-              {/* Botões: salvar tabela + atualizar preços + cadastrar em massa */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                <button
-                  onClick={salvarTabela}
-                  disabled={saving || cadastrando}
-                  className="py-2.5 rounded-lg text-sm font-semibold border flex items-center justify-center gap-2 hover:bg-gray-50 disabled:opacity-60"
-                  style={{ borderColor: C.esmeralda, color: C.esmeralda }}
-                >
-                  {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  Salvar Tabela
-                </button>
-                <button
-                  onClick={atualizarPrecosExistentes}
-                  disabled={saving || cadastrando}
-                  title="Aplica os preços calculados na tabela acima nos produtos-pedra já cadastrados deste tipo."
-                  className="py-2.5 rounded-lg text-sm font-semibold border flex items-center justify-center gap-2 hover:bg-gray-50 disabled:opacity-60"
-                  style={{ borderColor: "#0F766E", color: "#0F766E" }}
-                >
-                  {cadastrando ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                  Atualizar Preços
-                </button>
-                <button
-                  onClick={cadastrarEmMassa}
-                  disabled={saving || cadastrando}
-                  className="py-2.5 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-60"
-                  style={{ backgroundColor: C.esmeralda }}
-                >
-                  {cadastrando ? <Loader2 size={14} className="animate-spin" /> : <Diamond size={14} />}
-                  Cadastrar em Massa
-                </button>
-              </div>
+              {/* Ação unificada: salva a tabela e cadastra/atualiza as pedras
+                  numa única operação — toda pedra cadastrada precisa ter tabela. */}
+              <button
+                onClick={salvarECadastrar}
+                disabled={saving || cadastrando}
+                className="w-full py-3 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-60"
+                style={{ backgroundColor: C.esmeralda }}
+              >
+                {(saving || cadastrando) ? <Loader2 size={14} className="animate-spin" /> : <><Save size={14} /><Diamond size={14} /></>}
+                Salvar Tabela e Cadastrar Pedras
+              </button>
 
               <p className="text-[10px] text-gray-400 text-center">
-                O cadastro em massa cria <strong>{STONE_CT.length}</strong> produto{STONE_CT.length === 1 ? "" : "s"} (categoria <strong>Pedras</strong>)
-                — um por tamanho entre <strong>{tamanhoInicial}mm</strong> e <strong>{tamanhoFinal}mm</strong> (passo 0.1mm).
+                Salva a tabela de markup acima e cria/atualiza{" "}
+                <strong>{STONE_CT.length}</strong> pedra{STONE_CT.length === 1 ? "" : "s"} (categoria <strong>Pedras</strong>)
+                entre <strong>{tamanhoInicial}mm</strong> e <strong>{tamanhoFinal}mm</strong> (passo 0.1mm).
+                Pedras já cadastradas têm preço/peso atualizados.
               </p>
 
               {/* Status do catálogo removido — quantidade é imputada manualmente na
