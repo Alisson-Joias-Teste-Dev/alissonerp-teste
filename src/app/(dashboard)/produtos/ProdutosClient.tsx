@@ -14,7 +14,6 @@ import { formatPeso } from "@/lib/formatters";
 import ProdutoDrawer from "@/components/produtos/ProdutoDrawer";
 import CadastroProdutoModal from "@/components/produtos/CadastroProdutoModal";
 import ModalPersonalizacao from "@/components/produtos/ModalPersonalizacao";
-import GerenciarPedrasModal from "@/components/produtos/GerenciarPedrasModal";
 import BulkEditModal from "@/components/produtos/BulkEditModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -188,7 +187,6 @@ export default function ProdutosClient() {
   // Cadastro modal
   const [showCadastro, setShowCadastro] = useState(false);
   const [showPersonalizado, setShowPersonalizado] = useState(false);
-  const [showPedras, setShowPedras]     = useState(false);
 
   // Seleção em massa
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
@@ -381,13 +379,8 @@ export default function ProdutosClient() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowPedras(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border hover:bg-gray-50"
-              style={{ borderColor: "#184036", color: "#184036" }}
-            >
-              💎 Pedras
-            </button>
+            {/* Botão "💎 Pedras" removido — gerenciamento agora vive em
+                /precificacao > Markup Pedras (mesmo modal renderizado inline). */}
             <button
               onClick={() => setShowPersonalizado(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border hover:bg-amber-50"
@@ -866,12 +859,6 @@ export default function ProdutosClient() {
           bumpRefresh();
           setSelectedId(produtoId);
         }}
-      />
-
-      <GerenciarPedrasModal
-        open={showPedras}
-        onClose={() => setShowPedras(false)}
-        onCreated={() => { fetchProdutos(); bumpRefresh(); }}
       />
 
       {showPersonalizado && (
