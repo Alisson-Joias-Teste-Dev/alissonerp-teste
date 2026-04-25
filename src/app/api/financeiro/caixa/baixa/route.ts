@@ -10,6 +10,15 @@ export async function GET(_req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
+  // Mesma checagem de role do POST — antes qualquer usuário autenticado
+  // conseguia ver o histórico de baixas e pagamentos pendentes.
+  const [usuario] = await sql`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+  `;
+  if (!usuario || !podedarBaixaCaixa(usuario.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const [baixas, pendentes] = await Promise.all([
     sql`
       SELECT

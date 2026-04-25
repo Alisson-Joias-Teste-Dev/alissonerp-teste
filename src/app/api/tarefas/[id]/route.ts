@@ -74,8 +74,12 @@ export async function PATCH(
     status?: string;
     data_limite?: string | null;
     ordem_id?: number | null;
+    ordem_ids?: number[] | null;
+    peso_metal?: number | null;
     tags?: string[];
   };
+
+  const novoConcluida = body.status === "concluida" ? sql`NOW()` : sql`concluida_em`;
 
   await sql`
     UPDATE alissonerp.tarefas SET
@@ -86,7 +90,10 @@ export async function PATCH(
       status         = COALESCE(${body.status ?? null},         status),
       data_limite    = COALESCE(${body.data_limite ?? null}::date, data_limite),
       ordem_id       = COALESCE(${body.ordem_id ?? null},       ordem_id),
-      tags           = COALESCE(${body.tags ?? null},           tags)
+      ordem_ids      = COALESCE(${body.ordem_ids ?? null},      ordem_ids),
+      peso_metal     = COALESCE(${body.peso_metal ?? null},     peso_metal),
+      tags           = COALESCE(${body.tags ?? null},           tags),
+      concluida_em   = ${novoConcluida}
     WHERE id = ${tarefaId}
   `;
 

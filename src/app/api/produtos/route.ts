@@ -33,6 +33,7 @@ import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
 import { aplicarCurvaProduto } from "@/lib/aplicar-curva-produto";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
 import { uploadFile, ensureBucket } from "@/lib/storage";
+import { dispararWebhookBackground } from "@/lib/webhooks-server";
 
 // ── Helpers para geração de variações ─────────────────────────────────────────
 
@@ -824,6 +825,29 @@ export async function POST(req: NextRequest) {
         console.warn("[POST /api/produtos] falha ao fazer upload da foto:", err);
       }
     }
+
+    // ── Enfileirar sincronização com Tiny ────────────────────────────────────
+    const todosSyncIds = [result.pai.id_produto, ...result.variacoes.map((v: { produto_id: number }) => v.produto_id)];
+    try {
+      for (const pid of todosSyncIds) {
+        await sql`
+          INSERT INTO alissonerp.tiny_sync_produtos (produto_id, operacao, status)
+          VALUES (${pid}, 'create', 'pendente')
+          ON CONFLICT (produto_id) DO UPDATE SET operacao = 'create', status = 'pendente', tentativas = 0, updated_at = NOW()
+        `;
+      }
+    } catch (err) {
+      console.warn("[POST /api/produtos] falha ao enfileirar sync Tiny:", err);
+    }
+
+    // Notifica o site em background
+    dispararWebhookBackground("produto_criado_site", {
+      evento: "produto.criado",
+      produto_id: result.pai?.id_produto,
+      nome: result.pai?.nome,
+      situacao: result.pai?.situacao,
+      timestamp: new Date().toISOString(),
+    });
 
     return NextResponse.json(
       {

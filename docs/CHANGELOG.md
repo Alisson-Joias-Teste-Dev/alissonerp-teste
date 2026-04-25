@@ -1,8 +1,20 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 18/04/2026 — Versão: v2.25.0 <!-- Revisado 18/04/2026 -->
+> 📋 Última atualização automática: 23/04/2026 — Versão: v2.33.0 <!-- Revisado 23/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.33.0 (23/04/2026)
+### Feature — Dashboard Comercial (replicado do alison-joias-admin)
+- **Migration 174** (`174_dashboard_comercial_views.sql`): cria 12 views `alissonerp.vw_dash_*` apontando para `public.*` (vendas, metas_mensais, metas_por_hora, vendedores, itens_venda, comissoes, controle_entregas, forma_envio, forma_frete, leads, parcelas_pedidos, pedidos_parcelas_detalhado). Coluna `aprovada` na view de entregas normaliza bug do `status_aprovacao='APROVADA'` (dado real é `'2'`).
+- **Migration 175** (`175_dashboard_comercial_permissoes.sql`): registra módulo `dashboard_comercial` em `alissonerp.role_permissoes` para desenvolvedor/admin/gerente_loja/consultora. Fábrica (gerente_fabrica, ourives, pcp) e motoboy SEM acesso.
+- **6 API routes** em `src/app/api/dashboard-comercial/`: `vendas-dashboard`, `ranking`, `analise-performance` (4 cenários: horário acumulado/diário, mensal acumulado/projeção), `analise-frete`, `analise-comissoes`, `leads`, `comparativo-anual` (vs ano anterior).
+- **5 páginas** em `src/app/(dashboard)/dashboard-comercial/`: geral (performance + leads + cards Prata/Ouro/Diamante), analise-resultado (4 cenários), analise-frete (receita vs custo), analise-comissoes (resumo + detalhe por item), ranking (podium top 3 animado + tabela completa).
+- **Componentes UI base**: `DashboardHeader` (tabs + DateRangePicker), `StatCard`, `ConsultoraAvatar` (fallback iniciais), `Podium` (Framer Motion), `LoadingBlock/ErrorBlock`. Paleta oficial do fabricaAJ (esmeralda/creme/dourado).
+- **Menu Comercial**: adicionado item "Dashboard Comercial" no topo do grupo. Removidos 4 itens antigos que foram consolidados (Análise Resultado, Análise Frete, Análise Comissões, Metas) — páginas antigas ficam no filesystem como fallback.
+- **Libs adicionadas**: `framer-motion` (animações do podium), `date-fns` + `date-fns-tz` (manipulação de datas).
+- Stack: `fetch + useState` (sem React Query no cliente, consistente com o resto do fabricaAJ). SQL direto via `src/lib/db.ts` (sem PostgREST).
+- Validação: `npx tsc --noEmit` zero erros. 6 APIs retornam 200 com dados reais (faturamento R$ 394k período abr/2026, 123 vendas, ranking #1 Germana Valentim).
 
 ## v2.25.0 (18/04/2026)
 ### Feature — maquininhas por vendedor (MP Point)

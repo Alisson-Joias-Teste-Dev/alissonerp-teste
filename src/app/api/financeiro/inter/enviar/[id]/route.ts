@@ -60,6 +60,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   }
 
   const valor = Number(conta.valor);
+  // Inter rejeita valores <= 0 com erro 500 do gateway. Validar localmente
+  // garante mensagem clara e evita gastar uma chamada à API Inter.
+  if (!Number.isFinite(valor) || valor <= 0) {
+    return NextResponse.json(
+      { error: `Conta com valor inválido (${conta.valor}). Corrija o valor antes de enviar.` },
+      { status: 400 },
+    );
+  }
   const dataPagamento = conta.data_vencimento
     ? new Date(conta.data_vencimento).toISOString().slice(0, 10)
     : undefined;

@@ -85,12 +85,18 @@ export async function POST(
   }
 
   // 3. Marcar contas a receber vinculada como paga
-  await sql`
-    UPDATE alissonerp.contas_receber
-    SET situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
-    WHERE venda_erp_id = ${vendaId} AND situacao = 'pendente'
-    LIMIT 1
-  `.catch(() => {});
+  // Postgres não suporta LIMIT em UPDATE — sem LIMIT, o filtro WHERE já garante
+  // que só pendentes da venda são marcadas. Erros antes eram silenciados pelo
+  // .catch(() => {}) e o LIMIT 1 fazia a query falhar com erro de sintaxe.
+  try {
+    await sql`
+      UPDATE alissonerp.contas_receber
+      SET situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
+      WHERE venda_erp_id = ${vendaId} AND situacao = 'pendente'
+    `;
+  } catch (err) {
+    console.error(`[confirmarPagamento] Erro ao baixar contas_receber venda=${vendaId}:`, err);
+  }
 
   // 4. Checar se todos os pagamentos estão confirmados → concluir ou aprovar venda
   const [pendentes] = await sql`
@@ -102,8 +108,12 @@ export async function POST(
   let vendaConcluida = false;
   let vendaAprovada = false;
 
-  // Se venda em rascunho + crédito aprovado + todos os não-A Receber confirmados → aprovar
-  if (!todosPagos && venda?.situacao === "rascunho") {
+  // Auto-aprovar quando venda em rascunho com crédito aprovado e:
+  //   (a) ainda há pagamentos pendentes mas só do tipo "A Receber" — fluxo misto
+  //   (b) ou TODOS os pagamentos foram confirmados — venda 100% A Receber
+  // Antes só cobria (a) por causa do `!todosPagos`, o que deixava venda 100%
+  // A Receber em rascunho mesmo após confirmação completa.
+  if (venda?.situacao === "rascunho") {
     const [vendaCredito] = await sql`
       SELECT aprovacao_credito_tipo FROM alissonerp.vendas_erp WHERE id = ${vendaId}
     `;
@@ -113,20 +123,39 @@ export async function POST(
         WHERE venda_id = ${vendaId} AND forma != 'A Receber' AND status = 'pendente'
       `;
       if (Number(outrosPend.cnt) === 0) {
-        console.log(`[confirmarPagamento] auto-aprovando venda=${vendaId} tipo=${vendaCredito.aprovacao_credito_tipo} user=${user.id}`);
-        try {
-          const { approveVenda } = await import("@/lib/vendas-aprovar");
-          await approveVenda(vendaId, user.id, { tinyBestEffort: true });
-          vendaAprovada = true;
-          console.log(`[confirmarPagamento] venda=${vendaId} aprovada automaticamente`);
-        } catch (err) {
-          console.error(`[confirmarPagamento] Erro ao aprovar venda ${vendaId}:`, err);
+        const [vendaDesconto] = await sql`
+          SELECT desconto_revalidacao_necessaria, desconto_aprovado_por
+          FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+        `;
+        const [temAltoDesc] = await sql`
+          SELECT EXISTS(
+            SELECT 1 FROM alissonerp.itens_venda_erp
+            WHERE venda_id = ${vendaId} AND pct_desconto > 30
+          ) AS tem
+        `;
+        const bloqueadoPorDesconto =
+          vendaDesconto?.desconto_revalidacao_necessaria === true ||
+          (temAltoDesc?.tem && !vendaDesconto?.desconto_aprovado_por);
+
+        if (!bloqueadoPorDesconto) {
+          console.log(`[confirmarPagamento] auto-aprovando venda=${vendaId} tipo=${vendaCredito.aprovacao_credito_tipo} user=${user.id}`);
+          try {
+            const { approveVenda } = await import("@/lib/vendas-aprovar");
+            await approveVenda(vendaId, user.id, { tinyBestEffort: true });
+            vendaAprovada = true;
+            console.log(`[confirmarPagamento] venda=${vendaId} aprovada automaticamente`);
+          } catch (err) {
+            console.error(`[confirmarPagamento] Erro ao aprovar venda ${vendaId}:`, err);
+          }
         }
       }
     }
   }
 
-  if (todosPagos && venda?.situacao === "aprovado") {
+  // Auto-concluir: situação efetiva é 'aprovado' (já estava OU acabou de ser aprovada)
+  // e todos os pagamentos foram confirmados.
+  const situacaoEfetiva = vendaAprovada ? "aprovado" : venda?.situacao;
+  if (todosPagos && situacaoEfetiva === "aprovado") {
     try {
       await concluirVenda(vendaId, user.id, { tinyBestEffort: true });
       vendaConcluida = true;

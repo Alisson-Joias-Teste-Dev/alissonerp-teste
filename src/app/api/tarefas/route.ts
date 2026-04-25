@@ -19,8 +19,8 @@ export async function GET(req: NextRequest) {
   // Todos os usuários só veem tarefas onde são responsáveis ou criadores
   const tarefas = await sql`
     SELECT
-      t.id, t.titulo, t.descricao, t.prioridade, t.status,
-      t.data_limite, t.ordem_id, t.tags, t.created_at, t.updated_at, t.concluida_em,
+      t.id, t.titulo, t.descricao, t.prioridade, t.status, t.tipo,
+      t.data_limite, t.ordem_id, t.ordem_ids, t.peso_metal, t.tags, t.created_at, t.updated_at, t.concluida_em,
       t.responsavel_id, t.criado_por,
       ur.nome AS responsavel_nome,
       uc.nome AS criador_nome,
@@ -56,7 +56,10 @@ export async function POST(req: NextRequest) {
     prioridade?: string;
     data_limite?: string;
     ordem_id?: number;
+    ordem_ids?: number[];
+    peso_metal?: number;
     tags?: string[];
+    tipo?: string;
   };
 
   if (!body.titulo?.trim()) {
@@ -65,7 +68,7 @@ export async function POST(req: NextRequest) {
 
   const [tarefa] = await sql`
     INSERT INTO alissonerp.tarefas
-      (titulo, descricao, responsavel_id, criado_por, prioridade, data_limite, ordem_id, tags)
+      (titulo, descricao, responsavel_id, criado_por, prioridade, data_limite, ordem_id, ordem_ids, peso_metal, tags, tipo)
     VALUES (
       ${body.titulo.trim()},
       ${body.descricao ?? null},
@@ -74,9 +77,12 @@ export async function POST(req: NextRequest) {
       ${body.prioridade ?? "media"},
       ${body.data_limite ?? null},
       ${body.ordem_id ?? null},
-      ${body.tags ?? []}
+      ${body.ordem_ids ?? null},
+      ${body.peso_metal ?? null},
+      ${body.tags ?? []},
+      ${body.tipo ?? null}
     )
-    RETURNING id, titulo, status, prioridade, created_at
+    RETURNING id, titulo, status, prioridade, tipo, created_at
   `;
 
   // Notificar responsável se diferente do criador

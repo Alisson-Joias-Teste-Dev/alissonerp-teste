@@ -27,8 +27,11 @@ import { concluirVenda, estornarVenda } from "@/lib/vendas-aprovar";
 const WEBHOOK_NOME = "mercado-pago-payment";
 
 // User ID sistema — usado em created_by quando a transição vem de automação.
-// Lê de configuracoes_sistema.mp_system_user_id; fallback: usa o created_by
-// original da venda.
+// Cadeia de fallback (cobertura defensiva pra garantir que SEMPRE retorna user válido):
+//  1. configuracoes_sistema.mp_system_user_id (preferido — admin dedicado pra automação)
+//  2. created_by da venda
+//  3. qualquer usuário ativo desenvolvedor/admin (último recurso pra evitar null)
+//  4. null + log loudly se nem isso existir
 async function getSystemUserId(vendaId: number): Promise<string | null> {
   const [row] = await sql`
     SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'mp_system_user_id'
@@ -39,9 +42,25 @@ async function getSystemUserId(vendaId: number): Promise<string | null> {
     v = v.replace(/"/g, "").trim();
     if (v) return v;
   }
-  // Fallback: created_by da venda
+  // Fallback 1: created_by da venda
   const [venda] = await sql`SELECT created_by FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
-  return venda?.created_by ? String(venda.created_by) : null;
+  if (venda?.created_by) return String(venda.created_by);
+
+  // Fallback 2: qualquer admin/desenvolvedor ativo — evita ficar com pagamento confirmado
+  // mas venda nunca concluída quando created_by é null e mp_system_user_id não foi configurado
+  const [adminFallback] = await sql`
+    SELECT id FROM alissonerp.usuarios
+    WHERE role IN ('desenvolvedor', 'admin') AND ativo = true
+    ORDER BY created_at ASC
+    LIMIT 1
+  `;
+  if (adminFallback?.id) {
+    console.warn(`[webhook-mp] getSystemUserId venda=${vendaId} usou fallback admin id=${adminFallback.id}. Configure 'mp_system_user_id' em configuracoes_sistema.`);
+    return String(adminFallback.id);
+  }
+
+  console.error(`[webhook-mp] getSystemUserId venda=${vendaId} retornou NULL — sem mp_system_user_id, sem created_by, sem admin ativo. Pagamento será confirmado MAS venda não será concluída.`);
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -165,15 +184,19 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
       return { quitada: true, ja_coberto: true };
     }
 
+    // payment_ids_processados garante idempotência se o mesmo pagamento
+    // chegar depois via webhook tipo 'payment' (cenário comum: MP envia
+    // ambos). Antes este UPDATE não populava o array → re-execução.
     await tx`
       UPDATE alissonerp.pagamentos_venda
-      SET status = 'confirmado', data_confirmacao = NOW(), gateway_id = ${paymentId},
+      SET status = 'confirmado', source = 'webhook_mp', data_confirmacao = NOW(), gateway_id = ${paymentId},
           valor_liquido = ${transactionAmount}, taxas_mp = 0,
           gateway_payload = gateway_payload || ${JSON.stringify({
             merchant_order_id: orderId,
             ultimo_payment_id: paymentId,
             ultimo_status: "approved",
             ultimo_update: new Date().toISOString(),
+            payment_ids_processados: [paymentId],
           })}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
@@ -389,6 +412,23 @@ export async function POST(req: NextRequest) {
   };
 
   if (status === "approved") {
+    // Defesa: se MP retornar approved sem transaction_amount (raro mas
+    // documentado em alguns bursts da API), grava 0 em valor_liquido/taxas_mp
+    // mascarando os dados reais. Loga e ignora — webhook entrega de novo.
+    if (!Number.isFinite(transactionAmount) || transactionAmount <= 0) {
+      await sql`
+        INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
+        VALUES (${WEBHOOK_NOME}, ${JSON.stringify({
+          venda_id: vendaId,
+          pagamento_id: pagamentoId,
+          payment_id: paymentId,
+          status,
+          transaction_amount: payment.transaction_amount,
+          motivo: "transaction_amount inválido — webhook ignorado",
+        })}::text::jsonb, 200, 'transaction_amount inválido')
+      `;
+      return NextResponse.json({ ok: false, ignored: "transaction_amount inválido" });
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await (sql as any).begin(async (tx: typeof sql) => {
       // C2: SELECT FOR UPDATE dentro da tx — garante atomicidade contra webhooks concorrentes
@@ -425,6 +465,7 @@ export async function POST(req: NextRequest) {
         UPDATE alissonerp.pagamentos_venda
         SET
           status           = 'confirmado',
+          source           = 'webhook_mp',
           data_confirmacao = NOW(),
           gateway_id       = ${paymentId},
           valor_liquido    = ${valorLiquido},
@@ -573,14 +614,37 @@ export async function POST(req: NextRequest) {
     //
     // Se o pagamento NÃO estava confirmado (pending que foi cancelado),
     // só atualiza o payload (comportamento igual ao 'rejected').
-    if (pag.status !== "confirmado") {
-      await sql`
-        UPDATE alissonerp.pagamentos_venda
-        SET
-          status          = 'cancelado',
-          gateway_payload = ${JSON.stringify(novoPayload)}::text::jsonb
-        WHERE id = ${pagamentoId}
+    //
+    // RACE CONDITION FIX: a leitura de pag.status (linha 358) é fora de tx.
+    // Em caso de webhook approved + refunded chegando concorrentes, o approved
+    // pode commitar status='confirmado' DEPOIS dessa leitura mas ANTES da
+    // decisão aqui — fazendo o refund pular estornarVenda e marcar 'cancelado'
+    // sem reverter contas_receber. Releia status DENTRO de tx com FOR UPDATE.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const reReadStatus = await (sql as any).begin(async (tx: typeof sql) => {
+      const [pagTx] = await tx`
+        SELECT status FROM alissonerp.pagamentos_venda
+        WHERE id = ${pagamentoId} AND venda_id = ${vendaId}
+        FOR UPDATE
       `;
+      if (!pagTx) return null;
+      // Se ainda não está confirmado, marca como cancelado dentro da tx
+      if (pagTx.status !== "confirmado") {
+        await tx`
+          UPDATE alissonerp.pagamentos_venda
+          SET status = 'cancelado',
+              gateway_payload = ${JSON.stringify(novoPayload)}::text::jsonb
+          WHERE id = ${pagamentoId}
+        `;
+        return "cancelled_before_confirm";
+      }
+      return "confirmado";
+    });
+
+    if (reReadStatus === null) {
+      return NextResponse.json({ ok: true, ignored: "pagamento_id não encontrado" });
+    }
+    if (reReadStatus === "cancelled_before_confirm") {
       return NextResponse.json({ ok: true, cancelled_before_confirm: true, status });
     }
 

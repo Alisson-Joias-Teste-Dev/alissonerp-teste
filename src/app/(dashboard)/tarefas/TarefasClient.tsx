@@ -26,8 +26,11 @@ export interface Tarefa {
   descricao: string | null;
   prioridade: string;
   status: string;
+  tipo: string | null;
   data_limite: string | null;
   ordem_id: number | null;
+  ordem_ids: number[] | null;
+  peso_metal: number | null;
   numero_ordem: string | null;
   tags: string[];
   responsavel_id: string | null;
@@ -193,10 +196,13 @@ export default function TarefasClient() {
   // Drawer state
   const [drawerTarefa, setDrawerTarefa] = useState<Tarefa | null>(null);
   const [showNova, setShowNova] = useState(false);
-  const [novaForm, setNovaForm] = useState({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "" });
+  const [novaForm, setNovaForm] = useState({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "", tipo: "" });
   const [responsavelId, setResponsavelId] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [temOrdem, setTemOrdem] = useState<boolean | null>(null);
+  const [ordensInput, setOrdensInput] = useState<{ numero: string; id: number | null; erro: string }[]>([{ numero: "", id: null, erro: "" }]);
+  const [pesoMetal, setPesoMetal] = useState("");
 
   // DnD state
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -216,10 +222,7 @@ export default function TarefasClient() {
   useEffect(() => { carregar(); }, [carregar]);
 
   useEffect(() => {
-    apiFetch<Usuario[]>("/api/usuarios/busca", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q: "" }),
-    }).then(setUsuarios).catch(() => {});
+    apiFetch<Usuario[]>("/api/usuarios/busca?q=").then(setUsuarios).catch(() => {});
   }, []);
 
   // ─── DnD handlers ───────────────────────────────────────────────────────────
@@ -272,6 +275,25 @@ export default function TarefasClient() {
   }
 
   // ─── Nova Tarefa ────────────────────────────────────────────────────────────
+  async function buscarOrdemIdx(idx: number, numero: string) {
+    if (!numero.trim()) {
+      setOrdensInput(prev => prev.map((o, i) => i === idx ? { ...o, id: null, erro: "" } : o));
+      return;
+    }
+    try {
+      const data = await apiFetch(`/api/ordens/busca?q=${encodeURIComponent(numero.trim())}`);
+      const found = (data as { id: number; numero_ordem: string }[]).find(
+        o => o.numero_ordem.toLowerCase() === numero.trim().toLowerCase()
+      );
+      setOrdensInput(prev => prev.map((o, i) => i === idx
+        ? { ...o, id: found?.id ?? null, erro: found ? "" : "Ordem não encontrada" }
+        : o
+      ));
+    } catch {
+      setOrdensInput(prev => prev.map((o, i) => i === idx ? { ...o, id: null, erro: "Erro ao buscar" } : o));
+    }
+  }
+
   async function criarTarefa() {
     if (!novaForm.titulo.trim()) return;
     setSalvando(true);
@@ -286,11 +308,15 @@ export default function TarefasClient() {
           data_limite: novaForm.data_limite || undefined,
           responsavel_id: responsavelId || undefined,
           tags: novaForm.tags ? novaForm.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
+          tipo: novaForm.tipo || undefined,
+          ordem_ids: temOrdem && ordensInput.some(o => o.id) ? ordensInput.filter(o => o.id).map(o => o.id as number) : undefined,
+          peso_metal: pesoMetal ? Number(pesoMetal.replace(",", ".")) : undefined,
         }),
       });
       setShowNova(false);
-      setNovaForm({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "" });
+      setNovaForm({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "", tipo: "" });
       setResponsavelId("");
+      setTemOrdem(null); setOrdensInput([{ numero: "", id: null, erro: "" }]); setPesoMetal("");
       carregar();
     } catch { /* silencioso */ }
     setSalvando(false);
@@ -427,6 +453,70 @@ export default function TarefasClient() {
               style={{ borderColor: C.cremeBorder }}
               onKeyDown={e => { if (e.key === "Enter") criarTarefa(); }}
             />
+            <select value={novaForm.tipo} onChange={e => setNovaForm({ ...novaForm, tipo: e.target.value })}
+              className="w-full px-3 py-2.5 border rounded-xl text-sm outline-none"
+              style={{ borderColor: C.cremeBorder }}>
+              <option value="">Tipo (opcional)</option>
+              <option value="sangria">Sangria</option>
+              <option value="protocolo_metal">Protocolo de Metal</option>
+              <option value="geral">Geral</option>
+            </select>
+            {novaForm.tipo === "protocolo_metal" && (
+              <div className="rounded-xl border p-3 space-y-3" style={{ borderColor: C.cremeBorder, backgroundColor: "#f9f6f1" }}>
+                {/* Peso do metal */}
+                <div>
+                  <p className="text-xs font-semibold mb-1" style={{ color: C.esmeralda }}>Peso do metal enviado (g) *</p>
+                  <input type="number" step="0.01" placeholder="Ex: 12.50"
+                    value={pesoMetal}
+                    onChange={e => setPesoMetal(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm outline-none"
+                    style={{ borderColor: C.cremeBorder }}
+                  />
+                </div>
+                {/* Ordens vinculadas */}
+                <div>
+                  <p className="text-xs font-semibold mb-1" style={{ color: C.esmeralda }}>Esta entrega tem ordens vinculadas?</p>
+                  <div className="flex gap-2 mb-2">
+                    <button type="button" onClick={() => setTemOrdem(true)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${temOrdem === true ? "text-white" : "text-gray-500 bg-white"}`}
+                      style={temOrdem === true ? { backgroundColor: C.esmeralda, borderColor: C.esmeralda } : { borderColor: C.cremeBorder }}>
+                      Sim
+                    </button>
+                    <button type="button" onClick={() => { setTemOrdem(false); setOrdensInput([{ numero: "", id: null, erro: "" }]); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${temOrdem === false ? "text-white" : "text-gray-500 bg-white"}`}
+                      style={temOrdem === false ? { backgroundColor: "#6B7280", borderColor: "#6B7280" } : { borderColor: C.cremeBorder }}>
+                      Não
+                    </button>
+                  </div>
+                  {temOrdem === true && (
+                    <div className="space-y-2">
+                      {ordensInput.map((o, idx) => (
+                        <div key={idx} className="flex gap-2 items-center">
+                          <input type="text" placeholder={`Nº da ordem (ex: C-1865)`}
+                            value={o.numero}
+                            onChange={e => setOrdensInput(prev => prev.map((x, i) => i === idx ? { ...x, numero: e.target.value, id: null, erro: "" } : x))}
+                            onBlur={e => buscarOrdemIdx(idx, e.target.value)}
+                            className="flex-1 px-3 py-2 border rounded-lg text-sm outline-none"
+                            style={{ borderColor: o.erro ? "#EF4444" : o.id ? "#10B981" : C.cremeBorder }}
+                          />
+                          {o.id && <span className="text-xs font-semibold text-green-600 whitespace-nowrap">✓ {o.numero}</span>}
+                          {o.erro && <span className="text-xs text-red-500 whitespace-nowrap">{o.erro}</span>}
+                          {ordensInput.length > 1 && (
+                            <button type="button" onClick={() => setOrdensInput(prev => prev.filter((_, i) => i !== idx))}
+                              className="text-gray-400 hover:text-red-500 text-lg leading-none">×</button>
+                          )}
+                        </div>
+                      ))}
+                      <button type="button"
+                        onClick={() => setOrdensInput(prev => [...prev, { numero: "", id: null, erro: "" }])}
+                        className="text-xs font-semibold" style={{ color: C.esmeralda }}>
+                        + Adicionar outra ordem
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             <textarea placeholder="Descrição (opcional)" rows={2}
               value={novaForm.descricao} onChange={e => setNovaForm({ ...novaForm, descricao: e.target.value })}
               className="w-full px-3 py-2.5 border rounded-xl text-sm outline-none resize-none"

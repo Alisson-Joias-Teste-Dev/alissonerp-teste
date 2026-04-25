@@ -59,6 +59,10 @@ interface ProdutoDetalhe {
   preco_compra_usd?: string | number | null;
   quantidade_pedra?: number | null;
   peso_ct?: string | number | null;
+  // Tiny sync
+  id_api_produto?: number | null;
+  tiny_sync_status?: string | null;
+  tiny_sync_erro?: string | null;
 }
 
 interface Variacao {
@@ -101,6 +105,7 @@ interface Props {
   produtoId: number | null;
   onClose: () => void;
   onSaved?: () => void;
+  podeEditar?: boolean;
 }
 
 // ─── Design constants ─────────────────────────────────────────────────────────
@@ -439,7 +444,7 @@ function BomRowForm({ produtoId, item, insumos, onSaved, onCancel }: BomRowFormP
 
 // ─── Main Drawer ──────────────────────────────────────────────────────────────
 
-export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
+export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar = true }: Props) {
   const aberto = produtoId !== null;
 
   const [produto, setProduto] = useState<ProdutoDetalhe | null>(null);
@@ -792,7 +797,18 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
             {produto ? (
               <>
                 <h2 className="text-base font-semibold text-gray-800 truncate">{produto.nome}</h2>
-                <p className="text-xs text-gray-400 mt-0.5 font-mono">{produto.sku}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <p className="text-xs text-gray-400 font-mono">{produto.sku}</p>
+                  {produto.tiny_sync_status === "pendente" && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium">Aguardando Tiny</span>
+                  )}
+                  {produto.tiny_sync_status === "erro" && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-medium" title={produto.tiny_sync_erro ?? ""}>Erro Tiny</span>
+                  )}
+                  {!produto.id_api_produto && !produto.tiny_sync_status && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">Sem ID Tiny</span>
+                  )}
+                </div>
               </>
             ) : (
               <h2 className="text-base font-semibold text-gray-800">Produto</h2>
@@ -807,7 +823,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6 pb-28">
+        <div className={`flex-1 overflow-y-auto px-5 py-5 space-y-6 pb-28 ${!podeEditar ? "pointer-events-none select-none" : ""}`}>
           {loading && (
             <div className="flex items-center justify-center py-16">
               <Loader2 size={24} className="animate-spin text-gray-300" />
@@ -818,6 +834,13 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
             <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 rounded-lg px-3 py-2.5 border border-red-100">
               <AlertCircle size={14} />
               {error}
+            </div>
+          )}
+
+          {produto && !podeEditar && (
+            <div className="mx-5 mt-3 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2"
+              style={{ backgroundColor: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" }}>
+              <span>🔒</span> Acesso somente leitura — você não pode editar produtos.
             </div>
           )}
 
@@ -1616,7 +1639,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved }: Props) {
         </div>
 
         {/* Footer — Save */}
-        {produto && (
+        {produto && podeEditar && (
           <div
             className="shrink-0 px-5 py-4 border-t bg-white"
             style={{ borderColor: C.cremeBorder }}

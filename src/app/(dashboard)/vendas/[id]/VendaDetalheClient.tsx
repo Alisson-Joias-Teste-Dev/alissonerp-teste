@@ -321,6 +321,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [newPagBandeira, setNewPagBandeira] = useState("Outro");
   const [newPagParcelas, setNewPagParcelas] = useState(1);
   const [newPagCondicao, setNewPagCondicao] = useState("À vista");
+  const [newPagValeNumero, setNewPagValeNumero] = useState("");
   const [parcelasRows, setParcelasRows] = useState<ParcelaRow[]>([]);
   const [multPagForma, setMultPagForma] = useState("Dinheiro");
   const [multPagValor, setMultPagValor] = useState("");
@@ -330,6 +331,19 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [mpManualId, setMpManualId] = useState("");
   const [mpManualLoading, setMpManualLoading] = useState(false);
   const [mpManualMsg, setMpManualMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  // ── Manual MP inline (pagamento pendente na venda) ──────────────────────────
+  const [mpManualPagId, setMpManualPagId] = useState<number | null>(null);
+  const [mpManualPagIdValue, setMpManualPagIdValue] = useState("");
+  const [mpManualPagLoading, setMpManualPagLoading] = useState(false);
+  const [mpManualPagMsg, setMpManualPagMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  // ── Registrar Recebimento A Receber ─────────────────────────────────────────
+  const [recebimentoPagId, setRecebimentoPagId] = useState<number | null>(null);
+  const [recebimentoTipo, setRecebimentoTipo] = useState<"dinheiro" | "mp" | null>(null);
+  const [recebimentoMpId, setRecebimentoMpId] = useState("");
+  const [recebimentoLoading, setRecebimentoLoading] = useState(false);
+  const [recebimentoMsg, setRecebimentoMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   // ── Ouro ────────────────────────────────────────────────────────────────────
   const [ouroPeso, setOuroPeso] = useState("");
@@ -468,8 +482,11 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       return { full: false, limited: false, metadata: false, readOnly: true };
     if (venda.situacao === "rascunho")
       return { full: true, limited: true, metadata: true, readOnly: false };
-    if (venda.situacao === "aprovado")
-      return { full: false, limited: podeEditarAprovado, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
+    if (venda.situacao === "aprovado") {
+      const temSaldoPendente = Number(venda.total_pago ?? 0) < Number(venda.total_venda ?? 0);
+      const podeAdicionarPag = podeEditarAprovado || temSaldoPendente;
+      return { full: false, limited: podeAdicionarPag, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
+    }
     if (venda.situacao === "enviado" || venda.situacao === "entregue")
       return { full: false, limited: false, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
     return { full: false, limited: false, metadata: false, readOnly: true };
@@ -801,6 +818,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       if (newPagForma === "Cartão de Crédito") {
         body.gateway = newPagGateway;
       }
+      if (newPagForma === "Vale-Troca") {
+        body.vale_numero = newPagValeNumero.trim();
+      }
       const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -831,6 +851,63 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       setMpManualMsg({ text: e instanceof Error ? e.message : "Erro ao verificar pagamento", ok: false });
     } finally {
       setMpManualLoading(false);
+    }
+  }
+
+  async function handleMpManualPag() {
+    if (!venda || !mpManualPagId || !mpManualPagIdValue.trim()) return;
+    setMpManualPagLoading(true);
+    setMpManualPagMsg(null);
+    try {
+      const res = await fetch(`/api/vendas/${venda.id}/mercado-pago/verificar-manual`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payment_id: mpManualPagIdValue.trim(), pagamento_id: mpManualPagId }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      setMpManualPagMsg({ text: `Confirmado! R$ ${Number(d.valor_registrado).toFixed(2).replace(".", ",")}`, ok: true });
+      setMpManualPagId(null);
+      setMpManualPagIdValue("");
+      await load();
+    } catch (e) {
+      setMpManualPagMsg({ text: e instanceof Error ? e.message : "Erro ao verificar", ok: false });
+    } finally {
+      setMpManualPagLoading(false);
+    }
+  }
+
+  async function handleRegistrarRecebimento() {
+    if (!venda || !recebimentoPagId) return;
+    setRecebimentoLoading(true);
+    setRecebimentoMsg(null);
+    try {
+      if (recebimentoTipo === "dinheiro") {
+        const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${recebimentoPagId}/confirmar`, { method: "POST" });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+        setRecebimentoPagId(null);
+        setRecebimentoTipo(null);
+        await load();
+      } else if (recebimentoTipo === "mp") {
+        if (!recebimentoMpId.trim()) { setRecebimentoMsg({ text: "Informe o ID do pagamento", ok: false }); return; }
+        const res = await fetch(`/api/vendas/${venda.id}/mercado-pago/verificar-manual`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payment_id: recebimentoMpId.trim(), pagamento_id: recebimentoPagId }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+        setRecebimentoMsg({ text: `Confirmado! R$ ${Number(d.valor_registrado).toFixed(2).replace(".", ",")}${d.venda_concluida ? " — venda concluída." : ""}`, ok: true });
+        setRecebimentoPagId(null);
+        setRecebimentoTipo(null);
+        setRecebimentoMpId("");
+        await load();
+      }
+    } catch (e) {
+      setRecebimentoMsg({ text: e instanceof Error ? e.message : "Erro ao confirmar recebimento", ok: false });
+    } finally {
+      setRecebimentoLoading(false);
     }
   }
 
@@ -1215,6 +1292,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     return tags.includes("aprovacao_desconto");
   })();
   const temPagamentoPendente = venda.pagamentos.some(p => p.status === "pendente");
+  const temManualMpPendente = venda.pagamentos.some(p => p.forma === "Manual (MP)" && p.status === "pendente");
   const podeAprovarConcluir = venda.situacao === "aprovado" && temPagamentoPendente;
   const temDescontoAlto = venda.itens.some(i => Number(i.pct_desconto) > 30);
   const precisaSolicitarDesconto = temDescontoAlto && !venda.desconto_aprovado_por_nome && !venda.aprovacao_credito_tarefa_id && venda.situacao === "rascunho";
@@ -1333,6 +1411,15 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
               Ver Tarefa →
             </a>
           )}
+        </div>
+      )}
+
+      {/* ── Banner: Manual (MP) pendente — bloqueia aprovação ── */}
+      {temManualMpPendente && venda.situacao === "rascunho" && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center gap-2"
+          style={{ backgroundColor: "#EFF6FF", borderColor: "#BFDBFE", color: "#1E40AF" }}>
+          <Loader2 size={16} className="animate-spin shrink-0" />
+          <p className="text-sm font-medium">Confirme o pagamento Manual (MP) antes de aprovar a venda.</p>
         </div>
       )}
 
@@ -2061,18 +2148,33 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           </button>
                         )}
 
-                        {/* A Receber com crédito aprovado → botão registrar recebimento (quando cliente pagar) */}
+                        {/* A Receber com crédito aprovado → fluxo registrar recebimento */}
                         {isAReceber && pag.status === "pendente" && creditoAprovado &&
                           (isFullAccess || ["gerente_loja", "diretor"].includes(role)) && (
-                          <button onClick={() => confirmarPagamento(pag.id, pag.forma)} disabled={updating}
-                            className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
-                            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                            Registrar Recebimento
-                          </button>
+                          recebimentoPagId === pag.id ? null : (
+                            <button
+                              onClick={() => { setRecebimentoPagId(pag.id); setRecebimentoTipo(null); setRecebimentoMsg(null); setRecebimentoMpId(""); }}
+                              className="text-xs px-2.5 py-1 rounded-lg font-medium"
+                              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                              Registrar Recebimento
+                            </button>
+                          )
+                        )}
+
+                        {/* Manual (MP) pendente → botão confirmar com ID (qualquer role) */}
+                        {pag.forma === "Manual (MP)" && pag.status === "pendente" && (
+                          mpManualPagId === pag.id ? null : (
+                            <button
+                              onClick={() => { setMpManualPagId(pag.id); setMpManualPagMsg(null); setMpManualPagIdValue(""); }}
+                              className="text-xs px-2.5 py-1 rounded-lg font-medium"
+                              style={{ backgroundColor: "#0070E0", color: "#fff" }}>
+                              Informar ID do MP
+                            </button>
+                          )
                         )}
 
                         {/* Outros pagamentos pendentes → confirmar manual */}
-                        {!isAReceber && !isPix && !isCartao && pag.status === "pendente" &&
+                        {!isAReceber && pag.forma !== "Manual (MP)" && !isPix && !isCartao && pag.status === "pendente" &&
                           (isFullAccess || ["gerente_loja", "diretor"].includes(role)) && (
                           <button onClick={() => confirmarPagamento(pag.id, pag.forma)} disabled={updating}
                             className="text-xs px-2 py-1 rounded-lg font-medium disabled:opacity-50"
@@ -2087,6 +2189,97 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                         )}
                       </div>
                     </div>
+
+                    {/* A Receber — fluxo de recebimento inline */}
+                    {isAReceber && pag.status === "pendente" && recebimentoPagId === pag.id && (
+                      <div className="px-3 pb-3 pt-2 border-t space-y-2" style={{ borderColor: C.cremeBorder }}>
+                        {recebimentoMsg && (
+                          <p className="text-xs font-medium" style={{ color: recebimentoMsg.ok ? "#059669" : "#DC2626" }}>
+                            {recebimentoMsg.text}
+                          </p>
+                        )}
+                        {recebimentoTipo === null && (
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-gray-500 mr-1">Como foi pago?</p>
+                            <button
+                              onClick={() => setRecebimentoTipo("dinheiro")}
+                              className="text-xs px-3 py-1.5 rounded-lg font-medium border"
+                              style={{ borderColor: C.esmeralda, color: C.esmeralda }}>
+                              Dinheiro
+                            </button>
+                            <button
+                              onClick={() => setRecebimentoTipo("mp")}
+                              className="text-xs px-3 py-1.5 rounded-lg font-medium border"
+                              style={{ borderColor: "#0070E0", color: "#0070E0" }}>
+                              Mercado Pago (ID)
+                            </button>
+                            <button onClick={() => setRecebimentoPagId(null)} className="text-gray-400 hover:text-gray-600 ml-auto"><X size={13} /></button>
+                          </div>
+                        )}
+                        {recebimentoTipo === "dinheiro" && (
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-gray-500">Confirmar recebimento em dinheiro de <strong>R$ {pag.valor.toFixed(2).replace(".", ",")}</strong>?</p>
+                            <button
+                              onClick={handleRegistrarRecebimento}
+                              disabled={recebimentoLoading}
+                              className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
+                              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                              {recebimentoLoading ? <Loader2 size={12} className="animate-spin inline" /> : "Confirmar"}
+                            </button>
+                            <button onClick={() => setRecebimentoTipo(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                          </div>
+                        )}
+                        {recebimentoTipo === "mp" && (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              placeholder="ID do pagamento Mercado Pago"
+                              value={recebimentoMpId}
+                              onChange={e => { setRecebimentoMpId(e.target.value); setRecebimentoMsg(null); }}
+                              className="flex-1 text-xs border rounded-lg px-2 py-1.5 outline-none"
+                              style={{ borderColor: C.cremeBorder }}
+                            />
+                            <button
+                              onClick={handleRegistrarRecebimento}
+                              disabled={recebimentoLoading || !recebimentoMpId.trim()}
+                              className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
+                              style={{ backgroundColor: "#0070E0", color: "#fff" }}>
+                              {recebimentoLoading ? <Loader2 size={12} className="animate-spin inline" /> : "Verificar"}
+                            </button>
+                            <button onClick={() => setRecebimentoTipo(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Manual (MP) — campo ID inline */}
+                    {pag.forma === "Manual (MP)" && pag.status === "pendente" && mpManualPagId === pag.id && (
+                      <div className="px-3 pb-3 pt-2 border-t space-y-2" style={{ borderColor: C.cremeBorder }}>
+                        {mpManualPagMsg && (
+                          <p className="text-xs font-medium" style={{ color: mpManualPagMsg.ok ? "#059669" : "#DC2626" }}>
+                            {mpManualPagMsg.text}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="ID do pagamento Mercado Pago"
+                            value={mpManualPagIdValue}
+                            onChange={e => { setMpManualPagIdValue(e.target.value); setMpManualPagMsg(null); }}
+                            className="flex-1 text-xs border rounded-lg px-2 py-1.5 outline-none"
+                            style={{ borderColor: C.cremeBorder }}
+                          />
+                          <button
+                            onClick={handleMpManualPag}
+                            disabled={mpManualPagLoading || !mpManualPagIdValue.trim()}
+                            className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
+                            style={{ backgroundColor: "#0070E0", color: "#fff" }}>
+                            {mpManualPagLoading ? <Loader2 size={12} className="animate-spin inline" /> : "Verificar e Confirmar"}
+                          </button>
+                          <button onClick={() => setMpManualPagId(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Pix inline — gerar QR direto nessa linha */}
                     {isPix && pag.status === "pendente" && (
@@ -2122,10 +2315,25 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                   <span className="tabular-nums" style={{ color: "#374151" }}>{fmt(venda.total_pago)}</span>
                 </div>
                 {venda.total_venda - venda.total_pago > 0.01 && (
-                  <div className="flex items-center justify-between text-sm font-medium">
-                    <span style={{ color: "#D97706" }}>Saldo pendente</span>
-                    <span className="tabular-nums" style={{ color: "#D97706" }}>{fmt(venda.total_venda - venda.total_pago)}</span>
-                  </div>
+                  <>
+                    <div className="flex items-center justify-between text-sm font-medium">
+                      <span style={{ color: "#D97706" }}>Saldo pendente</span>
+                      <span className="tabular-nums" style={{ color: "#D97706" }}>{fmt(venda.total_venda - venda.total_pago)}</span>
+                    </div>
+                    {edit.limited && !addingPag && (
+                      <button
+                        onClick={() => {
+                          const restante = (venda.total_venda - venda.total_pago).toFixed(2).replace(".", ",");
+                          setNewPagValor(restante);
+                          setNewPagForma("Dinheiro");
+                          setAddingPag(true);
+                        }}
+                        className="w-full mt-1 py-1.5 rounded-lg text-xs font-semibold border"
+                        style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB", color: "#92400E" }}>
+                        + Completar pagamento — {fmt(venda.total_venda - venda.total_pago)}
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -2243,8 +2451,24 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                 </div>
               )}
 
-              {/* Ouro / A Receber / Pix / Vale-Troca — só condição */}
-              {COM_PARCELAS.includes(newPagForma) && !COM_CARTAO.includes(newPagForma) && newPagForma !== "Dinheiro" && (
+              {/* Vale-Troca — número do vale */}
+              {newPagForma === "Vale-Troca" && (
+                <div className="mb-4">
+                  <Label>Número do Vale</Label>
+                  <input
+                    type="text"
+                    value={newPagValeNumero}
+                    onChange={e => setNewPagValeNumero(e.target.value.toUpperCase())}
+                    placeholder="VT-00001"
+                    className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none"
+                    style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                  />
+                  <p className="text-xs mt-1" style={{ color: "#9CA3AF" }}>Informe o número do vale gerado na devolução</p>
+                </div>
+              )}
+
+              {/* Ouro / A Receber / Pix — só condição */}
+              {COM_PARCELAS.includes(newPagForma) && !COM_CARTAO.includes(newPagForma) && newPagForma !== "Dinheiro" && newPagForma !== "Vale-Troca" && (
                 <div className="mb-4 w-56">
                   <Label>Condição de Pagamento</Label>
                   <Select value={newPagCondicao} onChange={e => setNewPagCondicao(e.target.value)}>
@@ -2518,6 +2742,19 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                         </div>
                       </>
                     )}
+                    {newPagForma === "Vale-Troca" && (
+                      <div>
+                        <Label>Número do Vale</Label>
+                        <input
+                          type="text"
+                          value={newPagValeNumero}
+                          onChange={e => setNewPagValeNumero(e.target.value.toUpperCase())}
+                          placeholder="VT-00001"
+                          className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none"
+                          style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                        />
+                      </div>
+                    )}
                     <div>
                       <Label>Valor</Label>
                       <input type="text" value={newPagValor} onChange={e => setNewPagValor(e.target.value)}
@@ -2721,7 +2958,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
             {proximasAcoes.map(acao => {
               const needsValidation = acao.value === "aprovado" || acao.value === "concluido";
               const isConcluirBloqueado = acao.value === "concluido" && temPagamentoPendente;
-              const isDisabled = updating || saving || (needsValidation && !podeAprovar) || isConcluirBloqueado || aguardandoAprovacaoCredito;
+              const isDisabled = updating || saving || (needsValidation && !podeAprovar) || isConcluirBloqueado || aguardandoAprovacaoCredito || (acao.value === "aprovado" && temManualMpPendente);
 
               // Quando tem A Receber → usar solicitarAprovacao em vez de changeSituacao
               // Consultora sem desconto alto aprova direto; só vai para aprovação se tiver A Receber ou desconto alto

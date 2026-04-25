@@ -189,12 +189,60 @@ export async function PATCH(
     }
   }
 
+  // ── data_entrega obrigatória para aprovar ou confirmar ───────────────────
+  if (body.situacao === "aprovado" || body.situacao === "confirmado") {
+    const [vendaEntrega] = await sql`
+      SELECT data_entrega FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    `;
+    const dataEntregaFinal = body.data_entrega ?? vendaEntrega?.data_entrega;
+    if (!dataEntregaFinal) {
+      return NextResponse.json(
+        { error: "Data de entrega é obrigatória para aprovar a venda." },
+        { status: 400 }
+      );
+    }
+  }
+
+  // ── Bloquear aprovação se tem Manual (MP) pendente ───────────────────────
+  if (body.situacao === "aprovado") {
+    const [mpPendente] = await sql`
+      SELECT id FROM alissonerp.pagamentos_venda
+      WHERE venda_id = ${vendaId} AND forma = 'Manual (MP)' AND status = 'pendente'
+      LIMIT 1
+    `;
+    if (mpPendente) {
+      return NextResponse.json(
+        { error: "Confirme o pagamento Manual (MP) antes de aprovar a venda." },
+        { status: 409 }
+      );
+    }
+  }
+
   // ── Bloquear aprovação se lock pendente ──────────────────────────────────
   if (body.situacao === "aprovado" && venda.aprovacao_credito_tarefa_id) {
     return NextResponse.json(
       { error: "Venda aguarda aprovação pendente. Aprove via aba Tarefas antes de prosseguir." },
       { status: 409 }
     );
+  }
+  // ── Bloquear aprovação se há pagamento A Receber sem aprovação de crédito ──
+  if (body.situacao === "aprovado") {
+    const [aReceberPend] = await sql`
+      SELECT COALESCE(SUM(valor), 0)::numeric AS total
+      FROM alissonerp.pagamentos_venda
+      WHERE venda_id = ${vendaId} AND forma = 'A Receber' AND status = 'pendente'
+    `;
+    const [vendaCredTipo] = await sql`
+      SELECT aprovacao_credito_tipo FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    `;
+    const totalAReceber = Number(aReceberPend?.total ?? 0);
+    const aprovacaoTipo = vendaCredTipo?.aprovacao_credito_tipo;
+    if (totalAReceber > 0 && (!aprovacaoTipo || aprovacaoTipo === "pendente")) {
+      return NextResponse.json(
+        { error: "Venda com crédito a receber precisa de aprovação antes de ser aprovada." },
+        { status: 400 }
+      );
+    }
   }
   // ── Bloquear aprovação se desconto >30% sem aprovação (não-admin/dev) ────
   if (body.situacao === "aprovado" && !["desenvolvedor", "admin"].includes(usuario.role)) {
@@ -302,6 +350,21 @@ export async function PATCH(
       ? new Date(vendaFull.data_venda).toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10);
 
+    // Verificar se venda veio de orçamento
+    const isOrcamento = !!vendaFull.orcamento_id;
+    const TINY_PRODUTO_GENERICO = 746056974; // Aliança Personalizada
+
+    // Se NÃO é orçamento, todos os itens DEVEM ter produto no Tiny — retornar 400 antes de montar payload
+    if (!isOrcamento) {
+      const semProduto = itens.filter(i => !i.produto_id || !tinyIdMap.has(Number(i.produto_id)));
+      if (semProduto.length > 0) {
+        return NextResponse.json(
+          { error: `Produto "${semProduto[0].nome_produto}" não está cadastrado no Tiny. Vincule o produto antes de aprovar.` },
+          { status: 400 }
+        );
+      }
+    }
+
     const pedidoV3: Record<string, unknown> = {
       numeroPedido: vendaFull.numero_venda,
       idContato: Number(vendaFull.cliente_id_tiny) || undefined,
@@ -314,36 +377,22 @@ export async function PATCH(
       ...(vendaFull.vendedor_id_tiny ? { vendedor: { id: Number(vendaFull.vendedor_id_tiny) } } : {}),
       // Pagamento — buscar IDs reais de public.forma_pagamento e public.meio_pagamento
       ...(tinyPagamento ? { pagamento: tinyPagamento } : {}),
-      itens: (() => {
-        // Verificar se venda veio de orçamento
-        const isOrcamento = !!vendaFull.orcamento_id;
-        const TINY_PRODUTO_GENERICO = 746056974; // Aliança Personalizada
-
-        // Se NÃO é orçamento, todos os itens DEVEM ter produto no Tiny
-        if (!isOrcamento) {
-          const semProduto = itens.filter(i => !i.produto_id || !tinyIdMap.has(Number(i.produto_id)));
-          if (semProduto.length > 0) {
-            throw new Error(`Produto "${semProduto[0].nome_produto}" não está cadastrado no Tiny. Vincule o produto antes de aprovar.`);
-          }
-        }
-
-        return itens.map((item) => {
-          const tinyProdId = tinyIdMap.get(Number(item.produto_id));
-          // Orçamento sem produto: usa produto genérico. Venda normal: obrigatório ter ID.
-          const prodId = tinyProdId || (isOrcamento ? TINY_PRODUTO_GENERICO : 0);
-          return {
-            produto: {
-              id: prodId,
-              ...(item.sku ? { codigo: item.sku } : {}),
-              descricao: item.nome_produto || "Produto",
-              tipo: "P",
-            },
-            quantidade: Number(item.quantidade),
-            valorUnitario: Number(item.preco_unitario),
-            ...(item.observacao ? { infoAdicional: item.observacao } : {}),
-          };
-        });
-      })(),
+      itens: itens.map((item) => {
+        const tinyProdId = tinyIdMap.get(Number(item.produto_id));
+        // Orçamento sem produto: usa produto genérico. Venda normal: obrigatório ter ID.
+        const prodId = tinyProdId || (isOrcamento ? TINY_PRODUTO_GENERICO : 0);
+        return {
+          produto: {
+            id: prodId,
+            ...(item.sku ? { codigo: item.sku } : {}),
+            descricao: item.nome_produto || "Produto",
+            tipo: "P",
+          },
+          quantidade: Number(item.quantidade),
+          valorUnitario: Number(item.preco_unitario),
+          ...(item.observacao ? { infoAdicional: item.observacao } : {}),
+        };
+      }),
     };
 
     // Função para renovar token OAuth2 (refresh_token ou re-auth com client_credentials)
@@ -459,29 +508,46 @@ export async function PATCH(
           }
           catch { erroMsg += errBody ? `: ${errBody.slice(0, 300)}` : ""; }
         }
-        console.error("[Tiny] Erro ao enviar pedido:", erroMsg, "| Body enviado:", JSON.stringify(pedidoV3).slice(0, 500));
+
+        // Se o Tiny diz "já existe" e já temos tiny_pedido_id, o pedido foi criado em execução anterior — tratar como sucesso
+        const jaExiste = erroMsg.toLowerCase().includes("já existe") || erroMsg.toLowerCase().includes("ja existe");
+        const [vendaAtual] = await sql`SELECT tiny_pedido_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
+        if (jaExiste && vendaAtual?.tiny_pedido_id) {
+          console.log("[Tiny] Pedido já existe no Tiny — tratando como sucesso, tiny_pedido_id:", vendaAtual.tiny_pedido_id);
+          await sql`
+            UPDATE alissonerp.vendas_erp SET
+              situacao = 'aprovado',
+              tiny_sync_status = 'sincronizado',
+              tiny_sync_at = NOW(),
+              tiny_sync_erro = NULL
+            WHERE id = ${vendaId}
+          `;
+          // não seta tinyErroWarning — continua fluxo normalmente
+        } else {
+          console.error("[Tiny] Erro ao enviar pedido:", erroMsg, "| Body enviado:", JSON.stringify(pedidoV3).slice(0, 500));
+          await sql`
+            UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${erroMsg}
+            WHERE id = ${vendaId}
+          `;
+          tinyErroWarning = erroMsg;
+        }
+      } else {
+        const tinyData = await tinyRes.json() as { id?: number; numeroPedido?: string };
+        // Sucesso: atualizar situação + dados Tiny numa única query
         await sql`
-          UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${erroMsg}
+          UPDATE alissonerp.vendas_erp SET
+            situacao = 'aprovado',
+            tiny_pedido_id = ${String(tinyData.id ?? "")},
+            tiny_sync_status = 'sincronizado',
+            tiny_sync_at = NOW(),
+            tiny_sync_erro = NULL
           WHERE id = ${vendaId}
         `;
-        tinyErroWarning = erroMsg;
-      }
 
-      const tinyData = await tinyRes.json() as { id?: number; numeroPedido?: string };
-      // Sucesso: atualizar situação + dados Tiny numa única query
-      await sql`
-        UPDATE alissonerp.vendas_erp SET
-          situacao = 'aprovado',
-          tiny_pedido_id = ${String(tinyData.id ?? "")},
-          tiny_sync_status = 'sincronizado',
-          tiny_sync_at = NOW(),
-          tiny_sync_erro = NULL
-        WHERE id = ${vendaId}
-      `;
-
-      // Recalcular total se frete mudou
-      if (body.total_frete !== undefined) {
-        await sql`UPDATE alissonerp.vendas_erp SET total_venda = total_produtos + ${body.total_frete} WHERE id = ${vendaId}`;
+        // Recalcular total se frete mudou
+        if (body.total_frete !== undefined) {
+          await sql`UPDATE alissonerp.vendas_erp SET total_venda = total_produtos + ${body.total_frete} WHERE id = ${vendaId}`;
+        }
       }
 
       // NÃO retornar aqui — continuar para criação de ordem se for orçamento
