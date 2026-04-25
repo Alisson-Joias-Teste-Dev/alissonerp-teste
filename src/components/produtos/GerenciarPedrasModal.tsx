@@ -81,6 +81,7 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
   const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
   const [sucesso, setSucesso]         = useState<{
     criados: number;
+    atualizados: number;
     pulados: number;
     pedra: string;
     qtd_inicial: number;
@@ -481,6 +482,7 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
 
       setSucesso({
         criados: Number(data?.criados ?? 0),
+        atualizados: Number(data?.atualizados ?? 0),
         pulados: Array.isArray(data?.pulados) ? data.pulados.length : 0,
         pedra: label,
         qtd_inicial: qtdInicial,
@@ -988,25 +990,25 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated }: Props
               <div className="mx-auto w-16 h-16 rounded-full flex items-center justify-center" style={{ backgroundColor: "#ECFDF5" }}>
                 <CheckCircle2 size={40} style={{ color: "#059669" }} />
               </div>
-              <h3 className="text-lg font-bold text-gray-800">Pedras cadastradas!</h3>
+              <h3 className="text-lg font-bold text-gray-800">
+                {sucesso.criados > 0 ? "Pedras cadastradas!" : "Pedras atualizadas!"}
+              </h3>
               <p className="text-sm text-gray-600">
                 {sucesso.criados > 0 && (
                   <>
-                    <strong>{sucesso.criados}</strong> pedra{sucesso.criados === 1 ? "" : "s"} de{" "}
-                    <strong>{sucesso.pedra}</strong> {sucesso.criados === 1 ? "foi cadastrada" : "foram cadastradas"} no catálogo.
+                    <strong>{sucesso.criados}</strong> nova{sucesso.criados === 1 ? "" : "s"} pedra{sucesso.criados === 1 ? "" : "s"} de{" "}
+                    <strong>{sucesso.pedra}</strong> {sucesso.criados === 1 ? "criada" : "criadas"}.
                   </>
                 )}
-                {sucesso.criados === 0 && sucesso.pulados > 0 && (
+                {sucesso.atualizados > 0 && (
                   <>
-                    Nenhuma pedra nova — todas as {sucesso.pulados} já estavam cadastradas.
+                    {sucesso.criados > 0 && <br />}
+                    <strong>{sucesso.atualizados}</strong> pedra{sucesso.atualizados === 1 ? "" : "s"} já existente{sucesso.atualizados === 1 ? "" : "s"} {sucesso.atualizados === 1 ? "atualizada" : "atualizadas"} (preço/peso).
                   </>
                 )}
-                {sucesso.pulados > 0 && sucesso.criados > 0 && (
+                {sucesso.criados === 0 && sucesso.atualizados === 0 && sucesso.pulados > 0 && (
                   <>
-                    <br />
-                    <span className="text-xs text-gray-400">
-                      ({sucesso.pulados} já {sucesso.pulados === 1 ? "existia" : "existiam"} — pulada{sucesso.pulados === 1 ? "" : "s"})
-                    </span>
+                    Nenhuma pedra processada — todas as {sucesso.pulados} já estavam idênticas.
                   </>
                 )}
               </p>

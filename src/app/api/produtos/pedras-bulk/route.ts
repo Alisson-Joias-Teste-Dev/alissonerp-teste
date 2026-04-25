@@ -101,6 +101,7 @@ export async function POST(req: NextRequest) {
   try {
     const pulados: Array<{ nome: string; motivo: string }> = [];
     const produtos: Array<{ sku: string; nome: string; preco_tiny: number; id_produto: number }> = [];
+    const atualizados: Array<{ sku: string; nome: string; preco_antes: number; preco_depois: number }> = [];
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (sql as any).begin(async (tx: any) => {
@@ -123,16 +124,27 @@ export async function POST(req: NextRequest) {
         const mmFmt = Number.isInteger(it.mm) ? it.mm.toFixed(1) : String(it.mm);
         const nome = `${it.label} ${mmFmt}mm`;
 
-        // Dedup por nome exato + categoria Pedras ativa (restritivo)
-        const [dup] = await tx<{ sku: string }[]>`
-          SELECT sku FROM public.produtos
+        // Se já existe (mesmo nome + categoria Pedras), não cria novo:
+        // atualiza preço + peso_ct no produto existente.
+        const [dup] = await tx<{ id_produto: string; sku: string; preco_tiny: string | null }[]>`
+          SELECT id_produto, sku, preco_tiny FROM public.produtos
           WHERE LOWER(TRIM(nome)) = LOWER(${nome})
             AND situacao = 'A'
             AND categoria ILIKE 'Pedras%'
           LIMIT 1
         `;
         if (dup) {
-          pulados.push({ nome, motivo: `Já existe (SKU ${dup.sku})` });
+          const precoAntes = Number(dup.preco_tiny ?? 0);
+          const novoPreco = Math.round(Number(it.preco_venda));
+          if (Math.abs(precoAntes - novoPreco) >= 0.5) {
+            await tx`UPDATE public.produtos SET preco_tiny = ${novoPreco} WHERE id_produto = ${dup.id_produto}`;
+          }
+          await tx`
+            INSERT INTO alissonerp.produto_pedra_extras (produto_id, peso_ct)
+            VALUES (${dup.id_produto}, ${Number(it.ct.toFixed(4))})
+            ON CONFLICT (produto_id) DO UPDATE SET peso_ct = EXCLUDED.peso_ct, updated_at = NOW()
+          `;
+          atualizados.push({ sku: dup.sku, nome, preco_antes: precoAntes, preco_depois: novoPreco });
           continue;
         }
 
@@ -220,8 +232,10 @@ export async function POST(req: NextRequest) {
       {
         ok: true,
         criados: produtos.length,
+        atualizados: atualizados.length,
         pulados,
         produtos,
+        mudancas: atualizados,
       },
       { status: 201 }
     );
