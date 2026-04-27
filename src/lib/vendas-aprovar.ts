@@ -407,7 +407,7 @@ export async function criarOrdemDoOrcamento(
         'criado', 'aguardando', 'pcp',
         ${vendaOrc.cliente_id}, ${vendaOrc.vendedor_id},
         ${pesoNeg}, ${vendaOrc.data_entrega},
-        ${'Venda V-' + String(vendaId).padStart(5, '0') + ' / Orçamento ' + vendaOrc.numero_orcamento + (isPar ? ' (Par)' : '')},
+        ${'Venda #' + vendaOrc.numero_venda + ' / Orçamento ' + vendaOrc.numero_orcamento + (isPar ? ' (Par)' : '')},
         ${vendaOrc.foto_3d ?? null}, ${vendaId},
         ${vendaOrc.numero_venda ?? null}, NOW()
       ) RETURNING id, numero_ordem
