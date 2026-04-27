@@ -481,19 +481,8 @@ export async function criarOrdemDoOrcamento(
       }
     }
 
-    const [auditLoja] = await tx`
-      INSERT INTO alissonerp.auditorias (situacao, tipo_auditoria, rota_processo, ordem_id, peso_negociado, parecer, dados_ordem)
-      VALUES ('pendente', 'loja', 'entrada_ordem', ${ordem.id}, ${pesoNeg}, NULL,
-        ${JSON.stringify({ numero_ordem: numeroOrdem, tipo_ordem: "fabricacao", rota: "pcp", peso_negociado: pesoNeg, origem: "orcamento_venda", orcamento_id: vendaOrc.orc_id })}::text::jsonb)
-      RETURNING id
-    `;
-    // Aprovação automática: dispara fn_processar_auditoria que cria saida_ordem + pcp
-    // (trigger AFTER UPDATE — INSERT com pendente não dispara sozinho)
-    await tx`
-      UPDATE alissonerp.auditorias
-      SET situacao = 'aprovado', data_conclusao = NOW(), parecer = 'Aprovação automática — ERP'
-      WHERE id = ${auditLoja.id}
-    `;
+    // Auditoria criada e aprovada automaticamente pelo trigger trg_auto_auditoria_loja
+    // (migration 186) — não inserir manualmente para evitar unique constraint violation
 
     await tx`
       UPDATE alissonerp.orcamentos
@@ -582,17 +571,7 @@ export async function criarOrdemDeServico(
       `;
     }
 
-    const [auditLoja] = await tx`
-      INSERT INTO alissonerp.auditorias (situacao, tipo_auditoria, rota_processo, ordem_id, peso_negociado, dados_ordem)
-      VALUES ('pendente', 'loja', 'entrada_ordem', ${ordem.id}, 0,
-        ${JSON.stringify({ numero_ordem: numeroOrdem, tipo_ordem: 'servico_venda', rota: 'protocolo' })}::text::jsonb)
-      RETURNING id
-    `;
-    await tx`
-      UPDATE alissonerp.auditorias
-      SET situacao = 'aprovado', data_conclusao = NOW(), parecer = 'Aprovação automática — servico_venda'
-      WHERE id = ${auditLoja.id}
-    `;
+    // Auditoria criada e aprovada automaticamente pelo trigger trg_auto_auditoria_loja
   });
 
   return ordemCriada;
