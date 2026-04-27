@@ -154,6 +154,7 @@ interface Props {
   caixaPagamentos: CaixaDinheiro[];
   caixaBaixas: CaixaBaixa[];
   userRole: string | null;
+  defaultTab?: Tab;
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -2183,8 +2184,8 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
 
 type Tab = "pagar" | "receber" | "caixa" | "conciliacao_pendente" | "bancario";
 
-export default function FinanceiroClient({ pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas, userRole }: Props) {
-  const [tab, setTab] = useState<Tab>("pagar");
+export default function FinanceiroClient({ pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas, userRole, defaultTab }: Props) {
+  const [tab, setTab] = useState<Tab>(defaultTab ?? "pagar");
   const [cofre, setCofre] = useState<CofreOuro | null>(null);
 
   useEffect(() => {

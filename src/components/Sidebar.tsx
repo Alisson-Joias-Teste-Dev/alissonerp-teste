@@ -45,6 +45,10 @@ import {
   FileCheck2,
   Globe,
   Sparkles,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  Banknote,
+  Landmark,
 } from "lucide-react";
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
@@ -94,6 +98,10 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?
   FileCheck2,
   Globe,
   Sparkles,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  Banknote,
+  Landmark,
 };
 
 function isGroup(entry: MenuEntry): entry is MenuGroup {
