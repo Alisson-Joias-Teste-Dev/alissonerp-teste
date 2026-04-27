@@ -471,21 +471,7 @@ export async function POST(req: NextRequest) {
             `;
           }
 
-          // Auditoria loja automática — INSERT pendente + UPDATE aprovado para
-          // disparar o trigger BEFORE UPDATE fn_processar_auditoria
-          const [auditRep] = await sql`
-            INSERT INTO alissonerp.auditorias (
-              situacao, tipo_auditoria, rota_processo, ordem_id, peso_negociado, dados_ordem
-            ) VALUES (
-              'pendente', 'loja', 'entrada_ordem', ${ordem.id}, 0,
-              ${JSON.stringify({ numero_ordem: ordem.numero_ordem, tipo_ordem: 'reposicao_venda', rota: 'pcp' })}::jsonb
-            ) RETURNING id
-          `;
-          await sql`
-            UPDATE alissonerp.auditorias
-            SET situacao = 'aprovado', data_conclusao = NOW(), parecer = 'Aprovação automática — ERP'
-            WHERE id = ${auditRep.id}
-          `;
+          // Auditoria criada e aprovada automaticamente pelo trigger trg_auto_auditoria_loja
 
           ordensReposicao.push({ numero_ordem: ordem.numero_ordem, produto: item.nome_produto });
           ordemSeq++;

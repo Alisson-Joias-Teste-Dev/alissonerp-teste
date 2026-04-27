@@ -329,40 +329,8 @@ export async function POST(req: NextRequest) {
       `;
     }
 
-    // 3. Criar auditoria loja — sempre automática (INSERT pendente + UPDATE aprovado
-    //    para disparar o trigger BEFORE UPDATE fn_processar_auditoria)
-    const [auditLoja] = await tx`
-      INSERT INTO alissonerp.auditorias (
-        situacao, tipo_auditoria, rota_processo, ordem_id,
-        peso_negociado, parecer, dados_ordem
-      ) VALUES (
-        'pendente',
-        'loja',
-        'entrada_ordem',
-        ${ordem.id},
-        ${peso_metal_negociado ?? 0},
-        NULL,
-        ${JSON.stringify({
-          numero_ordem: numeroOrdem,
-          tipo_ordem,
-          rota,
-          peso_negociado: peso_metal_negociado ?? 0,
-          peso_externo: 0,
-          cliente_id: cliente_id ?? null,
-          vendedor_id: vendedor_id ?? null,
-          data_entrega: data_entrega ?? null,
-          itens_fabricacao: null,
-          ficha_tecnica_id: null,
-          origem: "erp",
-        })}::jsonb
-      )
-      RETURNING id
-    `;
-    await tx`
-      UPDATE alissonerp.auditorias
-      SET situacao = 'aprovado', data_conclusao = NOW(), parecer = 'Aprovação automática — ERP'
-      WHERE id = ${auditLoja.id}
-    `;
+    // 3. Auditoria criada e aprovada automaticamente pelo trigger trg_auto_auditoria_loja
+    //    — não inserir manualmente para evitar unique constraint violation
 
     // 4. Criar ficha técnica (se houver dados)
     if (ficha_tecnica_dados && ficha_tecnica_dados.tipo_item) {

@@ -805,18 +805,7 @@ export async function PATCH(
           }
         }
 
-        // Auditoria loja — INSERT + UPDATE imediato para disparar fn_processar_auditoria (AFTER UPDATE)
-        const [auditPatch] = await tx`
-          INSERT INTO alissonerp.auditorias (situacao, tipo_auditoria, rota_processo, ordem_id, peso_negociado, parecer, dados_ordem)
-          VALUES ('pendente', 'loja', 'entrada_ordem', ${ordem.id}, ${pesoNeg}, NULL,
-            ${JSON.stringify({ numero_ordem: numeroOrdem, tipo_ordem: "fabricacao", rota: "pcp", peso_negociado: pesoNeg, origem: "orcamento_venda", orcamento_id: vendaOrc.orc_id })}::jsonb)
-          RETURNING id
-        `;
-        await tx`
-          UPDATE alissonerp.auditorias
-          SET situacao = 'aprovado', data_conclusao = NOW(), parecer = 'Aprovação automática — ERP'
-          WHERE id = ${auditPatch.id}
-        `;
+        // Auditoria criada e aprovada automaticamente pelo trigger trg_auto_auditoria_loja
 
         // Atualizar orçamento com ordem gerada
         await tx`
