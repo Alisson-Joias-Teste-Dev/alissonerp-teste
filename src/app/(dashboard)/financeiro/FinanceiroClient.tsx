@@ -2257,38 +2257,6 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
         </div>
       )}
 
-      {/* Gráfico evolução */}
-      <EvolucaoMensal pagar={pagar} receber={receber} />
-
-      {/* Tabs */}
-      <div className="flex gap-1 rounded-xl p-1 border overflow-x-auto" style={{ backgroundColor: C.cremeBg, borderColor: C.cremeBorder }}>
-        {tabs.map(({ key, label, icon: Icon, badge }) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className="flex-shrink-0 flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
-            style={{
-              backgroundColor: tab === key ? C.esmeralda : "transparent",
-              color: tab === key ? C.creme : C.cinza,
-            }}
-          >
-            <Icon size={14} strokeWidth={1.75} />
-            <span className="hidden sm:inline">{label}</span>
-            {badge && (
-              <span
-                className="text-[10px] px-1.5 py-0.5 rounded-full font-bold"
-                style={{
-                  backgroundColor: tab === key ? C.creme : C.ambarLt,
-                  color: tab === key ? C.esmeralda : C.ambar,
-                }}
-              >
-                {badge}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
       {/* Content */}
       {tab === "pagar"                && <TabPagar pagar={pagar} />}
       {tab === "receber"              && <TabReceber receber={receber} saldoLiquido={totalReceber} />}
