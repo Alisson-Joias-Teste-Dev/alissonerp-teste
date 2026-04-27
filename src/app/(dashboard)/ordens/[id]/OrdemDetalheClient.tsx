@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import ComentariosOrdem from "@/components/ComentariosOrdem";
 import GaleriaFotosOrdem from "@/components/ordem/GaleriaFotosOrdem";
 import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
@@ -425,6 +426,18 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
               </p>
               <InfoRow label="Cliente"        value={ordem.cliente_nome} />
               <InfoRow label="Vendedor(a)"    value={ordem.vendedor_nome ?? ordem.created_by_nome} />
+              {ordem.venda_id != null && (
+                <div className="flex items-center justify-between py-2 border-b last:border-b-0" style={{ borderColor: C.cremeBorder }}>
+                  <span className="text-xs" style={{ color: "#9CA3AF" }}>Venda</span>
+                  <Link
+                    href={`/vendas/${ordem.venda_id}`}
+                    className="text-xs font-medium underline underline-offset-2"
+                    style={{ color: C.esmeralda }}
+                  >
+                    #{ordem.venda_id}
+                  </Link>
+                </div>
+              )}
               {ordem.data_entrega != null && (
                 <InfoRow label="Data Entrega" value={formatDateBR(ordem.data_entrega)} />
               )}
