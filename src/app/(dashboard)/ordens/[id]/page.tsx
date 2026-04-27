@@ -24,7 +24,7 @@ export default async function OrdemDetalhePage({
       LEFT JOIN alissonerp.ordens o2 ON o2.id = vod.id
       LEFT JOIN alissonerp.usuarios u_criador ON u_criador.id = o2.created_by
       LEFT JOIN alissonerp.vendas_erp ve_fallback
-        ON ve_fallback.numero_venda::text = vod.numero_pedido::text
+        ON ve_fallback.numero_venda::text = o2.numero_pedido::text
         AND vod.venda_id IS NULL
       WHERE vod.id = ${ordemId}
       LIMIT 1
