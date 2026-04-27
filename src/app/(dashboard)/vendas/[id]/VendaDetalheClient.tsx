@@ -1853,7 +1853,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                     {itens.length === 0 && !addingItem && (
                       <tr><td colSpan={10} className="px-3 py-8 text-center text-sm" style={{ color: "#9CA3AF" }}>Nenhum produto adicionado</td></tr>
                     )}
-                    {itens.map((item, idx) => (
+                    {itens.map((item, idx) => (<>
                       <tr key={`${item._key}-${item.pct_desconto}-${item.preco_unitario}-${item.quantidade}`} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                         <td className="px-2 py-2 tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
                         <td className="px-2 py-2 max-w-[140px] truncate font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
@@ -1988,7 +1988,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           </td>
                         </tr>
                       )}
-                    ))}
+                    </>) )}
                   </tbody>
                 </table>
               </div>

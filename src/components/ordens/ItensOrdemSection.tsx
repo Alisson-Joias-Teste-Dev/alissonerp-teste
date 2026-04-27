@@ -100,7 +100,7 @@ export default function ItensOrdemSection({ ordemId }: { ordemId: number }) {
             </tr>
           </thead>
           <tbody>
-            {itens.map((item, i) => (
+            {itens.map((item, i) => (<>
               <tr
                 key={item.id}
                 className={item.personalizacao?.valor ? "" : "border-b"}
@@ -138,7 +138,7 @@ export default function ItensOrdemSection({ ordemId }: { ordemId: number }) {
                   </td>
                 </tr>
               )}
-            ))}
+            </>))}
           </tbody>
         </table>
       )}
