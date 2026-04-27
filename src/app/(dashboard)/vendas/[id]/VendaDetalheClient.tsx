@@ -47,6 +47,7 @@ interface ItemVenda {
   preco_unitario: number; total_item: number; pct_comissao: number;
   valor_comissao: number; peso_estimado: number | null; unidade: string | null;
   observacao?: string | null;
+  personalizacao?: { valor?: string; preco_por_letra?: number; peso_por_letra?: number } | null;
 }
 interface PagamentoServer {
   id: number; forma: string; gateway: string | null; valor: number;
@@ -92,6 +93,7 @@ interface Venda {
     quantidade: number; preco_lista: number; pct_desconto: number;
     preco_unitario: number; total_item: number; pct_comissao: number;
     valor_comissao: number; observacao: string | null; peso_estimado?: number | null;
+    personalizacao?: { valor?: string; preco_por_letra?: number; peso_por_letra?: number } | null;
   }>;
   pagamentos: PagamentoServer[];
   ordens?: Array<{
@@ -501,6 +503,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       preco_unitario: i.preco_unitario, total_item: i.total_item,
       pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao,
       peso_estimado: i.peso_estimado ?? null, unidade: null, observacao: i.observacao,
+      personalizacao: i.personalizacao ?? null,
     })),
   [venda]);
 
@@ -1973,6 +1976,18 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           </td>
                         )}
                       </tr>
+                      {item.personalizacao?.valor && (
+                        <tr key={`${item._key}-pers`} style={{ backgroundColor: "#FFFCF5" }}>
+                          <td colSpan={20} className="px-4 py-2 border-t" style={{ borderColor: C.cremeBorder }}>
+                            <div className="flex items-center gap-2 flex-wrap pl-3 border-l-2" style={{ borderColor: "#D4A843" }}>
+                              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.esmeralda }}>🏷️ Nome a gravar</span>
+                              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded" style={{ backgroundColor: "#FFF8E6", color: "#92400E", letterSpacing: "0.08em" }}>
+                                {item.personalizacao.valor.toUpperCase()}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                     ))}
                   </tbody>
                 </table>

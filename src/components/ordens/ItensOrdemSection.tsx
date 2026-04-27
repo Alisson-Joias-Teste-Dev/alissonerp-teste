@@ -20,6 +20,7 @@ interface ItemOrdem {
   produto_sku: string | null;
   produto_peso: number | null;
   produto_imagem: string | null;
+  personalizacao?: { valor?: string } | null;
 }
 
 export default function ItensOrdemSection({ ordemId }: { ordemId: number }) {
@@ -102,7 +103,7 @@ export default function ItensOrdemSection({ ordemId }: { ordemId: number }) {
             {itens.map((item, i) => (
               <tr
                 key={item.id}
-                className="border-b"
+                className={item.personalizacao?.valor ? "" : "border-b"}
                 style={{
                   borderColor: C.creme,
                   backgroundColor: i % 2 === 0 ? "#fff" : C.bg,
@@ -125,6 +126,18 @@ export default function ItensOrdemSection({ ordemId }: { ordemId: number }) {
                   {item.produto_peso != null ? Number(item.produto_peso).toFixed(2) : "—"}
                 </td>
               </tr>
+              {item.personalizacao?.valor && (
+                <tr key={`${item.id}-pers`} className="border-b" style={{ borderColor: C.creme, backgroundColor: "#FFFCF5" }}>
+                  <td colSpan={4} className="px-4 py-2" style={{ borderTop: `1px solid ${C.cremeBorder}` }}>
+                    <div className="flex items-center gap-2 pl-2 border-l-2" style={{ borderColor: "#D4A843" }}>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "#184036" }}>🏷️ Nome a gravar</span>
+                      <span className="text-xs font-mono font-bold px-2 py-0.5 rounded" style={{ backgroundColor: "#FFF8E6", color: "#92400E", letterSpacing: "0.08em" }}>
+                        {item.personalizacao.valor.toUpperCase()}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              )}
             ))}
           </tbody>
         </table>

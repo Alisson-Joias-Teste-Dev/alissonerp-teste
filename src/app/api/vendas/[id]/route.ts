@@ -52,7 +52,7 @@ export async function GET(
       quantidade,
       preco_lista, pct_desconto, preco_unitario, total_item,
       pct_comissao, valor_comissao,
-      desconto_autorizado_por, observacao, peso_estimado, created_at
+      desconto_autorizado_por, observacao, peso_estimado, personalizacao, created_at
     FROM alissonerp.itens_venda_erp
     WHERE venda_id = ${vendaId}
     ORDER BY id

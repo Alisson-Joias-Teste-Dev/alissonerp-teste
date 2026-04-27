@@ -55,8 +55,13 @@ export async function GET(
       i.nome_produto  AS produto_nome,
       i.sku           AS produto_sku,
       i.peso_estimado AS produto_peso,
-      NULL            AS produto_imagem
+      NULL            AS produto_imagem,
+      iv.personalizacao
     FROM alissonerp.itens_ordem i
+    LEFT JOIN alissonerp.ordens o ON o.id = i.ordem_id
+    LEFT JOIN alissonerp.itens_venda_erp iv
+      ON iv.venda_id = o.venda_id
+      AND iv.produto_id = i.produto_id
     WHERE i.ordem_id = ${ordemId}
     ORDER BY i.id
   `;
