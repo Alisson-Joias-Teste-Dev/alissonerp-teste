@@ -96,6 +96,7 @@ export async function POST(
     FROM alissonerp.pagamentos_venda
     WHERE venda_id = ${vendaId}
       AND status = 'confirmado'
+      AND data_confirmacao IS NOT NULL
       ${body.pagamento_id ? sql`AND id != ${body.pagamento_id}` : sql``}
   `;
   const totalVenda = Number(venda.total_venda);

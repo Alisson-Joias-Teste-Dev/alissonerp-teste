@@ -115,7 +115,7 @@ export default async function OrdensPage({
     // ── Query principal: ordens da página ──────────────────────────────────────
     sql`
       SELECT
-        id, numero_ordem, numero_pedido,
+        id, numero_ordem, numero_pedido, venda_id,
         situacao, status, rota, tipo_ordem,
         setor_nome, vendedor_nome, cliente_nome,
         peso_metal_negociado, data_entrega, date_created

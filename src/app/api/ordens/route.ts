@@ -329,21 +329,19 @@ export async function POST(req: NextRequest) {
       `;
     }
 
-    // 3. Criar auditoria loja
-    //    Ordens que vão para Service (protocolo + tipos service) → auto-aprovada
-    //    Demais → pendente (aguarda conferência da loja)
-    const isServiceOrder = rota === "protocolo" && SERVICO_TIPOS.includes(tipo_ordem);
-    await tx`
+    // 3. Criar auditoria loja — sempre automática (INSERT pendente + UPDATE aprovado
+    //    para disparar o trigger BEFORE UPDATE fn_processar_auditoria)
+    const [auditLoja] = await tx`
       INSERT INTO alissonerp.auditorias (
         situacao, tipo_auditoria, rota_processo, ordem_id,
         peso_negociado, parecer, dados_ordem
       ) VALUES (
-        ${isServiceOrder ? 'aprovado' : 'pendente'},
+        'pendente',
         'loja',
         'entrada_ordem',
         ${ordem.id},
         ${peso_metal_negociado ?? 0},
-        ${isServiceOrder ? 'Aprovação automática — ordem de serviço' : null},
+        NULL,
         ${JSON.stringify({
           numero_ordem: numeroOrdem,
           tipo_ordem,
@@ -358,6 +356,12 @@ export async function POST(req: NextRequest) {
           origem: "erp",
         })}::jsonb
       )
+      RETURNING id
+    `;
+    await tx`
+      UPDATE alissonerp.auditorias
+      SET situacao = 'aprovado', data_conclusao = NOW(), parecer = 'Aprovação automática — ERP'
+      WHERE id = ${auditLoja.id}
     `;
 
     // 4. Criar ficha técnica (se houver dados)

@@ -103,11 +103,11 @@ export async function POST(
   const valorLiquido = netReceived > 0 ? netReceived : null;
   const parcelasMp = Number(mpData2.installments ?? 1);
 
-  // Calcular restante da venda
+  // Calcular restante da venda — exclui confirmados sem data_confirmacao (preferences ghost)
   const [{ soma_confirmados }] = await sql`
     SELECT COALESCE(SUM(valor), 0)::numeric AS soma_confirmados
     FROM alissonerp.pagamentos_venda
-    WHERE venda_id = ${vendaId} AND status = 'confirmado'
+    WHERE venda_id = ${vendaId} AND status = 'confirmado' AND data_confirmacao IS NOT NULL
   `;
   const restante = Math.max(0, Number(venda.total_venda) - Number(soma_confirmados));
   if (restante <= 0.009) {
@@ -130,56 +130,74 @@ export async function POST(
     registrado_manualmente: true,
   };
 
-  // Se veio pagamento_id existente (A Receber / Manual MP), atualiza o registro em vez de criar novo
-  let novoPagId: number;
-  if (pagamentoIdExistente) {
-    // RETURNING id pra detectar 404 — antes, se o pagamento_id pertencesse
-    // a outra venda, o UPDATE não atualizava nada e a rota retornava 200.
-    const updRows = await sql`
-      UPDATE alissonerp.pagamentos_venda
-      SET status = 'confirmado',
-          forma = ${formaErp},
-          gateway = 'Mercado Pago Manual',
-          gateway_id = ${mpPaymentId},
-          gateway_payload = ${JSON.stringify(gatewayPayload)}::jsonb,
-          data_confirmacao = ${dataConfirmacao},
-          valor = ${valorRegistrar},
-          valor_liquido = ${valorLiquido},
-          taxas_mp = ${taxasMp},
-          parcelas = ${parcelasMp}
-      WHERE id = ${pagamentoIdExistente} AND venda_id = ${vendaId}
-      RETURNING id
-    `;
-    if (updRows.length === 0) {
-      return NextResponse.json(
-        { error: "Pagamento não encontrado nesta venda" },
-        { status: 404 },
-      );
+  // Registrar pagamento e verificar conclusão dentro da mesma transação
+  // para evitar race condition (duas requests simultâneas concluindo a venda duas vezes).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const txResult = await (sql as any).begin(async (tx: typeof sql) => {
+    let novoPagId: number;
+
+    if (pagamentoIdExistente) {
+      // Revalidar com FOR UPDATE para garantir atomicidade
+      const [pagTx] = await tx`
+        SELECT id FROM alissonerp.pagamentos_venda
+        WHERE id = ${pagamentoIdExistente} AND venda_id = ${vendaId}
+        FOR UPDATE
+      `;
+      if (!pagTx) return { erro: "Pagamento não encontrado nesta venda", status: 404 };
+
+      await tx`
+        UPDATE alissonerp.pagamentos_venda
+        SET status = 'confirmado',
+            forma = ${formaErp},
+            gateway = 'Mercado Pago Manual',
+            gateway_id = ${mpPaymentId},
+            gateway_payload = ${JSON.stringify(gatewayPayload)}::jsonb,
+            data_confirmacao = ${dataConfirmacao},
+            valor = ${valorRegistrar},
+            valor_liquido = ${valorLiquido},
+            taxas_mp = ${taxasMp},
+            parcelas = ${parcelasMp}
+        WHERE id = ${pagamentoIdExistente} AND venda_id = ${vendaId}
+      `;
+      novoPagId = pagamentoIdExistente;
+    } else {
+      const [novoPag] = await tx`
+        INSERT INTO alissonerp.pagamentos_venda
+          (venda_id, forma, gateway, valor, parcelas, status, gateway_id, gateway_payload,
+           data_confirmacao, valor_liquido, taxas_mp)
+        VALUES (
+          ${vendaId}, ${formaErp}, 'Mercado Pago Manual', ${valorRegistrar}, ${parcelasMp}, 'confirmado',
+          ${mpPaymentId}, ${JSON.stringify(gatewayPayload)}::jsonb,
+          ${dataConfirmacao}, ${valorLiquido}, ${taxasMp}
+        )
+        RETURNING id
+      `;
+      novoPagId = novoPag.id;
     }
-    novoPagId = pagamentoIdExistente;
-  } else {
-    const [novoPag] = await sql`
-      INSERT INTO alissonerp.pagamentos_venda
-        (venda_id, forma, gateway, valor, parcelas, status, gateway_id, gateway_payload,
-         data_confirmacao, valor_liquido, taxas_mp)
-      VALUES (
-        ${vendaId}, ${formaErp}, 'Mercado Pago Manual', ${valorRegistrar}, ${parcelasMp}, 'confirmado',
-        ${mpPaymentId}, ${JSON.stringify(gatewayPayload)}::jsonb,
-        ${dataConfirmacao}, ${valorLiquido}, ${taxasMp}
-      )
-      RETURNING id
+
+    // Recalcular dentro da tx com o mesmo critério de data_confirmacao IS NOT NULL
+    const [{ nova_soma, total_venda_tx }] = await tx`
+      SELECT
+        COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado' AND p.data_confirmacao IS NOT NULL), 0)::numeric AS nova_soma,
+        v.total_venda::numeric AS total_venda_tx
+      FROM alissonerp.vendas_erp v
+      LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
+      WHERE v.id = ${vendaId}
+      GROUP BY v.total_venda
     `;
-    novoPagId = novoPag.id;
+
+    const quitada = Number(nova_soma) >= Number(total_venda_tx) - 0.01;
+    return { novoPagId, quitada, nova_soma: Number(nova_soma), total_venda_tx: Number(total_venda_tx) };
+  });
+
+  if (txResult?.erro) {
+    return NextResponse.json({ error: txResult.erro }, { status: txResult.status ?? 500 });
   }
 
-  // Concluir venda se totalmente paga
-  const [{ nova_soma }] = await sql`
-    SELECT COALESCE(SUM(valor), 0)::numeric AS nova_soma
-    FROM alissonerp.pagamentos_venda
-    WHERE venda_id = ${vendaId} AND status = 'confirmado'
-  `;
+  const { novoPagId, quitada } = txResult;
+
   let vendaConcluida = false;
-  if (Number(nova_soma) >= Number(venda.total_venda) - 0.009 && venda.situacao === "aprovado") {
+  if (quitada && venda.situacao === "aprovado") {
     try {
       await concluirVenda(vendaId, user.id, { tinyBestEffort: true });
       vendaConcluida = true;

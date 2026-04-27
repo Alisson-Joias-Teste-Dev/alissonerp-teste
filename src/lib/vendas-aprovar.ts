@@ -581,6 +581,18 @@ export async function criarOrdemDeServico(
         )
       `;
     }
+
+    const [auditLoja] = await tx`
+      INSERT INTO alissonerp.auditorias (situacao, tipo_auditoria, rota_processo, ordem_id, peso_negociado, dados_ordem)
+      VALUES ('pendente', 'loja', 'entrada_ordem', ${ordem.id}, 0,
+        ${JSON.stringify({ numero_ordem: numeroOrdem, tipo_ordem: 'servico_venda', rota: 'protocolo' })}::text::jsonb)
+      RETURNING id
+    `;
+    await tx`
+      UPDATE alissonerp.auditorias
+      SET situacao = 'aprovado', data_conclusao = NOW(), parecer = 'Aprovação automática — servico_venda'
+      WHERE id = ${auditLoja.id}
+    `;
   });
 
   return ordemCriada;
@@ -732,14 +744,31 @@ export async function concluirVenda(
     throw new Error("Venda cancelada não pode ser concluída");
   }
 
-  // ── 0. GUARD: verificar se há pagamentos pendentes ──────────────────────
-  const [pendente] = await sql`
-    SELECT COUNT(*) AS cnt FROM alissonerp.pagamentos_venda
-    WHERE venda_id = ${vendaId} AND status = 'pendente'
+  // ── 0. GUARD: verificar cobertura total de pagamentos ───────────────────
+  // Checar pendentes E se a soma dos confirmados realmente cobre o total_venda.
+  // data_confirmacao IS NOT NULL garante que só pagamentos com confirmação real
+  // (webhook, verificar-manual, confirmar endpoint) entram no cálculo —
+  // preferences fantasma (status='confirmado' sem data_confirmacao) são excluídas.
+  const [pagCheck] = await sql`
+    SELECT
+      v.total_venda::numeric AS total_venda,
+      COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'pendente'), 0)::numeric AS soma_pendentes,
+      COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado' AND p.data_confirmacao IS NOT NULL), 0)::numeric AS soma_confirmados
+    FROM alissonerp.vendas_erp v
+    LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
+    WHERE v.id = ${vendaId}
+    GROUP BY v.total_venda
   `;
-  if (Number(pendente.cnt) > 0) {
+  if (Number(pagCheck?.soma_pendentes ?? 0) > 0) {
     throw new Error(
       "Venda possui pagamentos pendentes. Confirme todos os pagamentos antes de concluir.",
+    );
+  }
+  const somaConfirmada = Number(pagCheck?.soma_confirmados ?? 0);
+  const totalVendaCheck = Number(pagCheck?.total_venda ?? 0);
+  if (somaConfirmada < totalVendaCheck - 0.01) {
+    throw new Error(
+      `Pagamento insuficiente: R$${somaConfirmada.toFixed(2)} confirmados de R$${totalVendaCheck.toFixed(2)} devidos. Registre o pagamento completo antes de concluir.`,
     );
   }
 

@@ -80,7 +80,9 @@ function fmt(v: number) {
 }
 function fmtDate(d: string | null) {
   if (!d) return "—";
-  const date = new Date(String(d).includes("T") ? d : d + "T12:00:00");
+  // Usa só YYYY-MM-DD para evitar conversão de fuso (coluna DATE vira T00:00:00Z no driver)
+  const [year, month, day] = String(d).slice(0, 10).split("-").map(Number);
+  const date = new Date(year, month - 1, day);
   if (isNaN(date.getTime())) return "—";
   return date.toLocaleDateString("pt-BR");
 }

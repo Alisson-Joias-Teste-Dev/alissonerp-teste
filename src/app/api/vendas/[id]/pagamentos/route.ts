@@ -164,7 +164,7 @@ export async function POST(
   const [totais] = await sql`
     SELECT
       v.total_venda::numeric                                                               AS total_venda,
-      COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado'), 0)::numeric           AS soma_confirmados
+      COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado' AND p.data_confirmacao IS NOT NULL), 0)::numeric AS soma_confirmados
     FROM alissonerp.vendas_erp v
     LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
     WHERE v.id = ${vendaId}

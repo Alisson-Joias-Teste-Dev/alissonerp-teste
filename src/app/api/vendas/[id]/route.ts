@@ -264,6 +264,37 @@ export async function PATCH(
     }
   }
 
+  // ── Guard: transição para 'concluido' exige pagamento real completo ─────────
+  // Bloqueia diretamente no PATCH antes do UPDATE para evitar bypass dos guards
+  // de concluirVenda. Replica a mesma lógica — data_confirmacao IS NOT NULL
+  // exclui preferences fantasma do cálculo.
+  if (body.situacao === "concluido") {
+    const [pcCheck] = await sql`
+      SELECT
+        v.total_venda::numeric AS total_venda,
+        COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'pendente'), 0)::numeric AS soma_pendentes,
+        COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado' AND p.data_confirmacao IS NOT NULL), 0)::numeric AS soma_confirmados
+      FROM alissonerp.vendas_erp v
+      LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
+      WHERE v.id = ${vendaId}
+      GROUP BY v.total_venda
+    `;
+    if (Number(pcCheck?.soma_pendentes ?? 0) > 0) {
+      return NextResponse.json(
+        { error: "Venda possui pagamentos pendentes. Confirme todos antes de concluir." },
+        { status: 409 },
+      );
+    }
+    const somaPaga = Number(pcCheck?.soma_confirmados ?? 0);
+    const totalDev = Number(pcCheck?.total_venda ?? 0);
+    if (somaPaga < totalDev - 0.01) {
+      return NextResponse.json(
+        { error: `Pagamento insuficiente: R$${somaPaga.toFixed(2)} confirmados de R$${totalDev.toFixed(2)} devidos.` },
+        { status: 409 },
+      );
+    }
+  }
+
   // ── Envio automático para Tiny ao aprovar ──────────────────────────────────
   let tinyErroWarning: string | null = null;
   if (body.situacao === "aprovado") {

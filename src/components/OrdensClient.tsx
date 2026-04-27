@@ -553,7 +553,15 @@ export default function OrdensClient({
                   style={{ borderColor: "#F3EADA", backgroundColor: i % 2 === 0 ? "#fff" : "#FAFAF7" }}>
                   <td className="px-4 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{o.id}</td>
                   <td className="px-4 py-2.5 font-mono text-xs font-semibold" style={{ color: o.numero_pedido ? "#184036" : "#D1D5DB" }}>
-                    {o.numero_pedido ? `#${o.numero_pedido}` : "—"}
+                    {o.numero_pedido && o.venda_id ? (
+                      <Link
+                        href={`/vendas/${o.venda_id}`}
+                        onClick={e => e.stopPropagation()}
+                        className="hover:underline"
+                      >
+                        #{o.numero_pedido}
+                      </Link>
+                    ) : o.numero_pedido ? `#${o.numero_pedido}` : "—"}
                   </td>
                   <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: "#184036" }}>
                     {o.numero_ordem ?? `#${o.id}`}
