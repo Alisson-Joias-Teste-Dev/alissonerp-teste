@@ -172,8 +172,7 @@ const TIPOS_SERVICO = [
   { id: 6, nome: "Outros" },
 ];
 
-const FORMAS_PAGAMENTO = ["Dinheiro", "Cartão de Crédito", "Pix", "Vale-Troca", "A Receber", "Manual (MP)", "Múltiplas"];
-const GATEWAYS = ["Mercado Pago", "PagSeguro", "Cielo", "Stone", "Getnet", "Rede", "Outro"];
+const FORMAS_FIXAS = ["Vale-Troca", "A Receber", "Múltiplas"];
 const CONDICOES = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
 const COM_CARTAO = ["Cartão de Crédito", "Pix"];
 
@@ -518,6 +517,15 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   // For serviço/fabricação
   const [servDescricao, setServDescricao] = useState("");
   const [servValor, setServValor] = useState("");
+
+  // ── Gateways dinâmicos ────────────────────────────────────────────────────
+  const [gateways, setGateways] = useState<{ id: number; nome: string }[]>([]);
+  useEffect(() => {
+    fetch("/api/configuracoes/gateways").then(r => r.json()).then(d => {
+      if (Array.isArray(d)) setGateways(d.filter((g: any) => g.ativo));
+    }).catch(() => {});
+  }, []);
+  const formasPagamento = [...gateways.map(g => g.nome), ...FORMAS_FIXAS];
 
   // ── Step 5: Pagamento ─────────────────────────────────────────────────────
   const [pagForma, setPagForma] = useState("Dinheiro");
@@ -2478,7 +2486,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               <Label>Forma de recebimento</Label>
               <Sel value={pagForma} onChange={e => { setPagForma(e.target.value); setPagCondicao("À vista"); }} className="w-56">
                 <optgroup label="Métodos de Pagamento">
-                  {FORMAS_PAGAMENTO.map(f => <option key={f} value={f}>{f}</option>)}
+                  {formasPagamento.map(f => <option key={f} value={f}>{f}</option>)}
                 </optgroup>
               </Sel>
             </div>
@@ -2516,7 +2524,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                 <div>
                   <Label>Gateway</Label>
                   <Sel value={pagGateway} onChange={e => setPagGateway(e.target.value)}>
-                    {GATEWAYS.map(g => <option key={g} value={g}>{g}</option>)}
+                    {gateways.map((g: { id: number; nome: string }) => <option key={g.id} value={g.nome}>{g.nome}</option>)}
                   </Sel>
                 </div>
                 {pagForma === "Cartão de Crédito" && (
@@ -2617,7 +2625,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                       <Label>Forma</Label>
                       <Sel value={pagMultForma} onChange={e => { setPagMultForma(e.target.value); setPagMultParcelas(1); setValeValidacao(null); setValeNumero(""); setPagValor(""); }}>
                         <optgroup label="Métodos de Pagamento">
-                          {FORMAS_PAGAMENTO.filter(f => f !== "Múltiplas").map(f => <option key={f} value={f}>{f}</option>)}
+                          {formasPagamento.filter(f => f !== "Múltiplas").map(f => <option key={f} value={f}>{f}</option>)}
                         </optgroup>
                       </Sel>
                     </div>

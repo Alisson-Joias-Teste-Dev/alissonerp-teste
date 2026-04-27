@@ -1,0 +1,3 @@
+timestamp,produto_id,uuid,stage,error
+2026-04-27T15:36:33.492Z,11666,02ef8c1b-44db-4dad-b87f-4fbab34369bd,process,"status code 499"
+2026-04-27T15:38:11.298Z,11666,02ef8c1b-44db-4dad-b87f-4fbab34369bd,process,"The object exceeded the maximum allowed size"
