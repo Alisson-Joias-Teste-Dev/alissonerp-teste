@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { ShoppingBag } from "lucide-react";
 
 const C = {
@@ -100,9 +100,8 @@ export default function ItensOrdemSection({ ordemId }: { ordemId: number }) {
             </tr>
           </thead>
           <tbody>
-            {itens.map((item, i) => (<>
+            {itens.map((item, i) => (<Fragment key={item.id}>
               <tr
-                key={item.id}
                 className={item.personalizacao?.valor ? "" : "border-b"}
                 style={{
                   borderColor: C.creme,
@@ -138,7 +137,7 @@ export default function ItensOrdemSection({ ordemId }: { ordemId: number }) {
                   </td>
                 </tr>
               )}
-            </>))}
+            </Fragment>))}
           </tbody>
         </table>
       )}
