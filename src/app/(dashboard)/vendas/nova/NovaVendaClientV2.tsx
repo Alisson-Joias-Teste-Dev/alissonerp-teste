@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, ArrowRight, Search, X, Plus, Loader2, CheckCircle, CheckCircle2,
+  ArrowLeft, ArrowRight, Search, X, XCircle, Plus, Loader2, CheckCircle, CheckCircle2,
   User, Package, Truck, CreditCard, FileText, Star, Calculator, Scale,
   MapPin, AlertCircle, AlertTriangle, Check, ChevronRight, Ticket, Pencil, Wrench, Video, Save,
 } from "lucide-react";
@@ -12,6 +12,7 @@ import CartaoInline from "@/components/vendas/CartaoInline";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import { maskCpfCnpj, formatDateBR } from "@/lib/formatters";
 import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
+import { createClient } from "@/lib/supabase/client";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -117,6 +118,11 @@ interface Pagamento {
   parcelas: number;
   vale_numero?: string;
   db_id?: number; // ID do pagamentos_venda pré-criado (Pix/Cartão em Múltiplas)
+  // Ouro (file fica local até salvar a venda; depois é uploaded e o path é usado)
+  ouro_peso?: number;
+  ouro_valor_grama?: number;
+  ouro_foto_file?: File;
+  ouro_foto_path?: string;
 }
 
 interface ParcelaRow {
@@ -545,6 +551,20 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [aprovacaoEnviada, setAprovacaoEnviada] = useState(false);
   const [aprovacaoDescontoEnviada, setAprovacaoDescontoEnviada] = useState(false);
   const [pedindoAprovacao, setPedindoAprovacao] = useState(false);
+
+  // ── Ouro (single + múltiplas) ─────────────────────────────────────────────
+  const [ouroPeso, setOuroPeso] = useState("");
+  const [ouroValorGrama, setOuroValorGrama] = useState("");
+  const [ouroFotoFile, setOuroFotoFile] = useState<File | null>(null);
+  const [ouroFotoPreview, setOuroFotoPreview] = useState<string | null>(null);
+  const [ouroValidacaoIA, setOuroValidacaoIA] = useState<{ match: boolean; mensagem: string } | null>(null);
+  const [ouroValidando, setOuroValidando] = useState(false);
+  const [multOuroPeso, setMultOuroPeso] = useState("");
+  const [multOuroValorGrama, setMultOuroValorGrama] = useState("");
+  const [multOuroFotoFile, setMultOuroFotoFile] = useState<File | null>(null);
+  const [multOuroFotoPreview, setMultOuroFotoPreview] = useState<string | null>(null);
+  const [multOuroValidacaoIA, setMultOuroValidacaoIA] = useState<{ match: boolean; mensagem: string } | null>(null);
+  const [multOuroValidando, setMultOuroValidando] = useState(false);
 
   // ── Step 6: Finalizar ─────────────────────────────────────────────────────
   const [showModalFim, setShowModalFim] = useState(false);
@@ -1075,9 +1095,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
     const pagamentosBody = skipPagamentos ? [] : pagForma === "Múltiplas"
       ? pagamentos
-          .filter(p => p.forma !== "Vale-Troca")
+          .filter(p => p.forma !== "Vale-Troca" && p.forma !== "Ouro")
           .map(p => ({ forma: p.forma, valor: p.valor, parcelas: p.parcelas, status: "pendente" }))
-      : pagForma === "Vale-Troca"
+      : pagForma === "Vale-Troca" || pagForma === "Ouro"
       ? []
       : [{
           forma: pagForma,
@@ -1169,6 +1189,28 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       setValeValidacao(d);
     } catch { setValeValidacao({ ok: false, erro: "Erro ao validar" }); }
     finally { setValeValidando(false); }
+  }
+
+  // ── Ouro helpers ──────────────────────────────────────────────────────────
+  async function validarOuroIA(file: File, peso: number, setter: (r: { match: boolean; mensagem: string } | null) => void, loadingSetter: (v: boolean) => void) {
+    loadingSetter(true);
+    setter(null);
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("peso", String(peso));
+    const res = await fetch("/api/pcp/validar-peso", { method: "POST", body: fd });
+    const result = await res.json() as { match: boolean; mensagem: string };
+    setter(result);
+    loadingSetter(false);
+  }
+
+  async function uploadOuroFoto(file: File, vendaIdParam: number): Promise<string | null> {
+    const supabase = createClient();
+    const ext = file.name.split(".").pop() ?? "jpg";
+    const path = `pagamentos/${vendaIdParam}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from("pagamento-fotos").upload(path, file, { contentType: file.type });
+    if (error) { setSaveErr("Erro ao enviar foto: " + error.message); return null; }
+    return path;
   }
 
   async function handleAddPagamento() {
@@ -1338,7 +1380,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
       // Se a venda foi pré-salva (step 4) sem pagamentos, criar agora os pagamentos não-gateway
       if (foiPresalva) {
-        const formasGateway = ["Pix", "Cartão de Crédito", "Vale-Troca"];
+        const formasGateway = ["Pix", "Cartão de Crédito", "Vale-Troca", "Ouro"];
         const pagList: Array<{ forma: string; valor: number; parcelas: number }> = [];
         if (pagForma === "Múltiplas") {
           pagamentos
@@ -1361,6 +1403,38 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
             const d = await res.json() as { error?: string };
             throw new Error(d.error ?? "Erro ao registrar pagamento");
           }
+        }
+      }
+
+      // ── Pagamentos em Ouro: upload da foto + POST separado ──
+      const ouroPags: Array<{ peso: number; vg: number; valor: number; file: File }> = [];
+      if (pagForma === "Ouro") {
+        const peso = parseFloat(ouroPeso.replace(",", "."));
+        const vg = parseFloat(ouroValorGrama.replace(",", "."));
+        if (!peso || peso <= 0) throw new Error("Informe o peso do ouro.");
+        if (!vg || vg <= 0) throw new Error("Informe o valor da grama.");
+        if (!ouroFotoFile) throw new Error("Foto da balança obrigatória.");
+        if (!ouroValidacaoIA?.match) throw new Error("O peso precisa ser confirmado pela IA antes de salvar.");
+        ouroPags.push({ peso, vg, valor: peso * vg, file: ouroFotoFile });
+      } else if (pagForma === "Múltiplas") {
+        for (const p of pagamentos.filter(p => p.forma === "Ouro")) {
+          if (!p.ouro_foto_file || !p.ouro_peso || !p.ouro_valor_grama) {
+            throw new Error("Pagamento em ouro inválido — foto/peso/valor da grama obrigatórios.");
+          }
+          ouroPags.push({ peso: p.ouro_peso, vg: p.ouro_valor_grama, valor: p.valor, file: p.ouro_foto_file });
+        }
+      }
+      for (const op of ouroPags) {
+        const path = await uploadOuroFoto(op.file, idFinal);
+        if (!path) throw new Error("Falha ao enviar foto da balança.");
+        const res = await fetch(`/api/vendas/${idFinal}/pagamentos`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ forma: "Ouro", valor: op.valor, ouro_peso: op.peso, ouro_valor_grama: op.vg, ouro_foto_path: path }),
+        });
+        if (!res.ok) {
+          const d = await res.json() as { error?: string };
+          throw new Error(d.error ?? "Erro ao registrar pagamento em ouro");
         }
       }
 
@@ -2497,6 +2571,52 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               </div>
             )}
 
+            {/* Ouro */}
+            {pagForma === "Ouro" && (
+              <div className="rounded-lg border p-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Peso (g)</Label>
+                    <input type="number" step="0.001" value={ouroPeso}
+                      onChange={e => { setOuroPeso(e.target.value); setOuroValidacaoIA(null); setOuroFotoFile(null); setOuroFotoPreview(null); }}
+                      placeholder="0.000"
+                      className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                  </div>
+                  <div>
+                    <Label>Valor da grama (R$)</Label>
+                    <input type="number" step="0.01" value={ouroValorGrama}
+                      onChange={e => setOuroValorGrama(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                  </div>
+                </div>
+                {ouroPeso && ouroValorGrama && (() => {
+                  const p = parseFloat(ouroPeso.replace(",", ".")); const vg = parseFloat(ouroValorGrama.replace(",", "."));
+                  if (p > 0 && vg > 0) return <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>Total: {fmt(p * vg)}</p>;
+                  return null;
+                })()}
+                <div>
+                  <Label>Foto da balança (obrigatória)</Label>
+                  <input type="file" accept="image/*" capture="environment"
+                    onChange={async e => {
+                      const file = e.target.files?.[0]; if (!file) return;
+                      setOuroFotoFile(file); setOuroFotoPreview(URL.createObjectURL(file)); setOuroValidacaoIA(null);
+                      const p = parseFloat(ouroPeso.replace(",", "."));
+                      if (p > 0) await validarOuroIA(file, p, setOuroValidacaoIA, setOuroValidando);
+                    }}
+                    className="w-full text-sm" />
+                  {ouroValidando && <p className="text-xs mt-1" style={{ color: "#6B7280" }}>Validando com IA...</p>}
+                  {ouroFotoPreview && <img src={ouroFotoPreview} alt="Balança" className="mt-2 h-24 rounded object-cover" />}
+                  {ouroValidacaoIA && (
+                    <div className={`mt-2 flex items-center gap-2 text-xs rounded px-3 py-2 ${ouroValidacaoIA.match ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
+                      {ouroValidacaoIA.match ? <CheckCircle size={13} /> : <XCircle size={13} />}
+                      {ouroValidacaoIA.mensagem}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {pagForma === "A Receber" && totalVenda > 0 && (
               <div className="rounded-xl border p-4 space-y-2" style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB" }}>
                 <p className="text-sm font-medium" style={{ color: "#374151" }}>A Receber — {fmt(totalVenda)}</p>
@@ -2623,13 +2743,13 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                   <div className="flex flex-wrap items-end gap-2 mb-3">
                     <div className="flex-1 min-w-36">
                       <Label>Forma</Label>
-                      <Sel value={pagMultForma} onChange={e => { setPagMultForma(e.target.value); setPagMultParcelas(1); setValeValidacao(null); setValeNumero(""); setPagValor(""); }}>
+                      <Sel value={pagMultForma} onChange={e => { setPagMultForma(e.target.value); setPagMultParcelas(1); setValeValidacao(null); setValeNumero(""); setPagValor(""); setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null); }}>
                         <optgroup label="Métodos de Pagamento">
                           {formasPagamento.filter(f => f !== "Múltiplas").map(f => <option key={f} value={f}>{f}</option>)}
                         </optgroup>
                       </Sel>
                     </div>
-                    {pagMultForma === "Vale-Troca" ? (
+                    {pagMultForma === "Ouro" ? null : pagMultForma === "Vale-Troca" ? (
                       <div className="flex-1 min-w-48 flex gap-2">
                         <div className="flex-1">
                           <Label>Número do Vale</Label>
@@ -2679,6 +2799,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                         })()}
                       </>
                     )}
+                    {pagMultForma !== "Ouro" && (
                     <button
                       onClick={() => {
                         if (pagMultForma === "Vale-Troca") {
@@ -2695,7 +2816,68 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                       style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                       <Plus size={13} /> Adicionar
                     </button>
+                    )}
                   </div>
+
+                  {/* Ouro no fluxo Múltiplas */}
+                  {pagMultForma === "Ouro" && (
+                    <div className="rounded-lg border p-3 mb-3 space-y-3" style={{ borderColor: C.cremeBorder }}>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label>Peso (g)</Label>
+                          <input type="number" step="0.001" value={multOuroPeso}
+                            onChange={e => { setMultOuroPeso(e.target.value); setMultOuroValidacaoIA(null); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); }}
+                            placeholder="0.000"
+                            className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                        </div>
+                        <div>
+                          <Label>Valor da grama (R$)</Label>
+                          <input type="number" step="0.01" value={multOuroValorGrama}
+                            onChange={e => setMultOuroValorGrama(e.target.value)}
+                            placeholder="0.00"
+                            className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                        </div>
+                      </div>
+                      {multOuroPeso && multOuroValorGrama && (() => {
+                        const p = parseFloat(multOuroPeso.replace(",", ".")); const vg = parseFloat(multOuroValorGrama.replace(",", "."));
+                        if (p > 0 && vg > 0) return <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>Total: {fmt(p * vg)}</p>;
+                        return null;
+                      })()}
+                      <div>
+                        <Label>Foto da balança</Label>
+                        <input type="file" accept="image/*" capture="environment"
+                          onChange={async e => {
+                            const file = e.target.files?.[0]; if (!file) return;
+                            setMultOuroFotoFile(file); setMultOuroFotoPreview(URL.createObjectURL(file)); setMultOuroValidacaoIA(null);
+                            const p = parseFloat(multOuroPeso.replace(",", "."));
+                            if (p > 0) await validarOuroIA(file, p, setMultOuroValidacaoIA, setMultOuroValidando);
+                          }}
+                          className="w-full text-sm" />
+                        {multOuroValidando && <p className="text-xs mt-1" style={{ color: "#6B7280" }}>Validando com IA...</p>}
+                        {multOuroFotoPreview && <img src={multOuroFotoPreview} alt="Balança" className="mt-2 h-20 rounded object-cover" />}
+                        {multOuroValidacaoIA && (
+                          <div className={`mt-2 flex items-center gap-2 text-xs rounded px-3 py-2 ${multOuroValidacaoIA.match ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
+                            {multOuroValidacaoIA.match ? <CheckCircle size={13} /> : <XCircle size={13} />}
+                            {multOuroValidacaoIA.mensagem}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        disabled={restante <= 0 || !multOuroValidacaoIA?.match || !multOuroFotoFile || multOuroValidando}
+                        onClick={() => {
+                          if (!multOuroFotoFile) return;
+                          const peso = parseFloat(multOuroPeso.replace(",", ".")); const vg = parseFloat(multOuroValorGrama.replace(",", "."));
+                          if (!peso || !vg) return;
+                          const valorOuro = Math.min(+(peso * vg).toFixed(2), restante);
+                          setPagamentos(prev => [...prev, { _key: uid(), forma: "Ouro", valor: valorOuro, parcelas: 1, ouro_peso: peso, ouro_valor_grama: vg, ouro_foto_file: multOuroFotoFile }]);
+                          setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null);
+                        }}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                        style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                        <Plus size={13} /> Adicionar Ouro
+                      </button>
+                    </div>
+                  )}
 
                   {pagamentos.length > 0 && (
                     <div className="space-y-1.5 mb-3">
