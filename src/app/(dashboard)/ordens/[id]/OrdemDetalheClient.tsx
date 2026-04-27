@@ -114,16 +114,20 @@ function MarcadorBadge({ marcador }: { marcador: string }) {
   );
 }
 
-function PecaClienteCard({ fotoPeca, pesoPeca, videoObs }: {
+function PecaClienteCard({ fotoPeca, fotoPeca2, pesoPeca, videoObs }: {
   fotoPeca: string | null;
+  fotoPeca2: string | null;
   pesoPeca: number | null;
   videoObs: string | null;
 }) {
   const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
-  // URLs públicas diretas (buckets públicos após migração)
-  const fotoUrl  = fotoPeca  ? (fotoPeca.startsWith("http") ? fotoPeca : `${SUPABASE_URL}/storage/v1/object/public/ordem-fotos/${fotoPeca}`)   : null;
-  const videoUrl = videoObs  ? (videoObs.startsWith("http") ? videoObs : `${SUPABASE_URL}/storage/v1/object/public/ordem-videos/${videoObs}`)  : null;
+  const toUrl = (path: string | null, bucket: string) =>
+    path ? (path.startsWith("http") ? path : `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`) : null;
+
+  const fotoUrl  = toUrl(fotoPeca,  "ordem-fotos");
+  const fotoUrl2 = toUrl(fotoPeca2, "ordem-fotos");
+  const videoUrl = toUrl(videoObs,  "ordem-videos");
 
   return (
     <div className="bg-white rounded-xl border p-5" style={{ borderColor: "#E8DCC8" }}>
@@ -143,6 +147,17 @@ function PecaClienteCard({ fotoPeca, pesoPeca, videoObs }: {
               />
             </a>
           )}
+          {fotoUrl2 && (
+            <a href={fotoUrl2} target="_blank" rel="noreferrer" className="shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={fotoUrl2}
+                alt="Foto da peça 2"
+                className="w-32 h-32 object-cover rounded-lg border"
+                style={{ borderColor: "#E8DCC8" }}
+              />
+            </a>
+          )}
           <div className="flex flex-col justify-center gap-2">
             {pesoPeca != null && (
               <div>
@@ -150,7 +165,7 @@ function PecaClienteCard({ fotoPeca, pesoPeca, videoObs }: {
                 <p className="font-mono text-[15px] mt-0.5" style={{ color: "#1A1A1A" }}>{Number(pesoPeca).toFixed(2)}g</p>
               </div>
             )}
-            {!fotoUrl && pesoPeca == null && !videoUrl && (
+            {!fotoUrl && !fotoUrl2 && pesoPeca == null && !videoUrl && (
               <p className="text-[13px]" style={{ color: "#9CA3AF" }}>Sem dados registrados.</p>
             )}
           </div>
@@ -458,9 +473,10 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
           )}
 
           {/* Peça do Cliente / Foto 3D — quando há foto, peso ou video */}
-          {(ordem.foto_peca_servico || ordem.peso_peca_servico != null || ordem.video_observacao) && (
+          {(ordem.foto_peca_servico || ordem.foto_peca_servico_2 || ordem.peso_peca_servico != null || ordem.video_observacao) && (
             <PecaClienteCard
               fotoPeca={ordem.foto_peca_servico}
+              fotoPeca2={ordem.foto_peca_servico_2 ?? null}
               pesoPeca={ordem.peso_peca_servico}
               videoObs={ordem.video_observacao}
             />
