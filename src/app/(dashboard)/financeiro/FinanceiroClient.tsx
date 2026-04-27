@@ -26,6 +26,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { dispararWebhook } from "@/lib/webhooks";
+import PeriodoFiltro, { type Periodo, calcPeriodo } from "@/components/ui/PeriodoFiltro";
 
 // ─── palette (tema claro/creme consistente com o resto do sistema) ───────────
 const C = {
@@ -914,25 +915,7 @@ function TabPagar({ pagar }: { pagar: ContaPagar[] }) {
 
 // ─── TabReceber ──────────────────────────────────────────────────────────────
 
-type Periodo = "hoje" | "7dias" | "30dias" | "mes" | "personalizado";
-
-function calcPeriodo(periodo: Periodo, dataInicio: string, dataFim: string): { ini: string; fim: string } {
-  const hoje = new Date().toISOString().slice(0, 10);
-  if (periodo === "hoje") return { ini: hoje, fim: hoje };
-  if (periodo === "7dias") {
-    const d = new Date(); d.setDate(d.getDate() - 6);
-    return { ini: d.toISOString().slice(0, 10), fim: hoje };
-  }
-  if (periodo === "30dias") {
-    const d = new Date(); d.setDate(d.getDate() - 29);
-    return { ini: d.toISOString().slice(0, 10), fim: hoje };
-  }
-  if (periodo === "mes") {
-    const d = new Date();
-    return { ini: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`, fim: hoje };
-  }
-  return { ini: dataInicio, fim: dataFim };
-}
+// Periodo + calcPeriodo importados de @/components/ui/PeriodoFiltro
 
 function TabReceber({ receber, saldoLiquido }: { receber: ContaReceber[]; saldoLiquido: number }) {
   const [filtro, setFiltro] = useState("todos");
@@ -946,10 +929,11 @@ function TabReceber({ receber, saldoLiquido }: { receber: ContaReceber[]; saldoL
   const hoje = new Date().toISOString().slice(0, 10);
   const [dataInicio, setDataInicio] = useState(hoje);
   const [dataFim, setDataFim] = useState(hoje);
+  const [mes, setMes] = useState(hoje.slice(0, 7));
 
   const isRecebido = (s: string) => s === "pago" || s === "recebido";
 
-  const { ini, fim } = calcPeriodo(periodo, dataInicio, dataFim);
+  const { ini, fim } = calcPeriodo(periodo, { dataInicio, dataFim, mes });
   const recebidoNoPeriodo = lista.filter(r =>
     isRecebido(r.situacao) &&
     r.data_recebimento != null &&
@@ -1137,45 +1121,13 @@ function TabReceber({ receber, saldoLiquido }: { receber: ContaReceber[]; saldoL
       <div className="rounded-xl bg-white border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
         <div className="px-4 py-3 border-b flex items-center justify-between gap-3 flex-wrap" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
           <p className="text-xs font-semibold" style={{ color: "#1A1A1A" }}>Já Recebido</p>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {(["hoje", "7dias", "30dias", "mes", "personalizado"] as Periodo[]).map(p => (
-              <button
-                key={p}
-                onClick={() => setPeriodo(p)}
-                className="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border"
-                style={{
-                  backgroundColor: periodo === p ? C.esmeralda : "transparent",
-                  borderColor: periodo === p ? C.esmeralda : C.cremeBorder,
-                  color: periodo === p ? C.creme : C.cinza,
-                }}
-              >
-                {p === "hoje" ? "Hoje" : p === "7dias" ? "7 dias" : p === "30dias" ? "30 dias" : p === "mes" ? "Este mês" : "Personalizado"}
-              </button>
-            ))}
-          </div>
+          <PeriodoFiltro
+            periodo={periodo} onPeriodoChange={setPeriodo}
+            dataInicio={dataInicio} dataFim={dataFim}
+            onDataInicioChange={setDataInicio} onDataFimChange={setDataFim}
+            mes={mes} onMesChange={setMes}
+          />
         </div>
-        {periodo === "personalizado" && (
-          <div className="px-4 py-3 border-b flex items-center gap-3 flex-wrap" style={{ borderColor: C.cremeBorder }}>
-            <div className="flex items-center gap-2">
-              <label className="text-xs" style={{ color: C.cinza }}>De</label>
-              <input
-                type="date" value={dataInicio}
-                onChange={e => setDataInicio(e.target.value)}
-                className="rounded-lg border px-2 py-1 text-xs outline-none"
-                style={{ borderColor: C.cremeBorder, color: "#374151" }}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs" style={{ color: C.cinza }}>até</label>
-              <input
-                type="date" value={dataFim}
-                onChange={e => setDataFim(e.target.value)}
-                className="rounded-lg border px-2 py-1 text-xs outline-none"
-                style={{ borderColor: C.cremeBorder, color: "#374151" }}
-              />
-            </div>
-          </div>
-        )}
         <div className="px-4 py-4 flex items-center justify-between">
           <div>
             <p className="text-[11px] uppercase tracking-wider font-medium" style={{ color: C.cinza }}>Total líquido recebido</p>
@@ -1862,12 +1814,31 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
   const [erro, setErro] = useState<string | null>(null);
   const [viewTab, setViewTab] = useState<"pendentes" | "historico">("pendentes");
   const [formaFiltro, setFormaFiltro] = useState<string>("Todos");
+  const [gatewaysFiltro, setGatewaysFiltro] = useState<string[]>([]);
+  const [estornoTarget, setEstornoTarget] = useState<CaixaDinheiro | null>(null);
+  const [estornando, setEstornando] = useState(false);
+  const [estornoErro, setEstornoErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/configuracoes/gateways")
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d)) setGatewaysFiltro(d.filter((g: any) => g.ativo && g.nome !== "Banco").map((g: any) => g.nome)); })
+      .catch(() => {});
+  }, []);
+
+  // Mapeia formas legadas para o gateway correspondente
+  const MP_FORMAS = ["Cartão de Crédito", "Pix", "PIX", "Manual (MP)", "Mercado Pago"];
+  function gatewayEfetivo(forma: string) {
+    if (MP_FORMAS.includes(forma)) return "Mercado Pago";
+    return forma;
+  }
 
   const [periodoC, setPeriodoC] = useState<Periodo>("30dias");
   const hojeStr = new Date().toISOString().slice(0, 10);
   const [dataInicioC, setDataInicioC] = useState(hojeStr);
   const [dataFimC, setDataFimC] = useState(hojeStr);
-  const { ini: cIni, fim: cFim } = calcPeriodo(periodoC, dataInicioC, dataFimC);
+  const [mesC, setMesC] = useState(hojeStr.slice(0, 7));
+  const { ini: cIni, fim: cFim } = calcPeriodo(periodoC, { dataInicio: dataInicioC, dataFim: dataFimC, mes: mesC });
 
   const inPeriod = (d: string | null) => !!d && d.slice(0, 10) >= cIni && d.slice(0, 10) <= cFim;
   const sumList  = (list: CaixaDinheiro[]) => list.reduce((s, r) => s + Number(r.valor), 0);
@@ -1886,11 +1857,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
   const saidasPeriodo  = baixas.filter(b => inPeriod(b.created_at)).reduce((s, b) => s + b.total, 0);
   const saldoPeriodoDin = sumList(byFormaPeriodo("Dinheiro")) - saidasPeriodo;
 
-  const formasPresentes = useMemo(() =>
-    Array.from(new Set(caixaList.map(r => r.forma))).sort(),
-  [caixaList]);
-
-  const listaFiltrada = (formaFiltro === "Todos" ? caixaList : caixaList.filter(r => r.forma === formaFiltro))
+  const listaFiltrada = (formaFiltro === "Todos" ? caixaList : caixaList.filter(r => gatewayEfetivo(r.forma) === formaFiltro))
     .filter(r => inPeriod(r.data_confirmacao));
 
   const showBaixa = formaFiltro === "Todos" || formaFiltro === "Dinheiro";
@@ -1901,11 +1868,30 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
   };
 
   const FORMA_COLOR: Record<string, { bg: string; text: string }> = {
-    "Dinheiro":         { bg: C.verdeLt,   text: C.verde },
-    "Pix":              { bg: "#EFF6FF",    text: "#1D4ED8" },
-    "Cartão de Crédito":{ bg: "#F3E8FF",    text: "#7C3AED" },
+    "Mercado Pago": { bg: "#EFF6FF",    text: "#1D4ED8" },
+    "Dinheiro":     { bg: C.verdeLt,    text: C.verde },
+    "Ouro":         { bg: "#FEF3C7",    text: "#92400E" },
+    "Banco":        { bg: "#F3E8FF",    text: "#7C3AED" },
   };
-  const formaColor = (f: string) => FORMA_COLOR[f] ?? { bg: C.cinzaLt, text: C.cinza };
+  const gatewayColor = (f: string) => FORMA_COLOR[gatewayEfetivo(f)] ?? { bg: C.cinzaLt, text: C.cinza };
+
+  async function confirmarEstorno() {
+    if (!estornoTarget) return;
+    setEstornando(true);
+    setEstornoErro(null);
+    try {
+      const res = await fetch(`/api/vendas/${estornoTarget.venda_id}/pagamentos/${estornoTarget.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "estornado" }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { setEstornoErro(json.error || "Erro ao estornar"); setEstornando(false); return; }
+      setCaixaList(prev => prev.filter(r => r.id !== estornoTarget.id));
+      setEstornoTarget(null);
+    } catch { setEstornoErro("Erro de rede"); }
+    setEstornando(false);
+  }
 
   async function darBaixa() {
     setDando(true);
@@ -1927,7 +1913,9 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
     setDando(false);
   }
 
-  const PagamentosTable = ({ lista, showForma }: { lista: CaixaDinheiro[]; showForma?: boolean }) => (
+  const PagamentosTable = ({ lista, showForma, showEstornar }: { lista: CaixaDinheiro[]; showForma?: boolean; showEstornar?: boolean }) => {
+    const colCount = 4 + (showForma ? 1 : 0) + (showEstornar ? 1 : 0);
+    return (
     <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -1938,14 +1926,15 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
               <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Consultora</th>
               <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Data</th>
               <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Valor</th>
+              {showEstornar && <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Ação</th>}
             </tr>
           </thead>
           <tbody>
             {lista.length === 0 && (
-              <tr><td colSpan={showForma ? 5 : 4} className="px-4 py-8 text-center text-sm" style={{ color: C.cinza }}>Nenhum registro.</td></tr>
+              <tr><td colSpan={colCount} className="px-4 py-8 text-center text-sm" style={{ color: C.cinza }}>Nenhum registro.</td></tr>
             )}
             {lista.map(r => {
-              const fc = formaColor(r.forma);
+              const fc = gatewayColor(r.forma);
               return (
                 <tr key={r.id} className="border-t hover:bg-gray-50 transition-colors" style={{ borderColor: C.cremeBorder }}>
                   <td className="px-4 py-3">
@@ -1960,6 +1949,17 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
                   <td className="px-4 py-3 text-sm" style={{ color: "#374151" }}>{r.vendedor_nome || <span style={{ color: C.cinza }}>—</span>}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{fmtDatetime(r.data_confirmacao)}</td>
                   <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: C.verde }}>{fmt(Number(r.valor))}</td>
+                  {showEstornar && (
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => { setEstornoErro(null); setEstornoTarget(r); }}
+                        className="text-xs px-2.5 py-1 rounded-lg border font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-1"
+                        style={{ borderColor: C.vermelho, color: C.vermelho, backgroundColor: "white" }}
+                      >
+                        <RefreshCw size={11} /> Estornar
+                      </button>
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -1974,7 +1974,8 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -1983,43 +1984,18 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
         <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.cinza }}>
           Caixa — Financeiro do Período
         </p>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {(["hoje", "7dias", "30dias", "mes", "personalizado"] as Periodo[]).map(p => (
-            <button key={p} onClick={() => setPeriodoC(p)}
-              className="text-xs px-3 py-1.5 rounded-full capitalize transition-colors border"
-              style={{
-                backgroundColor: periodoC === p ? C.esmeralda : "white",
-                borderColor: periodoC === p ? C.esmeralda : C.cremeBorder,
-                color: periodoC === p ? C.creme : C.cinza,
-              }}
-            >
-              {p === "hoje" ? "Hoje" : p === "7dias" ? "7 dias" : p === "30dias" ? "30 dias" : p === "mes" ? "Este mês" : "Personalizado"}
-            </button>
-          ))}
-        </div>
+        <PeriodoFiltro
+          periodo={periodoC} onPeriodoChange={setPeriodoC}
+          dataInicio={dataInicioC} dataFim={dataFimC}
+          onDataInicioChange={setDataInicioC} onDataFimChange={setDataFimC}
+          mes={mesC} onMesChange={setMesC}
+        />
       </div>
 
-      {periodoC === "personalizado" && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <label className="text-xs" style={{ color: C.cinza }}>De</label>
-            <input type="date" value={dataInicioC} onChange={e => setDataInicioC(e.target.value)}
-              className="rounded-lg px-2 py-1 text-xs outline-none bg-white"
-              style={{ border: `1px solid ${C.cremeBorder}`, color: "#374151" }} />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs" style={{ color: C.cinza }}>até</label>
-            <input type="date" value={dataFimC} onChange={e => setDataFimC(e.target.value)}
-              className="rounded-lg px-2 py-1 text-xs outline-none bg-white"
-              style={{ border: `1px solid ${C.cremeBorder}`, color: "#374151" }} />
-          </div>
-        </div>
-      )}
-
-      {/* Filtro por forma */}
+      {/* Filtro por gateway */}
       <div className="flex items-center gap-1.5 flex-wrap">
-        {["Todos", ...formasPresentes].map(f => {
-          const fc = f === "Todos" ? null : formaColor(f);
+        {["Todos", ...gatewaysFiltro].map(f => {
+          const fc = f === "Todos" ? null : FORMA_COLOR[f];
           const isActive = formaFiltro === f;
           return (
             <button key={f} onClick={() => setFormaFiltro(f)}
@@ -2038,9 +2014,9 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
       {formaFiltro === "Todos" ? (
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <KpiCard label="Total no Período"  value={fmt(sumList(listaFiltrada))}                   valueColor={C.esmeralda}  icon={Wallet}          accent={C.esmeralda} />
+          <KpiCard label="Mercado Pago"      value={fmt(sumList(listaFiltrada.filter(r => gatewayEfetivo(r.forma) === "Mercado Pago")))} valueColor="#1D4ED8" icon={Smartphone} accent="#1D4ED8" />
           <KpiCard label="Dinheiro"          value={fmt(sumList(byFormaPeriodo("Dinheiro")))}      valueColor={C.verde}      icon={Banknote}        accent={C.verde}      sub={`${pendentes.length} sem baixa`} />
-          <KpiCard label="PIX"               value={fmt(sumList(byFormaPeriodo("Pix")))}           valueColor="#1D4ED8"      icon={Smartphone}      accent="#1D4ED8" />
-          <KpiCard label="Cartão"            value={fmt(sumList(byFormaPeriodo("Cartão de Crédito")))} valueColor="#7C3AED"  icon={CreditCard}      accent="#7C3AED" />
+          <KpiCard label="Ouro"              value={fmt(sumList(listaFiltrada.filter(r => gatewayEfetivo(r.forma) === "Ouro")))}         valueColor="#92400E" icon={TrendingUp} accent="#92400E" />
           <KpiCard label="Baixas Realizadas" value={fmt(saidasPeriodo)}                            valueColor={C.vermelho}   icon={ArrowUpCircle}   accent={C.vermelho} />
         </div>
       ) : formaFiltro === "Dinheiro" ? (
@@ -2065,7 +2041,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <KpiCard label="Total no Período" value={fmt(sumList(listaFiltrada))}                                     valueColor={C.esmeralda} icon={ArrowDownCircle} accent={C.esmeralda} />
           <KpiCard label="Qtd. Transações"  value={String(listaFiltrada.length)}                                   valueColor={C.cinza}     icon={Landmark}        accent={C.cinza} />
-          <KpiCard label="Total Histórico"  value={fmt(sumList(caixaList.filter(r => r.forma === formaFiltro)))}   valueColor={C.cinza}     icon={TrendingUp}      accent={C.cinza} />
+          <KpiCard label="Total Histórico"  value={fmt(sumList(caixaList.filter(r => gatewayEfetivo(r.forma) === formaFiltro)))}   valueColor={C.cinza}     icon={TrendingUp}      accent={C.cinza} />
         </div>
       )}
 
@@ -2131,6 +2107,35 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
         </div>
       )}
 
+      {/* Modal confirmação estorno */}
+      {estornoTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => !estornando && setEstornoTarget(null)}>
+          <div className="bg-white rounded-2xl border w-full max-w-md p-6 space-y-4" style={{ borderColor: C.cremeBorder }} onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>Estornar Pagamento</h3>
+            <div className="rounded-xl p-4 border space-y-1" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+              <p className="text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Venda #{estornoTarget.numero_venda} · {estornoTarget.forma}</p>
+              <p className="text-2xl font-bold tabular-nums" style={{ color: C.vermelho }}>{fmt(Number(estornoTarget.valor))}</p>
+              <p className="text-xs" style={{ color: C.cinza }}>{estornoTarget.vendedor_nome ?? "—"} · {fmtDatetime(estornoTarget.data_confirmacao)}</p>
+            </div>
+            <p className="text-xs" style={{ color: C.cinza }}>
+              Este pagamento será marcado como <strong>estornado</strong>. Se todos os pagamentos da venda forem estornados, ela poderá ser cancelada na tela da venda.
+            </p>
+            {estornoErro && <p className="text-xs rounded-lg px-3 py-2" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>{estornoErro}</p>}
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={() => setEstornoTarget(null)} disabled={estornando}
+                className="px-4 py-2 rounded-lg text-sm border font-medium disabled:opacity-40"
+                style={{ borderColor: C.cremeBorder, color: C.cinza }}>Cancelar</button>
+              <button onClick={confirmarEstorno} disabled={estornando}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+                style={{ backgroundColor: C.vermelho, color: "white" }}>
+                {estornando ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                Confirmar Estorno
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sub-tabs (Dinheiro) ou tabela simples (outros) */}
       {formaFiltro === "Dinheiro" ? (
         <>
@@ -2144,7 +2149,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
             ))}
           </div>
 
-          {viewTab === "pendentes" && <PagamentosTable lista={pendentes} />}
+          {viewTab === "pendentes" && <PagamentosTable lista={pendentes} showEstornar={podeBaixar} />}
           {viewTab === "historico" && (
             <div className="space-y-3">
               {baixas.length === 0 && (
@@ -2176,7 +2181,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
           )}
         </>
       ) : (
-        <PagamentosTable lista={listaFiltrada} showForma={formaFiltro === "Todos"} />
+        <PagamentosTable lista={listaFiltrada} showForma={formaFiltro !== "Dinheiro"} showEstornar={podeBaixar} />
       )}
     </div>
   );

@@ -44,7 +44,7 @@ const ALL_MENUS: MenuItem[] = [
   { label: "A Pagar",            href: "/financeiro/a-pagar",   icon: "ArrowUpCircle"   },
   { label: "A Receber",          href: "/financeiro/a-receber", icon: "ArrowDownCircle" },
   { label: "Caixa",              href: "/financeiro/caixa",     icon: "Banknote"        },
-  { label: "Bancário",           href: "/financeiro/bancario",  icon: "Landmark"        },
+  { label: "Bancário", href: "/financeiro/bancario", icon: "Landmark" },
   { label: "Conciliação MP",     href: "/financeiro/conciliacao", icon: "ShieldCheck"   },
   { label: "Dashboard Comercial",href: "/dashboard-comercial",icon: "BarChart3"       },
   { label: "Vendas",             href: "/vendas",             icon: "ShoppingBag"     },
