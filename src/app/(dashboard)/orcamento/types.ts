@@ -61,6 +61,7 @@ export interface RingParams {
   stoneDrill: boolean;
   stoneHalfMoon: boolean;
   stoneFull: boolean;
+  stoneType: string;
   textEnabled: boolean;
   textFontType: 1 | 2;
   textContent: string;

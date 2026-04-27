@@ -44,6 +44,7 @@ const FICHA_LABELS: Record<string, string> = {
   espessura_chapa: "Espessura Chapa",
   nome_chapa: "Nome Chapa",
   tipo_tarraxa: "Tipo Tarraxa",
+  tipo_pedra: "Tipo de Pedra",
   pedras_detalhadas: "Pedras",
 };
 const TIPO_ITEM_LABELS: Record<string, string> = {
@@ -677,6 +678,9 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         return value.map((p: any) => `${p.tipo ?? ""}${p.qtd ? ` (${p.qtd}x)` : ""}`).filter(Boolean).join(", ") || "—";
                       }
+                      if (key === "peso_estimado" && value != null) {
+                        return `${Number(value).toFixed(2)}g`;
+                      }
                       return String(value);
                     };
                     const entries = Object.entries(dados ?? {}).filter(
@@ -713,7 +717,8 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                         </p>
                         <div className="grid grid-cols-2 gap-x-8">
                           {entries.map(([key, value]) => (
-                            <InfoRow key={key} label={fichaErpLabel(key)} value={String(value)} />
+                            <InfoRow key={key} label={fichaErpLabel(key)}
+                              value={key === "peso_estimado" ? `${Number(value).toFixed(2)}g` : String(value)} />
                           ))}
                         </div>
                       </div>

@@ -253,6 +253,7 @@ export default function OrcamentoClient({
         stoneSize: src.tamanho_pedra ? Number(src.tamanho_pedra) : p.stoneSize,
         stoneCount: src.qtd_pedras ? Number(src.qtd_pedras) : p.stoneCount,
         stoneDrill: !!src.pedra_drill, stoneHalfMoon: !!src.pedra_meia_lua, stoneFull: !!src.pedra_volta_completa,
+        stoneType: src.tipo_pedra ?? p.stoneType,
         stoneRows: src.pedra_fileiras ? Number(src.pedra_fileiras) : p.stoneRows,
         textEnabled: !!src.texto, textContent: src.texto || "",
         textFontType: src.tipo_fonte === "Cursiva" ? 2 : 1,
@@ -823,6 +824,7 @@ export default function OrcamentoClient({
       tipo_fonte: p.textEnabled && p.textContent.trim() ? (p.textFontType === 2 ? "Cursiva" : "Forma") : null,
       texto: p.textEnabled && p.textContent.trim() ? p.textContent.trim() : null,
       qtd_pedras: p.hasStones ? sc : null, tamanho_pedra: p.hasStones ? p.stoneSize : null,
+      tipo_pedra: p.hasStones ? p.stoneType : null,
       tipo_aplicacao_pedra: p.hasStones ? (p.stoneFull ? "Volta Completa" : p.stoneHalfMoon ? "Meia Alianca" : "Pontual") : null,
       profundidade_concava: p.concaveDepth,
       has_friso: p.hasGroove, friso_kind: p.hasGroove ? p.grooveKind : null,
@@ -2481,6 +2483,19 @@ export default function OrcamentoClient({
                     <span className="text-[10px] text-gray-400">max {stoneCapacity}</span>
                   </div>
                 )}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-gray-500 shrink-0">Tipo pedra:</span>
+                  <select
+                    value={activeParams.stoneType}
+                    onChange={e => updateParam("stoneType", e.target.value)}
+                    className="flex-1 text-[11px] border rounded-lg px-2 py-1"
+                    style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}
+                  >
+                    {["Zircônia", "Diamante", "Rubi", "Esmeralda", "Safira", "Outro"].map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={activeParams.stoneDrill} onChange={(e) => updateParam("stoneDrill", e.target.checked)} style={{ accentColor: C.esmeralda }} className="rounded" />
                   <span className="text-[10px] text-gray-500">Furo passante</span>

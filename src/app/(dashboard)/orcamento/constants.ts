@@ -88,6 +88,7 @@ export const DEFAULT_PARAMS: RingParams = {
   stoneDrill: true,
   stoneHalfMoon: false,
   stoneFull: false,
+  stoneType: "Zircônia",
   textEnabled: false,
   textFontType: 1,
   textContent: "",
