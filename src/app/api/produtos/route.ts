@@ -275,7 +275,7 @@ export async function GET(req: NextRequest) {
           p.tem_pedra_preciosa,
           p.situacao,
           p.categoria,
-          p.imagem   AS foto_produto,
+          vc.url_capa AS foto_produto,
           -- Saldo consolidado: MAIOR valor entre 3 fontes (próprio, filhos, directus).
           -- Usa GREATEST (não COALESCE) pra pais com linha em public.estoque = 0
           -- não ficarem "presos" a esse 0 e sim mostrarem a soma dos filhos.
@@ -342,6 +342,7 @@ export async function GET(req: NextRequest) {
             WHERE filhos.parent_id = ep.id
           ) ELSE 0 END AS qtd_variacoes
         FROM public.produtos p
+        LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
@@ -383,7 +384,7 @@ export async function GET(req: NextRequest) {
         p.tem_pedra_preciosa,
         p.situacao,
         p.categoria,
-        p.imagem      AS foto_produto,
+        vc.url_capa   AS foto_produto,
         GREATEST(
           COALESCE((SELECT e.saldo FROM public.estoque e WHERE e.sku = p.sku LIMIT 1), 0)::int,
           COALESCE((SELECT SUM(v.saldo) FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku), 0)::int
@@ -419,6 +420,7 @@ export async function GET(req: NextRequest) {
         NULL::text    AS numeracao,
         0::integer    AS qtd_variacoes
       FROM public.produtos p
+      LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
       WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}

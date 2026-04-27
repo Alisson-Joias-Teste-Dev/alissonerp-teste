@@ -76,12 +76,13 @@ export async function GET(req: NextRequest) {
       p.preco_tiny                        AS preco,
       p.preco_total_sync                  AS preco_com_pedras,
       p.tem_pedra_preciosa,
-      p.imagem                            AS foto,
+      vc.url_capa                         AS foto,
       p.categoria                         AS categoria,
       p.categoria_precificacao            AS categoria_precificacao,
       p.markup,
       p.updated_at
     FROM public.produtos p
+    LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
     WHERE 1=1
       ${filtroPorSituacao}
       ${filtroCategoria}

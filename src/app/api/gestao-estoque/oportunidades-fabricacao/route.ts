@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
         p.sku,
         p.nome,
         p.situacao,
-        p.imagem      AS imagem_capa,
+        vc.url_capa   AS imagem_capa,
         p.categoria,
         p.tipo_metal,
         p.peso_precificado,
@@ -108,6 +108,7 @@ export async function GET(req: NextRequest) {
       FROM public.produtos p
       JOIN vendas_agg va           ON va.produto_id = p.id_produto
       LEFT JOIN public.estoque e   ON e.sku        = p.sku
+      LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       WHERE
         -- SEM estoque OU desativado
         (COALESCE(e.saldo, 0) <= 0 OR COALESCE(p.situacao, 'I') <> 'A')

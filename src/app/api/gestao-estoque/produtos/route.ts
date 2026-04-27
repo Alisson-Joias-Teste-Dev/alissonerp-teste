@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
         p.categoria_precificacao,
         p.markup,
         p.fator,
-        p.imagem                  AS imagem_capa,
+        vc.url_capa               AS imagem_capa,
         COALESCE(ec.saldo_fisico, 0)::int AS saldo_estoque,
         COALESCE(ec.saldo_fisico, 0)::int AS estoque,
         uv.data_ultima_venda,
@@ -123,6 +123,7 @@ export async function GET(req: NextRequest) {
           ELSE NULL
         END AS preco_curva
       FROM public.produtos p
+      LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       LEFT JOIN estoque_comercial ec  ON ec.produto_id = p.id_produto
       LEFT JOIN ultima_venda uv       ON uv.produto_id = p.id_produto
       LEFT JOIN vendas_90d v90        ON v90.produto_id = p.id_produto

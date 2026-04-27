@@ -59,7 +59,7 @@ export async function GET(
             p.diferenca_percentual,
             p.tem_pedra_preciosa,
             p.situacao,
-            p.imagem     AS foto_produto,
+            vc.url_capa  AS foto_produto,
             NULL::text   AS descricao,
             NULL::text   AS referencia,
             p.categoria_precificacao AS categoria,
@@ -111,6 +111,7 @@ export async function GET(
             ts.status AS tiny_sync_status,
             ts.erro   AS tiny_sync_erro
           FROM public.produtos p
+          LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
           LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
           LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
@@ -130,7 +131,7 @@ export async function GET(
             p.diferenca_percentual,
             p.tem_pedra_preciosa,
             p.situacao,
-            p.imagem      AS foto_produto,
+            vc.url_capa   AS foto_produto,
             NULL::text    AS descricao,
             NULL::text    AS referencia,
             p.categoria_precificacao AS categoria,
@@ -179,6 +180,7 @@ export async function GET(
             ts.status AS tiny_sync_status,
             ts.erro   AS tiny_sync_erro
           FROM public.produtos p
+          LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
           LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
           WHERE p.id_produto = ${produtoId}
