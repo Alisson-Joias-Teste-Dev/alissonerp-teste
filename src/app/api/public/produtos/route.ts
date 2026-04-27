@@ -91,6 +91,7 @@ export async function GET(req: NextRequest) {
         p.categoria,
         p.tem_pedra_preciosa,
         vc.url_capa                     AS foto,
+        COALESCE(vi.imagens, '[]'::jsonb) AS imagens,
         COALESCE(p.preco_tiny::numeric, p.preco_sync::numeric, 0)  AS preco,
         -- Preço mínimo entre variações filhas (se produto pai)
         (
@@ -111,6 +112,7 @@ export async function GET(req: NextRequest) {
         )                               AS estoque
       FROM public.produtos p
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
+      LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       WHERE p.situacao = 'A'
         AND (ep.eh_variacao IS NULL OR ep.eh_variacao = false)

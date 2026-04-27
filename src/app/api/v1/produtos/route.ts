@@ -77,12 +77,14 @@ export async function GET(req: NextRequest) {
       p.preco_total_sync                  AS preco_com_pedras,
       p.tem_pedra_preciosa,
       vc.url_capa                         AS foto,
+      COALESCE(vi.imagens, '[]'::jsonb)   AS imagens,
       p.categoria                         AS categoria,
       p.categoria_precificacao            AS categoria_precificacao,
       p.markup,
       p.updated_at
     FROM public.produtos p
     LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
+    LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
     WHERE 1=1
       ${filtroPorSituacao}
       ${filtroCategoria}

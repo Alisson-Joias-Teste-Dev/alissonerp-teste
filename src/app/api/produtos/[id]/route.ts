@@ -60,6 +60,7 @@ export async function GET(
             p.tem_pedra_preciosa,
             p.situacao,
             vc.url_capa  AS foto_produto,
+            COALESCE(vi.imagens, '[]'::jsonb) AS imagens,
             NULL::text   AS descricao,
             NULL::text   AS referencia,
             p.categoria_precificacao AS categoria,
@@ -112,6 +113,7 @@ export async function GET(
             ts.erro   AS tiny_sync_erro
           FROM public.produtos p
           LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
+          LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
           LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
           LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
@@ -132,6 +134,7 @@ export async function GET(
             p.tem_pedra_preciosa,
             p.situacao,
             vc.url_capa   AS foto_produto,
+            COALESCE(vi.imagens, '[]'::jsonb) AS imagens,
             NULL::text    AS descricao,
             NULL::text    AS referencia,
             p.categoria_precificacao AS categoria,
@@ -181,6 +184,7 @@ export async function GET(
             ts.erro   AS tiny_sync_erro
           FROM public.produtos p
           LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
+          LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
           LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
           WHERE p.id_produto = ${produtoId}
