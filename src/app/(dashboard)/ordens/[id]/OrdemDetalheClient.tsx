@@ -122,8 +122,8 @@ function PecaClienteCard({ fotoPeca, pesoPeca, videoObs }: {
   const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
   // URLs públicas diretas (buckets públicos após migração)
-  const fotoUrl  = fotoPeca  ? `${SUPABASE_URL}/storage/v1/object/public/ordem-fotos/${fotoPeca}`   : null;
-  const videoUrl = videoObs  ? `${SUPABASE_URL}/storage/v1/object/public/ordem-videos/${videoObs}`  : null;
+  const fotoUrl  = fotoPeca  ? (fotoPeca.startsWith("http") ? fotoPeca : `${SUPABASE_URL}/storage/v1/object/public/ordem-fotos/${fotoPeca}`)   : null;
+  const videoUrl = videoObs  ? (videoObs.startsWith("http") ? videoObs : `${SUPABASE_URL}/storage/v1/object/public/ordem-videos/${videoObs}`)  : null;
 
   return (
     <div className="bg-white rounded-xl border p-5" style={{ borderColor: "#E8DCC8" }}>
