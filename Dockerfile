@@ -3,12 +3,13 @@ FROM node:20-alpine AS base
 # ---------- DEPS ----------
 FROM base AS deps
 WORKDIR /app
+ENV HUSKY=0
 COPY package.json package-lock.json* yarn.lock* pnpm-lock.yaml* ./
 RUN \
-  if [ -f yarn.lock ]; then HUSKY=0 yarn install --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then HUSKY=0 npm ci; \
-  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && HUSKY=0 pnpm i --frozen-lockfile; \
-  else HUSKY=0 npm i; \
+  if [ -f yarn.lock ]; then yarn install --frozen-lockfile; \
+  elif [ -f package-lock.json ]; then npm ci; \
+  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm i --frozen-lockfile; \
+  else npm i; \
   fi
 
 # ---------- BUILD ----------
