@@ -68,7 +68,7 @@ export async function validarPesoBalanca(
   const mediaType = (mediaTypeRaw || "image/jpeg") as MediaType;
 
   // ── 1. Ler configurações do banco ───────────────────────────────────────────
-  let config: Record<string, string> = {
+  const config: Record<string, string> = {
     ia_ativa: "true",
     ia_provedor: "claude",
     ia_modelo_claude: "claude-haiku-4-5-20251001",

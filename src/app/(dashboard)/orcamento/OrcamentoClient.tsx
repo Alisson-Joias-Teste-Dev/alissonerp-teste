@@ -510,7 +510,7 @@ export default function OrcamentoClient({
     return steps > 0 ? Math.round((10 - 4) / steps * 10) / 10 : 0;
   });
   // Markups por pedra por tamanho — carregado da config
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const [allStoneMarkups, setAllStoneMarkups] = useState<Record<string, Record<string, number>>>(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const raw = (config as any)?.stone_markups_table;
@@ -583,7 +583,7 @@ export default function OrcamentoClient({
       const rule = findGrooveRule(params.width, grooveRules);
       setParams((prev) => ({ ...prev, grooveWidth: rule.grooveWidth, grooveDepth: rule.grooveDepth, grooveOffset: rule.grooveOffset }));
     }
-  }, [params.width, params.hasGroove, params.grooveKind, grooveRules, riscoWidth, riscoDepth]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [params.width, params.hasGroove, params.grooveKind, grooveRules, riscoWidth, riscoDepth]);  
 
   // Calibracao vinda do config (com fallback para defaults conservadores)
   // Calibracao pode vir como objeto ou como string (caso legado do bug JSONB

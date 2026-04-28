@@ -387,7 +387,7 @@ export default function NovaVendaClientLegado({ role, vendedorId, maxDesconto }:
       valor: i === n - 1 ? +(totalVenda - base * (n - 1)).toFixed(2) : base,
     }));
     setParcelasRows(rows);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [pagCondicao, totalVenda, pagForma]);
 
   function equalizarParcelas() {

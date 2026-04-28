@@ -45,7 +45,7 @@ export default function GaleriaProduto({ produtoId, podeEditar = false, onCapaCh
     }
   }
 
-  useEffect(() => { carregar(); /* eslint-disable-next-line */ }, [produtoId]);
+  useEffect(() => { carregar();   }, [produtoId]);
 
   async function uploadFoto(file: File) {
     setBusy("upload");

@@ -13,7 +13,7 @@ export default async function NovaVendaPage() {
   let maxDesconto       = 15;
   let vendedorNome      = "";
   let vendedores: { id: number; nome: string }[] = [];
-  let userId            = user?.id ?? "";
+  const userId            = user?.id ?? "";
   let userName          = "";
 
   if (user) {

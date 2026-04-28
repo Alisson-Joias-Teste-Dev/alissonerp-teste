@@ -27,7 +27,7 @@ function sanitizeZpl(input: string): string {
   return input
     .replace(/\^/g, " ")
     .replace(/~/g, " ")
-    // eslint-disable-next-line no-control-regex
+     
     .replace(/[\x00-\x1F\x7F]/g, "")
     .trim();
 }

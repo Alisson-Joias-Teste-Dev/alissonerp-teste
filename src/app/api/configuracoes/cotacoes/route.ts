@@ -14,7 +14,7 @@ export async function GET() {
 
   const [params] = await sql`SELECT ouro, dollar, euro, prata FROM public.parametros LIMIT 1`;
 
-  let config = { auto_ativo: false, provedor: "openexchangerates", ultimo_update: null as string | null, api_key_configured: false };
+  const config = { auto_ativo: false, provedor: "openexchangerates", ultimo_update: null as string | null, api_key_configured: false };
   try {
     const rows = await sql`
       SELECT chave, valor FROM alissonerp.configuracoes_sistema

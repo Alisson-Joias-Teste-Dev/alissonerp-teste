@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
 
         // Garante SKU único em AMBAS as tabelas (public.produtos e erp_produtos).
         let sku = String(proxSku);
-        // eslint-disable-next-line no-constant-condition
+         
         while (true) {
           const [ex] = await tx`
             SELECT 1

@@ -12,7 +12,7 @@ export default async function PurificacaoPage() {
 
   let userRole: string | null = null;
   let userId: string | null = null;
-  let permissoesPurif = {
+  const permissoesPurif = {
     abrir_purificacao: false,
     concluir_purificacao: false,
     abrir_ligacao: false,

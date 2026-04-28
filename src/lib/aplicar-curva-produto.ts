@@ -23,7 +23,7 @@ import {
  *
  * SERVER-ONLY: este modulo nunca deve ser importado em Client Components.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export async function aplicarCurvaProduto(
   produtoId: number,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -620,7 +620,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       valor: i === n - 1 ? +(totalVenda - base * (n - 1)).toFixed(2) : base,
     }));
     setParcelasRows(rows);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [pagCondicao, totalVenda, pagForma]);
 
   // ─── CEP lookup ──────────────────────────────────────────────────────────
@@ -687,7 +687,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     if (usarEnderecoCliente && cliente) {
       calcularFrete(cliente.bairro ?? "", cliente.municipio ?? "");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [usarEnderecoCliente, cliente, modoEntrega]);
 
   // ─── CPF duplicado check ─────────────────────────────────────────────────

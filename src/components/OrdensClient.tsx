@@ -188,7 +188,7 @@ export default function OrdensClient({
 
   useEffect(() => {
     fetchFunil();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   function toggleCard(key: CardKey) {
