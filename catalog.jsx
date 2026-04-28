@@ -215,12 +215,12 @@ function ProductCard({ product, intensity = 1, showPrices = true, onOpen }) {
           <div className="product-price">
             {product.from > 0 && (
               <span className="price-row">
-                <span className="price-lbl">Valor sugerido</span>
+                <span className="price-lbl">De:</span>
                 <s className="price-old price-original">R$ {product.from.toLocaleString('pt-BR')}</s>
               </span>
             )}
             <span className="price-row price-now">
-              <span className="price-lbl">Edição Mães</span>
+              <span className="price-lbl">Por:</span>
               <strong>R$ {product.to.toLocaleString('pt-BR')}</strong>
             </span>
           </div>
@@ -393,12 +393,12 @@ function ProductDetail({ product, onClose, whatsNumber }) {
           <div className="pd-price-block">
             {product.from > 0 && (
               <div className="pd-price-row">
-                <span className="pd-price-lbl">Valor sugerido</span>
+                <span className="pd-price-lbl">De:</span>
                 <s className="pd-price-old price-original">R$ {product.from.toLocaleString('pt-BR')}</s>
               </div>
             )}
             <div className="pd-price-row pd-price-now">
-              <span className="pd-price-lbl">Edição Mães</span>
+              <span className="pd-price-lbl">Por:</span>
               <strong>R$ {product.to.toLocaleString('pt-BR')}</strong>
             </div>
           </div>
