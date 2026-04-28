@@ -225,3 +225,26 @@ Permissoes granulares: src/lib/permissoes.ts -> temPermissao()
 - **Modulo Service:** ver memory `project_modulo_service.md`
 - **Storage Buckets:** ver memory `project_storage_buckets.md`
 - **Usuarios teste:** ver `docs/claude-memory/MEMORY.md` secao 17
+
+---
+
+## 9. Regras Obrigatorias
+
+### Documentacao sempre em sincronia
+
+Toda alteracao no codigo — seja correcao de bug, refatoracao, ou feature nova — DEVE atualizar a documentacao afetada no MESMO commit.
+
+Arquivos de documentacao do projeto:
+- `MEMORY.md`
+- `CLAUDE.md`
+- `docs/arquitetura.md`
+- `ESTRUTURA_ATUAL.md`
+- `.aiox/knowledge/context.md`
+
+O que atualizar:
+- Arquivo criado/deletado/renomeado → atualizar referencias em todos os docs
+- Componente adicionado/removido → atualizar lista de componentes
+- Comportamento alterado → atualizar descricao do comportamento
+- Contagens (ex: "5 modais") → recalcular e corrigir
+
+Regra: se o commit altera codigo mas nao atualiza docs afetadas, o trabalho NAO esta completo. Docs desatualizadas sao bugs.
