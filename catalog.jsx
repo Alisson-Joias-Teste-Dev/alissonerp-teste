@@ -397,9 +397,6 @@ function ProductDetail({ product, onClose, whatsNumber }) {
               <span className="pd-price-lbl">Edição Mães</span>
               <strong>R$ {product.to.toLocaleString('pt-BR')}</strong>
             </div>
-            <div className="pd-install">
-              em até 12x de R$ {(product.to / 12).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} sem juros
-            </div>
           </div>
           {product._stock != null && product._stock <= 3 && (
             <div className="pd-scarcity">
