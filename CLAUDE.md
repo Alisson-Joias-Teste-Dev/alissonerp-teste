@@ -288,3 +288,28 @@ REJEICAO: se @qa REJEITAR → @aiox-master devolve automaticamente ao @dev/hotfi
 - Nunca pular o @qa — toda mudanca de codigo passa por revisao
 - Nunca autorizar push sem aprovacao explicita do Jonathan
 ```
+
+### Troca de modelo entre fases
+
+O fluxo usa modelos diferentes por fase:
+
+```
+FASE DE ANALISE (Opus):
+  @aiox-master, @analyst, @architect, @qa → exigem Opus
+
+FASE DE EXECUCAO (Sonnet):
+  @sm, @dev, @hotfix, @devops → rodam em Sonnet
+```
+
+Regra para o @aiox-master:
+
+```
+Ao terminar a fase de analise (antes de @dev/@hotfix):
+  → Avisar: "Analise completa. Troque para Sonnet com /model sonnet e diga 'continua'."
+
+Ao terminar a fase de execucao (antes de @qa):
+  → Avisar: "Implementacao pronta. Troque para Opus com /model opus e diga 'continua'."
+
+Quando Jonathan disser "continua" apos a troca:
+  → Retomar exatamente de onde parou e delegar pro proximo agente.
+```
