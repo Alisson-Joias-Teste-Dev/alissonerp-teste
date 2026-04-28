@@ -19,6 +19,7 @@ export default async function OrdemDetalhePage({
     sql`
       SELECT vod.*,
         u_criador.nome AS created_by_nome,
+        o2.created_by::text AS created_by_uuid,
         COALESCE(o2.venda_id, ve_fallback.id) AS venda_id
       FROM alissonerp.vw_ordem_detalhe vod
       LEFT JOIN alissonerp.ordens o2 ON o2.id = vod.id
@@ -74,9 +75,9 @@ export default async function OrdemDetalhePage({
     userRole = usuario?.role ?? null;
     if (usuario?.role === "consultora" && usuario.vendedor_id != null) {
       const ordemVendedorId = (ordens[0] as any).vendedor_id;
-      if (ordemVendedorId !== usuario.vendedor_id) {
-        redirect("/ordens");
-      }
+      const ordemCreatedBy  = (ordens[0] as any).created_by_uuid;
+      const ehDela = ordemVendedorId === usuario.vendedor_id || ordemCreatedBy === user.id;
+      if (!ehDela) redirect("/ordens");
     }
   }
 
