@@ -5,7 +5,7 @@
  * Limpo automaticamente a cada ciclo de verificação.
  */
 
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 
@@ -156,7 +156,6 @@ export function apiListResponse<T>(
 
 // ── Geração de nova chave ───────────────────────────────────────────────────────
 export function gerarApiKey(): { chave: string; hash: string; preview: string } {
-  const { randomBytes } = require("crypto") as typeof import("crypto");
   const raw = randomBytes(32).toString("hex"); // 64 chars hex
   const chave = `sk_live_${raw}`;
   const hash = createHash("sha256").update(chave).digest("hex");

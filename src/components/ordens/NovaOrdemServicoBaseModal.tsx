@@ -857,7 +857,7 @@ export default function NovaOrdemServicoBaseModal({
                   return outrosId && tiposSelecionados.includes(outrosId) ? (
                     <div className="mt-2">
                       <label className="block text-xs text-gray-400 mb-1">
-                        Descreva o serviço "Outros" *
+                        Descreva o serviço &ldquo;Outros&rdquo; *
                       </label>
                       <textarea
                         rows={2}

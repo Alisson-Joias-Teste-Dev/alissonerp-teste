@@ -527,7 +527,7 @@ const Dashboard: React.FC<DashboardProps> = ({
          : 0;
        const weight = weightKey ? (parseFloat(row[weightKey]) || 0) : 0;
        
-       let totalValue = stock * price;
+       const totalValue = stock * price;
 
        // Date Parsing
        let rowDate: Date | null = null;
@@ -1731,7 +1731,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     </h2>
                     <p className="text-sm text-gray-600 mt-1 max-w-2xl">
                       Peças <strong>que já venderam</strong> mas estão <strong>sem estoque</strong> ou desativadas.
-                      Possível "esquecimento" de re-fabricação.
+                      Possível &ldquo;esquecimento&rdquo; de re-fabricação.
                     </p>
                   </div>
                 </div>

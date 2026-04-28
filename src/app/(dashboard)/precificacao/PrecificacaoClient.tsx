@@ -1572,7 +1572,7 @@ function TabCurvaDinamica({
 
       <p className="flex items-center gap-1.5 mt-3 text-xs" style={{ color: P.muted }}>
         <Info size={12} />
-        Altere os parâmetros e clique em "Salvar Alterações". Para recalcular preços dos produtos, use "Aplicar em Produtos".
+        Altere os parâmetros e clique em &ldquo;Salvar Alterações&rdquo;. Para recalcular preços dos produtos, use &ldquo;Aplicar em Produtos&rdquo;.
       </p>
 
       {/* Modal Aplicar */}

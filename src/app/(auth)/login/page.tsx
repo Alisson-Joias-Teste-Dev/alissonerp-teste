@@ -79,7 +79,7 @@ function LoginForm() {
               className="border rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2"
               style={{
                 borderColor: C.cremeBorder,
-                // @ts-ignore
+                // @ts-expect-error — CSS custom property não reconhecida pelo TypeScript
                 "--tw-ring-color": C.esmeralda + "40",
               }}
               placeholder="seu@email.com"

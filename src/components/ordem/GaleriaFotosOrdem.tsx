@@ -291,7 +291,7 @@ export default function GaleriaFotosOrdem({ ordemId, arquivosPaths }: GaleriaFot
               Nenhuma foto anexada
             </p>
             <p className="text-[11px] mt-1" style={{ color: "#C4B5A0" }}>
-              Clique em "Adicionar" para enviar uma foto desta ordem.
+              Clique em &ldquo;Adicionar&rdquo; para enviar uma foto desta ordem.
             </p>
           </div>
         ) : (
@@ -348,7 +348,7 @@ export default function GaleriaFotosOrdem({ ordemId, arquivosPaths }: GaleriaFot
           onClick={fecharModal}
           onKeyDown={handleKeyDown}
           tabIndex={0}
-          // eslint-disable-next-line jsx-a11y/no-noninteractive-element-to-interactive-role
+           
           role="dialog"
           aria-modal="true"
           aria-label="Galeria de fotos"

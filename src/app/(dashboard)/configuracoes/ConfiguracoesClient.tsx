@@ -1925,7 +1925,7 @@ function TabPermissoes() {
 
   useEffect(() => {
     Promise.all([carregarRoles(), carregarPermissoes()]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, []);
 
   function toggleLevel(role: string, modulo: string) {
@@ -4492,7 +4492,7 @@ function TabMaquininhas() {
 
       {devices.length === 0 && (
         <div className="text-center py-10 text-sm" style={{ color: P.muted }}>
-          Clique em "Sincronizar com MP" para importar as maquininhas cadastradas no Mercado Pago.
+          Clique em &ldquo;Sincronizar com MP&rdquo; para importar as maquininhas cadastradas no Mercado Pago.
         </div>
       )}
 
