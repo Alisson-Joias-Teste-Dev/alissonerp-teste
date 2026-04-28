@@ -1,0 +1,442 @@
+"use client";
+
+import { useState, useMemo, useCallback } from "react";
+import {
+  CreditCard,
+  AlertTriangle,
+  Clock,
+  CheckCircle,
+  ChevronDown,
+  ChevronRight,
+  RefreshCw,
+  Search,
+  Loader2,
+  Wallet,
+  User,
+} from "lucide-react";
+import { apiFetch } from "@/lib/apiFetch";
+
+// ── Paleta ────────────────────────────────────────────────────────────────────
+const C = {
+  esmeralda:   "#184036",
+  esmeraldaLt: "#18403612",
+  creme:       "#F3EADA",
+  cremeBorder: "#E8DCC8",
+  cremeBg:     "#FAFAF7",
+  vermelho:    "#DC2626",
+  vermelhoLt:  "#FEE2E2",
+  ambar:       "#D97706",
+  ambarLt:     "#FEF3C7",
+  verde:       "#059669",
+  verdeLt:     "#D1FAE5",
+  cinza:       "#6B7280",
+  cinzaBorder: "#E5E7EB",
+};
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+export interface CrediarioItem {
+  conta_receber_id: number;
+  descricao: string;
+  valor: number;
+  data_vencimento: string | null;
+  data_recebimento: string | null;
+  situacao: string;
+  status_aging: string;
+  dias_atraso: number;
+  obs: string | null;
+  created_at: string;
+  venda_id: number | null;
+  numero_venda: string | null;
+  total_venda: number | null;
+  venda_situacao: string | null;
+  venda_bloqueada: boolean | null;
+  credito_gerente_usado: number | null;
+  venda_created_at: string | null;
+  cliente_id: number | null;
+  cliente_nome: string | null;
+  cliente_telefone: string | null;
+  vendedor_id: number | null;
+  vendedor_nome: string | null;
+  consultora_uuid: string | null;
+  consultora_nome: string | null;
+}
+
+interface Contagens {
+  total: number;
+  pendente: number;
+  pago: number;
+  vencido: number;
+  valor_pendente: number;
+  valor_vencido: number;
+}
+
+interface Props {
+  items: CrediarioItem[];
+  contagens: Contagens;
+  saldo: { atual: number; limite: number } | null;
+  userRole: string;
+  vendedorId: number | null;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtBRL(v: number) {
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+function fmtData(s: string | null) {
+  if (!s) return "—";
+  return new Date(s).toLocaleDateString("pt-BR");
+}
+
+function agingLabel(status: string, dias: number) {
+  if (status === "pago") return { text: "Pago", color: C.verde, bg: C.verdeLt };
+  if (status === "vencido") return { text: `Vencido ${dias}d`, color: C.vermelho, bg: C.vermelhoLt };
+  if (status === "vence_em_breve") return { text: "Vence em breve", color: C.ambar, bg: C.ambarLt };
+  return { text: "Em dia", color: C.esmeralda, bg: C.esmeraldaLt };
+}
+
+// ── Componente: Card de venda (agrupa parcelas da mesma venda) ────────────────
+function VendaCard({
+  vendaId,
+  numeroVenda,
+  clienteNome,
+  vendedorNome,
+  parcelas,
+  isGerente,
+}: {
+  vendaId: number | null;
+  numeroVenda: string | null;
+  clienteNome: string | null;
+  vendedorNome: string | null;
+  parcelas: CrediarioItem[];
+  isGerente: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const totalPendente = parcelas.filter(p => p.situacao === "pendente").reduce((s, p) => s + p.valor, 0);
+  const totalVencido  = parcelas.filter(p => p.status_aging === "vencido" && p.situacao === "pendente").reduce((s, p) => s + p.valor, 0);
+  const hasVencido    = totalVencido > 0;
+  const qtdPendentes  = parcelas.filter(p => p.situacao === "pendente").length;
+
+  return (
+    <div style={{
+      border: `1px solid ${hasVencido ? C.vermelho + "40" : C.cremeBorder}`,
+      borderRadius: 10,
+      background: hasVencido ? C.vermelhoLt + "40" : "#fff",
+      marginBottom: 10,
+    }}>
+      {/* Header da venda */}
+      <button
+        onClick={() => setExpanded(e => !e)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "12px 16px", background: "transparent", border: "none", cursor: "pointer",
+          borderRadius: expanded ? "10px 10px 0 0" : 10,
+          borderBottom: expanded ? `1px solid ${C.cremeBorder}` : "none",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          {expanded ? <ChevronDown size={16} color={C.cinza} /> : <ChevronRight size={16} color={C.cinza} />}
+          <div style={{ textAlign: "left", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontWeight: 600, fontSize: 14, color: C.esmeralda }}>
+                {numeroVenda ? `Venda ${numeroVenda}` : "Sem venda"}
+              </span>
+              {qtdPendentes > 0 && (
+                <span style={{
+                  fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 20,
+                  background: hasVencido ? C.vermelhoLt : C.esmeraldaLt,
+                  color: hasVencido ? C.vermelho : C.esmeralda,
+                }}>
+                  {qtdPendentes} pendente{qtdPendentes > 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: C.cinza, marginTop: 2, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <span><User size={11} style={{ display: "inline", marginRight: 3 }} />{clienteNome ?? "—"}</span>
+              {isGerente && vendedorNome && (
+                <span style={{ color: C.esmeralda }}>• {vendedorNome}</span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
+          {totalPendente > 0 && (
+            <div style={{ fontWeight: 700, fontSize: 15, color: hasVencido ? C.vermelho : C.esmeralda }}>
+              {fmtBRL(totalPendente)}
+            </div>
+          )}
+          {hasVencido && (
+            <div style={{ fontSize: 11, color: C.vermelho }}>
+              {fmtBRL(totalVencido)} vencido
+            </div>
+          )}
+        </div>
+      </button>
+
+      {/* Lista de parcelas */}
+      {expanded && (
+        <div style={{ padding: "8px 16px 12px" }}>
+          {parcelas.map((p) => {
+            const aging = agingLabel(p.status_aging, p.dias_atraso);
+            return (
+              <div key={p.conta_receber_id} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "8px 0",
+                borderBottom: `1px solid ${C.cremeBorder}`,
+              }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "#1f2937" }}>{p.descricao}</div>
+                  <div style={{ fontSize: 11, color: C.cinza, marginTop: 2 }}>
+                    Vence: {fmtData(p.data_vencimento)}
+                    {p.data_recebimento && ` · Recebido: ${fmtData(p.data_recebimento)}`}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: 12, flexShrink: 0 }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20,
+                    background: aging.bg, color: aging.color,
+                  }}>
+                    {aging.text}
+                  </span>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#1f2937", minWidth: 70, textAlign: "right" }}>
+                    {fmtBRL(p.valor)}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Componente principal ──────────────────────────────────────────────────────
+export default function CrediarioClient({ items, contagens, saldo, userRole, vendedorId }: Props) {
+  const [filtroSituacao, setFiltroSituacao] = useState<string>("pendente");
+  const [filtroAging, setFiltroAging] = useState<string>("");
+  const [busca, setBusca] = useState("");
+  const [loadedItems, setLoadedItems] = useState<CrediarioItem[]>(items);
+  const [loading, setLoading] = useState(false);
+
+  const isGerente = ["desenvolvedor", "admin", "gerente_loja"].includes(userRole);
+
+  const reload = useCallback(async (situacao: string, aging: string) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "200" });
+      if (situacao) params.set("situacao", situacao);
+      if (aging)    params.set("status_aging", aging);
+      if (!isGerente && vendedorId) params.set("vendedor_id", String(vendedorId));
+      const data = await apiFetch<{ items: CrediarioItem[] }>(`/api/crediario?${params}`);
+      setLoadedItems(data.items);
+    } finally {
+      setLoading(false);
+    }
+  }, [isGerente, vendedorId]);
+
+  const handleFiltroSituacao = (s: string) => {
+    setFiltroSituacao(s);
+    setFiltroAging("");
+    void reload(s, "");
+  };
+
+  const handleFiltroAging = (a: string) => {
+    const next = filtroAging === a ? "" : a;
+    setFiltroAging(next);
+    void reload(filtroSituacao, next);
+  };
+
+  // Agrupa por venda
+  const vendaGroups = useMemo(() => {
+    const filtered = busca.trim()
+      ? loadedItems.filter(i =>
+          (i.cliente_nome ?? "").toLowerCase().includes(busca.toLowerCase()) ||
+          (i.numero_venda ?? "").toLowerCase().includes(busca.toLowerCase()) ||
+          (i.vendedor_nome ?? "").toLowerCase().includes(busca.toLowerCase())
+        )
+      : loadedItems;
+
+    const map = new Map<string, CrediarioItem[]>();
+    for (const item of filtered) {
+      const key = item.venda_id ? String(item.venda_id) : `sem-venda-${item.conta_receber_id}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(item);
+    }
+    return Array.from(map.entries()).map(([key, parcelas]) => ({ key, parcelas }));
+  }, [loadedItems, busca]);
+
+  const saldoUsado = saldo ? saldo.limite - saldo.atual : 0;
+  const saldoPct = saldo ? Math.min(100, (saldoUsado / saldo.limite) * 100) : 0;
+
+  const tabs = [
+    { key: "pendente", label: "Pendentes", count: contagens.pendente },
+    { key: "pago",     label: "Pagos",     count: contagens.pago },
+    { key: "",         label: "Todos",     count: contagens.total },
+  ];
+
+  return (
+    <div style={{ background: C.cremeBg, minHeight: "100vh", padding: "20px 16px" }}>
+      <div style={{ maxWidth: 960, margin: "0 auto" }}>
+
+        {/* ── Cabeçalho ─────────────────────────────────────────────────────── */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 10,
+            background: C.esmeraldaLt, display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <CreditCard size={20} color={C.esmeralda} />
+          </div>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: C.esmeralda }}>Crediário</h1>
+            <p style={{ margin: 0, fontSize: 12, color: C.cinza }}>A Receber — vendas a prazo</p>
+          </div>
+        </div>
+
+        {/* ── Cards de resumo ───────────────────────────────────────────────── */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12, marginBottom: 20 }}>
+          <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+              <Clock size={12} /> Pendente
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 20, color: C.esmeralda }}>{fmtBRL(contagens.valor_pendente)}</div>
+            <div style={{ fontSize: 11, color: C.cinza }}>{contagens.pendente} conta{contagens.pendente !== 1 ? "s" : ""}</div>
+          </div>
+
+          {contagens.vencido > 0 && (
+            <div style={{ background: C.vermelhoLt, border: `1px solid ${C.vermelho}30`, borderRadius: 10, padding: "14px 16px" }}>
+              <div style={{ fontSize: 11, color: C.vermelho, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+                <AlertTriangle size={12} /> Vencido
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 20, color: C.vermelho }}>{fmtBRL(contagens.valor_vencido)}</div>
+              <div style={{ fontSize: 11, color: C.vermelho }}>{contagens.vencido} conta{contagens.vencido !== 1 ? "s" : ""}</div>
+            </div>
+          )}
+
+          <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+              <CheckCircle size={12} /> Recebidos
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 20, color: C.verde }}>{contagens.pago}</div>
+            <div style={{ fontSize: 11, color: C.cinza }}>contas pagas</div>
+          </div>
+
+          {/* Saldo da gerente — só visível para gerente/admin */}
+          {saldo && (
+            <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
+              <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+                <Wallet size={12} /> Saldo Crédito
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 20, color: saldo.atual < saldo.limite * 0.2 ? C.vermelho : C.esmeralda }}>
+                {fmtBRL(saldo.atual)}
+              </div>
+              <div style={{ fontSize: 11, color: C.cinza }}>de {fmtBRL(saldo.limite)}</div>
+              {/* barra de progresso */}
+              <div style={{ marginTop: 8, height: 4, borderRadius: 2, background: C.cremeBorder, overflow: "hidden" }}>
+                <div style={{
+                  height: "100%", width: `${saldoPct}%`, borderRadius: 2,
+                  background: saldoPct > 80 ? C.vermelho : saldoPct > 50 ? C.ambar : C.verde,
+                  transition: "width 0.3s",
+                }} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Filtros ───────────────────────────────────────────────────────── */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+          {tabs.map(t => (
+            <button
+              key={t.key}
+              onClick={() => handleFiltroSituacao(t.key)}
+              style={{
+                padding: "6px 14px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                background: filtroSituacao === t.key ? C.esmeralda : "#fff",
+                color:      filtroSituacao === t.key ? "#fff" : C.cinza,
+                boxShadow:  filtroSituacao === t.key ? "none" : `0 0 0 1px ${C.cremeBorder}`,
+              }}
+            >
+              {t.label} {t.count > 0 && <span style={{ opacity: 0.7 }}>({t.count})</span>}
+            </button>
+          ))}
+
+          {filtroSituacao === "pendente" && (
+            <>
+              <button
+                onClick={() => handleFiltroAging("vencido")}
+                style={{
+                  padding: "6px 14px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12,
+                  background: filtroAging === "vencido" ? C.vermelho : C.vermelhoLt,
+                  color:      filtroAging === "vencido" ? "#fff" : C.vermelho,
+                }}
+              >
+                <AlertTriangle size={11} style={{ display: "inline", marginRight: 4 }} />
+                Vencidos
+              </button>
+              <button
+                onClick={() => handleFiltroAging("vence_em_breve")}
+                style={{
+                  padding: "6px 14px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12,
+                  background: filtroAging === "vence_em_breve" ? C.ambar : C.ambarLt,
+                  color:      filtroAging === "vence_em_breve" ? "#fff" : C.ambar,
+                }}
+              >
+                Vence em breve
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* ── Busca ─────────────────────────────────────────────────────────── */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 8,
+          padding: "8px 12px", marginBottom: 16,
+        }}>
+          <Search size={15} color={C.cinza} />
+          <input
+            value={busca}
+            onChange={e => setBusca(e.target.value)}
+            placeholder="Buscar por cliente, venda ou consultora..."
+            style={{ border: "none", outline: "none", flex: 1, fontSize: 13, background: "transparent", color: "#1f2937" }}
+          />
+        </div>
+
+        {/* ── Lista de vendas agrupadas ─────────────────────────────────────── */}
+        {loading ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+            <Loader2 size={24} color={C.esmeralda} style={{ animation: "spin 1s linear infinite" }} />
+          </div>
+        ) : vendaGroups.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 48, color: C.cinza }}>
+            <CreditCard size={32} style={{ opacity: 0.3, marginBottom: 8 }} />
+            <p style={{ margin: 0, fontSize: 14 }}>Nenhum registro encontrado</p>
+          </div>
+        ) : (
+          vendaGroups.map(({ key, parcelas }) => {
+            const first = parcelas[0];
+            return (
+              <VendaCard
+                key={key}
+                vendaId={first.venda_id}
+                numeroVenda={first.numero_venda}
+                clienteNome={first.cliente_nome}
+                vendedorNome={first.vendedor_nome}
+                parcelas={parcelas}
+                isGerente={isGerente}
+              />
+            );
+          })
+        )}
+
+        {vendaGroups.length > 0 && (
+          <p style={{ textAlign: "center", fontSize: 12, color: C.cinza, marginTop: 16 }}>
+            {vendaGroups.length} venda{vendaGroups.length !== 1 ? "s" : ""} — {loadedItems.length} conta{loadedItems.length !== 1 ? "s" : ""}
+          </p>
+        )}
+      </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
