@@ -2163,17 +2163,14 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           </button>
                         )}
 
-                        {/* A Receber com crédito aprovado → fluxo registrar recebimento */}
-                        {isAReceber && pag.status === "pendente" && creditoAprovado &&
-                          (isFullAccess || ["gerente_loja", "diretor"].includes(role)) && (
-                          recebimentoPagId === pag.id ? null : (
-                            <button
-                              onClick={() => { setRecebimentoPagId(pag.id); setRecebimentoTipo(null); setRecebimentoMsg(null); setRecebimentoMpId(""); }}
-                              className="text-xs px-2.5 py-1 rounded-lg font-medium"
-                              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                              Registrar Recebimento
-                            </button>
-                          )
+                        {/* A Receber com crédito aprovado → gerenciar no Crediário */}
+                        {isAReceber && pag.status === "pendente" && creditoAprovado && (
+                          <a
+                            href="/crediario"
+                            className="text-xs px-2.5 py-1 rounded-lg font-medium inline-flex items-center gap-1"
+                            style={{ backgroundColor: C.esmeralda, color: C.creme, textDecoration: "none" }}>
+                            Crediário →
+                          </a>
                         )}
 
                         {/* Manual (MP) pendente → botão confirmar com ID (qualquer role) */}

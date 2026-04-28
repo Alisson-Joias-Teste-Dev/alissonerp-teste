@@ -13,6 +13,9 @@ import {
   Loader2,
   Wallet,
   User,
+  X,
+  MessageSquare,
+  ExternalLink,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 
@@ -61,6 +64,19 @@ export interface CrediarioItem {
   consultora_nome: string | null;
 }
 
+interface Comunicacao {
+  id: number;
+  tipo: string;
+  mensagem: string;
+  created_at: string;
+  usuario_nome: string | null;
+}
+
+interface ContaDetalhe extends CrediarioItem {
+  cliente_email: string | null;
+  comunicacoes: Comunicacao[];
+}
+
 interface Contagens {
   total: number;
   pendente: number;
@@ -86,12 +102,302 @@ function fmtData(s: string | null) {
   if (!s) return "—";
   return new Date(s).toLocaleDateString("pt-BR");
 }
+function fmtDtHr(s: string) {
+  return new Date(s).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
 
 function agingLabel(status: string, dias: number) {
   if (status === "pago") return { text: "Pago", color: C.verde, bg: C.verdeLt };
   if (status === "vencido") return { text: `Vencido ${dias}d`, color: C.vermelho, bg: C.vermelhoLt };
   if (status === "vence_em_breve") return { text: "Vence em breve", color: C.ambar, bg: C.ambarLt };
   return { text: "Em dia", color: C.esmeralda, bg: C.esmeraldaLt };
+}
+
+// ── Drawer de detalhe ─────────────────────────────────────────────────────────
+function DetalheDrawer({
+  contaId,
+  isGerente,
+  onClose,
+  onBaixa,
+}: {
+  contaId: number;
+  isGerente: boolean;
+  onClose: () => void;
+  onBaixa: (id: number) => void;
+}) {
+  const [detalhe, setDetalhe] = useState<ContaDetalhe | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [obs, setObs] = useState("");
+  const [baixando, setBaixando] = useState(false);
+  const [err, setErr] = useState("");
+  const [novaMsg, setNovaMsg] = useState("");
+  const [enviandoMsg, setEnviandoMsg] = useState(false);
+
+  const carregar = useCallback(async () => {
+    setLoading(true);
+    try {
+      const d = await apiFetch<ContaDetalhe>(`/api/crediario/${contaId}`);
+      setDetalhe(d);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Erro ao carregar");
+    } finally {
+      setLoading(false);
+    }
+  }, [contaId]);
+
+  // Carregar na montagem
+  useState(() => { void carregar(); });
+
+  async function handleBaixa() {
+    setBaixando(true);
+    setErr("");
+    try {
+      await apiFetch(`/api/crediario/${contaId}/registrar-pagamento`, {
+        method: "POST",
+        body: JSON.stringify({ obs: obs.trim() || undefined }),
+      });
+      onBaixa(contaId);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Erro ao registrar baixa");
+    } finally {
+      setBaixando(false);
+    }
+  }
+
+  async function handleEnviarMensagem() {
+    if (!novaMsg.trim()) return;
+    setEnviandoMsg(true);
+    try {
+      await apiFetch(`/api/crediario/${contaId}/comunicacao`, {
+        method: "POST",
+        body: JSON.stringify({ tipo: "observacao", mensagem: novaMsg.trim() }),
+      });
+      setNovaMsg("");
+      await carregar();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Erro ao enviar mensagem");
+    } finally {
+      setEnviandoMsg(false);
+    }
+  }
+
+  const aging = detalhe ? agingLabel(detalhe.status_aging, detalhe.dias_atraso) : null;
+  const podeRegistrarBaixa = isGerente && detalhe?.situacao === "pendente";
+
+  return (
+    <>
+      {/* Overlay */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 40,
+        }}
+      />
+      {/* Drawer */}
+      <div style={{
+        position: "fixed", top: 0, right: 0, bottom: 0, width: "min(420px, 100vw)",
+        background: "#fff", zIndex: 50, display: "flex", flexDirection: "column",
+        boxShadow: "-4px 0 24px rgba(0,0,0,0.12)",
+      }}>
+        {/* Header */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 20px", borderBottom: `1px solid ${C.cremeBorder}`,
+          background: C.cremeBg,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <CreditCard size={18} color={C.esmeralda} />
+            <span style={{ fontWeight: 700, fontSize: 15, color: C.esmeralda }}>
+              Detalhe do Crediário
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer" }}>
+            <X size={18} color={C.cinza} />
+          </button>
+        </div>
+
+        {loading ? (
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", flex: 1 }}>
+            <Loader2 size={24} color={C.esmeralda} style={{ animation: "spin 1s linear infinite" }} />
+          </div>
+        ) : !detalhe ? (
+          <div style={{ padding: 24, color: C.vermelho }}>Erro ao carregar dados.</div>
+        ) : (
+          <div style={{ flex: 1, overflow: "auto", padding: "16px 20px" }}>
+            {/* Status badge */}
+            {aging && (
+              <span style={{
+                display: "inline-block", fontSize: 12, fontWeight: 700,
+                padding: "3px 10px", borderRadius: 20, marginBottom: 14,
+                background: aging.bg, color: aging.color,
+              }}>
+                {aging.text}
+              </span>
+            )}
+
+            {/* Valor */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: C.esmeralda }}>
+                {fmtBRL(detalhe.valor)}
+              </div>
+              <div style={{ fontSize: 13, color: C.cinza }}>{detalhe.descricao}</div>
+            </div>
+
+            {/* Datas */}
+            <div style={{
+              display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16,
+              background: C.cremeBg, borderRadius: 8, padding: "12px 14px",
+            }}>
+              <div>
+                <div style={{ fontSize: 10, color: C.cinza, textTransform: "uppercase", letterSpacing: 1 }}>Vencimento</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#1f2937", marginTop: 2 }}>
+                  {fmtData(detalhe.data_vencimento)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: C.cinza, textTransform: "uppercase", letterSpacing: 1 }}>Recebimento</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: detalhe.data_recebimento ? C.verde : C.cinza, marginTop: 2 }}>
+                  {fmtData(detalhe.data_recebimento)}
+                </div>
+              </div>
+            </div>
+
+            {/* Cliente */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Cliente</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#1f2937" }}>{detalhe.cliente_nome ?? "—"}</div>
+              {detalhe.cliente_telefone && (
+                <div style={{ fontSize: 12, color: C.cinza }}>{detalhe.cliente_telefone}</div>
+              )}
+            </div>
+
+            {/* Venda */}
+            {detalhe.venda_id && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Venda</div>
+                <a
+                  href={`/vendas/${detalhe.venda_id}`}
+                  style={{ fontSize: 13, color: C.esmeralda, textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}>
+                  {detalhe.numero_venda ?? `#${detalhe.venda_id}`}
+                  <ExternalLink size={11} />
+                </a>
+                {detalhe.vendedor_nome && (
+                  <div style={{ fontSize: 12, color: C.cinza, marginTop: 2 }}>Consultora: {detalhe.vendedor_nome}</div>
+                )}
+              </div>
+            )}
+
+            {/* Observação */}
+            {detalhe.obs && (
+              <div style={{
+                marginBottom: 12, padding: "10px 12px", borderRadius: 8,
+                background: C.ambarLt, fontSize: 12, color: "#92400e",
+              }}>
+                {detalhe.obs}
+              </div>
+            )}
+
+            {/* Baixa */}
+            {podeRegistrarBaixa && (
+              <div style={{
+                marginBottom: 16, padding: "14px", borderRadius: 10,
+                border: `1px solid ${C.esmeralda}30`, background: C.esmeraldaLt,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.esmeralda, marginBottom: 8 }}>
+                  Registrar Recebimento
+                </div>
+                <textarea
+                  value={obs}
+                  onChange={e => setObs(e.target.value)}
+                  placeholder="Observação (opcional)..."
+                  rows={2}
+                  style={{
+                    width: "100%", fontSize: 13, padding: "8px 10px",
+                    border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
+                    resize: "none", outline: "none", background: "#fff",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <button
+                  onClick={handleBaixa}
+                  disabled={baixando}
+                  style={{
+                    marginTop: 8, width: "100%", padding: "9px",
+                    background: C.esmeralda, color: "#fff", border: "none",
+                    borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: baixando ? "not-allowed" : "pointer",
+                    opacity: baixando ? 0.7 : 1,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                  }}
+                >
+                  {baixando
+                    ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Confirmando...</>
+                    : <><CheckCircle size={14} /> Confirmar Recebimento</>
+                  }
+                </button>
+              </div>
+            )}
+
+            {err && (
+              <div style={{ padding: "8px 12px", borderRadius: 6, background: C.vermelhoLt, color: C.vermelho, fontSize: 12, marginBottom: 12 }}>
+                {err}
+              </div>
+            )}
+
+            {/* Timeline de comunicações */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
+                <MessageSquare size={13} /> Histórico ({detalhe.comunicacoes.length})
+              </div>
+              {detalhe.comunicacoes.length === 0 && (
+                <div style={{ fontSize: 12, color: C.cinza, fontStyle: "italic" }}>Sem registros ainda.</div>
+              )}
+              {detalhe.comunicacoes.map(cc => (
+                <div key={cc.id} style={{
+                  marginBottom: 8, padding: "8px 10px", borderRadius: 6,
+                  background: cc.tipo === "aviso_recebimento" ? C.verdeLt : C.cremeBg,
+                  border: `1px solid ${C.cremeBorder}`,
+                }}>
+                  <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>
+                    <span style={{ fontWeight: 600, color: cc.tipo === "aviso_recebimento" ? C.verde : C.esmeralda }}>
+                      {cc.tipo === "aviso_recebimento" ? "✓ Recebimento" : cc.tipo === "cobranca" ? "⚠ Cobrança" : "Obs."}
+                    </span>
+                    {" · "}{cc.usuario_nome ?? "Sistema"} · {fmtDtHr(cc.created_at)}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#1f2937" }}>{cc.mensagem}</div>
+                </div>
+              ))}
+
+              {/* Nova observação */}
+              <div style={{ marginTop: 12, display: "flex", gap: 6 }}>
+                <input
+                  value={novaMsg}
+                  onChange={e => setNovaMsg(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleEnviarMensagem(); } }}
+                  placeholder="Adicionar observação..."
+                  style={{
+                    flex: 1, fontSize: 12, padding: "7px 10px",
+                    border: `1px solid ${C.cremeBorder}`, borderRadius: 6, outline: "none",
+                  }}
+                />
+                <button
+                  onClick={handleEnviarMensagem}
+                  disabled={!novaMsg.trim() || enviandoMsg}
+                  style={{
+                    padding: "7px 12px", background: C.esmeralda, color: "#fff",
+                    border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600,
+                    opacity: !novaMsg.trim() || enviandoMsg ? 0.5 : 1,
+                  }}
+                >
+                  {enviandoMsg ? "..." : "OK"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
 }
 
 // ── Componente: Card de venda (agrupa parcelas da mesma venda) ────────────────
@@ -102,6 +408,7 @@ function VendaCard({
   vendedorNome,
   parcelas,
   isGerente,
+  onSelectParcela,
 }: {
   vendaId: number | null;
   numeroVenda: string | null;
@@ -109,6 +416,7 @@ function VendaCard({
   vendedorNome: string | null;
   parcelas: CrediarioItem[];
   isGerente: boolean;
+  onSelectParcela: (id: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -179,11 +487,16 @@ function VendaCard({
           {parcelas.map((p) => {
             const aging = agingLabel(p.status_aging, p.dias_atraso);
             return (
-              <div key={p.conta_receber_id} style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "8px 0",
-                borderBottom: `1px solid ${C.cremeBorder}`,
-              }}>
+              <div
+                key={p.conta_receber_id}
+                onClick={() => onSelectParcela(p.conta_receber_id)}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "8px 0",
+                  borderBottom: `1px solid ${C.cremeBorder}`,
+                  cursor: "pointer",
+                }}
+              >
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 500, color: "#1f2937" }}>{p.descricao}</div>
                   <div style={{ fontSize: 11, color: C.cinza, marginTop: 2 }}>
@@ -218,6 +531,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   const [busca, setBusca] = useState("");
   const [loadedItems, setLoadedItems] = useState<CrediarioItem[]>(items);
   const [loading, setLoading] = useState(false);
+  const [selectedContaId, setSelectedContaId] = useState<number | null>(null);
 
   const isGerente = ["desenvolvedor", "admin", "gerente_loja"].includes(userRole);
 
@@ -246,6 +560,12 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     setFiltroAging(next);
     void reload(filtroSituacao, next);
   };
+
+  const handleBaixaConfirmada = useCallback((contaId: number) => {
+    // Remove o item da lista e recarrega
+    setLoadedItems(prev => prev.filter(i => i.conta_receber_id !== contaId));
+    void reload(filtroSituacao, filtroAging);
+  }, [filtroSituacao, filtroAging, reload]);
 
   // Agrupa por venda
   const vendaGroups = useMemo(() => {
@@ -291,6 +611,16 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
             <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: C.esmeralda }}>Crediário</h1>
             <p style={{ margin: 0, fontSize: 12, color: C.cinza }}>A Receber — vendas a prazo</p>
           </div>
+          <button
+            onClick={() => void reload(filtroSituacao, filtroAging)}
+            disabled={loading}
+            style={{
+              marginLeft: "auto", background: "none", border: `1px solid ${C.cremeBorder}`,
+              borderRadius: 8, padding: "6px 10px", cursor: "pointer",
+            }}
+          >
+            <RefreshCw size={14} color={C.cinza} style={loading ? { animation: "spin 1s linear infinite" } : {}} />
+          </button>
         </div>
 
         {/* ── Cards de resumo ───────────────────────────────────────────────── */}
@@ -331,7 +661,6 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
                 {fmtBRL(saldo.atual)}
               </div>
               <div style={{ fontSize: 11, color: C.cinza }}>de {fmtBRL(saldo.limite)}</div>
-              {/* barra de progresso */}
               <div style={{ marginTop: 8, height: 4, borderRadius: 2, background: C.cremeBorder, overflow: "hidden" }}>
                 <div style={{
                   height: "100%", width: `${saldoPct}%`, borderRadius: 2,
@@ -424,6 +753,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
                 vendedorNome={first.vendedor_nome}
                 parcelas={parcelas}
                 isGerente={isGerente}
+                onSelectParcela={setSelectedContaId}
               />
             );
           })
@@ -435,6 +765,16 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
           </p>
         )}
       </div>
+
+      {/* ── Drawer de detalhe ─────────────────────────────────────────────── */}
+      {selectedContaId !== null && (
+        <DetalheDrawer
+          contaId={selectedContaId}
+          isGerente={isGerente}
+          onClose={() => setSelectedContaId(null)}
+          onBaixa={handleBaixaConfirmada}
+        />
+      )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
