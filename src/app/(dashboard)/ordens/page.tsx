@@ -56,8 +56,18 @@ export default async function OrdensPage({
   }
 
   // Fragmentos SQL dinâmicos — evita "could not determine data type of parameter $N"
-  const whereVendedor = vendedorIdFiltro !== null
-    ? sql`AND vendedor_id = ${vendedorIdFiltro}`
+  // Fallback created_by: ordens criadas pela consultora mas com vendedor_id=NULL
+  // também devem aparecer (vendor_id pode ser null quando usuarios.vendedor_id
+  // não estava configurado no momento da criação).
+  const whereVendedor = vendedorIdFiltro !== null && user
+    ? sql`AND (
+        vendedor_id = ${vendedorIdFiltro}
+        OR id IN (
+          SELECT id FROM alissonerp.ordens
+          WHERE created_by = ${user.id}::uuid
+            AND vendedor_id IS NULL
+        )
+      )`
     : sql``;
 
   // unaccent() torna a busca insensível a acentos: usuário digita "Joao"
