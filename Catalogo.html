@@ -1377,9 +1377,36 @@ function App() {
       const OV = window.CatalogOverrides;
       const overrides = OV ? OV.loadOverrides() : {};
       const assignments = OV ? OV.loadAssignments() : {};
+
+      // ─── FILTRO DE EXIBIÇÃO ───────────────────────────────────────────────────
+      // Só aparece no catálogo:
+      //   (1) SKUs do PDF "Promoção Fim de Mês" — lista fechada abaixo
+      //   (2) Refs atribuídos manualmente a qualquer vitrine pelo painel
+      const PROMO_SKUS = new Set([
+        'AJ2019','AJ4932','AJ4171','AJ2017','AJ1515','AJ2016',
+        'AJ4423','AJ4999','AJ1962','AJ4502','AJ4874','AJ4918',
+        'AJ4924','AJ1681','AJ4901','AJ4853','AJ4990','AJ4921',
+        'AJ4880','AJ4989','AJ5002','AJ4997','AJ4815','AJ4900',
+        'AJ5032','AJ4897','AJ4509','AJ5064','AJ4558','AJ4879',
+        'AJ4927','AJ4931','AJ5062','AJ5070','AJ5074','AJ5061',
+        'AJ5027','AJ5059','AJ5068',
+        // Anéis: PDF usa sufixo de tamanho (1020-9, 1457-15…) mas ERP
+        // só tem o ref base — incluímos ambos para garantir o match
+        '1020','1020-9',
+        '1224','1224-9',
+        '1429','1429-11',
+        '1430','1430-9',
+        '1431','1431-15',
+        '1432','1432-8',
+        '1440','1440-13','1440-16',
+        '1441','1441-18',
+        '1457','1457-15','1457-16',
+      ]);
+      const manualRefs = new Set(Object.values(assignments).flat());
+
       const erpEnriched = (erpProducts || [])
         .map(p => OV ? OV.applyOverride(p, overrides[p.ref]) : p)
-        .filter(p => !p.hidden);
+        .filter(p => !p.hidden && (PROMO_SKUS.has(p.ref) || manualRefs.has(p.ref)));
 
       // Index por ref para lookup rápido
       const erpByRef = {};
