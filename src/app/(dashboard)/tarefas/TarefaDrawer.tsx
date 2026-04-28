@@ -481,7 +481,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
                         </span>
                       </div>
                       <p className="text-[11px]" style={{ color: "#6B7280" }}>Aprovador: {a.aprovador_nome}</p>
-                      {a.motivo && <p className="text-xs mt-1 italic" style={{ color: "#6B7280" }}>"{a.motivo}"</p>}
+                      {a.motivo && <p className="text-xs mt-1 italic" style={{ color: "#6B7280" }}>&ldquo;{a.motivo}&rdquo;</p>}
                       {a.respondido_em && <p className="text-[10px] mt-1" style={{ color: "#9CA3AF" }}>Respondido em {fmtHora(a.respondido_em)}</p>}
 
                       {/* Botões de resposta para o aprovador */}

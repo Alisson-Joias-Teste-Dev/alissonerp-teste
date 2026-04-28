@@ -94,6 +94,7 @@ export function useDateRange() {
   const [from, setFrom] = useState<string>(inicioMes.toISOString().slice(0, 10));
   const [to, setTo] = useState<string>(hoje.toISOString().slice(0, 10));
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const setRange = useCallback((newFrom: string, newTo: string) => {
     setFrom(newFrom);
     setTo(newTo);

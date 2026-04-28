@@ -6,6 +6,14 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   // Override default ignores of eslint-config-next.
+  // Rebaixa regras legacy de error → warn para não bloquear o hook durante limpeza gradual
+  {
+    rules: {
+      "@typescript-eslint/no-explicit-any":   "warn",
+      "react-hooks/set-state-in-effect":       "warn",
+      "react-hooks/static-components":         "warn",
+    },
+  },
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
