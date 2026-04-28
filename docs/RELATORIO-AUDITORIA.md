@@ -267,7 +267,6 @@
 ### ORDENS (expandido)
 | Método | Path | O que faz |
 |--------|------|-----------|
-| GET | `/api/ordens/contatos` | Autocomplete contatos para criação de ordem |
 | GET | `/api/ordens/produtos-busca` | Autocomplete produtos para ordem |
 | GET | `/api/ordens/proximo-numero` | Preview próximo número C-XXXX |
 | GET | `/api/ordens/vendedores` | Vendedores ativos para dropdown |

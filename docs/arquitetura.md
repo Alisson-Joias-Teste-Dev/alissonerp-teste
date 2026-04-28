@@ -2180,7 +2180,6 @@ ALTER TABLE alissonerp.ordens
 | Rota | Método | Função |
 |------|--------|--------|
 | `/api/ordens` | POST | Cria ordem + itens + auditoria loja (transação atômica) |
-| `/api/ordens/contatos` | GET | Autocomplete clientes (`?busca=`) |
 | `/api/ordens/vendedores` | GET | Lista vendedores ativos |
 | `/api/ordens/produtos-busca` | GET | Busca produtos ativos (`?busca=`) |
 | `/api/ordens/[id]/itens` | GET | Itens da ordem — detecta origem automaticamente |

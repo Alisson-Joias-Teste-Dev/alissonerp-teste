@@ -510,7 +510,6 @@ POST /api/ordens                     → cria ordem ERP + itens (alissonerp.iten
                                               video_observacao? }
                                        Número = MAX(alissonerp + directus) + 1
                                        Rota automática: servico_venda → protocolo; demais → pcp
-GET  /api/ordens/contatos?busca=     → autocomplete clientes (public.contatos) — debounce 300ms
 GET  /api/ordens/vendedores          → lista vendedores ativos (public.vendedores)
 GET  /api/ordens/produtos-busca?busca= → busca produtos ativos (public.produtos + erp_produtos)
 GET  /api/ordens/rastreio?inicio=YYYY-MM-DD&fim=YYYY-MM-DD
@@ -1543,7 +1542,6 @@ POST /api/ordens              → cria ordem + itens (alissonerp.itens_ordem) + 
   Aceita: cliente_id? vendedor_id? detalhes_ordem? fotos_base64[]? itens[{produto_id,qtd,peso_estimado?}]
   fotos_base64[]: upload server-side → bucket ordem-fotos → salvo em ordens.fotos_paths TEXT[]
   Rollback: se qualquer upload falhar, limpa órfãos e retorna 500 (sem criar ordem)
-GET  /api/ordens/contatos     → ?busca= autocomplete clientes (public.contatos)
 GET  /api/ordens/vendedores   → lista vendedores ativos (public.vendedores)
 GET  /api/ordens/produtos-busca → ?busca= busca produtos (public.produtos + erp_produtos)
 GET  /api/produtos/[id]/variacoes → variações ativas de produto pai (erp_produtos.parent_id)
