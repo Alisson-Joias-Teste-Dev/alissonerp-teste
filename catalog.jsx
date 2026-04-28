@@ -335,8 +335,12 @@ function ProductDetail({ product, onClose, whatsNumber }) {
 
   if (!product) return null;
 
-  const hasRealGallery = product.gallery && product.gallery.length > 0;
-  const gallery = hasRealGallery ? product.gallery : ['a', 'b', 'c', 'd'];
+  // Monta galeria: usa gallery do produto, ou img como único item, ou placeholders
+  const rawGallery = (product.gallery && product.gallery.length > 0)
+    ? product.gallery
+    : (product.img ? [product.img] : null);
+  const hasRealGallery = !!rawGallery;
+  const gallery = rawGallery || ['a', 'b', 'c', 'd'];
   const maxIdx = gallery.length - 1;
   const specs = product.specs || {};
   const msg = `Olá! Tenho interesse na peça *${product.name}* (ref. ${product.ref}). Poderia me enviar mais informações?`;

@@ -67,12 +67,20 @@ function CGProductCard({ product, size, onOpen, showPrice = true, tone }) {
       aria-label={product.name}
     >
       <div className="cg-card-img">
-        <window.CatalogComponents.JewelPlaceholder
-          label={product.name}
-          tint={tint}
-          dark={isDark}
-          variant={variant}
-        />
+        {product.img
+          ? <img
+              src={product.img}
+              alt={product.name}
+              className="cg-card-real-img"
+              style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }}
+            />
+          : <window.CatalogComponents.JewelPlaceholder
+              label={product.name}
+              tint={tint}
+              dark={isDark}
+              variant={variant}
+            />
+        }
       </div>
       <div className="cg-card-overlay">
         <span className="cg-card-name">{product.name}</span>
