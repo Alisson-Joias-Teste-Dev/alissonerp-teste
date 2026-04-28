@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { maskCpfCnpj } from "@/lib/formatters";
 import { useDebounce } from "./_shared/useDebounce";
+import { Steps } from "./_shared/Steps";
 import { compressImage } from "./_shared/compressImage";
 import { fmtData, fmtBRL } from "./_shared/formatters";
 import { SITUACAO_LABEL } from "./_shared/constants";
@@ -55,41 +56,6 @@ export interface NovaOrdemServicoBaseModalProps {
 }
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
-function Steps({ current }: { current: number }) {
-  const steps = ["Cliente", "Venda", "Itens", "Detalhes", "Revisão"];
-  return (
-    <div className="flex items-center gap-1 mb-5">
-      {steps.map((label, i) => (
-        <div key={i} className="flex items-center gap-1 flex-1">
-          <div className="flex items-center gap-1.5">
-            <div
-              className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-              style={{
-                background: i <= current ? C.esmeralda : "#E5E7EB",
-                color:      i <= current ? C.creme     : "#9CA3AF",
-              }}
-            >
-              {i < current ? "✓" : i + 1}
-            </div>
-            <span
-              className="text-xs font-medium hidden sm:block"
-              style={{ color: i <= current ? C.esmeralda : "#9CA3AF" }}
-            >
-              {label}
-            </span>
-          </div>
-          {i < steps.length - 1 && (
-            <div
-              className="flex-1 h-px mx-1"
-              style={{ background: i < current ? C.esmeralda : "#E5E7EB" }}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ─── Main Modal ───────────────────────────────────────────────────────────────
 export default function NovaOrdemServicoBaseModal({
   isOpen, onClose, onSuccess, userId, userName, tipoOrdem, initialData,
@@ -628,7 +594,7 @@ export default function NovaOrdemServicoBaseModal({
 
         {/* Steps */}
         <div className="px-5 pt-4">
-          <Steps current={step} />
+          <Steps steps={["Cliente", "Venda", "Itens", "Detalhes", "Revisão"]} current={step} />
         </div>
 
         {/* Content */}
