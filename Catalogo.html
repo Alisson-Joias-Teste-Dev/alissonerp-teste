@@ -1427,12 +1427,10 @@ function App() {
         // Dados base hardcoded (para heroLabel etc.) — tenta match por ID
         const base = COLLECTIONS.find(hc => hc.id === c.id) || {};
 
-        let products;
-        if (assignedFromErp.length || extras.length) {
-          products = [...extras, ...assignedFromErp];
-        } else {
-          products = base.products || [];
-        }
+        // Só exibe o que foi selecionado via painel: refs do ERP atribuídos
+        // manualmente (showcaseAssignments) + produtos locais com collectionId.
+        // Sem fallback para produtos hardcoded.
+        const products = [...extras, ...assignedFromErp];
 
         return {
           ...base,
