@@ -11,6 +11,11 @@ import {
   ShoppingBag, Package, ChevronRight,
 } from "lucide-react";
 import { maskCpfCnpj } from "@/lib/formatters";
+import { useDebounce } from "./_shared/useDebounce";
+import { compressImage } from "./_shared/compressImage";
+import { fmtData, fmtBRL } from "./_shared/formatters";
+import { SITUACAO_LABEL } from "./_shared/constants";
+import type { Cliente, Venda, ItemVenda } from "./_shared/types";
 
 // ─── Cores ────────────────────────────────────────────────────────────────────
 const C = {
@@ -22,33 +27,6 @@ const C = {
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface Cliente {
-  id: number;
-  nome: string;
-  cpf_cnpj: string | null;
-  telefone: string | null;
-  celular: string | null;
-}
-
-interface Venda {
-  id: number;
-  numero_venda: string;
-  data_venda: string;
-  total_venda: number;
-  situacao: string;
-  qtd_itens: number;
-}
-
-interface ItemVenda {
-  id: number;
-  produto_id: number;
-  nome_produto: string;
-  sku: string | null;
-  quantidade: number;
-  preco_unitario: number;
-  total_item: number;
-}
-
 interface TipoServico {
   id: number;
   nome: string;
@@ -75,57 +53,6 @@ export interface NovaOrdemServicoBaseModalProps {
   tipoOrdem:   TipoOrdemServico;
   initialData?: OrdemInitialData;
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function useDebounce<T>(value: T, ms: number): T {
-  const [d, setD] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setD(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return d;
-}
-
-async function compressImage(file: File): Promise<string> {
-  return new Promise((resolve) => {
-    const img   = new Image();
-    const objUrl = URL.createObjectURL(file);
-    img.onload = () => {
-      const max = 1920;
-      let { width, height } = img;
-      if (width > max || height > max) {
-        if (width > height) { height = Math.round((height * max) / width); width = max; }
-        else { width = Math.round((width * max) / height); height = max; }
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width  = width;
-      canvas.height = height;
-      canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
-      URL.revokeObjectURL(objUrl);
-      canvas.toBlob((blob) => {
-        if (!blob) { resolve(""); return; }
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      }, "image/jpeg", 0.85);
-    };
-    img.onerror = () => { URL.revokeObjectURL(objUrl); resolve(""); };
-    img.src = objUrl;
-  });
-}
-
-function fmtData(d: string) {
-  return new Date(d).toLocaleDateString("pt-BR");
-}
-
-function fmtBRL(v: number) {
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-const SITUACAO_LABEL: Record<string, string> = {
-  rascunho: "Rascunho", aprovado: "Aprovado",
-  enviado: "Enviado",   concluido: "Concluído", cancelado: "Cancelado",
-};
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
 function Steps({ current }: { current: number }) {
