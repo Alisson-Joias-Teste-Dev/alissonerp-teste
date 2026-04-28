@@ -1263,7 +1263,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "showEditorial": true,
   "showErp": true,
   "mosaicSize": "wide",
-  "whatsNumber": "558597967017"
+  "whatsNumber": "5585997967017"
 }/*EDITMODE-END*/;
 
 const { HeroJewel, Collection, ProductDetail, COLLECTIONS } = window.CatalogComponents;
@@ -1486,11 +1486,11 @@ function App() {
   useEffect(() => {
     const obs = new IntersectionObserver((entries) => {
       entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('is-visible'); });
-    }, { threshold: 0.08 });
-    // Pequeno delay para o DOM estar pronto
+    }, { threshold: 0, rootMargin: '0px 0px -40px 0px' });
+    // Delay para o DOM estar pronto após render do React
     const tid = setTimeout(() => {
       document.querySelectorAll('.reveal:not(.is-visible)').forEach(el => obs.observe(el));
-    }, 80);
+    }, 150);
     return () => { clearTimeout(tid); obs.disconnect(); };
   }, [collections, activeCategory]);
 
