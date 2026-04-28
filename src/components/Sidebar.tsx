@@ -49,6 +49,7 @@ import {
   ArrowDownCircle,
   Banknote,
   Landmark,
+  CreditCard,
 } from "lucide-react";
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
@@ -102,6 +103,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?
   ArrowDownCircle,
   Banknote,
   Landmark,
+  CreditCard,
 };
 
 function isGroup(entry: MenuEntry): entry is MenuGroup {
@@ -126,10 +128,12 @@ export default function Sidebar() {
   const ROLES_FISCAL_SIDEBAR = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
   const ROLES_GESTAO_ESTOQUE = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
   const ROLES_SITE = ["desenvolvedor", "admin", "gerente_loja"];
+  const ROLES_CREDIARIO_SIDEBAR = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
   const hasOrcamento = role && ROLES_ORCAMENTO.includes(role);
   const hasFiscal = role && ROLES_FISCAL_SIDEBAR.includes(role);
   const hasGestaoEstoque = role && ROLES_GESTAO_ESTOQUE.includes(role);
   const hasSite = role && ROLES_SITE.includes(role);
+  const hasCrediario = role && ROLES_CREDIARIO_SIDEBAR.includes(role);
   const modulosEfetivos = [...modulos_leitura];
   if (modulosEfetivos.length > 0) {
     if (hasServicePanel && !modulosEfetivos.includes("service_painel")) modulosEfetivos.push("service_painel");
@@ -137,6 +141,7 @@ export default function Sidebar() {
     if (hasFiscal && !modulosEfetivos.includes("fiscal")) modulosEfetivos.push("fiscal");
     if (hasGestaoEstoque && !modulosEfetivos.includes("gestao_estoque")) modulosEfetivos.push("gestao_estoque");
     if (hasSite && !modulosEfetivos.includes("site")) modulosEfetivos.push("site");
+    if (hasCrediario && !modulosEfetivos.includes("crediario")) modulosEfetivos.push("crediario");
   }
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)
@@ -206,7 +211,7 @@ export default function Sidebar() {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [fetchContagem]);
 
   useEffect(() => {

@@ -96,17 +96,15 @@ export async function POST(req: NextRequest) {
   for (const c of vencidas) {
     const titulo = `Crediário vencido — ${c.cliente_nome ?? "cliente"} (${c.dias_atraso}d)`;
     const mensagem = `${c.descricao} · Venda ${c.numero_venda ?? c.venda_id} · ${fmtBRL(Number(c.valor))} · ${c.dias_atraso} dia${c.dias_atraso !== 1 ? "s" : ""} em atraso`;
-    const dados = { conta_receber_id: c.conta_receber_id, venda_id: c.venda_id, tipo_aging: "vencido" };
-
     // Notifica consultora
     if (c.consultora_uuid) {
-      await notificar(c.consultora_uuid as string, "crediario_vencido", titulo, mensagem, dados);
+      await notificar(c.consultora_uuid as string, "crediario_vencido", titulo, mensagem);
       notificacoesEnviadas++;
     }
 
     // Notifica gerentes
     for (const g of gerentes) {
-      await notificar(g.id as string, "crediario_vencido", titulo, mensagem, dados);
+      await notificar(g.id as string, "crediario_vencido", titulo, mensagem);
       notificacoesEnviadas++;
     }
 
@@ -128,11 +126,9 @@ export async function POST(req: NextRequest) {
   for (const c of vencemBreve) {
     const titulo = `Crediário vencendo — ${c.cliente_nome ?? "cliente"}`;
     const mensagem = `${c.descricao} · Venda ${c.numero_venda ?? c.venda_id} · ${fmtBRL(Number(c.valor))} · vence em breve`;
-    const dados = { conta_receber_id: c.conta_receber_id, venda_id: c.venda_id, tipo_aging: "vence_em_breve" };
-
     // Notifica apenas gerentes (consultora recebe só quando vence)
     for (const g of gerentes) {
-      await notificar(g.id as string, "crediario_vence_breve", titulo, mensagem, dados);
+      await notificar(g.id as string, "crediario_vence_breve", titulo, mensagem);
       notificacoesEnviadas++;
     }
 
@@ -160,7 +156,7 @@ export async function POST(req: NextRequest) {
 }
 
 // GET /api/crediario/aging-cron — preview (admin: vê o que seria notificado)
-export async function GET(req: NextRequest) {
+export async function GET() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
@@ -213,17 +209,15 @@ async function notificar(
   tipo: string,
   titulo: string,
   mensagem: string,
-  dados: object,
 ) {
   await sql`
     INSERT INTO alissonerp.notificacoes
-      (usuario_id, tipo, titulo, mensagem, dados)
+      (usuario_id, tipo, titulo, mensagem)
     VALUES (
       ${usuarioId}::uuid,
       ${tipo},
       ${titulo},
-      ${mensagem},
-      ${JSON.stringify(dados)}::jsonb
+      ${mensagem}
     )
   `.catch((err: Error) => {
     console.error("[aging-cron] Erro ao notificar:", err.message);

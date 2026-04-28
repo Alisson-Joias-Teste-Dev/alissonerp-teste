@@ -4,7 +4,8 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { creditarSaldo } from "@/lib/saldo-credito";
 import { concluirVenda } from "@/lib/vendas-aprovar";
 
-const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
+// Rota de emergência — use verificar-mp para baixas com comprovante MP
+const PODE_BAIXAR = ["desenvolvedor"];
 
 // POST /api/crediario/[id]/registrar-pagamento
 // [id] = conta_receber_id

@@ -127,6 +127,7 @@ function DetalheDrawer({
 }) {
   const [detalhe, setDetalhe] = useState<ContaDetalhe | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mpPaymentId, setMpPaymentId] = useState("");
   const [obs, setObs] = useState("");
   const [baixando, setBaixando] = useState(false);
   const [err, setErr] = useState("");
@@ -148,18 +149,25 @@ function DetalheDrawer({
   // Carregar na montagem
   useState(() => { void carregar(); });
 
-  async function handleBaixa() {
+  async function handleVerificarMp() {
+    if (!mpPaymentId.trim()) {
+      setErr("Informe o ID do pagamento do Mercado Pago");
+      return;
+    }
     setBaixando(true);
     setErr("");
     try {
-      await apiFetch(`/api/crediario/${contaId}/registrar-pagamento`, {
+      await apiFetch(`/api/crediario/${contaId}/verificar-mp`, {
         method: "POST",
-        body: JSON.stringify({ obs: obs.trim() || undefined }),
+        body: JSON.stringify({
+          payment_id: mpPaymentId.trim(),
+          obs: obs.trim() || undefined,
+        }),
       });
       onBaixa(contaId);
       onClose();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Erro ao registrar baixa");
+      setErr(e instanceof Error ? e.message : "Erro ao verificar pagamento");
     } finally {
       setBaixando(false);
     }
@@ -298,41 +306,59 @@ function DetalheDrawer({
               </div>
             )}
 
-            {/* Baixa */}
+            {/* Baixa com verificação Mercado Pago */}
             {podeRegistrarBaixa && (
               <div style={{
                 marginBottom: 16, padding: "14px", borderRadius: 10,
-                border: `1px solid ${C.esmeralda}30`, background: C.esmeraldaLt,
+                border: `1px solid #0070E040`, background: "#EBF5FB",
               }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: C.esmeralda, marginBottom: 8 }}>
-                  Registrar Recebimento
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#0070E0", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                  <CreditCard size={14} />
+                  Confirmar via Mercado Pago
                 </div>
+                <div style={{ fontSize: 11, color: "#4A6FA5", marginBottom: 10, lineHeight: 1.5 }}>
+                  Informe o ID do pagamento MP recebido do cliente. O sistema consulta a API do Mercado Pago e só confirma se o status for <b>approved</b>.
+                </div>
+                <input
+                  value={mpPaymentId}
+                  onChange={e => setMpPaymentId(e.target.value.replace(/\D/g, ""))}
+                  placeholder="ID do pagamento MP (ex: 123456789)"
+                  type="text"
+                  inputMode="numeric"
+                  style={{
+                    width: "100%", fontSize: 13, padding: "8px 10px",
+                    border: `1px solid #0070E040`, borderRadius: 6,
+                    outline: "none", background: "#fff", boxSizing: "border-box",
+                    fontFamily: "monospace",
+                  }}
+                />
                 <textarea
                   value={obs}
                   onChange={e => setObs(e.target.value)}
-                  placeholder="Observação (opcional)..."
+                  placeholder="Observação adicional (opcional)..."
                   rows={2}
                   style={{
-                    width: "100%", fontSize: 13, padding: "8px 10px",
+                    marginTop: 6, width: "100%", fontSize: 12, padding: "7px 10px",
                     border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
                     resize: "none", outline: "none", background: "#fff",
                     boxSizing: "border-box",
                   }}
                 />
                 <button
-                  onClick={handleBaixa}
-                  disabled={baixando}
+                  onClick={handleVerificarMp}
+                  disabled={baixando || !mpPaymentId.trim()}
                   style={{
-                    marginTop: 8, width: "100%", padding: "9px",
-                    background: C.esmeralda, color: "#fff", border: "none",
-                    borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: baixando ? "not-allowed" : "pointer",
-                    opacity: baixando ? 0.7 : 1,
+                    marginTop: 8, width: "100%", padding: "10px",
+                    background: mpPaymentId.trim() ? "#0070E0" : "#B0C4DE",
+                    color: "#fff", border: "none",
+                    borderRadius: 8, fontSize: 13, fontWeight: 700,
+                    cursor: baixando || !mpPaymentId.trim() ? "not-allowed" : "pointer",
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                   }}
                 >
                   {baixando
-                    ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Confirmando...</>
-                    : <><CheckCircle size={14} /> Confirmar Recebimento</>
+                    ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Verificando no MP...</>
+                    : <><CheckCircle size={14} /> Verificar e Confirmar</>
                   }
                 </button>
               </div>
@@ -402,7 +428,6 @@ function DetalheDrawer({
 
 // ── Componente: Card de venda (agrupa parcelas da mesma venda) ────────────────
 function VendaCard({
-  vendaId,
   numeroVenda,
   clienteNome,
   vendedorNome,
@@ -410,7 +435,7 @@ function VendaCard({
   isGerente,
   onSelectParcela,
 }: {
-  vendaId: number | null;
+  vendaId?: number | null;
   numeroVenda: string | null;
   clienteNome: string | null;
   vendedorNome: string | null;
@@ -538,7 +563,8 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   const reload = useCallback(async (situacao: string, aging: string) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: "200" });
+      // Pagos: busca mais itens pois pode acumular histórico longo
+      const params = new URLSearchParams({ limit: situacao === "pago" ? "500" : "200" });
       if (situacao) params.set("situacao", situacao);
       if (aging)    params.set("status_aging", aging);
       if (!isGerente && vendedorId) params.set("vendedor_id", String(vendedorId));
