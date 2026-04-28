@@ -192,9 +192,9 @@ export default function NovaOrdemServicoBaseModal({
     setClienteSelecionado(cliente);
     setVendaSelecionada(venda);
     setLoadingItens(true);
-    fetch(`/api/vendas/${venda.id}`)
-      .then(r => r.ok ? r.json() : { itens: [] })
-      .then(data => setItensVenda(data.itens ?? []))
+    fetch(`/api/vendas/${venda.id}/itens`)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setItensVenda(Array.isArray(data) ? data : []))
       .catch(() => setItensVenda([]))
       .finally(() => { setLoadingItens(false); setStep(2); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -248,10 +248,9 @@ export default function NovaOrdemServicoBaseModal({
     setVendaSelecionada(v);
     setLoadingItens(true);
     try {
-      const r = await fetch(`/api/vendas/${v.id}`);
+      const r = await fetch(`/api/vendas/${v.id}/itens`);
       if (r.ok) {
-        const data = await r.json();
-        setItensVenda(data.itens ?? []);
+        setItensVenda(await r.json());
       }
     } catch { setItensVenda([]); }
     finally { setLoadingItens(false); setStep(2); }
