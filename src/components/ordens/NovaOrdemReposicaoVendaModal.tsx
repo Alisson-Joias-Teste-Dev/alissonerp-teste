@@ -109,7 +109,7 @@ export default function NovaOrdemReposicaoVendaModal({
     setClienteBuscando(true);
     fetch(`/api/vendas/clientes/busca?q=${encodeURIComponent(clienteDebounced)}`)
       .then(r => r.json())
-      .then(d => { if (!cancel) { setClienteResultados(Array.isArray(d) ? d : d.clientes ?? []); setClienteDropOpen(true); } })
+      .then(d => { if (!cancel) { setClienteResultados(Array.isArray(d) ? d : []); setClienteDropOpen(true); } })
       .catch(() => {})
       .finally(() => { if (!cancel) setClienteBuscando(false); });
     return () => { cancel = true; };
@@ -138,7 +138,7 @@ export default function NovaOrdemReposicaoVendaModal({
     setLoadingVendas(true);
     fetch(`/api/vendas/por-cliente/${clienteSelecionado.id}`)
       .then(r => r.json())
-      .then(d => setVendas(Array.isArray(d) ? d : d.vendas ?? []))
+      .then(d => setVendas(Array.isArray(d) ? d : []))
       .catch(() => {})
       .finally(() => setLoadingVendas(false));
   }, [step, clienteSelecionado]);
@@ -149,7 +149,7 @@ export default function NovaOrdemReposicaoVendaModal({
     setLoadingItens(true);
     fetch(`/api/vendas/${vendaSelecionada.id}/itens`)
       .then(r => r.json())
-      .then(d => setItensVenda(Array.isArray(d) ? d : d.itens ?? []))
+      .then(d => setItensVenda(Array.isArray(d) ? d : []))
       .catch(() => {})
       .finally(() => setLoadingItens(false));
   }, [step, vendaSelecionada]);
