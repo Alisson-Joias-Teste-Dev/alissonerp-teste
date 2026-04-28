@@ -16,6 +16,7 @@ import { useDebounce } from "./_shared/useDebounce";
 import { fmtData, fmtBRL } from "./_shared/formatters";
 import { SITUACAO_LABEL } from "./_shared/constants";
 import type { Cliente, Venda, ItemVenda } from "./_shared/types";
+import { compressImage } from "./_shared/compressImage";
 
 // ─── Cores ──────────────────────────────────────────────────────────────────
 const C = {
@@ -33,35 +34,6 @@ export interface NovaOrdemFabricacaoModalProps {
   onSuccess?: (numeroOrdem: string) => void;
   userId:     string;
   userName:   string;
-}
-
-/** Comprime imagem via canvas (máx 1920px, JPEG 0.85) e retorna base64 */
-async function compressImage(file: File): Promise<string> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    const objectUrl = URL.createObjectURL(file);
-    img.onload = () => {
-      const max = 1920;
-      let { width, height } = img;
-      if (width > max || height > max) {
-        if (width > height) { height = Math.round((height * max) / width); width = max; }
-        else { width = Math.round((width * max) / height); height = max; }
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
-      URL.revokeObjectURL(objectUrl);
-      canvas.toBlob((blob) => {
-        if (!blob) { resolve(""); return; }
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      }, "image/jpeg", 0.85);
-    };
-    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(""); };
-    img.src = objectUrl;
-  });
 }
 
 const PRIORIDADES = ["Design da peça", "Peso do metal negociado"];
