@@ -1562,8 +1562,13 @@ Segue fluxo completo: auditoria loja (pendente) → PCP
 ── FLUXO DE CRIAÇÃO ──
 1. Botão "Nova Ordem" → dropdown com 7 tipos (ícones Lucide por tipo)
    servico_loja NÃO aparece (escondido do frontend)
-2. reposicao_loja → abre NovaOrdemReposicaoLojaModal
-   Demais tipos → toast "🚧 Em construção — [Tipo] estará disponível em breve!"
+2. Cada tipo abre seu modal específico:
+   fabricacao       → NovaOrdemFabricacaoModal (independente)
+   reposicao_venda  → NovaOrdemReposicaoVendaModal (independente)
+   reposicao_loja   → NovaOrdemReposicaoLojaModal (independente)
+   servico_interno  → NovaOrdemServicoInternoModal (independente)
+   garantia         → NovaOrdemGarantiaModal (wrapper → ServicoBaseModal)
+   servico_venda    → NovaOrdemServicoVendaModal (wrapper → ServicoBaseModal)
 3. Sucesso → toast "✓ Ordem C-XXXX criada com sucesso!" + router.refresh()
 
 ── TOAST SYSTEM ──
@@ -1572,9 +1577,16 @@ Custom: useState<string | null> + setTimeout
 Estilo: fixed bottom-6 right-6, bg #184036, rounded-xl shadow-lg
 
 ── COMPONENTES ──
-src/components/ordens/NovaOrdemButton.tsx           → dropdown 7 tipos + wiring modais + toast
-src/components/ordens/NovaOrdemReposicaoLojaModal.tsx → modal reposição loja (NOVO v2.14.0)
-src/components/ordens/ItensOrdemSection.tsx         → exibe itens na página /ordens/[id]
+src/components/ordens/NovaOrdemButton.tsx              → orquestrador: dropdown 7 tipos + abre modal por tipo + toast
+src/components/ordens/NovaOrdemFabricacaoModal.tsx     → modal fabricação (ativo, independente)
+src/components/ordens/NovaOrdemReposicaoVendaModal.tsx → modal reposição venda (ativo, independente)
+src/components/ordens/NovaOrdemReposicaoLojaModal.tsx  → modal reposição loja (ativo, independente)
+src/components/ordens/NovaOrdemServicoInternoModal.tsx → modal serviço interno (ativo, independente)
+src/components/ordens/NovaOrdemServicoBaseModal.tsx    → modal base compartilhada (garantia + serviço-venda)
+src/components/ordens/NovaOrdemGarantiaModal.tsx       → wrapper fino → ServicoBaseModal
+src/components/ordens/NovaOrdemServicoVendaModal.tsx   → wrapper fino → ServicoBaseModal
+src/components/ordens/_shared/                         → utilitários: compressImage, formatters, useDebounce, constants, types
+src/components/ordens/ItensOrdemSection.tsx            → exibe itens na página /ordens/[id]
 
 ── CARD PEÇA DO CLIENTE ──
 Visível somente para tipo=servico_venda na página /ordens/[id]

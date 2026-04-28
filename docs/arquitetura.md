@@ -606,8 +606,9 @@ Estrutura com Route Groups (Next.js 16):
 | `UserEditDrawer.tsx`                                 | `src/components/UserEditDrawer.tsx`                       | Edicao de usuario pelo admin |
 | `NotificacoesDrawer.tsx`                             | `src/components/NotificacoesDrawer.tsx`                   | Drawer de notificacoes (mencoes, sistema) — left-0 md:left-56 |
 | `ProtocoloMotoboy.tsx`                               | `src/components/motoboy/ProtocoloMotoboy.tsx`             | PWA dark theme para motoboy (protocolo simplificado) |
-| `NovaOrdemButton.tsx`                                | `src/components/ordens/NovaOrdemButton.tsx`               | Dropdown 7 tipos: cada tipo abre seu modal específico (6 modais wired); useAuth para userName |
+| `NovaOrdemButton.tsx`                                | `src/components/ordens/NovaOrdemButton.tsx`               | Dropdown 7 tipos: 5 modais ativos (4 independentes + 1 base) + 2 wrappers finos; useAuth para userName |
 | `NovaOrdemReposicaoLojaModal.tsx`                    | `src/components/ordens/NovaOrdemReposicaoLojaModal.tsx`   | Modal reposição loja: busca produto, checklist variações+qtd, fotos referência (canvas→base64→upload server) |
+| `_shared/` (ordens)                                  | `src/components/ordens/_shared/`                          | Utilitários compartilhados: `compressImage` (retry até quality 0.3, máx 2MB), `formatters` (fmtData/fmtBRL), `useDebounce`, `constants` (SITUACAO_LABEL, paleta C), `types` (Cliente/Venda/ItemVenda) |
 | `ItensOrdemSection.tsx`                              | `src/components/ordens/ItensOrdemSection.tsx`             | Exibe itens da ordem em /ordens/[id]: duas fontes (directus.itens_ordem_1 legado, alissonerp.itens_ordem ERP) |
 | `MobileHeader.tsx`                                   | `src/components/MobileHeader.tsx`                         | Header fixo h-14 mobile: ☰ toggle sidebar + logo + avatar (visível apenas < 768px) |
 | `MobileCard.tsx`                                     | `src/components/ui/MobileCard.tsx`                        | Componente reutilizável para cards de tabela no mobile (dual-render pattern) |
