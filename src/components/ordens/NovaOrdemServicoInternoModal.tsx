@@ -5,14 +5,9 @@ import {
   X, Search, Loader2, Camera, Video, Square, CheckSquare,
   StopCircle, Play, Upload, Trash2, Settings,
 } from "lucide-react";
-
-// ─── Cores do projeto ─────────────────────────────────────────────────────────
-const C = {
-  esmeralda:   "#184036",
-  creme:       "#F3EADA",
-  cremeBorder: "#E8DCC8",
-  bg:          "#FAFAF7",
-};
+import { useDebounce } from "./_shared/useDebounce";
+import { compressImage } from "./_shared/compressImage";
+import { C } from "./_shared/constants";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Produto {
@@ -35,46 +30,6 @@ export interface NovaOrdemServicoInternoModalProps {
   onSuccess?: () => void;
   userId: string;
   userName: string;
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function useDebounce<T>(value: T, ms: number): T {
-  const [d, setD] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setD(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return d;
-}
-
-/** Comprime imagem via canvas (máx 1920px, JPEG 0.85) e retorna base64 */
-async function compressImage(file: File): Promise<string> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    const objectUrl = URL.createObjectURL(file);
-    img.onload = () => {
-      const max = 1920;
-      let { width, height } = img;
-      if (width > max || height > max) {
-        if (width > height) { height = Math.round((height * max) / width); width = max; }
-        else { width = Math.round((width * max) / height); height = max; }
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width  = width;
-      canvas.height = height;
-      canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
-      URL.revokeObjectURL(objectUrl);
-      canvas.toBlob((blob) => {
-        if (!blob) { resolve(""); return; }
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      }, "image/jpeg", 0.85);
-    };
-    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(""); };
-    img.src = objectUrl;
-  });
 }
 
 /** Detecta o melhor mimeType suportado pelo MediaRecorder */
