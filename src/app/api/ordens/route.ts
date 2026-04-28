@@ -117,6 +117,16 @@ export async function POST(req: NextRequest) {
   // Auto-preencher vendedor_id a partir do usuário logado se não veio no body
   const vendedorIdFinal = vendedor_id ?? usuario.vendedor_id ?? null;
 
+  // Consultora sem vendedor_id configurado não pode criar ordens — o campo é
+  // obrigatório para que a ordem apareça na listagem dela. Admin deve configurar
+  // usuarios.vendedor_id antes de liberar o acesso.
+  if (usuario.role === "consultora" && vendedorIdFinal == null) {
+    return NextResponse.json(
+      { error: "Seu usuário não está vinculado a um vendedor. Contate o administrador para configurar o vínculo antes de criar ordens." },
+      { status: 422 },
+    );
+  }
+
   const isFullAccess = FULL_ACCESS_ROLES.includes(usuario.role);
   const tiposPermitidos: string[] = isFullAccess
     ? ALL_TIPOS
@@ -264,7 +274,7 @@ export async function POST(req: NextRequest) {
     //    quando a ordem for criada com venda_item_ids. Caso contrario, pode vir
     //    no body do item como { personalizacao: { valor, ... } }.
     //    Se houver, o texto legivel e concatenado em observacao (ourives ler la).
-    let personalizacoesPorProdutoId: Map<number, PersonalizacaoAplicada> = new Map();
+    const personalizacoesPorProdutoId: Map<number, PersonalizacaoAplicada> = new Map();
     if (venda_id && vendaItemIdsVal.length > 0) {
       const itensPersonalizados = await tx`
         SELECT produto_id, personalizacao
