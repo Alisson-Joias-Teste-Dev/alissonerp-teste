@@ -12,6 +12,10 @@ import FichaTecnicaForm, {
   type FichaTecnicaDados, type TipoItem, TIPOS_ITEM, validarFichaTecnica,
 } from "./FichaTecnicaForm";
 import { maskCpfCnpj } from "@/lib/formatters";
+import { useDebounce } from "./_shared/useDebounce";
+import { fmtData, fmtBRL } from "./_shared/formatters";
+import { SITUACAO_LABEL } from "./_shared/constants";
+import type { Cliente, Venda, ItemVenda } from "./_shared/types";
 
 // ─── Cores ──────────────────────────────────────────────────────────────────
 const C = {
@@ -23,10 +27,6 @@ const C = {
 };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
-interface Cliente { id: number; nome: string; cpf_cnpj: string | null; telefone: string | null; celular: string | null; }
-interface Venda   { id: number; numero_venda: string; data_venda: string; total_venda: number; situacao: string; qtd_itens: number; }
-interface ItemVenda { id: number; produto_id: number; nome_produto: string; sku: string | null; quantidade: number; preco_unitario: number; total_item: number; }
-
 export interface NovaOrdemFabricacaoModalProps {
   isOpen:     boolean;
   onClose:    () => void;
@@ -34,15 +34,6 @@ export interface NovaOrdemFabricacaoModalProps {
   userId:     string;
   userName:   string;
 }
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-function useDebounce<T>(value: T, ms: number): T {
-  const [d, setD] = useState(value);
-  useEffect(() => { const t = setTimeout(() => setD(value), ms); return () => clearTimeout(t); }, [value, ms]);
-  return d;
-}
-function fmtData(d: string) { return new Date(d).toLocaleDateString("pt-BR"); }
-function fmtBRL(v: number) { return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
 
 /** Comprime imagem via canvas (máx 1920px, JPEG 0.85) e retorna base64 */
 async function compressImage(file: File): Promise<string> {
@@ -72,11 +63,6 @@ async function compressImage(file: File): Promise<string> {
     img.src = objectUrl;
   });
 }
-
-const SITUACAO_LABEL: Record<string, string> = {
-  rascunho: "Rascunho", aprovado: "Aprovado",
-  enviado: "Enviado", concluido: "Concluído", cancelado: "Cancelado",
-};
 
 const PRIORIDADES = ["Design da peça", "Peso do metal negociado"];
 const ROTAS = [
