@@ -307,7 +307,7 @@ PDV → [TRIGGER PONTE] → alissonerp.ordens + AUDITORIA LOJA
   itens → directus.itens_ordem_1 (ponte: directus_ordem_id)
 
 ── FLUXO B: ERP (origem='erp') — Módulo Criação (18/03/2026) ──
-Usuário clica "Nova Ordem" → dropdown 7 tipos → NovaOrdemModal
+Usuário clica "Nova Ordem" → dropdown 7 tipos → NovaOrdemButton abre modal específico por tipo
   Número = MAX(ambos schemas) + 1 (evitar colisão)
   Rota: servico_venda → protocolo; demais → pcp
   POST /api/ordens: cria ordem + itens (alissonerp.itens_ordem) + auditoria loja (transação)
@@ -1574,7 +1574,6 @@ Estilo: fixed bottom-6 right-6, bg #184036, rounded-xl shadow-lg
 ── COMPONENTES ──
 src/components/ordens/NovaOrdemButton.tsx           → dropdown 7 tipos + wiring modais + toast
 src/components/ordens/NovaOrdemReposicaoLojaModal.tsx → modal reposição loja (NOVO v2.14.0)
-src/components/ordens/NovaOrdemModal.tsx            → modal criação genérico (aguardando integração)
 src/components/ordens/ItensOrdemSection.tsx         → exibe itens na página /ordens/[id]
 
 ── CARD PEÇA DO CLIENTE ──

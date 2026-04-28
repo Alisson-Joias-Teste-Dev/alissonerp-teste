@@ -606,9 +606,8 @@ Estrutura com Route Groups (Next.js 16):
 | `UserEditDrawer.tsx`                                 | `src/components/UserEditDrawer.tsx`                       | Edicao de usuario pelo admin |
 | `NotificacoesDrawer.tsx`                             | `src/components/NotificacoesDrawer.tsx`                   | Drawer de notificacoes (mencoes, sistema) — left-0 md:left-56 |
 | `ProtocoloMotoboy.tsx`                               | `src/components/motoboy/ProtocoloMotoboy.tsx`             | PWA dark theme para motoboy (protocolo simplificado) |
-| `NovaOrdemButton.tsx`                                | `src/components/ordens/NovaOrdemButton.tsx`               | Dropdown 7 tipos: reposicao_loja abre modal, demais mostram toast "Em construção"; useAuth para userName |
+| `NovaOrdemButton.tsx`                                | `src/components/ordens/NovaOrdemButton.tsx`               | Dropdown 7 tipos: cada tipo abre seu modal específico (6 modais wired); useAuth para userName |
 | `NovaOrdemReposicaoLojaModal.tsx`                    | `src/components/ordens/NovaOrdemReposicaoLojaModal.tsx`   | Modal reposição loja: busca produto, checklist variações+qtd, fotos referência (canvas→base64→upload server) |
-| `NovaOrdemModal.tsx`                                 | `src/components/ordens/NovaOrdemModal.tsx`                | Modal criação de ordens: autocomplete cliente/produto (debounce 300ms), upload foto+video, campos servico_venda condicionais |
 | `ItensOrdemSection.tsx`                              | `src/components/ordens/ItensOrdemSection.tsx`             | Exibe itens da ordem em /ordens/[id]: duas fontes (directus.itens_ordem_1 legado, alissonerp.itens_ordem ERP) |
 | `MobileHeader.tsx`                                   | `src/components/MobileHeader.tsx`                         | Header fixo h-14 mobile: ☰ toggle sidebar + logo + avatar (visível apenas < 768px) |
 | `MobileCard.tsx`                                     | `src/components/ui/MobileCard.tsx`                        | Componente reutilizável para cards de tabela no mobile (dual-render pattern) |
