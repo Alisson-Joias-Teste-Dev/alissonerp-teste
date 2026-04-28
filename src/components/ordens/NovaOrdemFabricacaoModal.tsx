@@ -17,6 +17,7 @@ import { fmtData, fmtBRL } from "./_shared/formatters";
 import { SITUACAO_LABEL } from "./_shared/constants";
 import type { Cliente, Venda, ItemVenda } from "./_shared/types";
 import { compressImage } from "./_shared/compressImage";
+import { Steps } from "./_shared/Steps";
 
 // ─── Cores ──────────────────────────────────────────────────────────────────
 const C = {
@@ -43,30 +44,6 @@ const ROTAS = [
 ];
 
 // ─── Steps ──────────────────────────────────────────────────────────────────
-function Steps({ current }: { current: number }) {
-  const steps = ["Cliente", "Venda", "Itens", "Dados", "Ficha", "Revisão"];
-  return (
-    <div className="flex items-center gap-0.5 mb-5">
-      {steps.map((label, i) => (
-        <div key={i} className="flex items-center gap-0.5 flex-1">
-          <div className="flex items-center gap-1">
-            <div
-              className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
-              style={{ background: i <= current ? C.esmeralda : "#E5E7EB", color: i <= current ? C.creme : "#9CA3AF" }}
-            >
-              {i < current ? "✓" : i + 1}
-            </div>
-            <span className="text-[10px] font-medium hidden sm:block" style={{ color: i <= current ? C.esmeralda : "#9CA3AF" }}>
-              {label}
-            </span>
-          </div>
-          {i < steps.length - 1 && <div className="flex-1 h-px mx-0.5" style={{ background: i < current ? C.esmeralda : "#E5E7EB" }} />}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ─── Main Modal ─────────────────────────────────────────────────────────────
 export default function NovaOrdemFabricacaoModal({
   isOpen, onClose, onSuccess, userId, userName,
@@ -276,7 +253,7 @@ export default function NovaOrdemFabricacaoModal({
         </div>
 
         {/* Steps */}
-        <div className="px-5 pt-4"><Steps current={step} /></div>
+        <div className="px-5 pt-4"><Steps steps={["Cliente", "Venda", "Itens", "Dados", "Ficha", "Revisão"]} current={step} /></div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-5 pb-4" style={{ maxHeight: "60dvh" }}>
