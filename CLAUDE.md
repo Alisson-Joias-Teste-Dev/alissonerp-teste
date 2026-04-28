@@ -248,3 +248,43 @@ O que atualizar:
 - Contagens (ex: "5 modais") → recalcular e corrigir
 
 Regra: se o commit altera codigo mas nao atualiza docs afetadas, o trabalho NAO esta completo. Docs desatualizadas sao bugs.
+
+---
+
+## 10. Orquestracao Automatica de Tarefas (@aiox-master)
+
+### Fluxo padrao — Jonathan so precisa explicar o problema e dar a aprovacao final
+
+Quando uma tarefa e iniciada via @aiox-master, o fluxo abaixo e executado AUTOMATICAMENTE, sem Jonathan precisar dizer qual agente chamar:
+
+```
+1. Jonathan explica o problema → @aiox-master entende e faz perguntas de clareza
+2. @aiox-master delega → @analyst investiga (codigo, banco, logs)
+3. @analyst entrega → @aiox-master delega → @architect avalia impacto e solucao
+4. @architect entrega → @aiox-master delega → @dev (feature/refactor) ou @hotfix (bug prod)
+5. Implementacao pronta → @aiox-master delega → @qa revisa
+6. @qa APROVA → @aiox-master pede AUTORIZACAO FINAL ao Jonathan
+7. Jonathan aprova → @aiox-master delega → @devops faz push
+8. @devops confirma push → @aiox-master reporta tarefa concluida
+
+REJEICAO: se @qa REJEITAR → @aiox-master devolve automaticamente ao @dev/hotfix → repete ate @qa aprovar
+```
+
+### Responsabilidades do Jonathan nesse fluxo
+
+```
+- Explicar o problema no inicio
+- Responder perguntas do time durante o processo
+- Dar a aprovacao final ANTES do push (passo 7)
+- Qualquer outro passo e automatico
+```
+
+### Responsabilidades do @aiox-master
+
+```
+- Entender o problema e fazer perguntas de clareza antes de comecar
+- Adaptar o fluxo: pular etapas que nao fazem sentido (ex: bug simples nao precisa de @analyst)
+- Informar Jonathan quando o proximo agente foi acionado e o que ele vai fazer
+- Nunca pular o @qa — toda mudanca de codigo passa por revisao
+- Nunca autorizar push sem aprovacao explicita do Jonathan
+```
