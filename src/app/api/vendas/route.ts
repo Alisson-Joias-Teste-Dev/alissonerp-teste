@@ -391,49 +391,38 @@ export async function POST(req: NextRequest) {
       throw new Error("Total da venda não pode ser zero. Verifique os preços e descontos dos itens.");
     }
 
-    return completa;
-  });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Erro ao criar venda";
-    return NextResponse.json({ error: msg }, { status: 400 });
-  }
+    // ─── Ordens de reposição (dentro da tx — falha reverte a venda inteira) ───
+    const ordensReposicao: Array<{ numero_ordem: string; produto: string }> = [];
+    if (body.tipo_venda === "produto" && Array.isArray(body.itens) && body.itens.length > 0) {
+      const produtoIds = body.itens.map((i: ItemInput) => i.produto_id).filter(Boolean);
+      if (produtoIds.length > 0) {
+        const saldos = await tx`
+          SELECT produto_id, SUM(saldo) AS saldo
+          FROM alissonerp.vw_saldo_estoque_comercial
+          WHERE produto_id = ANY(${produtoIds}::bigint[])
+          GROUP BY produto_id
+        `;
+        const saldoMap = new Map<number, number>(saldos.map((s: Record<string, unknown>) => [Number(s.produto_id), Number(s.saldo)]));
 
-  // ─── Ordens de reposição automáticas para itens sem estoque ─────────────────
-  // Fora da tx da venda: falha aqui não reverte a venda (já criada com sucesso).
-  const ordensReposicao: Array<{ numero_ordem: string; produto: string }> = [];
-  if (body.tipo_venda === "produto" && Array.isArray(body.itens) && body.itens.length > 0) {
-    const produtoIds = body.itens.map((i: ItemInput) => i.produto_id).filter(Boolean);
-    if (produtoIds.length > 0) {
-      const saldos = await sql`
-        SELECT produto_id, SUM(saldo) AS saldo
-        FROM alissonerp.vw_saldo_estoque_comercial
-        WHERE produto_id = ANY(${produtoIds}::bigint[])
-        GROUP BY produto_id
-      `;
-      const saldoMap = new Map(saldos.map(s => [Number(s.produto_id), Number(s.saldo)]));
+        const [{ data_entrega_rep }] = await tx`
+          SELECT alissonerp.fn_adicionar_dias_uteis(CURRENT_DATE, 10) AS data_entrega_rep
+        `;
 
-      const [{ data_entrega_rep }] = await sql`
-        SELECT alissonerp.fn_adicionar_dias_uteis(CURRENT_DATE, 10) AS data_entrega_rep
-      `;
+        const [{ proximo_ordem }] = await tx`
+          SELECT COALESCE(
+            MAX(CAST(SUBSTRING(numero_ordem FROM 3) AS INTEGER)) + 1, 1
+          ) AS proximo_ordem
+          FROM alissonerp.ordens
+          WHERE numero_ordem ~ '^C-[0-9]+$'
+        `;
+        let ordemSeq = Number(proximo_ordem);
 
-      // Busca próximo número de ordem (prefixo C-)
-      const [{ proximo_ordem }] = await sql`
-        SELECT COALESCE(
-          MAX(CAST(SUBSTRING(numero_ordem FROM 3) AS INTEGER)) + 1, 1
-        ) AS proximo_ordem
-        FROM alissonerp.ordens
-        WHERE numero_ordem ~ '^C-[0-9]+$'
-      `;
-      let ordemSeq = Number(proximo_ordem);
+        for (const item of body.itens as ItemInput[]) {
+          if (!item.produto_id) continue;
+          const saldo = saldoMap.get(Number(item.produto_id)) ?? 0;
+          if (saldo >= item.quantidade) continue;
 
-      for (const item of body.itens as ItemInput[]) {
-        if (!item.produto_id) continue;
-        const saldo = saldoMap.get(Number(item.produto_id)) ?? 0;
-        if (saldo >= item.quantidade) continue; // tem estoque suficiente
-
-        try {
-          // Busca ficha técnica do produto
-          const [ficha] = await sql`
+          const [ficha] = await tx`
             SELECT id, peso_estimado_metal, modelo, modelo_interno, arquivo_3dm, arquivo_glb
             FROM alissonerp.fichas_tecnicas_produto
             WHERE produto_id = ${item.produto_id}
@@ -441,26 +430,25 @@ export async function POST(req: NextRequest) {
           `;
 
           const numeroOrdem = `C-${String(ordemSeq).padStart(4, "0")}`;
-          const [ordem] = await sql`
+          const [ordem] = await tx`
             INSERT INTO alissonerp.ordens (
               numero_ordem, numero_pedido, tipo_ordem, rota, situacao, status,
               cliente_id, vendedor_id, data_entrega,
               venda_id, origem, created_by
             ) VALUES (
-              ${numeroOrdem}, ${novaVenda.numero_venda}, 'reposicao_venda', 'pcp', 'criado', 'aguardando',
+              ${numeroOrdem}, ${venda.numero_venda}, 'reposicao_venda', 'pcp', 'criado', 'aguardando',
               ${body.cliente_id ?? null}, ${body.vendedor_id ?? null}, ${data_entrega_rep},
-              ${novaVenda.id}, 'erp', ${user.id}::uuid
+              ${venda.id}, 'erp', ${user.id}::uuid
             ) RETURNING id, numero_ordem
           `;
 
-          await sql`
+          await tx`
             INSERT INTO alissonerp.itens_ordem (ordem_id, produto_id, nome_produto, sku, quantidade, peso_estimado)
             VALUES (${ordem.id}, ${item.produto_id}, ${item.nome_produto}, ${item.sku ?? null}, ${item.quantidade}, ${item.peso_estimado ?? null})
           `;
 
-          // Cria ficha técnica da ordem a partir do produto (se existir)
           if (ficha) {
-            await sql`
+            await tx`
               INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
               VALUES (
                 ${ordem.id},
@@ -471,16 +459,20 @@ export async function POST(req: NextRequest) {
             `;
           }
 
-          // Auditoria criada e aprovada automaticamente pelo trigger trg_auto_auditoria_loja
-
           ordensReposicao.push({ numero_ordem: ordem.numero_ordem, produto: item.nome_produto });
           ordemSeq++;
-        } catch (err) {
-          console.error(`[vendas] Erro ao criar ordem reposição para produto ${item.produto_id}:`, err);
         }
       }
     }
+
+    return { ...completa, ordensReposicao };
+  });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Erro ao criar venda";
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
+
+  const ordensReposicao = novaVenda.ordensReposicao ?? [];
 
   return NextResponse.json(
     {

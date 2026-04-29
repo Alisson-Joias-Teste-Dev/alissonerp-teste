@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { syncContatoToTiny } from "@/lib/tiny-contatos";
 
 // POST /api/contatos — cadastrar novo contato
 export async function POST(req: NextRequest) {
@@ -63,10 +62,11 @@ export async function POST(req: NextRequest) {
     RETURNING id_contato AS id, nome, cpf_cnpj, telefone, celular, email, endereco, numero, complemento, bairro, municipio, cep, uf
   `;
 
-  // Sincroniza com Tiny em background (best-effort)
-  syncContatoToTiny(Number(contato.id)).catch((err) =>
-    console.error("[contatos POST] Tiny sync falhou:", err)
-  );
+  // Enfileira sync com Tiny (assíncrono, não bloqueia criação do contato)
+  await sql`
+    INSERT INTO alissonerp.fila_sync_externo (sistema, acao, payload)
+    VALUES ('tiny', 'sync_contato', ${JSON.stringify({ contato_id: Number(contato.id) })}::jsonb)
+  `;
 
   return NextResponse.json(contato, { status: 201 });
 }
@@ -115,10 +115,11 @@ export async function PATCH(req: NextRequest) {
 
   if (!contato) return NextResponse.json({ error: "Contato não encontrado" }, { status: 404 });
 
-  // Sincroniza com Tiny em background (best-effort)
-  syncContatoToTiny(body.id).catch((err) =>
-    console.error("[contatos PATCH] Tiny sync falhou:", err)
-  );
+  // Enfileira sync com Tiny (assíncrono, não bloqueia atualização do contato)
+  await sql`
+    INSERT INTO alissonerp.fila_sync_externo (sistema, acao, payload)
+    VALUES ('tiny', 'sync_contato', ${JSON.stringify({ contato_id: body.id })}::jsonb)
+  `;
 
   return NextResponse.json(contato);
 }
