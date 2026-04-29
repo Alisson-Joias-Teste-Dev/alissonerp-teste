@@ -1,8 +1,20 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 29/04/2026 — Versão: v2.37.0 <!-- Revisado 29/04/2026 -->
+> 📋 Última atualização automática: 29/04/2026 — Versão: v2.38.0 <!-- Revisado 29/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.38.0 (29/04/2026)
+### Feature — Story 3.4 — Worker retry exponencial para fila_sync_externo
+- **Migration 200** (`200_fila_sync_proxima_execucao.sql`): adiciona coluna `proxima_execucao TIMESTAMPTZ NULL` em `alissonerp.fila_sync_externo` + índice parcial `idx_fila_sync_pendente` (status='pendente'). Executada em produção via Node pg Client.
+- **`src/lib/fila-sync-worker.ts`**: worker com retry exponencial (1m→5m→15m→1h→6h, MAX_TENTATIVAS=5). Usa `FOR UPDATE SKIP LOCKED` para segurança em múltiplas instâncias. Após MAX_TENTATIVAS, status→`falha_definitiva` + notificação admin. Processador extensível por sistema (`tiny` implementado: `sync_contato`).
+- **`POST /api/admin/fila-sync`**: dispara o worker manualmente (usado por cron externo ou admin). Auth: admin/desenvolvedor. Retorna `{ processados, falhas, falhas_definitivas }`.
+- **`GET /api/admin/fila-sync`**: expandido com campos `proxima_execucao` e `ultimo_erro` na listagem.
+- **`POST /api/admin/fila-sync/[id]/reprocessar`**: move `falha_definitiva` → `pendente`, zera tentativas e `proxima_execucao`.
+- **`POST /api/admin/fila-sync/limpar`**: deleta registros `processado` com mais de 30 dias.
+- **`src/app/(dashboard)/admin/fila-sync/`**: tela admin com tabela paginada, contadores por status, botões "Processar agora", "Reprocessar" (por item) e "Limpar antigos". Auto-refresh 30s. Roles: admin/desenvolvedor.
+- **`docs/adr/0005-sync-externo-fila.md`**: ADR documenta decisão de fila assíncrona vs sync inline.
+- `npx tsc --noEmit`: zero erros.
 
 ## v2.37.0 (29/04/2026)
 ### Feature — EPIC-001 Story 1.1 — alissonerp.parametros_sistema
