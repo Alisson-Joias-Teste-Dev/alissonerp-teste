@@ -241,11 +241,11 @@ export async function GET(
     }
 
     // Cotação atual do ouro e dólar (para cálculo em runtime no drawer)
-    const [cot] = await sql<{ ouro: string | null; dollar: string | null }[]>`
-      SELECT ouro, dollar FROM public.parametros LIMIT 1
+    const [cot] = await sql<{ cotacao_ouro: string | null; cotacao_dolar: string | null }[]>`
+      SELECT cotacao_ouro, cotacao_dolar FROM alissonerp.parametros LIMIT 1
     `;
-    const cotacao_ouro  = Number(cot?.ouro ?? 0);
-    const cotacao_dolar = Number(cot?.dollar ?? 0);
+    const cotacao_ouro  = Number(cot?.cotacao_ouro ?? 0);
+    const cotacao_dolar = Number(cot?.cotacao_dolar ?? 0);
 
     // Fornecedor — leitura separada, só se a coluna existir (migration 159)
     if (await colunaExiste("alissonerp", "erp_produtos", "fornecedor")) {

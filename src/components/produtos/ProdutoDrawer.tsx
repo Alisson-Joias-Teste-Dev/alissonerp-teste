@@ -131,7 +131,7 @@ function formatPreco(val: string | null | undefined): string {
   if (!val) return "—";
   const n = parseFloat(val);
   if (isNaN(n)) return "—";
-  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 function DeltaBadge({ pct }: { pct: string | null | undefined }) {
@@ -1443,10 +1443,11 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                       const precoLive = podeCalc
                         ? Math.round((pesoLive * cotacaoOuro * markupLive * fatorLive) / 10) * 10
                         : null;
+                      const toStrCmp = (v: unknown) => (v == null ? "" : String(v));
                       const editando =
-                        (pesoEdit || "")   !== (produto.peso_precificado ?? "") ||
-                        (markupEdit || "") !== (produto.markup ?? "") ||
-                        (fatorEdit || "")  !== (produto.fator ?? "");
+                        (pesoEdit || "")   !== toStrCmp(produto.peso_precificado) ||
+                        (markupEdit || "") !== toStrCmp(produto.markup) ||
+                        (fatorEdit || "")  !== toStrCmp(produto.fator);
 
                       if (editando && precoLive != null) {
                         return (

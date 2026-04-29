@@ -74,7 +74,7 @@ function formatPreco(val: string | null | undefined): string {
   if (!val) return "—";
   const n = parseFloat(val);
   if (isNaN(n)) return "—";
-  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 function SituacaoBadge({ situacao }: { situacao: string | null }) {
