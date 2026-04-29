@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql, { normalizeRow } from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // GET /api/purificacao/ligacao?status=em_processo&page=1
 export async function GET(req: NextRequest) {
@@ -174,6 +175,8 @@ export async function POST(req: NextRequest) {
   const tipo_18k_nome   = (mapeamento as any).tipo_18k_nome  as string;
   const liga_nome       = (mapeamento as any).liga_nome      as string;
 
+  const ouro24kLigaId = await getParametroNumber(PARAM.OURO_24K_LIGA_INSUMO_ID);
+
   // Calcular pesos (com pureza)
   const pureza_decimal      = Math.min(Math.max(pureza, 0), 100) / 100;
   const ouro_puro_real      = Number((peso_24k * pureza_decimal).toFixed(3));
@@ -184,7 +187,7 @@ export async function POST(req: NextRequest) {
   const [saldo24kRow] = await sql`
     SELECT COALESCE(saldo_real, 0)::numeric AS saldo_real
     FROM alissonerp.vw_detalhe_pote
-    WHERE insumo_id = 275
+    WHERE insumo_id = ${ouro24kLigaId}
   `;
   const saldo24k = Number((saldo24kRow as any)?.saldo_real ?? 0);
   if (peso_24k > saldo24k) {

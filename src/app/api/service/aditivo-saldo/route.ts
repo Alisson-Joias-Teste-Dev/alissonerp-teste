@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // GET /api/service/aditivo-saldo
 // Retorna o saldo de Ouro 18k (insumo_id=1) no depósito do operador logado.
@@ -27,8 +28,10 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ error: "Usuário não possui depósito/operador vinculado" }, { status: 422 });
   }
 
+  const ouro18kId = await getParametroNumber(PARAM.OURO_18K_INSUMO_ID);
+
   if (!caller.deposito_id) {
-    return NextResponse.json({ deposito_id: null, insumo_id: 1, saldo: 0 });
+    return NextResponse.json({ deposito_id: null, insumo_id: ouro18kId, saldo: 0 });
   }
 
   const depositoId = caller.deposito_id as number;
@@ -36,14 +39,14 @@ export async function GET(_req: NextRequest) {
   const [row] = await sql`
     SELECT COALESCE(saldo, 0) AS saldo
     FROM alissonerp.vw_saldo_estoque
-    WHERE deposito_id = ${depositoId} AND insumo_id = 1
+    WHERE deposito_id = ${depositoId} AND insumo_id = ${ouro18kId}
   `;
 
   const saldo = parseFloat(String(row?.saldo ?? 0));
 
   return NextResponse.json({
     deposito_id: depositoId,
-    insumo_id:   1,
+    insumo_id:   ouro18kId,
     saldo:       parseFloat(saldo.toFixed(4)),
   });
 }

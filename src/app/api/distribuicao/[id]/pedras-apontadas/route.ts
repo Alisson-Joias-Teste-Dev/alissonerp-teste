@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // GET /api/distribuicao/[id]/pedras-apontadas
 // Retorna pedras com saldo disponível: entrada − retorno − já usadas em saídas
@@ -12,6 +13,8 @@ export async function GET(
   if (isNaN(distId)) {
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
+
+  const pedraCategoriaId = await getParametroNumber(PARAM.PEDRA_CATEGORIA_ID);
 
   const rows = await sql`
     WITH apontamentos AS (
@@ -65,7 +68,7 @@ export async function GET(
     FROM apontamentos a
     JOIN alissonerp.insumos i ON i.id = a.insumo_id
     LEFT JOIN usadas u ON u.insumo_id = a.insumo_id
-    WHERE i.categoria_id = 2
+    WHERE i.categoria_id = ${pedraCategoriaId}
       AND GREATEST(
         COALESCE(a.qtd_entrada, 0) - COALESCE(a.qtd_retorno, 0) - COALESCE(u.qtd_usada, 0),
         0

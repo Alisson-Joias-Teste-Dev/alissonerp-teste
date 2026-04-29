@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { normalizeRow } from "@/lib/db";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // GET /api/compras — lista todas as compras com JOIN locais_estoque + fornecedor
 // Query params: ?situacao=rascunho&local_id=1
@@ -84,6 +85,7 @@ export async function GET(req: NextRequest) {
 // POST /api/compras
 // Body: { fornecedor_id?, obs?, local_destino_id?, numero_nf?, data_compra?, created_by? }
 export async function POST(req: NextRequest) {
+  const localEstoqueDefault = await getParametroNumber(PARAM.LOCAL_ESTOQUE_DEFAULT_ID);
   const { fornecedor_id, obs, local_destino_id, numero_nf, data_compra, created_by } =
     await req.json() as {
       fornecedor_id?: number | null;
@@ -101,7 +103,7 @@ export async function POST(req: NextRequest) {
       ${fornecedor_id ?? null},
       ${obs ?? null},
       'rascunho',
-      ${local_destino_id ?? 1},
+      ${local_destino_id ?? localEstoqueDefault},
       ${numero_nf ?? null},
       ${data_compra ?? null},
       ${created_by ?? null}::uuid

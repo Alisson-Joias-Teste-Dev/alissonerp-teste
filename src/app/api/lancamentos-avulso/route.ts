@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // POST /api/lancamentos-avulso
 // Body: { tipo_lancamento, insumo_id, peso, deposito_id?, deposito_destino_id?, obs?, created_by? }
@@ -16,6 +17,8 @@ export async function POST(req: NextRequest) {
       created_by?: string | null;
       local_estoque_id?: number | null;
     };
+
+  const localEstoqueDefault = await getParametroNumber(PARAM.LOCAL_ESTOQUE_DEFAULT_ID);
 
   if (!tipo_lancamento || !insumo_id || !peso || peso <= 0) {
     return NextResponse.json(
@@ -40,7 +43,7 @@ export async function POST(req: NextRequest) {
       ${peso},
       ${obs ?? null},
       ${created_by ?? null}::uuid,
-      ${local_estoque_id ?? 1}
+      ${local_estoque_id ?? localEstoqueDefault}
     )
     RETURNING id
   `;

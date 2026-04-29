@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { recalcularTotaisPCP } from "@/lib/recalcular-totais-pcp";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // POST /api/pcp/apontamentos
 export async function POST(req: NextRequest) {
@@ -73,6 +74,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
+
   // Guard ourives: só pode apontar em PCPs do seu depósito
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -122,7 +125,7 @@ export async function POST(req: NextRequest) {
               SELECT COALESCE(peso_pedra_ct, 0) FROM alissonerp.insumos WHERE id = ${insumo_id} LIMIT 1
             )) ELSE 0 END AS saida_ct
           FROM alissonerp.movimentacoes_estoque
-          WHERE insumo_id = ${insumo_id} AND deposito_id = 1
+          WHERE insumo_id = ${insumo_id} AND deposito_id = ${almoxarifadoId}
         ) t
       `;
       const saldoCt = Number(saldoRows[0]?.saldo_ct ?? 0);
@@ -135,7 +138,7 @@ export async function POST(req: NextRequest) {
     } else {
       const saldo = await sql`
         SELECT COALESCE(SUM(saldo), 0) AS saldo FROM alissonerp.vw_saldo_estoque
-        WHERE deposito_id = 1 AND insumo_id = ${insumo_id}
+        WHERE deposito_id = ${almoxarifadoId} AND insumo_id = ${insumo_id}
       `;
       const saldoAtual = Number(saldo[0]?.saldo ?? 0);
       if (saldoAtual < qtd) {

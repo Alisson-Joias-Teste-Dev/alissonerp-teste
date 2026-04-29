@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { normalizeRow } from "@/lib/db";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 type Params = Promise<{ id: string }>;
 
@@ -64,6 +65,8 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
     return NextResponse.json({ error: "insumo_id é obrigatório" }, { status: 400 });
   }
 
+  const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
+
   // Verificar se compra está bloqueada antes de inserir
   const [compra] = await sql`
     SELECT bloqueado, situacao FROM alissonerp.compras WHERE id = ${compraId} LIMIT 1
@@ -92,7 +95,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
       VALUES (
         ${compraId},
         ${insumo_id},
-        ${deposito_id ?? 1},
+        ${deposito_id ?? almoxarifadoId},
         ${peso_ct},
         ${custo_por_ct ?? null},
         'ct',
@@ -127,7 +130,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
       VALUES (
         ${compraId},
         ${insumo_id},
-        ${deposito_id ?? 1},
+        ${deposito_id ?? almoxarifadoId},
         ${qtd},
         ${valor_unitario ?? null},
         ${unidade},

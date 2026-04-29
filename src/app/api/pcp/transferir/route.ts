@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { registrarQuebra, buscarOuroRecebido } from "@/lib/registrar-quebra";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // POST /api/pcp/transferir
 // Move uma ordem do PCP de um depósito/operador para outro.
@@ -241,6 +242,8 @@ async function calcularSaldoAutomatico(
   distOuroReal: number,
 ): Promise<Array<{ insumo_id: number; quantidade: number }>> {
   const result: Array<{ insumo_id: number; quantidade: number }> = [];
+  const ouro18kId        = await getParametroNumber(PARAM.OURO_18K_INSUMO_ID);
+  const pedraCategoriaId = await getParametroNumber(PARAM.PEDRA_CATEGORIA_ID);
 
   // Metal (insumo_id=1)
   const [metalRow] = await sql`
@@ -254,12 +257,12 @@ async function calcularSaldoAutomatico(
       - COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 5 THEN a.qtd ELSE 0 END), 0)
       AS saldo
     FROM alissonerp.pcp p
-    LEFT JOIN alissonerp.apontamentos_pcp a ON a.pcp_id = p.id AND a.insumo_id = 1
+    LEFT JOIN alissonerp.apontamentos_pcp a ON a.pcp_id = p.id AND a.insumo_id = ${ouro18kId}
     WHERE p.id = ${pcp_id}
     GROUP BY p.id, p.dist_ouro_real
   `;
   const metalSaldo = Number(metalRow?.saldo ?? 0);
-  if (metalSaldo > 0) result.push({ insumo_id: 1, quantidade: metalSaldo });
+  if (metalSaldo > 0) result.push({ insumo_id: ouro18kId, quantidade: metalSaldo });
 
   // Pedras (cat=2): Entrada (tipo 3) − Retorno (tipo 6)
   const pedrasSaldos = await sql`
@@ -271,7 +274,7 @@ async function calcularSaldoAutomatico(
     FROM alissonerp.apontamentos_pcp a
     JOIN alissonerp.insumos i ON i.id = a.insumo_id
     WHERE a.pcp_id = ${pcp_id}
-      AND i.categoria_id = 2
+      AND i.categoria_id = ${pedraCategoriaId}
       AND a.insumo_id IS NOT NULL
     GROUP BY a.insumo_id
     HAVING

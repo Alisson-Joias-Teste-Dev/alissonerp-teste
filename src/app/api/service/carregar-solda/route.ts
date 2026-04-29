@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, ROLES_SERVICE_PANEL } from "@/lib/roles";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // POST /api/service/carregar-solda
 // Dupla-entrada: sai do Almoxarifado Central (dep 1) e entra no depósito do operador.
@@ -48,11 +49,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "foto_base64 obrigatória" }, { status: 400 });
   }
 
-  // ── 1. Verificar saldo do pote (Almoxarifado Central, dep=1) ─────────────
+  const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
+  const ouro18kId      = await getParametroNumber(PARAM.OURO_18K_INSUMO_ID);
+
+  // ── 1. Verificar saldo do pote (Almoxarifado Central) ────────────────────
   const [saldoPoteRow] = await sql`
     SELECT COALESCE(saldo, 0) AS saldo
     FROM alissonerp.vw_saldo_estoque
-    WHERE deposito_id = 1 AND insumo_id = 1
+    WHERE deposito_id = ${almoxarifadoId} AND insumo_id = ${ouro18kId}
   `;
   const saldoPote = parseFloat(String(saldoPoteRow?.saldo ?? 0));
   if (saldoPote < peso) {
@@ -77,9 +81,9 @@ export async function POST(req: NextRequest) {
   await (sql as any).begin(async (tx: typeof sql) => {
     await tx`
       SELECT alissonerp.fn_criar_par_movimentacao(
-        1::integer,
+        ${ouro18kId}::integer,
         ${peso}::real,
-        1::integer,
+        ${almoxarifadoId}::integer,
         NULL::integer,
         ${deposito_id}::integer,
         NULL::integer,
@@ -94,9 +98,9 @@ export async function POST(req: NextRequest) {
   const saldosRows = await sql`
     SELECT deposito_id, COALESCE(saldo, 0) AS saldo
     FROM alissonerp.vw_saldo_estoque
-    WHERE insumo_id = 1 AND deposito_id IN (1, ${deposito_id})
+    WHERE insumo_id = ${ouro18kId} AND deposito_id IN (${almoxarifadoId}, ${deposito_id})
   `;
-  const novo_saldo_pote     = parseFloat(String(saldosRows.find(r => r.deposito_id === 1)?.saldo ?? 0));
+  const novo_saldo_pote     = parseFloat(String(saldosRows.find(r => r.deposito_id === almoxarifadoId)?.saldo ?? 0));
   const novo_saldo_operador = parseFloat(String(saldosRows.find(r => r.deposito_id === deposito_id)?.saldo ?? 0));
 
   return NextResponse.json({

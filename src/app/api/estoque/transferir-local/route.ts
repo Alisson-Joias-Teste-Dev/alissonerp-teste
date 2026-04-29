@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // POST /api/estoque/transferir-local
 // Transferência de insumo entre locais de estoque (Fábrica ↔ Loja).
@@ -59,11 +60,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Local destino (id=${local_destino_id}) está inativo` }, { status: 400 });
   }
 
+  const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
+  const pedraCategoriaId = await getParametroNumber(PARAM.PEDRA_CATEGORIA_ID);
+
   // Verificar se é pedra — pedras vêm em ct, converter para gramas (1ct = 0.2g)
   const [insumoRow] = await sql`
     SELECT categoria_id FROM alissonerp.insumos WHERE id = ${insumo_id}
   `;
-  const isPedra = insumoRow?.categoria_id === 2;
+  const isPedra = insumoRow?.categoria_id === pedraCategoriaId;
   const pesoGramas = isPedra ? quantidade * 0.2 : quantidade;
 
   // Verificar saldo suficiente no local de origem (em gramas)
@@ -71,7 +75,7 @@ export async function POST(req: NextRequest) {
     SELECT COALESCE(SUM(COALESCE(entrada, 0)), 0) - COALESCE(SUM(COALESCE(saida, 0)), 0) AS saldo
     FROM alissonerp.movimentacoes_estoque
     WHERE insumo_id = ${insumo_id}
-      AND deposito_id = 1
+      AND deposito_id = ${almoxarifadoId}
       AND local_estoque_id = ${local_origem_id}
   `;
   const saldo = Number(saldoRows[0]?.saldo ?? 0);
@@ -92,7 +96,7 @@ export async function POST(req: NextRequest) {
     INSERT INTO alissonerp.movimentacoes_estoque
       (insumo_id, saida, deposito_id, local_estoque_id, marcador, obs)
     VALUES
-      (${insumo_id}, ${pesoGramas}::real, 1, ${local_origem_id},
+      (${insumo_id}, ${pesoGramas}::real, ${almoxarifadoId}, ${local_origem_id},
        'TA'::alissonerp.enum_marcador_estoque, ${obsText})
   `;
 
@@ -101,7 +105,7 @@ export async function POST(req: NextRequest) {
     INSERT INTO alissonerp.movimentacoes_estoque
       (insumo_id, entrada, deposito_id, local_estoque_id, marcador, obs)
     VALUES
-      (${insumo_id}, ${pesoGramas}::real, 1, ${local_destino_id},
+      (${insumo_id}, ${pesoGramas}::real, ${almoxarifadoId}, ${local_destino_id},
        'TA'::alissonerp.enum_marcador_estoque, ${obsText})
   `;
 

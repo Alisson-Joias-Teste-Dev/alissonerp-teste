@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // GET /api/pcp/[id]/pedras-disponiveis
 // Retorna pedras com saldo disponível no PCP: entrada (tipo 3) − retorno (tipo 6)
@@ -12,6 +13,8 @@ export async function GET(
   if (isNaN(pcpId)) {
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
+
+  const pedraCategoriaId = await getParametroNumber(PARAM.PEDRA_CATEGORIA_ID);
 
   const rows = await sql`
     WITH apontamentos AS (
@@ -58,7 +61,7 @@ export async function GET(
       )                                  AS saldo_un
     FROM apontamentos a
     JOIN alissonerp.insumos i ON i.id = a.insumo_id
-    WHERE i.categoria_id = 2
+    WHERE i.categoria_id = ${pedraCategoriaId}
       AND GREATEST(
         COALESCE(a.qtd_entrada, 0) - COALESCE(a.qtd_retorno, 0),
         0

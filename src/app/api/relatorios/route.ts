@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // ─── GET /api/relatorios?tipo=producao|comercial|financeiro|estoque&inicio=&fim=
 export async function GET(req: NextRequest) {
@@ -135,11 +136,13 @@ export async function GET(req: NextRequest) {
     }
 
     case "estoque": {
+      const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
+      const ouro18kId      = await getParametroNumber(PARAM.OURO_18K_INSUMO_ID);
       const [saldo_ouro, alertas, movimentacoes] = await Promise.all([
         sql`
           SELECT COALESCE(SUM(saldo), 0) AS total_ouro
           FROM alissonerp.vw_saldo_estoque
-          WHERE deposito_id = 1 AND insumo_id = 1
+          WHERE deposito_id = ${almoxarifadoId} AND insumo_id = ${ouro18kId}
         `,
         sql`
           SELECT status_alerta, COUNT(*) AS qtd

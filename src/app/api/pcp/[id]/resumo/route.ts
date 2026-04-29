@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // GET /api/pcp/[id]/resumo
 // Retorna apontamentos agrupados por tipo com totais de metal e pedras
@@ -10,6 +11,9 @@ export async function GET(
   const { id } = await params;
   const pcpId = parseInt(id);
 
+  const metalCategoriaId = await getParametroNumber(PARAM.METAL_CATEGORIA_ID);
+  const pedraCategoriaId = await getParametroNumber(PARAM.PEDRA_CATEGORIA_ID);
+
   const rows = await sql`
     SELECT
       ta.id        AS tipo_id,
@@ -17,15 +21,15 @@ export async function GET(
       COUNT(*)::int AS total_apontamentos,
       SUM(a.qtd)   AS total_qtd,
       -- Metal: qtd já é gramas
-      SUM(CASE WHEN i.categoria_id = 1 THEN a.qtd ELSE 0 END) AS peso_metal,
+      SUM(CASE WHEN i.categoria_id = ${metalCategoriaId} THEN a.qtd ELSE 0 END) AS peso_metal,
       -- Pedras: qtd (unidades) × peso_pedra do insumo
-      SUM(CASE WHEN i.categoria_id = 2
+      SUM(CASE WHEN i.categoria_id = ${pedraCategoriaId}
                THEN a.qtd * COALESCE(i.peso_pedra, 0)
                ELSE 0 END)                                      AS peso_pedras,
       -- Qtd de pedras (unidades)
-      SUM(CASE WHEN i.categoria_id = 2 THEN a.qtd ELSE 0 END) AS qtd_pedras,
+      SUM(CASE WHEN i.categoria_id = ${pedraCategoriaId} THEN a.qtd ELSE 0 END) AS qtd_pedras,
       -- Sprint 3: peso em quilates (ct)
-      SUM(CASE WHEN i.categoria_id = 2 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) AS pedras_ct,
+      SUM(CASE WHEN i.categoria_id = ${pedraCategoriaId} THEN COALESCE(a.peso_ct, 0) ELSE 0 END) AS pedras_ct,
       COALESCE(MIN(i.categoria_id), 0)::int                    AS categoria_id
     FROM alissonerp.apontamentos_pcp a
     JOIN alissonerp.tipos_apontamento ta ON ta.id = a.tipo_apontamento_id

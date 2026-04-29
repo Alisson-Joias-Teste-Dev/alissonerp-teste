@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // POST /api/distribuicao/apontamentos
 // Tipos scope 'ambos' ou 'distribuicao': 1,2,3,5,6,8,9
@@ -26,12 +27,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Validação de estoque no Almoxarifado Central (ID=1) para tipos que saem do almox
+  const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
+
+  // Validação de estoque no Almoxarifado Central para tipos que saem do almox
   // Tipos 1 (Aditivo), 2 (Entrada Metal), 3 (Entrada Pedra): saem do Almoxarifado
   if ((tipo_apontamento_id === 1 || tipo_apontamento_id === 2 || tipo_apontamento_id === 3) && insumo_id) {
     const saldo = await sql`
       SELECT COALESCE(SUM(saldo), 0) AS saldo FROM alissonerp.vw_saldo_estoque
-      WHERE deposito_id = 1 AND insumo_id = ${insumo_id}
+      WHERE deposito_id = ${almoxarifadoId} AND insumo_id = ${insumo_id}
     `;
     const saldoAtual = Number(saldo[0]?.saldo ?? 0);
     if (saldoAtual < qtd) {

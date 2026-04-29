@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ export async function GET(req: NextRequest) {
   if (!hasAccess) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   const localId = parseInt(req.nextUrl.searchParams.get("local_id") ?? "3");
+  const pedraCategoriaId = await getParametroNumber(PARAM.PEDRA_CATEGORIA_ID);
 
   const rows = await sql`
     SELECT
@@ -38,7 +40,7 @@ export async function GET(req: NextRequest) {
     FROM alissonerp.vw_saldo_por_local sl
     JOIN alissonerp.insumos i ON i.id = sl.insumo_id
     WHERE sl.local_estoque_id = ${localId}
-      AND sl.categoria_id = 2
+      AND sl.categoria_id = ${pedraCategoriaId}
       AND sl.saldo > 0
     ORDER BY i.nome
   `;

@@ -4,6 +4,7 @@ import { uploadFile } from "@/lib/storage";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // POST /api/service/[id]/concluir
 // Operador conclui o serviço: registra pesos, solda, pedras, fotos.
@@ -174,11 +175,12 @@ async function _handler(
     }
     fotoFioUrl = fioResult.url;
 
-    // 4c. Buscar saldo atual do fio (Ouro 18k = insumo_id=1) no depósito do operador
+    // 4c. Buscar saldo atual do fio (Ouro 18k) no depósito do operador
+    const ouro18kId = await getParametroNumber(PARAM.OURO_18K_INSUMO_ID);
     const [saldoRow] = await sql`
       SELECT COALESCE(saldo, 0) AS saldo
       FROM alissonerp.vw_saldo_estoque
-      WHERE deposito_id = ${operadorId} AND insumo_id = 1
+      WHERE deposito_id = ${operadorId} AND insumo_id = ${ouro18kId}
     `;
     pesoFioAntes = parseFloat(String(saldoRow?.saldo ?? 0));
 

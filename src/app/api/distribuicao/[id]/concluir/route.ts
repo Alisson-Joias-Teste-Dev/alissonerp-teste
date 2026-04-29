@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { registrarQuebra } from "@/lib/registrar-quebra";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // POST /api/distribuicao/[id]/concluir
 // Conclui a distribuição calculando o balanço do LOTE INTEIRO.
@@ -62,6 +63,8 @@ export async function POST(
     );
   }
 
+  const metalCategoriaId = await getParametroNumber(PARAM.METAL_CATEGORIA_ID);
+
   // 3. Calcular ouro entregue ao lote (dos apontamentos, categoria metal)
   //    tipos 1 (Aditivo) + 2 (Entrada) − tipo 5 (Retorno)
   const [metalLote] = await sql`
@@ -70,7 +73,7 @@ export async function POST(
       COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 5       THEN a.qtd ELSE 0 END), 0)::float8 AS retorno
     FROM alissonerp.apontamentos_distribuicao a
     JOIN alissonerp.insumos i ON i.id = a.insumo_id
-    WHERE a.distribuicao_id = ${distId} AND i.categoria_id = 1
+    WHERE a.distribuicao_id = ${distId} AND i.categoria_id = ${metalCategoriaId}
   `;
   const ouroEntregue = Number(metalLote.entrada) - Number(metalLote.retorno);
 

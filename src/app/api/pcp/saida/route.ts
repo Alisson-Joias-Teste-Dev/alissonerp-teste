@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { registrarQuebra, buscarOuroRecebido } from "@/lib/registrar-quebra";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // POST /api/pcp/saida — registra saída final do PCP
 //
@@ -85,6 +86,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const metalCategoriaId = await getParametroNumber(PARAM.METAL_CATEGORIA_ID);
+  const pedraCategoriaId = await getParametroNumber(PARAM.PEDRA_CATEGORIA_ID);
+
   // 2. Calcular peso das pedras utilizadas + validar qtd contra disponível
   let peso_pedras_total = 0;
   const pedrasInfo: { insumo_id: number; qtd: number; peso_unitario: number; peso_total: number }[] = [];
@@ -104,7 +108,7 @@ export async function POST(req: NextRequest) {
       FROM alissonerp.apontamentos_pcp a
       JOIN alissonerp.insumos i ON i.id = a.insumo_id
       WHERE a.pcp_id = ${pcp_id}
-        AND i.categoria_id = 2
+        AND i.categoria_id = ${pedraCategoriaId}
       GROUP BY a.insumo_id
       HAVING (
         SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -
@@ -196,7 +200,7 @@ export async function POST(req: NextRequest) {
     FROM alissonerp.apontamentos_pcp a
     JOIN alissonerp.insumos i ON i.id = a.insumo_id
     WHERE a.pcp_id = ${pcp_id}
-      AND i.categoria_id = 1
+      AND i.categoria_id = ${metalCategoriaId}
   `;
   const metal_liquido = Number(metalCalc.entrada) - Number(metalCalc.retorno);
   const total_metal   = metal_liquido + dist_ouro_real;
@@ -332,7 +336,7 @@ export async function POST(req: NextRequest) {
     FROM alissonerp.apontamentos_pcp a
     JOIN alissonerp.insumos i ON i.id = a.insumo_id
     WHERE a.pcp_id = ${pcp_id}
-      AND i.categoria_id = 2
+      AND i.categoria_id = ${pedraCategoriaId}
     GROUP BY a.insumo_id
     HAVING (
       SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -

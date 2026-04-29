@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 const ROLES_CANCELAR = ["admin", "desenvolvedor"];
 
@@ -168,20 +169,23 @@ export async function PATCH(
     WHERE id = ${purif_id}
   `;
 
-  // Inserir movimentação de entrada de Ouro 24k no pote (deposito_id=1)
+  const almoxarifadoId     = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
+  const localEstoqueDefault = await getParametroNumber(PARAM.LOCAL_ESTOQUE_DEFAULT_ID);
+
+  // Inserir movimentação de entrada de Ouro 24k no pote (Almoxarifado Central)
   await sql`
     INSERT INTO alissonerp.movimentacoes_estoque
       (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
     VALUES
       (
         ${ouro24k_id},
-        1,
+        ${almoxarifadoId},
         ${peso_retornado_24k}::real,
         'PURIF_ENTRADA'::alissonerp.enum_marcador_estoque,
         ${'Purificação #' + purif_id + ' — retorno 24k fino'},
         ${user_id}::uuid,
         NOW(),
-        1
+        ${localEstoqueDefault}
       )
   `;
 

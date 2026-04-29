@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql, { normalizeRow } from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // GET /api/purificacao?status=em_processo&page=1
 export async function GET(req: NextRequest) {
@@ -129,6 +130,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Itens obrigatórios" }, { status: 400 });
   }
 
+  const almoxarifadoId      = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
+  const metalCategoriaId    = await getParametroNumber(PARAM.METAL_CATEGORIA_ID);
+  const localEstoqueDefault = await getParametroNumber(PARAM.LOCAL_ESTOQUE_DEFAULT_ID);
+
   // Validar cada item
   for (const item of itens) {
     if (!item.insumo_id || !item.peso || item.peso <= 0) {
@@ -144,7 +149,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verificar se insumo existe e é categoria 1
+    // Verificar se insumo existe e é categoria metal
     const [ins] = await sql`
       SELECT id, categoria_id FROM alissonerp.insumos
       WHERE id = ${item.insumo_id} AND ativo = true LIMIT 1
@@ -155,7 +160,7 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    if ((ins as { categoria_id: number }).categoria_id !== 1) {
+    if ((ins as { categoria_id: number }).categoria_id !== metalCategoriaId) {
       return NextResponse.json(
         { error: `Insumo id=${item.insumo_id} não é da categoria Metal/Ouro` },
         { status: 400 },
@@ -227,13 +232,13 @@ export async function POST(req: NextRequest) {
       VALUES
         (
           ${item.insumo_id},
-          1,
+          ${almoxarifadoId},
           ${item.peso}::real,
           'PURIF_SAIDA'::alissonerp.enum_marcador_estoque,
           ${'Purificação #' + purif_id + ' — envio para refino'},
           ${user_id}::uuid,
           NOW(),
-          1
+          ${localEstoqueDefault}
         )
     `;
   }

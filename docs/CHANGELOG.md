@@ -1,8 +1,16 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 23/04/2026 — Versão: v2.33.0 <!-- Revisado 23/04/2026 -->
+> 📋 Última atualização automática: 29/04/2026 — Versão: v2.37.0 <!-- Revisado 29/04/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## v2.37.0 (29/04/2026)
+### Feature — EPIC-001 Story 1.1 — alissonerp.parametros_sistema
+- **Migration 192** (`192_parametros_sistema.sql`): cria tabela `alissonerp.parametros_sistema` (chave PK, valor, tipo, descricao, atualizado_em, atualizado_por). Seed inicial com 6 parâmetros: `ALMOXARIFADO_DEPOSITO_ID=1`, `OURO_18K_INSUMO_ID=1`, `METAL_CATEGORIA_ID=1`, `PEDRA_CATEGORIA_ID=2`, `LOCAL_ESTOQUE_DEFAULT_ID=1`, `OURO_24K_LIGA_INSUMO_ID=275`.
+- **`src/lib/parametros.ts`**: helper com cache TTL 5min, `getParametro()`, `getParametroNumber()`, `invalidarCacheParametros()`, constante tipada `PARAM`.
+- **29 rotas API refatoradas**: substituídos todos os IDs de domínio hardcoded (`deposito_id=1`, `insumo_id=1`, `insumo_id=275`, `categoria_id=1/2`, `local_estoque_id=1`) pelo helper. Zero hardcoded remanescentes (grep AC6 = 0).
+- Rotas refatoradas: `service/carregar-aditivo`, `service/carregar-solda`, `service/aditivo-saldo`, `service/solda-saldo`, `service/[id]/concluir`, `service/[id]/devolver`, `service/pedras-estoque`, `pcp/apontamentos`, `pcp/[id]/pedras-disponiveis`, `pcp/[id]/resumo`, `pcp/saida`, `pcp/transferir`, `distribuicao/apontamentos`, `distribuicao/[id]/pedras-apontadas`, `distribuicao/[id]/concluir`, `dashboard/fabrica`, `dashboard/fabrica/movimentacoes`, `estoque/transferir-local`, `relatorios`, `purificacao`, `purificacao/[id]`, `purificacao/ligacao`, `purificacao/liga-tipos`, `compras`, `compras/[id]/itens`, `lancamentos-avulso`.
+- `npx tsc --noEmit`: zero erros. Banco confirmou 6 parâmetros inseridos.
 
 ## v2.33.0 (23/04/2026)
 ### Feature — Dashboard Comercial (replicado do alison-joias-admin)

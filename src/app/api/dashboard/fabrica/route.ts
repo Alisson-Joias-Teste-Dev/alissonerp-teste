@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // GET /api/dashboard/fabrica?inicio=YYYY-MM-DD&fim=YYYY-MM-DD
 //
@@ -62,6 +63,9 @@ export async function GET(req: NextRequest) {
     ORDER BY quebra DESC
   `;
 
+  const almoxarifadoId  = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
+  const metalCategoriaId = await getParametroNumber(PARAM.METAL_CATEGORIA_ID);
+
   // 5. Movimentações financeiras do pote no período (entradas e saídas de ouro)
   const [movimentacoes] = await sql`
     SELECT
@@ -69,8 +73,8 @@ export async function GET(req: NextRequest) {
       COALESCE(SUM(me.saida),   0)::float8 AS total_saidas
     FROM alissonerp.movimentacoes_estoque me
     JOIN alissonerp.insumos i ON i.id = me.insumo_id
-    WHERE me.deposito_id = 1
-      AND i.categoria_id = 1
+    WHERE me.deposito_id = ${almoxarifadoId}
+      AND i.categoria_id = ${metalCategoriaId}
       AND me.data_hora BETWEEN ${inicioTs}::timestamptz AND ${fimTs}::timestamptz
   `;
 
@@ -80,8 +84,8 @@ export async function GET(req: NextRequest) {
       COALESCE(SUM(me.entrada), 0)::float8 - COALESCE(SUM(me.saida), 0)::float8 AS saldo
     FROM alissonerp.movimentacoes_estoque me
     JOIN alissonerp.insumos i ON i.id = me.insumo_id
-    WHERE me.deposito_id = 1
-      AND i.categoria_id = 1
+    WHERE me.deposito_id = ${almoxarifadoId}
+      AND i.categoria_id = ${metalCategoriaId}
       AND me.data_hora < ${inicioTs}::timestamptz
   `;
 

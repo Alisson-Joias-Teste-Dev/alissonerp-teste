@@ -5,6 +5,7 @@ import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { registrarQuebra, buscarOuroRecebido } from "@/lib/registrar-quebra";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 
 // POST /api/service/[id]/devolver
 // Operador service devolve a peça para o POTE (Almoxarifado ID=1).
@@ -165,10 +166,11 @@ async function _handler(
     }
     fotoFioUrl = (fioResult as { url: string }).url;
 
+    const ouro18kId = await getParametroNumber(PARAM.OURO_18K_INSUMO_ID);
     const [saldoRow] = await sql`
       SELECT COALESCE(saldo, 0) AS saldo
       FROM alissonerp.vw_saldo_estoque
-      WHERE deposito_id = ${operadorId}::integer AND insumo_id = 1
+      WHERE deposito_id = ${operadorId}::integer AND insumo_id = ${ouro18kId}
     `;
     pesoFioAntes = parseFloat(String(saldoRow?.saldo ?? 0));
     consumoSolda = parseFloat((pesoFioAntes - peso_fio_depois).toFixed(4));
@@ -183,6 +185,9 @@ async function _handler(
 
   // 5. Calcular ouro a devolver (saldo líquido do operador para esta ordem)
   //    Chamado ANTES de criar CEs para evitar double-counting
+  const almoxarifadoId   = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
+  const ouro18kId        = await getParametroNumber(PARAM.OURO_18K_INSUMO_ID);
+  const localEstoqueDefault = await getParametroNumber(PARAM.LOCAL_ESTOQUE_DEFAULT_ID);
   const ouroRecebido = await buscarOuroRecebido(ordemId, operadorId);
   const ouroDevolver = Math.max(0, parseFloat(ouroRecebido.toFixed(4)));
 
@@ -195,10 +200,10 @@ async function _handler(
         INSERT INTO alissonerp.movimentacoes_estoque
           (insumo_id, deposito_id, saida, entrada, marcador, obs, ordem_id, created_by, local_estoque_id)
         VALUES
-          (1, ${operadorId}::integer, ${consumoSolda}::real, 0,
+          (${ouro18kId}, ${operadorId}::integer, ${consumoSolda}::real, 0,
            'SM'::alissonerp.enum_marcador_estoque,
            ${'Consumo aditivo devolucao service #' + servicoId + ' - ' + numeroOrdem},
-           ${ordemId}::integer, ${userId}::uuid, 1)
+           ${ordemId}::integer, ${userId}::uuid, ${localEstoqueDefault})
       `;
     }
 
@@ -209,19 +214,19 @@ async function _handler(
         INSERT INTO alissonerp.movimentacoes_estoque
           (insumo_id, deposito_id, saida, entrada, marcador, obs, ordem_id, created_by, local_estoque_id)
         VALUES
-          (1, ${operadorId}::integer, ${ouroDevolver}::real, 0,
+          (${ouro18kId}, ${operadorId}::integer, ${ouroDevolver}::real, 0,
            'TED'::alissonerp.enum_marcador_estoque,
            ${'Devolucao service #' + servicoId + ' ao pote - ' + numeroOrdem},
-           ${ordemId}::integer, ${userId}::uuid, 1)
+           ${ordemId}::integer, ${userId}::uuid, ${localEstoqueDefault})
       `;
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
           (insumo_id, deposito_id, saida, entrada, marcador, obs, ordem_id, created_by, local_estoque_id)
         VALUES
-          (1, 1, 0, ${ouroDevolver}::real,
+          (${ouro18kId}, ${almoxarifadoId}, 0, ${ouroDevolver}::real,
            'TED'::alissonerp.enum_marcador_estoque,
            ${'Devolucao service #' + servicoId + ' ao pote - ' + numeroOrdem},
-           ${ordemId}::integer, ${userId}::uuid, 1)
+           ${ordemId}::integer, ${userId}::uuid, ${localEstoqueDefault})
       `;
     }
 
