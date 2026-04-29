@@ -1,10 +1,19 @@
 import { type ZodType, type ZodIssue } from "zod";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, AuthError, ForbiddenError, type AuthUser } from "@/lib/auth-server";
+import { registry } from "@/lib/openapi-registry";
+
+interface RouteMeta {
+  path: string;
+  method: "get" | "post" | "put" | "patch" | "delete";
+  tags?: string[];
+  summary?: string;
+}
 
 interface DefineRouteOpts<TInput> {
   requireRoles?: string[];
   inputSchema?: ZodType<TInput>;
+  meta?: RouteMeta;
   handler: (
     req: NextRequest,
     ctx: { user: AuthUser; body: TInput; params?: Record<string, string> },
@@ -12,6 +21,29 @@ interface DefineRouteOpts<TInput> {
 }
 
 export function defineRoute<TInput = unknown>(opts: DefineRouteOpts<TInput>) {
+  // Register route in OpenAPI registry if meta is provided
+  if (opts.inputSchema && opts.meta) {
+    registry.registerPath({
+      method: opts.meta.method,
+      path: opts.meta.path,
+      tags: opts.meta.tags,
+      summary: opts.meta.summary,
+      request: {
+        body: {
+          content: {
+            "application/json": { schema: opts.inputSchema },
+          },
+        },
+      },
+      responses: {
+        200: { description: "OK" },
+        400: { description: "Dados inválidos" },
+        401: { description: "Não autenticado" },
+        403: { description: "Sem permissão" },
+      },
+    });
+  }
+
   return async (
     req: NextRequest,
     ctx?: { params?: Promise<Record<string, string>> },
