@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import type { FaixaPedra } from "./page";
 import GerenciarPedrasModal from "@/components/produtos/GerenciarPedrasModal";
+import { useErrorStore } from "@/stores/errorStore";
 import {
   getPricingFactors,
   prepareCategories,
@@ -2217,7 +2218,7 @@ export default function PrecificacaoClient({ faixasPedrasInicial, configInicial,
     fetch("/api/precificacao/pendentes")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d) setPendentesCount(d.total ?? 0); })
-      .catch(() => {});
+      .catch(() => useErrorStore.getState().push("Erro ao carregar precificações pendentes", { level: "warning" }));
   }, []);
 
   function handleEnviado() {

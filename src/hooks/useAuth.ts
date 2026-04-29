@@ -18,7 +18,10 @@ interface AuthState {
 
 // Cache module-global: deduplica fetch entre os 17+ componentes que usam useAuth()
 // Sem isso, cada componente faz 2 fetches paralelos → satura limite de 6 conexões do browser
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos — role/permissões revalidam automaticamente
+
 let cachedState: AuthState | null = null;
+let cachedAt: number | null = null;
 let inflightPromise: Promise<AuthState> | null = null;
 const subscribers = new Set<(s: AuthState) => void>();
 
@@ -50,16 +53,25 @@ async function fetchAuthData(): Promise<AuthState> {
 
 function notifyAll(s: AuthState) {
   cachedState = s;
+  cachedAt = Date.now();
   subscribers.forEach((cb) => cb(s));
 }
 
 async function ensureLoaded(): Promise<AuthState> {
-  if (cachedState && !cachedState.loading) return cachedState;
+  const expired = cachedAt !== null && (Date.now() - cachedAt > CACHE_TTL_MS);
+  if (cachedState && !cachedState.loading && !expired) return cachedState;
   if (inflightPromise) return inflightPromise;
   inflightPromise = fetchAuthData()
     .then((s) => { notifyAll(s); inflightPromise = null; return s; })
     .catch((e) => { inflightPromise = null; throw e; });
   return inflightPromise;
+}
+
+/** Força revalidação imediata das permissões (chamar após mutations de role/perfil) */
+export function invalidarCacheAuth() {
+  cachedState = null;
+  cachedAt = null;
+  inflightPromise = null;
 }
 
 let authChangeHooked = false;
@@ -69,6 +81,7 @@ function hookAuthChangeOnce() {
   const supabase = createClient();
   supabase.auth.onAuthStateChange(() => {
     cachedState = null;
+    cachedAt = null;
     inflightPromise = null;
     ensureLoaded().catch(() => {});
   });

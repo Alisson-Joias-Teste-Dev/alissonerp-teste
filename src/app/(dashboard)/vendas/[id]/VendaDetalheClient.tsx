@@ -18,6 +18,7 @@ import PixQrInline from "@/components/vendas/PixQrInline";
 import CartaoInline from "@/components/vendas/CartaoInline";
 import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
+import { useErrorStore } from "@/stores/errorStore";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -423,11 +424,14 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
   // Load ref data
   useEffect(() => {
-    fetch("/api/vendas/faixas-comissao").then(r => r.json()).then(setFaixas).catch(() => {});
+    const { push } = useErrorStore.getState();
+    fetch("/api/vendas/faixas-comissao").then(r => r.json()).then(setFaixas)
+      .catch(() => push("Erro ao carregar faixas de comissão", { level: "warning" }));
     fetch("/api/vendas/forma-envio").then(r => r.json()).then((d: { envio: FormaEnvio[]; frete: FormaFrete[] }) => {
       setFormaEnvioOpts(d.envio ?? []); setFormaFreteAll(d.frete ?? []);
-    }).catch(() => {});
-    if (isFullAccess) fetch("/api/vendedores").then(r => r.json()).then(setVendedores).catch(() => {});
+    }).catch(() => push("Erro ao carregar formas de envio/frete", { level: "warning" }));
+    if (isFullAccess) fetch("/api/vendedores").then(r => r.json()).then(setVendedores)
+      .catch(() => push("Erro ao carregar vendedores", { level: "warning" }));
   }, [isFullAccess]);
 
   // ── Hydrate form from venda ─────────────────────────────────────────────────

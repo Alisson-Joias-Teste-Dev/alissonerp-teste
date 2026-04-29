@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import Link from "next/link";
+import { useErrorStore } from "@/stores/errorStore";
 
 // ─── Design tokens ──────────────────────────────────────────────────────────
 const C = {
@@ -134,7 +135,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
     fetch("/api/saldo-credito")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setSaldoCredito({ saldo: d.saldo_atual, limite: d.limite }); })
-      .catch(() => {});
+      .catch(() => useErrorStore.getState().push("Erro ao carregar saldo de crédito", { level: "warning" }));
   }, [mostraSaldo]);
 
   // Carregar vendedores (apenas acesso total)
@@ -143,7 +144,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
     fetch("/api/vendedores")
       .then(r => r.json())
       .then(setVendedores)
-      .catch(() => {});
+      .catch(() => useErrorStore.getState().push("Erro ao carregar vendedores", { level: "warning" }));
   }, [isFullAccess]);
 
   // Fetch vendas

@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { dispararWebhook } from "@/lib/webhooks";
 import PeriodoFiltro, { type Periodo, calcPeriodo } from "@/components/ui/PeriodoFiltro";
+import { useErrorStore } from "@/stores/errorStore";
 
 // ─── palette (tema claro/creme consistente com o resto do sistema) ───────────
 const C = {
@@ -1599,7 +1600,7 @@ function TabConciliacaoPendente() {
     fetch("/api/financeiro/conciliacao-pendente?periodo=30")
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setLista(d); })
-      .catch(() => {})
+      .catch(() => useErrorStore.getState().push("Erro ao carregar conciliações pendentes", { level: "warning" }))
       .finally(() => setLoading(false));
   }, []);
 
@@ -1823,7 +1824,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
     fetch("/api/configuracoes/gateways")
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setGatewaysFiltro(d.filter((g: any) => g.ativo && g.nome !== "Banco").map((g: any) => g.nome)); })
-      .catch(() => {});
+      .catch(() => useErrorStore.getState().push("Erro ao carregar gateways de pagamento", { level: "warning" }));
   }, []);
 
   // Mapeia formas legadas para o gateway correspondente
@@ -2197,7 +2198,7 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
     fetch("/api/financeiro/cofre-ouro")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d && d.total_transacoes > 0) setCofre(d); })
-      .catch(() => {});
+      .catch(() => useErrorStore.getState().push("Erro ao carregar cofre de ouro", { level: "warning" }));
   }, []);
 
   const isFinanceiro = ["admin", "desenvolvedor", "gerente_fabrica", "gerente_loja"].includes(userRole ?? "");

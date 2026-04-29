@@ -11,6 +11,7 @@ import Link from "next/link";
 import { maskCpfCnpj } from "@/lib/formatters";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import CartaoInline from "@/components/vendas/CartaoInline";
+import { useErrorStore } from "@/stores/errorStore";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -277,13 +278,16 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
 
   // Carregar dados de referência
   useEffect(() => {
-    fetch("/api/vendas/faixas-comissao").then(r => r.json()).then(setFaixas).catch(() => {});
+    const { push } = useErrorStore.getState();
+    fetch("/api/vendas/faixas-comissao").then(r => r.json()).then(setFaixas)
+      .catch(() => push("Não foi possível carregar faixas de comissão", { level: "warning" }));
     fetch("/api/vendas/forma-envio").then(r => r.json()).then((d: { envio: FormaEnvio[]; frete: FormaFrete[] }) => {
       setFormaEnvioOpts(d.envio ?? []);
       setFormaFreteAll(d.frete ?? []);
-    }).catch(() => {});
+    }).catch(() => push("Não foi possível carregar formas de envio/frete", { level: "warning" }));
     if (isFullAccess) {
-      fetch("/api/vendedores").then(r => r.json()).then(setVendedores).catch(() => {});
+      fetch("/api/vendedores").then(r => r.json()).then(setVendedores)
+        .catch(() => push("Não foi possível carregar lista de vendedores", { level: "warning" }));
     } else if (vendedorId) {
       // Consultora: buscar só o próprio vendedor pra mostrar o nome
       fetch("/api/vendedores").then(r => r.json()).then((all: Vendedor[]) => {

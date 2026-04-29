@@ -18,6 +18,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { apiFetch } from "@/lib/apiFetch";
 import TarefaDrawer from "./TarefaDrawer";
 import AutomacoesTab from "./AutomacoesTab";
+import { useErrorStore } from "@/stores/errorStore";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface Tarefa {
@@ -222,7 +223,8 @@ export default function TarefasClient() {
   useEffect(() => { carregar(); }, [carregar]);
 
   useEffect(() => {
-    apiFetch<Usuario[]>("/api/usuarios/busca?q=").then(setUsuarios).catch(() => {});
+    apiFetch<Usuario[]>("/api/usuarios/busca?q=").then(setUsuarios)
+      .catch(() => useErrorStore.getState().push("Erro ao carregar usuários", { level: "warning" }));
   }, []);
 
   // ─── DnD handlers ───────────────────────────────────────────────────────────
