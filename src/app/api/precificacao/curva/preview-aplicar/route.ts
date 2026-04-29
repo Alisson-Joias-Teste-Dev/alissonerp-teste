@@ -151,7 +151,7 @@ export async function POST(req: NextRequest) {
     for (const p of produtos) {
       const peso = Number(p.peso_precificado);
       const factors = getPricingFactors(peso, config, categorias);
-      const precoNovo = calcularPrecoSync(peso, cotacao, factors.mkp, config.arredondamento);
+      const precoNovo = calcularPrecoSync(peso, cotacao, factors.mkp, config.arredondamento, config.goldCostPercentage);
       const precoAtual = p.preco_sync != null ? Number(p.preco_sync) : null;
       const markupAtual = p.markup != null ? Number(p.markup) : null;
 

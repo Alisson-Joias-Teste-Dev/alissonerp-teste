@@ -1275,7 +1275,7 @@ export default function OrcamentoClient({
       ? getPricingFactors(pecaPeso, curvaConfig, curvaCategorias)
       : null;
     const pecaValorOuro = pecaFactors && curvaConfig
-      ? calcularPrecoSync(pecaPeso, cotacaoOuro, pecaFactors.mkp, curvaConfig.arredondamento)
+      ? calcularPrecoSync(pecaPeso, cotacaoOuro, pecaFactors.mkp, curvaConfig.arredondamento, curvaConfig.goldCostPercentage)
       : 0;
     const pecaMaxDesconto = pecaFactors?.maxDiscount ?? 0;
     const pecaSubtotal = pecaValorOuro + pecaPedrasTotalRS;
@@ -1374,7 +1374,7 @@ export default function OrcamentoClient({
               let valorOuro = 0;
               if (curvaConfig && curvaCategorias.length > 0) {
                 const factors = getPricingFactors(pecaPeso, curvaConfig, curvaCategorias);
-                valorOuro = calcularPrecoSync(pecaPeso, cotacaoOuro, factors.mkp, curvaConfig.arredondamento);
+                valorOuro = calcularPrecoSync(pecaPeso, cotacaoOuro, factors.mkp, curvaConfig.arredondamento, curvaConfig.goldCostPercentage);
               }
               return (
                 <div className="rounded-lg px-3 py-2.5 text-xs flex items-center justify-between"

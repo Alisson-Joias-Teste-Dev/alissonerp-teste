@@ -157,15 +157,17 @@ export function calcularCustoBase(peso: number, cotacaoOuro: number, goldCostPer
 }
 
 /**
- * Preco de venda final arredondado: peso x cotacao x mkp, arredondado.
+ * Preco de venda final arredondado: peso x cotacao x (goldCostPercentage/100) x mkp.
+ * goldCostPercentage=100 significa custo = 100% da cotacao (default retrocompativel).
  */
 export function calcularPrecoSync(
   peso: number,
   cotacaoOuro: number,
   mkp: number,
   arredondamento: Arredondamento,
+  goldCostPercentage: number = 100,
 ): number {
-  const bruto = peso * cotacaoOuro * mkp;
+  const bruto = peso * cotacaoOuro * (goldCostPercentage / 100) * mkp;
   return aplicarArredondamento(bruto, arredondamento);
 }
 
@@ -200,7 +202,7 @@ export function simularLucratividade(
   const factors = getPricingFactors(peso, config, categorias);
   const custo = calcularCustoBase(peso, cotacaoOuro, config.goldCostPercentage);
 
-  const vendaAuto = calcularPrecoSync(peso, cotacaoOuro, factors.mkp, config.arredondamento);
+  const vendaAuto = calcularPrecoSync(peso, cotacaoOuro, factors.mkp, config.arredondamento, config.goldCostPercentage);
   const lucroAuto = vendaAuto - custo;
   const margemAuto = vendaAuto > 0 ? (lucroAuto / vendaAuto) * 100 : 0;
 
@@ -217,7 +219,7 @@ export function simularLucratividade(
   };
 
   if (mkpManual !== undefined && mkpManual > 0) {
-    const vendaManual = calcularPrecoSync(peso, cotacaoOuro, mkpManual, config.arredondamento);
+    const vendaManual = calcularPrecoSync(peso, cotacaoOuro, mkpManual, config.arredondamento, config.goldCostPercentage);
     const lucroManual = vendaManual - custo;
     const margemManual = vendaManual > 0 ? (lucroManual / vendaManual) * 100 : 0;
     out.mkpManual = mkpManual;
@@ -252,7 +254,7 @@ export function gerarPontosCurva(
 
     const factors = getPricingFactors(peso, config, categorias);
     const custo = calcularCustoBase(peso, cotacaoOuro, config.goldCostPercentage);
-    const venda = calcularPrecoSync(peso, cotacaoOuro, factors.mkp, config.arredondamento);
+    const venda = calcularPrecoSync(peso, cotacaoOuro, factors.mkp, config.arredondamento, config.goldCostPercentage);
     const lucro = venda - custo;
     const margem = venda > 0 ? (lucro / venda) * 100 : 0;
     pontos.push({
@@ -331,7 +333,7 @@ export function getLimitPrice(
   categorias: CurvaCategoriaInput[],
 ): number {
   const factors = getPricingFactors(weight, config, categorias);
-  return calcularPrecoSync(weight, cotacaoOuro, factors.mkp, config.arredondamento);
+  return calcularPrecoSync(weight, cotacaoOuro, factors.mkp, config.arredondamento, config.goldCostPercentage);
 }
 
 /**

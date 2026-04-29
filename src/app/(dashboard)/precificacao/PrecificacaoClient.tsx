@@ -1167,13 +1167,13 @@ function TabCurvaDinamica({
 
   const simVenda = useMemo(() => {
     if (!simFactors || pesoNum <= 0 || cotacaoOuro <= 0) return null;
-    return calcularPrecoSync(pesoNum, cotacaoOuro, simFactors.mkp, config.arredondamento);
-  }, [simFactors, pesoNum, cotacaoOuro, config.arredondamento]);
+    return calcularPrecoSync(pesoNum, cotacaoOuro, simFactors.mkp, config.arredondamento, config.goldCostPercentage);
+  }, [simFactors, pesoNum, cotacaoOuro, config.arredondamento, config.goldCostPercentage]);
 
   const vendaManual = useMemo(() => {
     if (mkpManualNum <= 0 || pesoNum <= 0 || cotacaoOuro <= 0) return null;
-    return calcularPrecoSync(pesoNum, cotacaoOuro, mkpManualNum, config.arredondamento);
-  }, [mkpManualNum, pesoNum, cotacaoOuro, config.arredondamento]);
+    return calcularPrecoSync(pesoNum, cotacaoOuro, mkpManualNum, config.arredondamento, config.goldCostPercentage);
+  }, [mkpManualNum, pesoNum, cotacaoOuro, config.arredondamento, config.goldCostPercentage]);
 
   // ─── Handlers ───
   function updateConfig<K extends keyof CurvaConfig>(key: K, value: CurvaConfig[K]) {
