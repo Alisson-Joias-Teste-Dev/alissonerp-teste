@@ -1,0 +1,856 @@
+[
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_aging_contas",
+    "owner": "postgres",
+    "definition": " SELECT 'pagar'::text AS tipo,\n    cp.id,\n    cp.descricao,\n    cp.fornecedor_id AS contato_id,\n    cp.fornecedor_nome AS contato_nome,\n    cp.valor,\n    cp.data_vencimento,\n    cp.data_pagamento AS data_liquidacao,\n    cp.situacao,\n    cp.categoria,\n    cp.obs,\n    cp.created_at,\n        CASE\n            WHEN ((cp.situacao)::text = ANY ((ARRAY['pago'::character varying, 'cancelado'::character varying])::text[])) THEN cp.situacao\n            WHEN (cp.data_vencimento IS NULL) THEN 'sem_vencimento'::character varying\n            WHEN (cp.data_vencimento < CURRENT_DATE) THEN 'atrasado'::character varying\n            WHEN (cp.data_vencimento = CURRENT_DATE) THEN 'vence_hoje'::character varying\n            ELSE 'a_vencer'::character varying\n        END AS maturidade,\n        CASE\n            WHEN (((cp.situacao)::text = 'pendente'::text) AND (cp.data_vencimento IS NOT NULL) AND (cp.data_vencimento < CURRENT_DATE)) THEN (CURRENT_DATE - cp.data_vencimento)\n            ELSE 0\n        END AS dias_atraso\n   FROM alissonerp.contas_pagar cp\nUNION ALL\n SELECT 'receber'::text AS tipo,\n    cr.id,\n    cr.descricao,\n    cr.cliente_id AS contato_id,\n    cr.cliente_nome AS contato_nome,\n    cr.valor,\n    cr.data_vencimento,\n    cr.data_recebimento AS data_liquidacao,\n    cr.situacao,\n    cr.categoria,\n    cr.obs,\n    cr.created_at,\n        CASE\n            WHEN ((cr.situacao)::text = ANY ((ARRAY['recebido'::character varying, 'cancelado'::character varying])::text[])) THEN cr.situacao\n            WHEN (cr.data_vencimento IS NULL) THEN 'sem_vencimento'::character varying\n            WHEN (cr.data_vencimento < CURRENT_DATE) THEN 'atrasado'::character varying\n            WHEN (cr.data_vencimento = CURRENT_DATE) THEN 'vence_hoje'::character varying\n            ELSE 'a_vencer'::character varying\n        END AS maturidade,\n        CASE\n            WHEN (((cr.situacao)::text = 'pendente'::text) AND (cr.data_vencimento IS NOT NULL) AND (cr.data_vencimento < CURRENT_DATE)) THEN (CURRENT_DATE - cr.data_vencimento)\n            ELSE 0\n        END AS dias_atraso\n   FROM alissonerp.contas_receber cr;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_apontamentos_ordem",
+    "owner": "postgres",
+    "definition": " SELECT a.id,\n    a.pcp_id,\n    p.ordem_id,\n    o.numero_ordem,\n    a.qtd,\n    a.created_at AS data,\n    ta.id AS tipo_id,\n    ta.descricao AS tipo_descricao,\n    ins.id AS insumo_id,\n    ins.nome AS insumo_nome,\n    ins.sku AS insumo_sku,\n    cat.nome AS insumo_categoria,\n    dep.nome AS deposito_nome,\n    st.nome AS setor_nome,\n    COALESCE(NULLIF(TRIM(BOTH FROM up.name), ''::text), (au.email)::text, 'Sistema'::text) AS criado_por\n   FROM (((((((((alissonerp.apontamentos_pcp a\n     LEFT JOIN alissonerp.pcp p ON ((p.id = a.pcp_id)))\n     LEFT JOIN alissonerp.ordens o ON ((o.id = p.ordem_id)))\n     LEFT JOIN alissonerp.tipos_apontamento ta ON ((ta.id = a.tipo_apontamento_id)))\n     LEFT JOIN alissonerp.insumos ins ON ((ins.id = a.insumo_id)))\n     LEFT JOIN alissonerp.categorias_insumo cat ON ((cat.id = ins.categoria_id)))\n     LEFT JOIN alissonerp.depositos dep ON ((dep.id = a.deposito_id)))\n     LEFT JOIN alissonerp.setores st ON ((st.id = a.setor_id)))\n     LEFT JOIN auth.users au ON ((au.id = a.created_by)))\n     LEFT JOIN user_profiles up ON ((up.id_user = au.id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_auditorias_completa",
+    "owner": "postgres",
+    "definition": " SELECT a.id,\n    a.situacao,\n        CASE a.situacao\n            WHEN 'pendente'::text THEN 'Pendente'::character varying\n            WHEN 'em_analise'::text THEN 'Em Análise'::character varying\n            WHEN 'aprovado'::text THEN 'Aprovada'::character varying\n            WHEN 'reprovado'::text THEN 'Reprovada'::character varying\n            WHEN 'pendenciado'::text THEN 'Pendenciada'::character varying\n            ELSE a.situacao\n        END AS situacao_label,\n    a.tipo_auditoria,\n        CASE a.tipo_auditoria\n            WHEN 'loja'::text THEN 'Auditoria Loja'::character varying\n            WHEN 'fabrica'::text THEN 'Auditoria Fábrica'::character varying\n            ELSE COALESCE(a.tipo_auditoria, 'Outro'::character varying)\n        END AS tipo_auditoria_label,\n    a.rota_processo,\n    a.ordem_id,\n    o.numero_ordem,\n    o.numero_pedido,\n    (o.tipo_ordem)::text AS tipo_ordem,\n    (o.rota)::text AS rota_ordem,\n    a.ourives_nome,\n    COALESCE(a.peso_negociado, (0)::real) AS peso_negociado,\n    COALESCE(a.peso_final, (0)::real) AS peso_final,\n    COALESCE(a.pmc, (0)::real) AS pmc,\n    COALESCE(a.quebra, (0)::real) AS quebra,\n    COALESCE(a.quebra_percentual, (0)::real) AS quebra_percentual,\n    COALESCE(a.total_metal, (0)::real) AS total_metal,\n    COALESCE(a.retorno_metal, (0)::real) AS retorno_metal,\n    COALESCE(a.metal_externo, (0)::real) AS metal_externo,\n    a.ficha_tecnica_obs,\n    a.dados_ordem,\n        CASE\n            WHEN ((COALESCE(a.peso_negociado, (0)::real) > (0)::double precision) AND (COALESCE(a.peso_final, (0)::real) > (0)::double precision)) THEN round(((((a.peso_final - a.peso_negociado) / a.peso_negociado) * (100)::double precision))::numeric, 1)\n            ELSE (0)::numeric\n        END AS diff_peso_pct,\n    a.responsavel_id,\n    up.name AS responsavel_nome,\n    a.parecer,\n    a.motivo_reprovacao,\n    a.tipo_retrabalho,\n    a.ordem_retrabalho_id,\n    oret.numero_ordem AS ordem_retrabalho_numero,\n    c.nome AS cliente_nome,\n    v.nome AS vendedor_nome,\n    a.created_at,\n    a.data_conclusao,\n    round((EXTRACT(epoch FROM (COALESCE(a.data_conclusao, now()) - a.created_at)) / 86400.0), 1) AS dias_analise,\n    o.data_entrega,\n    COALESCE(o.peso_metal_externo, (0)::real) AS peso_metal_externo,\n    o.detalhes_ordem\n   FROM (((((alissonerp.auditorias a\n     LEFT JOIN alissonerp.ordens o ON ((o.id = a.ordem_id)))\n     LEFT JOIN user_profiles up ON ((up.id_user = a.responsavel_id)))\n     LEFT JOIN alissonerp.ordens oret ON ((oret.id = a.ordem_retrabalho_id)))\n     LEFT JOIN contatos c ON ((c.id_contato = o.cliente_id)))\n     LEFT JOIN vendedores v ON ((v.id_vendedor = o.vendedor_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_cofre_ouro",
+    "owner": "postgres",
+    "definition": " SELECT (count(*))::integer AS total_transacoes,\n    COALESCE(sum(pv.ouro_gramas), (0)::numeric) AS total_gramas,\n    COALESCE(sum(pv.valor), (0)::numeric) AS total_valor_brl,\n    COALESCE(avg(pv.ouro_valor_grama), (0)::numeric) AS preco_medio_grama,\n    (count(*) FILTER (WHERE (pv.created_at >= (now() - '30 days'::interval))))::integer AS transacoes_30d,\n    COALESCE(sum(pv.ouro_gramas) FILTER (WHERE (pv.created_at >= (now() - '30 days'::interval))), (0)::numeric) AS gramas_30d,\n    COALESCE(sum(pv.valor) FILTER (WHERE (pv.created_at >= (now() - '30 days'::interval))), (0)::numeric) AS valor_brl_30d\n   FROM alissonerp.pagamentos_venda pv\n  WHERE (((pv.forma)::text = 'Ouro'::text) AND ((pv.status)::text = 'confirmado'::text));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_comissoes",
+    "owner": "postgres",
+    "definition": " SELECT comissoes.id,\n    comissoes.created_at,\n    comissoes.nome,\n    comissoes.tabela\n   FROM comissoes;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_contatos",
+    "owner": "postgres",
+    "definition": " SELECT contatos.id_contato,\n    contatos.id_api_contato,\n    contatos.tipo_idapi,\n    contatos.nome,\n    contatos.codigo,\n    contatos.fantasia,\n    contatos.tipo_pessoa,\n    contatos.cpf_cnpj,\n    contatos.inscricao_estadual,\n    contatos.rg,\n    contatos.telefone,\n    contatos.celular,\n    contatos.email,\n    contatos.endereco,\n    contatos.numero,\n    contatos.complemento,\n    contatos.bairro,\n    contatos.municipio,\n    contatos.cep,\n    contatos.uf,\n    contatos.pais,\n    contatos.vendedor_idapi,\n    contatos.data_atualizacao,\n    contatos.id_kommo\n   FROM contatos;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_crediario",
+    "owner": "postgres",
+    "definition": " SELECT cr.id AS conta_receber_id,\n    cr.descricao,\n    cr.valor,\n    cr.data_vencimento,\n    cr.data_recebimento,\n    cr.situacao,\n    cr.obs,\n    cr.created_at,\n    cr.created_by AS criado_por_uuid,\n    cr.venda_erp_id AS venda_id,\n    v.numero_venda,\n    v.total_venda,\n    v.situacao AS venda_situacao,\n    v.bloqueado AS venda_bloqueada,\n    v.credito_gerente_usado,\n    v.created_at AS venda_created_at,\n    cr.cliente_id,\n    COALESCE(cr.cliente_nome, c.nome) AS cliente_nome,\n    c.telefone AS cliente_telefone,\n    c.email AS cliente_email,\n    v.vendedor_id,\n    vend.nome AS vendedor_nome,\n    u_cons.id AS consultora_uuid,\n    u_cons.nome AS consultora_nome,\n        CASE\n            WHEN ((cr.situacao)::text = 'pago'::text) THEN 'pago'::text\n            WHEN (cr.data_vencimento < CURRENT_DATE) THEN 'vencido'::text\n            WHEN (cr.data_vencimento <= (CURRENT_DATE + '7 days'::interval)) THEN 'vence_em_breve'::text\n            ELSE 'em_dia'::text\n        END AS status_aging,\n        CASE\n            WHEN ((cr.situacao)::text <> 'pendente'::text) THEN 0\n            WHEN (cr.data_vencimento IS NULL) THEN 0\n            ELSE GREATEST(0, (CURRENT_DATE - cr.data_vencimento))\n        END AS dias_atraso\n   FROM ((((alissonerp.contas_receber cr\n     LEFT JOIN alissonerp.vendas_erp v ON ((v.id = cr.venda_erp_id)))\n     LEFT JOIN contatos c ON ((c.id_contato = cr.cliente_id)))\n     LEFT JOIN vendedores vend ON ((vend.id_vendedor = v.vendedor_id)))\n     LEFT JOIN alissonerp.usuarios u_cons ON ((u_cons.id = v.created_by)))\n  WHERE ((cr.categoria)::text = 'venda'::text);",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_comissoes",
+    "owner": "postgres",
+    "definition": " SELECT comissoes.id,\n    comissoes.created_at,\n    comissoes.nome,\n    comissoes.tabela\n   FROM comissoes;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_controle_entregas",
+    "owner": "postgres",
+    "definition": " SELECT controle_entregas.id,\n    controle_entregas.pedido_id,\n    controle_entregas.entregador_responsavel,\n    controle_entregas.data_entrega,\n    controle_entregas.valor_entrega,\n    controle_entregas.observacoes,\n    controle_entregas.anexos_path,\n    controle_entregas.numero_pedido_plataforma,\n    controle_entregas.numero_pedido_tiny,\n    controle_entregas.nome_cliente,\n    controle_entregas.frete_pago_cliente,\n    controle_entregas.bairro_entrega,\n    controle_entregas.created_at,\n    controle_entregas.updated_at,\n    controle_entregas.created_by,\n    controle_entregas.vendedor_responsavel_id,\n    controle_entregas.entrega_type,\n    controle_entregas.status_aprovacao,\n    controle_entregas.descricao_entrega,\n    ((controle_entregas.status_aprovacao)::text = '2'::text) AS aprovada\n   FROM controle_entregas;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_forma_envio",
+    "owner": "postgres",
+    "definition": " SELECT forma_envio.id,\n    forma_envio.created_at,\n    forma_envio.id_api,\n    forma_envio.tipo,\n    forma_envio.situacao,\n    forma_envio.nome\n   FROM forma_envio;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_forma_frete",
+    "owner": "postgres",
+    "definition": " SELECT forma_frete.id,\n    forma_frete.created_at,\n    forma_frete.nome,\n    forma_frete.codigo,\n    forma_frete.codigo_externo,\n    forma_frete.tipo_entrega,\n    forma_frete.id_api,\n    forma_frete.id_api_logistica\n   FROM forma_frete;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_itens_venda",
+    "owner": "postgres",
+    "definition": " SELECT itens_venda.id,\n    itens_venda.venda_id,\n    itens_venda.produto_id,\n    itens_venda.sku,\n    itens_venda.quantidade,\n    itens_venda.preco_tabela,\n    itens_venda.preco_unitario_final,\n    itens_venda.preco_total,\n    itens_venda.desconto_percentual,\n    itens_venda.desconto_valor,\n    itens_venda.comissao_valor,\n    itens_venda.comissao_percentual,\n    itens_venda.n8n\n   FROM itens_venda;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_leads",
+    "owner": "postgres",
+    "definition": " SELECT leads.id,\n    leads.id_lead,\n    leads.fonte_entrada_id,\n    leads.consultor,\n    leads.data_entrada,\n    leads.data_fechamento,\n    leads.motivo_perda,\n    leads.pedido_tiny,\n    leads.contao_nome AS contato_nome,\n    leads.contato_telefone,\n    leads.etapa_lead,\n    leads.nome_lead,\n    leads.data_criacao,\n    leads.data_atualizacao,\n    leads.id_vendedor,\n    leads.status_pedido,\n    leads.status_id\n   FROM leads;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_metas_mensais",
+    "owner": "postgres",
+    "definition": " SELECT metas_mensais.id,\n    metas_mensais.created_at,\n    metas_mensais.mes_ano,\n    metas_mensais.horas_dia,\n    metas_mensais.hora_inicio,\n    metas_mensais.dias_trabalhados,\n    metas_mensais.valor_ouro,\n    metas_mensais.valor_prata,\n    metas_mensais.valor_diamante,\n    metas_mensais.consultora,\n    metas_mensais.dias_nao_trabalhados\n   FROM metas_mensais;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_metas_por_hora",
+    "owner": "postgres",
+    "definition": " SELECT metas_por_hora.id,\n    metas_por_hora.meta_mensal_id,\n    metas_por_hora.created_at,\n    metas_por_hora.data_hora,\n    metas_por_hora.consultora,\n    metas_por_hora.tipo_meta,\n    metas_por_hora.valor_meta,\n    metas_por_hora.meta_acumulada\n   FROM metas_por_hora;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_parcelas_pedidos",
+    "owner": "postgres",
+    "definition": " SELECT parcelas_pedidos.id_parcela,\n    parcelas_pedidos.dias,\n    parcelas_pedidos.data,\n    parcelas_pedidos.valor,\n    parcelas_pedidos.observacao,\n    parcelas_pedidos.forma_pagamento,\n    parcelas_pedidos.meio_pagamento,\n    parcelas_pedidos.pedido_id_api\n   FROM parcelas_pedidos;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_pedidos_parcelas_detalhado",
+    "owner": "postgres",
+    "definition": " SELECT pedidos_parcelas_detalhado.numero_pedido,\n    pedidos_parcelas_detalhado.data_pedido,\n    pedidos_parcelas_detalhado.situacao,\n    pedidos_parcelas_detalhado.cliente_id_api,\n    pedidos_parcelas_detalhado.id_vendedor,\n    pedidos_parcelas_detalhado.forma_pagamento_pedido,\n    pedidos_parcelas_detalhado.meio_pagamento_pedido,\n    pedidos_parcelas_detalhado.data_vencimento_parcela,\n    pedidos_parcelas_detalhado.valor_parcela,\n    pedidos_parcelas_detalhado.forma_pagamento_parcela,\n    pedidos_parcelas_detalhado.meio_pagamento_parcela,\n    pedidos_parcelas_detalhado.eh_devolucao\n   FROM pedidos_parcelas_detalhado;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_vendas",
+    "owner": "postgres",
+    "definition": " SELECT vendas.id,\n    vendas.created_at,\n    vendas.updated_at,\n    vendas.cliente_id,\n    vendas.vendedor_id,\n    vendas.data_venda,\n    vendas.data_envio,\n    vendas.status,\n    vendas.total_produtos,\n    vendas.total_venda,\n    vendas.total_itens_qnt,\n    vendas.total_itens_unidades,\n    vendas.forma_envio_id,\n    vendas.forma_frete_id,\n    vendas.endereco_cobranca,\n    vendas.dados_entrega,\n    vendas.dados_pagamento,\n    vendas.observacoes_internas,\n    vendas.observacoes,\n    vendas.arquivos_path,\n    vendas.frete_pago_cliente,\n    vendas.lead_id,\n    vendas.numero_pedido_tiny,\n    vendas.id_api_tiny,\n    vendas.public_link_uuid,\n    vendas.entregue,\n    vendas.numero_pedido,\n    vendas.pedido_numero\n   FROM vendas;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_vendas_todas",
+    "owner": "postgres",
+    "definition": " SELECT 'legado'::text AS fonte,\n    (v.id)::bigint AS id,\n    v.data_venda,\n    v.status,\n    (v.vendedor_id)::bigint AS vendedor_id,\n    (v.cliente_id)::bigint AS cliente_id,\n    v.total_venda,\n    v.frete_pago_cliente,\n    v.forma_envio_id,\n    v.numero_pedido,\n    v.numero_pedido_tiny,\n    v.id_api_tiny,\n    v.entregue,\n    NULL::text AS forma_envio_texto,\n    (COALESCE(( SELECT sum(p.valor) AS sum\n           FROM parcelas_pedidos p\n          WHERE ((p.pedido_id_api = v.id_api_tiny) AND (p.forma_pagamento = 'Vale-troca'::text))), (0)::double precision))::numeric AS valor_vale_troca\n   FROM vendas v\n  WHERE ((NOT (EXISTS ( SELECT 1\n           FROM alissonerp.vendas_erp ve\n          WHERE (((ve.situacao)::text = ANY ((ARRAY['aprovado'::character varying, 'enviado'::character varying, 'concluido'::character varying])::text[])) AND (ve.tiny_pedido_id IS NOT NULL) AND (ve.tiny_pedido_id = v.id_api_tiny) AND (ve.data_venda >= '2026-04-23'::date))))) AND (NOT (EXISTS ( SELECT 1\n           FROM alissonerp.vendas_erp ve2\n          WHERE (((ve2.situacao)::text = ANY ((ARRAY['aprovado'::character varying, 'enviado'::character varying, 'concluido'::character varying])::text[])) AND (ve2.tiny_pedido_id IS NULL) AND (ve2.numero_venda = (v.numero_pedido)::text) AND (ve2.data_venda < '2026-04-23'::date) AND (v.status <> 2))))) AND (NOT (EXISTS ( SELECT 1\n           FROM alissonerp.vendas_erp ve3\n          WHERE (((ve3.situacao)::text = ANY ((ARRAY['aprovado'::character varying, 'enviado'::character varying, 'concluido'::character varying])::text[])) AND (ve3.tiny_pedido_id IS NOT NULL) AND (ve3.tiny_pedido_id = v.id_api_tiny) AND (ve3.data_venda < '2026-04-23'::date) AND (v.status <> 2))))))\nUNION ALL\n SELECT 'erp'::text AS fonte,\n    (ve.id)::bigint AS id,\n    ve.data_venda,\n    2 AS status,\n    ve.vendedor_id,\n    ve.cliente_id,\n    ve.total_venda,\n    ve.total_frete AS frete_pago_cliente,\n    NULL::integer AS forma_envio_id,\n    NULL::bigint AS numero_pedido,\n    COALESCE((ve.tiny_pedido_id)::text, ve.numero_venda) AS numero_pedido_tiny,\n    ve.tiny_pedido_id AS id_api_tiny,\n    false AS entregue,\n    ve.forma_envio AS forma_envio_texto,\n    COALESCE(( SELECT sum(pv.valor) AS sum\n           FROM alissonerp.pagamentos_venda pv\n          WHERE ((pv.venda_id = ve.id) AND ((pv.forma)::text = 'Vale-troca'::text) AND ((pv.status)::text = 'confirmado'::text))), (0)::numeric) AS valor_vale_troca\n   FROM alissonerp.vendas_erp ve\n  WHERE (((ve.situacao)::text = ANY ((ARRAY['aprovado'::character varying, 'enviado'::character varying, 'concluido'::character varying])::text[])) AND ((ve.data_venda >= '2026-04-23'::date) OR ((ve.data_venda < '2026-04-23'::date) AND (ve.tiny_pedido_id IS NULL) AND (ve.total_venda > (0)::numeric) AND (EXISTS ( SELECT 1\n           FROM vendas v2\n          WHERE (((v2.numero_pedido)::text = ve.numero_venda) AND (v2.status <> 2))))) OR ((ve.data_venda < '2026-04-23'::date) AND (ve.tiny_pedido_id IS NOT NULL) AND (ve.total_venda > (0)::numeric) AND (EXISTS ( SELECT 1\n           FROM vendas v3\n          WHERE ((v3.id_api_tiny = ve.tiny_pedido_id) AND (v3.status IS DISTINCT FROM 2)))))));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dash_vendedores",
+    "owner": "postgres",
+    "definition": " SELECT vendedores.id_vendedor,\n    vendedores.nome,\n    vendedores.id_api_vendedor,\n    vendedores.foto,\n    vendedores.situacao,\n    vendedores.id_api_kommo,\n    vendedores.cpf,\n    vendedores.email,\n    vendedores.user_id,\n    vendedores.comissao,\n    vendedores.gerente_orcamento\n   FROM vendedores;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_dashboard_auditoria",
+    "owner": "postgres",
+    "definition": " SELECT auditorias.tipo_auditoria,\n    count(*) FILTER (WHERE ((auditorias.situacao)::text = 'pendente'::text)) AS pendentes,\n    count(*) FILTER (WHERE ((auditorias.situacao)::text = 'em_analise'::text)) AS em_analise,\n    count(*) FILTER (WHERE ((auditorias.situacao)::text = 'aprovado'::text)) AS aprovadas,\n    count(*) FILTER (WHERE ((auditorias.situacao)::text = 'reprovado'::text)) AS reprovadas,\n    count(*) FILTER (WHERE ((auditorias.situacao)::text = 'pendenciado'::text)) AS pendenciadas,\n    count(*) AS total,\n        CASE\n            WHEN (count(*) FILTER (WHERE ((auditorias.situacao)::text = ANY ((ARRAY['aprovado'::character varying, 'reprovado'::character varying])::text[]))) > 0) THEN round((((count(*) FILTER (WHERE ((auditorias.situacao)::text = 'aprovado'::text)))::numeric / (count(*) FILTER (WHERE ((auditorias.situacao)::text = ANY ((ARRAY['aprovado'::character varying, 'reprovado'::character varying])::text[]))))::numeric) * (100)::numeric), 1)\n            ELSE (0)::numeric\n        END AS taxa_aprovacao,\n    COALESCE(round(avg(\n        CASE\n            WHEN (auditorias.data_conclusao IS NOT NULL) THEN (EXTRACT(epoch FROM (auditorias.data_conclusao - auditorias.created_at)) / 86400.0)\n            ELSE NULL::numeric\n        END), 1), (0)::numeric) AS media_dias,\n    count(*) FILTER (WHERE (auditorias.quebra_percentual > (5)::double precision)) AS alertas_quebra\n   FROM alissonerp.auditorias\n  GROUP BY auditorias.tipo_auditoria;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_detalhe_pote",
+    "owner": "postgres",
+    "definition": " SELECT i.id AS insumo_id,\n    i.sku,\n    i.nome AS insumo_nome,\n    COALESCE(i.unidade, 'g'::character varying) AS unidade,\n    i.categoria_id,\n    ci.nome AS categoria_nome,\n    COALESCE(se.saldo_total, (0)::real) AS saldo_real,\n        CASE\n            WHEN (i.categoria_id = 2) THEN round(((COALESCE(se.saldo_total, (0)::real) / (0.2)::double precision))::numeric, 4)\n            ELSE NULL::numeric\n        END AS saldo_ct,\n        CASE\n            WHEN ((i.categoria_id = 2) AND (i.peso_pedra IS NOT NULL) AND (i.peso_pedra > (0)::double precision)) THEN round(((COALESCE(se.saldo_total, (0)::real) / i.peso_pedra))::numeric, 0)\n            ELSE NULL::numeric\n        END AS quantidade,\n    i.estoque_minimo,\n    i.estoque_maximo,\n    i.custo_compra,\n    i.descricao,\n    i.ativo,\n    i.foto,\n    i.fornecedor_id,\n    i.peso_pedra,\n    i.peso_pedra_ct,\n    i.observacao,\n    i.created_at,\n    i.updated_at\n   FROM ((alissonerp.insumos i\n     JOIN alissonerp.categorias_insumo ci ON ((ci.id = i.categoria_id)))\n     LEFT JOIN ( SELECT vw_saldo_estoque.insumo_id,\n            sum(vw_saldo_estoque.saldo) AS saldo_total\n           FROM alissonerp.vw_saldo_estoque\n          GROUP BY vw_saldo_estoque.insumo_id) se ON ((se.insumo_id = i.id)))\n  WHERE (i.ativo = true)\n  ORDER BY ci.nome, i.nome;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_estoque_comercial_alerta_v2",
+    "owner": "postgres",
+    "definition": " SELECT vw_saldo_estoque_comercial_consolidado.produto_id,\n    vw_saldo_estoque_comercial_consolidado.nome_produto,\n    vw_saldo_estoque_comercial_consolidado.sku,\n    vw_saldo_estoque_comercial_consolidado.categoria,\n    vw_saldo_estoque_comercial_consolidado.config_id,\n    vw_saldo_estoque_comercial_consolidado.estoque_minimo,\n    vw_saldo_estoque_comercial_consolidado.ativo,\n    vw_saldo_estoque_comercial_consolidado.saldo_fisico,\n    vw_saldo_estoque_comercial_consolidado.reservado,\n    vw_saldo_estoque_comercial_consolidado.disponivel,\n    vw_saldo_estoque_comercial_consolidado.em_transito,\n    vw_saldo_estoque_comercial_consolidado.total_movimentacoes,\n    vw_saldo_estoque_comercial_consolidado.ultima_movimentacao,\n        CASE\n            WHEN (vw_saldo_estoque_comercial_consolidado.disponivel < 0) THEN 'negativo'::text\n            WHEN (vw_saldo_estoque_comercial_consolidado.disponivel = 0) THEN 'zerado'::text\n            WHEN (vw_saldo_estoque_comercial_consolidado.disponivel < vw_saldo_estoque_comercial_consolidado.estoque_minimo) THEN 'abaixo_minimo'::text\n            WHEN (vw_saldo_estoque_comercial_consolidado.disponivel = vw_saldo_estoque_comercial_consolidado.estoque_minimo) THEN 'no_minimo'::text\n            ELSE 'ok'::text\n        END AS alerta\n   FROM alissonerp.vw_saldo_estoque_comercial_consolidado;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_estoque_directus",
+    "owner": "postgres",
+    "definition": " SELECT ce.id,\n    ce.entrada,\n    ce.saida,\n    ce.insumo_id,\n    ce.deposito_id,\n    ce.setor,\n    ce.marcador,\n    ce.ordem_id,\n    ce.data_hora,\n    ce.date_created\n   FROM directus.controle_estoque ce;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_estoque_directus_saldo",
+    "owner": "postgres",
+    "definition": " SELECT m.deposito_id,\n    dep.nome AS deposito_nome,\n    m.insumo_id,\n    ins.nome AS insumo_nome,\n    ins.sku AS insumo_sku,\n    cat.nome AS categoria_nome,\n    cat.id AS categoria_id,\n    m.local_estoque_id,\n    le.nome AS local_estoque_nome,\n    COALESCE(sum(m.entrada), (0)::real) AS total_entrada,\n    COALESCE(sum(m.saida), (0)::real) AS total_saida,\n    (COALESCE(sum(m.entrada), (0)::real) - COALESCE(sum(m.saida), (0)::real)) AS saldo,\n        CASE\n            WHEN (cat.id = 2) THEN round((((COALESCE(sum(m.entrada), (0)::real) - COALESCE(sum(m.saida), (0)::real)) / (0.2)::double precision))::numeric, 4)\n            ELSE NULL::numeric\n        END AS saldo_ct,\n        CASE\n            WHEN ((cat.id = 2) AND (ins.peso_pedra IS NOT NULL) AND (ins.peso_pedra > (0)::double precision)) THEN round((((COALESCE(sum(m.entrada), (0)::real) - COALESCE(sum(m.saida), (0)::real)) / ins.peso_pedra))::numeric, 0)\n            ELSE NULL::numeric\n        END AS quantidade,\n    ins.peso_pedra,\n    ins.peso_pedra_ct,\n    count(*) AS total_movimentacoes,\n    max(m.created_at) AS ultima_movimentacao\n   FROM ((((alissonerp.movimentacoes_estoque m\n     LEFT JOIN alissonerp.depositos dep ON ((dep.id = m.deposito_id)))\n     LEFT JOIN alissonerp.insumos ins ON ((ins.id = m.insumo_id)))\n     LEFT JOIN alissonerp.categorias_insumo cat ON ((cat.id = ins.categoria_id)))\n     LEFT JOIN alissonerp.locais_estoque le ON ((le.id = m.local_estoque_id)))\n  GROUP BY m.deposito_id, dep.nome, m.insumo_id, ins.nome, ins.sku, cat.nome, cat.id, ins.peso_pedra, ins.peso_pedra_ct, m.local_estoque_id, le.nome;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_estoque_ordem",
+    "owner": "postgres",
+    "definition": " SELECT m.id,\n    m.entrada,\n    m.saida,\n    (m.marcador)::text AS marcador,\n    m.data_hora,\n    m.created_at AS date_created,\n    m.ordem_id,\n    o.numero_ordem,\n    ins.nome AS insumo_nome,\n    dep.nome AS deposito_nome,\n    st.nome AS setor_nome\n   FROM ((((alissonerp.movimentacoes_estoque m\n     LEFT JOIN alissonerp.ordens o ON ((o.id = m.ordem_id)))\n     LEFT JOIN alissonerp.insumos ins ON ((ins.id = m.insumo_id)))\n     LEFT JOIN alissonerp.depositos dep ON ((dep.id = m.deposito_id)))\n     LEFT JOIN alissonerp.setores st ON ((st.id = m.setor_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_fichas_tecnicas",
+    "owner": "postgres",
+    "definition": " SELECT o.id AS ordem_id,\n    o.numero_ordem,\n    ft.id AS ficha_id,\n    ft.date_created,\n    ft.date_updated,\n    ft.milimetragem_1,\n    ft.milimetragem_2,\n    ft.numeracao,\n    ft.numeracao_2,\n    ft.comprimento,\n    ft.modelo_1,\n        CASE ft.modelo_1\n            WHEN '1'::text THEN 'Safira (Quadrada Lisa)'::character varying\n            WHEN '2'::text THEN 'Esmeralda (Boleada Lisa)'::character varying\n            WHEN '3'::text THEN 'Cristal (risco em cada lateral)'::character varying\n            WHEN '4'::text THEN 'Opala (risco lateral)'::character varying\n            WHEN '5'::text THEN 'Turquesa (risco no meio)'::character varying\n            WHEN '6'::text THEN 'Granada (dois riscos mesma lateral)'::character varying\n            WHEN '7'::text THEN 'Água Marinha (friso lateral)'::character varying\n            WHEN '8'::text THEN 'Bordas Elevadas (centro cravejado)'::character varying\n            WHEN '9'::text THEN 'Jade (risco lateral, escovado)'::character varying\n            WHEN '10'::text THEN 'Quartzo Rosa (bordas chanfradas)'::character varying\n            WHEN '11'::text THEN 'Ametista (risco no meio)'::character varying\n            WHEN '12'::text THEN 'Turmalina Paraíba (friso diamantado)'::character varying\n            WHEN '13'::text THEN 'Friso + corda + meia lua de pedras'::character varying\n            WHEN '14'::text THEN 'Dois frisos + corda'::character varying\n            ELSE ft.modelo_1\n        END AS modelo_1_label,\n    ft.outro_modelo_1,\n    ft.modelo_2,\n        CASE ft.modelo_2\n            WHEN '1'::text THEN 'Safira (Quadrada Lisa)'::character varying\n            WHEN '2'::text THEN 'Esmeralda (Boleada Lisa)'::character varying\n            WHEN '3'::text THEN 'Cristal (risco em cada lateral)'::character varying\n            WHEN '4'::text THEN 'Opala (risco lateral)'::character varying\n            WHEN '5'::text THEN 'Turquesa (risco no meio)'::character varying\n            WHEN '6'::text THEN 'Granada (dois riscos mesma lateral)'::character varying\n            WHEN '7'::text THEN 'Água Marinha (friso lateral)'::character varying\n            WHEN '8'::text THEN 'Bordas Elevadas (centro cravejado)'::character varying\n            WHEN '9'::text THEN 'Jade (risco lateral, escovado)'::character varying\n            WHEN '10'::text THEN 'Quartzo Rosa (bordas chanfradas)'::character varying\n            WHEN '11'::text THEN 'Ametista (risco no meio)'::character varying\n            WHEN '12'::text THEN 'Turmalina Paraíba (friso diamantado)'::character varying\n            WHEN '13'::text THEN 'Friso + corda + meia lua de pedras'::character varying\n            WHEN '14'::text THEN 'Dois frisos + corda'::character varying\n            ELSE ft.modelo_2\n        END AS modelo_2_label,\n    ft.outro_modelo_2,\n    ft.modelo_interno_1,\n        CASE ft.modelo_interno_1\n            WHEN '2'::text THEN 'Confort'::character varying\n            WHEN '3'::text THEN 'Reta'::character varying\n            ELSE ft.modelo_interno_1\n        END AS modelo_interno_1_label,\n    ft.modelo_interno_2,\n        CASE ft.modelo_interno_2\n            WHEN '2'::text THEN 'Confort'::character varying\n            WHEN '3'::text THEN 'Reta'::character varying\n            ELSE ft.modelo_interno_2\n        END AS modelo_interno_2_label,\n    ft.tipo_fonte_1,\n        CASE ft.tipo_fonte_1\n            WHEN '1'::text THEN 'Forma'::character varying\n            WHEN '2'::text THEN 'Cursiva'::character varying\n            WHEN '3'::text THEN 'Sem Gravação'::character varying\n            ELSE ft.tipo_fonte_1\n        END AS tipo_fonte_1_label,\n    ft.texto_tipo_fonte_1,\n    ft.tipo_fonte_2,\n        CASE ft.tipo_fonte_2\n            WHEN '1'::text THEN 'Forma'::character varying\n            WHEN '2'::text THEN 'Cursiva'::character varying\n            WHEN '3'::text THEN 'Sem Gravação'::character varying\n            ELSE ft.tipo_fonte_2\n        END AS tipo_fonte_2_label,\n    ft.texto_tipo_fonte_2,\n    ft.tipo_elo,\n        CASE ft.tipo_elo\n            WHEN '1'::text THEN 'Cartier Quadrado'::character varying\n            WHEN '2'::text THEN 'Cartier Aberto'::character varying\n            WHEN '3'::text THEN 'Veneziano'::character varying\n            WHEN '4'::text THEN 'Piastrine'::character varying\n            WHEN '5'::text THEN 'Elo Português'::character varying\n            WHEN '6'::text THEN 'Cingapura'::character varying\n            WHEN '7'::text THEN 'Corda'::character varying\n            WHEN '8'::text THEN 'Bismarck'::character varying\n            WHEN '9'::text THEN 'Garimpeiro'::character varying\n            WHEN '10'::text THEN 'Palmeira'::character varying\n            WHEN '11'::text THEN 'Escama de Peixe'::character varying\n            WHEN '12'::text THEN 'Grummert'::character varying\n            WHEN '13'::text THEN 'Baguet'::character varying\n            WHEN '14'::text THEN '3 em 1'::character varying\n            WHEN '15'::text THEN 'Outros'::character varying\n            ELSE ft.tipo_elo\n        END AS tipo_elo_label,\n    ft.outro_tipo_elo,\n    ft.tipo_fecho,\n        CASE ft.tipo_fecho\n            WHEN '1'::text THEN 'Boia'::character varying\n            WHEN '2'::text THEN 'Anzol'::character varying\n            WHEN '3'::text THEN 'Batom'::character varying\n            WHEN '4'::text THEN 'Caixa'::character varying\n            WHEN '5'::text THEN 'Imã'::character varying\n            WHEN '6'::text THEN 'Ouro'::character varying\n            ELSE ft.tipo_fecho\n        END AS tipo_fecho_label,\n    ft.outro_tipo_fecho,\n    ft.modelo_anel,\n    ft.milimetragem_da_base,\n    ft.milimetragem_do_aro,\n    ft.modelo_interno_anel,\n    ft.modelo_externo_anel,\n    ft.modelo_pingente,\n        CASE ft.modelo_pingente\n            WHEN '1'::text THEN 'Crucifixo'::character varying\n            WHEN '2'::text THEN 'Medalha'::character varying\n            WHEN '3'::text THEN 'Ponto de Luz'::character varying\n            WHEN '4'::text THEN 'Coração'::character varying\n            WHEN '6'::text THEN 'Outro'::character varying\n            ELSE ft.modelo_pingente\n        END AS modelo_pingente_label,\n    ft.\"Outro_modelo_pingente\" AS outro_modelo_pingente,\n    ft.\"Altura_pingente\" AS altura_pingente,\n    ft.largura_pingente,\n    ft.modelo_bracelete,\n    ft.altura_placa,\n    ft.largura_placa,\n    ft.expessura_chapa,\n    ft.nome_chapa,\n    ft.tipo_tarraxa\n   FROM ((alissonerp.ordens o\n     JOIN directus.ordens dor ON ((dor.id = o.directus_ordem_id)))\n     JOIN directus.ficha_tecnica_ordem ft ON ((ft.id = dor.ficha_tecnica_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_insumos_directus",
+    "owner": "postgres",
+    "definition": " SELECT i.id,\n    i.sku,\n    i.nome,\n    cat.nome AS categoria,\n    cat.id AS categoria_id,\n    i.saldo,\n    i.peso_pedra,\n    i.custo_compra,\n    i.estoque_minimo,\n    i.estoque_maximo,\n        CASE\n            WHEN (i.saldo <= (0)::double precision) THEN 'critico'::text\n            WHEN ((i.estoque_minimo > (0)::double precision) AND (i.saldo < i.estoque_minimo)) THEN 'critico'::text\n            WHEN ((i.estoque_minimo > (0)::double precision) AND (i.saldo < (i.estoque_minimo * (1.5)::double precision))) THEN 'atencao'::text\n            ELSE 'ok'::text\n        END AS status_estoque\n   FROM (alissonerp.insumos i\n     LEFT JOIN alissonerp.categorias_insumo cat ON ((cat.id = i.categoria_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_kpis_gerais",
+    "owner": "postgres",
+    "definition": " SELECT ( SELECT count(*) AS count\n           FROM alissonerp.ordens\n          WHERE (ordens.status = 'em_andamento'::alissonerp.enum_status_ordem)) AS ordens_em_andamento,\n    ( SELECT count(*) AS count\n           FROM alissonerp.ordens\n          WHERE (ordens.status = 'aguardando'::alissonerp.enum_status_ordem)) AS ordens_aguardando,\n    ( SELECT count(*) AS count\n           FROM alissonerp.ordens\n          WHERE ((ordens.status = 'concluido'::alissonerp.enum_status_ordem) AND (ordens.created_at > date_trunc('month'::text, now())))) AS concluidas_mes,\n    ( SELECT count(*) AS count\n           FROM alissonerp.pcp\n          WHERE (pcp.etapas = ANY (ARRAY['novas_ordens'::alissonerp.enum_etapas_pcp, 'aguardando'::alissonerp.enum_etapas_pcp, 'em_andamento'::alissonerp.enum_etapas_pcp]))) AS pcps_ativos,\n    ( SELECT count(*) AS count\n           FROM alissonerp.protocolos\n          WHERE (protocolos.etapas = ANY (ARRAY['pendente'::alissonerp.enum_etapas_protocolo, 'concluido'::alissonerp.enum_etapas_protocolo]))) AS protocolos_pendentes,\n    ( SELECT parametros.cotacao_ouro\n           FROM alissonerp.parametros\n          WHERE (parametros.id = 1)) AS cotacao_ouro,\n    ( SELECT parametros.cotacao_dolar\n           FROM alissonerp.parametros\n          WHERE (parametros.id = 1)) AS cotacao_dolar,\n    ( SELECT count(*) AS count\n           FROM alissonerp.contas_pagar\n          WHERE ((contas_pagar.situacao)::text = 'pendente'::text)) AS contas_pagar_pendentes,\n    ( SELECT COALESCE(sum(contas_pagar.valor), (0)::numeric) AS \"coalesce\"\n           FROM alissonerp.contas_pagar\n          WHERE ((contas_pagar.situacao)::text = 'pendente'::text)) AS total_a_pagar,\n    ( SELECT count(*) AS count\n           FROM alissonerp.contas_receber\n          WHERE ((contas_receber.situacao)::text = 'pendente'::text)) AS contas_receber_pendentes,\n    ( SELECT COALESCE(sum(contas_receber.valor), (0)::numeric) AS \"coalesce\"\n           FROM alissonerp.contas_receber\n          WHERE ((contas_receber.situacao)::text = 'pendente'::text)) AS total_a_receber;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_movimentacoes_directus",
+    "owner": "postgres",
+    "definition": " SELECT m.id,\n    m.entrada,\n    m.saida,\n    m.insumo_id,\n    ins.nome AS insumo_nome,\n    m.deposito_id,\n    dep.nome AS deposito_nome,\n    m.setor_id AS setor,\n    st.nome AS setor_nome,\n    (m.marcador)::text AS marcador,\n    m.ordem_id,\n    o.numero_ordem,\n    m.obs,\n    m.data_hora,\n    m.created_at AS date_created,\n    m.local_estoque_id,\n    le.nome AS local_estoque_nome\n   FROM (((((alissonerp.movimentacoes_estoque m\n     LEFT JOIN alissonerp.insumos ins ON ((ins.id = m.insumo_id)))\n     LEFT JOIN alissonerp.depositos dep ON ((dep.id = m.deposito_id)))\n     LEFT JOIN alissonerp.setores st ON ((st.id = m.setor_id)))\n     LEFT JOIN alissonerp.ordens o ON ((o.id = m.ordem_id)))\n     LEFT JOIN alissonerp.locais_estoque le ON ((le.id = m.local_estoque_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_ordem_detalhe",
+    "owner": "postgres",
+    "definition": " SELECT o.id,\n    o.numero_ordem,\n    (o.situacao)::text AS situacao_cod,\n        CASE (o.situacao)::text\n            WHEN 'cancelado'::text THEN 'Cancelado'::text\n            WHEN 'criado'::text THEN 'Criado'::text\n            WHEN 'rascunho'::text THEN 'Rascunho'::text\n            ELSE 'Desconhecido'::text\n        END AS situacao,\n    (o.status)::text AS status_cod,\n        CASE (o.status)::text\n            WHEN 'cancelado'::text THEN 'Cancelado'::text\n            WHEN 'aguardando'::text THEN 'Aguardando'::text\n            WHEN 'em_andamento'::text THEN 'Em Andamento'::text\n            WHEN 'concluido'::text THEN 'Concluído'::text\n            ELSE 'Aguardando'::text\n        END AS status,\n    (o.rota)::text AS rota_cod,\n        CASE (o.rota)::text\n            WHEN 'pcp'::text THEN 'PCP'::text\n            WHEN 'protocolo'::text THEN 'Protocolo'::text\n            ELSE '—'::text\n        END AS rota,\n    (o.tipo_ordem)::text AS tipo_ordem_cod,\n        CASE (o.tipo_ordem)::text\n            WHEN 'servico_venda'::text THEN 'Serviço Venda'::text\n            WHEN 'servico_loja'::text THEN 'Serviço Loja'::text\n            WHEN 'fabricacao'::text THEN 'Fabricação'::text\n            WHEN 'reposicao_venda'::text THEN 'Reposição Venda'::text\n            WHEN 'reposicao_loja'::text THEN 'Reposição Loja'::text\n            WHEN 'compra_fornecedor'::text THEN 'Compra de Fornecedor'::text\n            WHEN 'garantia'::text THEN 'Garantia'::text\n            WHEN 'servico_interno'::text THEN 'Serviço Interno'::text\n            ELSE '—'::text\n        END AS tipo_ordem,\n    o.setor_atual AS setor_id,\n    s.nome AS setor_nome,\n    o.local_atual AS deposito_id,\n    d.nome AS deposito_nome,\n    o.vendedor_id,\n    v.nome AS vendedor_nome,\n    o.cliente_id,\n    c.nome AS cliente_nome,\n    o.peso_metal_negociado,\n    o.peso_metal_externo,\n    o.data_entrega,\n    o.data_conclusao,\n    o.distribuicao_id,\n    o.protocolo_loja,\n    o.id_asana,\n    o.created_at AS date_created,\n    o.updated_at AS date_updated,\n    p.id AS pcp_id,\n    (p.etapas)::text AS pcp_etapas_cod,\n        CASE (p.etapas)::text\n            WHEN 'novas_ordens'::text THEN 'Novas Ordens'::text\n            WHEN 'pendencia'::text THEN 'Pendência'::text\n            WHEN 'aguardando'::text THEN 'Aguardando'::text\n            WHEN 'em_andamento'::text THEN 'Em Andamento'::text\n            WHEN 'concluido'::text THEN 'Concluído'::text\n            WHEN 'cancelado'::text THEN 'Cancelado'::text\n            ELSE '—'::text\n        END AS pcp_etapas,\n    p.total_metal AS pcp_total_metal,\n    p.retorno_metal AS pcp_retorno_metal,\n    p.total_pedras_un AS pcp_total_pedras_un,\n    p.total_pedras_g AS pcp_total_pedras_g,\n    p.total_geral_outros_pesos AS pcp_total_outros,\n    p.pmc AS pcp_pmc,\n    p.quebra AS pcp_quebra,\n    p.porcentagem_de_quebra AS pcp_quebra_pct,\n    p.peso_final AS pcp_peso_final,\n    p.metal_externo AS pcp_metal_externo,\n    p.bloqueado AS pcp_bloqueado,\n    p.data_conclusao AS pcp_data_conclusao,\n    p.local_atual AS pcp_local_atual,\n    COALESCE(NULLIF(TRIM(BOTH FROM up.name), ''::text), (au.email)::text, 'Sem operador'::text) AS pcp_operador_nome,\n    dist.id AS dist_id,\n    (dist.setor)::text AS dist_setor,\n    (dist.etapas)::text AS dist_etapas_cod,\n        CASE (dist.etapas)::text\n            WHEN 'em_andamento'::text THEN 'Em Andamento'::text\n            WHEN 'concluido'::text THEN 'Concluído'::text\n            ELSE NULL::text\n        END AS dist_etapas,\n    dist.pmc AS dist_pmc,\n    dist.quebra AS dist_quebra,\n    dist.porcentagem_de_quebra AS dist_quebra_pct,\n    o.foto_peca_servico,\n    o.peso_peca_servico,\n    o.video_observacao,\n    o.detalhes_ordem\n   FROM ((((((((alissonerp.ordens o\n     LEFT JOIN alissonerp.setores s ON ((s.id = o.setor_atual)))\n     LEFT JOIN alissonerp.depositos d ON ((d.id = o.local_atual)))\n     LEFT JOIN vendedores v ON ((v.id_vendedor = o.vendedor_id)))\n     LEFT JOIN contatos c ON ((c.id_contato = o.cliente_id)))\n     LEFT JOIN alissonerp.pcp p ON ((p.ordem_id = o.id)))\n     LEFT JOIN auth.users au ON ((au.id = p.operador)))\n     LEFT JOIN user_profiles up ON ((up.id_user = au.id)))\n     LEFT JOIN alissonerp.distribuicoes dist ON ((dist.id = o.distribuicao_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_ordens_aguardando_auditoria_loja",
+    "owner": "postgres",
+    "definition": " SELECT o.id,\n    o.numero_ordem,\n    (o.status)::text AS status,\n    (o.tipo_ordem)::text AS tipo_ordem,\n    (o.rota)::text AS rota,\n    a.id AS auditoria_id,\n    a.situacao AS auditoria_situacao,\n    a.created_at AS auditoria_criada_em\n   FROM (alissonerp.ordens o\n     JOIN alissonerp.auditorias a ON (((a.ordem_id = o.id) AND ((a.tipo_auditoria)::text = 'loja'::text))))\n  WHERE ((a.situacao)::text = ANY ((ARRAY['pendente'::character varying, 'em_analise'::character varying, 'pendenciado'::character varying])::text[]))\n  ORDER BY a.created_at DESC;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_ordens_completa",
+    "owner": "postgres",
+    "definition": " SELECT o.id,\n    o.numero_ordem,\n    o.numero_pedido,\n    o.venda_id,\n    (o.situacao)::text AS situacao_cod,\n        CASE (o.situacao)::text\n            WHEN 'cancelado'::text THEN 'Cancelado'::text\n            WHEN 'criado'::text THEN 'Criado'::text\n            WHEN 'rascunho'::text THEN 'Rascunho'::text\n            ELSE 'Desconhecido'::text\n        END AS situacao,\n    (o.status)::text AS status_cod,\n        CASE (o.status)::text\n            WHEN 'aguardando'::text THEN 'Aguardando'::text\n            WHEN 'em_andamento'::text THEN 'Em Andamento'::text\n            WHEN 'concluido'::text THEN 'Concluído'::text\n            WHEN 'cancelado'::text THEN 'Cancelado'::text\n            ELSE 'Desconhecido'::text\n        END AS status,\n    (o.rota)::text AS rota_cod,\n        CASE (o.rota)::text\n            WHEN 'pcp'::text THEN 'PCP'::text\n            WHEN 'protocolo'::text THEN 'Protocolo'::text\n            ELSE '—'::text\n        END AS rota,\n    (o.tipo_ordem)::text AS tipo_ordem_cod,\n        CASE (o.tipo_ordem)::text\n            WHEN 'servico_venda'::text THEN 'Serviço Venda'::text\n            WHEN 'servico_loja'::text THEN 'Serviço Loja'::text\n            WHEN 'fabricacao'::text THEN 'Fabricação'::text\n            WHEN 'reposicao_venda'::text THEN 'Reposição Venda'::text\n            WHEN 'reposicao_loja'::text THEN 'Reposição Loja'::text\n            WHEN 'compra_fornecedor'::text THEN 'Compra de Fornecedor'::text\n            WHEN 'garantia'::text THEN 'Garantia'::text\n            WHEN 'servico_interno'::text THEN 'Serviço Interno'::text\n            ELSE '—'::text\n        END AS tipo_ordem,\n    o.setor_atual AS setor_id,\n    s.nome AS setor_nome,\n    o.local_atual AS deposito_id,\n    d.nome AS deposito_nome,\n    o.vendedor_id,\n    v.nome AS vendedor_nome,\n    o.cliente_id,\n    c.nome AS cliente_nome,\n    o.peso_metal_negociado,\n    o.peso_metal_externo,\n    o.data_entrega,\n    o.data_conclusao,\n    o.distribuicao_id,\n    o.protocolo_loja,\n    o.id_asana,\n    o.created_at AS date_created,\n    o.updated_at AS date_updated\n   FROM ((((alissonerp.ordens o\n     LEFT JOIN alissonerp.setores s ON ((s.id = o.setor_atual)))\n     LEFT JOIN alissonerp.depositos d ON ((d.id = o.local_atual)))\n     LEFT JOIN vendedores v ON ((v.id_vendedor = o.vendedor_id)))\n     LEFT JOIN contatos c ON ((c.id_contato = o.cliente_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_ordens_por_tipo",
+    "owner": "postgres",
+    "definition": " SELECT\n        CASE (o.tipo_ordem)::text\n            WHEN 'servico_venda'::text THEN 'Serviço Venda'::text\n            WHEN 'servico_loja'::text THEN 'Serviço Loja'::text\n            WHEN 'fabricacao'::text THEN 'Fabricação'::text\n            WHEN 'reposicao_venda'::text THEN 'Reposição Venda'::text\n            WHEN 'reposicao_loja'::text THEN 'Reposição Loja'::text\n            WHEN 'compra_fornecedor'::text THEN 'Compra de Fornecedor'::text\n            WHEN 'garantia'::text THEN 'Garantia'::text\n            WHEN 'servico_interno'::text THEN 'Serviço Interno'::text\n            ELSE 'N/D'::text\n        END AS tipo,\n    count(*) AS total\n   FROM alissonerp.ordens o\n  WHERE (o.created_at > (now() - '6 mons'::interval))\n  GROUP BY o.tipo_ordem\n  ORDER BY (count(*)) DESC;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_ordens_prontas_ida",
+    "owner": "postgres",
+    "definition": " SELECT DISTINCT o.id,\n    o.numero_ordem,\n    (o.status)::text AS status\n   FROM (alissonerp.ordens o\n     JOIN alissonerp.auditorias a ON (((a.ordem_id = o.id) AND ((a.tipo_auditoria)::text = 'loja'::text) AND ((a.situacao)::text = 'aprovado'::text))))\n  WHERE (((o.rota)::text = 'protocolo'::text) AND ((o.status)::text <> ALL (ARRAY['cancelado'::text, 'entregue'::text, 'concluido'::text])) AND (NOT (o.id IN ( SELECT po.ordem_id\n           FROM (alissonerp.protocolo_ordens po\n             JOIN alissonerp.protocolos p ON ((p.id = po.protocolo_id)))\n          WHERE ((p.direcao)::text = 'ida'::text)))))\n  ORDER BY o.id DESC;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_ordens_prontas_pcp",
+    "owner": "postgres",
+    "definition": " SELECT DISTINCT o.id,\n    o.numero_ordem,\n    (o.status)::text AS status\n   FROM (alissonerp.ordens o\n     JOIN alissonerp.auditorias a ON (((a.ordem_id = o.id) AND ((a.tipo_auditoria)::text = 'loja'::text) AND ((a.situacao)::text = 'aprovado'::text))))\n  WHERE (((o.rota)::text = 'pcp'::text) AND ((o.status)::text <> ALL (ARRAY['cancelado'::text, 'entregue'::text, 'concluido'::text])) AND (NOT (EXISTS ( SELECT 1\n           FROM alissonerp.pcp p\n          WHERE (p.ordem_id = o.id)))))\n  ORDER BY o.id DESC;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_ordens_prontas_volta",
+    "owner": "postgres",
+    "definition": " SELECT DISTINCT o.id,\n    o.numero_ordem,\n    (o.status)::text AS status\n   FROM ((alissonerp.ordens o\n     JOIN alissonerp.pcp p2 ON (((p2.ordem_id = o.id) AND (p2.etapas = 'concluido'::alissonerp.enum_etapas_pcp))))\n     JOIN alissonerp.auditorias a ON (((a.ordem_id = o.id) AND ((a.tipo_auditoria)::text = 'fabrica'::text) AND ((a.situacao)::text = 'aprovado'::text))))\n  WHERE (((o.status)::text <> ALL (ARRAY['cancelado'::text, 'entregue'::text])) AND (NOT (o.id IN ( SELECT po.ordem_id\n           FROM (alissonerp.protocolo_ordens po\n             JOIN alissonerp.protocolos p ON ((p.id = po.protocolo_id)))\n          WHERE ((p.direcao)::text = 'volta'::text)))))\n  ORDER BY o.id DESC;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_ouro_em_producao",
+    "owner": "postgres",
+    "definition": " SELECT d.id AS deposito_id,\n    d.nome AS deposito_nome,\n    (COALESCE(sum(me.entrada), (0)::real) - COALESCE(sum(me.saida), (0)::real)) AS ouro_g\n   FROM ((alissonerp.movimentacoes_estoque me\n     JOIN alissonerp.insumos i ON ((i.id = me.insumo_id)))\n     JOIN alissonerp.depositos d ON ((d.id = me.deposito_id)))\n  WHERE ((me.deposito_id <> 1) AND (i.categoria_id = 1))\n  GROUP BY d.id, d.nome\n HAVING ((COALESCE(sum(me.entrada), (0)::real) - COALESCE(sum(me.saida), (0)::real)) <> (0)::double precision);",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_pcp_completa",
+    "owner": "postgres",
+    "definition": " SELECT p.id,\n    p.ordem_id,\n    p.etapas AS etapas_cod,\n        CASE p.etapas\n            WHEN '1'::text THEN 'Novas Ordens'::text\n            WHEN '2'::text THEN 'Pendencia'::text\n            WHEN '3'::text THEN 'Aguardando'::text\n            WHEN '4'::text THEN 'Em Andamento'::text\n            WHEN '5'::text THEN 'Concluido'::text\n            WHEN '6'::text THEN 'Cancelado'::text\n            ELSE 'Desconhecido'::text\n        END AS etapas,\n    p.total_metal,\n    p.retorno_metal,\n    p.total_pedras_un,\n    p.total_pedras_g,\n    p.pmc,\n    p.quebra,\n    p.porcentagem_de_quebra,\n    p.peso_final,\n    p.metal_externo,\n    p.\"Bloqueado\" AS bloqueado,\n    p.local_atual,\n    p.data_conclusao,\n    p.date_created,\n    p.operador,\n    o.numero_ordem,\n    o.cliente_id,\n    c.nome AS cliente_nome,\n    o.vendedor_id,\n    v.nome AS vendedor_nome,\n    o.peso_metal_negocido AS peso_metal_negociado,\n    o.data_entrega,\n    s.descricao AS setor_nome,\n    d.nome AS deposito_nome,\n    (o.local_atual)::integer AS deposito_id,\n    o.setor_atual AS setor_id\n   FROM (((((directus.pcp p\n     LEFT JOIN directus.ordens o ON ((p.ordem_id = o.id)))\n     LEFT JOIN contatos c ON ((o.cliente_id = c.id_contato)))\n     LEFT JOIN vendedores v ON ((o.vendedor_id = v.id_vendedor)))\n     LEFT JOIN directus.setor s ON ((o.setor_atual = s.id)))\n     LEFT JOIN directus.deposito d ON ((o.local_atual = d.id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_pcp_erp",
+    "owner": "postgres",
+    "definition": " SELECT p.id,\n    p.ordem_id,\n    (p.etapas)::text AS etapas_cod,\n        CASE p.etapas\n            WHEN 'novas_ordens'::alissonerp.enum_etapas_pcp THEN 'Novas Ordens'::text\n            WHEN 'pendencia'::alissonerp.enum_etapas_pcp THEN 'Pendencia'::text\n            WHEN 'aguardando'::alissonerp.enum_etapas_pcp THEN 'Aguardando'::text\n            WHEN 'em_andamento'::alissonerp.enum_etapas_pcp THEN 'Em Andamento'::text\n            WHEN 'concluido'::alissonerp.enum_etapas_pcp THEN 'Concluido'::text\n            WHEN 'cancelado'::alissonerp.enum_etapas_pcp THEN 'Cancelado'::text\n            ELSE 'Desconhecido'::text\n        END AS etapas,\n    p.total_metal,\n    p.retorno_metal,\n    p.total_pedras_un,\n    p.total_pedras_g,\n    p.pmc,\n    p.quebra,\n    p.porcentagem_de_quebra,\n    p.peso_final,\n    p.metal_externo,\n    p.bloqueado,\n    p.data_conclusao,\n    p.created_at,\n    p.operador,\n    o.numero_ordem,\n    o.cliente_id,\n    c.nome AS cliente_nome,\n    o.vendedor_id,\n    v.nome AS vendedor_nome,\n    o.peso_metal_negociado,\n    o.data_entrega,\n    o.local_atual AS deposito_id,\n    o.setor_atual AS setor_id,\n    dep.nome AS deposito_nome,\n    set_.nome AS setor_nome,\n    COALESCE(ap.total_apontamentos, 0) AS total_apontamentos\n   FROM ((((((alissonerp.pcp p\n     LEFT JOIN alissonerp.ordens o ON ((o.id = p.ordem_id)))\n     LEFT JOIN contatos c ON ((c.id_contato = o.cliente_id)))\n     LEFT JOIN vendedores v ON ((v.id_vendedor = o.vendedor_id)))\n     LEFT JOIN alissonerp.depositos dep ON ((dep.id = o.local_atual)))\n     LEFT JOIN alissonerp.setores set_ ON ((set_.id = o.setor_atual)))\n     LEFT JOIN ( SELECT apontamentos_pcp.pcp_id,\n            (count(*))::integer AS total_apontamentos\n           FROM alissonerp.apontamentos_pcp\n          GROUP BY apontamentos_pcp.pcp_id) ap ON ((ap.pcp_id = p.id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_producao_mensal",
+    "owner": "postgres",
+    "definition": " SELECT (date_trunc('month'::text, o.created_at))::date AS mes,\n    to_char(o.created_at, 'Mon/YY'::text) AS mes_label,\n    count(*) AS total_ordens,\n    count(*) FILTER (WHERE (o.status = 'concluido'::alissonerp.enum_status_ordem)) AS concluidas,\n    count(*) FILTER (WHERE (o.status = 'em_andamento'::alissonerp.enum_status_ordem)) AS em_andamento,\n    count(*) FILTER (WHERE (o.status = 'aguardando'::alissonerp.enum_status_ordem)) AS aguardando,\n    COALESCE(sum(o.peso_metal_negociado), (0)::real) AS peso_total_negociado\n   FROM alissonerp.ordens o\n  WHERE (o.created_at > (now() - '1 year'::interval))\n  GROUP BY (date_trunc('month'::text, o.created_at)), (to_char(o.created_at, 'Mon/YY'::text))\n  ORDER BY ((date_trunc('month'::text, o.created_at))::date) DESC;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_produtividade_ourives",
+    "owner": "postgres",
+    "definition": " SELECT COALESCE(NULLIF(TRIM(BOTH FROM up.name), ''::text), (au.email)::text, 'Sem operador'::text) AS operador,\n    count(p.id) AS total_ordens,\n    COALESCE(sum(p.total_metal), (0)::real) AS total_metal_processado,\n    COALESCE(sum(p.pmc), (0)::real) AS total_pmc,\n    COALESCE(avg(p.porcentagem_de_quebra), (0)::double precision) AS media_quebra,\n    COALESCE(sum(p.quebra), (0)::real) AS total_quebra,\n    COALESCE(avg((EXTRACT(epoch FROM (p.data_conclusao - p.created_at)) / 86400.0)), (0)::numeric) AS media_dias_producao\n   FROM ((alissonerp.pcp p\n     LEFT JOIN auth.users au ON ((au.id = p.operador)))\n     LEFT JOIN user_profiles up ON ((up.id_user = au.id)))\n  WHERE ((p.etapas = 'concluido'::alissonerp.enum_etapas_pcp) AND (p.total_metal > (0)::double precision))\n  GROUP BY up.name, au.email\n  ORDER BY (count(p.id)) DESC;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_produto_capa",
+    "owner": "postgres",
+    "definition": " WITH capa_propria AS (\n         SELECT produto_imagens.produto_id,\n            produto_imagens.url_publica\n           FROM alissonerp.produto_imagens\n          WHERE produto_imagens.eh_capa\n        )\n SELECT p.id_produto AS produto_id,\n    COALESCE(cp.url_publica, cp_pai.url_publica,\n        CASE\n            WHEN (p.imagem_capa IS NOT NULL) THEN ('https://base.alissonranyel.com.br/assets/'::text || (p.imagem_capa)::text)\n            ELSE NULL::text\n        END) AS url_capa,\n        CASE\n            WHEN (cp.url_publica IS NOT NULL) THEN 'propria'::text\n            WHEN (cp_pai.url_publica IS NOT NULL) THEN 'pai'::text\n            WHEN (p.imagem_capa IS NOT NULL) THEN 'directus_legacy'::text\n            ELSE NULL::text\n        END AS origem\n   FROM (((produtos p\n     LEFT JOIN capa_propria cp ON ((cp.produto_id = p.id_produto)))\n     LEFT JOIN alissonerp.erp_produtos ep ON (((ep.produto_id = p.id_produto) AND ep.eh_variacao)))\n     LEFT JOIN capa_propria cp_pai ON ((cp_pai.produto_id = ep.parent_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_produto_imagens",
+    "owner": "postgres",
+    "definition": " WITH agregado AS (\n         SELECT produto_imagens.produto_id,\n            jsonb_agg(jsonb_build_object('id', produto_imagens.id, 'url', produto_imagens.url_publica, 'eh_capa', produto_imagens.eh_capa, 'ordem', produto_imagens.ordem, 'origem', produto_imagens.origem) ORDER BY produto_imagens.eh_capa DESC, produto_imagens.ordem) AS imagens\n           FROM alissonerp.produto_imagens\n          GROUP BY produto_imagens.produto_id\n        )\n SELECT p.id_produto AS produto_id,\n    COALESCE(prop.imagens, pai.imagens, '[]'::jsonb) AS imagens,\n        CASE\n            WHEN (prop.imagens IS NOT NULL) THEN 'propria'::text\n            WHEN (pai.imagens IS NOT NULL) THEN 'pai'::text\n            ELSE 'vazia'::text\n        END AS origem_galeria\n   FROM (((produtos p\n     LEFT JOIN agregado prop ON ((prop.produto_id = p.id_produto)))\n     LEFT JOIN alissonerp.erp_produtos ep ON (((ep.produto_id = p.id_produto) AND ep.eh_variacao)))\n     LEFT JOIN agregado pai ON ((pai.produto_id = ep.parent_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_produtos",
+    "owner": "postgres",
+    "definition": " SELECT produtos.id_produto,\n    produtos.id_api_produto,\n    produtos.sku,\n    produtos.nome,\n    produtos.tipo_metal,\n    produtos.tipo,\n    produtos.situacao,\n    produtos.unidade,\n    produtos.gtin,\n    produtos.categoria,\n    produtos.marca,\n    produtos.qtd_estoque,\n    produtos.preco_tiny,\n    produtos.preco_promocional,\n    produtos.preco_custo,\n    produtos.preco_custo_medio,\n    produtos.preco_na_cotacao,\n    produtos.custo_na_cotacao,\n    produtos.peso_precificado,\n    produtos.markup,\n    produtos.fator,\n    produtos.fornecedor_etl,\n    produtos.preco_sync,\n    produtos.imagem,\n    produtos.data_atualizacao_preco,\n    produtos.diferenca_percentual,\n    produtos.fornecedor_id_api,\n    produtos.estoque_minimo,\n    produtos.estoque_maximo,\n    produtos.imagem_capa,\n    produtos.tipo_de_pedra,\n    produtos.url_drive,\n    produtos.peso_real,\n    produtos.iframe,\n    produtos.data_atualizacao,\n    produtos.id_kommo,\n    produtos.data_ultima_compra,\n    produtos.prompt_imagem_ia,\n    produtos.sob_encomenda,\n    produtos.prazo_producao,\n    produtos.categoria_precificacao\n   FROM produtos;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_produtos_erp",
+    "owner": "postgres",
+    "definition": " SELECT ep.id AS erp_id,\n    ep.produto_id,\n    ep.sku,\n    ep.nome,\n    ep.parent_sku,\n    ep.parent_id,\n    ep.eh_variacao,\n    ep.eh_pai,\n    ep.sufixo_variacao,\n    ep.numeracao,\n    ep.cor_metal,\n    ep.comprimento,\n    ep.largura_aro,\n    ep.altura_aro,\n    ep.base,\n    ep.observacao_erp,\n    ep.ativo,\n    NULL::text AS tipo_metal,\n    p.peso_precificado,\n    p.preco_sync,\n    p.preco_tiny,\n    p.diferenca_percentual,\n    p.categoria_precificacao,\n    p.tem_pedra_preciosa,\n    p.preco_pedras,\n    p.preco_total_sync,\n    p.situacao,\n    COALESCE(cnt.qtd, 0) AS qtd_variacoes\n   FROM ((alissonerp.erp_produtos ep\n     JOIN produtos p ON ((p.id_produto = ep.produto_id)))\n     LEFT JOIN ( SELECT erp_produtos.parent_id,\n            (count(*))::integer AS qtd\n           FROM alissonerp.erp_produtos\n          WHERE (erp_produtos.parent_id IS NOT NULL)\n          GROUP BY erp_produtos.parent_id) cnt ON ((cnt.parent_id = ep.id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_protocolo_ordens",
+    "owner": "postgres",
+    "definition": " SELECT po.id,\n    po.protocolo_id,\n    po.ordem_id,\n    o.numero_ordem,\n    o.cliente_id,\n    c.nome AS cliente_nome,\n    o.peso_metal_negociado,\n    (o.status)::text AS status,\n        CASE (o.status)::text\n            WHEN 'aguardando'::text THEN 'Aguardando'::text\n            WHEN 'em_andamento'::text THEN 'Em Andamento'::text\n            WHEN 'concluido'::text THEN 'Concluído'::text\n            ELSE '—'::text\n        END AS status_label\n   FROM ((alissonerp.protocolo_ordens po\n     LEFT JOIN alissonerp.ordens o ON ((o.id = po.ordem_id)))\n     LEFT JOIN contatos c ON ((c.id_contato = o.cliente_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_protocolos_completo",
+    "owner": "postgres",
+    "definition": " SELECT pr.id,\n    (pr.direcao)::text AS direcao,\n    (pr.etapas)::text AS etapas_cod,\n        CASE (pr.etapas)::text\n            WHEN 'pendente'::text THEN 'Pendente'::text\n            WHEN 'concluido'::text THEN 'Concluído'::text\n            ELSE 'Pendente'::text\n        END AS etapas,\n    pr.created_at AS data_criacao,\n    pr.updated_at AS data_atualizacao,\n    pr.data_conclusao,\n    COALESCE(NULLIF(TRIM(BOTH FROM up.name), ''::text), (au.email)::text) AS criado_por,\n    ( SELECT count(*) AS count\n           FROM alissonerp.protocolo_ordens po\n          WHERE (po.protocolo_id = pr.id)) AS total_ordens\n   FROM ((alissonerp.protocolos pr\n     LEFT JOIN auth.users au ON ((au.id = pr.created_by)))\n     LEFT JOIN user_profiles up ON ((up.id_user = au.id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_protocolos_loja_completo",
+    "owner": "postgres",
+    "definition": " SELECT pl.id,\n    pl.rota AS direcao,\n    pl.etapas AS etapas_cod,\n        CASE pl.etapas\n            WHEN '1'::text THEN 'Pendente'::text\n            WHEN '2'::text THEN 'Em Trânsito'::text\n            WHEN '3'::text THEN 'Concluído'::text\n            ELSE 'Pendente'::text\n        END AS etapas,\n    pl.date_created AS data_criacao,\n    pl.data_conclusao,\n    pl.obs,\n    COALESCE(NULLIF(TRIM(BOTH FROM (((COALESCE(du.first_name, ''::character varying))::text || ' '::text) || (COALESCE(du.last_name, ''::character varying))::text)), ''::text), (du.email)::text) AS criado_por,\n    ( SELECT count(*) AS count\n           FROM directus.protocolo_loja_ordens_1 plo\n          WHERE (plo.protocolo_loja_id = pl.id)) AS total_ordens\n   FROM (directus.protocolo_loja pl\n     LEFT JOIN directus.directus_users du ON ((pl.user_created = du.id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_quebra_mensal",
+    "owner": "postgres",
+    "definition": " SELECT date_trunc('month'::text, p.data_conclusao) AS mes,\n    to_char(p.data_conclusao, 'Mon/YY'::text) AS mes_label,\n    count(p.id) AS total_ordens,\n    COALESCE(sum(p.total_metal), (0)::real) AS total_metal,\n    COALESCE(sum(p.pmc), (0)::real) AS total_pmc,\n    COALESCE(sum(p.quebra), (0)::real) AS total_quebra,\n        CASE\n            WHEN (sum(p.pmc) > (0)::double precision) THEN round((((sum(p.quebra) / NULLIF(sum(p.pmc), (0)::double precision)) * (100)::double precision))::numeric, 2)\n            ELSE (0)::numeric\n        END AS percentual_quebra\n   FROM alissonerp.pcp p\n  WHERE ((p.etapas = 'concluido'::alissonerp.enum_etapas_pcp) AND (p.data_conclusao IS NOT NULL) AND (p.total_metal > (0)::double precision))\n  GROUP BY (date_trunc('month'::text, p.data_conclusao)), (to_char(p.data_conclusao, 'Mon/YY'::text))\n  ORDER BY (date_trunc('month'::text, p.data_conclusao)) DESC\n LIMIT 12;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_quebra_operadores",
+    "owner": "postgres",
+    "definition": " SELECT quebra_operador.deposito_id,\n    quebra_operador.deposito_nome,\n    quebra_operador.setor_nome,\n    count(*) AS total_registros,\n    sum(quebra_operador.ouro_recebido) AS total_recebido,\n    sum(quebra_operador.ouro_entregue) AS total_entregue,\n    sum(quebra_operador.quebra) AS total_quebra,\n        CASE\n            WHEN (sum(quebra_operador.ouro_recebido) > (0)::numeric) THEN round(((sum(quebra_operador.quebra) / sum(quebra_operador.ouro_recebido)) * (100)::numeric), 2)\n            ELSE (0)::numeric\n        END AS percentual_medio,\n    min(quebra_operador.data_registro) AS primeiro_registro,\n    max(quebra_operador.data_registro) AS ultimo_registro\n   FROM alissonerp.quebra_operador\n  GROUP BY quebra_operador.deposito_id, quebra_operador.deposito_nome, quebra_operador.setor_nome;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_quebra_por_deposito",
+    "owner": "postgres",
+    "definition": " SELECT dep.id AS deposito_id,\n    dep.nome AS deposito_nome,\n    COALESCE(sum(\n        CASE\n            WHEN (m.entrada > (0)::double precision) THEN m.entrada\n            ELSE (0)::real\n        END), (0)::real) AS total_entrada,\n    COALESCE(sum(\n        CASE\n            WHEN (m.saida > (0)::double precision) THEN m.saida\n            ELSE (0)::real\n        END), (0)::real) AS total_saida,\n    (COALESCE(sum(COALESCE(m.entrada, (0)::real)), (0)::real) - COALESCE(sum(COALESCE(m.saida, (0)::real)), (0)::real)) AS saldo\n   FROM (alissonerp.movimentacoes_estoque m\n     JOIN alissonerp.depositos dep ON ((dep.id = m.deposito_id)))\n  GROUP BY dep.id, dep.nome\n  ORDER BY (COALESCE(sum(COALESCE(m.entrada, (0)::real)), (0)::real) - COALESCE(sum(COALESCE(m.saida, (0)::real)), (0)::real)) DESC;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_quebra_por_ourives",
+    "owner": "postgres",
+    "definition": " SELECT p.operador AS operador_id,\n    COALESCE(u.nome, 'Sem operador'::character varying) AS operador_nome,\n    count(p.id) AS total_ordens,\n    COALESCE(sum(p.total_metal), (0)::real) AS total_metal,\n    COALESCE(sum(p.retorno_metal), (0)::real) AS total_retorno,\n    COALESCE(sum(p.pmc), (0)::real) AS total_pmc,\n    COALESCE(sum(p.quebra), (0)::real) AS total_quebra,\n        CASE\n            WHEN (sum(p.pmc) > (0)::double precision) THEN round((((sum(p.quebra) / NULLIF(sum(p.pmc), (0)::double precision)) * (100)::double precision))::numeric, 2)\n            ELSE (0)::numeric\n        END AS percentual_medio\n   FROM (alissonerp.pcp p\n     LEFT JOIN alissonerp.usuarios u ON ((p.operador = u.id)))\n  WHERE ((p.etapas = 'concluido'::alissonerp.enum_etapas_pcp) AND (p.total_metal > (0)::double precision))\n  GROUP BY p.operador, u.nome\n  ORDER BY\n        CASE\n            WHEN (sum(p.pmc) > (0)::double precision) THEN round((((sum(p.quebra) / NULLIF(sum(p.pmc), (0)::double precision)) * (100)::double precision))::numeric, 2)\n            ELSE (0)::numeric\n        END DESC;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_quebra_por_setor",
+    "owner": "postgres",
+    "definition": " SELECT s.id AS setor_id,\n    s.nome AS setor_nome,\n    count(DISTINCT p.id) AS total_ordens,\n    COALESCE(sum(p.total_metal), (0)::real) AS total_metal,\n    COALESCE(sum(p.pmc), (0)::real) AS total_pmc,\n    COALESCE(sum(p.retorno_metal), (0)::real) AS total_retorno,\n    COALESCE(sum(p.quebra), (0)::real) AS total_quebra,\n        CASE\n            WHEN (sum(p.pmc) > (0)::double precision) THEN round((((sum(p.quebra) / NULLIF(sum(p.pmc), (0)::double precision)) * (100)::double precision))::numeric, 2)\n            ELSE (0)::numeric\n        END AS percentual_quebra\n   FROM (((alissonerp.pcp p\n     JOIN alissonerp.distribuicao_ordens doo ON ((doo.ordens_id = p.ordem_id)))\n     JOIN alissonerp.distribuicoes d ON ((d.id = doo.distribuicao_id)))\n     JOIN alissonerp.setores s ON ((s.id = d.setor_id)))\n  WHERE ((p.etapas = 'concluido'::alissonerp.enum_etapas_pcp) AND (p.total_metal > (0)::double precision))\n  GROUP BY s.id, s.nome\n  ORDER BY COALESCE(sum(p.quebra), (0)::real) DESC;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_quebra_setor_operador",
+    "owner": "postgres",
+    "definition": " SELECT s.id AS setor_id,\n    s.nome AS setor_nome,\n    p.operador AS operador_id,\n    COALESCE(u.nome, 'Sem operador'::character varying) AS operador_nome,\n    count(DISTINCT p.id) AS total_ordens,\n    COALESCE(sum(p.total_metal), (0)::real) AS total_metal,\n    COALESCE(sum(p.pmc), (0)::real) AS total_pmc,\n    COALESCE(sum(p.retorno_metal), (0)::real) AS total_retorno,\n    COALESCE(sum(p.quebra), (0)::real) AS total_quebra,\n        CASE\n            WHEN (sum(p.pmc) > (0)::double precision) THEN round((((sum(p.quebra) / NULLIF(sum(p.pmc), (0)::double precision)) * (100)::double precision))::numeric, 2)\n            ELSE (0)::numeric\n        END AS percentual_medio\n   FROM ((((alissonerp.pcp p\n     JOIN alissonerp.distribuicao_ordens doo ON ((doo.ordens_id = p.ordem_id)))\n     JOIN alissonerp.distribuicoes d ON ((d.id = doo.distribuicao_id)))\n     JOIN alissonerp.setores s ON ((s.id = d.setor_id)))\n     LEFT JOIN alissonerp.usuarios u ON ((p.operador = u.id)))\n  WHERE ((p.etapas = 'concluido'::alissonerp.enum_etapas_pcp) AND (p.total_metal > (0)::double precision))\n  GROUP BY s.id, s.nome, p.operador, u.nome\n  ORDER BY COALESCE(sum(p.quebra), (0)::real) DESC;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_resumo_financeiro",
+    "owner": "postgres",
+    "definition": " SELECT 'pagar'::text AS tipo,\n    contas_pagar.situacao,\n    (count(*))::integer AS total,\n    COALESCE(sum(contas_pagar.valor), (0)::numeric) AS valor_total,\n    COALESCE(sum(\n        CASE\n            WHEN ((contas_pagar.data_vencimento < CURRENT_DATE) AND ((contas_pagar.situacao)::text = 'pendente'::text)) THEN contas_pagar.valor\n            ELSE (0)::numeric\n        END), (0)::numeric) AS vencido\n   FROM alissonerp.contas_pagar\n  GROUP BY contas_pagar.situacao\nUNION ALL\n SELECT 'receber'::text AS tipo,\n    contas_receber.situacao,\n    (count(*))::integer AS total,\n    COALESCE(sum(contas_receber.valor), (0)::numeric) AS valor_total,\n    COALESCE(sum(\n        CASE\n            WHEN ((contas_receber.data_vencimento < CURRENT_DATE) AND ((contas_receber.situacao)::text = 'pendente'::text)) THEN contas_receber.valor\n            ELSE (0)::numeric\n        END), (0)::numeric) AS vencido\n   FROM alissonerp.contas_receber\n  GROUP BY contas_receber.situacao;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_saldo_estoque",
+    "owner": "postgres",
+    "definition": " SELECT me.deposito_id,\n    me.insumo_id,\n    me.local_estoque_id,\n    (COALESCE(sum(me.entrada), (0)::real) - COALESCE(sum(me.saida), (0)::real)) AS saldo,\n    count(*) AS total_movimentacoes,\n    max(me.data_hora) AS ultima_movimentacao\n   FROM alissonerp.movimentacoes_estoque me\n  GROUP BY me.deposito_id, me.insumo_id, me.local_estoque_id;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_saldo_estoque_comercial",
+    "owner": "postgres",
+    "definition": " SELECT m.produto_id,\n    p.nome,\n    p.sku,\n    sum(\n        CASE\n            WHEN ((m.tipo)::text = 'entrada'::text) THEN m.quantidade\n            ELSE 0\n        END) AS total_entradas,\n    sum(\n        CASE\n            WHEN ((m.tipo)::text = 'saida'::text) THEN m.quantidade\n            ELSE 0\n        END) AS total_saidas,\n    sum(\n        CASE\n            WHEN ((m.tipo)::text = 'entrada'::text) THEN m.quantidade\n            ELSE (- m.quantidade)\n        END) AS saldo_atual,\n    sum(\n        CASE\n            WHEN ((m.tipo)::text = 'entrada'::text) THEN m.quantidade\n            ELSE (- m.quantidade)\n        END) AS saldo,\n    COALESCE(( SELECT sum(r.quantidade) AS sum\n           FROM alissonerp.reservas_estoque_comercial r\n          WHERE ((r.produto_id = m.produto_id) AND ((r.status)::text = 'ativo'::text))), (0)::bigint) AS reservado,\n    (sum(\n        CASE\n            WHEN ((m.tipo)::text = 'entrada'::text) THEN m.quantidade\n            ELSE (- m.quantidade)\n        END) - COALESCE(( SELECT sum(r.quantidade) AS sum\n           FROM alissonerp.reservas_estoque_comercial r\n          WHERE ((r.produto_id = m.produto_id) AND ((r.status)::text = 'ativo'::text))), (0)::bigint)) AS disponivel\n   FROM (alissonerp.movimentacoes_estoque_comercial m\n     JOIN produtos p ON ((p.id_produto = m.produto_id)))\n  WHERE ((m.status)::text = 'efetivado'::text)\n  GROUP BY m.produto_id, p.nome, p.sku;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_saldo_estoque_comercial_consolidado",
+    "owner": "postgres",
+    "definition": " SELECT vw_saldo_estoque_comercial_v2.produto_id,\n    vw_saldo_estoque_comercial_v2.nome_produto,\n    vw_saldo_estoque_comercial_v2.sku,\n    vw_saldo_estoque_comercial_v2.categoria,\n    vw_saldo_estoque_comercial_v2.config_id,\n    vw_saldo_estoque_comercial_v2.estoque_minimo,\n    vw_saldo_estoque_comercial_v2.ativo,\n    (sum(vw_saldo_estoque_comercial_v2.saldo_fisico))::integer AS saldo_fisico,\n    (sum(vw_saldo_estoque_comercial_v2.reservado))::integer AS reservado,\n    (sum(vw_saldo_estoque_comercial_v2.disponivel))::integer AS disponivel,\n    (sum(vw_saldo_estoque_comercial_v2.em_transito))::integer AS em_transito,\n    (sum(vw_saldo_estoque_comercial_v2.total_movimentacoes))::integer AS total_movimentacoes,\n    max(vw_saldo_estoque_comercial_v2.ultima_movimentacao) AS ultima_movimentacao\n   FROM alissonerp.vw_saldo_estoque_comercial_v2\n  GROUP BY vw_saldo_estoque_comercial_v2.produto_id, vw_saldo_estoque_comercial_v2.nome_produto, vw_saldo_estoque_comercial_v2.sku, vw_saldo_estoque_comercial_v2.categoria, vw_saldo_estoque_comercial_v2.config_id, vw_saldo_estoque_comercial_v2.estoque_minimo, vw_saldo_estoque_comercial_v2.ativo;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_saldo_estoque_comercial_v2",
+    "owner": "postgres",
+    "definition": " WITH mov_agg AS (\n         SELECT movimentacoes_estoque_comercial.produto_id,\n            movimentacoes_estoque_comercial.local_estoque_id,\n            (COALESCE(sum(\n                CASE\n                    WHEN ((movimentacoes_estoque_comercial.tipo)::text = 'entrada'::text) THEN movimentacoes_estoque_comercial.quantidade\n                    ELSE 0\n                END), (0)::bigint) - COALESCE(sum(\n                CASE\n                    WHEN ((movimentacoes_estoque_comercial.tipo)::text = 'saida'::text) THEN movimentacoes_estoque_comercial.quantidade\n                    ELSE 0\n                END), (0)::bigint)) AS saldo_fisico,\n            count(movimentacoes_estoque_comercial.id) AS total_movimentacoes,\n            max(movimentacoes_estoque_comercial.created_at) AS ultima_movimentacao\n           FROM alissonerp.movimentacoes_estoque_comercial\n          WHERE ((movimentacoes_estoque_comercial.status)::text = 'efetivado'::text)\n          GROUP BY movimentacoes_estoque_comercial.produto_id, movimentacoes_estoque_comercial.local_estoque_id\n        ), reservas_agg AS (\n         SELECT reservas_estoque_comercial.produto_id,\n            reservas_estoque_comercial.local_estoque_id,\n            sum(reservas_estoque_comercial.quantidade) AS total_reservado\n           FROM alissonerp.reservas_estoque_comercial\n          WHERE ((reservas_estoque_comercial.status)::text = 'ativo'::text)\n          GROUP BY reservas_estoque_comercial.produto_id, reservas_estoque_comercial.local_estoque_id\n        ), transito_agg AS (\n         SELECT transferencias_estoque_comercial.produto_id,\n            transferencias_estoque_comercial.local_destino_id AS local_estoque_id,\n            sum(transferencias_estoque_comercial.quantidade) AS em_transito\n           FROM alissonerp.transferencias_estoque_comercial\n          WHERE ((transferencias_estoque_comercial.status)::text = 'pendente'::text)\n          GROUP BY transferencias_estoque_comercial.produto_id, transferencias_estoque_comercial.local_destino_id\n        )\n SELECT p.id_produto AS produto_id,\n    p.nome AS nome_produto,\n    p.sku,\n    COALESCE(p.categoria, ''::character varying) AS categoria,\n    cfg.id AS config_id,\n    COALESCE(cfg.estoque_minimo, 0) AS estoque_minimo,\n    cfg.ativo,\n    m.local_estoque_id,\n    le.nome AS local_nome,\n    (COALESCE(m.saldo_fisico, (0)::bigint))::integer AS saldo_fisico,\n    (COALESCE(r.total_reservado, (0)::bigint))::integer AS reservado,\n    ((COALESCE(m.saldo_fisico, (0)::bigint) - COALESCE(r.total_reservado, (0)::bigint)))::integer AS disponivel,\n    (COALESCE(t.em_transito, (0)::bigint))::integer AS em_transito,\n    (COALESCE(m.total_movimentacoes, (0)::bigint))::integer AS total_movimentacoes,\n    m.ultima_movimentacao\n   FROM (((((produtos p\n     JOIN alissonerp.estoque_comercial_config cfg ON (((cfg.produto_id = p.id_produto) AND (cfg.ativo = true))))\n     LEFT JOIN mov_agg m ON ((m.produto_id = p.id_produto)))\n     LEFT JOIN alissonerp.locais_estoque le ON ((le.id = m.local_estoque_id)))\n     LEFT JOIN reservas_agg r ON (((r.produto_id = p.id_produto) AND (r.local_estoque_id = m.local_estoque_id))))\n     LEFT JOIN transito_agg t ON (((t.produto_id = p.id_produto) AND (t.local_estoque_id = m.local_estoque_id))));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_saldo_por_local",
+    "owner": "postgres",
+    "definition": " SELECT le.id AS local_estoque_id,\n    le.nome AS local_nome,\n    me.insumo_id,\n    i.nome AS insumo_nome,\n    i.sku,\n    i.categoria_id,\n    ci.nome AS categoria_nome,\n    COALESCE(i.unidade, 'g'::character varying) AS unidade,\n    i.peso_pedra,\n    i.peso_pedra_ct,\n    (COALESCE(sum(me.entrada), (0)::real) - COALESCE(sum(me.saida), (0)::real)) AS saldo,\n        CASE\n            WHEN (i.categoria_id = 2) THEN round((((COALESCE(sum(me.entrada), (0)::real) - COALESCE(sum(me.saida), (0)::real)) / (0.2)::double precision))::numeric, 4)\n            ELSE NULL::numeric\n        END AS saldo_ct,\n        CASE\n            WHEN ((i.categoria_id = 2) AND (i.peso_pedra IS NOT NULL) AND (i.peso_pedra > (0)::double precision)) THEN round((((COALESCE(sum(me.entrada), (0)::real) - COALESCE(sum(me.saida), (0)::real)) / i.peso_pedra))::numeric, 0)\n            ELSE NULL::numeric\n        END AS quantidade\n   FROM (((alissonerp.locais_estoque le\n     LEFT JOIN alissonerp.movimentacoes_estoque me ON ((me.local_estoque_id = le.id)))\n     LEFT JOIN alissonerp.insumos i ON ((i.id = me.insumo_id)))\n     LEFT JOIN alissonerp.categorias_insumo ci ON ((ci.id = i.categoria_id)))\n  WHERE (le.ativo = true)\n  GROUP BY le.id, le.nome, me.insumo_id, i.nome, i.sku, i.categoria_id, ci.nome, i.unidade, i.peso_pedra, i.peso_pedra_ct;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_saldo_pote",
+    "owner": "postgres",
+    "definition": " SELECT ci.id AS categoria_id,\n    ci.nome AS categoria_nome,\n    count(DISTINCT i.id) AS total_insumos,\n    COALESCE(sum(se.saldo_total), (0)::real) AS saldo_total,\n    COALESCE(( SELECT insumos.unidade\n           FROM alissonerp.insumos\n          WHERE ((insumos.categoria_id = ci.id) AND (insumos.ativo = true))\n         LIMIT 1), 'g'::character varying) AS unidade\n   FROM ((alissonerp.categorias_insumo ci\n     LEFT JOIN alissonerp.insumos i ON (((i.categoria_id = ci.id) AND (i.ativo = true))))\n     LEFT JOIN ( SELECT vw_saldo_estoque.insumo_id,\n            sum(vw_saldo_estoque.saldo) AS saldo_total\n           FROM alissonerp.vw_saldo_estoque\n          WHERE (vw_saldo_estoque.deposito_id = 1)\n          GROUP BY vw_saldo_estoque.insumo_id) se ON ((se.insumo_id = i.id)))\n  GROUP BY ci.id, ci.nome\n  ORDER BY ci.id;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_saldo_pote_ouro",
+    "owner": "postgres",
+    "definition": " SELECT i.id AS insumo_id,\n    i.nome AS insumo_nome,\n    (COALESCE(sum(me.entrada), (0)::real) - COALESCE(sum(me.saida), (0)::real)) AS saldo_g\n   FROM (alissonerp.movimentacoes_estoque me\n     JOIN alissonerp.insumos i ON ((i.id = me.insumo_id)))\n  WHERE ((me.deposito_id = 1) AND (i.categoria_id = 1))\n  GROUP BY i.id, i.nome\n HAVING ((COALESCE(sum(me.entrada), (0)::real) - COALESCE(sum(me.saida), (0)::real)) <> (0)::double precision);",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_saldo_unificado",
+    "owner": "postgres",
+    "definition": " WITH saldo_erp AS (\n         SELECT vw_saldo_estoque_comercial_v2.produto_id,\n            (COALESCE(sum(vw_saldo_estoque_comercial_v2.saldo_fisico), (0)::bigint))::integer AS qtd\n           FROM alissonerp.vw_saldo_estoque_comercial_v2\n          GROUP BY vw_saldo_estoque_comercial_v2.produto_id\n        ), reservado_erp AS (\n         SELECT vw_saldo_estoque_comercial_v2.produto_id,\n            (COALESCE(sum(vw_saldo_estoque_comercial_v2.reservado), (0)::bigint))::integer AS qtd\n           FROM alissonerp.vw_saldo_estoque_comercial_v2\n          GROUP BY vw_saldo_estoque_comercial_v2.produto_id\n        ), config_ativa AS (\n         SELECT estoque_comercial_config.produto_id,\n            true AS tem\n           FROM alissonerp.estoque_comercial_config\n          WHERE (estoque_comercial_config.ativo = true)\n        ), saldo_tiny AS (\n         SELECT p_1.id_produto AS produto_id,\n            (COALESCE(sum(e.saldo), (0)::numeric))::integer AS qtd\n           FROM (produtos p_1\n             LEFT JOIN estoque e ON ((((e.sku)::text = (p_1.sku)::text) AND (p_1.sku IS NOT NULL) AND ((p_1.sku)::text <> ''::text))))\n          GROUP BY p_1.id_produto\n        ), saldo_directus AS (\n         SELECT p_1.id_produto AS produto_id,\n            (COALESCE(sum(v.saldo), (0)::real))::integer AS qtd\n           FROM (produtos p_1\n             LEFT JOIN alissonerp.vw_estoque_directus_saldo v ON ((((v.insumo_sku)::text = (p_1.sku)::text) AND (p_1.sku IS NOT NULL) AND ((p_1.sku)::text <> ''::text))))\n          GROUP BY p_1.id_produto\n        ), saldo_pedra_extras AS (\n         SELECT produto_pedra_extras.produto_id,\n            COALESCE(produto_pedra_extras.quantidade, 0) AS qtd\n           FROM alissonerp.produto_pedra_extras\n        ), saldo_filhos_tiny AS (\n         SELECT pai.produto_id,\n            (COALESCE(sum(e_f.saldo), (0)::numeric))::integer AS qtd\n           FROM (((alissonerp.erp_produtos pai\n             JOIN alissonerp.erp_produtos filho ON ((filho.parent_id = pai.id)))\n             JOIN produtos prod_f ON ((prod_f.id_produto = filho.produto_id)))\n             LEFT JOIN estoque e_f ON ((((e_f.sku)::text = (prod_f.sku)::text) AND (prod_f.sku IS NOT NULL) AND ((prod_f.sku)::text <> ''::text))))\n          GROUP BY pai.produto_id\n        )\n SELECT p.id_produto AS produto_id,\n    p.sku,\n    p.nome,\n    p.categoria,\n    COALESCE(se.qtd, 0) AS saldo_erp,\n    COALESCE(re.qtd, 0) AS reservado_erp,\n    COALESCE(st.qtd, 0) AS saldo_tiny,\n    COALESCE(sd.qtd, 0) AS saldo_directus,\n    COALESCE(spe.qtd, 0) AS saldo_pedra_extras,\n    COALESCE(sft.qtd, 0) AS saldo_filhos_tiny,\n        CASE\n            WHEN ca.tem THEN COALESCE(se.qtd, 0)\n            ELSE GREATEST(COALESCE(st.qtd, 0), COALESCE(sd.qtd, 0), COALESCE(spe.qtd, 0), COALESCE(sft.qtd, 0), 0)\n        END AS saldo_efetivo,\n        CASE\n            WHEN ca.tem THEN GREATEST((COALESCE(se.qtd, 0) - COALESCE(re.qtd, 0)), 0)\n            ELSE GREATEST(COALESCE(st.qtd, 0), COALESCE(sd.qtd, 0), COALESCE(spe.qtd, 0), COALESCE(sft.qtd, 0), 0)\n        END AS disponivel,\n    COALESCE(ca.tem, false) AS tem_config\n   FROM (((((((produtos p\n     LEFT JOIN saldo_erp se ON ((se.produto_id = p.id_produto)))\n     LEFT JOIN reservado_erp re ON ((re.produto_id = p.id_produto)))\n     LEFT JOIN config_ativa ca ON ((ca.produto_id = p.id_produto)))\n     LEFT JOIN saldo_tiny st ON ((st.produto_id = p.id_produto)))\n     LEFT JOIN saldo_directus sd ON ((sd.produto_id = p.id_produto)))\n     LEFT JOIN saldo_pedra_extras spe ON ((spe.produto_id = p.id_produto)))\n     LEFT JOIN saldo_filhos_tiny sft ON ((sft.produto_id = p.id_produto)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_timeline_ordem",
+    "owner": "postgres",
+    "definition": " WITH ev_criacao AS (\n         SELECT o.id AS ordem_id,\n            1 AS passo,\n            'criacao'::text AS evento_cod,\n            'Criação da Ordem'::text AS evento,\n            o.created_at AS data_evento,\n            'concluido'::text AS status,\n            NULL::text AS detalhe\n           FROM alissonerp.ordens o\n        ), ev_audit_loja AS (\n         SELECT o.id AS ordem_id,\n            2 AS passo,\n            'auditoria_loja'::text AS evento_cod,\n            'Auditoria Loja'::text AS evento,\n                CASE\n                    WHEN ((a.situacao)::text = 'aprovado'::text) THEN a.data_conclusao\n                    ELSE NULL::timestamp with time zone\n                END AS data_evento,\n                CASE\n                    WHEN ((a.situacao)::text = 'aprovado'::text) THEN 'concluido'::text\n                    WHEN (a.id IS NOT NULL) THEN 'em_andamento'::text\n                    ELSE 'pendente'::text\n                END AS status,\n            a.parecer AS detalhe\n           FROM (alissonerp.ordens o\n             LEFT JOIN alissonerp.auditorias a ON (((a.ordem_id = o.id) AND ((a.tipo_auditoria)::text = 'loja'::text) AND ((a.situacao)::text <> 'reprovado'::text))))\n        ), ev_proto_ida AS (\n         SELECT o.id AS ordem_id,\n            3 AS passo,\n            'protocolo_ida'::text AS evento_cod,\n            'Protocolo Ida'::text AS evento,\n                CASE\n                    WHEN (p.etapas = 'concluido'::alissonerp.enum_etapas_protocolo) THEN p.data_conclusao\n                    ELSE NULL::timestamp with time zone\n                END AS data_evento,\n                CASE\n                    WHEN (p.etapas = 'concluido'::alissonerp.enum_etapas_protocolo) THEN 'concluido'::text\n                    WHEN (p.id IS NOT NULL) THEN 'em_andamento'::text\n                    ELSE 'pendente'::text\n                END AS status,\n            NULL::text AS detalhe\n           FROM (alissonerp.ordens o\n             LEFT JOIN LATERAL ( SELECT p2.id,\n                    p2.etapas,\n                    p2.data_conclusao\n                   FROM (alissonerp.protocolo_ordens po2\n                     JOIN alissonerp.protocolos p2 ON (((p2.id = po2.protocolo_id) AND (p2.direcao = 'ida'::alissonerp.enum_direcao_protocolo))))\n                  WHERE (po2.ordem_id = o.id)\n                  ORDER BY p2.id DESC\n                 LIMIT 1) p ON (true))\n        ), ev_pcp AS (\n         SELECT o.id AS ordem_id,\n            4 AS passo,\n            'pcp'::text AS evento_cod,\n            'PCP'::text AS evento,\n                CASE\n                    WHEN (pcp.etapas = 'concluido'::alissonerp.enum_etapas_pcp) THEN pcp.data_conclusao\n                    ELSE pcp.created_at\n                END AS data_evento,\n                CASE\n                    WHEN (pcp.etapas = 'concluido'::alissonerp.enum_etapas_pcp) THEN 'concluido'::text\n                    WHEN (pcp.id IS NOT NULL) THEN 'em_andamento'::text\n                    ELSE 'pendente'::text\n                END AS status,\n            NULL::text AS detalhe\n           FROM (alissonerp.ordens o\n             LEFT JOIN LATERAL ( SELECT pcp_1.id,\n                    pcp_1.etapas,\n                    pcp_1.data_conclusao,\n                    pcp_1.created_at\n                   FROM alissonerp.pcp pcp_1\n                  WHERE (pcp_1.ordem_id = o.id)\n                  ORDER BY pcp_1.created_at DESC NULLS LAST\n                 LIMIT 1) pcp ON (true))\n        ), ev_audit_fab AS (\n         SELECT o.id AS ordem_id,\n            5 AS passo,\n            'auditoria_fabrica'::text AS evento_cod,\n            'Auditoria Fábrica'::text AS evento,\n                CASE\n                    WHEN ((a.situacao)::text = 'aprovado'::text) THEN a.data_conclusao\n                    ELSE NULL::timestamp with time zone\n                END AS data_evento,\n                CASE\n                    WHEN ((a.situacao)::text = 'aprovado'::text) THEN 'concluido'::text\n                    WHEN (a.id IS NOT NULL) THEN 'em_andamento'::text\n                    ELSE 'pendente'::text\n                END AS status,\n            a.parecer AS detalhe\n           FROM (alissonerp.ordens o\n             LEFT JOIN alissonerp.auditorias a ON (((a.ordem_id = o.id) AND ((a.tipo_auditoria)::text = 'fabrica'::text) AND ((a.situacao)::text <> 'reprovado'::text))))\n        ), ev_proto_volta AS (\n         SELECT o.id AS ordem_id,\n            6 AS passo,\n            'protocolo_volta'::text AS evento_cod,\n            'Protocolo Volta'::text AS evento,\n                CASE\n                    WHEN (p.etapas = 'concluido'::alissonerp.enum_etapas_protocolo) THEN p.data_conclusao\n                    ELSE NULL::timestamp with time zone\n                END AS data_evento,\n                CASE\n                    WHEN (p.etapas = 'concluido'::alissonerp.enum_etapas_protocolo) THEN 'concluido'::text\n                    WHEN (p.id IS NOT NULL) THEN 'em_andamento'::text\n                    ELSE 'pendente'::text\n                END AS status,\n            NULL::text AS detalhe\n           FROM (alissonerp.ordens o\n             LEFT JOIN LATERAL ( SELECT p2.id,\n                    p2.etapas,\n                    p2.data_conclusao\n                   FROM (alissonerp.protocolo_ordens po2\n                     JOIN alissonerp.protocolos p2 ON (((p2.id = po2.protocolo_id) AND (p2.direcao = 'volta'::alissonerp.enum_direcao_protocolo))))\n                  WHERE (po2.ordem_id = o.id)\n                  ORDER BY p2.id DESC\n                 LIMIT 1) p ON (true))\n        ), ev_aprovacao AS (\n         SELECT o.id AS ordem_id,\n            7 AS passo,\n            'aprovacao_consultora'::text AS evento_cod,\n            'Aprovação Consultora'::text AS evento,\n                CASE\n                    WHEN (ac.etapas = 'aprovado'::alissonerp.enum_etapas_aprovacao) THEN ac.updated_at\n                    ELSE NULL::timestamp with time zone\n                END AS data_evento,\n                CASE\n                    WHEN (ac.etapas = 'aprovado'::alissonerp.enum_etapas_aprovacao) THEN 'concluido'::text\n                    WHEN (ac.id IS NOT NULL) THEN 'em_andamento'::text\n                    ELSE 'pendente'::text\n                END AS status,\n            ac.obs AS detalhe\n           FROM (alissonerp.ordens o\n             LEFT JOIN LATERAL ( SELECT aprovacoes_consultora.id,\n                    aprovacoes_consultora.etapas,\n                    aprovacoes_consultora.updated_at,\n                    aprovacoes_consultora.obs\n                   FROM alissonerp.aprovacoes_consultora\n                  WHERE (aprovacoes_consultora.ordem_id = o.id)\n                  ORDER BY aprovacoes_consultora.updated_at DESC NULLS LAST\n                 LIMIT 1) ac ON (true))\n        ), ev_entrega AS (\n         SELECT o.id AS ordem_id,\n            8 AS passo,\n            'preparacao_entrega'::text AS evento_cod,\n            'Preparação Entrega'::text AS evento,\n                CASE\n                    WHEN (pe.etapas = 'concluido'::alissonerp.enum_etapas_entrega) THEN pe.updated_at\n                    ELSE NULL::timestamp with time zone\n                END AS data_evento,\n                CASE\n                    WHEN (pe.etapas = 'concluido'::alissonerp.enum_etapas_entrega) THEN 'concluido'::text\n                    WHEN (pe.id IS NOT NULL) THEN 'em_andamento'::text\n                    ELSE 'pendente'::text\n                END AS status,\n            NULL::text AS detalhe\n           FROM (alissonerp.ordens o\n             LEFT JOIN LATERAL ( SELECT preparacoes_entrega.id,\n                    preparacoes_entrega.etapas,\n                    preparacoes_entrega.updated_at\n                   FROM alissonerp.preparacoes_entrega\n                  WHERE (preparacoes_entrega.ordem_id = o.id)\n                  ORDER BY preparacoes_entrega.updated_at DESC NULLS LAST\n                 LIMIT 1) pe ON (true))\n        )\n SELECT ev_criacao.ordem_id,\n    ev_criacao.passo,\n    ev_criacao.evento_cod,\n    ev_criacao.evento,\n    ev_criacao.data_evento,\n    ev_criacao.status,\n    ev_criacao.detalhe\n   FROM ev_criacao\nUNION ALL\n SELECT ev_audit_loja.ordem_id,\n    ev_audit_loja.passo,\n    ev_audit_loja.evento_cod,\n    ev_audit_loja.evento,\n    ev_audit_loja.data_evento,\n    ev_audit_loja.status,\n    ev_audit_loja.detalhe\n   FROM ev_audit_loja\nUNION ALL\n SELECT ev_proto_ida.ordem_id,\n    ev_proto_ida.passo,\n    ev_proto_ida.evento_cod,\n    ev_proto_ida.evento,\n    ev_proto_ida.data_evento,\n    ev_proto_ida.status,\n    ev_proto_ida.detalhe\n   FROM ev_proto_ida\nUNION ALL\n SELECT ev_pcp.ordem_id,\n    ev_pcp.passo,\n    ev_pcp.evento_cod,\n    ev_pcp.evento,\n    ev_pcp.data_evento,\n    ev_pcp.status,\n    ev_pcp.detalhe\n   FROM ev_pcp\nUNION ALL\n SELECT ev_audit_fab.ordem_id,\n    ev_audit_fab.passo,\n    ev_audit_fab.evento_cod,\n    ev_audit_fab.evento,\n    ev_audit_fab.data_evento,\n    ev_audit_fab.status,\n    ev_audit_fab.detalhe\n   FROM ev_audit_fab\nUNION ALL\n SELECT ev_proto_volta.ordem_id,\n    ev_proto_volta.passo,\n    ev_proto_volta.evento_cod,\n    ev_proto_volta.evento,\n    ev_proto_volta.data_evento,\n    ev_proto_volta.status,\n    ev_proto_volta.detalhe\n   FROM ev_proto_volta\nUNION ALL\n SELECT ev_aprovacao.ordem_id,\n    ev_aprovacao.passo,\n    ev_aprovacao.evento_cod,\n    ev_aprovacao.evento,\n    ev_aprovacao.data_evento,\n    ev_aprovacao.status,\n    ev_aprovacao.detalhe\n   FROM ev_aprovacao\nUNION ALL\n SELECT ev_entrega.ordem_id,\n    ev_entrega.passo,\n    ev_entrega.evento_cod,\n    ev_entrega.evento,\n    ev_entrega.data_evento,\n    ev_entrega.status,\n    ev_entrega.detalhe\n   FROM ev_entrega\n  ORDER BY 1, 2;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_transferencias_ordem",
+    "owner": "postgres",
+    "definition": " SELECT t.id,\n    t.pcp_id,\n    t.ordem_id,\n    o.numero_ordem,\n    t.created_at AS data,\n    dep.nome AS deposito_nome,\n    st.nome AS setor_nome,\n    COALESCE(NULLIF(TRIM(BOTH FROM up.name), ''::text), (au.email)::text, 'Sistema'::text) AS criado_por\n   FROM (((((alissonerp.transferencias_ordem t\n     LEFT JOIN alissonerp.ordens o ON ((o.id = t.ordem_id)))\n     LEFT JOIN alissonerp.depositos dep ON ((dep.id = t.deposito_id)))\n     LEFT JOIN alissonerp.setores st ON ((st.id = t.setor_id)))\n     LEFT JOIN auth.users au ON ((au.id = t.created_by)))\n     LEFT JOIN user_profiles up ON ((up.id_user = au.id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_user_profiles",
+    "owner": "postgres",
+    "definition": " SELECT user_profiles.id_user,\n    user_profiles.email,\n    user_profiles.password_hash,\n    user_profiles.name,\n    user_profiles.role,\n    user_profiles.avatar_url,\n    user_profiles.phone,\n    user_profiles.created_at,\n    user_profiles.updated_at,\n    user_profiles.last_login,\n    user_profiles.is_active,\n    user_profiles.vendedor_id,\n    user_profiles.mx_desconto_permitido\n   FROM user_profiles;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_vendas",
+    "owner": "postgres",
+    "definition": " SELECT vendas.id,\n    vendas.created_at,\n    vendas.updated_at,\n    vendas.cliente_id,\n    vendas.vendedor_id,\n    vendas.data_venda,\n    vendas.data_envio,\n    vendas.status,\n    vendas.total_produtos,\n    vendas.total_venda,\n    vendas.total_itens_qnt,\n    vendas.total_itens_unidades,\n    vendas.forma_envio_id,\n    vendas.forma_frete_id,\n    vendas.endereco_cobranca,\n    vendas.dados_entrega,\n    vendas.dados_pagamento,\n    vendas.observacoes_internas,\n    vendas.observacoes,\n    vendas.arquivos_path,\n    vendas.frete_pago_cliente,\n    vendas.lead_id,\n    vendas.numero_pedido_tiny,\n    vendas.id_api_tiny,\n    vendas.public_link_uuid,\n    vendas.entregue,\n    vendas.numero_pedido,\n    vendas.pedido_numero\n   FROM vendas;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_vendas_completa",
+    "owner": "postgres",
+    "definition": " SELECT v.id,\n    v.numero_pedido,\n    v.data_venda,\n    v.total_venda,\n    v.total_produtos,\n    v.total_itens_qnt,\n    v.status,\n    v.entregue,\n    v.dados_pagamento,\n    v.observacoes,\n    c.nome AS cliente_nome,\n    c.cpf_cnpj AS cliente_cpf,\n    ve.nome AS vendedor_nome,\n    ve.id_vendedor AS vendedor_id\n   FROM ((vendas v\n     LEFT JOIN contatos c ON ((c.id_contato = v.cliente_id)))\n     LEFT JOIN vendedores ve ON ((ve.id_vendedor = v.vendedor_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_vendas_erp_completa",
+    "owner": "postgres",
+    "definition": " SELECT v.id,\n    v.numero_venda,\n    v.cliente_id,\n    c.nome AS cliente_nome,\n    c.cpf_cnpj AS cliente_cpf_cnpj,\n    c.email AS cliente_email,\n    c.telefone AS cliente_telefone,\n    v.vendedor_id,\n    vend.nome AS vendedor_nome,\n    v.data_venda,\n    v.data_entrega,\n    v.total_produtos,\n    v.total_desconto,\n    v.total_frete,\n    v.total_venda,\n    v.total_comissao,\n    v.situacao,\n    v.forma_envio,\n    v.forma_frete,\n    v.observacoes,\n    v.observacoes_internas,\n    v.video_obs_interna,\n    v.tiny_pedido_id,\n    v.tiny_sync_status,\n    v.tiny_sync_at,\n    v.tiny_sync_erro,\n    v.bloqueado,\n    v.created_by,\n    v.created_at,\n    v.updated_at,\n    count(DISTINCT i.id) AS qtd_itens,\n    COALESCE(sum(p.valor) FILTER (WHERE ((p.status)::text = 'confirmado'::text)), (0)::numeric) AS total_pago\n   FROM ((((alissonerp.vendas_erp v\n     LEFT JOIN contatos c ON ((c.id_contato = v.cliente_id)))\n     LEFT JOIN vendedores vend ON ((vend.id_vendedor = v.vendedor_id)))\n     LEFT JOIN alissonerp.itens_venda_erp i ON ((i.venda_id = v.id)))\n     LEFT JOIN alissonerp.pagamentos_venda p ON ((p.venda_id = v.id)))\n  GROUP BY v.id, c.nome, c.cpf_cnpj, c.email, c.telefone, vend.nome;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "alissonerp",
+    "view_name": "vw_vendedores",
+    "owner": "postgres",
+    "definition": " SELECT vendedores.id_vendedor,\n    vendedores.nome,\n    vendedores.id_api_vendedor,\n    vendedores.foto,\n    vendedores.situacao,\n    vendedores.id_api_kommo,\n    vendedores.cpf,\n    vendedores.email,\n    vendedores.user_id,\n    vendedores.comissao,\n    vendedores.gerente_orcamento\n   FROM vendedores;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "directus",
+    "view_name": "ordem_comentarios_populados",
+    "owner": "supabase_admin",
+    "definition": " SELECT c.id,\n    c.ordem_id,\n    c.user_id,\n    c.conteudo,\n    c.anexos_path,\n    c.editado,\n    c.data_edicao,\n    c.date_created,\n    c.date_updated,\n    c.deleted_at,\n    u.id_user AS usuario_id,\n    u.name AS usuario_name,\n    u.email AS usuario_email,\n    u.avatar_url AS usuario_avatar_url,\n    u.role AS usuario_role\n   FROM (directus.ordem_comentarios c\n     LEFT JOIN user_profiles u ON ((c.user_id = u.id_user)))\n  WHERE (c.deleted_at IS NULL);",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "directus",
+    "view_name": "v_saldo_quebra_final",
+    "owner": "supabase_admin",
+    "definition": " WITH pcp_convertido AS (\n         SELECT pcp.id AS pcp_id,\n            pcp.ordem_id\n           FROM directus.pcp\n        ), movimento_producao AS (\n         SELECT ap.deposito AS id_deposito,\n            pcp.ordem_id,\n            sum(\n                CASE\n                    WHEN (ap.tipo_apontamento = ANY (ARRAY[1, 2])) THEN ap.qtd\n                    ELSE (0)::real\n                END) AS entrada_apontamento,\n            sum(\n                CASE\n                    WHEN (ap.tipo_apontamento = 5) THEN ap.qtd\n                    ELSE (0)::real\n                END) AS saida_apontamento,\n            max(\n                CASE\n                    WHEN (ap.tipo_apontamento = 5) THEN 1\n                    ELSE 0\n                END) AS flag_teve_retorno\n           FROM (directus.apontamento ap\n             LEFT JOIN pcp_convertido pcp ON ((ap.pcp_id = pcp.pcp_id)))\n          WHERE (ap.insumo = 1)\n          GROUP BY ap.deposito, pcp.ordem_id\n        ), movimento_logistica AS (\n         SELECT ce.deposito_id AS id_deposito,\n            ce.ordem_id,\n            sum(\n                CASE\n                    WHEN (((ce.marcador)::text ~~* '%TED%'::text) AND (ce.entrada > (0)::double precision)) THEN ce.entrada\n                    ELSE (0)::real\n                END) AS entrada_estoque,\n            sum(\n                CASE\n                    WHEN (((ce.marcador)::text ~~* '%TED%'::text) AND (ce.saida > (0)::double precision)) THEN ce.saida\n                    ELSE (0)::real\n                END) AS saida_estoque,\n            max(\n                CASE\n                    WHEN (((ce.marcador)::text ~~* '%TED%'::text) AND (ce.saida > (0)::double precision)) THEN 1\n                    ELSE 0\n                END) AS flag_teve_saida_estoque\n           FROM directus.controle_estoque ce\n          WHERE (ce.insumo_id = 1)\n          GROUP BY ce.deposito_id, ce.ordem_id\n        )\n SELECT COALESCE(mp.id_deposito, ml.id_deposito) AS id_deposito,\n    d.nome AS nome_deposito,\n    COALESCE(mp.ordem_id, ml.ordem_id) AS id_ordem,\n    o.numero_ordem,\n    (((COALESCE(mp.entrada_apontamento, (0)::real) + COALESCE(ml.entrada_estoque, (0)::real)) - (COALESCE(mp.saida_apontamento, (0)::real) + COALESCE(ml.saida_estoque, (0)::real))))::numeric(10,2) AS diferenca_calculada,\n        CASE\n            WHEN ((COALESCE(ml.flag_teve_saida_estoque, 0) = 0) AND (COALESCE(mp.flag_teve_retorno, 0) = 0)) THEN (((COALESCE(mp.entrada_apontamento, (0)::real) + COALESCE(ml.entrada_estoque, (0)::real)) - (COALESCE(mp.saida_apontamento, (0)::real) + COALESCE(ml.saida_estoque, (0)::real))))::numeric(10,2)\n            ELSE 0.00\n        END AS saldo_atual,\n        CASE\n            WHEN ((COALESCE(ml.flag_teve_saida_estoque, 0) = 1) OR (COALESCE(mp.flag_teve_retorno, 0) = 1)) THEN (((COALESCE(mp.entrada_apontamento, (0)::real) + COALESCE(ml.entrada_estoque, (0)::real)) - (COALESCE(mp.saida_apontamento, (0)::real) + COALESCE(ml.saida_estoque, (0)::real))))::numeric(10,2)\n            ELSE 0.00\n        END AS quebra_apurada\n   FROM (((movimento_producao mp\n     FULL JOIN movimento_logistica ml ON (((mp.id_deposito = ml.id_deposito) AND (mp.ordem_id = ml.ordem_id))))\n     LEFT JOIN directus.deposito d ON ((COALESCE(mp.id_deposito, ml.id_deposito) = d.id)))\n     LEFT JOIN directus.ordens o ON ((COALESCE(mp.ordem_id, ml.ordem_id) = o.id)))\n  WHERE ((((COALESCE(mp.entrada_apontamento, (0)::real) + COALESCE(ml.entrada_estoque, (0)::real)) + COALESCE(mp.saida_apontamento, (0)::real)) + COALESCE(ml.saida_estoque, (0)::real)) > (0)::double precision);",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "extensions",
+    "view_name": "hypopg_hidden_indexes",
+    "owner": "supabase_admin",
+    "definition": " SELECT h.indexid AS indexrelid,\n    i.relname AS index_name,\n    n.nspname AS schema_name,\n    t.relname AS table_name,\n    m.amname AS am_name,\n    false AS is_hypo\n   FROM (((((hypopg_hidden_indexes() h(indexid)\n     JOIN pg_index x ON ((x.indexrelid = h.indexid)))\n     JOIN pg_class i ON ((i.oid = h.indexid)))\n     JOIN pg_namespace n ON ((n.oid = i.relnamespace)))\n     JOIN pg_class t ON ((t.oid = x.indrelid)))\n     JOIN pg_am m ON ((m.oid = i.relam)))\nUNION ALL\n SELECT hl.indexrelid,\n    hl.index_name,\n    hl.schema_name,\n    hl.table_name,\n    hl.am_name,\n    true AS is_hypo\n   FROM (hypopg_hidden_indexes() hi(indexid)\n     JOIN hypopg_list_indexes hl ON ((hl.indexrelid = hi.indexid)))\n  ORDER BY 2;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "extensions",
+    "view_name": "hypopg_list_indexes",
+    "owner": "supabase_admin",
+    "definition": " SELECT h.indexrelid,\n    h.indexname AS index_name,\n    n.nspname AS schema_name,\n    COALESCE(c.relname, '<dropped>'::name) AS table_name,\n    am.amname AS am_name\n   FROM (((hypopg() h(indexname, indexrelid, indrelid, innatts, indisunique, indkey, indcollation, indclass, indoption, indexprs, indpred, amid)\n     LEFT JOIN pg_class c ON ((c.oid = h.indrelid)))\n     LEFT JOIN pg_namespace n ON ((n.oid = c.relnamespace)))\n     LEFT JOIN pg_am am ON ((am.oid = h.amid)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "extensions",
+    "view_name": "pg_stat_statements",
+    "owner": "supabase_admin",
+    "definition": " SELECT pg_stat_statements.userid,\n    pg_stat_statements.dbid,\n    pg_stat_statements.toplevel,\n    pg_stat_statements.queryid,\n    pg_stat_statements.query,\n    pg_stat_statements.plans,\n    pg_stat_statements.total_plan_time,\n    pg_stat_statements.min_plan_time,\n    pg_stat_statements.max_plan_time,\n    pg_stat_statements.mean_plan_time,\n    pg_stat_statements.stddev_plan_time,\n    pg_stat_statements.calls,\n    pg_stat_statements.total_exec_time,\n    pg_stat_statements.min_exec_time,\n    pg_stat_statements.max_exec_time,\n    pg_stat_statements.mean_exec_time,\n    pg_stat_statements.stddev_exec_time,\n    pg_stat_statements.rows,\n    pg_stat_statements.shared_blks_hit,\n    pg_stat_statements.shared_blks_read,\n    pg_stat_statements.shared_blks_dirtied,\n    pg_stat_statements.shared_blks_written,\n    pg_stat_statements.local_blks_hit,\n    pg_stat_statements.local_blks_read,\n    pg_stat_statements.local_blks_dirtied,\n    pg_stat_statements.local_blks_written,\n    pg_stat_statements.temp_blks_read,\n    pg_stat_statements.temp_blks_written,\n    pg_stat_statements.blk_read_time,\n    pg_stat_statements.blk_write_time,\n    pg_stat_statements.temp_blk_read_time,\n    pg_stat_statements.temp_blk_write_time,\n    pg_stat_statements.wal_records,\n    pg_stat_statements.wal_fpi,\n    pg_stat_statements.wal_bytes,\n    pg_stat_statements.jit_functions,\n    pg_stat_statements.jit_generation_time,\n    pg_stat_statements.jit_inlining_count,\n    pg_stat_statements.jit_inlining_time,\n    pg_stat_statements.jit_optimization_count,\n    pg_stat_statements.jit_optimization_time,\n    pg_stat_statements.jit_emission_count,\n    pg_stat_statements.jit_emission_time\n   FROM pg_stat_statements(true) pg_stat_statements(userid, dbid, toplevel, queryid, query, plans, total_plan_time, min_plan_time, max_plan_time, mean_plan_time, stddev_plan_time, calls, total_exec_time, min_exec_time, max_exec_time, mean_exec_time, stddev_exec_time, rows, shared_blks_hit, shared_blks_read, shared_blks_dirtied, shared_blks_written, local_blks_hit, local_blks_read, local_blks_dirtied, local_blks_written, temp_blks_read, temp_blks_written, blk_read_time, blk_write_time, temp_blk_read_time, temp_blk_write_time, wal_records, wal_fpi, wal_bytes, jit_functions, jit_generation_time, jit_inlining_count, jit_inlining_time, jit_optimization_count, jit_optimization_time, jit_emission_count, jit_emission_time);",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "extensions",
+    "view_name": "pg_stat_statements_info",
+    "owner": "supabase_admin",
+    "definition": " SELECT pg_stat_statements_info.dealloc,\n    pg_stat_statements_info.stats_reset\n   FROM pg_stat_statements_info() pg_stat_statements_info(dealloc, stats_reset);",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "contasareceberdetalhada",
+    "owner": "supabase_admin",
+    "definition": " SELECT cr.id_api_conta,\n    cr.situacao,\n    cr.data,\n    cr.data_vencimento,\n    cr.data_competencia,\n    cr.data_liquidacao,\n    cr.valor,\n    cr.saldo,\n    cr.juros,\n    cr.multa,\n    cr.valor_pago,\n    cr.forma_recebimento,\n    c.descricao AS nomecategoria,\n    c.grupo AS nomegrupo,\n    p.data_pedido,\n    p.id_api_pedido AS numero_pedido,\n    (cr.pedido_id_api IS NOT NULL) AS tem_relacao_com_pedido\n   FROM ((contas_a_receber cr\n     JOIN categorias_receitas_despesas c ON ((cr.categoria_id_api = c.id_api_categoria)))\n     LEFT JOIN pedidos p ON ((cr.pedido_id_api = p.id_api_pedido)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_agente_runs",
+    "owner": "postgres",
+    "definition": " SELECT agente_runs.id,\n    agente_runs.agente_id,\n    agente_runs.conversa_id,\n    agente_runs.prompt_final,\n    agente_runs.resposta,\n    agente_runs.modelo,\n    agente_runs.tokens_input,\n    agente_runs.tokens_output,\n    agente_runs.custo_usd,\n    agente_runs.elapsed_ms,\n    agente_runs.erro,\n    agente_runs.metadata,\n    agente_runs.created_at\n   FROM crm.agente_runs;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_agentes_ia",
+    "owner": "postgres",
+    "definition": " SELECT agentes_ia.id,\n    agentes_ia.codigo,\n    agentes_ia.nome,\n    agentes_ia.descricao,\n    agentes_ia.prompt_template_id,\n    agentes_ia.parametros,\n    agentes_ia.ativo,\n    agentes_ia.created_at,\n    agentes_ia.updated_at\n   FROM crm.agentes_ia;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_audit_log",
+    "owner": "postgres",
+    "definition": " SELECT audit_log.id,\n    audit_log.schema_name,\n    audit_log.table_name,\n    audit_log.operacao,\n    audit_log.registro_id,\n    audit_log.user_id,\n    audit_log.dados_antes,\n    audit_log.dados_depois,\n    audit_log.diff,\n    audit_log.ocorrido_em\n   FROM crm.audit_log;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_automacao_etapas",
+    "owner": "postgres",
+    "definition": " SELECT automacao_etapas.id,\n    automacao_etapas.legacy_id,\n    automacao_etapas.funil_id,\n    automacao_etapas.gatilho,\n    automacao_etapas.estagio_origem_id,\n    automacao_etapas.estagio_destino_id,\n    automacao_etapas.tipo_acao,\n    automacao_etapas.config,\n    automacao_etapas.descricao,\n    automacao_etapas.ativo,\n    automacao_etapas.total_execucoes,\n    automacao_etapas.ultima_execucao,\n    automacao_etapas.created_at,\n    automacao_etapas.updated_at\n   FROM crm.automacao_etapas;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_automacao_execucoes",
+    "owner": "postgres",
+    "definition": " SELECT automacao_execucoes.id,\n    automacao_execucoes.automacao_id,\n    automacao_execucoes.conversa_id,\n    automacao_execucoes.gatilho,\n    automacao_execucoes.payload,\n    automacao_execucoes.resultado,\n    automacao_execucoes.sucesso,\n    automacao_execucoes.erro,\n    automacao_execucoes.elapsed_ms,\n    automacao_execucoes.created_at\n   FROM crm.automacao_execucoes;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_automacao_gatilhos",
+    "owner": "postgres",
+    "definition": " SELECT automacao_gatilhos.automacao_id,\n    automacao_gatilhos.gatilho,\n    automacao_gatilhos.parametros\n   FROM crm.automacao_gatilhos;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_automacoes",
+    "owner": "postgres",
+    "definition": " SELECT automacoes.id,\n    automacoes.nome,\n    automacoes.descricao,\n    automacoes.ativa,\n    automacoes.prioridade,\n    automacoes.condicoes,\n    automacoes.acoes,\n    automacoes.total_execucoes,\n    automacoes.ultima_execucao,\n    automacoes.criado_por,\n    automacoes.created_at,\n    automacoes.updated_at\n   FROM crm.automacoes;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_brechas",
+    "owner": "postgres",
+    "definition": " SELECT brechas.id,\n    brechas.conversa_id,\n    brechas.contato_id,\n    brechas.tipo,\n    brechas.titulo,\n    brechas.descricao,\n    brechas.prioridade,\n    brechas.status,\n    brechas.vencimento,\n    brechas.metadata,\n    brechas.detectada_em,\n    brechas.fechada_em,\n    brechas.fechada_por,\n    brechas.created_at,\n    brechas.updated_at\n   FROM crm.brechas;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_ciclo_vida_eventos",
+    "owner": "postgres",
+    "definition": " SELECT ciclo_vida_eventos.id,\n    ciclo_vida_eventos.conversa_id,\n    ciclo_vida_eventos.contato_id,\n    ciclo_vida_eventos.evento,\n    ciclo_vida_eventos.detalhes,\n    ciclo_vida_eventos.ocorrido_em,\n    ciclo_vida_eventos.created_at\n   FROM crm.ciclo_vida_eventos;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_config_geral",
+    "owner": "postgres",
+    "definition": " SELECT config_geral.chave,\n    config_geral.valor,\n    config_geral.descricao,\n    config_geral.atualizado_por,\n    config_geral.created_at,\n    config_geral.updated_at\n   FROM crm.config_geral;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_contato_canais",
+    "owner": "postgres",
+    "definition": " SELECT contato_canais.id,\n    contato_canais.contato_id,\n    contato_canais.canal,\n    contato_canais.canal_id,\n    contato_canais.username,\n    contato_canais.nome_canal,\n    contato_canais.foto_url,\n    contato_canais.metadata,\n    contato_canais.created_at,\n    contato_canais.updated_at\n   FROM crm.contato_canais;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_conversas",
+    "owner": "postgres",
+    "definition": " SELECT conversas.id,\n    conversas.contato_id,\n    conversas.lead_id,\n    conversas.vendedor_id,\n    conversas.canal,\n    conversas.canal_contato_id,\n    conversas.canal_thread_id,\n    conversas.status,\n    conversas.modo_auto,\n    conversas.ultima_msg_em,\n    conversas.ultima_msg_resumo,\n    conversas.nao_lidas_count,\n    conversas.metadata,\n    conversas.created_at,\n    conversas.updated_at,\n    conversas.etapa_atual_id\n   FROM crm.conversas;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_conversas_completas",
+    "owner": "postgres",
+    "definition": " SELECT c.id,\n    c.contato_id,\n    c.lead_id,\n    c.vendedor_id,\n    c.canal,\n    c.canal_contato_id,\n    c.canal_thread_id,\n    c.status,\n    c.modo_auto,\n    c.ultima_msg_em,\n    c.ultima_msg_resumo,\n    c.nao_lidas_count,\n    c.etapa_atual_id,\n    c.metadata,\n    c.created_at,\n    c.updated_at,\n    ct.nome AS contato_nome,\n    ct.telefone AS contato_telefone,\n    ct.celular AS contato_celular,\n    ct.email AS contato_email,\n    v.nome AS vendedor_nome,\n    v.foto AS vendedor_foto,\n    fe.nome AS etapa_nome,\n    fe.cor AS etapa_cor,\n    fb.nome AS bloco_nome,\n    fb.cor AS bloco_cor\n   FROM ((((crm.conversas c\n     LEFT JOIN contatos ct ON ((ct.id_contato = c.contato_id)))\n     LEFT JOIN vendedores v ON ((v.id_vendedor = c.vendedor_id)))\n     LEFT JOIN crm.funil_etapas fe ON ((fe.id = c.etapa_atual_id)))\n     LEFT JOIN crm.funil_blocos fb ON ((fb.id = fe.bloco_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_funil_blocos",
+    "owner": "postgres",
+    "definition": " SELECT funil_blocos.id,\n    funil_blocos.nome,\n    funil_blocos.ordem,\n    funil_blocos.cor,\n    funil_blocos.created_at,\n    funil_blocos.updated_at\n   FROM crm.funil_blocos;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_funil_etapas",
+    "owner": "postgres",
+    "definition": " SELECT funil_etapas.id,\n    funil_etapas.bloco_id,\n    funil_etapas.nome,\n    funil_etapas.ordem,\n    funil_etapas.cor,\n    funil_etapas.ativo,\n    funil_etapas.acao_entrada,\n    funil_etapas.acao_saida,\n    funil_etapas.sla_horas,\n    funil_etapas.created_at,\n    funil_etapas.updated_at\n   FROM crm.funil_etapas;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_funil_etapas_completas",
+    "owner": "postgres",
+    "definition": " SELECT fe.id,\n    fe.bloco_id,\n    fe.nome,\n    fe.ordem,\n    fe.cor,\n    fe.ativo,\n    fb.nome AS bloco_nome,\n    fb.ordem AS bloco_ordem,\n    fb.cor AS bloco_cor\n   FROM (crm.funil_etapas fe\n     LEFT JOIN crm.funil_blocos fb ON ((fb.id = fe.bloco_id)))\n  ORDER BY fb.ordem, fe.ordem;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_funil_movimentos",
+    "owner": "postgres",
+    "definition": " SELECT funil_movimentos.id,\n    funil_movimentos.conversa_id,\n    funil_movimentos.etapa_de,\n    funil_movimentos.etapa_para,\n    funil_movimentos.motivo,\n    funil_movimentos.movido_por,\n    funil_movimentos.movido_em,\n    funil_movimentos.metadata\n   FROM crm.funil_movimentos;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_funis",
+    "owner": "postgres",
+    "definition": " SELECT funis.id,\n    funis.legacy_id,\n    funis.nome,\n    funis.cor,\n    funis.ordem,\n    funis.ativo,\n    funis.descricao,\n    funis.created_at,\n    funis.updated_at\n   FROM crm.funis;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_instagram_posts",
+    "owner": "postgres",
+    "definition": " SELECT instagram_posts.id,\n    instagram_posts.tipo,\n    instagram_posts.caption,\n    instagram_posts.permalink,\n    instagram_posts.thumbnail_url,\n    instagram_posts.media_url,\n    instagram_posts.thumbnail_storage_path,\n    instagram_posts.media_storage_path,\n    instagram_posts.thumbnail_url_local,\n    instagram_posts.media_url_local,\n    instagram_posts.timestamp_post,\n    instagram_posts.metadata,\n    instagram_posts.created_at,\n    instagram_posts.updated_at\n   FROM crm.instagram_posts;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_kommo_config",
+    "owner": "postgres",
+    "definition": " SELECT kommo_config.id,\n    kommo_config.subdomain,\n    kommo_config.client_id,\n    kommo_config.client_secret,\n    kommo_config.access_token,\n    kommo_config.refresh_token,\n    kommo_config.expires_at,\n    kommo_config.ativo,\n    kommo_config.created_at,\n    kommo_config.updated_at\n   FROM crm.kommo_config;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_mensagens",
+    "owner": "postgres",
+    "definition": " SELECT mensagens.id,\n    mensagens.conversa_id,\n    mensagens.canal_message_id,\n    mensagens.papel,\n    mensagens.conteudo,\n    mensagens.tipo_midia,\n    mensagens.midia_url,\n    mensagens.midia_storage_path,\n    mensagens.duracao_segundos,\n    mensagens.instagram_media_id,\n    mensagens.status,\n    mensagens.erro,\n    mensagens.enviado_em,\n    mensagens.metadata,\n    mensagens.created_at,\n    mensagens.updated_at\n   FROM crm.mensagens;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_meta_config",
+    "owner": "postgres",
+    "definition": " SELECT meta_config.id,\n    meta_config.app_id,\n    meta_config.app_secret,\n    meta_config.page_id,\n    meta_config.page_access_token,\n    meta_config.ig_business_id,\n    meta_config.verify_token,\n    meta_config.webhook_url,\n    meta_config.ativo,\n    meta_config.status,\n    meta_config.ultimo_erro,\n    meta_config.created_at,\n    meta_config.updated_at\n   FROM crm.meta_config;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_motivos_perda",
+    "owner": "postgres",
+    "definition": " SELECT motivos_perda.id,\n    motivos_perda.legacy_id,\n    motivos_perda.nome,\n    motivos_perda.ativo,\n    motivos_perda.ordem,\n    motivos_perda.created_at\n   FROM crm.motivos_perda;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_notificacoes",
+    "owner": "postgres",
+    "definition": " SELECT notificacoes.id,\n    notificacoes.user_id,\n    notificacoes.tipo,\n    notificacoes.titulo,\n    notificacoes.mensagem,\n    notificacoes.link,\n    notificacoes.conversa_id,\n    notificacoes.contato_id,\n    notificacoes.metadata,\n    notificacoes.lida,\n    notificacoes.lida_em,\n    notificacoes.created_at\n   FROM crm.notificacoes;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_oportunidade_historico",
+    "owner": "postgres",
+    "definition": " SELECT oportunidade_historico.id,\n    oportunidade_historico.oportunidade_id,\n    oportunidade_historico.etapa_anterior_id,\n    oportunidade_historico.etapa_nova_id,\n    oportunidade_historico.etapa_anterior_nome,\n    oportunidade_historico.etapa_nova_nome,\n    oportunidade_historico.motivo,\n    oportunidade_historico.user_id,\n    oportunidade_historico.metadata,\n    oportunidade_historico.ocorrido_em\n   FROM crm.oportunidade_historico;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_oportunidades",
+    "owner": "postgres",
+    "definition": " SELECT oportunidades.id,\n    oportunidades.legacy_id,\n    oportunidades.contato_id,\n    oportunidades.vendedor_id,\n    oportunidades.conversa_id,\n    oportunidades.funil_id,\n    oportunidades.etapa_id,\n    oportunidades.titulo,\n    oportunidades.valor,\n    oportunidades.produto_interesse,\n    oportunidades.notas,\n    oportunidades.tags,\n    oportunidades.origem_lead,\n    oportunidades.canal_origem,\n    oportunidades.motivo_perda,\n    oportunidades.tipo_pedido,\n    oportunidades.forma_atendimento,\n    oportunidades.tipo_cliente,\n    oportunidades.itens_pedido,\n    oportunidades.desconto,\n    oportunidades.parcelas,\n    oportunidades.forma_pagamento,\n    oportunidades.valor_frete,\n    oportunidades.endereco_entrega,\n    oportunidades.data_prevista_entrega,\n    oportunidades.data_envio,\n    oportunidades.transportador,\n    oportunidades.observacao_pedido,\n    oportunidades.forma_envio,\n    oportunidades.codigo_rastreio,\n    oportunidades.data_entrega,\n    oportunidades.entrega_confirmada,\n    oportunidades.score_bant,\n    oportunidades.classificacao,\n    oportunidades.perfil,\n    oportunidades.decisor,\n    oportunidades.orcamento_declarado,\n    oportunidades.ocasiao,\n    oportunidades.prazo,\n    oportunidades.motivo_pos_venda,\n    oportunidades.data_entrada_pos_venda,\n    oportunidades.opt_out,\n    oportunidades.opt_out_data,\n    oportunidades.tentativas_reabordagem,\n    oportunidades.campos_ia,\n    oportunidades.metadata,\n    oportunidades.created_at,\n    oportunidades.updated_at\n   FROM crm.oportunidades;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_oportunidades_completas",
+    "owner": "postgres",
+    "definition": " SELECT o.id,\n    o.legacy_id,\n    o.contato_id,\n    o.vendedor_id,\n    o.conversa_id,\n    o.funil_id,\n    o.etapa_id,\n    o.titulo,\n    o.valor,\n    o.produto_interesse,\n    o.notas,\n    o.tags,\n    o.origem_lead,\n    o.canal_origem,\n    o.motivo_perda,\n    o.tipo_pedido,\n    o.forma_atendimento,\n    o.tipo_cliente,\n    o.itens_pedido,\n    o.desconto,\n    o.parcelas,\n    o.forma_pagamento,\n    o.valor_frete,\n    o.endereco_entrega,\n    o.data_prevista_entrega,\n    o.data_envio,\n    o.transportador,\n    o.observacao_pedido,\n    o.forma_envio,\n    o.codigo_rastreio,\n    o.data_entrega,\n    o.entrega_confirmada,\n    o.score_bant,\n    o.classificacao,\n    o.perfil,\n    o.decisor,\n    o.orcamento_declarado,\n    o.ocasiao,\n    o.prazo,\n    o.motivo_pos_venda,\n    o.data_entrada_pos_venda,\n    o.opt_out,\n    o.opt_out_data,\n    o.tentativas_reabordagem,\n    o.campos_ia,\n    o.metadata,\n    o.created_at,\n    o.updated_at,\n    ct.nome AS cliente_nome,\n    ct.telefone AS cliente_telefone,\n    ct.celular AS cliente_celular,\n    ct.email AS cliente_email,\n    v.nome AS vendedor_nome,\n    v.foto AS vendedor_foto,\n    e.nome AS etapa_nome,\n    e.cor AS etapa_cor,\n    e.tipo AS etapa_tipo,\n    e.ordem AS etapa_ordem,\n    b.nome AS bloco_nome,\n    b.cor AS bloco_cor,\n        CASE\n            WHEN (ve.id IS NOT NULL) THEN 1\n            ELSE 0\n        END AS venda_registrada,\n    ve.id AS venda_id,\n    ve.data_venda,\n    ve.total_venda AS venda_total,\n    sdr.score_total AS bant_lead_score,\n    sdr.classificacao AS bant_classificacao,\n    sdr.score_budget AS bant_budget_score,\n    sdr.score_authority AS bant_authority_score,\n    sdr.score_need AS bant_need_score,\n    sdr.score_timing AS bant_timeline_score,\n    sdr.bonus_engajamento AS bant_bonus_score\n   FROM ((((((crm.oportunidades o\n     LEFT JOIN contatos ct ON ((ct.id_contato = o.contato_id)))\n     LEFT JOIN vendedores v ON ((v.id_vendedor = o.vendedor_id)))\n     LEFT JOIN crm.funil_etapas e ON ((e.id = o.etapa_id)))\n     LEFT JOIN crm.funil_blocos b ON ((b.id = e.bloco_id)))\n     LEFT JOIN alissonerp.vendas_erp ve ON (((ve.cliente_id = o.contato_id) AND (ve.created_at >= (o.created_at - '7 days'::interval)) AND (ve.created_at <= (o.created_at + '90 days'::interval)))))\n     LEFT JOIN LATERAL ( SELECT sdr_runs.id,\n            sdr_runs.conversa_id,\n            sdr_runs.score_budget,\n            sdr_runs.score_authority,\n            sdr_runs.score_need,\n            sdr_runs.score_timing,\n            sdr_runs.score_total,\n            sdr_runs.bonus_engajamento,\n            sdr_runs.classificacao,\n            sdr_runs.resumo,\n            sdr_runs.proximos_passos,\n            sdr_runs.agente_run_id,\n            sdr_runs.created_at\n           FROM crm.sdr_runs\n          WHERE (sdr_runs.conversa_id = o.conversa_id)\n          ORDER BY sdr_runs.created_at DESC\n         LIMIT 1) sdr ON (true));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_origens_lead",
+    "owner": "postgres",
+    "definition": " SELECT origens_lead.id,\n    origens_lead.legacy_id,\n    origens_lead.nome,\n    origens_lead.ativo,\n    origens_lead.ordem,\n    origens_lead.created_at\n   FROM crm.origens_lead;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_prompt_templates",
+    "owner": "postgres",
+    "definition": " SELECT prompt_templates.id,\n    prompt_templates.codigo,\n    prompt_templates.nome,\n    prompt_templates.descricao,\n    prompt_templates.modelo,\n    prompt_templates.temperatura,\n    prompt_templates.system_prompt,\n    prompt_templates.variaveis,\n    prompt_templates.ativo,\n    prompt_templates.created_at,\n    prompt_templates.updated_at\n   FROM crm.prompt_templates;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_sdr_runs",
+    "owner": "postgres",
+    "definition": " SELECT sdr_runs.id,\n    sdr_runs.conversa_id,\n    sdr_runs.score_budget,\n    sdr_runs.score_authority,\n    sdr_runs.score_need,\n    sdr_runs.score_timing,\n    sdr_runs.score_total,\n    sdr_runs.bonus_engajamento,\n    sdr_runs.classificacao,\n    sdr_runs.resumo,\n    sdr_runs.proximos_passos,\n    sdr_runs.agente_run_id,\n    sdr_runs.created_at\n   FROM crm.sdr_runs;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_tarefas",
+    "owner": "postgres",
+    "definition": " SELECT tarefas.id,\n    tarefas.titulo,\n    tarefas.descricao,\n    tarefas.conversa_id,\n    tarefas.contato_id,\n    tarefas.brecha_id,\n    tarefas.responsavel_id,\n    tarefas.prioridade,\n    tarefas.status,\n    tarefas.data_limite,\n    tarefas.concluida_em,\n    tarefas.criado_por,\n    tarefas.created_at,\n    tarefas.updated_at\n   FROM crm.tarefas;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_unipile_config",
+    "owner": "postgres",
+    "definition": " SELECT unipile_config.id,\n    unipile_config.api_key,\n    unipile_config.dsn,\n    unipile_config.account_id,\n    unipile_config.account_username,\n    unipile_config.account_provider,\n    unipile_config.webhook_id,\n    unipile_config.webhook_url,\n    unipile_config.webhook_source,\n    unipile_config.ativo,\n    unipile_config.status,\n    unipile_config.ultimo_erro,\n    unipile_config.created_at,\n    unipile_config.updated_at\n   FROM crm.unipile_config;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_user_perfil",
+    "owner": "postgres",
+    "definition": " SELECT au.id AS user_id,\n    au.email,\n    eu.nome,\n    eu.role,\n    eu.vendedor_id,\n    v.nome AS vendedor_nome,\n    v.foto AS vendedor_foto,\n    v.email AS vendedor_email\n   FROM ((auth.users au\n     LEFT JOIN alissonerp.usuarios eu ON ((eu.id = au.id)))\n     LEFT JOIN vendedores v ON ((v.id_vendedor = eu.vendedor_id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_webhook_config",
+    "owner": "postgres",
+    "definition": " SELECT webhook_config.id,\n    webhook_config.nome,\n    webhook_config.source,\n    webhook_config.url_callback,\n    webhook_config.ativo,\n    webhook_config.total_eventos,\n    webhook_config.ultimo_evento,\n    webhook_config.ultimo_erro,\n    webhook_config.configuracao,\n    webhook_config.created_at,\n    webhook_config.updated_at\n   FROM crm.webhook_config;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "crm_webhook_log",
+    "owner": "postgres",
+    "definition": " SELECT webhook_log.id,\n    webhook_log.source,\n    webhook_log.event,\n    webhook_log.payload,\n    webhook_log.processado,\n    webhook_log.resultado,\n    webhook_log.erro,\n    webhook_log.conversa_id,\n    webhook_log.mensagem_id,\n    webhook_log.recebido_em,\n    webhook_log.processado_em\n   FROM crm.webhook_log;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "fin_divergencias_pendentes",
+    "owner": "postgres",
+    "definition": " SELECT c.id AS conciliacao_id,\n    cp.id AS conta_pagar_id,\n    cp.historico AS descricao,\n    cp.fornecedor_id_api,\n    cp.valor AS valor_tiny,\n    abs(lb.valor) AS valor_banco,\n    c.diferenca_valor,\n    c.diferenca_dias,\n    cp.data_vencimento,\n    lb.data_lancamento,\n    lb.descricao AS historico_banco,\n    eb.banco,\n    c.created_at AS detectado_em\n   FROM (((fin_conciliacoes c\n     JOIN contas_a_pagar cp ON ((cp.id = c.conta_pagar_id)))\n     JOIN fin_lancamentos_bancarios lb ON ((lb.id = c.lancamento_id)))\n     JOIN fin_extratos_bancarios eb ON ((eb.id = lb.extrato_id)))\n  WHERE (c.status = 'divergente'::text)\n  ORDER BY cp.data_vencimento;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "pedidos_dashboard",
+    "owner": "supabase_admin",
+    "definition": " SELECT p.id_api_pedido,\n    p.data_pedido,\n    p.numero_pedido,\n    p.valor_total_pedido,\n    p.valor_frete,\n    v.id_vendedor,\n    (pp_vale.pedido_id_api IS NOT NULL) AS possui_vale_troca,\n    COALESCE(sum(pp_vale.valor), (0)::double precision) AS valor_vale_troca\n   FROM ((pedidos p\n     LEFT JOIN vendedores v ON ((p.vendedor_id_api = v.id_api_vendedor)))\n     LEFT JOIN parcelas_pedidos pp_vale ON (((p.id_api_pedido = pp_vale.pedido_id_api) AND (pp_vale.forma_pagamento = 'Vale-troca'::text))))\n  GROUP BY p.id_api_pedido, p.numero_pedido, p.data_pedido, p.valor_total_pedido, p.valor_frete, v.id_vendedor, pp_vale.pedido_id_api;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "pedidos_parcelas_detalhado",
+    "owner": "supabase_admin",
+    "definition": " WITH analise_pagamentos_parcela AS (\n         SELECT pp_1.pedido_id_api,\n            count(DISTINCT pp_1.forma_pagamento) AS total_formas_distintas,\n            max(\n                CASE\n                    WHEN (pp_1.forma_pagamento = 'Vale-troca'::text) THEN 1\n                    ELSE 0\n                END) AS tem_vale_troca\n           FROM parcelas_pedidos pp_1\n          GROUP BY pp_1.pedido_id_api\n        )\n SELECT p.numero_pedido,\n    p.data_pedido,\n    p.situacao,\n    p.cliente_id_api,\n    v.id_vendedor,\n    p.forma_pagamento AS forma_pagamento_pedido,\n    p.meio_pagamento AS meio_pagamento_pedido,\n    pp.data AS data_vencimento_parcela,\n    pp.valor AS valor_parcela,\n    pp.forma_pagamento AS forma_pagamento_parcela,\n    pp.meio_pagamento AS meio_pagamento_parcela,\n        CASE\n            WHEN (p.forma_pagamento = 'Vale-troca'::text) THEN true\n            WHEN ((ap.total_formas_distintas = 1) AND (ap.tem_vale_troca = 1)) THEN true\n            ELSE false\n        END AS eh_devolucao\n   FROM (((pedidos p\n     LEFT JOIN vendedores v ON ((p.vendedor_id_api = v.id_api_vendedor)))\n     LEFT JOIN parcelas_pedidos pp ON ((p.id_api_pedido = pp.pedido_id_api)))\n     LEFT JOIN analise_pagamentos_parcela ap ON ((p.id_api_pedido = ap.pedido_id_api)))\n  ORDER BY p.data_pedido, p.numero_pedido;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "produtos_views",
+    "owner": "supabase_admin",
+    "definition": " SELECT p.id_api_produto,\n    p.sku,\n    p.nome,\n    p.tipo_metal,\n    p.peso_precificado,\n    p.fornecedor_etl,\n    p.tipo_de_pedra,\n    p.data_atualizacao,\n    pai.id_api_produto AS produto_pai_id,\n        CASE\n            WHEN (POSITION(('-'::text) IN (p.sku)) > 0) THEN 'Variação'::text\n            WHEN (EXISTS ( SELECT 1\n               FROM produtos v\n              WHERE ((v.sku)::text ~~ ((p.sku)::text || '-%'::text)))) THEN 'Pai'::text\n            ELSE 'Simples'::text\n        END AS tipo_produto\n   FROM (produtos p\n     LEFT JOIN produtos pai ON (((pai.sku)::text =\n        CASE\n            WHEN (POSITION(('-'::text) IN (p.sku)) > 0) THEN \"substring\"((p.sku)::text, 1, (POSITION(('-'::text) IN (p.sku)) - 1))\n            ELSE NULL::text\n        END)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "users",
+    "owner": "supabase_admin",
+    "definition": " SELECT users.instance_id,\n    users.id,\n    users.aud,\n    users.role,\n    users.email,\n    users.encrypted_password,\n    users.email_confirmed_at,\n    users.invited_at,\n    users.confirmation_token,\n    users.confirmation_sent_at,\n    users.recovery_token,\n    users.recovery_sent_at,\n    users.email_change_token_new,\n    users.email_change,\n    users.email_change_sent_at,\n    users.last_sign_in_at,\n    users.raw_app_meta_data,\n    users.raw_user_meta_data,\n    users.is_super_admin,\n    users.created_at,\n    users.updated_at,\n    users.phone,\n    users.phone_confirmed_at,\n    users.phone_change,\n    users.phone_change_token,\n    users.phone_change_sent_at,\n    users.confirmed_at,\n    users.email_change_token_current,\n    users.email_change_confirm_status,\n    users.banned_until,\n    users.reauthentication_token,\n    users.reauthentication_sent_at,\n    users.is_sso_user,\n    users.deleted_at,\n    users.is_anonymous\n   FROM auth.users;",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "v_estoque_detalhado_insumo",
+    "owner": "supabase_admin",
+    "definition": " SELECT ce.id,\n    ce.data_hora,\n    ce.entrada,\n    ce.saida,\n    ce.insumo_id,\n    ce.obs,\n    d.nome AS deposito_nome,\n    i.nome AS insumo_nome,\n    o.numero_ordem AS ordem_numero\n   FROM (((directus.controle_estoque ce\n     LEFT JOIN directus.deposito d ON ((ce.deposito_id = d.id)))\n     LEFT JOIN directus.insumos i ON ((ce.insumo_id = i.id)))\n     LEFT JOIN directus.ordens o ON ((ce.ordem_id = o.id)));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "v_quebra_distribuicao",
+    "owner": "supabase_admin",
+    "definition": " WITH dono_lote AS (\n         SELECT apontamento_distribuicao.distribuicao_id,\n            max(apontamento_distribuicao.deposito) AS id_deposito\n           FROM directus.apontamento_distribuicao\n          WHERE (apontamento_distribuicao.deposito IS NOT NULL)\n          GROUP BY apontamento_distribuicao.distribuicao_id\n        )\n SELECT d.id AS id_distribuicao,\n    d.date_created AS data_criacao,\n    dl.id_deposito,\n    dep.nome AS nome_deposito,\n    (((COALESCE(d.total_metal, (0)::real) - COALESCE(d.retorno_metal, (0)::real)) - COALESCE(d.quebra, (0)::real)))::numeric(10,2) AS saldo_atual,\n    (COALESCE(d.quebra, (0)::real))::numeric(10,2) AS quebra_apurada\n   FROM ((directus.distribuicao d\n     LEFT JOIN dono_lote dl ON ((d.id = dl.distribuicao_id)))\n     LEFT JOIN directus.deposito dep ON ((dl.id_deposito = dep.id)))\n  WHERE ((((COALESCE(d.total_metal, (0)::real) - COALESCE(d.retorno_metal, (0)::real)) - COALESCE(d.quebra, (0)::real)) > (0)::double precision) OR (COALESCE(d.quebra, (0)::real) > (0)::double precision));",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "v_saldo_quebra_final",
+    "owner": "supabase_admin",
+    "definition": " WITH pcp_convertido AS (\n         SELECT pcp.id AS pcp_id,\n            pcp.ordem_id\n           FROM directus.pcp\n        ), movimento_producao AS (\n         SELECT ap.deposito AS id_deposito,\n            pcp.ordem_id,\n            max(ap.date_created) AS data_ultimo_apontamento,\n            sum(\n                CASE\n                    WHEN (ap.tipo_apontamento = ANY (ARRAY[1, 2])) THEN ap.qtd\n                    ELSE (0)::real\n                END) AS entrada_apontamento,\n            sum(\n                CASE\n                    WHEN (ap.tipo_apontamento = 5) THEN ap.qtd\n                    ELSE (0)::real\n                END) AS saida_apontamento,\n            max(\n                CASE\n                    WHEN (ap.tipo_apontamento = 5) THEN 1\n                    ELSE 0\n                END) AS flag_teve_retorno\n           FROM (directus.apontamento ap\n             LEFT JOIN pcp_convertido pcp ON ((ap.pcp_id = pcp.pcp_id)))\n          WHERE (ap.insumo = 1)\n          GROUP BY ap.deposito, pcp.ordem_id\n        ), movimento_logistica AS (\n         SELECT ce.deposito_id AS id_deposito,\n            ce.ordem_id,\n            sum(\n                CASE\n                    WHEN (((ce.marcador)::text ~~* '%TED%'::text) AND (ce.entrada > (0)::double precision)) THEN ce.entrada\n                    ELSE (0)::real\n                END) AS entrada_estoque,\n            sum(\n                CASE\n                    WHEN (((ce.marcador)::text ~~* '%TED%'::text) AND (ce.saida > (0)::double precision)) THEN ce.saida\n                    ELSE (0)::real\n                END) AS saida_estoque,\n            max(\n                CASE\n                    WHEN (((ce.marcador)::text ~~* '%TED%'::text) AND (ce.saida > (0)::double precision)) THEN 1\n                    ELSE 0\n                END) AS flag_teve_saida_estoque\n           FROM directus.controle_estoque ce\n          WHERE (ce.insumo_id = 1)\n          GROUP BY ce.deposito_id, ce.ordem_id\n        )\n SELECT COALESCE(mp.id_deposito, ml.id_deposito) AS id_deposito,\n    d.nome AS nome_deposito,\n    COALESCE(mp.ordem_id, ml.ordem_id) AS id_ordem,\n    o.numero_ordem,\n    mp.data_ultimo_apontamento,\n    (((COALESCE(mp.entrada_apontamento, (0)::real) + COALESCE(ml.entrada_estoque, (0)::real)) - (COALESCE(mp.saida_apontamento, (0)::real) + COALESCE(ml.saida_estoque, (0)::real))))::numeric(10,2) AS diferenca_calculada,\n        CASE\n            WHEN ((COALESCE(ml.flag_teve_saida_estoque, 0) = 0) AND (COALESCE(mp.flag_teve_retorno, 0) = 0)) THEN (((COALESCE(mp.entrada_apontamento, (0)::real) + COALESCE(ml.entrada_estoque, (0)::real)) - (COALESCE(mp.saida_apontamento, (0)::real) + COALESCE(ml.saida_estoque, (0)::real))))::numeric(10,2)\n            ELSE 0.00\n        END AS saldo_atual,\n        CASE\n            WHEN ((COALESCE(ml.flag_teve_saida_estoque, 0) = 1) OR (COALESCE(mp.flag_teve_retorno, 0) = 1)) THEN (((COALESCE(mp.entrada_apontamento, (0)::real) + COALESCE(ml.entrada_estoque, (0)::real)) - (COALESCE(mp.saida_apontamento, (0)::real) + COALESCE(ml.saida_estoque, (0)::real))))::numeric(10,2)\n            ELSE 0.00\n        END AS quebra_apurada\n   FROM (((movimento_producao mp\n     FULL JOIN movimento_logistica ml ON (((mp.id_deposito = ml.id_deposito) AND (mp.ordem_id = ml.ordem_id))))\n     LEFT JOIN directus.deposito d ON ((COALESCE(mp.id_deposito, ml.id_deposito) = d.id)))\n     LEFT JOIN directus.ordens o ON ((COALESCE(mp.ordem_id, ml.ordem_id) = o.id)))\n  WHERE ((((COALESCE(mp.entrada_apontamento, (0)::real) + COALESCE(ml.entrada_estoque, (0)::real)) + COALESCE(mp.saida_apontamento, (0)::real)) + COALESCE(ml.saida_estoque, (0)::real)) > (0)::double precision);",
+    "is_materialized": false
+  },
+  {
+    "schema_name": "public",
+    "view_name": "view_monitoramento_ordens",
+    "owner": "supabase_admin",
+    "definition": " SELECT ordens.id,\n    ordens.numero_ordem,\n    ordens.local_atual,\n    ordens.date_updated AS ultima_atualizacao,\n    ordens.data_conclusao,\n        CASE\n            WHEN (ordens.data_conclusao IS NOT NULL) THEN 'concluido'::text\n            ELSE 'em_andamento'::text\n        END AS status_logico\n   FROM directus.ordens\n  ORDER BY ordens.date_updated DESC;",
+    "is_materialized": false
+  }
+]
