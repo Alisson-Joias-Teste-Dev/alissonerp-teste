@@ -1,14 +1,16 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Usa service_role key se disponível (bypassa RLS), senão usa anon key
-// Segurança garantida pelas API routes autenticadas — NÃO expor este client no frontend
-const storageKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  storageKey
-);
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+// Lazy init — criado apenas na primeira chamada para evitar crash no hot reload
+// quando env vars ainda não estão disponíveis na avaliação do módulo.
+let _supabaseAdmin: SupabaseClient | null = null;
+function getAdmin(): SupabaseClient {
+  if (!_supabaseAdmin) {
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!key) throw new Error('[storage] supabaseKey is required — verifique NEXT_PUBLIC_SUPABASE_ANON_KEY no .env.local');
+    _supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key);
+  }
+  return _supabaseAdmin;
+}
 
 /**
  * Upload de arquivo para Supabase Storage (server-side)
@@ -26,7 +28,7 @@ export async function uploadFile(
     const base64Clean = base64Data.replace(/^data:[^;]+;base64,/, '');
     const buffer = Buffer.from(base64Clean, 'base64');
 
-    const { data, error } = await supabaseAdmin.storage
+    const { data, error } = await getAdmin().storage
       .from(bucket)
       .upload(path, buffer, {
         contentType,
@@ -39,7 +41,7 @@ export async function uploadFile(
     }
 
     // URL pública direta (bucket é público)
-    const url = `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${data.path}`;
+    const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${bucket}/${data.path}`;
 
     return { url, path: data.path };
   } catch (err) {
@@ -56,7 +58,7 @@ export async function deleteFile(
   path: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabaseAdmin.storage
+    const { error } = await getAdmin().storage
       .from(bucket)
       .remove([path]);
 
@@ -76,7 +78,7 @@ export async function deleteFile(
  * Chamar antes do primeiro uploadFile em buckets dinâmicos.
  */
 export async function ensureBucket(bucket: string): Promise<void> {
-  const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: true });
+  const { error } = await getAdmin().storage.createBucket(bucket, { public: true });
   if (error && !error.message?.toLowerCase().includes('already exists')) {
     console.warn(`[storage] ensureBucket(${bucket}):`, error.message);
   }
@@ -88,5 +90,5 @@ export async function ensureBucket(bucket: string): Promise<void> {
  */
 export function getPublicUrl(bucket: string, path: string): string {
   if (path.startsWith('http')) return path;
-  return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
+  return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
 }
