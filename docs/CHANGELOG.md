@@ -4,6 +4,31 @@
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
 
+## EPIC-001 — Fundação Técnica (29/04/2026) — resumo executivo
+
+### Stories implementadas
+
+| Story | Título | Arquivos-chave |
+|-------|--------|----------------|
+| 1.1 | parametros_sistema — eliminar IDs hardcoded | `src/lib/parametros.ts`, migration 192, 29 rotas refatoradas |
+| 1.2 | Ordens reposição + fila_sync_externo | migration 193, rota `contatos` usa fila |
+| 1.3 | TTL 5min + invalidarCacheAuth() | `src/hooks/useAuth.ts` |
+| 1.4 | auth-server + api-handler (defineRoute) | `src/lib/auth-server.ts`, `src/lib/api-handler.ts` |
+| 3.1 | Catches silenciosos → useErrorStore | 19 catches corrigidos em múltiplos componentes |
+| 3.2 | Guard updated_at em PATCH /api/vendas/[id] | `VendaDetalheClient.tsx`, rota vendas PATCH |
+| 3.3 | Audit log em 5 rotas críticas | `src/lib/audit.ts`, tabela `alissonerp.audit_log` |
+| 3.4 | Worker retry exponencial fila_sync | `src/lib/fila-sync-worker.ts`, migration 200, tela `/admin/fila-sync` |
+| 3.5 | UNIQUE INDEX fechamentos_distribuicao | migration 197 |
+| 3.6 | fn_criar_par_movimentacao retorna TABLE | migration 198, ADR 0002 |
+| bug | Reposição usa SUM(disponivel) pré-reserva | rotas de reposição |
+
+### Impacto estrutural
+- Novo padrão de API route: `defineRoute` em `src/lib/api-handler.ts`
+- IDs de domínio nunca mais hardcoded: sempre `PARAM.X` via `src/lib/parametros.ts`
+- Erros de integração externa não bloqueiam operações: fila `fila_sync_externo`
+- Rastreabilidade completa em mutações críticas: `logAudit(tx, ...)`
+- Auth server-side centralizada: `requireAuth()` / `requirePermissao()` em `src/lib/auth-server.ts`
+
 ## v2.38.0 (29/04/2026)
 ### Feature — Story 3.4 — Worker retry exponencial para fila_sync_externo
 - **Migration 200** (`200_fila_sync_proxima_execucao.sql`): adiciona coluna `proxima_execucao TIMESTAMPTZ NULL` em `alissonerp.fila_sync_externo` + índice parcial `idx_fila_sync_pendente` (status='pendente'). Executada em produção via Node pg Client.

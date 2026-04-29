@@ -122,6 +122,14 @@ Estoque comercial: inserir item de venda CRIA RESERVA (nunca saida direta) — r
 Curva precificacao: chamar aplicarCurvaProduto() apos criar/editar produto com peso+categoria (src/lib/aplicar-curva-produto.ts)
 Vale-troca: vale > total venda gera NOVO vale com troco (vale_origem_id rastreia cadeia) — cada vale usado UMA vez
 ABC: classificar por receita_total_12m (ultimos 12 meses), NUNCA por capital (estoque * preco) — produto sem venda em 12m = C automatico
+parametros_sistema: usar PARAM.X de src/lib/parametros.ts, NUNCA literals como deposito_id=1
+reposicao de estoque: verificar SUM(disponivel) pre-reserva, nao SUM(saldo)
+dupla-entrada: fn_criar_par_movimentacao agora retorna (saida_id, entrada_id) — capturar
+updated_at guard: PATCH vendas aceita client_updated_at → 409 se modificado por outro usuario
+audit: logAudit(tx, ...) dentro da mesma transacao — nunca falha a operacao principal
+catches silenciosos: usar useErrorStore.getState().push() em vez de .catch(() => {})
+defineRoute: novo padrao de API route — ver src/lib/api-handler.ts
+fila_sync: erros Tiny vao para fila_sync_externo, nao bloqueiam a operacao principal
 ```
 
 ---
@@ -170,6 +178,15 @@ Tipos apontamento   = IDs 1-9 fixos
 PMC PCP             = peso_final - outros - metal_externo
 PMC Distribuicao    = peso_final - outros (SEM metal_externo)
 Servico             -> SEMPRE rota = protocolo
+```
+
+PARAMETROS SISTEMA (via src/lib/parametros.ts):
+  ALMOXARIFADO_DEPOSITO_ID = Deposito ID=1 (antes hardcoded)
+  OURO_18K_INSUMO_ID       = Insumo ID=1 (antes hardcoded)
+  METAL_CATEGORIA_ID       = Categoria ID=1 (antes hardcoded)
+  PEDRA_CATEGORIA_ID       = Categoria ID=2 (antes hardcoded)
+  LOCAL_ESTOQUE_DEFAULT_ID = Local ID=1 (antes hardcoded)
+  OURO_24K_LIGA_INSUMO_ID  = Insumo ID=275 (antes hardcoded)
 ```
 
 ### Valores Legados (Directus)
@@ -312,4 +329,32 @@ Ao terminar a fase de execucao (antes de @qa):
 
 Quando Jonathan disser "continua" apos a troca:
   → Retomar exatamente de onde parou e delegar pro proximo agente.
+```
+
+---
+
+## 11. Padrao de API Route (pos-EPIC-001)
+
+### Novo padrao com defineRoute (recomendado para rotas novas)
+```typescript
+import { defineRoute } from "@/lib/api-handler";
+import { z } from "zod";
+
+const InputSchema = z.object({ campo: z.string() });
+
+export const POST = defineRoute({
+  requireRoles: ["admin", "desenvolvedor"],
+  inputSchema: InputSchema,
+  handler: async (_req, { user, body }) => {
+    // user.id, user.role disponiveis
+    // body ja validado pelo schema
+    return NextResponse.json({ ok: true });
+  },
+});
+```
+
+### Padrao legado (ainda funcional, migrar gradualmente)
+```typescript
+import { requireAuth } from "@/lib/auth-server";
+// usar requireAuth() em vez de createServerSupabase() + getUser() manual
 ```

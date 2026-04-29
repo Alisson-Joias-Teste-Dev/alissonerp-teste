@@ -7,30 +7,31 @@ ADRs capturam o **porquê** de decisões arquiteturais críticas. Mudanças impo
 
 ## Lista de ADRs
 
-| ID | Título | Status | Story relacionada |
-|----|--------|--------|-------------------|
-| 0001 | Zod Validation Wrapper | ⏳ Pendente | 1.4 |
-| 0002 | Padrão de Dupla-Entrada | ⏳ Pendente | 3.6 |
-| 0003 | React Query Cache Strategy | ⏳ Pendente | 1.3 |
-| 0004 | Audit Log Strategy | ⏳ Pendente | 3.3 |
-| 0005 | Sync Externo via Fila | ⏳ Pendente | 3.4 |
-| 0006 | Versioning Mutations | ⏳ Pendente | 3.2 |
-| **0007** | **Banco como Fonte da Verdade (Princípio Rector)** | ✅ Aceito | EPIC-001 |
-| 0008 | Guard Duplicação Fechamento | ⏳ Pendente | 3.5 |
-| **0009** | **Estratégia de Testes (Pirâmide + Mitigações Produção)** | ✅ Aceito | 2.x |
-| **0010** | **Directus e Tiny Sync (Decisão de Não Migrar)** | ✅ Aceito | 1.6 + 3.4 |
-| 0011 | Banco de Teste Real (saldo M7) | ⏳ Pendente | 4.7 |
-| **0012** | **RLS vs Application Auth (Defesa em Profundidade)** | ✅ Aceito | 1.4 |
+| ID | Título | Status | Data | Story relacionada |
+|----|--------|--------|------|-------------------|
+| **0001** | **Zod Validation Wrapper (defineRoute)** | ✅ Aceito | 2026-04-29 | 1.4 |
+| **0002** | **Padrão de Dupla-Entrada em movimentacoes_estoque** | ✅ Aceito | 2026-04-29 | 3.6 |
+| **0003** | **Cache Strategy no useAuth (TTL + Invalidação Explícita)** | ✅ Aceito | 2026-04-29 | 1.3 |
+| **0004** | **Estratégia de Audit Log** | ✅ Aceito | 2026-04-29 | 3.3 |
+| **0005** | **Sync Externo via Fila Persistente com Retry Exponencial** | ✅ Aceito | 2026-04-29 | 3.4 |
+| **0006** | **Guard de Versão em Mutations (Lost Update Prevention)** | ✅ Aceito | 2026-04-29 | 3.2 |
+| **0007** | **Banco como Fonte da Verdade (Princípio Rector)** | ✅ Aceito | 2026-04-29 | EPIC-001 |
+| **0008** | **Parâmetros de Sistema (Eliminar IDs Hardcoded)** | ✅ Aceito | 2026-04-29 | 3.5 |
+| **0009** | **Estratégia de Testes (Pirâmide + Mitigações Produção)** | ✅ Aceito | 2026-04-29 | 2.x |
+| **0010** | **Sincronização com Directus e Tiny (Decisão de Não Migrar)** | ✅ Aceito | 2026-04-29 | 1.6 + 3.4 |
+| 0011 | Banco de Teste Real (saldo M7) | ⏳ Pendente | — | 4.7 |
+| **0012** | **RLS vs Application Auth (Defesa em Profundidade)** | ✅ Aceito | 2026-04-29 | 1.4 |
 
-**4 ADRs criadas pelo Architect** (0007, 0009, 0010, 0012). As demais são criadas durante implementação das stories correspondentes (Story 4.3 finaliza o lote completo de 10 ADRs — agora 11 com 0012).
+**11 ADRs aceitas** (0001–0010, 0012). ADR 0011 será criada na Story 4.7.
 
 ## Template
 
 ```markdown
-# NNNN — Título
+# ADR NNNN — Título
 
-## Status
-Aceito | Substituído por NNNN | Deprecated
+**Status:** Accepted
+**Data:** YYYY-MM-DD
+**Story:** X.Y
 
 ## Contexto
 O problema, forças em jogo, restrições.
@@ -39,12 +40,18 @@ O problema, forças em jogo, restrições.
 A decisão tomada (1-3 parágrafos diretos).
 
 ## Consequências
-- Positivas
-- Negativas
-- Neutras
 
-## Referências
-- Documentos relacionados
+**Positivas:**
+- ...
+
+**Negativas:**
+- ...
+
+**Neutras:**
+- ...
+
+## Arquivos
+- `caminho/para/arquivo.ts` — descrição
 ```
 
 ## Numeração
