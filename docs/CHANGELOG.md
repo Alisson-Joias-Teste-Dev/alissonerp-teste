@@ -4,6 +4,36 @@
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
 
+## docs (29/04/2026) — Mapeamento Completo do Banco
+
+Entregue em `docs/db-mapping/` (47 arquivos `.md` + 16 JSONs crus, ~5.2 MB):
+
+- **7 schemas** mapeados: `alissonerp`, `public`, `directus`, `crm`, `auth`, `storage`, `extensions`
+- **377 tabelas** com colunas, PK/FK/UNIQUE/CHECK, índices, triggers, RLS
+- **321 funções/procedures** com argumentos, retorno e **CORPO-FONTE COMPLETO**
+- **148 triggers** com função alvo, evento, timing, definição completa
+- **122 views** com SQL completo
+- **234 RLS policies** com `qual` e `with_check`
+- **819 indexes**, 228 sequences, 28 enums, 13 extensions
+- **Cross-reference banco↔código**: 1013 arquivos varridos (8.1 MB), top 30, lista de objetos sem uso
+
+Achados:
+
+- **CLAUDE.md desatualizado:** dizia "~60 tabelas alissonerp" — são **139**. Dizia "~35 views, ~30 triggers" — são **71 views, 55 triggers**.
+- Função no-touch `fn_processar_transferencia_saida` (CLAUDE.md) na verdade se chama `fn_processar_transferencia` (sem `_saida`). O typo veio do nome da migration `019_trigger_transferencia_saida.sql`.
+- **Schema `crm` (31 tabelas, 41 RLS policies) descoberto** — não documentado no CLAUDE.md e sem nenhuma referência no código atual. Conteúdo: agentes IA, conversas WhatsApp/Meta/Kommo, funis, automações. Provavelmente projeto paralelo no mesmo banco.
+- **474 objetos sem uso identificado no código** — distribuídos em `public` (169), `directus` (114), `alissonerp` (94), `crm` (67). Lista completa em `docs/db-mapping/99-code-mapping.md`.
+
+Scripts geradores (idempotentes, ~10s cada):
+
+```bash
+node scripts/_db_mapping_extract.mjs     # extrai catálogo do banco para _raw/
+node scripts/_db_mapping_code_xref.mjs   # cross-reference banco↔código
+node scripts/_db_mapping_build_docs.mjs  # gera os .md finais
+```
+
+Atualizados em sincronia: `CLAUDE.md`, `MEMORY.md`, `ESTRUTURA_ATUAL.md`, `docs/arquitetura.md`, `docs/schema/README.md`.
+
 ## EPIC-001 — Fundação Técnica (29/04/2026) — resumo executivo
 
 ### Stories implementadas

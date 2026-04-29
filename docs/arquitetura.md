@@ -23,13 +23,21 @@ Sistema ERP para a Joalheria ALISSON. Stack: Next.js 16.1.6 + PostgreSQL 15 (Sup
 
 ## Schemas e Responsabilidades
 
-| Schema       | Dono        | Permissao       | Descricao                                    |
-|--------------|-------------|-----------------|----------------------------------------------|
-| `alissonerp` | Este sistema | Leitura/Escrita | Tabelas e views do ERP de fabrica            |
-| `public`     | PDV (externo)| Somente leitura | vendedores, contatos, vendas, produtos       |
-| `directus`   | Directus CMS | Somente leitura | ordens, pcp, setor, deposito (legado)        |
+| Schema       | Dono              | Permissao       | Tabelas | Funcoes | Triggers | Views | Descricao |
+|--------------|-------------------|-----------------|--------:|--------:|---------:|------:|-----------|
+| `alissonerp` | Este sistema      | Leitura/Escrita | 139     | 67      | 55       | 71    | Tabelas e views do ERP de fabrica |
+| `public`     | PDV (externo)     | Somente leitura | 65      | 69      | 33       | 45    | vendedores, contatos, vendas, produtos |
+| `directus`   | Directus CMS      | Somente leitura | 110     | 14      | 20       | 2     | ordens, pcp, setor, deposito (legado) |
+| `crm`        | Projeto paralelo  | NAO USADO       | 31      | 13      | 31       | 0     | CRM com IA (agentes, conversas, funis) — sem referencia no codigo do ERP |
+| `auth`       | Supabase GoTrue   | via API         | 20      | 4       | 2        | 0     | users, sessions, identities |
+| `storage`    | Supabase Storage  | via API         | 11      | 29      | 7        | 0     | buckets, objects |
+| `extensions` | Postgres ext.     | nunca tocar     | 1       | 125     | 0        | 4     | pgcrypto, http, pg_net, uuid-ossp, etc. |
 
-**Regra absoluta**: nunca alterar tabelas em `public` ou `directus`. Apenas criar views no `alissonerp` que fazem JOIN com esses schemas.
+**Total:** 377 tabelas, 321 funcoes, 148 triggers, 122 views, 234 RLS policies, 819 indexes.
+
+**Regra absoluta**: nunca alterar tabelas em `public`, `directus` ou `crm`. Apenas criar views no `alissonerp` que fazem JOIN com esses schemas (quando aplicavel).
+
+> **Mapeamento exaustivo do banco:** ver `docs/db-mapping/` — cada tabela com colunas/PK/FK/CHECK/index/trigger/RLS, cada funcao com corpo-fonte completo, cada view com SQL completo, cross-reference com codigo (1013 arquivos varridos). Comecar em `docs/db-mapping/README.md`. Resumo em `docs/db-mapping/99-summary.md`.
 
 ---
 
