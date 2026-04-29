@@ -1,0 +1,2886 @@
+[
+  {
+    "table_schema": "alissonerp",
+    "table_name": "api_chaves",
+    "constraint_name": "api_chaves_chave_hash_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{chave_hash}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "api_chaves",
+    "constraint_name": "api_chaves_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "api_log",
+    "constraint_name": "api_log_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "apontamentos_distribuicao",
+    "constraint_name": "apontamentos_distribuicao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "apontamentos_pcp",
+    "constraint_name": "apontamentos_pcp_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "apontamentos_pote",
+    "constraint_name": "apontamentos_pote_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "apontamentos_servico",
+    "constraint_name": "apontamentos_servico_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "aprovacoes_consultora",
+    "constraint_name": "aprovacoes_consultora_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "aprovacoes_tarefa",
+    "constraint_name": "aprovacoes_tarefa_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "audit_log",
+    "constraint_name": "audit_log_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "auditorias",
+    "constraint_name": "auditorias_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "automacoes_execucoes",
+    "constraint_name": "automacoes_execucoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "automacoes_tarefa",
+    "constraint_name": "automacoes_tarefa_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "categorias_insumo",
+    "constraint_name": "categorias_insumo_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "comentarios_ordem",
+    "constraint_name": "comentarios_ordem_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "comentarios_tarefa",
+    "constraint_name": "comentarios_tarefa_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "compras",
+    "constraint_name": "compras_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "comunicacoes_crediario",
+    "constraint_name": "comunicacoes_crediario_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "config_orcamento",
+    "constraint_name": "config_orcamento_name_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{name}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "config_orcamento",
+    "constraint_name": "config_orcamento_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "configuracoes_secrets",
+    "constraint_name": "configuracoes_secrets_chave_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{chave}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "configuracoes_secrets",
+    "constraint_name": "configuracoes_secrets_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "configuracoes_sistema",
+    "constraint_name": "configuracoes_sistema_chave_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{chave}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "configuracoes_sistema",
+    "constraint_name": "configuracoes_sistema_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "contas_pagar",
+    "constraint_name": "contas_pagar_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "contas_receber",
+    "constraint_name": "contas_receber_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "contatos_fiscais",
+    "constraint_name": "contatos_fiscais_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_contato}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "curva_categorias",
+    "constraint_name": "curva_categorias_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "curva_config",
+    "constraint_name": "curva_config_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "dashboard_configs",
+    "constraint_name": "dashboard_configs_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "dashboard_configs",
+    "constraint_name": "dashboard_configs_usuario_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{usuario_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "depositos",
+    "constraint_name": "depositos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "devolucoes_itens",
+    "constraint_name": "devolucoes_itens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "devolucoes_venda",
+    "constraint_name": "devolucoes_venda_numero_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{numero}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "devolucoes_venda",
+    "constraint_name": "devolucoes_venda_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "distribuicao_ordens",
+    "constraint_name": "distribuicao_ordens_distribuicao_id_ordens_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{distribuicao_id,ordens_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "distribuicao_ordens",
+    "constraint_name": "distribuicao_ordens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "distribuicao_saida_pedras",
+    "constraint_name": "distribuicao_saida_pedras_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "distribuicoes",
+    "constraint_name": "distribuicoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "editor_ia_historico",
+    "constraint_name": "editor_ia_historico_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "empresas_emitentes",
+    "constraint_name": "empresas_emitentes_cnpj_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{cnpj}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "empresas_emitentes",
+    "constraint_name": "empresas_emitentes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "epc_serial",
+    "constraint_name": "epc_serial_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{ano}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "erp_produtos",
+    "constraint_name": "erp_produtos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "erp_produtos",
+    "constraint_name": "erp_produtos_produto_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{produto_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "erp_produtos",
+    "constraint_name": "erp_produtos_sku_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{sku}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "estoque_comercial_config",
+    "constraint_name": "estoque_comercial_config_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "estoque_comercial_config",
+    "constraint_name": "estoque_comercial_config_produto_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{produto_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "estornos_distribuicao",
+    "constraint_name": "estornos_distribuicao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "faixas_comissao",
+    "constraint_name": "faixas_comissao_desconto_pct_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{desconto_pct}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "faixas_comissao",
+    "constraint_name": "faixas_comissao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fechamentos_distribuicao",
+    "constraint_name": "fechamentos_distribuicao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fechamentos_fabrica",
+    "constraint_name": "fechamentos_fabrica_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fichas_tecnicas",
+    "constraint_name": "fichas_tecnicas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fichas_tecnicas_produto",
+    "constraint_name": "fichas_tecnicas_produto_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fichas_tecnicas_produto",
+    "constraint_name": "fichas_tecnicas_produto_produto_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{produto_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fila_sync_externo",
+    "constraint_name": "fila_sync_externo_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fin_caixa_baixas",
+    "constraint_name": "fin_caixa_baixas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fin_conciliacoes",
+    "constraint_name": "fin_conciliacoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fin_extratos_bancarios",
+    "constraint_name": "fin_extratos_bancarios_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fin_gateways",
+    "constraint_name": "fin_gateways_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fin_lancamentos_bancarios",
+    "constraint_name": "fin_lancamentos_bancarios_fitid_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{fitid}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fin_lancamentos_bancarios",
+    "constraint_name": "fin_lancamentos_bancarios_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fornecedores",
+    "constraint_name": "fornecedores_nome_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{nome}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fornecedores",
+    "constraint_name": "fornecedores_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "fretes_bairro",
+    "constraint_name": "fretes_bairro_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "gateways_pagamento",
+    "constraint_name": "gateways_pagamento_nome_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{nome}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "gateways_pagamento",
+    "constraint_name": "gateways_pagamento_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "insumos",
+    "constraint_name": "insumos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "inter_sync_log",
+    "constraint_name": "inter_sync_log_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "inventarios_comercial",
+    "constraint_name": "inventarios_comercial_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "itens_compra",
+    "constraint_name": "itens_compra_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "itens_distribuicao",
+    "constraint_name": "itens_distribuicao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "itens_inventario_comercial",
+    "constraint_name": "itens_inventario_comercial_inventario_id_produto_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{inventario_id,produto_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "itens_inventario_comercial",
+    "constraint_name": "itens_inventario_comercial_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "itens_ordem",
+    "constraint_name": "itens_ordem_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "itens_ordem_insumos",
+    "constraint_name": "itens_ordem_insumos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "itens_ordem_produtos",
+    "constraint_name": "itens_ordem_produtos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "itens_venda_erp",
+    "constraint_name": "itens_venda_erp_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "joias_leituras",
+    "constraint_name": "joias_leituras_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "joias_rfid",
+    "constraint_name": "joias_rfid_epc_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{epc}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "joias_rfid",
+    "constraint_name": "joias_rfid_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "lancamentos_avulso",
+    "constraint_name": "lancamentos_avulso_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "liga_tipo_ouro",
+    "constraint_name": "liga_tipo_ouro_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "liga_tipo_ouro",
+    "constraint_name": "liga_tipo_ouro_tipo_18k_insumo_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{tipo_18k_insumo_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "ligacoes",
+    "constraint_name": "ligacoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "locais_estoque",
+    "constraint_name": "locais_estoque_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "markup_alteracoes",
+    "constraint_name": "markup_alteracoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "markup_pedras",
+    "constraint_name": "markup_pedras_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "metas_vendedoras",
+    "constraint_name": "metas_vendedoras_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "metas_vendedoras",
+    "constraint_name": "metas_vendedoras_vendedor_id_mes_ano_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{vendedor_id,mes,ano}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "movimentacoes_estoque",
+    "constraint_name": "movimentacoes_estoque_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "movimentacoes_estoque_comercial",
+    "constraint_name": "movimentacoes_estoque_comercial_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "mp_point_devices",
+    "constraint_name": "mp_point_devices_device_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{device_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "mp_point_devices",
+    "constraint_name": "mp_point_devices_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "notas_fiscais",
+    "constraint_name": "notas_fiscais_chave_44_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{chave_44}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "notas_fiscais",
+    "constraint_name": "notas_fiscais_focus_ref_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{focus_ref}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "notas_fiscais",
+    "constraint_name": "notas_fiscais_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "notas_fiscais_eventos",
+    "constraint_name": "notas_fiscais_eventos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "notas_fiscais_itens",
+    "constraint_name": "notas_fiscais_itens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "notificacoes",
+    "constraint_name": "notificacoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "orcamento_fichas_tecnicas",
+    "constraint_name": "orcamento_fichas_tecnicas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "orcamentos",
+    "constraint_name": "orcamentos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "ordem_comentario_mencoes",
+    "constraint_name": "ordem_comentario_mencoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "ordem_comentarios",
+    "constraint_name": "ordem_comentarios_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "ordens",
+    "constraint_name": "ordens_numero_ordem_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{numero_ordem}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "ordens",
+    "constraint_name": "ordens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "outros_insumos_distribuicao",
+    "constraint_name": "outros_insumos_distribuicao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "outros_insumos_pcp",
+    "constraint_name": "outros_insumos_pcp_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "pagamentos_venda",
+    "constraint_name": "pagamentos_venda_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "pagamentos_venda",
+    "constraint_name": "uq_pagamentos_gateway_id",
+    "constraint_type": "UNIQUE",
+    "columns": "{gateway_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "parametros",
+    "constraint_name": "parametros_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "parametros_sistema",
+    "constraint_name": "parametros_sistema_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{chave}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "pcp",
+    "constraint_name": "pcp_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "pedras_ordens",
+    "constraint_name": "pedras_ordens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "permissoes_usuario",
+    "constraint_name": "permissoes_usuario_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "permissoes_usuario",
+    "constraint_name": "permissoes_usuario_usuario_id_acao_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{usuario_id,acao}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "precificacao_config",
+    "constraint_name": "precificacao_config_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "precificacao_historico",
+    "constraint_name": "precificacao_historico_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "preparacoes_entrega",
+    "constraint_name": "preparacoes_entrega_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "produto_composicao",
+    "constraint_name": "produto_composicao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "produto_composicao",
+    "constraint_name": "produto_composicao_produto_id_insumo_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{produto_id,insumo_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "produto_curva_aplicada",
+    "constraint_name": "produto_curva_aplicada_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{produto_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "produto_imagens",
+    "constraint_name": "produto_imagens_origem_uuid_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{origem_uuid}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "produto_imagens",
+    "constraint_name": "produto_imagens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "produto_pedra_extras",
+    "constraint_name": "produto_pedra_extras_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{produto_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "produto_personalizacao",
+    "constraint_name": "produto_personalizacao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "produto_personalizacao",
+    "constraint_name": "produto_personalizacao_produto_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{produto_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "produto_tipo_item",
+    "constraint_name": "produto_tipo_item_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{produto_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "produtos_fiscais",
+    "constraint_name": "produtos_fiscais_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_produto}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "protocolo_fotos",
+    "constraint_name": "protocolo_fotos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "protocolo_ordens",
+    "constraint_name": "protocolo_ordens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "protocolo_ordens",
+    "constraint_name": "protocolo_ordens_protocolo_id_ordem_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{protocolo_id,ordem_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "protocolos",
+    "constraint_name": "protocolos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "purificacoes",
+    "constraint_name": "purificacoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "quebra_operador",
+    "constraint_name": "quebra_operador_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "reembolsos",
+    "constraint_name": "reembolsos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "regras_fiscais",
+    "constraint_name": "regras_fiscais_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "reservas_estoque_comercial",
+    "constraint_name": "reservas_estoque_comercial_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "role_permissoes",
+    "constraint_name": "role_permissoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "role_permissoes",
+    "constraint_name": "role_permissoes_role_modulo_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{role,modulo}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "roles",
+    "constraint_name": "roles_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{nome}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "saidas_distribuicao",
+    "constraint_name": "saidas_distribuicao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "saidas_ordem",
+    "constraint_name": "saidas_ordem_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "saldo_credito_loja",
+    "constraint_name": "saldo_credito_loja_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "servicos",
+    "constraint_name": "servicos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "setores",
+    "constraint_name": "setores_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "site_config",
+    "constraint_name": "site_config_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "site_produtos",
+    "constraint_name": "site_produtos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "site_produtos",
+    "constraint_name": "site_produtos_produto_id_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{produto_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "solicitacoes_desconto",
+    "constraint_name": "solicitacoes_desconto_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "tarefas",
+    "constraint_name": "tarefas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "teores_ouro",
+    "constraint_name": "teores_ouro_insumo_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{insumo_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "teores_ouro",
+    "constraint_name": "teores_ouro_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "tiny_sync_produtos",
+    "constraint_name": "tiny_sync_produtos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{produto_id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "tipos_apontamento",
+    "constraint_name": "tipos_apontamento_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "tipos_servico",
+    "constraint_name": "tipos_servico_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "transferencias_estoque_comercial",
+    "constraint_name": "transferencias_estoque_comercial_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "transferencias_ordem",
+    "constraint_name": "transferencias_ordem_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "user_views",
+    "constraint_name": "user_views_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "user_views",
+    "constraint_name": "user_views_user_auth_id_scope_nome_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{user_auth_id,scope,nome}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "uso_maquina_reserva",
+    "constraint_name": "uso_maquina_reserva_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "usuarios",
+    "constraint_name": "usuarios_email_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{email}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "usuarios",
+    "constraint_name": "usuarios_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "vale_troca",
+    "constraint_name": "vale_troca_numero_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{numero}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "vale_troca",
+    "constraint_name": "vale_troca_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "vendas_erp",
+    "constraint_name": "vendas_erp_numero_venda_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{numero_venda}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "vendas_erp",
+    "constraint_name": "vendas_erp_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "vendedores_fiscais",
+    "constraint_name": "vendedores_fiscais_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_vendedor}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "webhook_config",
+    "constraint_name": "webhook_config_nome_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{nome}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "webhook_config",
+    "constraint_name": "webhook_config_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "alissonerp",
+    "table_name": "webhook_log",
+    "constraint_name": "webhook_log_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "audit_log_entries",
+    "constraint_name": "audit_log_entries_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "flow_state",
+    "constraint_name": "flow_state_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "identities",
+    "constraint_name": "identities_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "identities",
+    "constraint_name": "identities_provider_id_provider_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{provider_id,provider}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "instances",
+    "constraint_name": "instances_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "mfa_amr_claims",
+    "constraint_name": "amr_id_pk",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "mfa_amr_claims",
+    "constraint_name": "mfa_amr_claims_session_id_authentication_method_pkey",
+    "constraint_type": "UNIQUE",
+    "columns": "{session_id,authentication_method}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "mfa_challenges",
+    "constraint_name": "mfa_challenges_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "mfa_factors",
+    "constraint_name": "mfa_factors_last_challenged_at_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{last_challenged_at}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "mfa_factors",
+    "constraint_name": "mfa_factors_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "oauth_authorizations",
+    "constraint_name": "oauth_authorizations_authorization_code_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{authorization_code}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "oauth_authorizations",
+    "constraint_name": "oauth_authorizations_authorization_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{authorization_id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "oauth_authorizations",
+    "constraint_name": "oauth_authorizations_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "oauth_client_states",
+    "constraint_name": "oauth_client_states_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "oauth_clients",
+    "constraint_name": "oauth_clients_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "oauth_consents",
+    "constraint_name": "oauth_consents_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "oauth_consents",
+    "constraint_name": "oauth_consents_user_client_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{user_id,client_id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "one_time_tokens",
+    "constraint_name": "one_time_tokens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "refresh_tokens",
+    "constraint_name": "refresh_tokens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "refresh_tokens",
+    "constraint_name": "refresh_tokens_token_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{token}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "saml_providers",
+    "constraint_name": "saml_providers_entity_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{entity_id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "saml_providers",
+    "constraint_name": "saml_providers_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "saml_relay_states",
+    "constraint_name": "saml_relay_states_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "schema_migrations",
+    "constraint_name": "schema_migrations_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{version}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "sessions",
+    "constraint_name": "sessions_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "sso_domains",
+    "constraint_name": "sso_domains_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "sso_providers",
+    "constraint_name": "sso_providers_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "users",
+    "constraint_name": "users_phone_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{phone}"
+  },
+  {
+    "table_schema": "auth",
+    "table_name": "users",
+    "constraint_name": "users_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "agente_runs",
+    "constraint_name": "agente_runs_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "agentes_ia",
+    "constraint_name": "agentes_ia_codigo_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{codigo}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "agentes_ia",
+    "constraint_name": "agentes_ia_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "audit_log",
+    "constraint_name": "audit_log_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "automacao_etapas",
+    "constraint_name": "automacao_etapas_legacy_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{legacy_id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "automacao_etapas",
+    "constraint_name": "automacao_etapas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "automacao_execucoes",
+    "constraint_name": "automacao_execucoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "automacao_gatilhos",
+    "constraint_name": "automacao_gatilhos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{automacao_id,gatilho}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "automacoes",
+    "constraint_name": "automacoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "brechas",
+    "constraint_name": "brechas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "ciclo_vida_eventos",
+    "constraint_name": "ciclo_vida_eventos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "config_geral",
+    "constraint_name": "config_geral_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{chave}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "contato_canais",
+    "constraint_name": "contato_canais_canal_canal_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{canal,canal_id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "contato_canais",
+    "constraint_name": "contato_canais_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "conversas",
+    "constraint_name": "conversas_canal_canal_thread_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{canal,canal_thread_id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "conversas",
+    "constraint_name": "conversas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "funil_blocos",
+    "constraint_name": "funil_blocos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "funil_etapas",
+    "constraint_name": "funil_etapas_legacy_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{legacy_id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "funil_etapas",
+    "constraint_name": "funil_etapas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "funil_movimentos",
+    "constraint_name": "funil_movimentos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "funis",
+    "constraint_name": "funis_legacy_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{legacy_id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "funis",
+    "constraint_name": "funis_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "instagram_posts",
+    "constraint_name": "instagram_posts_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "kommo_config",
+    "constraint_name": "kommo_config_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "mensagens",
+    "constraint_name": "mensagens_conversa_id_canal_message_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{conversa_id,canal_message_id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "mensagens",
+    "constraint_name": "mensagens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "meta_config",
+    "constraint_name": "meta_config_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "motivos_perda",
+    "constraint_name": "motivos_perda_legacy_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{legacy_id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "motivos_perda",
+    "constraint_name": "motivos_perda_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "notificacoes",
+    "constraint_name": "notificacoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "oportunidade_historico",
+    "constraint_name": "oportunidade_historico_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "oportunidades",
+    "constraint_name": "oportunidades_legacy_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{legacy_id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "oportunidades",
+    "constraint_name": "oportunidades_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "origens_lead",
+    "constraint_name": "origens_lead_legacy_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{legacy_id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "origens_lead",
+    "constraint_name": "origens_lead_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "prompt_templates",
+    "constraint_name": "prompt_templates_codigo_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{codigo}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "prompt_templates",
+    "constraint_name": "prompt_templates_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "sdr_runs",
+    "constraint_name": "sdr_runs_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "tarefas",
+    "constraint_name": "tarefas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "unipile_config",
+    "constraint_name": "unipile_config_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "webhook_config",
+    "constraint_name": "webhook_config_nome_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{nome}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "webhook_config",
+    "constraint_name": "webhook_config_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "crm",
+    "table_name": "webhook_log",
+    "constraint_name": "webhook_log_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "auditar_financeiro",
+    "constraint_name": "auditar_financeiro_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "categoria_insumo",
+    "constraint_name": "categoria_insumo_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "compras",
+    "constraint_name": "compras_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "controle_estoque",
+    "constraint_name": "controle_estoque_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "deposito",
+    "constraint_name": "deposito_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_access",
+    "constraint_name": "directus_access_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_activity",
+    "constraint_name": "directus_activity_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_collections",
+    "constraint_name": "directus_collections_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{collection}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_comments",
+    "constraint_name": "directus_comments_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_dashboards",
+    "constraint_name": "directus_dashboards_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_extensions",
+    "constraint_name": "directus_extensions_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_fields",
+    "constraint_name": "directus_fields_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_files",
+    "constraint_name": "directus_files_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_flows",
+    "constraint_name": "directus_flows_operation_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{operation}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_flows",
+    "constraint_name": "directus_flows_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_folders",
+    "constraint_name": "directus_folders_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_migrations",
+    "constraint_name": "directus_migrations_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{version}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_notifications",
+    "constraint_name": "directus_notifications_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_operations",
+    "constraint_name": "directus_operations_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_operations",
+    "constraint_name": "directus_operations_reject_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{reject}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_operations",
+    "constraint_name": "directus_operations_resolve_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{resolve}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_panels",
+    "constraint_name": "directus_panels_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_permissions",
+    "constraint_name": "directus_permissions_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_policies",
+    "constraint_name": "directus_policies_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_presets",
+    "constraint_name": "directus_presets_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_relations",
+    "constraint_name": "directus_relations_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_revisions",
+    "constraint_name": "directus_revisions_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_roles",
+    "constraint_name": "directus_roles_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_sessions",
+    "constraint_name": "directus_sessions_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{token}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_settings",
+    "constraint_name": "directus_settings_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_shares",
+    "constraint_name": "directus_shares_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_translations",
+    "constraint_name": "directus_translations_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_users",
+    "constraint_name": "directus_users_email_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{email}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_users",
+    "constraint_name": "directus_users_external_identifier_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{external_identifier}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_users",
+    "constraint_name": "directus_users_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_users",
+    "constraint_name": "directus_users_token_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{token}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_versions",
+    "constraint_name": "directus_versions_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "directus_webhooks",
+    "constraint_name": "directus_webhooks_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "fechamento_fabrica",
+    "constraint_name": "fechamento_fabrica_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "ficha_tecnica_ordem",
+    "constraint_name": "ficha_tecnica_ordem_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "insumos",
+    "constraint_name": "insumos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "itens_compras",
+    "constraint_name": "itens_compras_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "itens_ordem_1",
+    "constraint_name": "itens_ordem_1_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "ordem_comentario_mencoes",
+    "constraint_name": "ordem_comentario_mencoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "ordem_comentarios",
+    "constraint_name": "ordem_comentarios_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "ordens",
+    "constraint_name": "ordens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "pcp",
+    "constraint_name": "pcp_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "produtos_files",
+    "constraint_name": "produtos_files_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "produtos_files_1",
+    "constraint_name": "produtos_files_1_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "produtos_files_2",
+    "constraint_name": "produtos_files_2_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "protocolo",
+    "constraint_name": "protocolo_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "protocolo_loja_ordens_1",
+    "constraint_name": "protocolo_loja_ordens_1_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "protocolo_ordens",
+    "constraint_name": "protocolo_ordens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "protocolo_ordens_1",
+    "constraint_name": "protocolo_ordens_1_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "protocolo_ordens_2",
+    "constraint_name": "protocolo_ordens_2_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "protocolo_ordens_3",
+    "constraint_name": "protocolo_ordens_3_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "directus",
+    "table_name": "protocolo_ordens_4",
+    "constraint_name": "protocolo_ordens_4_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "extensions",
+    "table_name": "wrappers_fdw_stats",
+    "constraint_name": "wrappers_fdw_stats_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{fdw_name}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "banco_imagens",
+    "constraint_name": "banco_imagens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "categoria_precificação",
+    "constraint_name": "categoria_precificação_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "categorias",
+    "constraint_name": "categorias_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "categorias_receitas_despesas",
+    "constraint_name": "categorias_receitas_despesas_id_categoria_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_categoria}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "categorias_receitas_despesas",
+    "constraint_name": "categorias_receitas_despesas_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_categoria}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "categorias_receitas_despesas",
+    "constraint_name": "categorias_receitas_despesas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_categoria}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "comissoes",
+    "constraint_name": "comissoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "complementos_contatos",
+    "constraint_name": "complementos_contatos_contato_id_api_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{contato_id_api}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "complementos_contatos",
+    "constraint_name": "complementos_contatos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "config_orcamento_aliancas",
+    "constraint_name": "config_orcamento_aliancas_name_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{name}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "config_orcamento_aliancas",
+    "constraint_name": "config_orcamento_aliancas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "contas_a_pagar",
+    "constraint_name": "contas_a_pagar_id_api_conta_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_conta}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "contas_a_pagar",
+    "constraint_name": "contas_a_pagar_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "contas_a_receber",
+    "constraint_name": "contas_a_receber_id_api_conta_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_conta}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "contas_a_receber",
+    "constraint_name": "contas_a_receber_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "contatos",
+    "constraint_name": "contatos_cpf_cnpj_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{cpf_cnpj}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "contatos",
+    "constraint_name": "contatos_id_api_contato_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_contato}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "contatos",
+    "constraint_name": "contatos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_contato}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "controle_de_execucao",
+    "constraint_name": "controle_de_execucao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "controle_entregas",
+    "constraint_name": "controle_entregas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "controle_requisicao",
+    "constraint_name": "controle_requisicao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "controle_sequencia",
+    "constraint_name": "controle_sequencia_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{nome_tabela}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "cotacao",
+    "constraint_name": "cotacao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "estoque",
+    "constraint_name": "estoque_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_estoque}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "estoque",
+    "constraint_name": "estoque_produto_id_api_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{produto_id_api}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "ficha_tecnica",
+    "constraint_name": "ficha_tecnica_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "ficha_tecnica_orcamento",
+    "constraint_name": "ficha_tecnica_orcamento_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "ficha_tecnica_produto",
+    "constraint_name": "ficha_tecnica_produto_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "fila_webhooks_n8n",
+    "constraint_name": "fila_webhooks_n8n_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "fin_conciliacoes",
+    "constraint_name": "fin_conciliacoes_conta_pagar_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{conta_pagar_id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "fin_conciliacoes",
+    "constraint_name": "fin_conciliacoes_lancamento_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{lancamento_id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "fin_conciliacoes",
+    "constraint_name": "fin_conciliacoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "fin_extratos_bancarios",
+    "constraint_name": "fin_extratos_bancarios_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "fin_lancamentos_bancarios",
+    "constraint_name": "fin_lancamentos_bancarios_extrato_id_fitid_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{extrato_id,fitid}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "fin_lancamentos_bancarios",
+    "constraint_name": "fin_lancamentos_bancarios_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "fonte_entrada_kommo",
+    "constraint_name": "fonte_entrada_kommo_id_fonte_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_fonte}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "fonte_entrada_kommo",
+    "constraint_name": "fonte_entrada_kommo_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "forma_envio",
+    "constraint_name": "logistica_id_api_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "forma_envio",
+    "constraint_name": "logistica_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "forma_frete",
+    "constraint_name": "forma_frete_id_api_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "forma_frete",
+    "constraint_name": "forma_frete_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "forma_pagamento",
+    "constraint_name": "forma_pagamento_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "forma_pagamento",
+    "constraint_name": "forma_pagamento_slug_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{slug}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "historico_ordem",
+    "constraint_name": "historico_ordem_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "historico_preco",
+    "constraint_name": "historico_preco_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "historico_venda_ja",
+    "constraint_name": "historico_venda_ja_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "indicadores_marketing",
+    "constraint_name": "indicadores_marketing_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "itens_da_ordem",
+    "constraint_name": "itens_da_ordem_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "itens_pedido",
+    "constraint_name": "itens_pedido_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_item}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "itens_venda",
+    "constraint_name": "itens_venda_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "leads",
+    "constraint_name": "leads_id_lead_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_lead}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "leads",
+    "constraint_name": "leads_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id,id_lead}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "loock",
+    "constraint_name": "look_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "loock",
+    "constraint_name": "look_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "map_asana",
+    "constraint_name": "map_asana_gid_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{gid}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "map_asana",
+    "constraint_name": "map_asana_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "map_vendedor_kommo",
+    "constraint_name": "map_vendedor_kommo_id_api_kommo_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_kommo}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "map_vendedor_kommo",
+    "constraint_name": "map_vendedor_kommo_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "meio_pagamento",
+    "constraint_name": "meio_pagamento_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "meio_pagamento",
+    "constraint_name": "meio_pagamento_slug_forma_unique",
+    "constraint_type": "UNIQUE",
+    "columns": "{slug,forma_pagamento_id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "metas_mensais",
+    "constraint_name": "metas_mensais_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "metas_por_hora",
+    "constraint_name": "metas_por_hora_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "notificacoes",
+    "constraint_name": "notificacoes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "orcamento",
+    "constraint_name": "orcamento_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "ordem_compras",
+    "constraint_name": "ordem_compras_id_ordem_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_ordem}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "ordem_compras",
+    "constraint_name": "ordem_compras_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "pagamentos",
+    "constraint_name": "pagamentos_id_api_pagamento_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_pagamento}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "pagamentos",
+    "constraint_name": "pagamentos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "parametros",
+    "constraint_name": "parametros_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "parcelas_da_ordem",
+    "constraint_name": "parcelas_da_ordem_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "parcelas_pedidos",
+    "constraint_name": "parcelas_pedidos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_parcela}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "pedidos",
+    "constraint_name": "pedidos_id_api_pedido_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_pedido}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "pedidos",
+    "constraint_name": "pedidos_id_lead_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_lead}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "pedidos",
+    "constraint_name": "pedidos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "produtos",
+    "constraint_name": "produtos_id_api_produto_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_produto}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "produtos",
+    "constraint_name": "produtos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_produto}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "public_links",
+    "constraint_name": "public_links_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "recebimentos",
+    "constraint_name": "recebimentos_id_api_recebimento_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_recebimento}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "recebimentos",
+    "constraint_name": "recebimentos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "relacao_tinny_moura",
+    "constraint_name": "relacao_tinny_moura_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_tiny}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "solicitacoes_vale_troca",
+    "constraint_name": "solicitacoes_vale_troca_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "staging_markup_aprovacao",
+    "constraint_name": "staging_markup_aprovacao_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "suporte_conversas",
+    "constraint_name": "suporte_conversas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "suporte_conversas",
+    "constraint_name": "suporte_conversas_telefone_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{telefone}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "tipos_contatos",
+    "constraint_name": "tipos_contatos_id_api_tipo_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_tipo}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "tipos_contatos",
+    "constraint_name": "tipos_contatos_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_tipo}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_profiles",
+    "constraint_name": "user_profiles_id_user_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_user}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_profiles",
+    "constraint_name": "users_email_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{email}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_profiles",
+    "constraint_name": "users_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_user}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "vales_troca",
+    "constraint_name": "vales_troca_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "vendas",
+    "constraint_name": "vendas_id_api_tiny_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_tiny}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "vendas",
+    "constraint_name": "vendas_lead_id_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{lead_id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "vendas",
+    "constraint_name": "vendas_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "vendedores",
+    "constraint_name": "vendedores_cpf_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{cpf}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "vendedores",
+    "constraint_name": "vendedores_email_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{email}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "vendedores",
+    "constraint_name": "vendedores_id_api_kommo_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_kommo}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "vendedores",
+    "constraint_name": "vendedores_id_api_vendedor_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{id_api_vendedor}"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "vendedores",
+    "constraint_name": "vendedores_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id_vendedor}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "buckets",
+    "constraint_name": "buckets_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "buckets_analytics",
+    "constraint_name": "buckets_analytics_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "buckets_vectors",
+    "constraint_name": "buckets_vectors_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "iceberg_namespaces",
+    "constraint_name": "iceberg_namespaces_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "iceberg_tables",
+    "constraint_name": "iceberg_tables_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "migrations",
+    "constraint_name": "migrations_name_key",
+    "constraint_type": "UNIQUE",
+    "columns": "{name}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "migrations",
+    "constraint_name": "migrations_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "objects",
+    "constraint_name": "objects_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "prefixes",
+    "constraint_name": "prefixes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{bucket_id,level,name}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "s3_multipart_uploads",
+    "constraint_name": "s3_multipart_uploads_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "s3_multipart_uploads_parts",
+    "constraint_name": "s3_multipart_uploads_parts_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  },
+  {
+    "table_schema": "storage",
+    "table_name": "vector_indexes",
+    "constraint_name": "vector_indexes_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "columns": "{id}"
+  }
+]
