@@ -79,8 +79,8 @@ export async function POST(req: NextRequest) {
   // ── 3. Dupla-entrada via fn_criar_par_movimentacao ────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (sql as any).begin(async (tx: typeof sql) => {
-    await tx`
-      SELECT alissonerp.fn_criar_par_movimentacao(
+    const [parMov] = await tx`
+      SELECT saida_id, entrada_id FROM alissonerp.fn_criar_par_movimentacao(
         ${ouro18kId}::integer,
         ${peso}::real,
         ${almoxarifadoId}::integer,
@@ -92,6 +92,8 @@ export async function POST(req: NextRequest) {
         ${'Carga aditivo para ' + operador_nome + ' - Service'}
       )
     `;
+    // parMov.saida_id e parMov.entrada_id disponíveis para log/audit futuros
+    void parMov;
   });
 
   // ── 4. Buscar novos saldos ─────────────────────────────────────────────────

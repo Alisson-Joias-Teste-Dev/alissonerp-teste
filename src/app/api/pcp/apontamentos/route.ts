@@ -176,8 +176,8 @@ export async function POST(req: NextRequest) {
     const [pcp] = await sql`
       SELECT ordem_id FROM alissonerp.pcp WHERE id = ${pcp_id} LIMIT 1
     `;
-    await sql`
-      SELECT alissonerp.fn_criar_par_movimentacao(
+    const [parMov] = await sql`
+      SELECT saida_id, entrada_id FROM alissonerp.fn_criar_par_movimentacao(
         ${insumo_id}::integer,
         ${qtd}::real,
         1,                     -- dep_origem = Almoxarifado Central
@@ -190,6 +190,9 @@ export async function POST(req: NextRequest) {
         1                      -- local_estoque_id = Fabrica
       )
     `;
+    // parMov.saida_id e parMov.entrada_id disponíveis para log/audit futuros
+    // (capturados para rastreabilidade — uso completo vem na Story 3.3)
+    void parMov;
   }
 
   // Mover PCP para "em_andamento" se ainda estava em "novas_ordens"
