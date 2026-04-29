@@ -47,6 +47,7 @@ import UserEditDrawer, { type UsuarioEdit, type Deposito as DepositoEdit } from 
 import { useAuth } from "@/hooks/useAuth";
 import { isFullAccess } from "@/lib/roles";
 import LocaisEstoqueTab from "@/components/LocaisEstoqueTab";
+import { useErrorStore } from "@/stores/errorStore";
 
 // ─── Paleta (tema claro — alinhado com aba Usuários) ─────────────────────────
 const P = {
@@ -513,7 +514,7 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
             .map(r => ({ value: r.nome, label: ROLE_LABEL[r.nome] ?? r.nome }))
         );
       })
-      .catch(() => {});
+      .catch((e) => useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao carregar roles", { level: "warning" }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1897,7 +1898,7 @@ function TabPermissoes() {
   const [erroNovaRole,  setErroNovaRole]  = useState("");
 
   async function carregarRoles() {
-    const res = await fetch("/api/configuracoes/roles").catch(() => null);
+    const res = await fetch("/api/configuracoes/roles").catch((e) => { useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao carregar roles", { level: "warning" }); return null; });
     if (!res?.ok) return;
     const data = await res.json() as { roles: { nome: string; descricao: string; ativo: boolean }[] };
     setRolesAtivas(
@@ -1908,7 +1909,7 @@ function TabPermissoes() {
   }
 
   async function carregarPermissoes() {
-    const res = await fetch("/api/configuracoes/permissoes").catch(() => null);
+    const res = await fetch("/api/configuracoes/permissoes").catch((e) => { useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao carregar permissões", { level: "warning" }); return null; });
     if (!res?.ok) { setErro("Erro ao carregar permissões"); setLoading(false); return; }
     const data = await res.json();
     const map: PermMap = {};
@@ -2569,7 +2570,7 @@ function TabTiposServico() {
   async function carregar() {
     setLoading(true);
     setErro("");
-    const res = await fetch("/api/tipos-servico?todos=true").catch(() => null);
+    const res = await fetch("/api/tipos-servico?todos=true").catch((e) => { useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao carregar tipos de serviço", { level: "warning" }); return null; });
     if (!res?.ok) { setErro("Erro ao carregar tipos"); setLoading(false); return; }
     const data = await res.json();
     setTipos(data.tipos ?? []);
@@ -2586,7 +2587,7 @@ function TabTiposServico() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nome }),
-    }).catch(() => null);
+    }).catch((e) => { useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao criar tipo de serviço", { level: "critical" }); return null; });
     setCriando(false);
     if (!res?.ok) {
       const d = await res?.json().catch(() => ({}));
@@ -2605,7 +2606,7 @@ function TabTiposServico() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, nome: nomeTrimmed }),
-    }).catch(() => null);
+    }).catch((e) => useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao editar tipo de serviço", { level: "critical" }));
     setSalvandoId(null);
     setEditandoId(null);
     setSavedId(id);
@@ -2619,7 +2620,7 @@ function TabTiposServico() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: t.id, ativo: !t.ativo }),
-    }).catch(() => null);
+    }).catch((e) => useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao alterar tipo de serviço", { level: "critical" }));
     setSalvandoId(null);
     carregar();
   }

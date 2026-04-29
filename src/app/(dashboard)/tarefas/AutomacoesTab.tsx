@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Zap, Play, Trash2, Loader2, ToggleLeft, ToggleRight } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
+import { useErrorStore } from "@/stores/errorStore";
 import { type Usuario, PRIORIDADE_BADGE } from "./TarefasClient";
 
 const C = {
@@ -97,7 +98,7 @@ export default function AutomacoesTab({ usuarios, podeGerenciar }: { usuarios: U
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ativa: !a.ativa }),
-    }).catch(() => {});
+    }).catch((e) => useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao alterar automação", { level: "critical" }));
     setAutomacoes(prev => prev.map(x => x.id === a.id ? { ...x, ativa: !x.ativa } : x));
   }
 

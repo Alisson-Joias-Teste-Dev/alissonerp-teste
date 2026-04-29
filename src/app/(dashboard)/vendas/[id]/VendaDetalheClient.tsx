@@ -73,6 +73,7 @@ interface Venda {
   video_obs_interna: string | null; tiny_sync_status: string | null;
   tiny_pedido_id: string | null; tiny_sync_erro: string | null; bloqueado: boolean; qtd_itens: number;
   created_at?: string | null;
+  updated_at?: string | null;
   credito_gerente_usado?: number;
   aprovacao_credito_tipo?: string | null;
   aprovacao_credito_tarefa_id?: number | null;
@@ -1086,9 +1087,15 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       if (Object.keys(patch).length > 0) {
         const res = await fetch(`/api/vendas/${venda.id}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patch),
+          body: JSON.stringify({ ...patch, client_updated_at: venda.updated_at }),
         });
-        if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+        if (!res.ok) {
+          const d = await res.json();
+          if (res.status === 409 && d.error?.includes("Conflito")) {
+            throw new Error("Esta venda foi modificada por outro usuário. Recarregue a página.");
+          }
+          throw new Error(d.error ?? `HTTP ${res.status}`);
+        }
         // Atualiza referência local sem recarregar a página inteira
         setVenda(prev => prev ? { ...prev, ...patch } : prev);
       }
@@ -1104,9 +1111,13 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     try {
       const res = await fetch(`/api/vendas/${venda.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ situacao: s }),
+        body: JSON.stringify({ situacao: s, client_updated_at: venda.updated_at }),
       });
       const d = await res.json();
+      if (res.status === 409 && d.error?.includes("Conflito")) {
+        setSaveErr("Esta venda foi modificada por outro usuário. Recarregue a página.");
+        return;
+      }
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
       if (d.ordem_criada && d.tiny_warning) {
         alert(`Ordem ${d.ordem_criada} criada!\n\nAtenção: falha ao sincronizar com Tiny — ${d.tiny_warning}\nA venda ficará pendente de sync no Tiny.`);

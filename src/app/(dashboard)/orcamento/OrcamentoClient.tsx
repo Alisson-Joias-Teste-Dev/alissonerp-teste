@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useErrorStore } from "@/stores/errorStore";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
@@ -202,7 +203,7 @@ export default function OrcamentoClient({
   const [editingOrcId, setEditingOrcId] = useState<number | null>(null);
   const fetchOrcamentos = useCallback(async () => {
     setLoadingOrc(true);
-    const res = await fetch("/api/orcamento?limit=100").catch(() => null);
+    const res = await fetch("/api/orcamento?limit=100").catch((e) => { useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao carregar orçamentos", { level: "warning" }); return null; });
     const data = res?.ok ? await res.json().catch(() => ({})) : {};
     setOrcamentos(data.orcamentos ?? []);
     setLoadingOrc(false);

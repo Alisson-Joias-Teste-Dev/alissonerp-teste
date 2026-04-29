@@ -6,6 +6,7 @@ import {
   Trash2, Calendar, User, Tag, MessageSquare, Clock, Edit3,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
+import { useErrorStore } from "@/stores/errorStore";
 import { type Tarefa, type Usuario, PRIORIDADE_BADGE, STATUS_COLS } from "./TarefasClient";
 
 const C = {
@@ -150,7 +151,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
-    }).catch(() => {});
+    }).catch((e) => useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao mover tarefa", { level: "critical" }));
     onUpdated({ id: tarefa.id, status });
   }
 

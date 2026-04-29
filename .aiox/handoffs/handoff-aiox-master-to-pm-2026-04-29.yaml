@@ -1,0 +1,132 @@
+handoff:
+  from_agent: "aiox-master"
+  to_agent: "pm"
+  timestamp: "2026-04-29T18:00:00Z"
+  consumed: false
+
+  story_context:
+    epic_id: "EPIC-001-FONTE-DA-VERDADE"
+    epic_title: "Banco como Fonte da Verdade"
+    epic_path: "docs/plano-fonte-da-verdade.md"
+    epic_status: "Plano v1.2 aprovado pelo owner — pronto para formalização"
+    current_task: "Decompor em 23 stories formais usando template AIOX"
+    branch: "main"
+    target_branch: "homolog"
+
+  context_summary: |
+    Atlas (analyst) entregou plano completo em docs/plano-fonte-da-verdade.md v1.2.
+    Plano resolve 10 problemas críticos identificados em diagnóstico do sistema fabricaAJ:
+    310 tabelas + 117 views + 80 triggers + 280+ rotas API.
+
+    Decisões já tomadas pelo owner (Jonathan):
+    - Cadência diária (sem sprints de 3 semanas)
+    - Testes integration em PRODUÇÃO com mitigações estritas (§3.4)
+    - Stack: Zod + React Query (já instalado) + Vitest (já configurado) + Playwright (novo)
+    - Legados Directus/Tiny mantidos, blindados com fila + dashboard de drift
+    - Documentação alvo: Schema spec auto-gerado + OpenAPI 3.1 + ADRs + Runbooks
+
+    Owner exige fluxo formal AIOX: Analyst → PM → Architect → Dev.
+    Não pode passar para Dev até mapeamento estar 100%.
+
+  decisions:
+    - "Cadência diária — cada dia entrega ~8-12h focadas, sem prazo total fixo"
+    - "Testes em produção com 7 mitigações obrigatórias (M1-M7) detalhadas em §3.4"
+    - "Stack stack frozen: Zod + React Query + Vitest + Playwright + GitHub Actions"
+    - "23 stories distribuídas em 4 fases lógicas (não 4 sprints temporais)"
+    - "Story 4.7 (banco de teste real) prazo ≤ 30 dias úteis — débito técnico P1"
+    - "Branch alvo homolog, regras Git do CLAUDE.md mantidas"
+
+  files_modified:
+    - "docs/plano-fonte-da-verdade.md (v1.2 — 1131 linhas)"
+
+  blockers:
+    - "Nenhum bloqueio para PM iniciar trabalho"
+
+  next_action: |
+    Morgan (PM), preciso que você execute as seguintes tarefas:
+
+    1. CRIAR EPIC FORMAL
+       - Path: docs/prd/EPIC-001-FONTE-DA-VERDADE.md
+       - Template: .aiox-core/development/templates/prd-tmpl.yaml
+       - Conteúdo: visão, objetivos (O1-O7 do plano), stakeholders, success criteria (M1-M10),
+         premissas (§3.2 + §3.3), restrições (§3.4), riscos (§10), referência ao plano
+
+    2. DECOMPOR EM 23 STORIES FORMAIS
+       Stories já listadas no plano (§5):
+       - Story 1.1 — parametros_sistema + substituir 15+ IDs hardcoded
+       - Story 1.2 — Sync Tiny + ordens reposição em transação
+       - Story 1.3 — useAuth com React Query + TTL
+       - Story 1.4 — Wrapper Zod + helpers auth/permissão
+       - Story 1.5 — CI GitHub Actions com janela restrita
+       - Story 1.6 — Sync Directus monitorado
+       - Story 2.1 — Setup ambiente teste em produção (gate de segurança)
+       - Story 2.2 — Cobertura módulo Vendas
+       - Story 2.3 — Cobertura módulo PCP + Estoque
+       - Story 2.4 — Cobertura módulo Protocolo + Crediário
+       - Story 2.5 — Setup Playwright
+       - Story 2.6 — 12 E2E críticos
+       - Story 3.1 — Caça aos erros silenciados
+       - Story 3.2 — Versioning em mutações concorrentes
+       - Story 3.3 — Audit log completo
+       - Story 3.4 — Fila sync externo + retry
+       - Story 3.5 — Guard duplicação fechamento_dist
+       - Story 3.6 — Unificar dupla-entrada
+       - Story 4.1 — Schema spec auto-gerado
+       - Story 4.2 — OpenAPI 3.1 gerado de Zod
+       - Story 4.3 — 10 ADRs críticos
+       - Story 4.4 — 8 Runbooks operacionais
+       - Story 4.5 — Atualização docs existentes
+       - Story 4.6 — Auditoria final
+       - Story 4.7 — Provisionar banco de teste real (débito P1)
+
+       Cada story em docs/stories/{epicNum}.{storyNum}.{slug}.md usando template
+       .aiox-core/development/templates/story-tmpl.yaml com:
+       - Status (Draft inicial)
+       - Story (As a / I want / So that)
+       - Acceptance Criteria (verificáveis)
+       - Tasks/Subtasks (granulares)
+       - Dev Notes (referência ao plano)
+       - Dependencies (entre stories)
+       - Estimate (esforço em dias)
+       - Owner (Backend / Frontend / DevOps / Architect)
+
+    3. MAPEAR DEPENDÊNCIAS ENTRE STORIES
+       Algumas stories são pré-requisito de outras. Exemplo:
+       - 1.4 (wrapper Zod) é pré-requisito de 2.2/2.3/2.4 (testes)
+       - 1.1 (parametros_sistema) é pré-requisito de várias rotas
+       - 2.1 (setup teste) é gate de TODAS as 2.x
+       Salvar matriz em docs/prd/dependencies-matrix.md
+
+    4. VALIDAR PRIORIZAÇÃO
+       Confirmar com Jonathan se ordem de execução faz sentido.
+       Pacote Dia 1 sugerido pelo Atlas (§11.2):
+       - 1.1, 1.2 (parcial), 1.3 (mini), 3.5, 3.1 (parcial), 3.3 (parcial)
+
+    5. HANDOFF PARA @architect
+       Após EPIC + stories prontas, registrar handoff para Aria (architect)
+       que vai fazer mapeamento técnico completo + impacto.
+
+  acceptance_criteria_for_pm_phase:
+    - "EPIC-001-FONTE-DA-VERDADE.md criado em docs/prd/"
+    - "23 stories criadas em docs/stories/ seguindo template AIOX"
+    - "Matriz de dependências em docs/prd/dependencies-matrix.md"
+    - "Cada story com AC verificável e estimate em dias"
+    - "Status de cada story = Draft (não Ready até PO validar)"
+    - "Validação de Pacote Dia 1 com Jonathan"
+    - "Handoff para @architect criado em .aiox/handoffs/"
+
+  reference_documents:
+    primary:
+      - "docs/plano-fonte-da-verdade.md (fonte da verdade do plano)"
+    supporting:
+      - "CLAUDE.md (regras do projeto fabricaAJ)"
+      - "ESTRUTURA_ATUAL.md (snapshot do banco)"
+      - ".claude/rules/agent-authority.md (limites de cada agente)"
+      - ".aiox-core/development/templates/prd-tmpl.yaml"
+      - ".aiox-core/development/templates/story-tmpl.yaml"
+
+  notes:
+    - "PO (Pax) vai validar cada story APÓS PM criar (10-point checklist)"
+    - "SM (River) vai priorizar para execução APÓS PO aprovar"
+    - "Architect (Aria) recebe handoff em paralelo para mapeamento técnico"
+    - "Nenhum dev é acionado até EPIC + stories + mapeamento estarem 100%"
