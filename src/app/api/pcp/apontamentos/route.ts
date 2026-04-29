@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { recalcularTotaisPCP } from "@/lib/recalcular-totais-pcp";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { logAudit } from "@/lib/audit";
 
 // POST /api/pcp/apontamentos
 export async function POST(req: NextRequest) {
@@ -211,6 +212,14 @@ export async function POST(req: NextRequest) {
 
   // Recalcular totais dist_* (fire-and-forget, não bloqueia resposta)
   recalcularTotaisPCP(pcp_id).catch((err) => console.error('recalcularTotaisPCP falhou:', err));
+
+  await logAudit(sql, {
+    tabela: "apontamentos_pcp",
+    operacao: "INSERT",
+    registro_id: rows[0].id,
+    usuario_id: created_by ?? null,
+    dados_depois: { pcp_id, tipo_apontamento_id, deposito_id, insumo_id, qtd: qtdParaInserir },
+  });
 
   return NextResponse.json(rows[0], { status: 201 });
 }

@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { creditarSaldo } from "@/lib/saldo-credito";
 import { concluirVenda } from "@/lib/vendas-aprovar";
+import { logAudit } from "@/lib/audit";
 
 // Rota de emergência — use verificar-mp para baixas com comprovante MP
 const PODE_BAIXAR = ["desenvolvedor"];
@@ -94,6 +95,15 @@ export async function POST(
         ${user.id}::uuid
       )
     `;
+
+    await logAudit(tx, {
+      tabela: "contas_receber",
+      operacao: "UPDATE",
+      registro_id: contaId,
+      usuario_id: user.id,
+      dados_antes: { situacao: "pendente" },
+      dados_depois: { situacao: "pago", data_recebimento: new Date().toISOString().split("T")[0] },
+    });
   });
 
   // 4. Devolver saldo ao gerente se crédito foi usado (fora da tx para evitar lock)

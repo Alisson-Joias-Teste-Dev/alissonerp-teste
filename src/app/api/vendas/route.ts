@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { validarDescontos } from "@/lib/validar-desconto";
+import { logAudit } from "@/lib/audit";
 import {
   validarPersonalizacao,
   normalizarPersonalizacao,
@@ -390,6 +391,14 @@ export async function POST(req: NextRequest) {
     if (Number(completa.total_venda) <= 0 && body.tipo_venda !== "servico") {
       throw new Error("Total da venda não pode ser zero. Verifique os preços e descontos dos itens.");
     }
+
+    await logAudit(tx, {
+      tabela: "vendas_erp",
+      operacao: "INSERT",
+      registro_id: venda.id,
+      usuario_id: user.id,
+      dados_depois: { numero_venda: completa.numero_venda, total_venda: Number(completa.total_venda), situacao: completa.situacao },
+    });
 
     // ─── Ordens de reposição (dentro da tx — falha reverte a venda inteira) ───
     const ordensReposicao: Array<{ numero_ordem: string; produto: string }> = [];

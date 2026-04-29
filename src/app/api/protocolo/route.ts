@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logAudit } from "@/lib/audit";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -88,6 +89,14 @@ export async function POST(req: NextRequest) {
 
   const rows = ordem_ids.map((ordem_id) => ({ protocolo_id: prot.id, ordem_id }));
   await sql`INSERT INTO alissonerp.protocolo_ordens ${sql(rows)}`;
+
+  await logAudit(sql, {
+    tabela: "protocolos",
+    operacao: "INSERT",
+    registro_id: prot.id,
+    usuario_id: user.id,
+    dados_depois: { direcao: tipoFinal === "fabrica" ? direcao : direcao, tipo_protocolo: tipoFinal, ordens: ordem_ids.length },
+  });
 
   return NextResponse.json({ id: prot.id });
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { logAudit } from "@/lib/audit";
 
 // POST /api/distribuicao/apontamentos
 // Tipos scope 'ambos' ou 'distribuicao': 1,2,3,5,6,8,9
@@ -59,6 +60,14 @@ export async function POST(req: NextRequest) {
   `;
 
   // Trigger fn_processar_apontamento_dist executa CE + atualiza totais da distribuição
+
+  await logAudit(sql, {
+    tabela: "apontamentos_distribuicao",
+    operacao: "INSERT",
+    registro_id: rows[0].id,
+    usuario_id: user_id ?? null,
+    dados_depois: { distribuicao_id, tipo_apontamento_id, deposito_id, insumo_id, qtd },
+  });
 
   return NextResponse.json(rows[0], { status: 201 });
 }
