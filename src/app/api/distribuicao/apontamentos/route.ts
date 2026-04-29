@@ -2,11 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { logAudit } from "@/lib/audit";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 // POST /api/distribuicao/apontamentos
 // Tipos scope 'ambos' ou 'distribuicao': 1,2,3,5,6,8,9
 // Trigger fn_processar_apontamento_dist (migration 020) executa CE automaticamente após INSERT.
 export async function POST(req: NextRequest) {
+  let authUser: Awaited<ReturnType<typeof requireAuth>>;
+  try {
+    authUser = await requireAuth(req);
+  } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: 401 });
+    throw e;
+  }
+
   const {
     distribuicao_id, tipo_apontamento_id, deposito_id, setor_id,
     insumo_id, qtd, foto_balanca, user_id,

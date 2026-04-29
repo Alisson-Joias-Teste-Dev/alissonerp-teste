@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logAudit } from "@/lib/audit";
 import sql from "@/lib/db";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 // GET /api/protocolo?user_id=UUID — lista protocolos do motoboy (ou todos se todos=true)
 export async function GET(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try {
+    user = await requireAuth(req);
+  } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: 401 });
+    throw e;
+  }
 
   const userId = req.nextUrl.searchParams.get("user_id");
   const todos = req.nextUrl.searchParams.get("todos") === "true";
@@ -42,9 +46,13 @@ export async function POST(req: NextRequest) {
   };
 
   // Auth obrigatória — user.id substitui body.user_id para created_by e permissões
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try {
+    user = await requireAuth(req);
+  } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: 401 });
+    throw e;
+  }
 
   if (!direcao || !Array.isArray(ordem_ids) || ordem_ids.length === 0) {
     return NextResponse.json({ error: "Parâmetros inválidos" }, { status: 400 });
