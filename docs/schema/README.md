@@ -3,6 +3,8 @@
 > Gerado automaticamente por `scripts/generate-schema-doc.mjs`
 > Data: 2026-04-29
 
+> **Procurando algo mais detalhado?** Veja `docs/db-mapping/` — mapeamento completo (7 schemas, 377 tabelas, 321 funções com **corpo-fonte**, 148 triggers, 122 views, 234 RLS policies, cross-reference com código). Os dois conjuntos de docs são complementares: este aqui é resumido por categoria de negócio; o `db-mapping` é exaustivo por schema.
+
 ## Arquivos
 
 | Arquivo | Descrição | Tabelas | Views |

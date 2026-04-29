@@ -12,9 +12,14 @@
 
 | Schema | Permissao | Conteudo |
 |--------|-----------|----------|
-| `alissonerp` | Leitura+Escrita | ~60 tabelas, ~35 views, ~30 triggers — ERP fabrica |
-| `public` | READONLY | contatos (=clientes), vendedores, produtos, vendas, user_profiles |
-| `directus` | READONLY | ordens, pcp, apontamento, controle_estoque, protocolo (legado) |
+| `alissonerp` | Leitura+Escrita | 139 tabelas, 71 views, 55 triggers — ERP fabrica |
+| `public` | READONLY | 65 tabelas, 45 views — contatos (=clientes), vendedores, produtos, vendas, user_profiles |
+| `directus` | READONLY | 110 tabelas (so ~15 ainda lidas) — ordens, pcp, apontamento, controle_estoque, protocolo (legado) |
+| `crm` | NAO USADO PELO ERP | 31 tabelas, 13 funcoes — modulo CRM com IA, conversas WhatsApp/Meta, automacoes (provavelmente projeto paralelo no mesmo banco) |
+| `auth` | Supabase GoTrue | use `supabase.auth.*` |
+| `storage` | Supabase Storage | use `supabase.storage.*` |
+
+> **Mapeamento exaustivo do banco:** ver `docs/db-mapping/` (377 tabelas, 321 funcoes, 148 triggers, 122 views, 234 RLS policies, todos com cross-reference ao codigo).
 
 **Acesso DB:** API routes Next.js com `postgres` npm (SQL direto via `src/lib/db.ts`).
 **NUNCA** usar `supabase.from()` para schema alissonerp (PostgREST bug — retorna `[]` silenciosamente).
@@ -83,13 +88,14 @@ buscarOuroRecebido: SUM(entrada)-SUM(saida), chamar ANTES das CEs de saida
 ### Zonas No-Touch (NUNCA alterar sem autorizacao)
 ```
 fn_processar_apontamento_pcp (018)
-fn_processar_transferencia_saida (019)
+fn_processar_transferencia (019) — nome do ARQUIVO eh _saida.sql, mas a funcao se chama sem _saida
 fn_processar_fechamento_dist (020)
 fn_concluir_protocolo
 fn_processar_auditoria
 fn_criar_servico_from_pcp (092)
 fn_calcular_peso_pedra_gramas (092)
 Schemas: public.* e directus.* sao READONLY
+Schema crm.* nao eh usado pelo codigo do ERP — nao tocar
 ```
 
 ---
@@ -235,7 +241,9 @@ Permissoes granulares: src/lib/permissoes.ts -> temPermissao()
 
 ## 8. Referencias
 
-- **Arquitetura completa:** `docs/arquitetura.md` (140KB)
+- **Mapeamento exaustivo do banco:** `docs/db-mapping/` — 7 schemas, 377 tabelas, 321 funcoes (com corpo), 148 triggers, 122 views, 234 RLS policies, cross-reference com codigo. Comecar em `docs/db-mapping/README.md`.
+- **Schema doc resumido por categoria:** `docs/schema/` (alissonerp-vendas, -pcp, -estoque, -admin, -ordens, -outros, public, directus)
+- **Arquitetura completa:** `docs/arquitetura.md` (~155KB)
 - **Dominio ERP (schemas, fluxos, tabelas):** `docs/claude-memory/MEMORY.md`
 - **Memory files:** `~/.claude/projects/C--Users-Jonathan-Ara-jo-OneDrive-fabricaAJ/memory/`
 - **API Routes (280+):** ver memory `project_api_routes.md`

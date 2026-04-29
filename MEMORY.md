@@ -32,9 +32,14 @@ são INACEITÁVEIS — significam que não consultou o banco.
 
 | Schema | Acesso | Conteúdo |
 |--------|--------|----------|
-| `public` | READONLY | contatos (=CLIENTES), vendedores, produtos, vendas, pedidos, user_profiles |
-| `directus` | READONLY | ordens, pcp, apontamento, controle_estoque, protocolo, ficha_tecnica_ordem, insumos |
-| `alissonerp` | LEITURA+ESCRITA | 65+ tabelas reais, 43+ views reais, 33+ triggers reais |
+| `alissonerp` | LEITURA+ESCRITA | **139 tabelas, 71 views, 67 funções, 55 triggers, 38 RLS policies** |
+| `public` | READONLY | 65 tabelas — contatos (=CLIENTES), vendedores, produtos, vendas, pedidos, user_profiles |
+| `directus` | READONLY | 110 tabelas — ordens, pcp, apontamento, controle_estoque, protocolo, ficha_tecnica_ordem, insumos |
+| `crm` | NÃO USADO | 31 tabelas — CRM com IA (agentes, conversas, funis), provavelmente projeto paralelo no mesmo banco |
+| `auth` | via API | Supabase GoTrue — `supabase.auth.*` |
+| `storage` | via API | Supabase Storage — `supabase.storage.*` |
+
+> **Mapeamento exaustivo:** `docs/db-mapping/` — cada tabela/função/trigger/view com detalhe + cross-reference com código (377 tabelas, 321 funções, 148 triggers, 122 views, 234 RLS policies, 819 indexes).
 
 ### Erros que NUNCA devem acontecer
 ```

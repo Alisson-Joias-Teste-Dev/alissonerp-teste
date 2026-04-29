@@ -1,12 +1,24 @@
 # Estrutura Atual — fabricaAJ
 
-> Snapshot gerado em 2026-04-28. Fonte: banco de produção (`72.60.55.140:5543`) + filesystem.
+> Snapshot gerado em 2026-04-29. Fonte: banco de produção (`72.60.55.140:5543`) + filesystem.
 
 ---
 
 ## 1. Tabelas no Supabase (PostgreSQL)
 
-Total: **310 tabelas + 117 views** distribuídas em 3 schemas.
+Total: **377 tabelas + 122 views + 321 funções + 148 triggers + 234 RLS policies** distribuídas em 7 schemas.
+
+> **Inventário completo:** `docs/db-mapping/` (gerado por `scripts/_db_mapping_extract.mjs` via queries diretas no `pg_catalog`). Cada schema tem `tables.md`, `functions.md` (com corpo-fonte), `triggers.md`, `views.md`, `rls.md`. O resumo executivo está em `docs/db-mapping/99-summary.md`.
+
+| Schema | Tabelas | Colunas | Views | Funções | Triggers | RLS | Acesso |
+|--------|--------:|--------:|------:|--------:|---------:|----:|--------|
+| `alissonerp` | 139 | 2619 | 71 | 67 | 55 | 38 | RW (ERP) |
+| `public` | 65 | 1255 | 45 | 69 | 33 | 114 | RO (legado PDV/Supabase) |
+| `directus` | 110 | 1004 | 2 | 14 | 20 | 17 | RO (legado Directus) |
+| `crm` | 31 | 372 | 0 | 13 | 31 | 41 | **NÃO USADO PELO ERP** (CRM com IA paralelo) |
+| `auth` | 20 | 189 | 0 | 4 | 2 | 0 | Supabase GoTrue |
+| `storage` | 11 | 90 | 0 | 29 | 7 | 24 | Supabase Storage |
+| `extensions` | 1 | 65 | 4 | 125 | 0 | 0 | pgcrypto, http, etc. |
 
 ### Schema `alissonerp` — ERP fábrica (CRUD)
 
@@ -107,6 +119,40 @@ tipos_contatos, user_profiles, vales_troca, vendas, vendedores
 `tipo_ocorrencia`, etc.
 
 **Views (2):** `ordem_comentarios_populados`, `v_saldo_quebra_final`.
+
+### Schema `crm` — CRM com IA (NÃO USADO PELO ERP)
+
+**31 tabelas, 13 funções, 41 RLS policies.** Conteúdo aparente:
+
+- **Agentes IA:** `agente_runs`, `agentes_ia`, `prompt_templates`, `sdr_runs`
+- **Canais:** `conversas`, `mensagens`, `kommo_config`, `unipile_config`, `meta_config`, `instagram_posts`, `contato_canais`
+- **Funis/Pipeline:** `funis`, `funil_etapas`, `funil_blocos`, `funil_movimentos`, `oportunidades`, `oportunidade_historico`, `motivos_perda`, `origens_lead`
+- **Automações:** `automacoes`, `automacao_etapas`, `automacao_gatilhos`, `automacao_execucoes`, `ciclo_vida_eventos`
+- **Infra:** `webhook_config`, `webhook_log`, `notificacoes`, `tarefas`, `audit_log`, `config_geral`, `brechas`
+
+**Sem nenhuma referência no código atual do projeto fabricaAJ** — provavelmente projeto paralelo compartilhando o mesmo banco. Não documentado no CLAUDE.md original.
+
+### Schemas Supabase internos
+
+| Schema | Conteúdo | Quando tocar |
+|--------|----------|--------------|
+| `auth` | 20 tabelas (users, sessions, identities) — Supabase GoTrue | Use `supabase.auth.*` |
+| `storage` | 11 tabelas (buckets, objects, migrations) — Supabase Storage | Use `supabase.storage.*` |
+| `extensions` | 1 tabela + 125 funções de extensions (pgcrypto, http, pg_net, hypopg, uuid-ossp, pg_stat_statements, unaccent, wrappers, index_advisor) | Nunca |
+
+### 1.1. Documentação detalhada do banco
+
+- `docs/db-mapping/` — **inventário exaustivo** (cada tabela com colunas/PK/FK/CHECK/index/trigger/RLS, cada função com corpo-fonte, cada view com SQL completo, cross-reference com código)
+- `docs/schema/` — visão resumida por categoria (alissonerp-vendas, -pcp, -estoque, -admin, -ordens, -outros, public, directus)
+
+Os dois conjuntos são complementares.
+
+### 1.2. Scripts geradores
+
+- `scripts/_db_mapping_extract.mjs` — extrai catálogo do banco para `docs/db-mapping/_raw/*.json` (~10s)
+- `scripts/_db_mapping_code_xref.mjs` — varre `src/`, `scripts/`, `supabase/migrations/` e gera `code_references.json` (~10s)
+- `scripts/_db_mapping_build_docs.mjs` — gera os `.md` finais a partir dos JSONs crus
+- `scripts/generate-schema-doc.mjs` — gera `docs/schema/*.md` (resumido)
 
 ---
 
