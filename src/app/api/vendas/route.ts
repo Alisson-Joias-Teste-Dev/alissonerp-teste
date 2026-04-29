@@ -229,6 +229,30 @@ export async function POST(req: NextRequest) {
       WHERE id = ${venda.id}
     `;
 
+    // 3a. Verificar saldo disponível ANTES do INSERT (trigger ainda não criou reservas)
+    //     Usa 'disponivel' (saldo - reservas existentes) para alinhar com o que o frontend exibe.
+    //     Produtos com disponivel < quantidade entram na lista de reposição.
+    const produtosParaReposicao = new Set<number>();
+    if (body.tipo_venda === "produto" && Array.isArray(body.itens) && body.itens.length > 0) {
+      const pids = (body.itens as ItemInput[]).map(i => i.produto_id).filter(Boolean);
+      if (pids.length > 0) {
+        const saldosPre = await tx`
+          SELECT produto_id, SUM(disponivel)::float8 AS disponivel
+          FROM alissonerp.vw_saldo_estoque_comercial
+          WHERE produto_id = ANY(${pids}::bigint[])
+          GROUP BY produto_id
+        `;
+        const dispMap = new Map<number, number>(
+          saldosPre.map((s: Record<string, unknown>) => [Number(s.produto_id), Number(s.disponivel)])
+        );
+        for (const item of body.itens as ItemInput[]) {
+          if (!item.produto_id) continue;
+          const disp = dispMap.get(Number(item.produto_id)) ?? 0;
+          if (disp < item.quantidade) produtosParaReposicao.add(Number(item.produto_id));
+        }
+      }
+    }
+
     // 3. Inserir itens (trigger recalcula totais automaticamente)
     if (!Array.isArray(body.itens) || body.itens.length === 0) {
       throw new Error("Venda deve ter pelo menos um item");
@@ -402,17 +426,7 @@ export async function POST(req: NextRequest) {
 
     // ─── Ordens de reposição (dentro da tx — falha reverte a venda inteira) ───
     const ordensReposicao: Array<{ numero_ordem: string; produto: string }> = [];
-    if (body.tipo_venda === "produto" && Array.isArray(body.itens) && body.itens.length > 0) {
-      const produtoIds = body.itens.map((i: ItemInput) => i.produto_id).filter(Boolean);
-      if (produtoIds.length > 0) {
-        const saldos = await tx`
-          SELECT produto_id, SUM(saldo) AS saldo
-          FROM alissonerp.vw_saldo_estoque_comercial
-          WHERE produto_id = ANY(${produtoIds}::bigint[])
-          GROUP BY produto_id
-        `;
-        const saldoMap = new Map<number, number>(saldos.map((s: Record<string, unknown>) => [Number(s.produto_id), Number(s.saldo)]));
-
+    if (produtosParaReposicao.size > 0) {
         const [{ data_entrega_rep }] = await tx`
           SELECT alissonerp.fn_adicionar_dias_uteis(CURRENT_DATE, 10) AS data_entrega_rep
         `;
@@ -428,8 +442,7 @@ export async function POST(req: NextRequest) {
 
         for (const item of body.itens as ItemInput[]) {
           if (!item.produto_id) continue;
-          const saldo = saldoMap.get(Number(item.produto_id)) ?? 0;
-          if (saldo >= item.quantidade) continue;
+          if (!produtosParaReposicao.has(Number(item.produto_id))) continue;
 
           const [ficha] = await tx`
             SELECT id, peso_estimado_metal, modelo, modelo_interno, arquivo_3dm, arquivo_glb
@@ -471,7 +484,6 @@ export async function POST(req: NextRequest) {
           ordensReposicao.push({ numero_ordem: ordem.numero_ordem, produto: item.nome_produto });
           ordemSeq++;
         }
-      }
     }
 
     return { ...completa, ordensReposicao };
