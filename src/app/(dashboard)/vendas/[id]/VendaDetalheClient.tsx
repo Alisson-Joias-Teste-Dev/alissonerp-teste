@@ -1340,16 +1340,23 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
               </span>
             )}
             {venda.tiny_sync_status === "erro" && !venda.tiny_pedido_id && (
-              <button
-                onClick={retryTiny}
-                disabled={retryingTiny}
-                className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-80"
-                style={{ backgroundColor: "#FEE2E2", color: "#991B1B" }}
-                title={venda.tiny_sync_erro ?? "Erro na sincronização com o Tiny"}
-              >
-                {retryingTiny ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-                {retryingTiny ? "Reenviando..." : "Erro Tiny — Retentar"}
-              </button>
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={retryTiny}
+                  disabled={retryingTiny}
+                  className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-80 self-start"
+                  style={{ backgroundColor: "#FEE2E2", color: "#991B1B" }}
+                  title="Reenviar sincronização com o Tiny"
+                >
+                  {retryingTiny ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                  {retryingTiny ? "Reenviando..." : "Erro Tiny — Retentar"}
+                </button>
+                {venda.tiny_sync_erro && (
+                  <span className="text-xs px-2 py-0.5 rounded-lg" style={{ backgroundColor: "#FFF5F5", color: "#991B1B", maxWidth: "320px", lineHeight: "1.3" }}>
+                    {venda.tiny_sync_erro}
+                  </span>
+                )}
+              </div>
             )}
             {tinyRetryMsg && (
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${tinyRetryMsg.includes("sucesso") ? "bg-green-100 text-green-800" : "bg-red-100 text-red-700"}`}>

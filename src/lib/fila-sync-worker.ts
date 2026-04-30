@@ -1,4 +1,5 @@
 import sql from "@/lib/db";
+import { syncContatoToTiny } from "@/lib/tiny-contatos";
 
 const DELAYS_SEGUNDOS = [60, 300, 900, 3600, 21600]; // 1m, 5m, 15m, 1h, 6h
 const MAX_TENTATIVAS = 5;
@@ -28,44 +29,12 @@ async function processarItem(item: FilaItem): Promise<void> {
 async function processarTiny(item: FilaItem): Promise<void> {
   const { acao, payload } = item;
   if (acao === "sync_contato") {
-    // Payload: { id_contato: number, nome: string, ... }
-    // Buscar token do Tiny e reenviar o contato
-    const [tokenRow] = await sql`
-      SELECT valor_encrypted FROM alissonerp.configuracoes_secrets
-      WHERE chave = 'tiny_bearer_token'
-    `;
-    if (!tokenRow?.valor_encrypted) throw new Error("Token Tiny não configurado");
-    let token: string;
-    try { token = JSON.parse(tokenRow.valor_encrypted as string); }
-    catch { token = String(tokenRow.valor_encrypted); }
-    token = token.replace(/"/g, "").trim();
-
     const contatoId = payload.id_contato as number;
-    const [contato] = await sql`
-      SELECT id_contato, nome, cpf_cnpj, email, telefone, celular
-      FROM public.contatos WHERE id_contato = ${contatoId}
-    `;
-    if (!contato) throw new Error(`Contato ${contatoId} não encontrado`);
+    if (!contatoId) throw new Error("Payload inválido: id_contato ausente");
 
-    const res = await fetch(`https://api.tiny.com.br/public-api/v3/contatos`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-      body: JSON.stringify({
-        nome: contato.nome,
-        cpf_cnpj: contato.cpf_cnpj,
-        email: contato.email,
-        telefone: contato.telefone ?? contato.celular,
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Tiny ${res.status}: ${err.slice(0, 200)}`);
-    }
-    // Atualizar id_api_contato se retornado
-    const data = await res.json() as { id?: number };
-    if (data.id) {
-      await sql`UPDATE public.contatos SET id_api_contato = ${String(data.id)} WHERE id_contato = ${contatoId}`;
+    const result = await syncContatoToTiny(contatoId);
+    if (!result.ok) {
+      throw new Error(result.erro ?? "Falha ao sincronizar contato com Tiny");
     }
   } else {
     throw new Error(`Ação Tiny desconhecida: ${acao}`);

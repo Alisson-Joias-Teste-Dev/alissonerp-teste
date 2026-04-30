@@ -221,7 +221,7 @@ export async function sendToTiny(vendaId: number): Promise<void> {
       UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${msg}
       WHERE id = ${vendaId}
     `;
-    throw new Error(`Erro Tiny: ${msg}`);
+    throw new Error(`${msg}`);
   }
 
   const dataVenda = venda.data_venda
@@ -292,7 +292,7 @@ export async function sendToTiny(vendaId: number): Promise<void> {
       UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${msg}
       WHERE id = ${vendaId}
     `;
-    throw new Error(`Erro Tiny: ${msg}`);
+    throw new Error(`${msg}`);
   }
 
   if (!tinyRes.ok) {
@@ -317,7 +317,7 @@ export async function sendToTiny(vendaId: number): Promise<void> {
       UPDATE alissonerp.vendas_erp SET tiny_sync_status = 'erro', tiny_sync_at = NOW(), tiny_sync_erro = ${erroMsg}
       WHERE id = ${vendaId}
     `;
-    throw new Error(`Erro Tiny: ${erroMsg}`);
+    throw new Error(`${erroMsg}`);
   }
 
   const tinyData = await tinyRes.json() as { id?: number; numeroPedido?: string };
