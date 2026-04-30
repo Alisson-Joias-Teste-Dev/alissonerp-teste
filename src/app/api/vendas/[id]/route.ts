@@ -184,6 +184,19 @@ export async function PATCH(
     return NextResponse.json({ error: "Situação inválida" }, { status: 400 });
   }
 
+  // ── Guard de versão (lost-update prevention) ────────────────────────────────
+  // Deve rodar ANTES do bloco Tiny, pois o Tiny faz UPDATE em vendas_erp e
+  // dispara o trigger de updated_at — causando falso positivo se checado depois.
+  if (body.client_updated_at) {
+    const [row] = await sql`SELECT updated_at FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
+    if (row && new Date(row.updated_at as string).getTime() !== new Date(body.client_updated_at).getTime()) {
+      return NextResponse.json(
+        { error: "Conflito: registro foi modificado por outro usuário. Recarregue a página." },
+        { status: 409 }
+      );
+    }
+  }
+
   // Campos restritos a rascunho
   if (body.cliente_id !== undefined || body.vendedor_id !== undefined || body.data_venda !== undefined) {
     if (venda.situacao !== "rascunho") {
@@ -592,18 +605,6 @@ export async function PATCH(
         WHERE id = ${vendaId}
       `;
       tinyErroWarning = erroMsg;
-    }
-  }
-
-  // ── Guard de versão (lost-update prevention) ────────────────────────────────
-  // Opcional: só verifica se o cliente enviou client_updated_at
-  if (body.client_updated_at) {
-    const [row] = await sql`SELECT updated_at FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
-    if (row && new Date(row.updated_at as string).getTime() !== new Date(body.client_updated_at).getTime()) {
-      return NextResponse.json(
-        { error: "Conflito: registro foi modificado por outro usuário. Recarregue a página." },
-        { status: 409 }
-      );
     }
   }
 
