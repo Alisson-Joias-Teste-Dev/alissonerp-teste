@@ -360,7 +360,7 @@ export async function POST(req: NextRequest) {
             peso_estimado, observacao, personalizacao
           ) VALUES (
             ${venda.id},
-            ${item.produto_id},
+            ${item.produto_id ?? null},
             ${item.nome_produto},
             ${item.sku ?? null},
             ${item.quantidade},

@@ -1135,11 +1135,13 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   async function salvarRascunho(opts?: { skipPagamentos?: boolean }): Promise<{ id: number; numero_venda: string }> {
     const body = montarBody(undefined, opts?.skipPagamentos ?? false);
     if (vendaId) {
-      // PATCH
+      // omite cliente_id/vendedor_id: imutáveis pós-rascunho; enviar causaria 409 se a venda já foi aprovada
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { cliente_id, vendedor_id, ...patchBody } = body;
       const res = await fetch(`/api/vendas/${vendaId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(patchBody),
       });
       const data = await res.json() as { id?: number; numero_venda?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
