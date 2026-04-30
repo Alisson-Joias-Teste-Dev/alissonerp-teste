@@ -72,6 +72,7 @@ interface Venda {
   observacoes: string | null; observacoes_internas: string | null;
   video_obs_interna: string | null; tiny_sync_status: string | null;
   tiny_pedido_id: string | null; tiny_sync_erro: string | null; bloqueado: boolean; qtd_itens: number;
+  cliente_id_tiny?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
   credito_gerente_usado?: number;
@@ -389,6 +390,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [sharing, setSharing] = useState(false);
   const [retryingTiny, setRetryingTiny] = useState(false);
   const [tinyRetryMsg, setTinyRetryMsg] = useState<string | null>(null);
+  const [syncingCliente, setSyncingCliente] = useState(false);
+  const [clienteSyncMsg, setClienteSyncMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [abrirNfce, setAbrirNfce] = useState(false);
@@ -1186,6 +1189,24 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     finally { setGerandoPdf(false); }
   }
 
+  // ── Sync cliente para Tiny ───────────────────────────────────────────────────
+  async function syncClienteTiny() {
+    if (!venda?.cliente_id) return;
+    setSyncingCliente(true);
+    setClienteSyncMsg(null);
+    try {
+      const res = await fetch(`/api/contatos/${venda.cliente_id}/tiny-sync`, { method: "POST" });
+      const data = await res.json() as { ok?: boolean; tiny_id?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Erro ao sincronizar cliente");
+      setClienteSyncMsg("Cliente enviado ao Tiny com sucesso!");
+      setVenda(prev => prev ? { ...prev, cliente_id_tiny: data.tiny_id ?? prev.cliente_id_tiny } : prev);
+    } catch (e) {
+      setClienteSyncMsg(e instanceof Error ? e.message : "Erro ao sincronizar cliente");
+    } finally {
+      setSyncingCliente(false);
+    }
+  }
+
   // ── Share ───────────────────────────────────────────────────────────────────
   async function retryTiny() {
     if (!venda) return;
@@ -1362,6 +1383,25 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${tinyRetryMsg.includes("sucesso") ? "bg-green-100 text-green-800" : "bg-red-100 text-red-700"}`}>
                 {tinyRetryMsg}
               </span>
+            )}
+            {venda.cliente_id && !venda.cliente_id_tiny && (
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={syncClienteTiny}
+                  disabled={syncingCliente}
+                  className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-80 self-start"
+                  style={{ backgroundColor: "#FEF9C3", color: "#854D0E" }}
+                  title="Enviar cliente ao Tiny para poder aprovar a venda"
+                >
+                  {syncingCliente ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                  {syncingCliente ? "Enviando..." : "Cliente sem Tiny — Sincronizar"}
+                </button>
+                {clienteSyncMsg && (
+                  <span className={`text-xs px-2 py-0.5 rounded-lg ${clienteSyncMsg.includes("sucesso") ? "bg-green-50 text-green-800" : "bg-red-50 text-red-700"}`}>
+                    {clienteSyncMsg}
+                  </span>
+                )}
+              </div>
             )}
             {venda.bloqueado && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Bloqueada</span>
