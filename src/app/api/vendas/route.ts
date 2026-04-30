@@ -458,7 +458,7 @@ export async function POST(req: NextRequest) {
               cliente_id, vendedor_id, data_entrega,
               venda_id, origem, created_by
             ) VALUES (
-              ${numeroOrdem}, ${venda.numero_venda}, 'reposicao_venda', 'pcp', 'criado', 'aguardando',
+              ${numeroOrdem}, ${completa.numero_venda}, 'reposicao_venda', 'pcp', 'criado', 'aguardando',
               ${body.cliente_id ?? null}, ${body.vendedor_id ?? null}, ${data_entrega_rep},
               ${venda.id}, 'erp', ${user.id}::uuid
             ) RETURNING id, numero_ordem
