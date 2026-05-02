@@ -1,0 +1,37 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createDeepSeekProvider } from '@/agentes/core/llm/deepseek';
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const token = req.headers.get('X-Playground-Token');
+  if (token !== process.env.DEV_PLAYGROUND_TOKEN) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let body: { messages?: Array<{ role: string; content: string }>; message?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  const messages = body.messages ?? [
+    { role: 'user', content: body.message ?? 'Olá' },
+  ];
+
+  const llm = createDeepSeekProvider();
+
+  try {
+    const result = await llm.chat({ messages, maxTokens: 500 });
+    return NextResponse.json({
+      response: result.content,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      model: result.model,
+    });
+  } catch (error) {
+    return NextResponse.json({
+      error: 'LLM request failed',
+      detail: String(error),
+    }, { status: 502 });
+  }
+}

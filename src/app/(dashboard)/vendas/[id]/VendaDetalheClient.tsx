@@ -1479,6 +1479,26 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         </div>
       )}
 
+      {/* ── Banner: aprovação de desconto pendente ── */}
+      {isDescontoApproval && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-2"
+          style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
+          <div className="flex items-center gap-2">
+            <Loader2 size={16} className="animate-spin shrink-0" />
+            <p className="text-sm font-medium">
+              Aguardando aprovação de desconto
+            </p>
+          </div>
+          {venda.aprovacao_desconto_aprov_id && (
+            <a href={`/tarefas/${venda.aprovacao_desconto_aprov_id}`}
+              className="text-xs font-semibold px-3 py-1 rounded-lg shrink-0"
+              style={{ backgroundColor: "#FDE68A", color: "#713F12" }}>
+              Ver Tarefa →
+            </a>
+          )}
+        </div>
+      )}
+
       {/* ── Banner: Manual (MP) pendente — bloqueia aprovação ── */}
       {temManualMpPendente && venda.situacao === "rascunho" && (
         <div className="mb-3 px-4 py-3 rounded-lg border flex items-center gap-2"
