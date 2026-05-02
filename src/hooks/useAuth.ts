@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import type { Role } from "@/lib/auth/permissions";
@@ -115,6 +115,20 @@ export function useAuth(): AuthState {
     }
     return () => { subscribers.delete(sub); };
   }, []);
+
+  // ── Tiny OAuth2 keepalive: renova token a cada 30 min (admin/dev apenas) ──
+  const keepaliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (state.loading) return;
+    const roleOk = state.role === "admin" || state.role === "desenvolvedor";
+    if (!roleOk || keepaliveRef.current) return;
+    keepaliveRef.current = setInterval(() => {
+      fetch("/api/admin/tiny-keepalive").catch(() => {});
+    }, 30 * 60 * 1000);
+    return () => {
+      if (keepaliveRef.current) { clearInterval(keepaliveRef.current); keepaliveRef.current = null; }
+    };
+  }, [state.loading, state.role]);
 
   return state;
 }
