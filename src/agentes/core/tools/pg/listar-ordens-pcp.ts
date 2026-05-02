@@ -3,14 +3,19 @@ import type { Tool } from '../registry';
 
 export const listarOrdensPcp: Tool = {
   name: 'listar_ordens_pcp',
-  description: 'Lista ordens de produção em aberto com informações de PCP, situação, status e cliente',
+  description: 'Lista ordens de produção com PCP, situação, status e cliente. Filtra por padrão ordens criadas/ativas',
   parameters: {
     type: 'object',
     properties: {
       situacao: {
         type: 'string',
-        enum: ['aberto', 'em_andamento', 'finalizado'],
-        description: 'Filtrar por situação da ordem (opcional)',
+        enum: ['criado', 'cancelado', 'rascunho'],
+        description: 'Filtrar por situacao (criado, cancelado, rascunho). Padrão: criado',
+      },
+      status: {
+        type: 'string',
+        enum: ['aguardando', 'em_andamento', 'concluido', 'cancelado'],
+        description: 'Filtrar por status (aguardando, em_andamento, concluido, cancelado)',
       },
       limite: {
         type: 'number',
@@ -23,6 +28,8 @@ export const listarOrdensPcp: Tool = {
 
   async execute(args: Record<string, unknown>): Promise<unknown> {
     const limite = Math.min((args.limite as number) ?? 10, 50);
+    const filtroSituacao = (args.situacao as string) ?? 'criado';
+    const filtroStatus = args.status as string | undefined;
 
     const rows = await sql`
       SELECT
@@ -32,7 +39,8 @@ export const listarOrdensPcp: Tool = {
         vw.pcp_id, vw.pcp_etapas, vw.pcp_bloqueado,
         vw.pcp_peso_final, vw.pcp_metal_externo
       FROM alissonerp.vw_ordem_detalhe vw
-      WHERE vw.situacao_cod IN ('1','2')
+      WHERE LOWER(vw.situacao) = LOWER(${filtroSituacao})
+        ${filtroStatus ? sql`AND LOWER(vw.status) = LOWER(${filtroStatus})` : sql``}
       ORDER BY vw.data_entrega ASC NULLS LAST
       LIMIT ${limite}
     `;
