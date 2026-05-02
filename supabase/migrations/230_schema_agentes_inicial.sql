@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS agentes.skills (
   descricao       TEXT,
   bot_token_env   VARCHAR(100) NOT NULL,
   prompt_path     VARCHAR(255) NOT NULL,
-  prompt_versao   VARCHAR(20) NOT NULL DEFAULT 'v1',
+  prompt_versao   VARCHAR(64) NOT NULL DEFAULT 'v1',
   ativa           BOOLEAN NOT NULL DEFAULT true,
   llm_provider    VARCHAR(30) NOT NULL DEFAULT 'deepseek',
   llm_model       VARCHAR(50) NOT NULL DEFAULT 'deepseek-chat',
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS agentes.conversas (
   tool_result     JSONB,
   tokens_in       INT,
   tokens_out      INT,
-  prompt_versao   VARCHAR(20),
+  prompt_versao   VARCHAR(64),
   modelo          VARCHAR(50),
   criada_em       TIMESTAMPTZ DEFAULT NOW(),
   anonimizada_em  TIMESTAMPTZ
