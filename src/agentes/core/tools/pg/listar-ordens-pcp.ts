@@ -3,18 +3,18 @@ import type { Tool } from '../registry';
 
 export const listarOrdensPcp: Tool = {
   name: 'listar_ordens_pcp',
-  description: 'Lista ordens em produção (PCP) com situação, status, operador e dados de fabricação',
+  description: 'Lista ordens do PCP (produção) com etapa, cliente, peso e dados de fabricação. Filtra por padrão ordens ativas (não concluídas)',
   parameters: {
     type: 'object',
     properties: {
-      status: {
+      etapa: {
         type: 'string',
-        enum: ['em_andamento', 'concluido', 'aguardando', 'cancelado'],
-        description: 'Filtrar por status (padrão: em_andamento)',
+        enum: ['novas_ordens', 'em_andamento', 'aguardando', 'cancelado', 'concluido'],
+        description: 'Filtrar por etapa (novas_ordens, em_andamento, aguardando, cancelado, concluido)',
       },
-      somente_ativos: {
-        type: 'boolean',
-        description: 'Se true, mostra apenas PCPs sem data de conclusão (padrão: true)',
+      deposito_id: {
+        type: 'number',
+        description: 'Filtrar por depósito (padrão 1)',
       },
       limite: {
         type: 'number',
@@ -27,40 +27,45 @@ export const listarOrdensPcp: Tool = {
 
   async execute(args: Record<string, unknown>): Promise<unknown> {
     const limite = Math.min((args.limite as number) ?? 10, 50);
-    const filtroStatus = args.status as string | undefined;
-    const somenteAtivos = args.somente_ativos !== false;
+    const filtroEtapa = args.etapa as string | undefined;
+    const depositoId = (args.deposito_id as number) ?? 1;
 
     const rows = await sql`
       SELECT
-        o.id, o.numero_ordem, o.situacao, o.status,
-        o.cliente_id, o.peso_metal_negociado, o.data_entrega,
-        p.id as pcp_id, p.bloqueado, p.operador,
-        p.total_metal, p.retorno_metal, p.peso_final,
-        p.quantidade, p.data_conclusao as pcp_data_conclusao,
-        u.nome as operador_nome
-      FROM alissonerp.pcp p
-      JOIN alissonerp.ordens o ON o.id = p.ordem_id
-      LEFT JOIN alissonerp.usuarios u ON u.id = p.operador
-      WHERE (o.situacao = 'criado' OR o.situacao = 'cancelado')
-        ${filtroStatus ? sql`AND o.status::text = ${filtroStatus}` : sql``}
-        ${somenteAtivos ? sql`AND p.data_conclusao IS NULL` : sql``}
-      ORDER BY o.data_entrega ASC NULLS LAST
+        v.id, v.ordem_id, v.etapas_cod, v.etapas,
+        v.numero_ordem, v.cliente_nome, v.vendedor_nome,
+        v.setor_nome, v.total_metal, v.peso_final,
+        v.data_conclusao, v.created_at, v.deposito_id,
+        v.bloqueado, v.data_entrega
+      FROM alissonerp.vw_pcp_erp v
+      WHERE v.deposito_id = ${depositoId}
+        AND NOT EXISTS (
+          SELECT 1 FROM alissonerp.servicos s
+          WHERE s.pcp_id = v.id
+            AND s.status IN ('em_servico', 'aguardando', 'concluido')
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM alissonerp.transferencias_ordem t
+          WHERE t.pcp_id = v.id
+            AND t.tipo_transferencia = 'service'
+        )
+        ${filtroEtapa ? sql`AND v.etapas_cod = ${filtroEtapa}` : sql`AND v.etapas_cod <> 'concluido'`}
+      ORDER BY v.id DESC
       LIMIT ${limite}
     `;
 
     return rows.map((r) => ({
       id: r.id,
       ordem: r.numero_ordem,
-      situacao: r.situacao,
-      status: r.status,
-      pcp_id: r.pcp_id,
-      bloqueado: r.bloqueado,
-      operador: r.operador_nome ?? 'Não atribuído',
+      etapa: r.etapas_cod,
+      etapa_nome: r.etapas,
+      cliente: r.cliente_nome,
+      vendedor: r.vendedor_nome,
+      setor: r.setor_nome,
       peso_metal: r.total_metal,
       peso_final: r.peso_final,
-      quantidade: r.quantidade,
       data_entrega: r.data_entrega,
-      concluido: r.pcp_data_conclusao !== null,
+      bloqueado: r.bloqueado,
     }));
   },
 };
