@@ -42,7 +42,7 @@ export const listarOrdensPcp: Tool = {
       JOIN alissonerp.ordens o ON o.id = p.ordem_id
       LEFT JOIN alissonerp.usuarios u ON u.id = p.operador
       WHERE (o.situacao = 'criado' OR o.situacao = 'cancelado')
-        ${filtroStatus ? sql`AND LOWER(o.status) = LOWER(${filtroStatus})` : sql``}
+        ${filtroStatus ? sql`AND o.status::text = ${filtroStatus}` : sql``}
         ${somenteAtivos ? sql`AND p.data_conclusao IS NULL` : sql``}
       ORDER BY o.data_entrega ASC NULLS LAST
       LIMIT ${limite}
