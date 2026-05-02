@@ -25,7 +25,7 @@ export async function POST(
     await processUpdate(body as Parameters<typeof processUpdate>[0], bot);
   } catch (error) {
     console.error(`[telegram/${bot}] erro:`, error);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: false, error: String(error) }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });
