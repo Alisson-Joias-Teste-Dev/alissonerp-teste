@@ -3,19 +3,18 @@ import type { Tool } from '../registry';
 
 export const listarOrdensPcp: Tool = {
   name: 'listar_ordens_pcp',
-  description: 'Lista ordens de produção com PCP, situação, status e cliente. Filtra por padrão ordens criadas/ativas',
+  description: 'Lista ordens em produção (PCP) com situação, status, operador e dados de fabricação',
   parameters: {
     type: 'object',
     properties: {
-      situacao: {
-        type: 'string',
-        enum: ['criado', 'cancelado', 'rascunho'],
-        description: 'Filtrar por situacao (criado, cancelado, rascunho). Padrão: criado',
-      },
       status: {
         type: 'string',
-        enum: ['aguardando', 'em_andamento', 'concluido', 'cancelado'],
-        description: 'Filtrar por status (aguardando, em_andamento, concluido, cancelado)',
+        enum: ['em_andamento', 'concluido', 'aguardando', 'cancelado'],
+        description: 'Filtrar por status (padrão: em_andamento)',
+      },
+      somente_ativos: {
+        type: 'boolean',
+        description: 'Se true, mostra apenas PCPs sem data de conclusão (padrão: true)',
       },
       limite: {
         type: 'number',
@@ -28,20 +27,24 @@ export const listarOrdensPcp: Tool = {
 
   async execute(args: Record<string, unknown>): Promise<unknown> {
     const limite = Math.min((args.limite as number) ?? 10, 50);
-    const filtroSituacao = (args.situacao as string) ?? 'criado';
     const filtroStatus = args.status as string | undefined;
+    const somenteAtivos = args.somente_ativos !== false;
 
     const rows = await sql`
       SELECT
-        vw.id, vw.numero_ordem, vw.situacao, vw.situacao_cod,
-        vw.status, vw.status_cod, vw.rota, vw.cliente_nome,
-        vw.peso_metal_negociado, vw.data_entrega,
-        vw.pcp_id, vw.pcp_etapas, vw.pcp_bloqueado,
-        vw.pcp_peso_final, vw.pcp_metal_externo
-      FROM alissonerp.vw_ordem_detalhe vw
-      WHERE LOWER(vw.situacao) = LOWER(${filtroSituacao})
-        ${filtroStatus ? sql`AND LOWER(vw.status) = LOWER(${filtroStatus})` : sql``}
-      ORDER BY vw.data_entrega ASC NULLS LAST
+        o.id, o.numero_ordem, o.situacao, o.status,
+        o.cliente_id, o.peso_metal_negociado, o.data_entrega,
+        p.id as pcp_id, p.bloqueado, p.operador,
+        p.total_metal, p.retorno_metal, p.peso_final,
+        p.quantidade, p.data_conclusao as pcp_data_conclusao,
+        u.nome as operador_nome
+      FROM alissonerp.pcp p
+      JOIN alissonerp.ordens o ON o.id = p.ordem_id
+      LEFT JOIN alissonerp.usuarios u ON u.id = p.operador
+      WHERE (o.situacao = 'criado' OR o.situacao = 'cancelado')
+        ${filtroStatus ? sql`AND LOWER(o.status) = LOWER(${filtroStatus})` : sql``}
+        ${somenteAtivos ? sql`AND p.data_conclusao IS NULL` : sql``}
+      ORDER BY o.data_entrega ASC NULLS LAST
       LIMIT ${limite}
     `;
 
@@ -50,12 +53,14 @@ export const listarOrdensPcp: Tool = {
       ordem: r.numero_ordem,
       situacao: r.situacao,
       status: r.status,
-      rota: r.rota,
-      cliente: r.cliente_nome,
-      peso_metal: r.peso_metal_negociado,
-      data_entrega: r.data_entrega,
       pcp_id: r.pcp_id,
-      pcp_bloqueado: r.pcp_bloqueado,
+      bloqueado: r.bloqueado,
+      operador: r.operador_nome ?? 'Não atribuído',
+      peso_metal: r.total_metal,
+      peso_final: r.peso_final,
+      quantidade: r.quantidade,
+      data_entrega: r.data_entrega,
+      concluido: r.pcp_data_conclusao !== null,
     }));
   },
 };
