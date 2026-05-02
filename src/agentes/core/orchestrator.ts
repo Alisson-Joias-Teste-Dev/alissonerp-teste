@@ -34,6 +34,7 @@ export async function processUpdate(rawBody: TelegramUpdate, botSlug: string): P
   const authResult = await handleAuthFlow(chatId, text, botSlug);
 
   if (!authResult.authenticated) {
+    console.log(`[auth] chat=${chatId} reply="${authResult.reply.substring(0, 50)}..."`);
     await sendMessage(botSlug, chatId, authResult.reply);
     return 'auth required';
   }
