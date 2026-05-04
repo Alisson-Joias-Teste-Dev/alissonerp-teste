@@ -39,7 +39,7 @@ export function createDeepSeekProvider(model = 'deepseek-chat'): LLMProvider {
         content: (systemMsg?.content ?? '') + toolDescriptions,
       };
 
-      let currentMessages: Array<{ role: string; content: string }> = [systemContent, ...nonSystemMsgs];
+      const currentMessages: Array<{ role: string; content: string }> = [systemContent, ...nonSystemMsgs];
       let finalText = '';
 
       for (let round = 0; round < 3; round++) {
