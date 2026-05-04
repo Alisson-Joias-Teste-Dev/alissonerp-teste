@@ -83,5 +83,43 @@ export async function aplicarCurvaProduto(
       updated_at       = NOW()
   `;
 
+  // ── Propagar para variacoes filhas ──
+  const filhos = await db`
+    SELECT filho.produto_id, filho_prod.peso_precificado
+    FROM alissonerp.erp_produtos pai
+    JOIN alissonerp.erp_produtos filho ON filho.parent_id = pai.id
+    JOIN public.produtos filho_prod ON filho_prod.id_produto = filho.produto_id
+    WHERE pai.produto_id = ${produtoId}
+      AND filho.eh_variacao = true
+      AND filho_prod.peso_precificado IS NOT NULL
+      AND filho_prod.peso_precificado > 0
+  `;
+
+  for (const filho of filhos) {
+    const pesoFilho = Number(filho.peso_precificado);
+    const factorsFilho = getPricingFactors(pesoFilho, config, categorias);
+    const markupFilho = Number(factorsFilho.mkp.toFixed(4));
+    const comissaoFilho = Number(factorsFilho.commission.toFixed(3));
+    const maxDescontoFilho = Number(factorsFilho.maxDiscount.toFixed(2));
+
+    await db`
+      UPDATE public.produtos
+      SET markup = ${markupFilho}
+      WHERE id_produto = ${filho.produto_id}
+    `;
+
+    await db`
+      INSERT INTO alissonerp.produto_curva_aplicada
+        (produto_id, comissao_pct, max_desconto_pct, markup_aplicado, updated_at)
+      VALUES
+        (${filho.produto_id}, ${comissaoFilho}, ${maxDescontoFilho}, ${markupFilho}, NOW())
+      ON CONFLICT (produto_id) DO UPDATE SET
+        comissao_pct     = EXCLUDED.comissao_pct,
+        max_desconto_pct = EXCLUDED.max_desconto_pct,
+        markup_aplicado  = EXCLUDED.markup_aplicado,
+        updated_at       = NOW()
+    `;
+  }
+
   return { applied: true, markup, comissao_pct: comissao, max_desconto_pct: maxDesconto };
 }
