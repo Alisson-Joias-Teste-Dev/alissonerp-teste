@@ -7,10 +7,11 @@ VALUES ('pagamento-fotos', 'pagamento-fotos', false, 10485760,
 ON CONFLICT (id) DO NOTHING;
 
 -- RLS: authenticated pode fazer upload e leitura
-CREATE POLICY IF NOT EXISTS "pagamento_fotos_insert"
-ON storage.objects FOR INSERT TO authenticated
-WITH CHECK (bucket_id = 'pagamento-fotos');
-
-CREATE POLICY IF NOT EXISTS "pagamento_fotos_select"
-ON storage.objects FOR SELECT TO authenticated
-USING (bucket_id = 'pagamento-fotos');
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'pagamento_fotos_insert') THEN
+    CREATE POLICY pagamento_fotos_insert ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'pagamento-fotos');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'pagamento_fotos_select') THEN
+    CREATE POLICY pagamento_fotos_select ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'pagamento-fotos');
+  END IF;
+END $$;
