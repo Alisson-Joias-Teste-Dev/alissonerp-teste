@@ -1197,13 +1197,22 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   async function validarOuroIA(file: File, peso: number, setter: (r: { match: boolean; mensagem: string } | null) => void, loadingSetter: (v: boolean) => void) {
     loadingSetter(true);
     setter(null);
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("peso", String(peso));
-    const res = await fetch("/api/pcp/validar-peso", { method: "POST", body: fd });
-    const result = await res.json() as { match: boolean; mensagem: string };
-    setter(result);
-    loadingSetter(false);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("peso", String(peso));
+      const res = await fetch("/api/pcp/validar-peso", { method: "POST", body: fd });
+      const result = await res.json() as { match: boolean; mensagem: string } & { error?: string };
+      if (!res.ok) {
+        setter({ match: false, mensagem: result.error || `Erro ${res.status} ao validar peso` });
+      } else {
+        setter(result);
+      }
+    } catch {
+      setter({ match: false, mensagem: "Falha de conexão ao validar peso. Verifique sua internet." });
+    } finally {
+      loadingSetter(false);
+    }
   }
 
   async function uploadOuroFoto(file: File, vendaIdParam: number): Promise<string | null> {
@@ -2867,9 +2876,10 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                       <button
                         disabled={restante <= 0 || !multOuroValidacaoIA?.match || !multOuroFotoFile || multOuroValidando}
                         onClick={() => {
-                          if (!multOuroFotoFile) return;
+                          if (!multOuroFotoFile) { setSaveErr("Foto da balança obrigatória."); return; }
                           const peso = parseFloat(multOuroPeso.replace(",", ".")); const vg = parseFloat(multOuroValorGrama.replace(",", "."));
-                          if (!peso || !vg) return;
+                          if (!peso || peso <= 0) { setSaveErr("Informe o peso do ouro."); return; }
+                          if (!vg || vg <= 0) { setSaveErr("Informe o valor da grama."); return; }
                           const valorOuro = Math.min(+(peso * vg).toFixed(2), restante);
                           setPagamentos(prev => [...prev, { _key: uid(), forma: "Ouro", valor: valorOuro, parcelas: 1, ouro_peso: peso, ouro_valor_grama: vg, ouro_foto_file: multOuroFotoFile }]);
                           setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null);
