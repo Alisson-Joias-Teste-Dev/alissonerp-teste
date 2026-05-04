@@ -94,8 +94,7 @@ export async function POST(req: NextRequest) {
       SELECT p.id_produto, p.peso_precificado
       FROM public.produtos p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
-      WHERE (ep.eh_variacao = false OR ep.id IS NULL)
-        AND p.peso_precificado IS NOT NULL
+      WHERE p.peso_precificado IS NOT NULL
         AND p.peso_precificado > 0
         ${w.wBusca} ${w.wSkuPrefix} ${w.wPedra} ${w.wSituacao}
         ${w.wCategoria} ${w.wTipoMetal} ${w.wEstoque}
