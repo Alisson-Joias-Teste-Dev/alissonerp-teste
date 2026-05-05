@@ -86,6 +86,18 @@ async function main() {
     // ── CORREÇÃO ──────────────────────────────────────────────────────────
     console.log("\n─── CORRIGINDO ───");
 
+    // Guardar IDs das vendas afetadas ANTES dos UPDATES
+    const vendasAntes = await sql`
+      SELECT DISTINCT venda_id
+      FROM alissonerp.itens_venda_erp
+      WHERE pct_comissao = 0
+    `;
+    const vendasAfetadas: number[] = vendasAntes.map((v: Record<string, unknown>) => Number(v.venda_id));
+    console.log(`Vendas afetadas: ${vendasAfetadas.length}`);
+
+    // Bypass da blindagem de vendas fechadas (igual aos sync triggers)
+    await sql`SELECT set_config('app.sync_ativo', 'true', true)`;
+
     // Itens 0%–30%: via faixas_comissao
     const [r1] = await sql`
       WITH updated AS (
@@ -120,16 +132,10 @@ async function main() {
     console.log(`Itens >30% corrigidos: ${r2.corrigidos}`);
 
     // ── RECALCULAR TOTAIS ─────────────────────────────────────────────────
-    if (r1.corrigidos > 0 || r2.corrigidos > 0) {
+    if (vendasAfetadas.length > 0) {
       console.log("\n─── RECALCULANDO TOTAIS DAS VENDAS ───");
 
-      // Recalcular para TODAS as vendas que tinham itens com comissao zerada
       const [r3] = await sql`
-        WITH vendas_afetadas AS (
-          SELECT DISTINCT venda_id
-          FROM alissonerp.itens_venda_erp
-          WHERE pct_comissao > 0
-        )
         UPDATE alissonerp.vendas_erp ve
         SET
           total_comissao = COALESCE((
@@ -138,12 +144,14 @@ async function main() {
             WHERE venda_id = ve.id
           ), 0),
           updated_at = NOW()
-        FROM vendas_afetadas va
-        WHERE ve.id = va.venda_id
+        WHERE ve.id = ANY(${vendasAfetadas})
         RETURNING ve.id
       `;
       console.log(`Vendas com total_comissao recalculado: ${r3.length}`);
     }
+
+    // Remove bypass
+    await sql`SELECT set_config('app.sync_ativo', '', true)`;
 
     // ── CONFERÊNCIA ───────────────────────────────────────────────────────
     const [resto] = await sql`
