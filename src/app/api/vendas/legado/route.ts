@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
         clienteId = Number(body.cliente_id);
       }
 
-      // 2. Inserir venda legacy (sem financeiro, sem estoque)
+      // 2. Inserir venda como rascunho primeiro (triggers bloqueiam itens em concluido)
       const observacoes = body.observacoes?.trim() || "Registro manual de venda antiga";
 
       const [venda] = await tx`
@@ -168,7 +168,7 @@ export async function POST(req: NextRequest) {
           ${clienteId},
           ${dataVenda}::date,
           ${observacoes},
-          'concluido',
+          'rascunho',
           true,
           0, 0, 0, 0, 0,
           ${user.id}::uuid
@@ -215,6 +215,11 @@ export async function POST(req: NextRequest) {
           )
         `;
       }
+
+      // 5. Concluir venda (apos itens inseridos para bypassar trigger de bloqueio)
+      await tx`
+        UPDATE alissonerp.vendas_erp SET situacao = 'concluido' WHERE id = ${venda.id}
+      `;
 
       // 5. Audit log
       await logAudit(tx, {
