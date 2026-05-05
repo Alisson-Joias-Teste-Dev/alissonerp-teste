@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
 
     const warehouseId = body.warehouse_id ?? 2; // default: Loja
 
-    await sql.begin(async (tx) => {
+    await sql.begin(async (tx: any) => {
       // 1. Registra entrada no stock_ledger_entry
       await tx`
         INSERT INTO alissonerp.stock_ledger_entry
