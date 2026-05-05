@@ -96,7 +96,7 @@ async function main() {
     console.log(`Vendas afetadas: ${vendasAfetadas.length}`);
 
     // Transação única: bypass + updates + recalculo (set_config é LOCAL = só dura na tx)
-    await sql.begin(async (tx) => {
+    await (sql as any).begin(async (tx: typeof sql) => {
       // Bypass da blindagem de vendas fechadas
       await tx`SELECT set_config('app.sync_ativo', 'true', true)`;
 
