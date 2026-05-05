@@ -58,6 +58,8 @@ interface CaixaDinheiro {
   numero_venda: string;
   vendedor_nome: string | null;
   venda_id: number;
+  ouro_gramas?: number;
+  ouro_valor_grama?: number;
 }
 
 interface CaixaBaixa {
@@ -1823,7 +1825,13 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
   useEffect(() => {
     fetch("/api/configuracoes/gateways")
       .then(r => r.json())
-      .then(d => { if (Array.isArray(d)) setGatewaysFiltro(d.filter((g: any) => g.ativo && g.nome !== "Banco").map((g: any) => g.nome)); })
+      .then(d => {
+        if (Array.isArray(d)) {
+          const nomes = d.filter((g: any) => g.ativo && g.nome !== "Banco").map((g: any) => g.nome);
+          if (!nomes.includes("Ouro")) nomes.push("Ouro");
+          setGatewaysFiltro(nomes);
+        }
+      })
       .catch(() => useErrorStore.getState().push("Erro ao carregar gateways de pagamento", { level: "warning" }));
   }, []);
 
@@ -1850,6 +1858,10 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
 
   const byForma        = (f: string) => caixaList.filter(r => r.forma === f);
   const byFormaPeriodo = (f: string) => byForma(f).filter(r => inPeriod(r.data_confirmacao));
+
+  const ouroPeriodo = byFormaPeriodo("Ouro");
+  const ouroGramsPeriodo = ouroPeriodo.reduce((s, r) => s + Number(r.ouro_gramas ?? 0), 0);
+  const ouroTotalG = caixaList.filter(r => r.forma === "Ouro").reduce((s, r) => s + Number(r.ouro_gramas ?? 0), 0);
 
   // Métricas Dinheiro (para a view específica)
   const entradasDinheiroAntes = sumList(byForma("Dinheiro").filter(r => !!r.data_confirmacao && r.data_confirmacao.slice(0, 10) < cIni));
@@ -1915,7 +1927,9 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
   }
 
   const PagamentosTable = ({ lista, showForma, showEstornar }: { lista: CaixaDinheiro[]; showForma?: boolean; showEstornar?: boolean }) => {
-    const colCount = 4 + (showForma ? 1 : 0) + (showEstornar ? 1 : 0);
+    const hasOuro = lista.some(r => r.forma === "Ouro" && r.ouro_gramas != null);
+    const colCount = 4 + (showForma ? 1 : 0) + (hasOuro ? 1 : 0) + (showEstornar ? 1 : 0);
+    const ouroTotalG = lista.filter(r => r.forma === "Ouro").reduce((s, r) => s + Number(r.ouro_gramas ?? 0), 0);
     return (
     <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
       <div className="overflow-x-auto">
@@ -1926,6 +1940,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
               {showForma && <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Forma</th>}
               <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Consultora</th>
               <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Data</th>
+              {hasOuro && <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: "#92400E" }}>Ouro (g)</th>}
               <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Valor</th>
               {showEstornar && <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Ação</th>}
             </tr>
@@ -1949,6 +1964,11 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
                   )}
                   <td className="px-4 py-3 text-sm" style={{ color: "#374151" }}>{r.vendedor_nome || <span style={{ color: C.cinza }}>—</span>}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{fmtDatetime(r.data_confirmacao)}</td>
+                  {hasOuro && (
+                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: r.forma === "Ouro" ? "#92400E" : C.cinza }}>
+                      {r.forma === "Ouro" && r.ouro_gramas != null ? `${Number(r.ouro_gramas).toFixed(3)}g` : "—"}
+                    </td>
+                  )}
                   <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: C.verde }}>{fmt(Number(r.valor))}</td>
                   {showEstornar && (
                     <td className="px-4 py-3 text-right">
@@ -1968,7 +1988,12 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
         </table>
       </div>
       {lista.length > 0 && (
-        <div className="px-4 py-3 border-t flex justify-end" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+        <div className="px-4 py-3 border-t flex justify-end gap-4" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+          {hasOuro && ouroTotalG > 0 && (
+            <p className="text-xs tabular-nums font-medium" style={{ color: "#92400E" }}>
+              Ouro: {ouroTotalG.toFixed(3)}g
+            </p>
+          )}
           <p className="text-xs tabular-nums font-medium" style={{ color: C.verde }}>
             Total: {fmt(sumList(lista))}
           </p>
@@ -2017,7 +2042,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
           <KpiCard label="Total no Período"  value={fmt(sumList(listaFiltrada))}                   valueColor={C.esmeralda}  icon={Wallet}          accent={C.esmeralda} />
           <KpiCard label="Mercado Pago"      value={fmt(sumList(listaFiltrada.filter(r => gatewayEfetivo(r.forma) === "Mercado Pago")))} valueColor="#1D4ED8" icon={Smartphone} accent="#1D4ED8" />
           <KpiCard label="Dinheiro"          value={fmt(sumList(byFormaPeriodo("Dinheiro")))}      valueColor={C.verde}      icon={Banknote}        accent={C.verde}      sub={`${pendentes.length} sem baixa`} />
-          <KpiCard label="Ouro"              value={fmt(sumList(listaFiltrada.filter(r => gatewayEfetivo(r.forma) === "Ouro")))}         valueColor="#92400E" icon={TrendingUp} accent="#92400E" />
+          <KpiCard label="Ouro"              value={fmt(sumList(listaFiltrada.filter(r => gatewayEfetivo(r.forma) === "Ouro")))}         valueColor="#92400E" icon={TrendingUp} accent="#92400E" sub={ouroGramsPeriodo > 0 ? `${ouroGramsPeriodo.toFixed(3)}g` : undefined} />
           <KpiCard label="Baixas Realizadas" value={fmt(saidasPeriodo)}                            valueColor={C.vermelho}   icon={ArrowUpCircle}   accent={C.vermelho} />
         </div>
       ) : formaFiltro === "Dinheiro" ? (
@@ -2037,6 +2062,13 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
             <p className="text-xl font-semibold tabular-nums" style={{ color: totalPendente > 0 ? C.ambar : C.cinza }}>{fmt(totalPendente)}</p>
             <p className="text-[11px] mt-0.5" style={{ color: C.cinza }}>{pendentes.length} sem baixa</p>
           </div>
+        </div>
+      ) : formaFiltro === "Ouro" ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <KpiCard label="Total no Período" value={fmt(sumList(listaFiltrada))}                                     valueColor={C.esmeralda} icon={ArrowDownCircle} accent={C.esmeralda} />
+          <KpiCard label="Ouro no Período"  value={`${ouroGramsPeriodo.toFixed(3)}g`}                               valueColor="#92400E"     icon={TrendingUp}      accent="#92400E" />
+          <KpiCard label="Qtd. Transações"  value={String(listaFiltrada.length)}                                   valueColor={C.cinza}     icon={Landmark}        accent={C.cinza} />
+          <KpiCard label="Total Histórico"  value={fmt(sumList(caixaList.filter(r => gatewayEfetivo(r.forma) === formaFiltro)))}   valueColor={C.cinza}     icon={TrendingUp}      accent={C.cinza} sub={ouroTotalG > 0 ? `${ouroTotalG.toFixed(3)}g acumulado` : undefined} />
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -2193,13 +2225,25 @@ type Tab = "pagar" | "receber" | "caixa" | "conciliacao_pendente" | "bancario";
 export default function FinanceiroClient({ pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas, userRole, defaultTab }: Props) {
   const [tab, setTab] = useState<Tab>(defaultTab ?? "pagar");
   const [cofre, setCofre] = useState<CofreOuro | null>(null);
+  const [cofreLoaded, setCofreLoaded] = useState(false);
 
   useEffect(() => {
     fetch("/api/financeiro/cofre-ouro")
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d && d.total_transacoes > 0) setCofre(d); })
-      .catch(() => useErrorStore.getState().push("Erro ao carregar cofre de ouro", { level: "warning" }));
+      .then(d => setCofre(d ?? null))
+      .catch(() => useErrorStore.getState().push("Erro ao carregar cofre de ouro", { level: "warning" }))
+      .finally(() => setCofreLoaded(true));
   }, []);
+
+  const cofreDisplay = cofre ?? {
+    total_transacoes: 0,
+    total_gramas: 0,
+    total_valor_brl: 0,
+    preco_medio_grama: 0,
+    transacoes_30d: 0,
+    gramas_30d: 0,
+    valor_brl_30d: 0,
+  };
 
   const isFinanceiro = ["admin", "desenvolvedor", "gerente_fabrica", "gerente_loja"].includes(userRole ?? "");
 
@@ -2228,8 +2272,8 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
         </div>
       </div>
 
-      {/* Card Cofre de Ouro (só aparece se há transações em ouro) */}
-      {cofre && (
+      {/* Card Cofre de Ouro */}
+      {cofreLoaded && (
         <div className="rounded-xl border p-4" style={{ borderColor: "#D97706", backgroundColor: "#FFFBEB" }}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">
@@ -2240,23 +2284,23 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
               <div className="text-right">
                 <p className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>Últimos 30d</p>
                 <p className="text-base font-bold tabular-nums" style={{ color: "#92400E" }}>
-                  {cofre.gramas_30d.toFixed(2)}g
+                  {cofreDisplay.gramas_30d.toFixed(2)}g
                 </p>
-                <p className="text-[11px]" style={{ color: "#B45309" }}>{fmt(cofre.valor_brl_30d)}</p>
+                <p className="text-[11px]" style={{ color: "#B45309" }}>{fmt(cofreDisplay.valor_brl_30d)}</p>
               </div>
               <div className="text-right">
                 <p className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>Total acumulado</p>
                 <p className="text-base font-bold tabular-nums" style={{ color: "#92400E" }}>
-                  {cofre.total_gramas.toFixed(2)}g
+                  {cofreDisplay.total_gramas.toFixed(2)}g
                 </p>
-                <p className="text-[11px]" style={{ color: "#B45309" }}>{fmt(cofre.total_valor_brl)}</p>
+                <p className="text-[11px]" style={{ color: "#B45309" }}>{fmt(cofreDisplay.total_valor_brl)}</p>
               </div>
               <div className="text-right">
                 <p className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>Preço médio/g</p>
                 <p className="text-base font-bold tabular-nums" style={{ color: "#92400E" }}>
-                  {fmt(cofre.preco_medio_grama)}
+                  {fmt(cofreDisplay.preco_medio_grama)}
                 </p>
-                <p className="text-[11px]" style={{ color: "#B45309" }}>{cofre.total_transacoes} transação(ões)</p>
+                <p className="text-[11px]" style={{ color: "#B45309" }}>{cofreDisplay.total_transacoes} transação(ões)</p>
               </div>
             </div>
           </div>
