@@ -114,11 +114,15 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
     });
   }, [vendedoras, sortField, sortDir]);
 
+  // Resetar página quando os filtros mudam
+  useEffect(() => {
+    setPagina(1);
+  }, [filtroVendedor, filtroPedido]);
+
   // Filtro itens
   const itensFiltrados = useMemo(() => {
-    setPagina(1);
     return itens.filter(i => {
-      if (filtroVendedor && i.vendedor_id !== filtroVendedor) return false;
+      if (filtroVendedor !== "" && i.vendedor_id !== filtroVendedor) return false;
       if (filtroPedido && !i.numero_venda.toLowerCase().includes(filtroPedido.toLowerCase())) return false;
       return true;
     });
