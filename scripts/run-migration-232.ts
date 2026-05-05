@@ -95,13 +95,14 @@ async function main() {
     const vendasAfetadas: number[] = vendasAntes.map((v: Record<string, unknown>) => Number(v.venda_id));
     console.log(`Vendas afetadas: ${vendasAfetadas.length}`);
 
-    // Transação única: bypass + updates + recalculo (set_config é LOCAL = só dura na tx)
-    await sql.begin(async (tx) => {
-      // Bypass da blindagem de vendas fechadas
-      await tx`SELECT set_config('app.sync_ativo', 'true', true)`;
+    // Transação única: bypass + updates + recalculo
+    // Usamos SET SESSION (não LOCAL) porque o trigger SECURITY DEFINER precisa enxergar
+    await sql`SET SESSION app.sync_ativo = 'true'`;
 
-      // Itens 0%–30%: via faixas_comissao
-      const [r1] = await tx`
+    try {
+      await sql.begin(async (tx) => {
+        // Itens 0%–30%: via faixas_comissao
+        const [r1] = await tx`
         WITH updated AS (
           UPDATE alissonerp.itens_venda_erp ive
           SET
@@ -150,9 +151,10 @@ async function main() {
         console.log(`Vendas com total_comissao recalculado: ${r3.length}`);
       }
     });
-
-    // Remove bypass
-    await sql`SELECT set_config('app.sync_ativo', '', true)`;
+    } finally {
+      // Remove bypass
+      await sql`SET SESSION app.sync_ativo = ''`;
+    }
 
     // ── CONFERÊNCIA ───────────────────────────────────────────────────────
     const [resto] = await sql`
