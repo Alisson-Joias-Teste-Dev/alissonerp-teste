@@ -41,6 +41,9 @@ export default async function PcpPage() {
           v.created_at, v.deposito_id, v.setor_id,
           COALESCE(o.eh_teste, false) AS eh_teste,
           o.peso_metal_externo,
+          o.tipo_ordem::text AS tipo_ordem,
+          o.data_entrega,
+          o.created_at AS ordem_created_at,
           EXISTS (
             SELECT 1 FROM alissonerp.servicos s
             WHERE s.pcp_id = v.id
@@ -75,6 +78,9 @@ export default async function PcpPage() {
           v.created_at, v.deposito_id, v.setor_id,
           COALESCE(o.eh_teste, false) AS eh_teste,
           o.peso_metal_externo,
+          o.tipo_ordem::text AS tipo_ordem,
+          o.data_entrega,
+          o.created_at AS ordem_created_at,
           EXISTS (
             SELECT 1 FROM alissonerp.servicos s
             WHERE s.pcp_id = v.id
