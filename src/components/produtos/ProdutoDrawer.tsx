@@ -796,7 +796,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       setSaveMsg({ ok: true, texto: "Alterações salvas com sucesso." });
       onSaved?.();
       setTimeout(() => setSaveMsg(null), 3000);
-      // Oferecer propagação para variações se for pai
+      // Oferecer propagação manual para medidas/BOM (campos simples já foram
+      // propagados automaticamente pelo backend).
       if (produto.eh_pai && variacoes.length > 0 && Object.keys(body).length > 0) {
         setShowPropagar(true);
       }
@@ -821,7 +822,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       if (!res.ok) throw new Error(b.error ?? "Erro ao propagar");
       setPropagarMsg({ ok: true, texto: `Propagado para ${b.propagado ?? variacoes.length} variação(ões).` });
       setShowPropagar(false);
-      setTimeout(() => setPropagarMsg(null), 4000);
+      // Fechar drawer após propagar
+      setTimeout(() => {
+        onClose();
+      }, 1000);
     } catch (e) {
       setPropagarMsg({ ok: false, texto: e instanceof Error ? e.message : "Erro ao propagar" });
     } finally {
@@ -1915,7 +1919,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                     Ambos
                   </button>
                   <button
-                    onClick={() => setShowPropagar(false)}
+                    onClick={() => { setShowPropagar(false); onClose(); }}
                     className="px-2.5 py-1.5 rounded-md text-xs text-gray-500 hover:text-gray-700 transition-colors"
                   >
                     Só no pai

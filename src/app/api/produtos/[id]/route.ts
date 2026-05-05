@@ -544,6 +544,126 @@ export async function PATCH(
       }
     }
 
+    // ── Propagar campos simples para variações (se for pai) ──────────────────
+    const camposAlterados = [
+      ...Object.keys(pubUpdate),
+      ...Object.keys(erpUpdate),
+    ];
+    if (camposAlterados.length > 0) {
+      try {
+        const [tblOk] = await sql<{ exists: boolean }[]>`
+          SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'alissonerp' AND table_name = 'erp_produtos'
+          ) AS exists
+        `;
+        if (tblOk?.exists) {
+          const [pai] = await sql<{ id: number }[]>`
+            SELECT id FROM alissonerp.erp_produtos
+            WHERE produto_id = ${produtoId} AND eh_pai = true
+            LIMIT 1
+          `;
+          if (pai) {
+            const filhos = await sql<{ produto_id: number }[]>`
+              SELECT produto_id FROM alissonerp.erp_produtos
+              WHERE parent_id = ${pai.id}
+            `;
+            if (filhos.length > 0) {
+              const filhoIds = filhos.map(f => f.produto_id);
+
+              // public.produtos
+              if (pubUpdate.situacao !== undefined) {
+                await sql`
+                  UPDATE public.produtos SET situacao = ${pubUpdate.situacao as string}
+                  WHERE id_produto = ANY(${filhoIds})
+                `;
+              }
+              if (pubUpdate.tipo_metal !== undefined) {
+                await sql`
+                  UPDATE public.produtos SET tipo_metal = ${pubUpdate.tipo_metal as string | null}
+                  WHERE id_produto = ANY(${filhoIds})
+                `;
+              }
+              if (pubUpdate.categoria !== undefined) {
+                await sql`
+                  UPDATE public.produtos SET categoria = ${pubUpdate.categoria as string | null}
+                  WHERE id_produto = ANY(${filhoIds})
+                `;
+              }
+              if (pubUpdate.categoria_precificacao !== undefined) {
+                await sql`
+                  UPDATE public.produtos SET categoria_precificacao = ${pubUpdate.categoria_precificacao as string | null}
+                  WHERE id_produto = ANY(${filhoIds})
+                `;
+              }
+              if (pubUpdate.tem_pedra_preciosa !== undefined) {
+                await sql`
+                  UPDATE public.produtos SET tem_pedra_preciosa = ${pubUpdate.tem_pedra_preciosa as boolean}
+                  WHERE id_produto = ANY(${filhoIds})
+                `;
+                for (const fid of filhoIds) {
+                  await recalcularPrecoPedras(fid);
+                }
+              }
+              if (pubUpdate.fator !== undefined) {
+                await sql`
+                  UPDATE public.produtos SET fator = ${pubUpdate.fator as number | null}
+                  WHERE id_produto = ANY(${filhoIds})
+                `;
+              }
+              if (pubUpdate.peso_precificado !== undefined) {
+                await sql`
+                  UPDATE public.produtos SET peso_precificado = ${pubUpdate.peso_precificado as number | null}
+                  WHERE id_produto = ANY(${filhoIds})
+                `;
+                for (const fid of filhoIds) {
+                  try {
+                    await aplicarCurvaProduto(fid);
+                  } catch (err) {
+                    console.warn("[PATCH /api/produtos/[id]] falha ao recalcular curva p/ filho", fid, err);
+                  }
+                }
+              }
+
+              // erp_produtos (fornecedor / observacao_erp)
+              if (erpUpdate.fornecedor !== undefined || erpUpdate.observacao_erp !== undefined) {
+                const temForn = await colunaExiste("alissonerp", "erp_produtos", "fornecedor");
+                if (temForn) {
+                  await sql`
+                    UPDATE alissonerp.erp_produtos SET
+                      fornecedor     = CASE WHEN ${erpUpdate.fornecedor !== undefined} THEN ${erpUpdate.fornecedor as string | null} ELSE fornecedor END,
+                      observacao_erp = CASE WHEN ${erpUpdate.observacao_erp !== undefined} THEN ${erpUpdate.observacao_erp as string | null} ELSE observacao_erp END,
+                      date_updated   = NOW()
+                    WHERE produto_id = ANY(${filhoIds})
+                  `;
+                } else {
+                  await sql`
+                    UPDATE alissonerp.erp_produtos SET
+                      observacao_erp = CASE WHEN ${erpUpdate.observacao_erp !== undefined} THEN ${erpUpdate.observacao_erp as string | null} ELSE observacao_erp END,
+                      date_updated   = NOW()
+                    WHERE produto_id = ANY(${filhoIds})
+                  `;
+                }
+              }
+
+              if (erpUpdate.largura_aro !== undefined || erpUpdate.altura_aro !== undefined || erpUpdate.base !== undefined) {
+                await sql`
+                  UPDATE alissonerp.erp_produtos SET
+                    largura_aro  = CASE WHEN ${erpUpdate.largura_aro !== undefined} THEN ${erpUpdate.largura_aro as number | null} ELSE largura_aro END,
+                    altura_aro   = CASE WHEN ${erpUpdate.altura_aro !== undefined} THEN ${erpUpdate.altura_aro as number | null} ELSE altura_aro END,
+                    base         = CASE WHEN ${erpUpdate.base !== undefined} THEN ${erpUpdate.base as number | null} ELSE base END,
+                    date_updated = NOW()
+                  WHERE produto_id = ANY(${filhoIds})
+                `;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[PATCH /api/produtos/[id]] falha ao propagar para variações:", err);
+      }
+    }
+
     // ── Pedra-produto: preco_compra_usd e quantidade ─────────────────────────
     // Upsert em alissonerp.produto_pedra_extras; se preco_compra_usd mudou e
     // o produto é pedra, recalcula preco_tiny = preco_compra_usd × dolar × markup_faixa.
