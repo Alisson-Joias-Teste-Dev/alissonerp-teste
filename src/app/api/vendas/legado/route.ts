@@ -4,9 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { logAudit } from "@/lib/audit";
 
 const MAX_LEGACY_DATE = "2023-12-31";
-const ROLES_PERMITIDOS = [
-  "desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora",
-];
+const ROLES_PERMITIDOS = ["desenvolvedor", "admin"];
 
 // ─── POST /api/vendas/legado ─────────────────────────────────────────────────
 // Cria venda antiga (legacy) — registro historico para garantia vitalicia.
@@ -45,7 +43,20 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json() as {
     cliente_id?: number;
-    novo_cliente?: { nome: string; telefone: string };
+    novo_cliente?: {
+      nome: string;
+      telefone: string;
+      cpf_cnpj?: string;
+      email?: string;
+      celular?: string;
+      endereco?: string;
+      numero?: string;
+      complemento?: string;
+      bairro?: string;
+      municipio?: string;
+      cep?: string;
+      uf?: string;
+    };
     data_venda?: string;
     observacoes?: string;
     itens?: LegacyItemInput[];
@@ -113,9 +124,25 @@ export async function POST(req: NextRequest) {
       let clienteId: number;
 
       if (body.novo_cliente) {
+        const c = body.novo_cliente;
         const [novo] = await tx`
-          INSERT INTO public.contatos (nome, telefone)
-          VALUES (${body.novo_cliente!.nome.trim()}, ${body.novo_cliente!.telefone.trim()})
+          INSERT INTO public.contatos (
+            nome, cpf_cnpj, telefone, celular, email,
+            endereco, numero, complemento, bairro, municipio, cep, uf
+          ) VALUES (
+            ${c.nome.trim()},
+            ${c.cpf_cnpj ? c.cpf_cnpj.replace(/\D/g, "") : null},
+            ${c.telefone.trim()},
+            ${c.celular?.trim() || null},
+            ${c.email?.trim() || null},
+            ${c.endereco?.trim() || null},
+            ${c.numero?.trim() || null},
+            ${c.complemento?.trim() || null},
+            ${c.bairro?.trim() || null},
+            ${c.municipio?.trim() || null},
+            ${c.cep ? c.cep.replace(/\D/g, "") : null},
+            ${c.uf?.trim().toUpperCase() || null}
+          )
           RETURNING id_contato
         `;
         clienteId = Number(novo.id_contato);
