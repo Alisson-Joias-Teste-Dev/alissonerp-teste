@@ -79,7 +79,9 @@ export async function getFinanceiroData() {
         p.data_confirmacao::text AS data_confirmacao,
         v.numero_venda,
         v.id AS venda_id,
-        vend.nome AS vendedor_nome
+        vend.nome AS vendedor_nome,
+        COALESCE(p.ouro_peso, p.ouro_gramas) AS ouro_gramas,
+        p.ouro_valor_grama
       FROM alissonerp.pagamentos_venda p
       JOIN alissonerp.vendas_erp v ON v.id = p.venda_id
       LEFT JOIN public.vendedores vend ON vend.id_vendedor = v.vendedor_id

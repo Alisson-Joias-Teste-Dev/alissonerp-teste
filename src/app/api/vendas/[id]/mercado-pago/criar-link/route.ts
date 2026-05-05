@@ -131,7 +131,7 @@ export async function POST(
     if (existente) {
       await sql`
         UPDATE alissonerp.pagamentos_venda
-        SET gateway = 'Mercado Pago Online', forma = 'Mercado Pago', valor = ${valorCobranca}
+        SET gateway = 'Mercado Pago Online', valor = ${valorCobranca}
         WHERE id = ${existente.id}
       `;
       pagamentoId = Number(existente.id);
@@ -140,7 +140,7 @@ export async function POST(
         INSERT INTO alissonerp.pagamentos_venda (
           venda_id, forma, gateway, valor, parcelas, status
         ) VALUES (
-          ${vendaId}, 'Mercado Pago', 'Mercado Pago Online',
+          ${vendaId}, 'Cartão de Crédito', 'Mercado Pago Online',
           ${valorCobranca}, 1, 'pendente'
         )
         RETURNING id

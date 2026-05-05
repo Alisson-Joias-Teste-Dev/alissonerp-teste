@@ -58,6 +58,8 @@ interface CaixaDinheiro {
   numero_venda: string;
   vendedor_nome: string | null;
   venda_id: number;
+  ouro_gramas?: number;
+  ouro_valor_grama?: number;
 }
 
 interface CaixaBaixa {
@@ -1802,10 +1804,11 @@ const D = {
   dourado: "#DB9864",
 };
 
-function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
+function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   caixa: CaixaDinheiro[];
   baixas: CaixaBaixa[];
   podeBaixar: boolean;
+  caixaOuroTrigger: number;
 }) {
   const [baixas, setBaixas] = useState(baixasInit);
   const [caixaList, setCaixaList] = useState(caixa);
@@ -1820,12 +1823,57 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
   const [estornando, setEstornando] = useState(false);
   const [estornoErro, setEstornoErro] = useState<string | null>(null);
 
+  // ─── Baixa de Ouro ───────────────────────────────────────────────────────────
+  interface BaixaOuro {
+    id: number;
+    gramas: number;
+    destino: string;
+    status: string;
+    realizado_nome: string | null;
+    created_at: string;
+    obs: string | null;
+  }
+  const [baixasOuro, setBaixasOuro] = useState<BaixaOuro[]>([]);
+  const [saldoOuroDisp, setSaldoOuroDisp] = useState<number>(0);
+  const [loadingOuro, setLoadingOuro] = useState(false);
+  const [showBaixaOuro, setShowBaixaOuro] = useState(false);
+  const [baixaOuroGrams, setBaixaOuroGrams] = useState("");
+  const [baixaOuroDestino, setBaixaOuroDestino] = useState<"alisson" | "fabrica" | "service">("alisson");
+  const [baixaOuroObs, setBaixaOuroObs] = useState("");
+  const [baixaOuroErro, setBaixaOuroErro] = useState<string | null>(null);
+  const [baixandoOuro, setBaixandoOuro] = useState(false);
+
   useEffect(() => {
     fetch("/api/configuracoes/gateways")
       .then(r => r.json())
-      .then(d => { if (Array.isArray(d)) setGatewaysFiltro(d.filter((g: any) => g.ativo && g.nome !== "Banco").map((g: any) => g.nome)); })
+      .then(d => {
+        if (Array.isArray(d)) {
+          const nomes = d.filter((g: any) => g.ativo && g.nome !== "Banco").map((g: any) => g.nome);
+          if (!nomes.includes("Ouro")) nomes.push("Ouro");
+          setGatewaysFiltro(nomes);
+        }
+      })
       .catch(() => useErrorStore.getState().push("Erro ao carregar gateways de pagamento", { level: "warning" }));
   }, []);
+
+  // ─── Carregar dados do cofre de ouro ────────────────────────────────────────
+  useEffect(() => {
+    setLoadingOuro(true);
+    Promise.all([
+      fetch("/api/financeiro/cofre-ouro/disponivel").then(r => r.ok ? r.json() : null),
+      fetch("/api/financeiro/cofre-ouro/baixas").then(r => r.ok ? r.json() : null),
+    ])
+      .then(([disp, bx]) => {
+        if (disp) setSaldoOuroDisp(Number(disp.disponivel_gramas ?? 0));
+        if (Array.isArray(bx)) setBaixasOuro(bx);
+      })
+      .catch(() => useErrorStore.getState().push("Erro ao carregar baixas de ouro", { level: "warning" }))
+      .finally(() => setLoadingOuro(false));
+  }, []);
+
+  useEffect(() => {
+    if (caixaOuroTrigger > 0) setFormaFiltro("Ouro");
+  }, [caixaOuroTrigger]);
 
   // Mapeia formas legadas para o gateway correspondente
   const MP_FORMAS = ["Cartão de Crédito", "Pix", "PIX", "Manual (MP)", "Mercado Pago"];
@@ -1850,6 +1898,10 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
 
   const byForma        = (f: string) => caixaList.filter(r => r.forma === f);
   const byFormaPeriodo = (f: string) => byForma(f).filter(r => inPeriod(r.data_confirmacao));
+
+  const ouroPeriodo = byFormaPeriodo("Ouro");
+  const ouroGramsPeriodo = ouroPeriodo.reduce((s, r) => s + Number(r.ouro_gramas ?? 0), 0);
+  const ouroTotalG = caixaList.filter(r => r.forma === "Ouro").reduce((s, r) => s + Number(r.ouro_gramas ?? 0), 0);
 
   // Métricas Dinheiro (para a view específica)
   const entradasDinheiroAntes = sumList(byForma("Dinheiro").filter(r => !!r.data_confirmacao && r.data_confirmacao.slice(0, 10) < cIni));
@@ -1914,8 +1966,38 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
     setDando(false);
   }
 
+  async function darBaixaOuro() {
+    const g = parseFloat(baixaOuroGrams.replace(",", "."));
+    if (!g || g <= 0) { setBaixaOuroErro("Informe um peso válido"); return; }
+    if (g > saldoOuroDisp) { setBaixaOuroErro(`Saldo insuficiente. Disponível: ${saldoOuroDisp.toFixed(3)}g`); return; }
+    setBaixandoOuro(true);
+    setBaixaOuroErro(null);
+    try {
+      const res = await fetch("/api/financeiro/cofre-ouro/baixas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gramas: g,
+          destino: baixaOuroDestino,
+          obs: baixaOuroObs.trim() || undefined,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { setBaixaOuroErro(json.error || "Erro ao dar baixa"); setBaixandoOuro(false); return; }
+      setBaixasOuro(prev => [json, ...prev]);
+      setSaldoOuroDisp(prev => prev - g);
+      setBaixaOuroGrams("");
+      setBaixaOuroObs("");
+      setBaixaOuroDestino("alisson");
+      setShowBaixaOuro(false);
+    } catch { setBaixaOuroErro("Erro de rede"); }
+    setBaixandoOuro(false);
+  }
+
   const PagamentosTable = ({ lista, showForma, showEstornar }: { lista: CaixaDinheiro[]; showForma?: boolean; showEstornar?: boolean }) => {
-    const colCount = 4 + (showForma ? 1 : 0) + (showEstornar ? 1 : 0);
+    const hasOuro = lista.some(r => r.forma === "Ouro" && r.ouro_gramas != null);
+    const colCount = 4 + (showForma ? 1 : 0) + (hasOuro ? 1 : 0) + (showEstornar ? 1 : 0);
+    const ouroTotalG = lista.filter(r => r.forma === "Ouro").reduce((s, r) => s + Number(r.ouro_gramas ?? 0), 0);
     return (
     <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
       <div className="overflow-x-auto">
@@ -1926,6 +2008,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
               {showForma && <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Forma</th>}
               <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Consultora</th>
               <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Data</th>
+              {hasOuro && <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: "#92400E" }}>Ouro (g)</th>}
               <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Valor</th>
               {showEstornar && <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Ação</th>}
             </tr>
@@ -1949,6 +2032,11 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
                   )}
                   <td className="px-4 py-3 text-sm" style={{ color: "#374151" }}>{r.vendedor_nome || <span style={{ color: C.cinza }}>—</span>}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{fmtDatetime(r.data_confirmacao)}</td>
+                  {hasOuro && (
+                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: r.forma === "Ouro" ? "#92400E" : C.cinza }}>
+                      {r.forma === "Ouro" && r.ouro_gramas != null ? `${Number(r.ouro_gramas).toFixed(3)}g` : "—"}
+                    </td>
+                  )}
                   <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: C.verde }}>{fmt(Number(r.valor))}</td>
                   {showEstornar && (
                     <td className="px-4 py-3 text-right">
@@ -1968,7 +2056,12 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
         </table>
       </div>
       {lista.length > 0 && (
-        <div className="px-4 py-3 border-t flex justify-end" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+        <div className="px-4 py-3 border-t flex justify-end gap-4" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+          {hasOuro && ouroTotalG > 0 && (
+            <p className="text-xs tabular-nums font-medium" style={{ color: "#92400E" }}>
+              Ouro: {ouroTotalG.toFixed(3)}g
+            </p>
+          )}
           <p className="text-xs tabular-nums font-medium" style={{ color: C.verde }}>
             Total: {fmt(sumList(lista))}
           </p>
@@ -2017,7 +2110,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
           <KpiCard label="Total no Período"  value={fmt(sumList(listaFiltrada))}                   valueColor={C.esmeralda}  icon={Wallet}          accent={C.esmeralda} />
           <KpiCard label="Mercado Pago"      value={fmt(sumList(listaFiltrada.filter(r => gatewayEfetivo(r.forma) === "Mercado Pago")))} valueColor="#1D4ED8" icon={Smartphone} accent="#1D4ED8" />
           <KpiCard label="Dinheiro"          value={fmt(sumList(byFormaPeriodo("Dinheiro")))}      valueColor={C.verde}      icon={Banknote}        accent={C.verde}      sub={`${pendentes.length} sem baixa`} />
-          <KpiCard label="Ouro"              value={fmt(sumList(listaFiltrada.filter(r => gatewayEfetivo(r.forma) === "Ouro")))}         valueColor="#92400E" icon={TrendingUp} accent="#92400E" />
+          <KpiCard label="Ouro"              value={fmt(sumList(listaFiltrada.filter(r => gatewayEfetivo(r.forma) === "Ouro")))}         valueColor="#92400E" icon={TrendingUp} accent="#92400E" sub={ouroGramsPeriodo > 0 ? `${ouroGramsPeriodo.toFixed(3)}g` : undefined} />
           <KpiCard label="Baixas Realizadas" value={fmt(saidasPeriodo)}                            valueColor={C.vermelho}   icon={ArrowUpCircle}   accent={C.vermelho} />
         </div>
       ) : formaFiltro === "Dinheiro" ? (
@@ -2037,6 +2130,13 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
             <p className="text-xl font-semibold tabular-nums" style={{ color: totalPendente > 0 ? C.ambar : C.cinza }}>{fmt(totalPendente)}</p>
             <p className="text-[11px] mt-0.5" style={{ color: C.cinza }}>{pendentes.length} sem baixa</p>
           </div>
+        </div>
+      ) : formaFiltro === "Ouro" ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <KpiCard label="Total no Período" value={fmt(sumList(listaFiltrada))}                                     valueColor={C.esmeralda} icon={ArrowDownCircle} accent={C.esmeralda} />
+          <KpiCard label="Ouro no Período"  value={`${ouroGramsPeriodo.toFixed(3)}g`}                               valueColor="#92400E"     icon={TrendingUp}      accent="#92400E" />
+          <KpiCard label="Qtd. Transações"  value={String(listaFiltrada.length)}                                   valueColor={C.cinza}     icon={Landmark}        accent={C.cinza} />
+          <KpiCard label="Total Histórico"  value={fmt(sumList(caixaList.filter(r => gatewayEfetivo(r.forma) === formaFiltro)))}   valueColor={C.cinza}     icon={TrendingUp}      accent={C.cinza} sub={ouroTotalG > 0 ? `${ouroTotalG.toFixed(3)}g acumulado` : undefined} />
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -2137,6 +2237,141 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar }: {
         </div>
       )}
 
+      {/* Baixa de Ouro */}
+      {formaFiltro === "Ouro" && (
+        <div className="space-y-4">
+          {/* Card de saldo + botão */}
+          <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "#D97706", backgroundColor: "#FFFBEB" }}>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-sm font-semibold" style={{ color: "#92400E" }}>
+                  Cofre de Ouro · Saldo disponível: {saldoOuroDisp.toFixed(3)}g
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: "#B45309" }}>
+                  {baixasOuro.length} baixa{baixasOuro.length !== 1 ? "s" : ""} registrada{baixasOuro.length !== 1 ? "s" : ""}
+                </p>
+              </div>
+              {podeBaixar && saldoOuroDisp > 0 && (
+                <button onClick={() => { setBaixaOuroErro(null); setShowBaixaOuro(true); }}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: "#D97706", color: "white" }}
+                >
+                  <ArrowUpCircle size={14} /> Dar Baixa no Ouro
+                </button>
+              )}
+              {podeBaixar && saldoOuroDisp <= 0 && (
+                <p className="text-xs" style={{ color: "#B45309" }}>Nenhum ouro disponível para baixa</p>
+              )}
+              {!podeBaixar && (
+                <p className="text-xs" style={{ color: "#B45309" }}>Apenas gerentes e admins podem dar baixa</p>
+              )}
+            </div>
+          </div>
+
+          {/* Histórico de baixas */}
+          {baixasOuro.length > 0 ? (
+            <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
+                      <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Usuário</th>
+                      <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: "#92400E" }}>Ouro (g)</th>
+                      <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Destino</th>
+                      <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Data / Hora</th>
+                      <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Status</th>
+                      <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Obs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {baixasOuro.map(b => {
+                      const statusColor = b.status === "concluido" ? C.verde : b.status === "cancelado" ? C.vermelho : C.ambar;
+                      const statusLabel = b.status === "concluido" ? "Concluído" : b.status === "cancelado" ? "Cancelado" : b.status === "em_trafego" ? "Em Tráfego" : "Pendente";
+                      const destinoLabel = b.destino === "alisson" ? "Alisson (direta)" : b.destino === "fabrica" ? "Fábrica" : "Service";
+                      return (
+                        <tr key={b.id} className="border-t hover:bg-gray-50 transition-colors" style={{ borderColor: C.cremeBorder }}>
+                          <td className="px-4 py-3 text-sm" style={{ color: "#374151" }}>{b.realizado_nome || "—"}</td>
+                          <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: "#92400E" }}>{Number(b.gramas).toFixed(3)}g</td>
+                          <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{destinoLabel}</td>
+                          <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{fmtDatetime(b.created_at)}</td>
+                          <td className="px-4 py-3">
+                            <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                              style={{ backgroundColor: statusColor + "20", color: statusColor }}>{statusLabel}</span>
+                          </td>
+                          <td className="px-4 py-3 text-xs max-w-[160px] truncate" style={{ color: C.cinza }}>{b.obs || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border p-6 text-center" style={{ borderColor: C.cremeBorder }}>
+              <p className="text-sm" style={{ color: C.cinza }}>Nenhuma baixa de ouro registrada ainda.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modal Baixa de Ouro */}
+      {showBaixaOuro && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => !baixandoOuro && setShowBaixaOuro(false)}>
+          <div className="bg-white rounded-2xl border w-full max-w-md p-6 space-y-4" style={{ borderColor: C.cremeBorder }} onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-semibold" style={{ color: "#1A1A1A" }}>Dar Baixa no Ouro</h3>
+            <div className="rounded-xl p-4 border space-y-2" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+              <p className="text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Saldo disponível</p>
+              <p className="text-2xl font-bold tabular-nums" style={{ color: "#92400E" }}>{saldoOuroDisp.toFixed(3)}g</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: "#374151" }}>Gramas a retirar</label>
+              <input type="number" step="0.001" min="0.001" value={baixaOuroGrams}
+                onChange={e => { setBaixaOuroGrams(e.target.value); setBaixaOuroErro(null); }}
+                placeholder={`Máx: ${saldoOuroDisp.toFixed(3)}g`}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: "#374151" }}>Destino</label>
+              <div className="flex gap-2">
+                {(["alisson", "fabrica", "service"] as const).map(d => (
+                  <button key={d} onClick={() => setBaixaOuroDestino(d)}
+                    className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium border transition-colors ${
+                      baixaOuroDestino === d ? "text-white" : ""
+                    }`}
+                    style={{
+                      backgroundColor: baixaOuroDestino === d ? "#D97706" : "white",
+                      borderColor: baixaOuroDestino === d ? "#D97706" : C.cremeBorder,
+                      color: baixaOuroDestino === d ? "white" : C.cinza,
+                    }}>
+                    {d === "alisson" ? "Alisson" : d === "fabrica" ? "Fábrica" : "Service"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: "#374151" }}>Observação (opcional)</label>
+              <input value={baixaOuroObs} onChange={e => setBaixaOuroObs(e.target.value)}
+                placeholder="Motivo da baixa"
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+            </div>
+            {baixaOuroErro && <p className="text-xs rounded-lg px-3 py-2" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>{baixaOuroErro}</p>}
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={() => setShowBaixaOuro(false)} disabled={baixandoOuro}
+                className="px-4 py-2 rounded-lg text-sm border font-medium disabled:opacity-40"
+                style={{ borderColor: C.cremeBorder, color: C.cinza }}>Cancelar</button>
+              <button onClick={darBaixaOuro} disabled={baixandoOuro}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+                style={{ backgroundColor: "#D97706", color: "white" }}>
+                {baixandoOuro ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                {baixaOuroDestino === "alisson" ? "Confirmar Baixa" : "Criar Baixa + Protocolo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sub-tabs (Dinheiro) ou tabela simples (outros) */}
       {formaFiltro === "Dinheiro" ? (
         <>
@@ -2193,13 +2428,26 @@ type Tab = "pagar" | "receber" | "caixa" | "conciliacao_pendente" | "bancario";
 export default function FinanceiroClient({ pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas, userRole, defaultTab }: Props) {
   const [tab, setTab] = useState<Tab>(defaultTab ?? "pagar");
   const [cofre, setCofre] = useState<CofreOuro | null>(null);
+  const [cofreLoaded, setCofreLoaded] = useState(false);
+  const [caixaOuroTrigger, setCaixaOuroTrigger] = useState(0);
 
   useEffect(() => {
     fetch("/api/financeiro/cofre-ouro")
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d && d.total_transacoes > 0) setCofre(d); })
-      .catch(() => useErrorStore.getState().push("Erro ao carregar cofre de ouro", { level: "warning" }));
+      .then(d => setCofre(d ?? null))
+      .catch(() => useErrorStore.getState().push("Erro ao carregar cofre de ouro", { level: "warning" }))
+      .finally(() => setCofreLoaded(true));
   }, []);
+
+  const cofreDisplay = cofre ?? {
+    total_transacoes: 0,
+    total_gramas: 0,
+    total_valor_brl: 0,
+    preco_medio_grama: 0,
+    transacoes_30d: 0,
+    gramas_30d: 0,
+    valor_brl_30d: 0,
+  };
 
   const isFinanceiro = ["admin", "desenvolvedor", "gerente_fabrica", "gerente_loja"].includes(userRole ?? "");
 
@@ -2228,35 +2476,40 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
         </div>
       </div>
 
-      {/* Card Cofre de Ouro (só aparece se há transações em ouro) */}
-      {cofre && (
+      {/* Card Cofre de Ouro */}
+      {cofreLoaded && (
         <div className="rounded-xl border p-4" style={{ borderColor: "#D97706", backgroundColor: "#FFFBEB" }}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">
               <CircleDollarSign size={18} style={{ color: "#D97706" }} />
               <p className="text-sm font-semibold" style={{ color: "#92400E" }}>Cofre de Ouro</p>
+              <button onClick={() => { setTab("caixa"); setCaixaOuroTrigger(n => n + 1); }}
+                className="text-[10px] px-2 py-0.5 rounded-full border font-medium transition-colors hover:opacity-80"
+                style={{ borderColor: "#D97706", color: "#D97706" }}>
+                Gerenciar baixas
+              </button>
             </div>
             <div className="flex items-center gap-6 flex-wrap">
               <div className="text-right">
                 <p className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>Últimos 30d</p>
                 <p className="text-base font-bold tabular-nums" style={{ color: "#92400E" }}>
-                  {cofre.gramas_30d.toFixed(2)}g
+                  {cofreDisplay.gramas_30d.toFixed(2)}g
                 </p>
-                <p className="text-[11px]" style={{ color: "#B45309" }}>{fmt(cofre.valor_brl_30d)}</p>
+                <p className="text-[11px]" style={{ color: "#B45309" }}>{fmt(cofreDisplay.valor_brl_30d)}</p>
               </div>
               <div className="text-right">
                 <p className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>Total acumulado</p>
                 <p className="text-base font-bold tabular-nums" style={{ color: "#92400E" }}>
-                  {cofre.total_gramas.toFixed(2)}g
+                  {cofreDisplay.total_gramas.toFixed(2)}g
                 </p>
-                <p className="text-[11px]" style={{ color: "#B45309" }}>{fmt(cofre.total_valor_brl)}</p>
+                <p className="text-[11px]" style={{ color: "#B45309" }}>{fmt(cofreDisplay.total_valor_brl)}</p>
               </div>
               <div className="text-right">
                 <p className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>Preço médio/g</p>
                 <p className="text-base font-bold tabular-nums" style={{ color: "#92400E" }}>
-                  {fmt(cofre.preco_medio_grama)}
+                  {fmt(cofreDisplay.preco_medio_grama)}
                 </p>
-                <p className="text-[11px]" style={{ color: "#B45309" }}>{cofre.total_transacoes} transação(ões)</p>
+                <p className="text-[11px]" style={{ color: "#B45309" }}>{cofreDisplay.total_transacoes} transação(ões)</p>
               </div>
             </div>
           </div>
@@ -2266,7 +2519,7 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
       {/* Content */}
       {tab === "pagar"                && <TabPagar pagar={pagar} />}
       {tab === "receber"              && <TabReceber receber={receber} saldoLiquido={totalReceber} />}
-      {tab === "caixa"                && <TabCaixa caixa={caixaPagamentos} baixas={caixaBaixas} podeBaixar={["admin","desenvolvedor","gerente_loja","gerente_fabrica"].includes(userRole ?? "")} />}
+      {tab === "caixa"                && <TabCaixa caixa={caixaPagamentos} baixas={caixaBaixas} podeBaixar={["admin","desenvolvedor","gerente_loja","gerente_fabrica"].includes(userRole ?? "")} caixaOuroTrigger={caixaOuroTrigger} />}
       {tab === "bancario"             && <TabConciliacao extratos={extratos} lancamentos={lancamentos} />}
       {tab === "conciliacao_pendente" && <TabConciliacaoPendente />}
     </div>
