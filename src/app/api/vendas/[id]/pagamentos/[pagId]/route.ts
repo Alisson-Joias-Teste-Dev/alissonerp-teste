@@ -38,13 +38,24 @@ export async function PATCH(
     return NextResponse.json({ error: "Status inválido" }, { status: 400 });
   }
 
-  await sql`
-    UPDATE alissonerp.pagamentos_venda SET
-      status           = ${body.status},
-      data_confirmacao = COALESCE(${body.data_confirmacao ?? null}::timestamptz, data_confirmacao),
-      gateway_id       = COALESCE(${body.gateway_id      ?? null},              gateway_id)
-    WHERE id = ${pId}
-  `;
+  // Força data_confirmacao ao confirmar (evita pagamento fantasma sem timestamp)
+  if (body.status === "confirmado") {
+    await sql`
+      UPDATE alissonerp.pagamentos_venda SET
+        status           = 'confirmado',
+        data_confirmacao = COALESCE(data_confirmacao, NOW()),
+        gateway_id       = COALESCE(${body.gateway_id ?? null}, gateway_id)
+      WHERE id = ${pId}
+    `;
+  } else {
+    await sql`
+      UPDATE alissonerp.pagamentos_venda SET
+        status           = ${body.status},
+        data_confirmacao = COALESCE(${body.data_confirmacao ?? null}::timestamptz, data_confirmacao),
+        gateway_id       = COALESCE(${body.gateway_id      ?? null},              gateway_id)
+      WHERE id = ${pId}
+    `;
+  }
 
   return NextResponse.json({ ok: true });
 }
