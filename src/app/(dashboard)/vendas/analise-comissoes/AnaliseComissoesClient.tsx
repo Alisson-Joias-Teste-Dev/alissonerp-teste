@@ -62,7 +62,7 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
   const [error,   setError]   = useState("");
 
   // Filtros itens
-  const [filtroVendedor, setFiltroVendedor] = useState<number | "">("");
+  const [filtroVendedor, setFiltroVendedor] = useState("");
   const [filtroPedido,   setFiltroPedido]   = useState("");
   const [pagina,         setPagina]         = useState(1);
   const itensPorPagina = 15;
@@ -122,7 +122,7 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
   // Filtro itens
   const itensFiltrados = useMemo(() => {
     return itens.filter(i => {
-      if (filtroVendedor !== "" && i.vendedor_id !== filtroVendedor) return false;
+      if (filtroVendedor !== "" && String(i.vendedor_id) !== filtroVendedor) return false;
       if (filtroPedido && !i.numero_venda.toLowerCase().includes(filtroPedido.toLowerCase())) return false;
       return true;
     });
@@ -144,7 +144,11 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
 
   const vendedoresUnicos = useMemo(() => {
     const map = new Map<number, string>();
-    itens.forEach(i => map.set(i.vendedor_id, i.vendedor_nome));
+    itens.forEach(i => {
+      const vid = i.vendedor_id;
+      const vnome = i.vendedor_nome;
+      if (vid != null && vnome) map.set(vid, vnome);
+    });
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [itens]);
 
@@ -269,10 +273,10 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
               <div className="flex flex-wrap items-center gap-3 mt-2">
                 <div>
                   <label className="text-[10px] block mb-0.5" style={{ color: "#9CA3AF" }}>Consultora</label>
-                  <select value={filtroVendedor} onChange={e => setFiltroVendedor(e.target.value ? Number(e.target.value) : "")}
+                  <select value={filtroVendedor} onChange={e => setFiltroVendedor(e.target.value)}
                     className="border rounded-lg px-2 py-1.5 text-xs outline-none" style={{ borderColor: C.cremeBorder }}>
                     <option value="">Todas as consultoras</option>
-                    {vendedoresUnicos.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
+                    {vendedoresUnicos.map(([id, nome]) => <option key={id} value={String(id)}>{nome}</option>)}
                   </select>
                 </div>
                 <div>
