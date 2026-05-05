@@ -59,6 +59,7 @@ export async function POST(req: NextRequest) {
     };
     data_venda?: string;
     observacoes?: string;
+    vendedor_id?: number | null;
     itens?: LegacyItemInput[];
   };
 
@@ -156,7 +157,7 @@ export async function POST(req: NextRequest) {
       const [venda] = await tx`
         INSERT INTO alissonerp.vendas_erp (
           numero_venda,
-          cliente_id,
+          cliente_id, vendedor_id,
           data_venda,
           observacoes,
           situacao,
@@ -166,6 +167,7 @@ export async function POST(req: NextRequest) {
         ) VALUES (
           'LEG-TEMP',
           ${clienteId},
+          ${body.vendedor_id ?? null},
           ${dataVenda}::date,
           ${observacoes},
           'rascunho',
