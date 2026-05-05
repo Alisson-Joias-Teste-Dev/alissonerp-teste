@@ -95,60 +95,61 @@ async function main() {
     const vendasAfetadas: number[] = vendasAntes.map((v: Record<string, unknown>) => Number(v.venda_id));
     console.log(`Vendas afetadas: ${vendasAfetadas.length}`);
 
-    // Bypass da blindagem de vendas fechadas (igual aos sync triggers)
-    await sql`SELECT set_config('app.sync_ativo', 'true', true)`;
+    // Transação única: bypass + updates + recalculo (set_config é LOCAL = só dura na tx)
+    await sql.begin(async (tx) => {
+      // Bypass da blindagem de vendas fechadas
+      await tx`SELECT set_config('app.sync_ativo', 'true', true)`;
 
-    // Itens 0%–30%: via faixas_comissao
-    const [r1] = await sql`
-      WITH updated AS (
-        UPDATE alissonerp.itens_venda_erp ive
-        SET
-          pct_comissao   = fc.comissao_pct,
-          valor_comissao = ROUND((ive.total_item * fc.comissao_pct / 100)::numeric, 2)
-        FROM alissonerp.faixas_comissao fc
-        WHERE ive.pct_comissao = 0
-          AND ive.pct_desconto <= 30
-          AND fc.desconto_pct = ROUND(ive.pct_desconto)
-          AND fc.ativo = true
-        RETURNING ive.id
-      )
-      SELECT COUNT(*)::int AS corrigidos FROM updated
-    `;
-    console.log(`Itens 0-30% corrigidos: ${r1.corrigidos}`);
-
-    // Itens >30%: comissão fixa 0.5%
-    const [r2] = await sql`
-      WITH updated AS (
-        UPDATE alissonerp.itens_venda_erp
-        SET
-          pct_comissao   = 0.5,
-          valor_comissao = ROUND((total_item * 0.5 / 100)::numeric, 2)
-        WHERE pct_comissao = 0
-          AND pct_desconto > 30
-        RETURNING id
-      )
-      SELECT COUNT(*)::int AS corrigidos FROM updated
-    `;
-    console.log(`Itens >30% corrigidos: ${r2.corrigidos}`);
-
-    // ── RECALCULAR TOTAIS ─────────────────────────────────────────────────
-    if (vendasAfetadas.length > 0) {
-      console.log("\n─── RECALCULANDO TOTAIS DAS VENDAS ───");
-
-      const [r3] = await sql`
-        UPDATE alissonerp.vendas_erp ve
-        SET
-          total_comissao = COALESCE((
-            SELECT SUM(valor_comissao)
-            FROM alissonerp.itens_venda_erp
-            WHERE venda_id = ve.id
-          ), 0),
-          updated_at = NOW()
-        WHERE ve.id = ANY(${vendasAfetadas})
-        RETURNING ve.id
+      // Itens 0%–30%: via faixas_comissao
+      const [r1] = await tx`
+        WITH updated AS (
+          UPDATE alissonerp.itens_venda_erp ive
+          SET
+            pct_comissao   = fc.comissao_pct,
+            valor_comissao = ROUND((ive.total_item * fc.comissao_pct / 100)::numeric, 2)
+          FROM alissonerp.faixas_comissao fc
+          WHERE ive.pct_comissao = 0
+            AND ive.pct_desconto <= 30
+            AND fc.desconto_pct = ROUND(ive.pct_desconto)
+            AND fc.ativo = true
+          RETURNING ive.id
+        )
+        SELECT COUNT(*)::int AS corrigidos FROM updated
       `;
-      console.log(`Vendas com total_comissao recalculado: ${r3.length}`);
-    }
+      console.log(`Itens 0-30% corrigidos: ${r1.corrigidos}`);
+
+      // Itens >30%: comissão fixa 0.5%
+      const [r2] = await tx`
+        WITH updated AS (
+          UPDATE alissonerp.itens_venda_erp
+          SET
+            pct_comissao   = 0.5,
+            valor_comissao = ROUND((total_item * 0.5 / 100)::numeric, 2)
+          WHERE pct_comissao = 0
+            AND pct_desconto > 30
+          RETURNING id
+        )
+        SELECT COUNT(*)::int AS corrigidos FROM updated
+      `;
+      console.log(`Itens >30% corrigidos: ${r2.corrigidos}`);
+
+      // Recalcular totais das vendas afetadas
+      if (vendasAfetadas.length > 0) {
+        const [r3] = await tx`
+          UPDATE alissonerp.vendas_erp ve
+          SET
+            total_comissao = COALESCE((
+              SELECT SUM(valor_comissao)
+              FROM alissonerp.itens_venda_erp
+              WHERE venda_id = ve.id
+            ), 0),
+            updated_at = NOW()
+          WHERE ve.id = ANY(${vendasAfetadas})
+          RETURNING ve.id
+        `;
+        console.log(`Vendas com total_comissao recalculado: ${r3.length}`);
+      }
+    });
 
     // Remove bypass
     await sql`SELECT set_config('app.sync_ativo', '', true)`;
