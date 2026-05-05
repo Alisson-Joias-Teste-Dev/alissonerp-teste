@@ -129,16 +129,6 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
     setPagina(1);
   }, [filtroVendedor, filtroPedido]);
 
-  const vendedoresUnicos = useMemo(() => {
-    const map = new Map<number, string>();
-    itens.forEach(i => {
-      const vid = i.vendedor_id;
-      const vnome = i.vendedor_nome;
-      if (vid != null && vnome) map.set(vid, vnome);
-    });
-    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [itens]);
-
   // DEBUG: ver se o filtro está chegando
   useEffect(() => {
     console.log("[DEBUG] filtroVendedor mudou para:", JSON.stringify(filtroVendedor), "| tipo:", typeof filtroVendedor);
