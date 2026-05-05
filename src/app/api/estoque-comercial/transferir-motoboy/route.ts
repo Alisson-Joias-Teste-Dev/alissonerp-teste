@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const result = await sql.begin(async (tx) => {
+      const result = await sql.begin(async (tx: any) => {
         const [saida] = await tx`
           INSERT INTO alissonerp.stock_ledger_entry
             (item_id, item_type, warehouse_id, actual_qty, voucher_type, obs, created_by, posting_date, posting_time)
@@ -168,7 +168,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const result = await sql.begin(async (tx) => {
+      const result = await sql.begin(async (tx: any) => {
         const [saida] = await tx`
           INSERT INTO alissonerp.stock_ledger_entry
             (item_id, item_type, warehouse_id, actual_qty, voucher_type, obs, created_by, posting_date, posting_time)
