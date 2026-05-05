@@ -178,10 +178,12 @@ export async function PATCH(
       await tx`
         INSERT INTO alissonerp.itens_venda_erp (
           venda_id, nome_produto, quantidade, preco_lista,
-          pct_desconto, preco_unitario, total_item, peso_estimado, observacao
+          pct_desconto, preco_unitario, total_item, peso_estimado,
+          pct_comissao, valor_comissao, observacao
         ) VALUES (
           ${venda.id}, ${nomeItem}, 1, ${valorItem},
           0, ${valorItem}, ${valorItem}, ${pesoItem},
+          0, 0,
           ${'Orçamento ' + orc.numero_orcamento}
         )
       `;
