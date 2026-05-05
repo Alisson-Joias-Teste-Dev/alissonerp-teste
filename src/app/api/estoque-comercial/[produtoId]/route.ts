@@ -90,6 +90,13 @@ export async function GET(
       LIMIT 20
     `;
 
+    const rfidItens = await sql`
+      SELECT id, epc, sku, nome, localizacao_atual, status, peso_g, preco_venda
+      FROM alissonerp.joias_rfid
+      WHERE produto_id = ${id}::bigint
+      ORDER BY epc
+    `;
+
     return NextResponse.json({
       consolidado: consolidado ?? null,
       saldoPorLocal: saldoPorLocal.map(r => ({
@@ -102,6 +109,7 @@ export async function GET(
       movimentos,
       reservas,
       transferencias,
+      rfidItens,
     });
   }
 
@@ -148,5 +156,6 @@ export async function GET(
     })),
     reservas: [],
     transferencias: [],
+    rfidItens: [],
   });
 }
