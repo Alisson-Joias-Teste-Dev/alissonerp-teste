@@ -7,7 +7,7 @@ import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle,
   Truck, Video, RefreshCw, Share2, Download,
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
-  RotateCcw, ArrowRight, PackageCheck,
+  RotateCcw, ArrowRight, PackageCheck, ScanLine,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { maskCpfCnpj } from "@/lib/formatters";
@@ -256,6 +256,122 @@ function Input({ className = "", ...props }: React.InputHTMLAttributes<HTMLInput
 }
 function Select({ className = "", ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select className={`w-full border rounded-lg px-3 py-2.5 text-sm outline-none ${className}`} style={{ borderColor: C.cremeBorder, color: "#374151" }} {...props} />;
+}
+
+// ─── RFID Section ─────────────────────────────────────────────────────────────
+function RFIDSection({ vendaId, onUpdate }: { vendaId: number; onUpdate: () => void }) {
+  const [vinculados, setVinculados] = useState<Array<{ id: string; epc: string; sku: string; nome: string; status: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [scanValue, setScanValue] = useState("");
+  const [scanMsg, setScanMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const scanRef = useRef<HTMLInputElement>(null);
+
+  const fetchVinculados = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/vendas/${vendaId}/rfid`);
+      if (r.ok) {
+        const data = await r.json();
+        setVinculados(data.vinculados ?? []);
+        setScanMsg(null);
+      }
+    } finally { setLoading(false); }
+  }, [vendaId]);
+
+  useEffect(() => { fetchVinculados(); }, [fetchVinculados]);
+
+  // Foca no input de scan sempre que a lista carregar
+  useEffect(() => { if (!loading) scanRef.current?.focus(); }, [loading]);
+
+  async function handleScan(code: string) {
+    if (!code.trim()) return;
+    setScanValue("");
+    setScanMsg(null);
+    try {
+      const r = await fetch("/api/rfid/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ codigo: code.trim(), action: "vincular_venda", venda_id: vendaId }),
+      });
+      const data = await r.json();
+      if (r.ok) {
+        setScanMsg({ ok: true, text: `✅ ${data.rfid.produto} vinculado` });
+        await fetchVinculados();
+        onUpdate();
+      } else {
+        setScanMsg({ ok: false, text: `❌ ${data.error}` });
+      }
+    } catch {
+      setScanMsg({ ok: false, text: "❌ Erro ao processar leitura" });
+    }
+    setTimeout(() => scanRef.current?.focus(), 100);
+  }
+
+  return (
+    <div>
+      {/* Scanner input */}
+      <div className="mb-4">
+        <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>
+          Ler etiqueta RFID
+        </label>
+        <div className="flex gap-2">
+          <input
+            ref={scanRef}
+            type="text"
+            value={scanValue}
+            onChange={e => setScanValue(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleScan(scanValue); }}
+            placeholder="Aponte o leitor aqui e escaneie..."
+            className="flex-1 border rounded-lg px-3 py-2.5 text-sm outline-none font-mono"
+            style={{ borderColor: C.cremeBorder, color: "#374151" }}
+            autoFocus
+          />
+          <button
+            onClick={() => handleScan(scanValue)}
+            className="px-4 py-2 rounded-xl text-sm font-medium"
+            style={{ background: C.esmeralda, color: C.creme }}
+          >
+            OK
+          </button>
+        </div>
+        {scanMsg && (
+          <p className={`text-xs mt-1.5 ${scanMsg.ok ? "text-green-600" : "text-red-500"}`}>
+            {scanMsg.text}
+          </p>
+        )}
+        <p className="text-xs text-gray-400 mt-1.5">
+          Escaneie o código de barras ou RFID da peça. O sistema vincula automaticamente.
+        </p>
+      </div>
+
+      {/* Vinculados */}
+      {loading ? (
+        <p className="text-sm" style={{ color: "#9CA3AF" }}>Carregando...</p>
+      ) : vinculados.length > 0 ? (
+        <div>
+          <p className="text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: "#6B7280" }}>
+            Peças vinculadas ({vinculados.length})
+          </p>
+          <div className="space-y-1.5">
+            {vinculados.map(r => (
+              <div key={r.id} className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg" style={{ background: "#F0FDF4", border: "1px solid #BBF7D0" }}>
+                <CheckIcon size={14} style={{ color: "#16A34A" }} />
+                <span className="font-mono text-xs text-gray-500">{r.epc.slice(-12)}</span>
+                <span className="text-gray-700">{r.nome}</span>
+                <span className="text-xs ml-auto px-1.5 py-0.5 rounded" style={{ background: r.status === "reservado" ? "#FEF3C7" : "#D1FAE5", color: r.status === "reservado" ? "#92400E" : "#065F46" }}>
+                  {r.status === "reservado" ? "Reservado" : "Vendido"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm" style={{ color: "#9CA3AF" }}>
+          Nenhuma peça vinculada. Escaneie as etiquetas acima.
+        </p>
+      )}
+    </div>
+  );
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -2943,7 +3059,21 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
           </div>
         </Secao>
 
-        {/* ── 6. Dados Adicionais ── */}
+        {/* ── 6. Itens RFID ── */}
+        <Secao>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}>
+              <FileText size={18} style={{ color: C.esmeralda }} />
+            </div>
+            <div>
+              <p className="font-semibold text-base" style={{ color: "#1A1A1A" }}>Itens RFID</p>
+              <p className="text-xs" style={{ color: "#6B7280" }}>Vincule os chips físicos a esta venda</p>
+            </div>
+          </div>
+          <RFIDSection vendaId={vendaId} onUpdate={load} />
+        </Secao>
+
+        {/* ── 7. Dados Adicionais ── */}
         <Secao>
           <STitle>Dados Adicionais</STitle>
           <div className="space-y-4">

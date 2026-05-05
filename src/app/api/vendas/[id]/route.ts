@@ -180,7 +180,7 @@ export async function PATCH(
     client_updated_at?:    string;
   };
 
-  const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "cancelado", "concluido"];
+  const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "entregue", "cancelado", "concluido"];
   if (body.situacao && !SITUACOES_VALIDAS.includes(body.situacao)) {
     return NextResponse.json({ error: "Situação inválida" }, { status: 400 });
   }

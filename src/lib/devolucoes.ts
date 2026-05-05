@@ -468,11 +468,11 @@ export async function concluirDevolucao(
         INSERT INTO alissonerp.movimentacoes_estoque_comercial (
           produto_id, tipo, quantidade, motivo,
           referencia_id, referencia_tipo, devolucao_id,
-          observacao, created_by
+          local_estoque_id, observacao, created_by
         ) VALUES (
           ${it.produto_id}, 'entrada', ${qtd}, 'devolucao',
           ${dev.venda_id}, 'venda_erp', ${id},
-          ${"Devolucao " + dev.numero}, ${userId}::uuid
+          2, ${"Devolucao " + dev.numero}, ${userId}::uuid
         )
       `;
       // Garantir que produto tem config no estoque comercial (upsert)
