@@ -16,6 +16,7 @@ import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
 import MercadoPagoCobranca from "@/components/vendas/MercadoPagoCobranca";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import CartaoInline from "@/components/vendas/CartaoInline";
+import PagamentoForm, { type PagamentoEntry, fmt as fmtPagamento } from "@/components/vendas/PagamentoForm";
 import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 import { useErrorStore } from "@/stores/errorStore";
@@ -43,7 +44,7 @@ interface Produto {
 }
 interface FaixaComissao { desconto_pct: number; comissao_pct: number; }
 interface ItemVenda {
-  id?: number; _key: string; produto_id: number; nome_produto: string; sku: string;
+  id?: number; _key: string; produto_id: number | null; nome_produto: string; sku: string;
   quantidade: number; preco_lista: number; pct_desconto: number;
   preco_unitario: number; total_item: number; pct_comissao: number;
   valor_comissao: number; peso_estimado: number | null; unidade: string | null;
@@ -92,7 +93,7 @@ interface Venda {
   cliente_complemento?: string | null; cliente_bairro?: string | null;
   cliente_municipio?: string | null; cliente_cep?: string | null; cliente_uf?: string | null;
   itens: Array<{
-    id: number; produto_id: number; nome_produto: string; sku: string | null;
+    id: number; produto_id: number | null; nome_produto: string; sku: string | null;
     quantidade: number; preco_lista: number; pct_desconto: number;
     preco_unitario: number; total_item: number; pct_comissao: number;
     valor_comissao: number; observacao: string | null; peso_estimado?: number | null;
@@ -482,6 +483,29 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [multOuroValidacaoIA, setMultOuroValidacaoIA] = useState<{ match: boolean; mensagem: string } | null>(null);
   const [multOuroValidando, setMultOuroValidando] = useState(false);
 
+  // ── Vale-Troca ───────────────────────────────────────────────────────────────
+  const [valeNumero, setValeNumero] = useState("");
+  const [valeValidando, setValeValidando] = useState(false);
+  const [valeValidacao, setValeValidacao] = useState<{
+    ok: boolean; erro?: string; valor_disponivel?: number; cliente_id?: number | null;
+  } | null>(null);
+  const [multValeNumero, setMultValeNumero] = useState("");
+  const [multValeValidando, setMultValeValidando] = useState(false);
+  const [multValeValidacao, setMultValeValidacao] = useState<{
+    ok: boolean; erro?: string; valor_disponivel?: number; cliente_id?: number | null;
+  } | null>(null);
+
+  // ── Gateways dinâmicos ──────────────────────────────────────────────────────
+  const [gateways, setGateways] = useState<{ id: number; nome: string }[]>([]);
+  useEffect(() => {
+    fetch("/api/configuracoes/gateways").then(r => r.json()).then(d => {
+      if (Array.isArray(d)) setGateways(d.filter((g: any) => g.ativo));
+    }).catch(() => {});
+  }, []);
+
+  // ── PagamentoForm payments ──────────────────────────────────────────────────
+  const [edicaoPayments, setEdicaoPayments] = useState<PagamentoEntry[]>([]);
+
   // ── Modals & delivery address ────────────────────────────────────────────────
   const [showDadosCliente, setShowDadosCliente] = useState(false);
   const [showNovoCliente, setShowNovoCliente] = useState(false);
@@ -692,6 +716,12 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     return faixa.comissao_pct;
   }
 
+  // Itens de orçamento (produto_id nulo) são peças personalizadas cuja
+  // comissão deve ser definida manualmente — não auto-calculada via faixas.
+  function isOrcamentoItem(item: { produto_id?: number | null }): boolean {
+    return item.produto_id == null;
+  }
+
   function calcItem(produto: Produto, q: number, pct: number) {
     const precoLista = produto.preco_venda ?? 0;
     const precoUnit = precoLista * (1 - pct / 100);
@@ -765,8 +795,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       const newQtd        = item.quantidade;
       const precoUnit     = novoPreco;                             // preserva precisão digitada
       const totalItem     = precoUnit * newQtd;
-      const pctComissao   = getComissao(pct);
-      const valorComissao = totalItem * pctComissao / 100;
+      const isOrc         = isOrcamentoItem(item);
+      const pctComissao   = isOrc ? item.pct_comissao : getComissao(pct);
+      const valorComissao = isOrc ? item.valor_comissao : totalItem * pctComissao / 100;
 
       setUpdating(true);
       try {
@@ -817,8 +848,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     const newDesc = field === "pct_desconto" ? val : item.pct_desconto;
     const precoUnit = item.preco_lista * (1 - newDesc / 100);
     const totalItem = precoUnit * newQtd;
-    const pctComissao = getComissao(newDesc);
-    const valorComissao = totalItem * pctComissao / 100;
+    const isOrc = isOrcamentoItem(item);
+    const pctComissao = isOrc ? item.pct_comissao : getComissao(newDesc);
+    const valorComissao = isOrc ? item.valor_comissao : totalItem * pctComissao / 100;
 
     setUpdating(true);
     try {
@@ -856,6 +888,24 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     } finally {
       loadingSetter(false);
     }
+  }
+
+  // ── Vale-Troca validar (callback-style para PagamentoForm) ──────────────────
+  async function validarValeFn(
+    numero: string,
+    setResult: (r: { ok: boolean; erro?: string; valor_disponivel?: number; cliente_id?: number | null } | null) => void,
+    setLoading: (v: boolean) => void,
+  ) {
+    setLoading(true); setResult(null);
+    try {
+      const res = await fetch("/api/vale-troca/validar", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ numero: numero.trim() }),
+      });
+      const d = await res.json() as { ok: boolean; erro?: string; valor_disponivel?: number; cliente_id?: number | null };
+      setResult(d);
+    } catch { setResult({ ok: false, erro: "Erro ao validar" }); }
+    finally { setLoading(false); }
   }
 
   async function uploadOuroFoto(file: File, vendaIdParam: number): Promise<string | null> {
@@ -2583,433 +2633,203 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
             }}
           />
 
-          {/* Formulário de pagamento (mesmo layout da nova venda) */}
-          {edit.limited && venda.pagamentos.length === 0 && (
-            <>
-              <p className="text-sm mb-4" style={{ color: "#6B7280" }}>Selecione a forma de recebimento do valor total</p>
+          {/* ── Formulário de pagamento padronizado ── */}
+          {edit.limited && (() => {
+            const saldoPendente = Math.max(0, totalVenda - (venda?.total_pago ?? 0));
 
-              <div className="mb-4">
-                <Label>Forma de recebimento</Label>
-                <Select value={newPagForma} onChange={e => { setNewPagForma(e.target.value); setNewPagParcelas(1); }}>
-                  <optgroup label="Métodos de Pagamento">
-                    {FORMAS_PAGAMENTO.map(f => <option key={f} value={f}>{f}</option>)}
-                  </optgroup>
-                </Select>
-              </div>
+            // Função de add pagamento (modo edição: salva imediato)
+            // Aceita valor opcional — útil quando chamado do Múltiplas (usa multValor)
+            const handleEdicaoAdd = async (valorManual?: string) => {
+              if (!venda) return;
+              setUpdating(true);
+              try {
+                const v = valorManual ? parseFloat(valorManual.replace(",", ".")) : parseFloat(newPagValor.replace(",", ".")) || saldoPendente;
+                if (!v || v <= 0) return;
+                const parcelas = newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao) || 1;
+                const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas };
+                if (newPagForma === "Cartão de Crédito") body.gateway = newPagGateway;
+                if (newPagForma === "Vale-Troca") body.vale_numero = valeNumero.trim();
 
-              {/* Dinheiro / A Receber */}
-              {["Dinheiro", "A Receber"].includes(newPagForma) && (
-                <div className="rounded-lg border px-4 py-3 text-sm mb-4" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>
-                  Pagamento em {newPagForma.toLowerCase()}. Não há campos adicionais necessários.
-                </div>
-              )}
+                const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(body),
+                });
+                if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+                await load();
+                setNewPagValor(""); setValeNumero(""); setValeValidacao(null);
+                setOuroPeso(""); setOuroValorGrama(""); setOuroFotoFile(null); setOuroFotoPreview(null); setOuroValidacaoIA(null);
+              } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro"); }
+              finally { setUpdating(false); }
+            };
 
-              {/* Ouro */}
-              {newPagForma === "Ouro" && (
-                <div className="rounded-lg border p-4 mb-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label>Peso (g)</Label>
-                      <input type="number" step="0.001" value={ouroPeso}
-                        onChange={e => { setOuroPeso(e.target.value); setOuroValidacaoIA(null); setOuroFotoFile(null); setOuroFotoPreview(null); }}
-                        placeholder="0.000"
-                        className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
-                    </div>
-                    <div>
-                      <Label>Valor da grama (R$)</Label>
-                      <input type="number" step="0.01" value={ouroValorGrama}
-                        onChange={e => setOuroValorGrama(e.target.value)}
-                        placeholder="0.00"
-                        className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
-                    </div>
-                  </div>
-                  {ouroPeso && ouroValorGrama && (() => {
-                    const p = parseFloat(ouroPeso.replace(",", ".")); const vg = parseFloat(ouroValorGrama.replace(",", "."));
-                    if (p > 0 && vg > 0) return <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>Total: {fmt(p * vg)}</p>;
-                    return null;
-                  })()}
-                  <div>
-                    <Label>Foto da balança (obrigatória)</Label>
-                    <input type="file" accept="image/*" capture="environment"
-                      onChange={async e => {
-                        const file = e.target.files?.[0]; if (!file) return;
-                        setOuroFotoFile(file); setOuroFotoPreview(URL.createObjectURL(file)); setOuroValidacaoIA(null);
-                        const p = parseFloat(ouroPeso.replace(",", "."));
-                        if (p > 0) await validarOuroIA(file, p, setOuroValidacaoIA, setOuroValidando);
-                      }}
-                      className="w-full text-sm" />
-                    {ouroValidando && <p className="text-xs mt-1" style={{ color: "#6B7280" }}>Validando com IA...</p>}
-                    {ouroFotoPreview && <img src={ouroFotoPreview} alt="Balança" className="mt-2 h-24 rounded object-cover" />}
-                    {ouroValidacaoIA && (
-                      <div className={`mt-2 flex items-center gap-2 text-xs rounded px-3 py-2 ${ouroValidacaoIA.match ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
-                        {ouroValidacaoIA.match ? <CheckCircle size={13} /> : <XCircle size={13} />}
-                        {ouroValidacaoIA.mensagem}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Cartão Crédito — gateway + condição */}
-              {COM_CARTAO.includes(newPagForma) && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <Label>Gateway</Label>
-                    <Select value={newPagGateway} onChange={e => setNewPagGateway(e.target.value)}>
-                      {GATEWAYS.map(g => <option key={g} value={g}>{g}</option>)}
-                    </Select>
-                  </div>
-                  {newPagForma === "Cartão de Crédito" && (
-                    <div>
-                      <Label>Condição de Pagamento</Label>
-                      <Select value={newPagCondicao} onChange={e => setNewPagCondicao(e.target.value)}>
-                        {CONDICOES.map(c => <option key={c} value={c}>{c}</option>)}
-                      </Select>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Vale-Troca — número do vale */}
-              {newPagForma === "Vale-Troca" && (
-                <div className="mb-4">
-                  <Label>Número do Vale</Label>
-                  <input
-                    type="text"
-                    value={newPagValeNumero}
-                    onChange={e => setNewPagValeNumero(e.target.value.toUpperCase())}
-                    placeholder="VT-00001"
-                    className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none"
-                    style={{ borderColor: C.cremeBorder, color: "#374151" }}
-                  />
-                  <p className="text-xs mt-1" style={{ color: "#9CA3AF" }}>Informe o número do vale gerado na devolução</p>
-                </div>
-              )}
-
-              {/* Ouro / A Receber / Pix — só condição */}
-              {COM_PARCELAS.includes(newPagForma) && !COM_CARTAO.includes(newPagForma) && newPagForma !== "Dinheiro" && newPagForma !== "Vale-Troca" && (
-                <div className="mb-4 w-56">
-                  <Label>Condição de Pagamento</Label>
-                  <Select value={newPagCondicao} onChange={e => setNewPagCondicao(e.target.value)}>
-                    {CONDICOES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </Select>
-                </div>
-              )}
-
-              {/* QR Code Pix via Mercado Pago (quando forma=Pix) */}
-              {newPagForma === "Pix" && (
-                <PixQrInline
+            return venda.pagamentos.length === 0 ? (
+              // Sem pagamentos: formulário completo padronizado
+              <div className="mt-2">
+                <PagamentoForm
+                  totalVenda={totalVenda}
                   vendaId={venda.id}
                   numeroVenda={venda.numero_venda}
-                  valor={Math.max(0, venda.total_venda - venda.total_pago)}
-                  endpoint="criar-pix-instore"
-                  onPagamentoConfirmado={() => load()}
-                />
-              )}
-
-              {/* Manual (MP) — verifica pagamento por ID */}
-              {newPagForma === "Manual (MP)" && (
-                <div className="rounded-xl border p-4 mb-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
-                  <p className="text-xs" style={{ color: "#6B7280" }}>
-                    Cole o ID do pagamento do Mercado Pago. O sistema vai consultar o MP e registrar automaticamente se estiver aprovado.
-                  </p>
-                  <div>
-                    <Label>ID do Pagamento (MP)</Label>
-                    <input
-                      type="text"
-                      value={mpManualId}
-                      onChange={e => { setMpManualId(e.target.value); setMpManualMsg(null); }}
-                      placeholder="ex: 123456789"
-                      className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono"
-                      style={{ borderColor: C.cremeBorder, color: "#374151" }}
-                    />
-                  </div>
-                  {mpManualMsg && (
-                    <p className="text-xs font-medium" style={{ color: mpManualMsg.ok ? "#059669" : "#DC2626" }}>
-                      {mpManualMsg.text}
-                    </p>
-                  )}
-                  <button
-                    onClick={handleMpManual}
-                    disabled={mpManualLoading || !mpManualId.trim()}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
-                    style={{ backgroundColor: C.esmeralda, color: C.creme }}
-                  >
-                    {mpManualLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckIcon size={14} />}
-                    Verificar e Registrar
-                  </button>
-                </div>
-              )}
-
-              {/* Cartão de Crédito via Mercado Pago (link ou maquininha) */}
-              {newPagForma === "Cartão de Crédito" && (
-                <CartaoInline
-                  vendaId={venda.id}
-                  numeroVenda={venda.numero_venda}
-                  valor={Math.max(0, venda.total_venda - venda.total_pago)}
-                  installments={newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao) || 1}
-                  onPagamentoConfirmado={() => load()}
-                />
-              )}
-
-
-              {/* Múltiplas */}
-              {newPagForma === "Múltiplas" && (() => {
-                const totalMult = multPagamentos.reduce((s, p) => s + p.valor, 0);
-                const restante = +(totalVenda - (venda?.total_pago ?? 0) - totalMult).toFixed(2);
-                return (
-                  <div className="mb-4">
-                    <div className="flex flex-wrap items-end gap-2 mb-3">
-                      <div className="flex-1 min-w-36">
-                        <Label>Forma</Label>
-                        <Select value={multPagForma} onChange={e => { setMultPagForma(e.target.value); setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null); }}>
-                          <optgroup label="Métodos de Pagamento">
-                            {FORMAS_PAGAMENTO.filter(f => f !== "Múltiplas" && f !== "Manual (MP)").map(f => <option key={f} value={f}>{f}</option>)}
-                          </optgroup>
-                        </Select>
-                      </div>
-                      {multPagForma !== "Ouro" && (
-                        <div className="flex-1 min-w-28">
-                          <Label>Valor{restante > 0 && <span className="ml-1 font-normal text-xs" style={{ color: "#9CA3AF" }}>(restante: {fmt(restante)})</span>}</Label>
-                          <input type="text" value={multPagValor} onChange={e => setMultPagValor(e.target.value)}
-                            placeholder={restante > 0 ? restante.toFixed(2).replace(".", ",") : "0,00"}
-                            onKeyDown={e => {
-                              if (e.key === "Enter") {
-                                const v = parseFloat(multPagValor.replace(",", ".")) || 0;
-                                if (v > 0 && restante > 0) {
-                                  setMultPagamentos(prev => [...prev, { _key: Math.random().toString(36).slice(2), forma: multPagForma, valor: Math.min(v, restante) }]);
-                                  setMultPagValor("");
-                                }
-                              }
-                            }}
-                            className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
-                        </div>
-                      )}
-                      {multPagForma !== "Ouro" ? (
-                        <button onClick={() => {
-                            const v = parseFloat(multPagValor.replace(",", ".")) || 0;
-                            if (v > 0 && restante > 0) {
-                              setMultPagamentos(prev => [...prev, { _key: Math.random().toString(36).slice(2), forma: multPagForma, valor: Math.min(v, restante) }]);
-                              setMultPagValor("");
-                            }
-                          }} disabled={restante <= 0}
-                          className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
-                          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                          <Plus size={13} /> Adicionar
-                        </button>
-                      ) : null}
-                    </div>
-                    {/* Ouro no fluxo Múltiplas */}
-                    {multPagForma === "Ouro" && (
-                      <div className="rounded-lg border p-3 mb-3 space-y-3" style={{ borderColor: C.cremeBorder }}>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <Label>Peso (g)</Label>
-                            <input type="number" step="0.001" value={multOuroPeso}
-                              onChange={e => { setMultOuroPeso(e.target.value); setMultOuroValidacaoIA(null); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); }}
-                              placeholder="0.000"
-                              className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
-                          </div>
-                          <div>
-                            <Label>Valor da grama (R$)</Label>
-                            <input type="number" step="0.01" value={multOuroValorGrama}
-                              onChange={e => setMultOuroValorGrama(e.target.value)}
-                              placeholder="0.00"
-                              className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
-                          </div>
-                        </div>
-                        {multOuroPeso && multOuroValorGrama && (() => {
-                          const p = parseFloat(multOuroPeso); const vg = parseFloat(multOuroValorGrama);
-                          if (p > 0 && vg > 0) return <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>Total: {fmt(p * vg)}</p>;
-                          return null;
-                        })()}
-                        <div>
-                          <Label>Foto da balança</Label>
-                          <input type="file" accept="image/*" capture="environment"
-                            onChange={async e => {
-                              const file = e.target.files?.[0]; if (!file) return;
-                              setMultOuroFotoFile(file); setMultOuroFotoPreview(URL.createObjectURL(file)); setMultOuroValidacaoIA(null);
-                              const p = parseFloat(multOuroPeso);
-                              if (p > 0) await validarOuroIA(file, p, setMultOuroValidacaoIA, setMultOuroValidando);
-                            }}
-                            className="w-full text-sm" />
-                          {multOuroValidando && <p className="text-xs mt-1" style={{ color: "#6B7280" }}>Validando com IA...</p>}
-                          {multOuroFotoPreview && <img src={multOuroFotoPreview} alt="Balança" className="mt-2 h-20 rounded object-cover" />}
-                          {multOuroValidacaoIA && (
-                            <div className={`mt-2 flex items-center gap-2 text-xs rounded px-3 py-2 ${multOuroValidacaoIA.match ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
-                              {multOuroValidacaoIA.match ? <CheckCircle size={13} /> : <XCircle size={13} />}
-                              {multOuroValidacaoIA.mensagem}
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          disabled={restante <= 0 || !multOuroValidacaoIA?.match || !multOuroFotoFile || multOuroValidando}
-                          onClick={async () => {
-                            if (!venda || !multOuroFotoFile) { setSaveErr("Foto da balança obrigatória."); return; }
-                            const peso = parseFloat(multOuroPeso.replace(",", ".")); const vg = parseFloat(multOuroValorGrama.replace(",", "."));
-                            if (!peso || peso <= 0) { setSaveErr("Informe o peso do ouro."); return; }
-                            if (!vg || vg <= 0) { setSaveErr("Informe o valor da grama."); return; }
-                            const path = await uploadOuroFoto(multOuroFotoFile, venda.id);
-                            if (!path) return;
-                            const valorOuro = Math.min(+(peso * vg).toFixed(2), restante);
-                            setMultPagamentos(prev => [...prev, { _key: Math.random().toString(36).slice(2), forma: "Ouro", valor: valorOuro, ouro_peso: peso, ouro_valor_grama: vg, ouro_foto_path: path }]);
-                            setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null);
-                          }}
-                          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
-                          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                          <Plus size={13} /> Adicionar Ouro
-                        </button>
-                      </div>
-                    )}
-                    {multPagamentos.length > 0 && (
-                      <div className="space-y-1.5">
-                        {multPagamentos.map(p => (
-                          <div key={p._key} className="flex items-center justify-between px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }}>
-                            <span style={{ color: "#374151" }}>{p.forma}</span>
-                            <div className="flex items-center gap-3">
-                              <span className="tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(p.valor)}</span>
-                              <button onClick={() => setMultPagamentos(prev => prev.filter(x => x._key !== p._key))} className="text-gray-300 hover:text-red-400"><X size={13} /></button>
-                            </div>
-                          </div>
-                        ))}
-                        <div className="flex justify-between text-sm pt-1 border-t" style={{ borderColor: C.cremeBorder }}>
-                          <span style={{ color: "#6B7280" }}>Restante a pagar</span>
-                          <span className="tabular-nums font-semibold" style={{ color: restante > 0.01 ? "#D97706" : "#059669" }}>{fmt(restante)}</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* Categoria */}
-              <div className="rounded-lg border px-4 py-3 text-sm mb-4" style={{ borderColor: C.cremeBorder }}>
-                <span className="font-medium" style={{ color: "#374151" }}>Categoria:</span>
-                <span className="ml-1" style={{ color: "#6B7280" }}>01.01 - Vendas de Produtos e serviço</span>
-              </div>
-
-              {/* Botão registrar pagamento */}
-              {newPagForma !== "Múltiplas" && newPagForma !== "Manual (MP)" ? (
-                newPagForma === "Ouro" ? (
-                  <button onClick={handleAddPagamentoOuro}
-                    disabled={updating || !ouroValidacaoIA?.match || !ouroFotoFile}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
-                    style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                    {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamento em Ouro
-                  </button>
-                ) : (
-                  <button onClick={() => handleAddPagamento(totalVenda)} disabled={updating || totalVenda <= 0}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
-                    style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                    {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamento
-                  </button>
-                )
-              ) : (
-                <button onClick={async () => {
-                    if (multPagamentos.length === 0) return;
+                  mode="edicao"
+                  gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagSeguro" }, { id: 3, nome: "Cielo" }, { id: 4, nome: "Stone" }, { id: 5, nome: "Getnet" }, { id: 6, nome: "Rede" }, { id: 7, nome: "Outro" }]}
+                  // Payment form
+                  pagForma={newPagForma} setPagForma={setNewPagForma}
+                  pagGateway={newPagGateway} setPagGateway={setNewPagGateway}
+                  pagCondicao={newPagCondicao} setPagCondicao={setNewPagCondicao}
+                  // Valor form simples
+                  pagFormValor={newPagValor} setPagFormValor={setNewPagValor}
+                  // Múltiplas
+                  payments={edicaoPayments} setPayments={setEdicaoPayments}
+                  multForma={multPagForma} setMultForma={setMultPagForma}
+                  multParcelas={newPagParcelas} setMultParcelas={setNewPagParcelas}
+                  multValor={multPagValor} setMultValor={setMultPagValor}
+                  // Vale-Troca
+                  valeNumero={valeNumero} setValeNumero={setValeNumero}
+                  valeValidando={valeValidando} setValeValidando={setValeValidando}
+                  valeValidacao={valeValidacao} setValeValidacao={setValeValidacao}
+                  // Vale-Troca múltiplas
+                  multValeNumero={multValeNumero} setMultValeNumero={setMultValeNumero}
+                  multValeValidando={multValeValidando} setMultValeValidando={setMultValeValidando}
+                  multValeValidacao={multValeValidacao} setMultValeValidacao={setMultValeValidacao}
+                  // Ouro
+                  ouroPeso={ouroPeso} setOuroPeso={setOuroPeso}
+                  ouroValorGrama={ouroValorGrama} setOuroValorGrama={setOuroValorGrama}
+                  ouroFotoFile={ouroFotoFile} setOuroFotoFile={setOuroFotoFile}
+                  ouroFotoPreview={ouroFotoPreview} setOuroFotoPreview={setOuroFotoPreview}
+                  ouroValidacaoIA={ouroValidacaoIA} setOuroValidacaoIA={setOuroValidacaoIA}
+                  ouroValidando={ouroValidando} setOuroValidando={setOuroValidando}
+                  // Ouro múltiplas
+                  multOuroPeso={multOuroPeso} setMultOuroPeso={setMultOuroPeso}
+                  multOuroValorGrama={multOuroValorGrama} setMultOuroValorGrama={setMultOuroValorGrama}
+                  multOuroFotoFile={multOuroFotoFile} setMultOuroFotoFile={setMultOuroFotoFile}
+                  multOuroFotoPreview={multOuroFotoPreview} setMultOuroFotoPreview={setMultOuroFotoPreview}
+                  multOuroValidacaoIA={multOuroValidacaoIA} setMultOuroValidacaoIA={setMultOuroValidacaoIA}
+                  multOuroValidando={multOuroValidando} setMultOuroValidando={setMultOuroValidando}
+                  // Manual (MP)
+                  mpManualId={mpManualId} setMpManualId={setMpManualId}
+                  mpManualLoading={mpManualLoading} setMpManualLoading={setMpManualLoading}
+                  mpManualMsg={mpManualMsg} setMpManualMsg={setMpManualMsg}
+                  // Saving
+                  saving={updating}
+                  // Functions
+                  validarOuroIA={validarOuroIA}
+                  validarValeTroca={validarValeFn}
+                  handleAddPagamento={handleEdicaoAdd}
+                  handleRemovePagamento={(p) => setEdicaoPayments(prev => prev.filter(x => x._key !== p._key))}
+                  handleMpManual={handleMpManual}
+                  handleAddMultOuro={async () => {
+                    if (!venda || !multOuroFotoFile) { setSaveErr("Foto da balança obrigatória."); return; }
                     setUpdating(true);
                     try {
-                      for (const p of multPagamentos) {
-                        const body: Record<string, unknown> = { forma: p.forma, valor: p.valor, parcelas: 1 };
-                        if (p.forma === "Ouro") {
-                          body.ouro_peso = p.ouro_peso;
-                          body.ouro_valor_grama = p.ouro_valor_grama;
-                          body.ouro_foto_path = p.ouro_foto_path;
-                        }
-                        const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
-                          method: "POST", headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify(body),
-                        });
-                        if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Erro"); }
-                      }
+                      const peso = parseFloat(multOuroPeso.replace(",", ".")); const vg = parseFloat(multOuroValorGrama.replace(",", "."));
+                      if (!peso || peso <= 0) throw new Error("Informe o peso do ouro.");
+                      if (!vg || vg <= 0) throw new Error("Informe o valor da grama.");
+                      const totalMult = edicaoPayments.reduce((s, p) => s + p.valor, 0);
+                      const restante = +(totalVenda - (venda?.total_pago ?? 0) - totalMult).toFixed(2);
+                      const path = await uploadOuroFoto(multOuroFotoFile, venda.id);
+                      if (!path) throw new Error("Erro ao enviar foto.");
+                      const valorOuro = Math.min(+(peso * vg).toFixed(2), restante);
+                      const body: Record<string, unknown> = { forma: "Ouro", valor: valorOuro, parcelas: 1, ouro_peso: peso, ouro_valor_grama: vg, ouro_foto_path: path };
+                      const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
+                        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+                      });
+                      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
                       await load();
-                      setMultPagamentos([]);
                       setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null);
-                    } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao registrar pagamentos"); }
+                    } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao registrar pagamento em ouro"); }
                     finally { setUpdating(false); }
-                  }} disabled={updating || multPagamentos.length === 0}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
-                  style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                  {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Registrar Pagamentos ({multPagamentos.length})
-                </button>
-              )}
-            </>
-          )}
-
-          {/* Botão adicionar mais quando já tem pagamentos */}
-          {edit.limited && venda.pagamentos.length > 0 && (
-            <>
-              {addingPag ? (
-                <div className="p-4 rounded-xl border mb-3 mt-3" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-sm font-medium" style={{ color: "#374151" }}>Adicionar pagamento</p>
-                    <button onClick={() => setAddingPag(false)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                      <Label>Forma</Label>
-                      <Select value={newPagForma} onChange={e => setNewPagForma(e.target.value)}>
-                        {FORMAS_PAGAMENTO.map(f => <option key={f} value={f}>{f}</option>)}
-                      </Select>
-                    </div>
-                    {newPagForma === "Cartão de Crédito" && (
-                      <>
-                        <div>
-                          <Label>Gateway</Label>
-                          <Select value={newPagGateway} onChange={e => setNewPagGateway(e.target.value)}>
-                            {GATEWAYS.map(g => <option key={g} value={g}>{g}</option>)}
-                          </Select>
-                        </div>
-                      </>
-                    )}
-                    {newPagForma === "Vale-Troca" && (
-                      <div>
-                        <Label>Número do Vale</Label>
-                        <input
-                          type="text"
-                          value={newPagValeNumero}
-                          onChange={e => setNewPagValeNumero(e.target.value.toUpperCase())}
-                          placeholder="VT-00001"
-                          className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none"
-                          style={{ borderColor: C.cremeBorder, color: "#374151" }}
-                        />
-                      </div>
-                    )}
-                    <div>
-                      <Label>Valor</Label>
-                      <input type="text" value={newPagValor} onChange={e => setNewPagValor(e.target.value)}
-                        placeholder="0,00" onKeyDown={e => e.key === "Enter" && handleAddPagamento()}
-                        className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
-                    </div>
-                    <div>
-                      <Label>Parcelas</Label>
-                      <Select value={newPagParcelas} onChange={e => setNewPagParcelas(Number(e.target.value))}>
-                        {[1,2,3,4,5,6,7,8,9,10,11,12].map(n => <option key={n} value={n}>{n}x</option>)}
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="flex justify-end mt-3">
-                    <button onClick={() => handleAddPagamento()} disabled={updating}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
-                      style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                      {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={13} />} Adicionar
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button onClick={() => {
-                    const totalPago = venda.pagamentos.reduce((s, p) => s + Number(p.valor), 0);
-                    const pendente = totalVenda - totalPago;
-                    setNewPagValor(pendente > 0 ? pendente.toFixed(2).replace(".", ",") : "");
-                    setAddingPag(true);
                   }}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-opacity hover:opacity-80 mt-3"
-                  style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
-                  <Plus size={14} /> adicionar pagamento
-                </button>
-              )}
-            </>
-          )}
+                  onPaymentSaved={load}
+                />
+              </div>
+            ) : (
+              // Já tem pagamentos: botão + formulário colapsável padronizado
+              <>
+                {!addingPag ? (
+                  <button onClick={() => {
+                      const pendente = Math.max(0, totalVenda - (venda?.total_pago ?? 0));
+                      setNewPagValor(pendente > 0 ? pendente.toFixed(2).replace(".", ",") : "");
+                      setAddingPag(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-opacity hover:opacity-80 mt-3"
+                    style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
+                    <Plus size={14} /> adicionar pagamento
+                  </button>
+                ) : (
+                  <div className="p-4 rounded-xl border mb-3 mt-3" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-sm font-medium" style={{ color: "#374151" }}>Adicionar pagamento</p>
+                      <button onClick={() => setAddingPag(false)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+                    </div>
+                    <PagamentoForm
+                      totalVenda={saldoPendente > 0 ? saldoPendente : totalVenda}
+                      vendaId={venda.id}
+                      numeroVenda={venda.numero_venda}
+                      mode="edicao"
+                      gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagSeguro" }, { id: 3, nome: "Cielo" }, { id: 4, nome: "Stone" }, { id: 5, nome: "Getnet" }, { id: 6, nome: "Rede" }, { id: 7, nome: "Outro" }]}
+                      pagForma={newPagForma} setPagForma={setNewPagForma}
+                      pagGateway={newPagGateway} setPagGateway={setNewPagGateway}
+                      pagCondicao={newPagCondicao} setPagCondicao={setNewPagCondicao}
+                      pagFormValor={newPagValor} setPagFormValor={setNewPagValor}
+                      payments={edicaoPayments} setPayments={setEdicaoPayments}
+                      multForma={multPagForma} setMultForma={setMultPagForma}
+                      multParcelas={newPagParcelas} setMultParcelas={setNewPagParcelas}
+                      multValor={multPagValor} setMultValor={setMultPagValor}
+                      valeNumero={valeNumero} setValeNumero={setValeNumero}
+                      valeValidando={valeValidando} setValeValidando={setValeValidando}
+                      valeValidacao={valeValidacao} setValeValidacao={setValeValidacao}
+                      multValeNumero={multValeNumero} setMultValeNumero={setMultValeNumero}
+                      multValeValidando={multValeValidando} setMultValeValidando={setMultValeValidando}
+                      multValeValidacao={multValeValidacao} setMultValeValidacao={setMultValeValidacao}
+                      ouroPeso={ouroPeso} setOuroPeso={setOuroPeso}
+                      ouroValorGrama={ouroValorGrama} setOuroValorGrama={setOuroValorGrama}
+                      ouroFotoFile={ouroFotoFile} setOuroFotoFile={setOuroFotoFile}
+                      ouroFotoPreview={ouroFotoPreview} setOuroFotoPreview={setOuroFotoPreview}
+                      ouroValidacaoIA={ouroValidacaoIA} setOuroValidacaoIA={setOuroValidacaoIA}
+                      ouroValidando={ouroValidando} setOuroValidando={setOuroValidando}
+                      multOuroPeso={multOuroPeso} setMultOuroPeso={setMultOuroPeso}
+                      multOuroValorGrama={multOuroValorGrama} setMultOuroValorGrama={setMultOuroValorGrama}
+                      multOuroFotoFile={multOuroFotoFile} setMultOuroFotoFile={setMultOuroFotoFile}
+                      multOuroFotoPreview={multOuroFotoPreview} setMultOuroFotoPreview={setMultOuroFotoPreview}
+                      multOuroValidacaoIA={multOuroValidacaoIA} setMultOuroValidacaoIA={setMultOuroValidacaoIA}
+                      multOuroValidando={multOuroValidando} setMultOuroValidando={setMultOuroValidando}
+                      mpManualId={mpManualId} setMpManualId={setMpManualId}
+                      mpManualLoading={mpManualLoading} setMpManualLoading={setMpManualLoading}
+                      mpManualMsg={mpManualMsg} setMpManualMsg={setMpManualMsg}
+                      saving={updating}
+                      validarOuroIA={validarOuroIA}
+                      validarValeTroca={validarValeFn}
+                      handleAddPagamento={handleEdicaoAdd}
+                      handleRemovePagamento={(p) => setEdicaoPayments(prev => prev.filter(x => x._key !== p._key))}
+                      handleMpManual={handleMpManual}
+                      handleAddMultOuro={async () => {
+                        if (!venda || !multOuroFotoFile) { setSaveErr("Foto da balança obrigatória."); return; }
+                        setUpdating(true);
+                        try {
+                          const peso = parseFloat(multOuroPeso.replace(",", ".")); const vg = parseFloat(multOuroValorGrama.replace(",", "."));
+                          if (!peso || peso <= 0) throw new Error("Informe o peso do ouro.");
+                          if (!vg || vg <= 0) throw new Error("Informe o valor da grama.");
+                          const totalMultEd = edicaoPayments.reduce((s, p) => s + p.valor, 0);
+                          const restanteEd = +(saldoPendente - totalMultEd).toFixed(2);
+                          const path = await uploadOuroFoto(multOuroFotoFile, venda.id);
+                          if (!path) throw new Error("Erro ao enviar foto.");
+                          const valorOuro = Math.min(+(peso * vg).toFixed(2), restanteEd);
+                          const body: Record<string, unknown> = { forma: "Ouro", valor: valorOuro, parcelas: 1, ouro_peso: peso, ouro_valor_grama: vg, ouro_foto_path: path };
+                          const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
+                            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+                          });
+                          if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+                          await load();
+                          setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null);
+                        } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao registrar pagamento em ouro"); }
+                        finally { setUpdating(false); }
+                      }}
+                      onPaymentSaved={() => { load(); setAddingPag(false); }}
+                    />
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {/* Totals */}
           <div className="mt-4 pt-4 border-t space-y-1.5" style={{ borderColor: C.cremeBorder }}>

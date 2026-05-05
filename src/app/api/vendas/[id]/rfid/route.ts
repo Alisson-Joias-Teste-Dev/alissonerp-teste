@@ -34,7 +34,7 @@ export async function GET(
 
   // RFIDs disponíveis para cada produto da venda
   const produtoIds = [...new Set(itens.map(i => i.produto_id).filter(Boolean))];
-  let disponiveis: Record<number, Array<{ id: string; epc: string; sku: string; nome: string }>> = {};
+  const disponiveis: Record<number, Array<{ id: string; epc: string; sku: string; nome: string }>> = {};
 
   if (produtoIds.length > 0) {
     const rfids = await sql`

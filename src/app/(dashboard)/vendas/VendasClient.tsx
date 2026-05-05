@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import {
   Search, RefreshCw, Loader2, Plus, TrendingUp,
   ShoppingBag, DollarSign, ChevronRight, Trophy,
-  ChevronLeft, Wallet, Receipt, FileCheck,
+  ChevronLeft, Wallet, Receipt, FileCheck, History,
 } from "lucide-react";
 import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
+import LegacySaleModal from "@/components/vendas/LegacySaleModal";
 import Link from "next/link";
 import { useErrorStore } from "@/stores/errorStore";
 
@@ -126,6 +127,8 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
 
   // NFC-e modal
   const [vendaNfce, setVendaNfce] = useState<VendaERP | null>(null);
+  // Legacy sale modal
+  const [showLegacyModal, setShowLegacyModal] = useState(false);
 
   // Saldo crédito (só gerente_loja / diretor)
   const mostraSaldo = ["gerente_loja", "diretor"].includes(role);
@@ -246,6 +249,17 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
               <Trophy size={14} />
               Ranking
             </Link>
+          )}
+          {(role === "admin" || role === "desenvolvedor") && (
+            <button
+              type="button"
+              onClick={() => setShowLegacyModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-80 border"
+              style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+            >
+              <History size={15} strokeWidth={2} />
+              Venda Antiga
+            </button>
           )}
           <Link
             href="/vendas/nova"
@@ -592,6 +606,16 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
           venda={vendaNfce}
           onClose={() => setVendaNfce(null)}
           onSuccess={() => { fetchVendas(inicio, fim); }}
+        />
+      )}
+
+      {showLegacyModal && (
+        <LegacySaleModal
+          onClose={() => setShowLegacyModal(false)}
+          onSuccess={(result) => {
+            setShowLegacyModal(false);
+            fetchVendas(inicio, fim);
+          }}
         />
       )}
     </div>

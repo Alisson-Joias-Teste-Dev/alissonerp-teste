@@ -158,7 +158,7 @@ export async function GET(req: NextRequest) {
 
       itensDetalhados.push({
         id: i.id,
-        id_vendedor: i.id_vendedor,
+        id_vendedor: Number(i.id_vendedor),
         consultora: i.consultora ?? "Não informada",
         foto: i.foto,
         data_venda: i.data_venda,
