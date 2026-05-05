@@ -121,12 +121,17 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
 
   // Filtro itens
   const itensFiltrados = useMemo(() => {
+    if (filtroVendedor !== "") {
+      console.log("[filtro] filtroVendedor =", JSON.stringify(filtroVendedor), typeof filtroVendedor);
+      console.log("[filtro] vendedoresUnicos =", vendedoresUnicos.map(([id, n]) => [id, n, typeof id]));
+      console.log("[filtro] 3 primeiros itens:", itens.slice(0, 3).map(i => ({ vid: i.vendedor_id, vidType: typeof i.vendedor_id, nome: i.vendedor_nome, num: i.numero_venda })));
+    }
     return itens.filter(i => {
       if (filtroVendedor !== "" && String(i.vendedor_id) !== filtroVendedor) return false;
       if (filtroPedido && !i.numero_venda.toLowerCase().includes(filtroPedido.toLowerCase())) return false;
       return true;
     });
-  }, [itens, filtroVendedor, filtroPedido]);
+  }, [itens, filtroVendedor, filtroPedido, vendedoresUnicos]);
 
   const totalPaginas = Math.ceil(itensFiltrados.length / itensPorPagina);
   const itensPaginados = itensFiltrados.slice((pagina - 1) * itensPorPagina, pagina * itensPorPagina);

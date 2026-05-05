@@ -107,6 +107,12 @@ export async function GET(req: NextRequest) {
     ORDER BY v.data_venda DESC, v.id DESC, i.id
   `;
 
+  // DEBUG: log raw vendedor_id type from first item
+  if (itens.length > 0) {
+    const raw = itens[0].vendedor_id;
+    console.log("[analise-comissoes API] raw vendedor_id =", raw, "type =", typeof raw, "constructor =", raw?.constructor?.name);
+  }
+
   // ── Totais rodapé ─────────────────────────────────────────────────────────
   const totalComissao = itens.reduce((s, i) => s + Number(i.valor_comissao), 0);
   const totalRetida   = porVendedora.reduce((s, r) => s + (perdidaMap.get(Number(r.vendedor_id)) ?? 0), 0);
