@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import {
   X, Loader2, Search, Package, History,
   User, Phone, Calendar, FileText, Weight, Hash,
+  Mail, MapPin, Hash as HashIcon, Building,
 } from "lucide-react";
 
 const C = {
@@ -147,12 +148,49 @@ function AutoComplete<T>({
   );
 }
 
+// ─── Input rapido para campos inline ────────────────────────────────────────
+function InputField({
+  icon: Icon, placeholder, value, onChange, maxLength,
+}: {
+  icon: React.ComponentType<{ size?: number; style?: React.CSSProperties; className?: string }>;
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+  maxLength?: number;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 rounded-lg px-3 py-2.5 border bg-white" style={{ borderColor: C.cremeBorder }}>
+      <Icon size={14} style={{ color: "#9CA3AF" }} className="flex-shrink-0" />
+      <input
+        className="flex-1 outline-none text-sm bg-transparent min-w-0"
+        style={{ color: "#1A1A1A" }}
+        placeholder={placeholder}
+        value={value}
+        maxLength={maxLength}
+        onChange={e => onChange(e.target.value)}
+      />
+    </div>
+  );
+}
+
 // ─── Componente principal ───────────────────────────────────────────────────
 export default function LegacySaleModal({ onClose, onSuccess }: Props) {
   const [modoCliente, setModoCliente] = useState<"buscar" | "novo">("buscar");
   const [cliente, setCliente] = useState<Cliente | null>(null);
-  const [nomeNovoCliente, setNomeNovoCliente] = useState("");
-  const [telefoneNovoCliente, setTelefoneNovoCliente] = useState("");
+  const [novoCliente, setNovoCliente] = useState({
+    nome: "",
+    cpf_cnpj: "",
+    email: "",
+    telefone: "",
+    celular: "",
+    endereco: "",
+    numero: "",
+    complemento: "",
+    bairro: "",
+    municipio: "",
+    cep: "",
+    uf: "",
+  });
 
   const [dataVenda, setDataVenda] = useState("");
   const [observacoes, setObservacoes] = useState("Registro manual de venda antiga");
@@ -166,8 +204,9 @@ export default function LegacySaleModal({ onClose, onSuccess }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const nomeProduto = produto ? produto.nome : nomeProdutoManual;
+  const novoClienteValido = novoCliente.nome.trim() && novoCliente.telefone.trim();
   const valido =
-    ((modoCliente === "buscar" && cliente) || (modoCliente === "novo" && nomeNovoCliente.trim() && telefoneNovoCliente.trim())) &&
+    ((modoCliente === "buscar" && cliente) || (modoCliente === "novo" && novoClienteValido)) &&
     nomeProduto.trim() &&
     pesoEstimado.trim() && Number(pesoEstimado) > 0 &&
     (!quantidade || Number(quantidade) >= 1);
@@ -194,8 +233,18 @@ export default function LegacySaleModal({ onClose, onSuccess }: Props) {
         body.cliente_id = cliente.id;
       } else {
         body.novo_cliente = {
-          nome: nomeNovoCliente.trim(),
-          telefone: telefoneNovoCliente.trim(),
+          nome: novoCliente.nome.trim(),
+          telefone: novoCliente.telefone.trim(),
+          cpf_cnpj: novoCliente.cpf_cnpj.trim() || undefined,
+          email: novoCliente.email.trim() || undefined,
+          celular: novoCliente.celular.trim() || undefined,
+          endereco: novoCliente.endereco.trim() || undefined,
+          numero: novoCliente.numero.trim() || undefined,
+          complemento: novoCliente.complemento.trim() || undefined,
+          bairro: novoCliente.bairro.trim() || undefined,
+          municipio: novoCliente.municipio.trim() || undefined,
+          cep: novoCliente.cep.trim() || undefined,
+          uf: novoCliente.uf.trim().toUpperCase() || undefined,
         };
       }
 
@@ -291,28 +340,40 @@ export default function LegacySaleModal({ onClose, onSuccess }: Props) {
                 onClear={() => setCliente(null)}
               />
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div>
-                  <div className="flex items-center gap-1.5 rounded-lg px-3 py-2.5 border bg-white" style={{ borderColor: C.cremeBorder }}>
-                    <User size={14} style={{ color: "#9CA3AF" }} className="flex-shrink-0" />
-                    <input
-                      className="flex-1 outline-none text-sm bg-transparent min-w-0"
-                      placeholder="Nome completo"
-                      value={nomeNovoCliente}
-                      onChange={e => setNomeNovoCliente(e.target.value)}
-                    />
-                  </div>
+              <div className="space-y-2">
+                {/* Linha 1: Nome + CPF/CNPJ */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <InputField icon={User} placeholder="Nome completo *" value={novoCliente.nome} onChange={v => setNovoCliente(p => ({ ...p, nome: v }))} />
+                  <InputField icon={HashIcon} placeholder="CPF/CNPJ" value={novoCliente.cpf_cnpj} onChange={v => setNovoCliente(p => ({ ...p, cpf_cnpj: v }))} />
                 </div>
-                <div>
-                  <div className="flex items-center gap-1.5 rounded-lg px-3 py-2.5 border bg-white" style={{ borderColor: C.cremeBorder }}>
-                    <Phone size={14} style={{ color: "#9CA3AF" }} className="flex-shrink-0" />
-                    <input
-                      className="flex-1 outline-none text-sm bg-transparent min-w-0"
-                      placeholder="Telefone"
-                      value={telefoneNovoCliente}
-                      onChange={e => setTelefoneNovoCliente(e.target.value)}
-                    />
+                {/* Linha 2: Telefone + Celular */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <InputField icon={Phone} placeholder="Telefone *" value={novoCliente.telefone} onChange={v => setNovoCliente(p => ({ ...p, telefone: v }))} />
+                  <InputField icon={Phone} placeholder="Celular" value={novoCliente.celular} onChange={v => setNovoCliente(p => ({ ...p, celular: v }))} />
+                </div>
+                {/* Linha 3: Email */}
+                <InputField icon={Mail} placeholder="Email" value={novoCliente.email} onChange={v => setNovoCliente(p => ({ ...p, email: v }))} />
+                {/* Linha 4: Endereco + Numero */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="sm:col-span-2">
+                    <InputField icon={MapPin} placeholder="Endereco" value={novoCliente.endereco} onChange={v => setNovoCliente(p => ({ ...p, endereco: v }))} />
                   </div>
+                  <InputField icon={HashIcon} placeholder="Numero" value={novoCliente.numero} onChange={v => setNovoCliente(p => ({ ...p, numero: v }))} />
+                </div>
+                {/* Linha 5: Complemento + Bairro */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <InputField icon={Building} placeholder="Complemento" value={novoCliente.complemento} onChange={v => setNovoCliente(p => ({ ...p, complemento: v }))} />
+                  <InputField icon={MapPin} placeholder="Bairro" value={novoCliente.bairro} onChange={v => setNovoCliente(p => ({ ...p, bairro: v }))} />
+                </div>
+                {/* Linha 6: Municipio + CEP + UF */}
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                  <div className="sm:col-span-2">
+                    <InputField icon={MapPin} placeholder="Municipio" value={novoCliente.municipio} onChange={v => setNovoCliente(p => ({ ...p, municipio: v }))} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <InputField icon={MapPin} placeholder="CEP" value={novoCliente.cep} onChange={v => setNovoCliente(p => ({ ...p, cep: v }))} />
+                  </div>
+                  <InputField icon={MapPin} placeholder="UF" value={novoCliente.uf} onChange={v => setNovoCliente(p => ({ ...p, uf: v }))} maxLength={2} />
                 </div>
               </div>
             )}

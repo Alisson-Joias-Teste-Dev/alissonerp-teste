@@ -250,15 +250,17 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
               Ranking
             </Link>
           )}
-          <button
-            type="button"
-            onClick={() => setShowLegacyModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-80 border"
-            style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
-          >
-            <History size={15} strokeWidth={2} />
-            Venda Antiga
-          </button>
+          {(role === "admin" || role === "desenvolvedor") && (
+            <button
+              type="button"
+              onClick={() => setShowLegacyModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-80 border"
+              style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+            >
+              <History size={15} strokeWidth={2} />
+              Venda Antiga
+            </button>
+          )}
           <Link
             href="/vendas/nova"
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-80"
