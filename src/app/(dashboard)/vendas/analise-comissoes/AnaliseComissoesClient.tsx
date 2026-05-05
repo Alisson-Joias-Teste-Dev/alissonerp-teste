@@ -119,19 +119,25 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
     setPagina(1);
   }, [filtroVendedor, filtroPedido]);
 
+  // DEBUG: ver se o filtro está chegando
+  useEffect(() => {
+    console.log("[DEBUG] filtroVendedor mudou para:", JSON.stringify(filtroVendedor), "| tipo:", typeof filtroVendedor);
+    if (filtroVendedor !== "") {
+      console.log("[DEBUG] vendedoresUnicos:", vendedoresUnicos.map(([id, n]) => ({ id, nome: n, typeId: typeof id })));
+      console.log("[DEBUG] amostra itens:", itens.slice(0, 3).map(i => ({ vid: i.vendedor_id, vidType: typeof i.vendedor_id, str: String(i.vendedor_id), nome: i.vendedor_nome })));
+      const matchSample = itens.filter(i => String(i.vendedor_id) === filtroVendedor);
+      console.log("[DEBUG] itens que batem com filtro:", matchSample.length, "de", itens.length);
+    }
+  }, [filtroVendedor, vendedoresUnicos, itens]);
+
   // Filtro itens
   const itensFiltrados = useMemo(() => {
-    if (filtroVendedor !== "") {
-      console.log("[filtro] filtroVendedor =", JSON.stringify(filtroVendedor), typeof filtroVendedor);
-      console.log("[filtro] vendedoresUnicos =", vendedoresUnicos.map(([id, n]) => [id, n, typeof id]));
-      console.log("[filtro] 3 primeiros itens:", itens.slice(0, 3).map(i => ({ vid: i.vendedor_id, vidType: typeof i.vendedor_id, nome: i.vendedor_nome, num: i.numero_venda })));
-    }
     return itens.filter(i => {
       if (filtroVendedor !== "" && String(i.vendedor_id) !== filtroVendedor) return false;
       if (filtroPedido && !i.numero_venda.toLowerCase().includes(filtroPedido.toLowerCase())) return false;
       return true;
     });
-  }, [itens, filtroVendedor, filtroPedido, vendedoresUnicos]);
+  }, [itens, filtroVendedor, filtroPedido]);
 
   const totalPaginas = Math.ceil(itensFiltrados.length / itensPorPagina);
   const itensPaginados = itensFiltrados.slice((pagina - 1) * itensPorPagina, pagina * itensPorPagina);
