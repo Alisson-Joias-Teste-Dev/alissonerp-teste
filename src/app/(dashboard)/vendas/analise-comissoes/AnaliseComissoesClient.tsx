@@ -114,6 +114,16 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
     });
   }, [vendedoras, sortField, sortDir]);
 
+  const vendedoresUnicos = useMemo(() => {
+    const map = new Map<number, string>();
+    itens.forEach(i => {
+      const vid = i.vendedor_id;
+      const vnome = i.vendedor_nome;
+      if (vid != null && vnome) map.set(vid, vnome);
+    });
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [itens]);
+
   // Resetar página quando os filtros mudam
   useEffect(() => {
     setPagina(1);

@@ -1,37 +1,52 @@
-// Aplica migration 231_add_legacy_venda.sql
 import postgres from 'postgres';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { readFileSync } from 'fs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DB = process.env.DATABASE_URL ?? 'postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres';
-const sql = postgres(DB, { ssl: false, max: 1, connection: { search_path: "alissonerp,public" } });
+// Lê DATABASE_URL diretamente do .env.local (sem dependência de dotenv)
+const env = readFileSync('.env.local', 'utf8');
+const dbUrl = env.split('\n').find(l => l.startsWith('DATABASE_URL='))?.split('=').slice(1).join('=').trim();
+if (!dbUrl) { console.error('DATABASE_URL não encontrado em .env.local'); process.exit(1); }
 
-console.log('=== APPLY 231: add is_legacy, atualiza view, indice ===\n');
+const sql = postgres(dbUrl, { ssl: false });
+
+console.log('=== Migration 231: Rota de Fabricação + Reposição Automática ===\n');
+
+const migration = readFileSync('supabase/migrations/231_produto_rota_reposicao.sql', 'utf8');
 
 try {
-  const path = resolve(__dirname, '../supabase/migrations/231_add_legacy_venda.sql');
-  const ddl = readFileSync(path, 'utf8');
-  await sql.unsafe(ddl);
-  console.log('DDL aplicado');
-
-  const col = await sql`
-    SELECT column_name FROM information_schema.columns
-    WHERE table_schema='alissonerp' AND table_name='vendas_erp' AND column_name='is_legacy'
-  `;
-  console.log(`  coluna is_legacy: ${col.length ? 'OK' : 'FALHOU'}`);
-
-  const view = await sql`
-    SELECT column_name FROM information_schema.columns
-    WHERE table_schema='alissonerp' AND table_name='vw_vendas_erp_completa' AND column_name='is_legacy'
-  `;
-  console.log(`  view vw_vendas_erp_completa.is_legacy: ${view.length ? 'OK' : 'FALHOU'}`);
-
-  console.log('\nMigration 231 aplicada');
+  await sql.unsafe(migration);
+  console.log('✓ Migration 231 aplicada com sucesso.\n');
 } catch (e) {
-  console.error('Erro:', e.message);
-  process.exit(1);
-} finally {
+  console.error('ERRO na migration:', e.message);
   await sql.end();
+  process.exit(1);
 }
+
+// ── Verificações pós-migration ─────────────────────────────────────────────
+
+const tabRepo = await sql`
+  SELECT column_name, data_type, is_nullable
+  FROM information_schema.columns
+  WHERE table_schema='alissonerp' AND table_name='produto_reposicao_config'
+  ORDER BY ordinal_position
+`;
+console.log('produto_reposicao_config:');
+for (const c of tabRepo) console.log(`  ${c.column_name} (${c.data_type})`);
+
+const tabRota = await sql`
+  SELECT column_name, data_type, is_nullable
+  FROM information_schema.columns
+  WHERE table_schema='alissonerp' AND table_name='produto_rota'
+  ORDER BY ordinal_position
+`;
+console.log('\nproduto_rota:');
+for (const c of tabRota) console.log(`  ${c.column_name} (${c.data_type})`);
+
+const colPcp = await sql`
+  SELECT column_name, data_type, column_default
+  FROM information_schema.columns
+  WHERE table_schema='alissonerp' AND table_name='pcp' AND column_name='rota_etapa_atual'
+`;
+console.log('\npcp.rota_etapa_atual:', colPcp[0] ? `${colPcp[0].data_type} default ${colPcp[0].column_default}` : 'NÃO EXISTE ⚠️');
+
+await sql.end();
+console.log('\n=== Migration 231 validada ===');

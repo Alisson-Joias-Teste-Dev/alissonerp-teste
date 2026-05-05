@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Validacao de data ────────────────────────────────────────────────────
-  let dataVenda = body.data_venda || "2023-01-01";
+  const dataVenda = body.data_venda || "2023-01-01";
   if (dataVenda > MAX_LEGACY_DATE) {
     return NextResponse.json(
       { error: `Data maxima permitida: ${MAX_LEGACY_DATE.split("-").reverse().join("/")}` },

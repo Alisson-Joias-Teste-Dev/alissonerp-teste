@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Printer, Loader2, Copy, CheckCircle2, AlertTriangle, ArrowLeft } from "lucide-react";
+import { Printer, Loader2, Copy, CheckCircle2, AlertTriangle, ArrowLeft, Download } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export default function TestarRFID() {
@@ -14,6 +14,9 @@ export default function TestarRFID() {
   } | null>(null);
   const [erro, setErro] = useState("");
   const [copiado, setCopiado] = useState(false);
+  const [localPrinting, setLocalPrinting] = useState(false);
+  const [localPrintMsg, setLocalPrintMsg] = useState("");
+  const [bridgeUrl, setBridgeUrl] = useState("http://localhost:3456");
 
   async function testar(tipo: "gerar" | "imprimir") {
     setLoading(true);
@@ -41,6 +44,36 @@ export default function TestarRFID() {
       setCopiado(true);
       setTimeout(() => setCopiado(false), 2000);
     }
+  }
+
+  async function imprimirLocal() {
+    if (!resultado?.zpl) return;
+    setLocalPrinting(true);
+    setLocalPrintMsg("");
+    try {
+      const r = await fetch(`${bridgeUrl}/print`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zpl: resultado.zpl }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error || "Falha ao imprimir");
+      setLocalPrintMsg("✅ Impresso com sucesso!");
+    } catch (err) {
+      setLocalPrintMsg(`❌ ${(err as Error).message}`);
+    } finally {
+      setLocalPrinting(false);
+    }
+  }
+
+  function baixarZpl() {
+    if (!resultado?.zpl) return;
+    const blob = new Blob([resultado.zpl], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rfid-${resultado.epc}.zpl`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
