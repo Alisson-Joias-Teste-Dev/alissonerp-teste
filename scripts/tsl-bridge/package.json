@@ -1,0 +1,13 @@
+{
+  "name": "tsl-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ponte WebSocket para TSL 1128 via SPP",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "serialport": "^13.0.0",
+    "ws": "^8.18.0"
+  }
+}

@@ -2,129 +2,212 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 
-// POST /api/rfid/inventario
-// Body: { leituras: string[], leitor_id?: string }
-//   leituras: Array de EPCs lidos pelo leitor TSL 1128
-//   leitor_id: identificador do leitor (ex: "TSL-1128-BT-001")
-//
-// Recebe lote de leituras do leitor RFID, compara com o estoque esperado
-// e retorna divergências para conferência.
-export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const body = await req.json() as { leituras: string[]; leitor_id?: string };
-  if (!Array.isArray(body.leituras) || body.leituras.length === 0) {
-    return NextResponse.json({ error: "leituras é obrigatório (array de strings)" }, { status: 400 });
-  }
-
-  const leituras = [...new Set(body.leituras.map(l => l.trim()).filter(Boolean))];
-  const leitorId = body.leitor_id ?? "TSL-1128";
-
-  // 1. Registra todas as leituras na tabela de eventos
-  const inserts = leituras.map(epc => ({
-    epc,
-    evento: "leitura_inventario",
-    localizacao: "Loja",
-    leitor_id: leitorId,
-    operador: user.id,
-  }));
-
-  // Batch insert via sql.unsafe (mais rapido que inserts individuais)
-  const valuesStr = inserts.map(i =>
-    `('${i.epc}', '${i.evento}', '${i.localizacao}', '${i.leitor_id}', '${i.operador}'::uuid, now())`
-  ).join(",\n");
-
-  await sql.unsafe(`
-    INSERT INTO alissonerp.joias_leituras (epc, evento, localizacao, leitor_id, operador, lido_em)
-    VALUES ${valuesStr}
-  `);
-
-  // 2. Identifica quais RFIDs foram lidos e seus produtos
-  const lidos = await sql`
-    SELECT j.epc, j.produto_id, j.sku, j.nome, j.status, j.localizacao_atual,
-           p.nome AS produto_nome
-    FROM alissonerp.joias_rfid j
-    LEFT JOIN public.produtos p ON p.id_produto = j.produto_id::bigint
-    WHERE j.epc = ANY(${leituras}::text[])
-  `;
-
-  // 3. Identifica RFIDs que deveriam estar presentes mas NAO foram lidos
-  const epcsLidos = new Set(lidos.map(r => r.epc));
-  const naoLidos = await sql`
-    SELECT j.epc, j.produto_id, j.sku, j.nome, j.status,
-           p.nome AS produto_nome
-    FROM alissonerp.joias_rfid j
-    LEFT JOIN public.produtos p ON p.id_produto = j.produto_id::bigint
-    WHERE j.status = 'ativo'
-      AND j.localizacao_atual = 'Loja'
-      AND j.epc != ALL(${leituras}::text[])
-  `;
-
-  // 4. Agrupa por produto para resumo
-  const resumo: Record<number, { produto: string; sku: string; esperado: number; lidos: number; divergencia: number }> = {};
-  for (const r of lidos) {
-    const pid = Number(r.produto_id);
-    if (!resumo[pid]) {
-      const [prod] = await sql`SELECT nome, sku FROM public.produtos WHERE id_produto = ${pid}::bigint`;
-      resumo[pid] = { produto: prod?.nome ?? "?", sku: prod?.sku ?? "?", esperado: 0, lidos: 0, divergencia: 0 };
-    }
-    resumo[pid].lidos++;
-  }
-  for (const r of naoLidos) {
-    const pid = Number(r.produto_id);
-    if (!resumo[pid]) {
-      resumo[pid] = { produto: r.produto_nome ?? "?", sku: r.sku ?? "?", esperado: 0, lidos: 0, divergencia: 0 };
-    }
-    resumo[pid].esperado++;
-    resumo[pid].divergencia--;
-  }
-  // Ajusta: lidos que estao no esperado
-  for (const pid of Object.keys(resumo)) {
-    const esperadoTotal = naoLidos.filter(r => Number(r.produto_id) === Number(pid)).length + resumo[Number(pid)].lidos;
-    resumo[Number(pid)].esperado = esperadoTotal;
-    resumo[Number(pid)].divergencia = resumo[Number(pid)].lidos - esperadoTotal;
-  }
-
-  return NextResponse.json({
-    ok: true,
-    total_leituras: leituras.length,
-    rfids_lidos: lidos.length,
-    rfids_esperados_nao_lidos: naoLidos.length,
-    lidos: lidos.map(r => ({
-      epc: r.epc,
-      produto: r.produto_nome,
-      sku: r.sku,
-      status: r.status,
-    })),
-    nao_lidos: naoLidos.map(r => ({
-      epc: r.epc,
-      produto: r.produto_nome,
-      sku: r.sku,
-      status: r.status,
-    })),
-    resumo: Object.entries(resumo).map(([pid, r]) => ({
-      produto_id: Number(pid),
-      ...r,
-    })),
-  });
+function extrairIdApi(epc: string): number | null {
+  if (!epc || epc.length < 13) return null;
+  if (!/^\d{24}$/.test(epc)) return null;
+  const id = parseInt(epc.slice(4, 13), 10);
+  return isNaN(id) || id <= 0 ? null : id;
 }
 
-// GET /api/rfid/inventario
-// Retorna: histórico de leituras de inventário
-export async function GET() {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const leituras = await sql`
-    SELECT epc, evento, localizacao, leitor_id, created_at
-    FROM alissonerp.joias_leituras
-    WHERE evento = 'leitura_inventario'
-    ORDER BY created_at DESC
-    LIMIT 100
+async function getLocalNomeFromId(localId: number): Promise<string> {
+  const [row] = await sql`
+    SELECT nome FROM alissonerp.locais_estoque WHERE id = ${localId}
   `;
+  return row?.nome ?? "Loja";
+}
 
-  return NextResponse.json(leituras);
+export async function POST(req: NextRequest) {
+  try {
+    const supabase = await createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
+    const body = await req.json() as {
+      leituras: string[];
+      leitor_id?: string;
+      local_estoque_id?: number;
+      concluir?: boolean;
+    };
+
+    if (!Array.isArray(body.leituras) || body.leituras.length === 0) {
+      return NextResponse.json({ error: "leituras é obrigatório (array de strings)" }, { status: 400 });
+    }
+
+    if (body.concluir) {
+      return NextResponse.json({ ok: true, concluido: true, mensagem: "Inventario concluido" });
+    }
+
+    const leituras = [...new Set(body.leituras.map(l => l.trim()).filter(Boolean))];
+    const leitorId = body.leitor_id ?? "TSL-1128";
+    const localEstoqueId = body.local_estoque_id ?? 2;
+    const localNome = await getLocalNomeFromId(localEstoqueId);
+
+    // Registra todas as leituras
+    await sql.begin(async (tx: any) => {
+      for (const epc of leituras) {
+        await tx`
+          INSERT INTO alissonerp.joias_leituras (epc, evento, localizacao, leitor_id, operador, lido_em)
+          VALUES (${epc}, 'inventario', ${localNome}, ${leitorId}, ${user.id}::uuid, now())
+        `;
+      }
+    });
+
+    // Extrai id_api_produto de cada EPC e busca os produtos
+    const idsApi = [...new Set(leituras.map(extrairIdApi).filter(Boolean) as number[])];
+    const naoIdentificados: string[] = [];
+
+    const contagem: Record<number, { epcs: string[]; count: number }> = {};
+    for (const epc of leituras) {
+      const idApi = extrairIdApi(epc);
+      if (!idApi) { naoIdentificados.push(epc); continue; }
+      if (!contagem[idApi]) contagem[idApi] = { epcs: [], count: 0 };
+      contagem[idApi].epcs.push(epc);
+      contagem[idApi].count++;
+    }
+
+    // Busca dados dos produtos por id_api_produto
+    const produtosMap = new Map<number, { id_produto: number; sku: string; nome: string }>();
+    if (idsApi.length > 0) {
+      const rows = await sql`
+        SELECT id_produto, id_api_produto, sku, nome
+        FROM public.produtos
+        WHERE id_api_produto = ANY(${idsApi}::int[])
+      `;
+      for (const r of rows) {
+        produtosMap.set(Number(r.id_api_produto), {
+          id_produto: Number(r.id_produto),
+          sku: (r.sku as string) ?? "",
+          nome: (r.nome as string) ?? "",
+        });
+      }
+    }
+
+    // Busca estoque esperado por produto no local
+    const esperado = new Map<number, { saldo_fisico: number; reservado: number; disponivel: number }>();
+    const stockRows = await sql`
+      SELECT produto_id, saldo_fisico::int, reservado::int, disponivel::int
+      FROM alissonerp.vw_saldo_estoque_comercial_v2
+      WHERE local_estoque_id = ${localEstoqueId}
+    `;
+    for (const r of stockRows) {
+      esperado.set(Number(r.produto_id), {
+        saldo_fisico: Number(r.saldo_fisico ?? 0),
+        reservado: Number(r.reservado ?? 0),
+        disponivel: Number(r.disponivel ?? 0),
+      });
+    }
+
+    // Monta relatório por produto
+    const produtos: Array<{
+      produto_id: number | null;
+      id_api_produto: number | null;
+      sku: string | null;
+      nome: string | null;
+      esperado: number;
+      encontrado: number;
+      divergencia: number;
+      epcs: string[];
+      status: "ok" | "faltando" | "excedente" | "nao_cadastrado";
+    }> = [];
+
+    for (const [idApi, dados] of Object.entries(contagem)) {
+      const id = Number(idApi);
+      const prod = produtosMap.get(id);
+      const stock = prod ? esperado.get(prod.id_produto) : null;
+      const esperadoQty = stock?.saldo_fisico ?? 0;
+      const divergencia = dados.count - esperadoQty;
+
+      let status: "ok" | "faltando" | "excedente" | "nao_cadastrado";
+      if (!prod) status = "nao_cadastrado";
+      else if (divergencia < 0) status = "faltando";
+      else if (divergencia > 0) status = "excedente";
+      else status = "ok";
+
+      produtos.push({
+        produto_id: prod?.id_produto ?? null,
+        id_api_produto: id,
+        sku: prod?.sku ?? null,
+        nome: prod?.nome ?? null,
+        esperado: esperadoQty,
+        encontrado: dados.count,
+        divergencia,
+        epcs: dados.epcs,
+        status,
+      });
+    }
+
+    // Produtos que deveriam ter estoque mas não foram escaneados
+    for (const [produtoId, stock] of esperado) {
+      if (stock.saldo_fisico <= 0) continue;
+      const prod = [...produtosMap.values()].find(p => p.id_produto === produtoId);
+      if (!prod) continue;
+      const idApi = idsApi.find(a => produtosMap.get(a)?.id_produto === produtoId);
+      if (idApi && contagem[idApi]) continue;
+
+      produtos.push({
+        produto_id: produtoId,
+        id_api_produto: idApi ?? null,
+        sku: prod.sku,
+        nome: prod.nome,
+        esperado: stock.saldo_fisico,
+        encontrado: 0,
+        divergencia: -stock.saldo_fisico,
+        epcs: [],
+        status: "faltando",
+      });
+    }
+
+    const totalEsperado = produtos.reduce((s, p) => s + p.esperado, 0);
+    const totalEncontrado = produtos.reduce((s, p) => s + p.encontrado, 0);
+    const div = produtos.filter(p => p.status !== "ok");
+
+    return NextResponse.json({
+      ok: true,
+      local_estoque_id: localEstoqueId,
+      local_nome: localNome,
+      total_epcs: leituras.length,
+      total_epcs_unicos: leituras.length,
+      nao_identificados: naoIdentificados,
+      produtos,
+      resumo: {
+        total_produtos: produtos.length,
+        total_esperado: totalEsperado,
+        total_encontrado: totalEncontrado,
+        produtos_com_divergencia: div.length,
+        faltando: div.filter(p => p.status === "faltando").length,
+        excedente: div.filter(p => p.status === "excedente").length,
+        nao_cadastrado: div.filter(p => p.status === "nao_cadastrado").length,
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Erro interno";
+    console.error("[rfid/inventario]", message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function GET() {
+  try {
+    const supabase = await createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
+    const leituras = await sql`
+      SELECT epc, evento, localizacao, leitor_id, created_at
+      FROM alissonerp.joias_leituras
+      WHERE evento = 'inventario'
+      ORDER BY created_at DESC
+      LIMIT 100
+    `;
+
+    return NextResponse.json(leituras);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Erro interno";
+    console.error("[rfid/inventario GET]", message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

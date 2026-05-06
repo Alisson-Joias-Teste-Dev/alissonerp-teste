@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "prepare": "husky || true",
     "db:homolog": "bash scripts/switch-to-homolog.sh",
-    "db:producao": "bash scripts/switch-to-producao.sh"
+    "db:producao": "bash scripts/switch-to-producao.sh",
+    "tsl-bridge": "cd scripts/tsl-bridge && node index.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.74",
