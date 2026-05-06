@@ -213,10 +213,8 @@ export default function InventarioRfidPage() {
             </p>
           </div>
         </div>
-        </div>
       </div>
 
-      {/* Painel de controle (só aparece antes de enviar) */}
       {!resultado && (
         <div
           className="rounded-xl p-5 mb-6 space-y-4"
@@ -302,7 +300,6 @@ export default function InventarioRfidPage() {
         </div>
       )}
 
-      {/* Resultado da conferência */}
       {resultado && (
         <div className="space-y-4">
           <div
@@ -321,7 +318,6 @@ export default function InventarioRfidPage() {
               )}
             </div>
 
-            {/* Cards resumo */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
               <div className="bg-white rounded-lg p-3 text-center border" style={{ borderColor: "#E8DCC8" }}>
                 <p className="text-2xl font-bold" style={{ color: "#184036" }}>{resultado.total_epcs_unicos}</p>
@@ -346,7 +342,6 @@ export default function InventarioRfidPage() {
               </div>
             </div>
 
-            {/* Tabela de produtos */}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -390,7 +385,6 @@ export default function InventarioRfidPage() {
               </table>
             </div>
 
-            {/* Nao identificados */}
             {resultado.nao_identificados.length > 0 && (
               <details className="mt-4">
                 <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
@@ -404,7 +398,6 @@ export default function InventarioRfidPage() {
               </details>
             )}
 
-            {/* Botao concluir */}
             {!concluido && (
               <div className="mt-5 flex items-center gap-3 justify-end">
                 <button
@@ -429,7 +422,6 @@ export default function InventarioRfidPage() {
         </div>
       )}
 
-      {/* Lista ao vivo (só enquanto nao enviou) */}
       {!resultado && reader.epcs.length > 0 && (
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "#6B7280" }}>
