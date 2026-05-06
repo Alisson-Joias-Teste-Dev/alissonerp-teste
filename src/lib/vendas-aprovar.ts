@@ -42,7 +42,7 @@ interface VendaFull {
 }
 
 const SITUACAO_TINY: Record<string, number> = {
-  rascunho: 0, aprovado: 3, confirmado: 3, concluido: 6, cancelado: 2,
+  rascunho: 0, aberto: 1, aprovado: 3, confirmado: 3, concluido: 6, cancelado: 2,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -231,7 +231,7 @@ export async function sendToTiny(vendaId: number): Promise<void> {
   const pedidoV3: Record<string, unknown> = {
     numeroPedido: venda.numero_venda,
     idContato: Number(venda.cliente_id_tiny),
-    situacao: SITUACAO_TINY["aprovado"],
+    situacao: SITUACAO_TINY["aberto"],
     data: dataVenda,
     ...(Number(venda.total_frete) > 0 ? { valorFrete: Number(venda.total_frete) } : {}),
     ...(venda.observacoes ? { observacoes: venda.observacoes } : {}),
