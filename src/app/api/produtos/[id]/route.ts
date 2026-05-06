@@ -13,6 +13,7 @@ import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
 import { aplicarCurvaProduto } from "@/lib/aplicar-curva-produto";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { dispararWebhookBackground } from "@/lib/webhooks-server";
+import { syncProdutoToTiny } from "@/lib/produto-tiny-sync";
 
 export async function GET(
   _req: NextRequest,
@@ -741,7 +742,8 @@ export async function PATCH(
           FROM public.produtos
           WHERE id_produto = ${produtoId}
         `;
-    // ── Enfileirar sincronização com Tiny ────────────────────────────────────
+    // ── Sincronização com Tiny (síncrona imediata + fila como fallback) ────
+    let tinySyncResult: { ok: boolean; erro?: string } | null = null;
     try {
       await sql`
         INSERT INTO alissonerp.tiny_sync_produtos (produto_id, operacao, status)
@@ -752,8 +754,11 @@ export async function PATCH(
           tentativas = 0,
           updated_at = NOW()
       `;
+      const operacao = (await sql`SELECT id_api_produto FROM public.produtos WHERE id_produto = ${produtoId}`)[0]?.id_api_produto
+        ? 'update' : 'create';
+      tinySyncResult = await syncProdutoToTiny(produtoId, operacao);
     } catch (err) {
-      console.warn("[PATCH /api/produtos/[id]] falha ao enfileirar sync Tiny:", err);
+      console.warn("[PATCH /api/produtos/[id]] falha ao sincronizar com Tiny:", err);
     }
 
     // Notifica o site em background (não bloqueia resposta)
@@ -765,7 +770,7 @@ export async function PATCH(
       timestamp: new Date().toISOString(),
     });
 
-    return NextResponse.json({ produto });
+    return NextResponse.json({ produto, tiny_sync: tinySyncResult });
   } catch (err) {
     console.error("[PATCH /api/produtos/[id]]", err);
     return NextResponse.json({ error: "Erro ao atualizar produto" }, { status: 500 });
