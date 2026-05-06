@@ -114,11 +114,6 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
     });
   }, [vendedoras, sortField, sortDir]);
 
-  // Resetar página quando os filtros mudam
-  useEffect(() => {
-    setPagina(1);
-  }, [filtroVendedor, filtroPedido]);
-
   const vendedoresUnicos = useMemo(() => {
     const map = new Map<number, string>();
     itens.forEach(i => {
@@ -128,6 +123,11 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
     });
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [itens]);
+
+  // Resetar página quando os filtros mudam
+  useEffect(() => {
+    setPagina(1);
+  }, [filtroVendedor, filtroPedido]);
 
   // DEBUG: ver se o filtro está chegando
   useEffect(() => {

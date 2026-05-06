@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 
-// PATCH /api/setores/[id] — editar nome, deposito_id ou ativo
-// Body: { nome?: string, deposito_id?: number | null, ativo?: boolean }
+// PATCH /api/setores/[id] — editar nome, deposito_id, ativo, requer_peso
+// Body: { nome?: string, deposito_id?: number | null, ativo?: boolean, requer_peso?: boolean }
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     const setorId = parseInt(id);
-    const body = await req.json() as { nome?: string; deposito_id?: number | null; ativo?: boolean };
+    const body = await req.json() as { nome?: string; deposito_id?: number | null; ativo?: boolean; requer_peso?: boolean };
 
     if (body.nome !== undefined) {
       const nome = body.nome.trim();
@@ -21,6 +21,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     if (body.ativo !== undefined) {
       await sql`UPDATE alissonerp.setores SET ativo = ${body.ativo}, updated_at = NOW() WHERE id = ${setorId}`;
+    }
+
+    if (body.requer_peso !== undefined) {
+      await sql`UPDATE alissonerp.setores SET requer_peso = ${body.requer_peso}, updated_at = NOW() WHERE id = ${setorId}`;
     }
 
     return NextResponse.json({ ok: true });
