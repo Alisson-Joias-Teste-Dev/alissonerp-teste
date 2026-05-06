@@ -23,7 +23,7 @@ export interface TSLReaderState {
   lastError: string | null;
 }
 
-const BASE_URL = process.env.NEXT_PUBLIC_TSL_HTTP_URL || "http://localhost:9101";
+const BASE_URL = process.env.NEXT_PUBLIC_TSL_HTTP_URL || "http://127.0.0.1:9101";
 const POLL_MS = 500;
 const DEDUP_MS = 3000;
 

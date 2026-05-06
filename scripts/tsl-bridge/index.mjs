@@ -177,7 +177,14 @@ function startHttpServer() {
     res.setHeader("Access-Control-Allow-Private-Network", "true");
 
     if (req.method === "OPTIONS") {
-      res.writeHead(204);
+      res.writeHead(204, {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Private-Network": "true",
+        "Access-Control-Max-Age": "0",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+      });
       res.end();
       return;
     }
