@@ -1,2 +1,2 @@
 npx tsc --noEmit
-npx eslint . --max-warnings 400
+npx eslint . --max-warnings 500

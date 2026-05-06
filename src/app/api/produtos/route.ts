@@ -34,6 +34,7 @@ import { aplicarCurvaProduto } from "@/lib/aplicar-curva-produto";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { dispararWebhookBackground } from "@/lib/webhooks-server";
+import { syncProdutoToTiny } from "@/lib/produto-tiny-sync";
 
 // ── Helpers para geração de variações ─────────────────────────────────────────
 
@@ -832,18 +833,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Enfileirar sincronização com Tiny ────────────────────────────────────
+    // ── Sincronização com Tiny (síncrona imediata + fila como fallback) ────
     const todosSyncIds = [result.pai.id_produto, ...result.variacoes.map((v: { produto_id: number }) => v.produto_id)];
-    try {
-      for (const pid of todosSyncIds) {
+    const syncResults: { produto_id: number; ok: boolean; erro?: string }[] = [];
+    for (const pid of todosSyncIds) {
+      // Enfileira na fila (fallback para o CRON)
+      try {
         await sql`
           INSERT INTO alissonerp.tiny_sync_produtos (produto_id, operacao, status)
           VALUES (${pid}, 'create', 'pendente')
           ON CONFLICT (produto_id) DO UPDATE SET operacao = 'create', status = 'pendente', tentativas = 0, updated_at = NOW()
         `;
+      } catch (err) {
+        console.warn("[POST /api/produtos] falha ao enfileirar sync Tiny:", err);
       }
-    } catch (err) {
-      console.warn("[POST /api/produtos] falha ao enfileirar sync Tiny:", err);
+      // Tenta envio síncrono imediato
+      const r = await syncProdutoToTiny(pid, "create");
+      syncResults.push({ produto_id: pid, ...r });
     }
 
     // Notifica o site em background
@@ -862,6 +868,7 @@ export async function POST(req: NextRequest) {
         erp: result.erp,
         variacoes: result.variacoes,
         totalCriados: 1 + result.variacoes.length,
+        tiny_sync: syncResults,
       },
       { status: 201 }
     );
