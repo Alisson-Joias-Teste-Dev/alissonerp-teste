@@ -60,7 +60,8 @@ export async function GET(req: NextRequest) {
       GROUP BY produto_id
     ) rfid ON rfid.produto_id = p.id_produto
     WHERE
-      (p.sku ILIKE ${'%' + q + '%'} OR ${termos.map(t => sql`p.nome ILIKE ${'%' + t + '%'}`).reduce((a, b) => sql`${a} AND ${b}`)})
+      p.situacao = 'A'
+      AND (p.sku ILIKE ${'%' + q + '%'} OR ${termos.map(t => sql`p.nome ILIKE ${'%' + t + '%'}`).reduce((a, b) => sql`${a} AND ${b}`)})
       AND (ep.eh_pai IS NULL OR ep.eh_pai = false)
     ORDER BY
       (p.situacao = 'A')                     DESC,
