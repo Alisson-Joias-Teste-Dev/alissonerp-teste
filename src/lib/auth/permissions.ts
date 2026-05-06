@@ -75,21 +75,12 @@ const ROLE_MENUS: Record<Role, string[]> = {
   admin:              ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rota-fabricacao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/rfid/cadastro", "/vendas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/crediario", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/site", "/editor-ia"],
   gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/rota-fabricacao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/rfid/cadastro", "/vendas", "/estoque-comercial", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/editor-ia"],
   gerente_loja:       ["/dashboard-comercial", "/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/editor-ia", "/crediario"],
-<<<<<<< HEAD
-  ourives:            ["/ordens", "/pcp", "/tarefas", "/editor-ia"],
-  motoboy:            ["/protocolo", "/tarefas", "/editor-ia"],
-  consultora:         ["/dashboard-comercial", "/ordens", "/estoque", "/conferencia", "/orcamento", "/tarefas", "/editor-ia", "/crediario"],
-  estoquista_fabrica: ["/estoque", "/quebra", "/compras", "/insumos", "/rfid/cadastro", "/tarefas", "/editor-ia"],
-  estoquista_loja:    ["/estoque", "/tarefas", "/editor-ia"],
-  pcp:                ["/ordens", "/pcp", "/distribuicao", "/purificacao", "/quebra", "/tarefas", "/editor-ia"],
-=======
   ourives:            ["/ordens", "/pcp", "/editor-ia"],
   motoboy:            ["/protocolo", "/editor-ia"],
   consultora:         ["/dashboard-comercial", "/ordens", "/estoque", "/conferencia", "/orcamento", "/editor-ia", "/crediario"],
   estoquista_fabrica: ["/estoque", "/quebra", "/compras", "/insumos", "/rfid/cadastro", "/editor-ia"],
   estoquista_loja:    ["/estoque", "/editor-ia"],
   pcp:                ["/ordens", "/pcp", "/rota-fabricacao", "/setores", "/distribuicao", "/purificacao", "/quebra", "/editor-ia"],
->>>>>>> main
 };
 
 // Agrupamento do menu lateral
