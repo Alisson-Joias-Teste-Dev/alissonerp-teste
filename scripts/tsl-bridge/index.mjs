@@ -1,11 +1,13 @@
 import { SerialPort } from "serialport";
 import { ReadlineParser } from "@serialport/parser-readline";
 import http from "http";
+import https from "https";
 
 const PORT = process.env.TSL_PORT || "COM3";
 const BAUD = parseInt(process.env.TSL_BAUD || "115200", 10);
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || "9101", 10);
 const RETRY_DELAY = parseInt(process.env.TSL_RETRY || "5000", 10);
+const PROXY_URL = process.env.PROXY_URL || "https://erp.alissonjoias.com.br";
 
 let port = null;
 let scanning = false;
@@ -169,6 +171,200 @@ function cleanupPort() {
   scanning = false;
 }
 
+function getInventoryPageHtml() {
+  const proxyBase = "";
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Inventario RFID - TSL 1128</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F5F5F0;color:#374151;padding:16px}
+.card{background:#FAFAF7;border:1px solid #E8DCC8;border-radius:16px;padding:20px;margin-bottom:16px}
+h1{font-family:Georgia,serif;color:#184036;font-size:22px;margin-bottom:4px}
+.status-dot{width:12px;height:12px;border-radius:50%;display:inline-block;margin-right:8px}
+.btn{padding:10px 20px;border-radius:12px;border:none;font-size:14px;font-weight:600;cursor:pointer;color:#F3EADA;display:inline-flex;align-items:center;gap:8px}
+.btn:disabled{opacity:.5;cursor:default}
+.btn-primary{background:#184036}
+.btn-danger{background:#DC2626}
+.btn-success{background:#059669}
+.btn-gray{background:#374151}
+select{padding:6px 12px;border-radius:8px;border:1px solid #E8DCC8;font-size:14px;background:#fff}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;padding:8px 6px;font-size:12px;color:#6B7280;text-transform:uppercase;border-bottom:1px solid #E8DCC8;font-weight:600}
+td{padding:10px 6px;border-bottom:1px solid #F3F4F6}
+.badge{padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}
+.badge-ok{background:#D1FAE5;color:#065F46}
+.badge-warn{background:#FEE2E2;color:#991B1B}
+.badge-exc{background:#FEF3C7;color:#92400E}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.stat-card{background:#fff;border:1px solid #E8DCC8;border-radius:10px;padding:12px;text-align:center}
+.stat-card .num{font-size:26px;font-weight:700;color:#184036}
+.stat-card .lbl{font-size:11px;color:#6B7280;margin-top:2px}
+.summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+#log{max-height:400px;overflow-y:auto}
+.log-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;border:1px solid #F3F4F6;margin-bottom:4px;font-size:13px}
+.log-item .dot{width:8px;height:8px;border-radius:50%;background:#059669;flex-shrink:0}
+.log-item .epc{font-family:monospace;font-size:12px;color:#6B7280}
+.log-item .info{color:#9CA3AF;font-size:12px;font-style:italic}
+</style>
+</head>
+<body>
+
+<div class="card" style="display:flex;align-items:center;gap:10px;padding:14px 20px">
+  <span id="statusDot" class="status-dot" style="background:#DC2626"></span>
+  <div>
+    <p id="statusTitle" style="font-weight:600;color:#184036">Conectando...</p>
+    <p id="statusSub" style="font-size:12px;color:#9CA3AF">Iniciando bridge</p>
+  </div>
+</div>
+
+<div class="card" id="controls">
+  <div class="summary">
+    <label style="font-size:13px;font-weight:600;color:#6B7280">Local:</label>
+    <select id="localSelect"></select>
+    <span id="timer" style="font-family:monospace;color:#2563EB;display:none"></span>
+    <span id="count" style="font-weight:600;color:#184036">0 pecas</span>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button id="btnStart" class="btn btn-primary" onclick="startScan()">Iniciar Contagem</button>
+    <button id="btnStop" class="btn btn-danger" onclick="stopScan()" style="display:none">Parar</button>
+    <button id="btnClear" class="btn btn-gray" onclick="reset()" disabled>Limpar</button>
+    <button id="btnSend" class="btn btn-success" onclick="sendInventory()" disabled>Conferir</button>
+  </div>
+</div>
+
+<div id="resultArea" style="display:none"></div>
+
+<div id="logArea">
+  <p style="font-size:11px;font-weight:600;text-transform:uppercase;color:#6B7280;margin-bottom:8px">
+    Leituras <span id="logCount"></span>
+  </p>
+  <div id="log"></div>
+</div>
+
+<script>
+const API = "";
+let epcs = [], known = new Set(), scanning = false, timer = 0, timerInt = null;
+
+async function api(path) { const r = await fetch(API + path, {cache:"no-store"}); return r.json(); }
+async function apiPost(path, body) {
+  const r = await fetch(API + path, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body), cache:"no-store"});
+  return r.json();
+}
+function $(id) { return document.getElementById(id); }
+function setStatus(color, title, sub) { $("statusDot").style.background = color; $("statusTitle").textContent = title; $("statusSub").textContent = sub; }
+
+// Carrega locais via proxy
+apiPost("/proxy", {url:"/api/locais-estoque"}).then(d => {
+  if (Array.isArray(d)) {
+    const sel = $("localSelect");
+    sel.innerHTML = d.map(l => '<option value="'+l.id+'">'+l.nome+'</option>').join("");
+  }
+}).catch(() => {});
+
+// Poll status
+setInterval(async () => {
+  try {
+    const d = await api("/status");
+    const conn = d.connected;
+    setStatus(conn ? "#059669" : "#F59E0B", conn ? "Leitor conectado (COM3)" : "Bridge ativo, aguardando leitor...", conn ? "Pronto" : "Pressione o gatilho do TSL 1128");
+    $("btnStart").disabled = !conn;
+    if (Array.isArray(d.epcs)) {
+      for (const epc of d.epcs) {
+        if (known.has(epc)) continue;
+        known.add(epc);
+        epcs.unshift({epc, ts: Date.now()});
+        if (epcs.length > 5000) epcs.pop();
+        renderLog();
+      }
+    }
+  } catch(e) {
+    setStatus("#DC2626", "Bridge desconectado", "Inicie o bridge com npm run tsl-bridge");
+  }
+}, 500);
+
+function renderLog() {
+  $("count").textContent = epcs.length + " peca" + (epcs.length !== 1 ? "s" : "");
+  $("btnClear").disabled = epcs.length === 0;
+  $("btnSend").disabled = epcs.length === 0;
+  $("logCount").textContent = epcs.length > 50 ? "(ultimas 50)" : "(" + epcs.length + ")";
+  $("log").innerHTML = epcs.slice(0, 50).map((e,i) =>
+    '<div class="log-item"><span class="dot"></span><span class="epc">' + (e.epc.length > 20 ? e.epc.slice(-16) : e.epc) + '</span>' +
+    (i === 0 && scanning ? '<span class="info">AGORA</span>' : '') + '</div>'
+  ).join("");
+}
+
+async function startScan() {
+  scanning = true;
+  $("btnStart").style.display = "none";
+  $("btnStop").style.display = "";
+  timer = 0; $("timer").style.display = "";
+  timerInt = setInterval(() => { timer++; $("timer").textContent = "⏱ " + String(Math.floor(timer/60)).padStart(2,"0") + ":" + String(timer%60).padStart(2,"0"); }, 1000);
+  await apiPost("/command", {cmd:"inventory_start"});
+}
+
+async function stopScan() {
+  scanning = false;
+  $("btnStart").style.display = "";
+  $("btnStop").style.display = "none";
+  if (timerInt) clearInterval(timerInt);
+  $("timer").style.display = "none";
+  await apiPost("/command", {cmd:"inventory_stop"});
+}
+
+async function reset() {
+  epcs = []; known.clear(); renderLog();
+  await apiPost("/command", {cmd:"reset"});
+}
+
+async function sendInventory() {
+  const localId = parseInt($("localSelect").value);
+  const data = await apiPost("/proxy", {
+    url: "/api/rfid/inventario",
+    method: "POST",
+    body: {leituras: epcs.map(e=>e.epc), leitor_id:"TSL-1128", local_estoque_id: localId}
+  });
+  showResult(data);
+}
+
+function showResult(d) {
+  $("resultArea").style.display = "";
+  $("logArea").style.display = "none";
+  $("controls").style.display = "none";
+  let rows = "";
+  for (const p of d.produtos || []) {
+    const cl = p.status==="ok"?"badge-ok":p.status==="faltando"?"badge-warn":p.status==="excedente"?"badge-exc":"";
+    const lb = p.status==="ok"?"OK":p.status==="faltando"?"Faltando":p.status==="excedente"?"Excedente":"Nao cadastrado";
+    rows += '<tr><td>' + (p.nome||"API #"+p.id_api_produto) + '</td><td>' + (p.sku||"-") + '</td><td>' +
+      p.esperado + '</td><td>' + p.encontrado + '</td><td style="color:' +
+      (p.divergencia===0?"#6B7280":p.divergencia<0?"#DC2626":"#F59E0B") + '">' +
+      (p.divergencia>0?"+":"") + p.divergencia + '</td><td><span class="badge ' + cl + '">' + lb + '</span></td></tr>';
+  }
+  const diff = d.resumo.total_encontrado - d.resumo.total_esperado;
+  $("resultArea").innerHTML =
+    '<div class="card"><h2 style="margin-bottom:12px">Resultado — ' + d.local_nome + '</h2>' +
+    '<div class="grid-4">' +
+      '<div class="stat-card"><div class="num">' + d.total_epcs_unicos + '</div><div class="lbl">Pecas lidas</div></div>' +
+      '<div class="stat-card"><div class="num">' + d.resumo.total_esperado + '</div><div class="lbl">Esperado</div></div>' +
+      '<div class="stat-card"><div class="num" style="color:' + (d.resumo.produtos_com_divergencia>0?"#DC2626":"#059669") + '">' + d.resumo.produtos_com_divergencia + '</div><div class="lbl">Divergencias</div></div>' +
+      '<div class="stat-card"><div class="num" style="color:' + (diff===0?"#059669":"#DC2626") + '">' + (diff>0?"+":"") + diff + '</div><div class="lbl">Diferenca</div></div>' +
+    '</div>' +
+    (d.nao_identificados?.length ? '<p style="margin:10px 0;font-size:12px;color:#9CA3AF">' + d.nao_identificados.length + ' EPCs nao identificados</p>' : "") +
+    '<table>' + (rows ? '<thead><tr><th>Produto</th><th>SKU</th><th>Esperado</th><th>Lido</th><th>Div.</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody>' : "") + '</table>' +
+    '<div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">' +
+      '<button class="btn btn-gray" onclick="resetResult()">Refazer contagem</button>' +
+      '<button class="btn btn-success" onclick="concludeInv()">Concluir Inventario</button>' +
+    '</div></div>';
+}
+
+function resetResult() { $("resultArea").style.display = "none"; $("logArea").style.display = ""; $("controls").style.display = ""; epcs = []; known.clear(); renderLog(); }
+
+function concludeInv() { alert("Inventario concluido com sucesso!"); resetResult(); }
+</script>
+</body></html>`;
+}
+
 function startHttpServer() {
   const server = http.createServer((req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -192,7 +388,7 @@ function startHttpServer() {
     const url = new URL(req.url, `http://localhost:${HTTP_PORT}`);
     const path = url.pathname;
 
-    if (path === "/health" || path === "/") {
+    if (path === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         ok: true,
@@ -202,6 +398,12 @@ function startHttpServer() {
         port_name: PORT,
         firmware: statusLog.firmware || null,
       }));
+      return;
+    }
+
+    if (path === "/") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(getInventoryPageHtml());
       return;
     }
 
@@ -247,6 +449,45 @@ function startHttpServer() {
               res.writeHead(400);
               res.end(JSON.stringify({ error: "cmd desconhecido" }));
           }
+        } catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: "JSON invalido" }));
+        }
+      });
+      return;
+    }
+
+    if (path === "/proxy" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        try {
+          const msg = JSON.parse(body);
+          const targetUrl = new URL(msg.url, PROXY_URL);
+          const isPost = msg.method === "POST" || (msg.body != null);
+
+          const opts = {
+            hostname: targetUrl.hostname,
+            port: 443,
+            path: targetUrl.pathname + targetUrl.search,
+            method: isPost ? "POST" : "GET",
+            headers: { "Content-Type": "application/json" },
+          };
+
+          const pReq = https.request(opts, (pRes) => {
+            let data = "";
+            pRes.on("data", (chunk) => { data += chunk; });
+            pRes.on("end", () => {
+              res.writeHead(pRes.statusCode, { "Content-Type": "application/json" });
+              res.end(data);
+            });
+          });
+          pReq.on("error", () => {
+            res.writeHead(502);
+            res.end(JSON.stringify({ error: "Proxy error" }));
+          });
+          if (isPost && msg.body) pReq.write(JSON.stringify(msg.body));
+          pReq.end();
         } catch {
           res.writeHead(400);
           res.end(JSON.stringify({ error: "JSON invalido" }));
