@@ -129,17 +129,6 @@ export default function AnaliseComissoesClient({ podeGerenciar, vendedorId }: Pr
     setPagina(1);
   }, [filtroVendedor, filtroPedido]);
 
-  // DEBUG: ver se o filtro está chegando
-  useEffect(() => {
-    console.log("[DEBUG] filtroVendedor mudou para:", JSON.stringify(filtroVendedor), "| tipo:", typeof filtroVendedor);
-    if (filtroVendedor !== "") {
-      console.log("[DEBUG] vendedoresUnicos:", vendedoresUnicos.map(([id, n]) => ({ id, nome: n, typeId: typeof id })));
-      console.log("[DEBUG] amostra itens:", itens.slice(0, 3).map(i => ({ vid: i.vendedor_id, vidType: typeof i.vendedor_id, str: String(i.vendedor_id), nome: i.vendedor_nome })));
-      const matchSample = itens.filter(i => String(i.vendedor_id) === filtroVendedor);
-      console.log("[DEBUG] itens que batem com filtro:", matchSample.length, "de", itens.length);
-    }
-  }, [filtroVendedor, vendedoresUnicos, itens]);
-
   // Filtro itens
   const itensFiltrados = useMemo(() => {
     return itens.filter(i => {
