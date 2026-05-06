@@ -1,6 +1,7 @@
 import { SerialPort } from "serialport";
 import { ReadlineParser } from "@serialport/parser-readline";
 import { WebSocketServer } from "ws";
+import http from "http";
 
 const PORT = process.env.TSL_PORT || "COM3";
 const BAUD = parseInt(process.env.TSL_BAUD || "115200", 10);
@@ -10,6 +11,7 @@ const MAX_RETRIES = 0; // 0 = infinite
 
 let port = null;
 let wss = null;
+let httpServer = null;
 let scanning = false;
 let retryTimer = null;
 let retryCount = 0;
@@ -183,11 +185,53 @@ function cleanupPort() {
   scanning = false;
 }
 
-function startWebSocket() {
-  wss = new WebSocketServer({ port: WS_PORT });
-  console.log(`[tsl-bridge] WebSocket em ws://localhost:${WS_PORT}`);
-  console.log(`[tsl-bridge] Tentando conectar em ${PORT} @ ${BAUD} baud`);
-  console.log(`[tsl-bridge] Para trocar de porta: TSL_PORT=COM3 npm run tsl-bridge`);
+function startServer() {
+  httpServer = http.createServer((req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    if (req.url === "/health" || req.url === "/") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        ok: true,
+        service: "tsl-bridge",
+        ws_port: WS_PORT,
+        connected: port?.isOpen ?? false,
+        scanning,
+        port_name: PORT,
+      }));
+      return;
+    }
+
+    if (req.url === "/status") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        connected: port?.isOpen ?? false,
+        scanning,
+        port: PORT,
+        firmware: null,
+      }));
+      return;
+    }
+
+    res.writeHead(404);
+    res.end("Not found");
+  });
+
+  wss = new WebSocketServer({ server: httpServer });
+
+  httpServer.listen(WS_PORT, () => {
+    console.log(`[tsl-bridge] Servidor em http://localhost:${WS_PORT}`);
+    console.log(`[tsl-bridge] WebSocket em ws://localhost:${WS_PORT}`);
+    console.log(`[tsl-bridge] Tentando conectar em ${PORT} @ ${BAUD} baud`);
+    console.log(`[tsl-bridge] Para trocar de porta: TSL_PORT=COM3 npm run tsl-bridge`);
+  });
 
   wss.on("connection", (ws) => {
     console.log("[tsl-bridge] Navegador conectado ao WebSocket");
@@ -229,13 +273,14 @@ function cleanup() {
   if (retryTimer) clearTimeout(retryTimer);
   cleanupPort();
   if (wss) wss.close();
+  if (httpServer) httpServer.close();
   process.exit(0);
 }
 
 process.on("SIGINT", cleanup);
 process.on("SIGTERM", cleanup);
 
-startWebSocket();
+startServer();
 setTimeout(connectSerial, 500);
 
 console.log(`[tsl-bridge] ========================================`);

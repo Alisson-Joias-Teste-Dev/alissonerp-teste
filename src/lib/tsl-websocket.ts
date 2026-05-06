@@ -116,16 +116,18 @@ export function useTslReader() {
           }
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
           wsRef.current = null;
           updateState({
-            status: { connected: false },
+            status: { connected: false, error: `Conexao fechada (codigo: ${event.code})` },
             scanning: false,
           });
+          console.warn(`[tsl-bridge] WebSocket fechado: codigo=${event.code}, motivo=${event.reason || "nenhum"}`);
           reconnectTimer.current = setTimeout(connect, 3000);
         };
 
-        ws.onerror = () => {
+        ws.onerror = (event) => {
+          console.error("[tsl-bridge] WebSocket erro:", event);
           ws.close();
         };
       } catch {
