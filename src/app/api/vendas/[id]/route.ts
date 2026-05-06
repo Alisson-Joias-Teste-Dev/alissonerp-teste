@@ -280,11 +280,9 @@ export async function PATCH(
     }
   }
 
-  // ── Guard: transição para 'concluido' exige pagamento real completo ─────────
-  // Bloqueia diretamente no PATCH antes do UPDATE para evitar bypass dos guards
-  // de concluirVenda. Replica a mesma lógica — data_confirmacao IS NOT NULL
-  // exclui preferences fantasma do cálculo.
-  if (body.situacao === "concluido") {
+  // ── Guard: transições que avançam o status exigem pagamento completo ────────
+  // Aplica para concluido, aprovado, enviado, entregue. Rascunho e cancelado não.
+  if (body.situacao && ["concluido", "aprovado", "enviado", "entregue"].includes(body.situacao)) {
     const [pcCheck] = await sql`
       SELECT
         v.total_venda::numeric AS total_venda,
