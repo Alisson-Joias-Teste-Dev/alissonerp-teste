@@ -1,28 +1,19 @@
 import { SerialPort } from "serialport";
 import { ReadlineParser } from "@serialport/parser-readline";
-import { WebSocketServer } from "ws";
 import http from "http";
 
 const PORT = process.env.TSL_PORT || "COM3";
 const BAUD = parseInt(process.env.TSL_BAUD || "115200", 10);
-const WS_PORT = parseInt(process.env.WS_PORT || "9101", 10);
+const HTTP_PORT = parseInt(process.env.HTTP_PORT || "9101", 10);
 const RETRY_DELAY = parseInt(process.env.TSL_RETRY || "5000", 10);
-const MAX_RETRIES = 0; // 0 = infinite
 
 let port = null;
-let wss = null;
-let httpServer = null;
 let scanning = false;
 let retryTimer = null;
 let retryCount = 0;
-
-function broadcast(data) {
-  if (!wss) return;
-  const msg = JSON.stringify(data);
-  for (const client of wss.clients) {
-    if (client.readyState === 1) client.send(msg);
-  }
-}
+const recentEpcs = [];
+const MAX_EPCS = 10000;
+const statusLog = { connected: false };
 
 function hexToAscii(hex) {
   let out = "";
@@ -45,56 +36,45 @@ function parseLine(line) {
     const raw = clean.slice(3).replace(/[^0-9A-Fa-f]/g, "");
     if (raw.length < 6) return null;
 
-    // Tenta decodificar hex → ASCII
     const decoded = hexToAscii(raw);
     const trimmed = decoded.replace(/\0/g, "").trim();
 
-    // Se parecer um EPC AJ válido (só caracteres imprimíveis, começa com AJ)
     if (trimmed.startsWith("AJ") && isPrintable(trimmed) && trimmed.length >= 8) {
-      console.log(`[EPC] AJ=${trimmed}  hex=${raw}  len=${raw.length}`);
+      console.log(`[EPC] AJ=${trimmed}  hex=${raw}`);
       return { type: "epc", epc: trimmed };
     }
 
-    // Tenta sem os 2 primeiros bytes (PC bits — protocol control)
     if (raw.length > 8) {
       const stripped = hexToAscii(raw.slice(4)).replace(/\0/g, "").trim();
       if (stripped.startsWith("AJ") && isPrintable(stripped) && stripped.length >= 8) {
-        console.log(`[EPC] AJ(pc_strip)=${stripped}  hex_no_pc=${raw.slice(4)}  raw_len=${raw.length}`);
+        console.log(`[EPC] AJ(pc)=${stripped}`);
         return { type: "epc", epc: stripped };
       }
     }
 
-    // Tenta decodificar o hex puro como ASCII (tags com EPC em texto)
     const ascii = raw.length % 2 === 0 ? hexToAscii(raw).replace(/\0/g, "").trim() : "";
     if (ascii.length >= 4 && /^\d+$/.test(ascii)) {
       console.log(`[EPC] ASCII=${ascii}  hex=${raw}`);
       return { type: "epc", epc: ascii };
     }
 
-    // Fallback: retorna o hex puro
-    console.log(`[EPC] RAW_HEX=${raw}`);
+    console.log(`[EPC] RAW=${raw}`);
     return { type: "epc", epc: raw };
   }
 
   if (clean.startsWith("IV:")) {
-    const status = clean.slice(3).trim();
-    if (status === "OK" || status.startsWith("OK")) {
-      scanning = true;
-      broadcast({ type: "inventory_status", status: "started" });
-    } else if (status === "STOP") {
-      scanning = false;
-      broadcast({ type: "inventory_status", status: "stopped" });
-    }
+    const s = clean.slice(3).trim();
+    scanning = s === "OK" || s.startsWith("OK");
     return null;
   }
 
   if (clean.startsWith("VR:")) {
-    broadcast({ type: "firmware", version: clean.slice(3).trim() });
+    statusLog.firmware = clean.slice(3).trim();
     return null;
   }
 
   if (clean.startsWith("ER:")) {
-    broadcast({ type: "error", message: clean.slice(3).trim() });
+    console.error("[ERRO LEITOR]", clean.slice(3).trim());
     return null;
   }
 
@@ -116,15 +96,14 @@ async function connectSerial() {
 
     if (!match) {
       retryCount++;
-      const msg = `Porta ${PORT} nao encontrada (tentativa ${retryCount}). Portas: ${list.map(p => p.path).join(", ")}`;
-      console.warn(`[tsl-bridge] ${msg}`);
-      broadcast({ type: "status", connected: false, message: msg });
+      console.warn(`[tsl-bridge] ${PORT} nao encontrada (tentativa ${retryCount})`);
+      statusLog.com_error = `Porta ${PORT} nao encontrada`;
       retryTimer = setTimeout(connectSerial, RETRY_DELAY);
       return;
     }
 
     retryCount = 0;
-    console.log(`[tsl-bridge] Porta ${PORT} encontrada. Abrindo...`);
+    console.log(`[tsl-bridge] Abrindo ${PORT}...`);
 
     port = new SerialPort({
       path: PORT,
@@ -140,25 +119,30 @@ async function connectSerial() {
 
     port.on("open", () => {
       console.log(`[tsl-bridge] Conectado em ${PORT} @ ${BAUD} baud RTS/CTS`);
-      broadcast({ type: "status", connected: true, port: PORT, baud: BAUD });
+      statusLog.connected = true;
+      statusLog.com_error = null;
       setTimeout(() => sendToReader(".vr"), 1000);
     });
 
     parser.on("data", (line) => {
       const parsed = parseLine(line);
-      if (parsed) broadcast(parsed);
+      if (parsed && parsed.type === "epc") {
+        recentEpcs.push(parsed.epc);
+        if (recentEpcs.length > MAX_EPCS) recentEpcs.shift();
+      }
     });
 
     port.on("error", (err) => {
-      console.error(`[tsl-bridge] Erro na porta: ${err.message}`);
-      broadcast({ type: "status", connected: false, error: err.message });
+      console.error(`[tsl-bridge] Erro: ${err.message}`);
+      statusLog.connected = false;
+      statusLog.com_error = err.message;
       cleanupPort();
       retryTimer = setTimeout(connectSerial, RETRY_DELAY);
     });
 
     port.on("close", () => {
       console.log("[tsl-bridge] Porta fechada");
-      broadcast({ type: "status", connected: false });
+      statusLog.connected = false;
       cleanupPort();
       retryTimer = setTimeout(connectSerial, RETRY_DELAY);
     });
@@ -166,15 +150,15 @@ async function connectSerial() {
     port.open((err) => {
       if (err) {
         console.error(`[tsl-bridge] Falha ao abrir ${PORT}: ${err.message}`);
-        console.error(`[tsl-bridge] Pressione o gatilho do leitor para acorda-lo e reconecte o Bluetooth.`);
-        broadcast({ type: "status", connected: false, error: err.message });
+        statusLog.connected = false;
+        statusLog.com_error = err.message;
         cleanupPort();
         retryTimer = setTimeout(connectSerial, RETRY_DELAY);
       }
     });
   } catch (err) {
-    console.error(`[tsl-bridge] Falha ao conectar: ${err.message}`);
-    broadcast({ type: "status", connected: false, error: err.message });
+    console.error(`[tsl-bridge] Falha: ${err.message}`);
+    statusLog.com_error = err.message;
     retryTimer = setTimeout(connectSerial, RETRY_DELAY);
   }
 }
@@ -185,10 +169,11 @@ function cleanupPort() {
   scanning = false;
 }
 
-function startServer() {
-  httpServer = http.createServer((req, res) => {
+function startHttpServer() {
+  const server = http.createServer((req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -196,75 +181,81 @@ function startServer() {
       return;
     }
 
-    if (req.url === "/health" || req.url === "/") {
+    const url = new URL(req.url, `http://localhost:${HTTP_PORT}`);
+    const path = url.pathname;
+
+    if (path === "/health" || path === "/") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         ok: true,
         service: "tsl-bridge",
-        ws_port: WS_PORT,
-        connected: port?.isOpen ?? false,
+        connected: statusLog.connected,
         scanning,
         port_name: PORT,
+        firmware: statusLog.firmware || null,
       }));
       return;
     }
 
-    if (req.url === "/status") {
+    if (path === "/status") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
-        connected: port?.isOpen ?? false,
+        connected: statusLog.connected,
         scanning,
         port: PORT,
-        firmware: null,
+        firmware: statusLog.firmware || null,
+        epcs: recentEpcs.slice(-100),
+        epc_count: recentEpcs.length,
+        com_error: statusLog.com_error || null,
       }));
+      return;
+    }
+
+    if (path === "/command" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        try {
+          const msg = JSON.parse(body);
+          switch (msg.cmd) {
+            case "inventory_start":
+              scanning = true;
+              sendToReader(".iv");
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ ok: true, cmd: "started" }));
+              break;
+            case "inventory_stop":
+              scanning = false;
+              sendToReader(".");
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ ok: true, cmd: "stopped" }));
+              break;
+            case "reset":
+              recentEpcs.length = 0;
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ ok: true }));
+              break;
+            default:
+              res.writeHead(400);
+              res.end(JSON.stringify({ error: "cmd desconhecido" }));
+          }
+        } catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: "JSON invalido" }));
+        }
+      });
       return;
     }
 
     res.writeHead(404);
-    res.end("Not found");
+    res.end();
   });
 
-  wss = new WebSocketServer({ server: httpServer });
-
-  httpServer.listen(WS_PORT, () => {
-    console.log(`[tsl-bridge] Servidor em http://localhost:${WS_PORT}`);
-    console.log(`[tsl-bridge] WebSocket em ws://localhost:${WS_PORT}`);
+  server.listen(HTTP_PORT, () => {
+    console.log(`[tsl-bridge] Servidor HTTP em http://localhost:${HTTP_PORT}`);
+    console.log(`[tsl-bridge] Endpoints: /health /status /command`);
     console.log(`[tsl-bridge] Tentando conectar em ${PORT} @ ${BAUD} baud`);
-    console.log(`[tsl-bridge] Para trocar de porta: TSL_PORT=COM3 npm run tsl-bridge`);
-  });
-
-  wss.on("connection", (ws) => {
-    console.log("[tsl-bridge] Navegador conectado ao WebSocket");
-
-    ws.send(JSON.stringify({
-      type: "status",
-      ws_connected: true,
-      ws_port: WS_PORT,
-      connected: port?.isOpen ?? false,
-      port: PORT,
-      scanning,
-    }));
-
-    ws.on("message", (raw) => {
-      let msg;
-      try { msg = JSON.parse(raw.toString()); } catch { return; }
-
-      switch (msg.cmd) {
-        case "inventory_start":
-          sendToReader(".iv");
-          break;
-        case "inventory_stop":
-          sendToReader(".");
-          break;
-        case "status":
-          ws.send(JSON.stringify({ type: "status", connected: port?.isOpen ?? false, scanning }));
-          break;
-        case "reconnect":
-          cleanupPort();
-          setTimeout(connectSerial, 500);
-          break;
-      }
-    });
+    console.log(`[tsl-bridge] TSL_PORT=COM3 npm run tsl-bridge`);
   });
 }
 
@@ -272,27 +263,17 @@ function cleanup() {
   console.log("\n[tsl-bridge] Encerrando...");
   if (retryTimer) clearTimeout(retryTimer);
   cleanupPort();
-  if (wss) wss.close();
-  if (httpServer) httpServer.close();
   process.exit(0);
 }
 
 process.on("SIGINT", cleanup);
 process.on("SIGTERM", cleanup);
 
-startServer();
+startHttpServer();
 setTimeout(connectSerial, 500);
 
-console.log(`[tsl-bridge] ========================================`);
-console.log(`[tsl-bridge] TSL 1128 Bridge iniciado`);
+console.log(`[tsl-bridge] =======================`);
+console.log(`[tsl-bridge] TSL 1128 Bridge (HTTP)`);
 console.log(`[tsl-bridge] Porta: ${PORT}`);
-console.log(`[tsl-bridge] WebSocket: ws://localhost:${WS_PORT}`);
-console.log(`[tsl-bridge] ========================================`);
-console.log(`[tsl-bridge] `);
-console.log(`[tsl-bridge] ANTES DE USAR, CERTIFIQUE-SE DE:`);
-console.log(`[tsl-bridge] 1. Leitor TSL 1128 ligado (LED azul)  `);
-console.log(`[tsl-bridge] 2. Pressione o gatilho para acordar  `);
-console.log(`[tsl-bridge] 3. No Windows: Config > Bluetooth > `);
-console.log(`[tsl-bridge]    "001116-BR-1128" deve estar como `);
-console.log(`[tsl-bridge]    "Conectado" (nao apenas "Pareado")`);
-console.log(`[tsl-bridge] `);
+console.log(`[tsl-bridge] HTTP: http://localhost:${HTTP_PORT}`);
+console.log(`[tsl-bridge] =======================`);

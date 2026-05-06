@@ -9,8 +9,6 @@ export interface EPCRead {
 
 export interface TSLBridgeStatus {
   connected: boolean;
-  ws_connected?: boolean;
-  ws_port?: number;
   port?: string;
   baud?: number;
   scanning?: boolean;
@@ -25,7 +23,8 @@ export interface TSLReaderState {
   lastError: string | null;
 }
 
-const WS_URL = process.env.NEXT_PUBLIC_TSL_WS_URL || "ws://localhost:9101";
+const BASE_URL = process.env.NEXT_PUBLIC_TSL_HTTP_URL || "http://localhost:9101";
+const POLL_MS = 500;
 const DEDUP_MS = 3000;
 
 export function useTslReader() {
@@ -37,116 +36,71 @@ export function useTslReader() {
     lastError: null,
   });
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const epcsRef = useRef<EPCRead[]>([]);
-  const connectRef = useRef<(() => void) | null>(null);
+  const knownEpcsRef = useRef<Set<string>>(new Set());
 
   const updateState = useCallback((patch: Partial<TSLReaderState>) => {
     setState((prev) => ({ ...prev, ...patch }));
   }, []);
 
   useEffect(() => {
-    const dedupMs = DEDUP_MS;
-    const wsUrl = WS_URL;
-
-    function connect() {
-      if (wsRef.current?.readyState === WebSocket.OPEN) return;
-
+    async function poll() {
       try {
-        const ws = new WebSocket(wsUrl);
+        const res = await fetch(`${BASE_URL}/status`);
+        if (!res.ok) return;
+        const data = await res.json();
 
-        ws.onopen = () => {
-          wsRef.current = ws;
-          if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-        };
+        updateState({
+          status: {
+            connected: data.connected ?? false,
+            port: data.port,
+            scanning: data.scanning ?? false,
+            error: data.com_error ?? null,
+          },
+          scanning: data.scanning ?? false,
+          firmware: data.firmware ?? null,
+        });
 
-        ws.onmessage = (event) => {
-          let data: Record<string, unknown>;
-          try {
-            data = JSON.parse(event.data as string);
-          } catch {
-            return;
+        if (Array.isArray(data.epcs)) {
+          for (const epc of data.epcs) {
+            if (knownEpcsRef.current.has(epc)) continue;
+            knownEpcsRef.current.add(epc);
+            const now = Date.now();
+            const prev = epcsRef.current;
+            const dupe = prev.some((p) => p.epc === epc && now - p.ts < DEDUP_MS);
+            if (dupe) continue;
+            const updated = [{ epc, ts: now }, ...prev].slice(0, 5000);
+            epcsRef.current = updated;
+            updateState({ epcs: updated });
           }
-
-          switch (data.type) {
-            case "status": {
-              const s = data as unknown as TSLBridgeStatus;
-              updateState({
-                status: s,
-                scanning: s.scanning ?? false,
-              });
-              break;
-            }
-
-            case "epc": {
-              const epc = data.epc as string;
-              const ts = Date.now();
-              const prev = epcsRef.current;
-
-              const dupe = prev.some(
-                (p) => p.epc === epc && ts - p.ts < dedupMs
-              );
-              if (dupe) break;
-
-              const updated = [{ epc, ts }, ...prev].slice(0, 5000);
-              epcsRef.current = updated;
-              updateState({ epcs: updated });
-              break;
-            }
-
-            case "inventory_status": {
-              const status = data.status as string;
-              updateState({
-                scanning: status === "started",
-                lastError: null,
-              });
-              break;
-            }
-
-            case "firmware": {
-              updateState({ firmware: data.version as string });
-              break;
-            }
-
-            case "error": {
-              updateState({ lastError: data.message as string });
-              break;
-            }
-          }
-        };
-
-        ws.onclose = (event) => {
-          wsRef.current = null;
-          updateState({
-            status: { connected: false, error: `Conexao fechada (codigo: ${event.code})` },
-            scanning: false,
-          });
-          console.warn(`[tsl-bridge] WebSocket fechado: codigo=${event.code}, motivo=${event.reason || "nenhum"}`);
-          reconnectTimer.current = setTimeout(connect, 3000);
-        };
-
-        ws.onerror = (event) => {
-          console.error("[tsl-bridge] WebSocket erro:", event);
-          ws.close();
-        };
-      } catch {
-        reconnectTimer.current = setTimeout(connect, 3000);
+        }
+      } catch (err) {
+        updateState({
+          status: { connected: false },
+          scanning: false,
+          lastError: err instanceof Error ? err.message : "Erro de conexao",
+        });
       }
     }
 
-    connectRef.current = connect;
-    connect();
+    poll();
+    pollRef.current = setInterval(poll, POLL_MS);
 
     return () => {
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      if (wsRef.current) wsRef.current.close();
+      if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [updateState]);
 
-  const sendCmd = useCallback((cmd: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ cmd }));
+  const sendCmd = useCallback(async (cmd: string) => {
+    try {
+      await fetch(`${BASE_URL}/command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cmd }),
+      });
+    } catch {
+      // silently fail
     }
   }, []);
 
@@ -154,12 +108,10 @@ export function useTslReader() {
   const stopScanning = useCallback(() => sendCmd("inventory_stop"), [sendCmd]);
   const reset = useCallback(() => {
     epcsRef.current = [];
+    knownEpcsRef.current.clear();
+    sendCmd("reset");
     updateState({ epcs: [], lastError: null });
-  }, [updateState]);
+  }, [sendCmd, updateState]);
 
-  const reconnect = useCallback(() => {
-    connectRef.current?.();
-  }, []);
-
-  return { ...state, startScanning, stopScanning, reset, reconnect };
+  return { ...state, startScanning, stopScanning, reset };
 }
