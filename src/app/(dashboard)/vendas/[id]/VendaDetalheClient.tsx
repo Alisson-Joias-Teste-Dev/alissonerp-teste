@@ -716,12 +716,6 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     return faixa.comissao_pct;
   }
 
-  // Itens de orçamento (produto_id nulo) são peças personalizadas cuja
-  // comissão deve ser definida manualmente — não auto-calculada via faixas.
-  function isOrcamentoItem(item: { produto_id?: number | null }): boolean {
-    return item.produto_id == null;
-  }
-
   function calcItem(produto: Produto, q: number, pct: number) {
     const precoLista = produto.preco_venda ?? 0;
     const precoUnit = precoLista * (1 - pct / 100);
@@ -795,9 +789,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       const newQtd        = item.quantidade;
       const precoUnit     = novoPreco;                             // preserva precisão digitada
       const totalItem     = precoUnit * newQtd;
-      const isOrc         = isOrcamentoItem(item);
-      const pctComissao   = isOrc ? item.pct_comissao : getComissao(pct);
-      const valorComissao = isOrc ? item.valor_comissao : totalItem * pctComissao / 100;
+      const pctComissao   = getComissao(pct);
+      const valorComissao = totalItem * pctComissao / 100;
 
       setUpdating(true);
       try {
@@ -848,9 +841,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     const newDesc = field === "pct_desconto" ? val : item.pct_desconto;
     const precoUnit = item.preco_lista * (1 - newDesc / 100);
     const totalItem = precoUnit * newQtd;
-    const isOrc = isOrcamentoItem(item);
-    const pctComissao = isOrc ? item.pct_comissao : getComissao(newDesc);
-    const valorComissao = isOrc ? item.valor_comissao : totalItem * pctComissao / 100;
+    const pctComissao = getComissao(newDesc);
+    const valorComissao = totalItem * pctComissao / 100;
 
     setUpdating(true);
     try {

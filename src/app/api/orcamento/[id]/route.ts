@@ -167,7 +167,7 @@ export async function PATCH(
       `;
       const [vendaFinal] = await tx`SELECT numero_venda FROM alissonerp.vendas_erp WHERE id = ${venda.id}`;
 
-      // 3. Criar item da venda
+      // 3. Criar item da venda com comissão calculada via faixas_comissao
       const nomeItem = orc.tipo === "alianca"
         ? `Aliança ${perfilNomes[orc.perfil as string] ?? orc.modelo ?? "Personalizada"}`
         : `Peça Personalizada`;
@@ -175,6 +175,16 @@ export async function PATCH(
       const [orcValores] = await tx`SELECT valor, peso FROM alissonerp.orcamentos WHERE id = ${orcId}`;
       const valorItem = Number(orcValores?.valor ?? 0);
       const pesoItem = Number(orcValores?.peso ?? orc.peso_estimado ?? 0);
+
+      // Calcular comissão baseada na faixa (desconto 0% → mesma lógica do frontend)
+      const [faixa] = await tx`
+        SELECT comissao_pct FROM alissonerp.faixas_comissao
+        WHERE desconto_pct = 0 AND ativo = true
+        LIMIT 1
+      `;
+      const pctComissao = Number(faixa?.comissao_pct ?? 0);
+      const valorComissao = Math.round(valorItem * pctComissao) / 100;
+
       await tx`
         INSERT INTO alissonerp.itens_venda_erp (
           venda_id, nome_produto, quantidade, preco_lista,
@@ -183,7 +193,7 @@ export async function PATCH(
         ) VALUES (
           ${venda.id}, ${nomeItem}, 1, ${valorItem},
           0, ${valorItem}, ${valorItem}, ${pesoItem},
-          0, 0,
+          ${pctComissao}, ${valorComissao},
           ${'Orçamento ' + orc.numero_orcamento}
         )
       `;
