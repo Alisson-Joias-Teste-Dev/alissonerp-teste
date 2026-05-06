@@ -3,7 +3,6 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 
-// ─── GET /api/tarefas/[id] ────────────────────────────────────────────────────
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -16,35 +15,46 @@ export async function GET(
   const tarefaId = Number(id);
   if (isNaN(tarefaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const [tarefa] = await sql`
-    SELECT
-      t.*, ur.nome AS responsavel_nome, uc.nome AS criador_nome, o.numero_ordem
-    FROM alissonerp.tarefas t
-    LEFT JOIN alissonerp.usuarios ur ON ur.id = t.responsavel_id
-    LEFT JOIN alissonerp.usuarios uc ON uc.id = t.criado_por
-    LEFT JOIN alissonerp.ordens o ON o.id = t.ordem_id
-    WHERE t.id = ${tarefaId}
-  `;
-  if (!tarefa) return NextResponse.json({ error: "Tarefa não encontrada" }, { status: 404 });
+  try {
+    const [tarefa] = await sql`
+      SELECT
+        t.id, t.titulo, t.descricao, t.prioridade, t.status, t.tipo,
+        t.data_limite, t.ordem_id, t.ordem_ids, t.peso_metal, t.tags,
+        t.venda_id, t.posicao,
+        t.responsavel_id, t.criado_por,
+        t.created_at, t.updated_at, t.concluida_em,
+        ur.nome AS responsavel_nome, uc.nome AS criador_nome, o.numero_ordem
+      FROM alissonerp.tarefas t
+      LEFT JOIN alissonerp.usuarios ur ON ur.id = t.responsavel_id
+      LEFT JOIN alissonerp.usuarios uc ON uc.id = t.criado_por
+      LEFT JOIN alissonerp.ordens o ON o.id = t.ordem_id
+      WHERE t.id = ${tarefaId}
+    `;
+    if (!tarefa) return NextResponse.json({ error: "Tarefa não encontrada" }, { status: 404 });
 
-  const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-  const isOwner = tarefa.responsavel_id === user.id || tarefa.criado_por === user.id;
-  if (!isOwner && !isFullAccess(usuario?.role)) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
+    const isOwner = tarefa.responsavel_id === user.id || tarefa.criado_por === user.id;
+
+    if (!isOwner && !isFullAccess(usuario?.role)) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
+
+    const comentarios = await sql`
+      SELECT c.*, u.nome AS autor_nome
+      FROM alissonerp.comentarios_tarefa c
+      LEFT JOIN alissonerp.usuarios u ON u.id = c.autor_id
+      WHERE c.tarefa_id = ${tarefaId}
+      ORDER BY c.created_at ASC
+    `;
+
+    return NextResponse.json({ ...tarefa, comentarios });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[GET /api/tarefas/${tarefaId}]`, msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
-
-  const comentarios = await sql`
-    SELECT c.*, u.nome AS autor_nome
-    FROM alissonerp.comentarios_tarefa c
-    LEFT JOIN alissonerp.usuarios u ON u.id = c.autor_id
-    WHERE c.tarefa_id = ${tarefaId}
-    ORDER BY c.created_at ASC
-  `;
-
-  return NextResponse.json({ ...tarefa, comentarios });
 }
 
-// ─── PATCH /api/tarefas/[id] ──────────────────────────────────────────────────
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -57,12 +67,16 @@ export async function PATCH(
   const tarefaId = Number(id);
   if (isNaN(tarefaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const [tarefaPatch] = await sql`SELECT responsavel_id, criado_por FROM alissonerp.tarefas WHERE id = ${tarefaId} LIMIT 1`;
+  const [tarefaPatch] = await sql`
+    SELECT responsavel_id, criado_por, status, titulo
+    FROM alissonerp.tarefas WHERE id = ${tarefaId} LIMIT 1
+  `;
   if (!tarefaPatch) return NextResponse.json({ error: "Tarefa não encontrada" }, { status: 404 });
 
   const [usuarioPatch] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-  const isOwnerPatch = tarefaPatch.responsavel_id === user.id || tarefaPatch.criado_por === user.id;
-  if (!isOwnerPatch && !isFullAccess(usuarioPatch?.role)) {
+  const isOwner = tarefaPatch.responsavel_id === user.id || tarefaPatch.criado_por === user.id;
+
+  if (!isOwner && !isFullAccess(usuarioPatch?.role)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -77,9 +91,30 @@ export async function PATCH(
     ordem_ids?: number[] | null;
     peso_metal?: number | null;
     tags?: string[];
+    tipo?: string;
+    motivo_delegacao?: string;
   };
 
-  const novoConcluida = body.status === "concluida" ? sql`NOW()` : sql`concluida_em`;
+  const novoResponsavel = body.responsavel_id;
+  const responsavelAnterior = tarefaPatch.responsavel_id;
+
+  if (novoResponsavel !== undefined && novoResponsavel !== responsavelAnterior) {
+    await sql`
+      INSERT INTO alissonerp.tarefas_historico
+        (tarefa_id, usuario_id, acao, campo, valor_anterior, valor_novo, comentario, created_at)
+      VALUES (
+        ${tarefaId}, ${user.id}::uuid, 'atribuida',
+        'responsavel_id', ${responsavelAnterior ?? null}::text,
+        ${novoResponsavel ?? null}::text,
+        ${body.motivo_delegacao ?? null},
+        now()
+      )
+    `.catch(() => {});
+  }
+
+  const novoConcluida = body.status === "concluida" || body.status === "aprovada"
+    ? sql`NOW()`
+    : sql`concluida_em`;
 
   await sql`
     UPDATE alissonerp.tarefas SET
@@ -93,14 +128,28 @@ export async function PATCH(
       ordem_ids      = COALESCE(${body.ordem_ids ?? null},      ordem_ids),
       peso_metal     = COALESCE(${body.peso_metal ?? null},     peso_metal),
       tags           = COALESCE(${body.tags ?? null},           tags),
+      tipo           = COALESCE(${body.tipo ?? null},           tipo),
       concluida_em   = ${novoConcluida}
     WHERE id = ${tarefaId}
   `;
 
+  if (novoResponsavel && novoResponsavel !== user.id && novoResponsavel !== responsavelAnterior) {
+    await sql`
+      INSERT INTO alissonerp.notificacoes
+        (usuario_id, tipo, titulo, mensagem, remetente_id, link)
+      VALUES (
+        ${novoResponsavel}::uuid, 'tarefa',
+        ${'Tarefa delegada: ' + tarefaPatch.titulo},
+        ${body.motivo_delegacao ?? 'Tarefa delegada para você'},
+        ${user.id}::uuid,
+        ${`/tarefas?abrir=${tarefaId}`}
+      )
+    `.catch(() => {});
+  }
+
   return NextResponse.json({ ok: true });
 }
 
-// ─── DELETE /api/tarefas/[id] ─────────────────────────────────────────────────
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

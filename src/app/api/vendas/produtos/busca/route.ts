@@ -43,19 +43,22 @@ export async function GET(req: NextRequest) {
       ep.numeracao,
       ep.largura_aro,
       COALESCE(est.saldo, 0) AS saldo_disponivel,
-      (ftp.id IS NOT NULL) AS tem_ficha_tecnica
+      (ftp.id IS NOT NULL) AS tem_ficha_tecnica,
+      COALESCE(rfid.qtd, 0) AS rfid_disponivel
     FROM public.produtos p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
     LEFT JOIN (
-      -- vw_saldo_estoque_comercial expõe: total_entradas, total_saidas,
-      -- saldo_atual, reservado, disponivel. Para venda interessa o disponível
-      -- (saldo_atual − reservado). Mantemos SUM+GROUP BY por segurança caso
-      -- a view venha a devolver mais de uma linha por produto.
       SELECT produto_id, SUM(disponivel) AS saldo
       FROM alissonerp.vw_saldo_estoque_comercial
       GROUP BY produto_id
     ) est ON est.produto_id = p.id_produto
     LEFT JOIN alissonerp.fichas_tecnicas_produto ftp ON ftp.produto_id = p.id_produto
+    LEFT JOIN (
+      SELECT produto_id, COUNT(*)::int AS qtd
+      FROM alissonerp.joias_rfid
+      WHERE status = 'ativo'
+      GROUP BY produto_id
+    ) rfid ON rfid.produto_id = p.id_produto
     WHERE
       (p.sku ILIKE ${'%' + q + '%'} OR ${termos.map(t => sql`p.nome ILIKE ${'%' + t + '%'}`).reduce((a, b) => sql`${a} AND ${b}`)})
       AND (ep.eh_pai IS NULL OR ep.eh_pai = false)
@@ -76,6 +79,7 @@ export async function GET(req: NextRequest) {
       peso_precificado:  p.peso_precificado  != null ? Number(p.peso_precificado)  : null,
       saldo_disponivel:  Number(p.saldo_disponivel ?? 0),
       tem_ficha_tecnica: Boolean(p.tem_ficha_tecnica),
+      rfid_disponivel:   Number(p.rfid_disponivel ?? 0),
     }))
   );
 }

@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import sql from "@/lib/db";
+import { verificarReposicaoAutomatica } from "@/lib/reposicao-automatica";
 
 // ─── Tipos internos ──────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ interface VendaFull {
 }
 
 const SITUACAO_TINY: Record<string, number> = {
-  rascunho: 0, aprovado: 3, confirmado: 3, concluido: 6, cancelado: 2,
+  rascunho: 0, aberto: 1, aprovado: 3, confirmado: 3, concluido: 6, cancelado: 2,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -231,7 +232,7 @@ export async function sendToTiny(vendaId: number): Promise<void> {
   const pedidoV3: Record<string, unknown> = {
     numeroPedido: venda.numero_venda,
     idContato: Number(venda.cliente_id_tiny),
-    situacao: SITUACAO_TINY["aprovado"],
+    situacao: SITUACAO_TINY["aberto"],
     data: dataVenda,
     ...(Number(venda.total_frete) > 0 ? { valorFrete: Number(venda.total_frete) } : {}),
     ...(venda.observacoes ? { observacoes: venda.observacoes } : {}),
@@ -659,6 +660,23 @@ export async function approveVenda(
     } catch (err) {
       console.error(`[approveVenda] Erro ao criar ordem (servico) p/ venda ${vendaId}:`, err);
     }
+  }
+
+  // 4. Reposição automática — após o estoque ter sido baixado pelo trigger
+  //    trg_estoque_comercial_aprovar_venda. Best-effort: erro aqui não impede
+  //    a aprovação da venda.
+  try {
+    const itensProdutos = await sql`
+      SELECT DISTINCT produto_id
+      FROM alissonerp.itens_venda_erp
+      WHERE venda_id = ${vendaId} AND produto_id IS NOT NULL
+    `;
+    const produtoIds = itensProdutos.map((r) => Number(r.produto_id));
+    if (produtoIds.length > 0) {
+      await verificarReposicaoAutomatica({ userId, produtoIds });
+    }
+  } catch (err) {
+    console.error(`[approveVenda] Reposição automática falhou (não-bloqueante) p/ venda ${vendaId}:`, err);
   }
 
   return {

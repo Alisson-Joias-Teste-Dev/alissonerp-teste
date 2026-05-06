@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import {
   X, Loader2, Search, Package, History,
   User, Phone, Calendar, FileText, Weight, Hash,
-  Mail, MapPin, Hash as HashIcon, Building,
+  Mail, MapPin, Building, UserCheck,
 } from "lucide-react";
 
 const C = {
@@ -30,6 +30,11 @@ interface Produto {
   preco_venda?: number | null;
   peso_precificado?: number | null;
   saldo_disponivel?: number;
+}
+
+interface Vendedor {
+  id_vendedor: number;
+  nome: string;
 }
 
 interface Props {
@@ -194,6 +199,7 @@ export default function LegacySaleModal({ onClose, onSuccess }: Props) {
 
   const [dataVenda, setDataVenda] = useState("");
   const [observacoes, setObservacoes] = useState("Registro manual de venda antiga");
+  const [vendedor, setVendedor] = useState<Vendedor | null>(null);
 
   const [produto, setProduto] = useState<Produto | null>(null);
   const [nomeProdutoManual, setNomeProdutoManual] = useState("");
@@ -220,6 +226,7 @@ export default function LegacySaleModal({ onClose, onSuccess }: Props) {
       const body: Record<string, unknown> = {
         data_venda: dataVenda || undefined,
         observacoes: observacoes || undefined,
+        vendedor_id: vendedor?.id_vendedor ?? undefined,
         itens: [{
           produto_id: produto?.id ?? null,
           nome_produto: nomeProduto,
@@ -344,7 +351,7 @@ export default function LegacySaleModal({ onClose, onSuccess }: Props) {
                 {/* Linha 1: Nome + CPF/CNPJ */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <InputField icon={User} placeholder="Nome completo *" value={novoCliente.nome} onChange={v => setNovoCliente(p => ({ ...p, nome: v }))} />
-                  <InputField icon={HashIcon} placeholder="CPF/CNPJ" value={novoCliente.cpf_cnpj} onChange={v => setNovoCliente(p => ({ ...p, cpf_cnpj: v }))} />
+                  <InputField icon={Hash} placeholder="CPF/CNPJ" value={novoCliente.cpf_cnpj} onChange={v => setNovoCliente(p => ({ ...p, cpf_cnpj: v }))} />
                 </div>
                 {/* Linha 2: Telefone + Celular */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -358,7 +365,7 @@ export default function LegacySaleModal({ onClose, onSuccess }: Props) {
                   <div className="sm:col-span-2">
                     <InputField icon={MapPin} placeholder="Endereco" value={novoCliente.endereco} onChange={v => setNovoCliente(p => ({ ...p, endereco: v }))} />
                   </div>
-                  <InputField icon={HashIcon} placeholder="Numero" value={novoCliente.numero} onChange={v => setNovoCliente(p => ({ ...p, numero: v }))} />
+                  <InputField icon={Hash} placeholder="Numero" value={novoCliente.numero} onChange={v => setNovoCliente(p => ({ ...p, numero: v }))} />
                 </div>
                 {/* Linha 5: Complemento + Bairro */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -401,6 +408,26 @@ export default function LegacySaleModal({ onClose, onSuccess }: Props) {
                 <p className="text-[10px] mt-0.5 px-1" style={{ color: "#9CA3AF" }}>
                   Data maxima: 31/12/2023
                 </p>
+              </div>
+              <div>
+                <AutoComplete<Vendedor>
+                  placeholder="Buscar vendedor(a)..."
+                  onSearch={async q => {
+                    const r = await fetch(`/api/vendedores?q=${encodeURIComponent(q)}`);
+                    const data = await r.json();
+                    return data.filter((v: Vendedor) =>
+                      v.nome.toLowerCase().includes(q.toLowerCase())
+                    );
+                  }}
+                  renderItem={v => (
+                    <div>
+                      <p className="font-medium text-sm">{v.nome}</p>
+                    </div>
+                  )}
+                  onSelect={v => setVendedor(v)}
+                  selectedLabel={vendedor?.nome ?? null}
+                  onClear={() => setVendedor(null)}
+                />
               </div>
             </div>
 

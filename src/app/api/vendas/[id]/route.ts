@@ -180,7 +180,7 @@ export async function PATCH(
     client_updated_at?:    string;
   };
 
-  const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "cancelado", "concluido"];
+  const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "entregue", "cancelado", "concluido"];
   if (body.situacao && !SITUACOES_VALIDAS.includes(body.situacao)) {
     return NextResponse.json({ error: "Situação inválida" }, { status: 400 });
   }
@@ -314,7 +314,7 @@ export async function PATCH(
   if (body.situacao === "aprovado") {
     // Mapa situacao ERP → situacao Tiny v3
     const SITUACAO_TINY: Record<string, number> = {
-      rascunho: 0, aprovado: 3, confirmado: 3, concluido: 6, cancelado: 2,
+      rascunho: 0, aberto: 1, aprovado: 3, confirmado: 3, concluido: 6, cancelado: 2,
     };
 
     // Buscar venda completa + cliente
@@ -413,7 +413,7 @@ export async function PATCH(
     const pedidoV3: Record<string, unknown> = {
       numeroPedido: vendaFull.numero_venda,
       idContato: Number(vendaFull.cliente_id_tiny) || undefined,
-      situacao: SITUACAO_TINY["aprovado"],
+      situacao: SITUACAO_TINY["aberto"],
       data: dataVenda,
       // NÃO enviar valorDesconto — o desconto já está aplicado no valorUnitario de cada item
       ...(Number(vendaFull.total_frete) > 0 ? { valorFrete: Number(vendaFull.total_frete) } : {}),

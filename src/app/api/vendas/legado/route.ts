@@ -59,6 +59,7 @@ export async function POST(req: NextRequest) {
     };
     data_venda?: string;
     observacoes?: string;
+    vendedor_id?: number | null;
     itens?: LegacyItemInput[];
   };
 
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Validacao de data ────────────────────────────────────────────────────
-  let dataVenda = body.data_venda || "2023-01-01";
+  const dataVenda = body.data_venda || "2023-01-01";
   if (dataVenda > MAX_LEGACY_DATE) {
     return NextResponse.json(
       { error: `Data maxima permitida: ${MAX_LEGACY_DATE.split("-").reverse().join("/")}` },
@@ -150,13 +151,13 @@ export async function POST(req: NextRequest) {
         clienteId = Number(body.cliente_id);
       }
 
-      // 2. Inserir venda legacy (sem financeiro, sem estoque)
+      // 2. Inserir venda como rascunho primeiro (triggers bloqueiam itens em concluido)
       const observacoes = body.observacoes?.trim() || "Registro manual de venda antiga";
 
       const [venda] = await tx`
         INSERT INTO alissonerp.vendas_erp (
           numero_venda,
-          cliente_id,
+          cliente_id, vendedor_id,
           data_venda,
           observacoes,
           situacao,
@@ -166,9 +167,10 @@ export async function POST(req: NextRequest) {
         ) VALUES (
           'LEG-TEMP',
           ${clienteId},
+          ${body.vendedor_id ?? null},
           ${dataVenda}::date,
           ${observacoes},
-          'concluido',
+          'rascunho',
           true,
           0, 0, 0, 0, 0,
           ${user.id}::uuid
@@ -215,6 +217,11 @@ export async function POST(req: NextRequest) {
           )
         `;
       }
+
+      // 5. Concluir venda (apos itens inseridos para bypassar trigger de bloqueio)
+      await tx`
+        UPDATE alissonerp.vendas_erp SET situacao = 'concluido' WHERE id = ${venda.id}
+      `;
 
       // 5. Audit log
       await logAudit(tx, {

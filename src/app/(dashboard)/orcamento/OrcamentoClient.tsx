@@ -402,6 +402,24 @@ export default function OrcamentoClient({
     }));
   }, [stonePricesLocal, stoneMarkup, cotacaoDolar]);
   useEffect(() => {
+    if (profile !== ProfileType.QuadradoCanal && params.textContent.trim()) {
+      const raw = params.textContent.replace(/\s/g, "");
+      const formatted = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : "";
+      if (formatted !== params.textContent) {
+        setParams((prev) => ({ ...prev, textContent: formatted }));
+      }
+    }
+  }, [profile]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (profile2 !== ProfileType.QuadradoCanal && params2.textContent.trim()) {
+      const raw = params2.textContent.replace(/\s/g, "");
+      const formatted = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : "";
+      if (formatted !== params2.textContent) {
+        setParams2((prev) => ({ ...prev, textContent: formatted }));
+      }
+    }
+  }, [profile2]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
     if (!params2.hasStones || stoneEntries2.length === 0) return;
     setStoneEntries2((prev) => prev.map((e) => {
       if (e.tamanho_mm === params2.stoneSize) return e;
@@ -2667,15 +2685,18 @@ export default function OrcamentoClient({
                 {/* Primeiro nome — incluso */}
                 <div>
                   <label className="text-[8px] text-gray-400 block">Nome principal <span className="text-emerald-500">(incluso)</span></label>
-                  <input type="text" maxLength={20} value={activeParams.textContent}
+                  <input type="text" maxLength={activeProfile === ProfileType.QuadradoCanal ? 50 : 20} value={activeParams.textContent}
                     onChange={(e) => {
-                      // Sem espaços, só 1ª letra maiúscula, resto minúsculo
-                      const raw = e.target.value.replace(/\s/g, "");
-                      if (!raw) { updateParam("textContent", ""); return; }
-                      const formatted = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
-                      updateParam("textContent", formatted);
+                      if (activeProfile === ProfileType.QuadradoCanal) {
+                        updateParam("textContent", e.target.value);
+                      } else {
+                        const raw = e.target.value.replace(/\s/g, "");
+                        if (!raw) { updateParam("textContent", ""); return; }
+                        const formatted = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+                        updateParam("textContent", formatted);
+                      }
                     }}
-                    placeholder="Nome (sem espaco)"
+                    placeholder={activeProfile === ProfileType.QuadradoCanal ? "Nome a gravar" : "Nome (sem espaco)"}
                     className="w-full px-3 py-1.5 text-[11px] rounded-lg border outline-none bg-white" style={{ borderColor: C.cremeBorder }} />
                 </div>
                 {/* Textos adicionais — R$ cada */}
@@ -2685,11 +2706,15 @@ export default function OrcamentoClient({
                       {idx === 0 ? "Nome/data adicional" : `Adicional ${idx + 1}`} <span className="text-amber-500">+R$ {precoGravacao.toFixed(0)}</span>
                     </label>
                     <div className="flex gap-1">
-                      <input type="text" maxLength={20} value={txt}
+                      <input type="text" maxLength={activeProfile === ProfileType.QuadradoCanal ? 50 : 20} value={txt}
                         onChange={(e) => {
-                          const raw = e.target.value.replace(/\s/g, "");
-                          const formatted = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : "";
-                          const u = [...extras]; u[idx] = formatted; setExtras(u);
+                          if (activeProfile === ProfileType.QuadradoCanal) {
+                            const u = [...extras]; u[idx] = e.target.value; setExtras(u);
+                          } else {
+                            const raw = e.target.value.replace(/\s/g, "");
+                            const formatted = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : "";
+                            const u = [...extras]; u[idx] = formatted; setExtras(u);
+                          }
                         }}
                         placeholder="Nome ou data (sem espaco)"
                         className="flex-1 px-3 py-1.5 text-[11px] rounded-lg border outline-none bg-white" style={{ borderColor: C.cremeBorder }} />

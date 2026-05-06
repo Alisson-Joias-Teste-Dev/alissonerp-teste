@@ -524,6 +524,16 @@ export default function PagamentoForm({
                     </button>
                   </div>
                 </div>
+              ) : multForma === "Manual (MP)" ? (
+                <div className="flex-1 min-w-48">
+                  <Label>ID do Pagamento (MP)</Label>
+                  <input type="text" value={mpManualId}
+                    onChange={e => { setMpManualId(e.target.value); setMpManualMsg(null); }}
+                    placeholder="ex: 123456789"
+                    className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono"
+                    style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                    onKeyDown={e => e.key === "Enter" && handleMpManual()} />
+                </div>
               ) : (
                 <>
                   <div className="flex-1 min-w-28">
@@ -560,15 +570,26 @@ export default function PagamentoForm({
                       const valorValeDisp = Math.min(multValeValidacao.valor_disponivel, restante);
                       setPayments([...payments, { _key: Math.random().toString(36).slice(2), forma: "Vale-Troca", valor: valorValeDisp, parcelas: 1, vale_numero: multValeNumero.trim() }]);
                       setMultValeNumero(""); setMultValeValidacao(null); setMultValor("");
+                    } else if (multForma === "Manual (MP)") {
+                      handleMpManual();
                     } else {
                       handleAddPagamento(multValor);
                     }
                   }}
-                  disabled={restante <= 0 || (multForma === "Vale-Troca" ? !multValeValidacao?.ok : false)}
+                  disabled={restante <= 0 || (multForma === "Vale-Troca" ? !multValeValidacao?.ok : false) || (multForma === "Manual (MP)" ? (mpManualLoading || !mpManualId.trim()) : false)}
                   className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
                   style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                  <Plus size={13} /> Adicionar
+                  {multForma === "Manual (MP)"
+                    ? <>{mpManualLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={13} />} Verificar</>
+                    : <><Plus size={13} /> Adicionar</>
+                  }
                 </button>
+              )}
+              {/* Feedback Manual (MP) no Múltiplas */}
+              {multForma === "Manual (MP)" && mpManualMsg && (
+                <p className="text-xs font-medium mt-1" style={{ color: mpManualMsg.ok ? "#059669" : "#DC2626" }}>
+                  {mpManualMsg.text}
+                </p>
               )}
             </div>
 
