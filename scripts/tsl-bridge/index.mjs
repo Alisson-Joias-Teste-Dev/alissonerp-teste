@@ -1,21 +1,38 @@
 import { SerialPort } from "serialport";
 import { ReadlineParser } from "@serialport/parser-readline";
 import http from "http";
-import https from "https";
+import postgres from "postgres";
 
 const PORT = process.env.TSL_PORT || "COM3";
 const BAUD = parseInt(process.env.TSL_BAUD || "115200", 10);
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || "9101", 10);
 const RETRY_DELAY = parseInt(process.env.TSL_RETRY || "5000", 10);
-const PROXY_URL = process.env.PROXY_URL || "https://erp.alissonjoias.com.br";
+const DATABASE_URL = process.env.DATABASE_URL;
 
 let port = null;
 let scanning = false;
 let retryTimer = null;
 let retryCount = 0;
+let db = null;
 const recentEpcs = [];
 const MAX_EPCS = 10000;
 const statusLog = { connected: false };
+
+// Conexao com banco
+function initDb() {
+  if (!DATABASE_URL) {
+    console.warn("[tsl-bridge] DATABASE_URL nao definida. Proxy DB desabilitado.");
+    return;
+  }
+  try {
+    db = postgres(DATABASE_URL, { ssl: false, max: 2, idle_timeout: 20,
+      connection: { search_path: "alissonerp,public" },
+    });
+    console.log("[tsl-bridge] Conexao com banco OK");
+  } catch (e) {
+    console.error("[tsl-bridge] Erro ao conectar no banco:", e.message);
+  }
+}
 
 function hexToAscii(hex) {
   let out = "";
@@ -458,39 +475,104 @@ function startHttpServer() {
     }
 
     if (path === "/proxy" && req.method === "POST") {
-      let body = "";
-      req.on("data", (chunk) => { body += chunk; });
-      req.on("end", () => {
+      let raw = "";
+      req.on("data", (chunk) => { raw += chunk; });
+      req.on("end", async () => {
         try {
-          const msg = JSON.parse(body);
-          const targetUrl = new URL(msg.url, PROXY_URL);
-          const isPost = msg.method === "POST" || (msg.body != null);
+          const msg = JSON.parse(raw);
+          if (!db) throw new Error("Banco nao conectado");
 
-          const opts = {
-            hostname: targetUrl.hostname,
-            port: 443,
-            path: targetUrl.pathname + targetUrl.search,
-            method: isPost ? "POST" : "GET",
-            headers: { "Content-Type": "application/json" },
-          };
+          if (msg.url === "/api/locais-estoque") {
+            const rows = await db`SELECT id, nome FROM alissonerp.locais_estoque WHERE ativo = true ORDER BY nome`;
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(rows));
+            return;
+          }
 
-          const pReq = https.request(opts, (pRes) => {
-            let data = "";
-            pRes.on("data", (chunk) => { data += chunk; });
-            pRes.on("end", () => {
-              res.writeHead(pRes.statusCode, { "Content-Type": "application/json" });
-              res.end(data);
-            });
-          });
-          pReq.on("error", () => {
-            res.writeHead(502);
-            res.end(JSON.stringify({ error: "Proxy error" }));
-          });
-          if (isPost && msg.body) pReq.write(JSON.stringify(msg.body));
-          pReq.end();
-        } catch {
+          if (msg.url === "/api/rfid/inventario" && msg.body) {
+            const b = msg.body;
+            const leituras = [...new Set((b.leituras || []).map(l => String(l).trim()).filter(Boolean))];
+            if (leituras.length === 0) throw new Error("Nenhuma leitura");
+
+            // Registra leituras
+            for (const epc of leituras) {
+              await db`INSERT INTO alissonerp.joias_leituras (epc, evento, localizacao, leitor_id, lido_em) VALUES (${epc}, 'inventario', 'RFID', 'TSL-1128', now())`;
+            }
+
+            // Busca joias_rfid cadastradas
+            const lidos = leituras.length ? await db`SELECT j.epc, j.produto_id, j.sku, j.nome, j.status, j.localizacao_atual, p.nome AS produto_nome FROM alissonerp.joias_rfid j LEFT JOIN public.produtos p ON p.id_produto = j.produto_id::bigint WHERE j.epc = ANY(${leituras}::text[])` : [];
+
+            // Extrai id_api_produto de EPCs nao cadastrados
+            const epcsSet = new Set(lidos.map(r => r.epc));
+            const naoCadastrados = leituras.filter(e => !epcsSet.has(e));
+            const idsApi = [];
+            for (const epc of naoCadastrados) {
+              if (epc.length >= 13 && /^\d{24}$/.test(epc)) {
+                const idApi = parseInt(epc.slice(4, 13), 10);
+                if (!isNaN(idApi) && idApi > 0) idsApi.push(idApi);
+              }
+            }
+
+            // Busca produtos por id_api_produto
+            const prodsMap = new Map();
+            if (idsApi.length > 0) {
+              const prods = await db`SELECT id_produto, id_api_produto, sku, nome FROM public.produtos WHERE id_api_produto = ANY(${idsApi}::int[])`;
+              for (const p of prods) prodsMap.set(Number(p.id_api_produto), p);
+            }
+
+            // Agrupa por id_api_produto
+            const groups = {};
+            for (const epc of leituras) {
+              let idApi = null;
+              if (epc.length >= 13 && /^\d{24}$/.test(epc)) {
+                idApi = parseInt(epc.slice(4, 13), 10);
+                if (isNaN(idApi) || idApi <= 0) idApi = null;
+              }
+              const key = idApi || epc;
+              if (!groups[key]) groups[key] = { epcs: [], count: 0, idApi };
+              groups[key].epcs.push(epc);
+              groups[key].count++;
+            }
+
+            // Monta relatorio
+            const produtos = [];
+            let totalEsperado = 0, totalEncontrado = 0;
+            for (const [key, g] of Object.entries(groups)) {
+              const prod = g.idApi ? prodsMap.get(g.idApi) : null;
+              if (prod) totalEncontrado += g.count;
+              const status = !prod ? "nao_cadastrado" : "ok";
+              produtos.push({
+                produto_id: prod?.id_produto ?? null,
+                id_api_produto: g.idApi,
+                sku: prod?.sku ?? null,
+                nome: prod?.nome ?? null,
+                esperado: 0, encontrado: g.count,
+                divergencia: 0, epcs: g.epcs, status,
+              });
+            }
+
+            const resultado = {
+              ok: true, local_estoque_id: b.local_estoque_id ?? 2,
+              local_nome: "Loja", total_epcs_unicos: leituras.length,
+              nao_identificados: naoCadastrados.filter(e => !/^\d{24}$/.test(e)),
+              produtos,
+              resumo: {
+                total_produtos: produtos.length, total_esperado: totalEsperado,
+                total_encontrado: totalEncontrado, produtos_com_divergencia: 0,
+                faltando: 0, excedente: 0, nao_cadastrado: produtos.filter(p => p.status === "nao_cadastrado").length,
+              },
+            };
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(resultado));
+            return;
+          }
+
           res.writeHead(400);
-          res.end(JSON.stringify({ error: "JSON invalido" }));
+          res.end(JSON.stringify({ error: "url nao suportada" }));
+        } catch (e) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: e.message }));
         }
       });
       return;
@@ -519,6 +601,7 @@ process.on("SIGINT", cleanup);
 process.on("SIGTERM", cleanup);
 
 startHttpServer();
+initDb();
 setTimeout(connectSerial, 500);
 
 console.log(`[tsl-bridge] =======================`);
