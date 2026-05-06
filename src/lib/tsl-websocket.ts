@@ -9,6 +9,8 @@ export interface EPCRead {
 
 export interface TSLBridgeStatus {
   connected: boolean;
+  ws_connected?: boolean;
+  ws_port?: number;
   port?: string;
   baud?: number;
   scanning?: boolean;

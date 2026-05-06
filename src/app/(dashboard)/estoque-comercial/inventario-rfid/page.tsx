@@ -190,16 +190,29 @@ export default function InventarioRfidPage() {
         <div className="flex items-center gap-3">
           <div
             className="w-3 h-3 rounded-full shrink-0"
-            style={{ background: reader.status.connected ? "#059669" : "#DC2626" }}
+            style={{
+              background: reader.status.connected ? "#059669"
+                : reader.status.ws_connected ? "#F59E0B"
+                : "#DC2626",
+            }}
           />
           <div>
             <p className="text-sm font-medium" style={{ color: "#184036" }}>
-              {reader.status.connected ? `Conectado (${reader.status.port})` : "Desconectado"}
+              {reader.status.connected
+                ? `Leitor conectado (${reader.status.port})`
+                : reader.status.ws_connected
+                  ? "Bridge ativo, aguardando leitor..."
+                  : "Bridge desconectado"}
             </p>
             <p className="text-xs text-gray-400">
-              {reader.status.connected ? "Pronto" : "npm run tsl-bridge"}
+              {reader.status.connected
+                ? "Pronto para contagem"
+                : reader.status.ws_connected
+                  ? `Pressione o gatilho do TSL 1128 para conectar`
+                  : "Inicie a ponte com npm run tsl-bridge"}
             </p>
           </div>
+        </div>
         </div>
       </div>
 

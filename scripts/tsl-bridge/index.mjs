@@ -194,6 +194,8 @@ function startWebSocket() {
 
     ws.send(JSON.stringify({
       type: "status",
+      ws_connected: true,
+      ws_port: WS_PORT,
       connected: port?.isOpen ?? false,
       port: PORT,
       scanning,
