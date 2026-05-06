@@ -207,10 +207,45 @@ export default function LegacySaleModal({ onClose, onSuccess }: Props) {
   const [quantidade, setQuantidade] = useState("1");
 
   const [loading, setLoading] = useState(false);
+  const [cepLoading, setCepLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const nomeProduto = produto ? produto.nome : nomeProdutoManual;
-  const novoClienteValido = novoCliente.nome.trim() && novoCliente.telefone.trim();
+  const novoClienteValido =
+    novoCliente.nome.trim() &&
+    novoCliente.cpf_cnpj.trim() &&
+    novoCliente.email.trim() &&
+    novoCliente.telefone.trim() &&
+    novoCliente.celular.trim() &&
+    novoCliente.endereco.trim() &&
+    novoCliente.numero.trim() &&
+    novoCliente.bairro.trim() &&
+    novoCliente.municipio.trim() &&
+    novoCliente.cep.trim() &&
+    novoCliente.uf.trim();
+
+  // ── CEP auto-fill ────────────────────────────────────────────────────
+  const buscarCep = useCallback(async (cep: string) => {
+    const limpo = cep.replace(/\D/g, "");
+    if (limpo.length !== 8) return;
+    setCepLoading(true);
+    try {
+      const r = await fetch(`https://viacep.com.br/ws/${limpo}/json/`);
+      const d = await r.json();
+      if (d.erro) return;
+      setNovoCliente(p => ({
+        ...p,
+        endereco: d.logradouro ?? "",
+        bairro: d.bairro ?? "",
+        municipio: d.localidade ?? "",
+        uf: (d.uf ?? "").toUpperCase(),
+      }));
+    } catch {
+      // ignora erro de rede
+    } finally {
+      setCepLoading(false);
+    }
+  }, []);
   const valido =
     ((modoCliente === "buscar" && cliente) || (modoCliente === "novo" && novoClienteValido)) &&
     nomeProduto.trim() &&
@@ -241,17 +276,17 @@ export default function LegacySaleModal({ onClose, onSuccess }: Props) {
       } else {
         body.novo_cliente = {
           nome: novoCliente.nome.trim(),
+          cpf_cnpj: novoCliente.cpf_cnpj.trim(),
           telefone: novoCliente.telefone.trim(),
-          cpf_cnpj: novoCliente.cpf_cnpj.trim() || undefined,
-          email: novoCliente.email.trim() || undefined,
-          celular: novoCliente.celular.trim() || undefined,
-          endereco: novoCliente.endereco.trim() || undefined,
-          numero: novoCliente.numero.trim() || undefined,
-          complemento: novoCliente.complemento.trim() || undefined,
-          bairro: novoCliente.bairro.trim() || undefined,
-          municipio: novoCliente.municipio.trim() || undefined,
-          cep: novoCliente.cep.trim() || undefined,
-          uf: novoCliente.uf.trim().toUpperCase() || undefined,
+          celular: novoCliente.celular.trim(),
+          email: novoCliente.email.trim(),
+          endereco: novoCliente.endereco.trim(),
+          numero: novoCliente.numero.trim(),
+          complemento: novoCliente.complemento.trim(),
+          bairro: novoCliente.bairro.trim(),
+          municipio: novoCliente.municipio.trim(),
+          cep: novoCliente.cep.trim(),
+          uf: novoCliente.uf.trim().toUpperCase(),
         };
       }
 
@@ -351,37 +386,56 @@ export default function LegacySaleModal({ onClose, onSuccess }: Props) {
                 {/* Linha 1: Nome + CPF/CNPJ */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <InputField icon={User} placeholder="Nome completo *" value={novoCliente.nome} onChange={v => setNovoCliente(p => ({ ...p, nome: v }))} />
-                  <InputField icon={Hash} placeholder="CPF/CNPJ" value={novoCliente.cpf_cnpj} onChange={v => setNovoCliente(p => ({ ...p, cpf_cnpj: v }))} />
+                  <InputField icon={Hash} placeholder="CPF/CNPJ *" value={novoCliente.cpf_cnpj} onChange={v => setNovoCliente(p => ({ ...p, cpf_cnpj: v }))} />
                 </div>
                 {/* Linha 2: Telefone + Celular */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <InputField icon={Phone} placeholder="Telefone *" value={novoCliente.telefone} onChange={v => setNovoCliente(p => ({ ...p, telefone: v }))} />
-                  <InputField icon={Phone} placeholder="Celular" value={novoCliente.celular} onChange={v => setNovoCliente(p => ({ ...p, celular: v }))} />
+                  <InputField icon={Phone} placeholder="Celular *" value={novoCliente.celular} onChange={v => setNovoCliente(p => ({ ...p, celular: v }))} />
                 </div>
                 {/* Linha 3: Email */}
-                <InputField icon={Mail} placeholder="Email" value={novoCliente.email} onChange={v => setNovoCliente(p => ({ ...p, email: v }))} />
-                {/* Linha 4: Endereco + Numero */}
+                <InputField icon={Mail} placeholder="Email *" value={novoCliente.email} onChange={v => setNovoCliente(p => ({ ...p, email: v }))} />
+                {/* Linha 4: CEP + UF */}
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                  <div className="sm:col-span-3">
+                    <div className="flex items-center gap-1.5 rounded-lg px-3 py-2.5 border bg-white" style={{ borderColor: C.cremeBorder }}>
+                      {cepLoading ? (
+                        <Loader2 size={14} className="animate-spin text-gray-400 flex-shrink-0" />
+                      ) : (
+                        <MapPin size={14} style={{ color: "#9CA3AF" }} className="flex-shrink-0" />
+                      )}
+                      <input
+                        className="flex-1 outline-none text-sm bg-transparent min-w-0"
+                        style={{ color: "#1A1A1A" }}
+                        placeholder="CEP *"
+                        value={novoCliente.cep}
+                        maxLength={9}
+                        onChange={e => {
+                          const v = e.target.value;
+                          setNovoCliente(p => ({ ...p, cep: v }));
+                          buscarCep(v);
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <InputField icon={MapPin} placeholder="UF *" value={novoCliente.uf} onChange={v => setNovoCliente(p => ({ ...p, uf: v }))} maxLength={2} />
+                  </div>
+                </div>
+                {/* Linha 5: Endereco + Numero */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div className="sm:col-span-2">
-                    <InputField icon={MapPin} placeholder="Endereco" value={novoCliente.endereco} onChange={v => setNovoCliente(p => ({ ...p, endereco: v }))} />
+                    <InputField icon={MapPin} placeholder="Endereco *" value={novoCliente.endereco} onChange={v => setNovoCliente(p => ({ ...p, endereco: v }))} />
                   </div>
-                  <InputField icon={Hash} placeholder="Numero" value={novoCliente.numero} onChange={v => setNovoCliente(p => ({ ...p, numero: v }))} />
+                  <InputField icon={Hash} placeholder="Numero *" value={novoCliente.numero} onChange={v => setNovoCliente(p => ({ ...p, numero: v }))} />
                 </div>
-                {/* Linha 5: Complemento + Bairro */}
+                {/* Linha 6: Complemento + Bairro */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <InputField icon={Building} placeholder="Complemento" value={novoCliente.complemento} onChange={v => setNovoCliente(p => ({ ...p, complemento: v }))} />
-                  <InputField icon={MapPin} placeholder="Bairro" value={novoCliente.bairro} onChange={v => setNovoCliente(p => ({ ...p, bairro: v }))} />
+                  <InputField icon={Building} placeholder="Complemento *" value={novoCliente.complemento} onChange={v => setNovoCliente(p => ({ ...p, complemento: v }))} />
+                  <InputField icon={MapPin} placeholder="Bairro *" value={novoCliente.bairro} onChange={v => setNovoCliente(p => ({ ...p, bairro: v }))} />
                 </div>
-                {/* Linha 6: Municipio + CEP + UF */}
-                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
-                  <div className="sm:col-span-2">
-                    <InputField icon={MapPin} placeholder="Municipio" value={novoCliente.municipio} onChange={v => setNovoCliente(p => ({ ...p, municipio: v }))} />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <InputField icon={MapPin} placeholder="CEP" value={novoCliente.cep} onChange={v => setNovoCliente(p => ({ ...p, cep: v }))} />
-                  </div>
-                  <InputField icon={MapPin} placeholder="UF" value={novoCliente.uf} onChange={v => setNovoCliente(p => ({ ...p, uf: v }))} maxLength={2} />
-                </div>
+                {/* Linha 7: Municipio */}
+                <InputField icon={MapPin} placeholder="Municipio *" value={novoCliente.municipio} onChange={v => setNovoCliente(p => ({ ...p, municipio: v }))} />
               </div>
             )}
           </div>

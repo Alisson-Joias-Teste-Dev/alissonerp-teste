@@ -72,11 +72,39 @@ export async function POST(req: NextRequest) {
   }
 
   if (body.novo_cliente) {
-    if (!body.novo_cliente.nome?.trim()) {
+    const c = body.novo_cliente;
+    if (!c.nome?.trim()) {
       return NextResponse.json({ error: "Nome do cliente e obrigatorio" }, { status: 400 });
     }
-    if (!body.novo_cliente.telefone?.trim()) {
+    if (!c.telefone?.trim()) {
       return NextResponse.json({ error: "Telefone do cliente e obrigatorio" }, { status: 400 });
+    }
+    if (!c.cpf_cnpj?.trim()) {
+      return NextResponse.json({ error: "CPF/CNPJ do cliente e obrigatorio" }, { status: 400 });
+    }
+    if (!c.email?.trim()) {
+      return NextResponse.json({ error: "Email do cliente e obrigatorio" }, { status: 400 });
+    }
+    if (!c.celular?.trim()) {
+      return NextResponse.json({ error: "Celular do cliente e obrigatorio" }, { status: 400 });
+    }
+    if (!c.endereco?.trim()) {
+      return NextResponse.json({ error: "Endereco do cliente e obrigatorio" }, { status: 400 });
+    }
+    if (!c.numero?.trim()) {
+      return NextResponse.json({ error: "Numero do endereco e obrigatorio" }, { status: 400 });
+    }
+    if (!c.bairro?.trim()) {
+      return NextResponse.json({ error: "Bairro do cliente e obrigatorio" }, { status: 400 });
+    }
+    if (!c.municipio?.trim()) {
+      return NextResponse.json({ error: "Municipio do cliente e obrigatorio" }, { status: 400 });
+    }
+    if (!c.cep?.trim()) {
+      return NextResponse.json({ error: "CEP do cliente e obrigatorio" }, { status: 400 });
+    }
+    if (!c.uf?.trim()) {
+      return NextResponse.json({ error: "UF do cliente e obrigatoria" }, { status: 400 });
     }
   }
 
