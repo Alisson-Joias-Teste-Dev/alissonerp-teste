@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   X, Loader2, Send, ShieldCheck, Check, XCircle,
-  Trash2, Calendar, User, Tag, MessageSquare, Clock, Edit3,
+  Trash2, Calendar, User, Tag, MessageSquare, Edit3,
+  Paperclip, History, ArrowRightLeft,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import { useErrorStore } from "@/stores/errorStore";
@@ -35,31 +36,82 @@ interface Aprovacao {
   respondido_em: string | null;
 }
 
+interface HistoricoEntry {
+  id: number;
+  acao: string;
+  campo: string | null;
+  valor_anterior: string | null;
+  valor_novo: string | null;
+  comentario: string | null;
+  usuario_nome: string | null;
+  created_at: string;
+}
+
+interface Anexo {
+  id: number;
+  nome: string;
+  url: string;
+  tamanho: number | null;
+  tipo_mime: string | null;
+  usuario_nome: string | null;
+  created_at: string;
+}
+
 interface Props {
   tarefa: Tarefa;
   usuarios: Usuario[];
   currentUserId: string;
+  role: string;
   podeGerenciar: boolean;
   onClose: () => void;
   onUpdated: (t: Partial<Tarefa> & { id: number }) => void;
   onDeleted: (id: number) => void;
 }
 
-function fmt(d: string) {
-  return new Date(d.includes("T") ? d : d + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
-}
-function fmtHora(d: string) {
-  return new Date(d).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+function safeDate(d: string | null | undefined): Date | null {
+  if (!d) return null;
+  const date = new Date(d);
+  return isNaN(date.getTime()) ? null : date;
 }
 
-export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGerenciar, onClose, onUpdated, onDeleted }: Props) {
+function fmt(d: string | null | undefined): string {
+  const date = safeDate(d);
+  if (!date) return "-";
+  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+function fmtHora(d: string | null | undefined): string {
+  const date = safeDate(d);
+  if (!date) return "-";
+  return date.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function statusLabel(acao: string): { label: string; color: string; bg: string } {
+  const map: Record<string, { label: string; color: string; bg: string }> = {
+    criada: { label: "Criada", color: "#6B7280", bg: "#F3F4F6" },
+    pendente: { label: "Pendente", color: "#6B7280", bg: "#F3F4F6" },
+    em_andamento: { label: "Em Andamento", color: "#D97706", bg: "#FEF3C7" },
+    aguardando_aprovacao: { label: "Aguard. Aprovação", color: "#7C3AED", bg: "#EDE9FE" },
+    aprovado: { label: "Aprovada", color: "#059669", bg: "#D1FAE5" },
+    aprovada: { label: "Aprovada", color: "#059669", bg: "#D1FAE5" },
+    rejeitado: { label: "Rejeitada", color: "#DC2626", bg: "#FEE2E2" },
+    rejeitada: { label: "Rejeitada", color: "#DC2626", bg: "#FEE2E2" },
+    concluida: { label: "Concluída", color: "#059669", bg: "#D1FAE5" },
+    cancelada: { label: "Cancelada", color: "#DC2626", bg: "#FEE2E2" },
+    vencida: { label: "Vencida", color: "#EF4444", bg: "#FEE2E2" },
+    atribuida: { label: "Atribuída", color: "#2563EB", bg: "#DBEAFE" },
+  };
+  return map[acao] ?? { label: acao, color: "#6B7280", bg: "#F3F4F6" };
+}
+
+export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, podeGerenciar, onClose, onUpdated, onDeleted }: Props) {
   const [comentarios, setComentarios] = useState<Comentario[]>([]);
   const [aprovacoes, setAprovacoes] = useState<Aprovacao[]>([]);
+  const [historico, setHistorico] = useState<HistoricoEntry[]>([]);
+  const [anexos, setAnexos] = useState<Anexo[]>([]);
   const [novoComentario, setNovoComentario] = useState("");
   const [sendingComment, setSendingComment] = useState(false);
-  const [aba, setAba] = useState<"detalhes" | "comentarios" | "aprovacao">("detalhes");
+  const [aba, setAba] = useState<"detalhes" | "comentarios" | "aprovacao" | "historico" | "anexos">("detalhes");
 
-  // Edição
   const [editando, setEditando] = useState(false);
   const [editForm, setEditForm] = useState({
     titulo: tarefa.titulo,
@@ -71,7 +123,6 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
   });
   const [salvandoEdit, setSalvandoEdit] = useState(false);
 
-  // Aprovação
   const [aprovadorId, setAprovadorId] = useState("");
   const [solicitandoAprovacao, setSolicitandoAprovacao] = useState(false);
   const [respondendoAprovacao, setRespondendoAprovacao] = useState<number | null>(null);
@@ -79,13 +130,14 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
 
   const [deletando, setDeletando] = useState(false);
 
+  const [delegando, setDelegando] = useState(false);
+  const [novoResponsavelId, setNovoResponsavelId] = useState("");
+  const [motivoDelegacao, setMotivoDelegacao] = useState("");
+
   const carregarComentarios = useCallback(async () => {
     try {
-      const res = await fetch(`/api/tarefas/${tarefa.id}`, { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json() as { comentarios?: Comentario[] };
-        setComentarios(data.comentarios ?? []);
-      }
+      const data = await apiFetch<Tarefa & { comentarios?: Comentario[] }>(`/api/tarefas/${tarefa.id}`);
+      setComentarios(data.comentarios ?? []);
     } catch { /* silencioso */ }
   }, [tarefa.id]);
 
@@ -96,10 +148,29 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
     } catch { /* silencioso */ }
   }, [tarefa.id]);
 
+  const carregarHistorico = useCallback(async () => {
+    try {
+      const data = await apiFetch<HistoricoEntry[]>(`/api/tarefas/${tarefa.id}/historico`);
+      setHistorico(data);
+    } catch { /* silencioso */ }
+  }, [tarefa.id]);
+
+  const carregarAnexos = useCallback(async () => {
+    try {
+      const data = await apiFetch<Anexo[]>(`/api/tarefas/${tarefa.id}/anexos`);
+      setAnexos(data);
+    } catch { /* silencioso */ }
+  }, [tarefa.id]);
+
   useEffect(() => {
     carregarComentarios();
     carregarAprovacoes();
   }, [carregarComentarios, carregarAprovacoes]);
+
+  useEffect(() => {
+    if (aba === "historico") carregarHistorico();
+    if (aba === "anexos") carregarAnexos();
+  }, [aba, carregarHistorico, carregarAnexos]);
 
   async function enviarComentario() {
     if (!novoComentario.trim()) return;
@@ -119,6 +190,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
   async function salvarEdicao() {
     setSalvandoEdit(true);
     try {
+      const novoRespId = editForm.responsavel_id || null;
       await apiFetch(`/api/tarefas/${tarefa.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -127,8 +199,9 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
           descricao:      editForm.descricao || null,
           prioridade:     editForm.prioridade,
           data_limite:    editForm.data_limite || null,
-          responsavel_id: editForm.responsavel_id || null,
+          responsavel_id: novoRespId,
           tags:           editForm.tags ? editForm.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
+          motivo_delegacao: novoRespId !== tarefa.responsavel_id ? motivoDelegacao || undefined : undefined,
         }),
       });
       setEditando(false);
@@ -138,7 +211,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
         descricao:      editForm.descricao || null,
         prioridade:     editForm.prioridade,
         data_limite:    editForm.data_limite || null,
-        responsavel_id: editForm.responsavel_id || null,
+        responsavel_id: novoRespId,
         responsavel_nome: usuarios.find(u => u.id === editForm.responsavel_id)?.nome ?? null,
         tags:           editForm.tags ? editForm.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
       });
@@ -178,7 +251,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ aprovacao_id: aprovacaoId, decisao, motivo: motivoRejeicao || undefined }),
       });
-      const novoStatus = decisao === "aprovado" ? "concluida" : "em_andamento";
+      const novoStatus = decisao === "aprovado" ? "aprovada" : "rejeitada";
       onUpdated({ id: tarefa.id, status: novoStatus });
       carregarAprovacoes();
       setMotivoRejeicao("");
@@ -196,6 +269,31 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
     setDeletando(false);
   }
 
+  async function delegarTarefa() {
+    if (!novoResponsavelId) return;
+    setEditando(false);
+    try {
+      await apiFetch(`/api/tarefas/${tarefa.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          responsavel_id: novoResponsavelId,
+          motivo_delegacao: motivoDelegacao || undefined,
+        }),
+      });
+      onUpdated({
+        id: tarefa.id,
+        responsavel_id: novoResponsavelId,
+        responsavel_nome: usuarios.find(u => u.id === novoResponsavelId)?.nome ?? null,
+      });
+      setDelegando(false);
+      setNovoResponsavelId("");
+      setMotivoDelegacao("");
+    } catch (e) {
+      useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao delegar", { level: "critical" });
+    }
+  }
+
   const pri = PRIORIDADE_BADGE[tarefa.prioridade] ?? PRIORIDADE_BADGE.media;
   const statusCol = STATUS_COLS.find(c => c.key === tarefa.status);
   const pendingAprovacao = aprovacoes.find(a => a.status === "pendente");
@@ -203,14 +301,9 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
 
   return (
     <>
-      {/* Backdrop */}
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-
-      {/* Drawer */}
       <div className="fixed inset-y-0 right-0 z-50 w-full md:w-[480px] bg-white shadow-2xl flex flex-col"
         style={{ borderLeft: `1px solid ${C.cremeBorder}` }}>
-
-        {/* Header do drawer */}
         <div className="flex items-center gap-3 px-5 py-4 border-b flex-shrink-0"
           style={{ borderColor: C.cremeBorder }}>
           <div className="flex-1 min-w-0">
@@ -246,14 +339,16 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b px-5 flex-shrink-0" style={{ borderColor: C.cremeBorder }}>
+        <div className="flex border-b px-5 flex-shrink-0 overflow-x-auto" style={{ borderColor: C.cremeBorder }}>
           {([
             ["detalhes",    "Detalhes"],
-            ["comentarios", `Comentários${comentarios.length > 0 ? ` (${comentarios.length})` : ""}`],
+            ["comentarios", `Coment.${comentarios.length > 0 ? ` (${comentarios.length})` : ""}`],
             ["aprovacao",   "Aprovação"],
+            ["historico",   "Histórico"],
+            ["anexos",      "Anexos"],
           ] as const).map(([key, label]) => (
             <button key={key} onClick={() => setAba(key)}
-              className="px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors"
+              className="px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap"
               style={{
                 borderColor: aba === key ? C.esmeralda : "transparent",
                 color: aba === key ? C.esmeralda : "#9CA3AF",
@@ -263,9 +358,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
           ))}
         </div>
 
-        {/* Conteúdo */}
         <div className="flex-1 overflow-y-auto">
-
           {/* ─── Detalhes ─── */}
           {aba === "detalhes" && (
             <div className="p-5 space-y-4">
@@ -299,12 +392,16 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
                     <option value="">Sem responsável</option>
                     {usuarios.map(u => <option key={u.id} value={u.id}>{u.nome}</option>)}
                   </select>
+                  <input type="text" placeholder="Motivo da delegação (opcional, se alterar responsável)"
+                    value={motivoDelegacao} onChange={e => setMotivoDelegacao(e.target.value)}
+                    className="w-full px-3 py-2.5 border rounded-xl text-xs outline-none"
+                    style={{ borderColor: C.cremeBorder }} />
                   <input type="text" placeholder="Tags (separadas por vírgula)"
                     value={editForm.tags} onChange={e => setEditForm({ ...editForm, tags: e.target.value })}
                     className="w-full px-3 py-2.5 border rounded-xl text-sm outline-none"
                     style={{ borderColor: C.cremeBorder }} />
                   <div className="flex gap-2">
-                    <button onClick={() => setEditando(false)}
+                    <button onClick={() => { setEditando(false); setDelegando(false); }}
                       className="flex-1 py-2 rounded-xl text-sm border"
                       style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
                     <button onClick={salvarEdicao} disabled={salvandoEdit}
@@ -372,6 +469,46 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
                     )}
                   </div>
 
+                  {/* Botão de delegar rápido */}
+                  {podeGerenciar && (
+                    <div className="pt-2 border-t" style={{ borderColor: C.cremeBorder }}>
+                      {!delegando ? (
+                        <button onClick={() => setDelegando(true)}
+                          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg hover:opacity-80"
+                          style={{ color: "#2563EB", backgroundColor: "#DBEAFE" }}>
+                          <ArrowRightLeft size={12} />
+                          Delegar / Reatribuir
+                        </button>
+                      ) : (
+                        <div className="space-y-2 p-3 rounded-xl border" style={{ borderColor: "#2563EB33", backgroundColor: "#EFF6FF" }}>
+                          <p className="text-xs font-semibold" style={{ color: "#1E40AF" }}>Delegar para</p>
+                          <select value={novoResponsavelId} onChange={e => setNovoResponsavelId(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-xl text-sm outline-none"
+                            style={{ borderColor: C.cremeBorder }}>
+                            <option value="">Selecionar novo responsável...</option>
+                            {usuarios.filter(u => u.id !== tarefa.responsavel_id).map(u => (
+                              <option key={u.id} value={u.id}>{u.nome}</option>
+                            ))}
+                          </select>
+                          <input type="text" placeholder="Motivo (opcional)"
+                            value={motivoDelegacao} onChange={e => setMotivoDelegacao(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-xl text-xs outline-none"
+                            style={{ borderColor: C.cremeBorder }} />
+                          <div className="flex gap-2">
+                            <button onClick={() => { setDelegando(false); setNovoResponsavelId(""); setMotivoDelegacao(""); }}
+                              className="flex-1 py-2 rounded-xl text-xs border"
+                              style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
+                            <button onClick={delegarTarefa} disabled={!novoResponsavelId}
+                              className="flex-1 py-2 rounded-xl text-xs font-semibold disabled:opacity-50"
+                              style={{ backgroundColor: "#2563EB", color: "#fff" }}>
+                              Delegar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Confirmar Recebimento — protocolo de metal */}
                   {tarefa.tipo === "protocolo_metal"
                     && tarefa.responsavel_id === currentUserId
@@ -401,6 +538,13 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
                           {col.label}
                         </button>
                       ))}
+                      {tarefa.status !== "cancelada" && (
+                        <button onClick={() => moverStatus("cancelada")}
+                          className="text-[11px] px-2.5 py-1 rounded-lg font-semibold transition-opacity hover:opacity-80"
+                          style={{ backgroundColor: "#FEE2E2", color: "#DC2626" }}>
+                          Cancelada
+                        </button>
+                      )}
                     </div>
                   </div>
                 </>
@@ -437,8 +581,6 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
                   </div>
                 ))}
               </div>
-
-              {/* Input comentário */}
               <div className="p-4 border-t flex-shrink-0" style={{ borderColor: C.cremeBorder }}>
                 <div className="flex gap-2">
                   <textarea
@@ -463,68 +605,70 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
           {/* ─── Aprovação ─── */}
           {aba === "aprovacao" && (
             <div className="p-5 space-y-4">
-
-              {/* Aprovações anteriores */}
               {aprovacoes.length > 0 && (
                 <div className="space-y-3">
-                  {aprovacoes.map(a => (
-                    <div key={a.id} className="rounded-xl border p-3" style={{ borderColor: C.cremeBorder }}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-semibold" style={{ color: "#1A1A1A" }}>
-                          Solicitado por {a.solicitante_nome}
-                        </span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full`}
-                          style={{
-                            backgroundColor: a.status === "aprovado" ? "#D1FAE5" : a.status === "rejeitado" ? "#FEE2E2" : "#EDE9FE",
-                            color: a.status === "aprovado" ? "#059669" : a.status === "rejeitado" ? "#DC2626" : "#7C3AED",
-                          }}>
-                          {a.status === "aprovado" ? "Aprovado" : a.status === "rejeitado" ? "Rejeitado" : "Pendente"}
-                        </span>
-                      </div>
-                      <p className="text-[11px]" style={{ color: "#6B7280" }}>Aprovador: {a.aprovador_nome}</p>
-                      {a.motivo && <p className="text-xs mt-1 italic" style={{ color: "#6B7280" }}>&ldquo;{a.motivo}&rdquo;</p>}
-                      {a.respondido_em && <p className="text-[10px] mt-1" style={{ color: "#9CA3AF" }}>Respondido em {fmtHora(a.respondido_em)}</p>}
-
-                      {/* Botões de resposta para o aprovador */}
-                      {a.status === "pendente" && isAprovador && (
-                        <div className="mt-3 space-y-2">
-                          <textarea rows={2} placeholder="Motivo (opcional)"
-                            value={motivoRejeicao} onChange={e => setMotivoRejeicao(e.target.value)}
-                            className="w-full px-3 py-2 border rounded-xl text-xs outline-none resize-none"
-                            style={{ borderColor: C.cremeBorder }} />
-                          <div className="flex gap-2">
-                            <button onClick={() => responderAprovacao(a.id, "aprovado")}
-                              disabled={respondendoAprovacao === a.id}
-                              className="flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1"
-                              style={{ backgroundColor: "#059669", color: "#fff" }}>
-                              {respondendoAprovacao === a.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                              Aprovar
-                            </button>
-                            <button onClick={() => responderAprovacao(a.id, "rejeitado")}
-                              disabled={respondendoAprovacao === a.id}
-                              className="flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1"
-                              style={{ backgroundColor: "#EF4444", color: "#fff" }}>
-                              <XCircle size={12} />
-                              Rejeitar
-                            </button>
-                          </div>
+                  {aprovacoes.map(a => {
+                    const isPending = a.status === "pendente";
+                    return (
+                      <div key={a.id} className="rounded-xl border p-3" style={{ borderColor: C.cremeBorder }}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-semibold" style={{ color: "#1A1A1A" }}>
+                            Solicitado por {a.solicitante_nome}
+                          </span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                            style={{
+                              backgroundColor: a.status === "aprovado" ? "#D1FAE5" : a.status === "rejeitado" ? "#FEE2E2" : "#EDE9FE",
+                              color: a.status === "aprovado" ? "#059669" : a.status === "rejeitado" ? "#DC2626" : "#7C3AED",
+                            }}>
+                            {a.status === "aprovado" ? "Aprovado" : a.status === "rejeitado" ? "Rejeitado" : "Pendente"}
+                          </span>
                         </div>
-                      )}
-                    </div>
-                  ))}
+                        <p className="text-[11px]" style={{ color: "#6B7280" }}>Aprovador: {a.aprovador_nome}</p>
+                        {a.motivo && <p className="text-xs mt-1 italic" style={{ color: "#6B7280" }}>&ldquo;{a.motivo}&rdquo;</p>}
+                        {a.respondido_em && <p className="text-[10px] mt-1" style={{ color: "#9CA3AF" }}>Respondido em {fmtHora(a.respondido_em)}</p>}
+
+                        {isPending && a.aprovador_id === currentUserId && (
+                          <div className="mt-3 space-y-2">
+                            <textarea rows={2} placeholder="Motivo (obrigatório para rejeitar)"
+                              value={motivoRejeicao} onChange={e => setMotivoRejeicao(e.target.value)}
+                              className="w-full px-3 py-2 border rounded-xl text-xs outline-none resize-none"
+                              style={{ borderColor: C.cremeBorder }} />
+                            <div className="flex gap-2">
+                              <button onClick={() => responderAprovacao(a.id, "aprovado")}
+                                disabled={respondendoAprovacao === a.id}
+                                className="flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1"
+                                style={{ backgroundColor: "#059669", color: "#fff" }}>
+                                {respondendoAprovacao === a.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                                Aprovar
+                              </button>
+                              <button onClick={() => {
+                                if (!motivoRejeicao.trim()) {
+                                  useErrorStore.getState().push("Motivo obrigatório para rejeitar", { level: "warning" });
+                                  return;
+                                }
+                                responderAprovacao(a.id, "rejeitado");
+                              }}
+                                disabled={respondendoAprovacao === a.id}
+                                className="flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1"
+                                style={{ backgroundColor: "#EF4444", color: "#fff" }}>
+                                <XCircle size={12} />
+                                Rejeitar
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
-              {/* Nova solicitação de aprovação */}
-              {tarefa.status !== "concluida" && tarefa.status !== "aguardando_aprovacao" && (
+              {tarefa.status !== "concluida" && tarefa.status !== "aguardando_aprovacao" && tarefa.status !== "aprovada" && (
                 <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder, backgroundColor: "#EDE9FE20" }}>
                   <div className="flex items-center gap-2">
                     <ShieldCheck size={16} style={{ color: "#7C3AED" }} />
                     <p className="text-sm font-semibold" style={{ color: "#7C3AED" }}>Solicitar Aprovação</p>
                   </div>
-                  <p className="text-xs" style={{ color: "#6B7280" }}>
-                    Envie esta tarefa para aprovação de um gerente antes de concluí-la.
-                  </p>
                   <select value={aprovadorId} onChange={e => setAprovadorId(e.target.value)}
                     className="w-full px-3 py-2.5 border rounded-xl text-sm outline-none"
                     style={{ borderColor: C.cremeBorder }}>
@@ -545,9 +689,125 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, podeGere
                   Aguardando resposta do aprovador...
                 </p>
               )}
+            </div>
+          )}
 
-              {aprovacoes.length === 0 && tarefa.status === "concluida" && (
-                <p className="text-sm text-center py-4" style={{ color: "#9CA3AF" }}>Tarefa concluída.</p>
+          {/* ─── Histórico ─── */}
+          {aba === "historico" && (
+            <div className="p-5">
+              {historico.length === 0 ? (
+                <div className="text-center py-10">
+                  <History size={32} style={{ color: "#D1D5DB" }} className="mx-auto mb-2" />
+                  <p className="text-sm" style={{ color: "#9CA3AF" }}>Nenhum histórico registrado</p>
+                </div>
+              ) : (
+                <div className="space-y-0 relative">
+                  <div className="absolute left-3.5 top-0 bottom-0 w-px" style={{ backgroundColor: C.cremeBorder }} />
+                  {historico.map((h) => {
+                    const sl = statusLabel(h.acao);
+                    return (
+                      <div key={h.id} className="flex gap-3 pb-4 relative">
+                        <div className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center z-10"
+                          style={{ backgroundColor: sl.bg, border: `2px solid ${sl.color}` }}>
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: sl.color }} />
+                        </div>
+                        <div className="flex-1 min-w-0 pt-0.5">
+                          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                              style={{ backgroundColor: sl.bg, color: sl.color }}>
+                              {sl.label}
+                            </span>
+                            {h.usuario_nome && (
+                              <span className="text-xs font-medium" style={{ color: "#1A1A1A" }}>{h.usuario_nome}</span>
+                            )}
+                          </div>
+                          {h.campo && h.valor_anterior && h.valor_novo && (
+                            <p className="text-[11px]" style={{ color: "#6B7280" }}>
+                              {h.campo}: de &ldquo;{h.valor_anterior}&rdquo; → &ldquo;{h.valor_novo}&rdquo;
+                            </p>
+                          )}
+                          {h.comentario && (
+                            <p className="text-[11px] italic mt-0.5" style={{ color: "#9CA3AF" }}>&ldquo;{h.comentario}&rdquo;</p>
+                          )}
+                          <p className="text-[10px] mt-0.5" style={{ color: "#D1D5DB" }}>{fmtHora(h.created_at)}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ─── Anexos ─── */}
+          {aba === "anexos" && (
+            <div className="p-5 space-y-3">
+              {anexos.length === 0 ? (
+                <div className="text-center py-10">
+                  <Paperclip size={32} style={{ color: "#D1D5DB" }} className="mx-auto mb-2" />
+                  <p className="text-sm" style={{ color: "#9CA3AF" }}>Nenhum anexo</p>
+                </div>
+              ) : (
+                anexos.map(a => (
+                  <div key={a.id} className="flex items-center gap-3 p-3 rounded-xl border"
+                    style={{ borderColor: C.cremeBorder }}>
+                    <Paperclip size={16} style={{ color: "#9CA3AF" }} />
+                    <div className="flex-1 min-w-0">
+                      <a href={a.url} target="_blank" rel="noopener noreferrer"
+                        className="text-sm font-medium hover:underline truncate block"
+                        style={{ color: C.esmeralda }}>
+                        {a.nome}
+                      </a>
+                      <p className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                        {a.usuario_nome && `${a.usuario_nome} · `}
+                        {a.tamanho ? `${(a.tamanho / 1024).toFixed(0)} KB · ` : ""}
+                        {fmtHora(a.created_at)}
+                      </p>
+                    </div>
+                    {(podeGerenciar || a.usuario_nome === usuarios.find(u => u.id === currentUserId)?.nome) && (
+                      <button onClick={async () => {
+                        await apiFetch(`/api/tarefas/${tarefa.id}/anexos/${a.id}`, { method: "DELETE" });
+                        carregarAnexos();
+                      }}
+                        className="text-red-400 hover:text-red-600">
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+              {/* Upload simplificado via URL */}
+              {podeGerenciar && (
+                <div className="rounded-xl border p-3 space-y-2" style={{ borderColor: C.cremeBorder }}>
+                  <p className="text-xs font-semibold" style={{ color: C.esmeralda }}>Adicionar link/URL</p>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    const nome = (form.elements.namedItem("nome") as HTMLInputElement).value;
+                    const url = (form.elements.namedItem("url") as HTMLInputElement).value;
+                    if (!nome || !url) return;
+                    await apiFetch(`/api/tarefas/${tarefa.id}/anexos`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ nome, url }),
+                    });
+                    carregarAnexos();
+                    form.reset();
+                  }}
+                    className="flex gap-2">
+                    <input name="nome" type="text" placeholder="Nome do arquivo"
+                      className="flex-1 px-2.5 py-2 border rounded-lg text-xs outline-none"
+                      style={{ borderColor: C.cremeBorder }} />
+                    <input name="url" type="text" placeholder="URL"
+                      className="flex-1 px-2.5 py-2 border rounded-lg text-xs outline-none"
+                      style={{ borderColor: C.cremeBorder }} />
+                    <button type="submit"
+                      className="px-3 py-2 rounded-lg text-xs font-semibold"
+                      style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                      Adicionar
+                    </button>
+                  </form>
+                </div>
               )}
             </div>
           )}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 
-// GET /api/usuarios/busca?q=nome — busca usuários por nome para @menção
+// GET /api/usuarios/busca?q=nome — busca usuários por nome
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase();
   const {
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     SELECT id, nome, role FROM alissonerp.usuarios
     WHERE ativo = true AND nome ILIKE ${"%" + q + "%"}
     ORDER BY nome
-    LIMIT 10
+    LIMIT ${q ? 30 : 200}
   `;
 
   return NextResponse.json(usuarios);
