@@ -559,9 +559,15 @@ function startHttpServer() {
             const estoquePorSku = new Map(); // sku -> saldo_fisico
             if (skusLidos.size > 0) {
               const skuArr = [...skusLidos];
+              console.log(`[inventario] buscando SKUs: ${skuArr.join(",")}`);
               const alertRows = await db`SELECT sku, saldo_fisico::int FROM alissonerp.vw_estoque_comercial_alerta_v2 WHERE sku = ANY(${skuArr}::text[])`;
               console.log(`[inventario] estoque alerta encontrado: ${alertRows.length}`);
               for (const r of alertRows) estoquePorSku.set(String(r.sku), Number(r.saldo_fisico ?? 0));
+              if (alertRows.length === 0) {
+                // Debug: ver SKUs disponiveis
+                const amostra = await db`SELECT sku, saldo_fisico FROM alissonerp.vw_estoque_comercial_alerta_v2 LIMIT 10`;
+                console.log(`[inventario] amostra alerta: ${JSON.stringify(amostra.map(r=>({sku:r.sku, saldo:r.saldo_fisico})))}`);
+              }
             }
 
             // 6. Busca TODOS os SKUs com estoque no alerta (para mostrar faltantes)
