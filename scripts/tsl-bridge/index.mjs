@@ -501,73 +501,125 @@ function startHttpServer() {
             const b = msg.body;
             const leituras = [...new Set((b.leituras || []).map(l => String(l).trim()).filter(Boolean))];
             if (leituras.length === 0) throw new Error("Nenhuma leitura");
+            const localId = b.local_estoque_id ?? 2;
 
-            // Registra leituras
+            // 1. Registra leituras
             for (const epc of leituras) {
               await db`INSERT INTO alissonerp.joias_leituras (epc, evento, localizacao, leitor_id, lido_em) VALUES (${epc}, 'inventario', 'RFID', 'TSL-1128', now())`;
             }
 
-            // Busca joias_rfid cadastradas
-            const lidos = leituras.length ? await db`SELECT j.epc, j.produto_id, j.sku, j.nome, j.status, j.localizacao_atual, p.nome AS produto_nome FROM alissonerp.joias_rfid j LEFT JOIN public.produtos p ON p.id_produto = j.produto_id::bigint WHERE j.epc = ANY(${leituras}::text[])` : [];
-
-            // Extrai id_api_produto de EPCs nao cadastrados
-            const epcsSet = new Set(lidos.map(r => r.epc));
-            const naoCadastrados = leituras.filter(e => !epcsSet.has(e));
-            const idsApi = [];
-            for (const epc of naoCadastrados) {
+            // 2. Extrai id_api_produto de cada EPC
+            const idsApiLidos = new Set();
+            const naoIdentificados = [];
+            for (const epc of leituras) {
               if (epc.length >= 13 && /^\d{24}$/.test(epc)) {
                 const idApi = parseInt(epc.slice(4, 13), 10);
-                if (!isNaN(idApi) && idApi > 0) idsApi.push(idApi);
+                if (!isNaN(idApi) && idApi > 0) idsApiLidos.add(idApi);
+              } else {
+                naoIdentificados.push(epc);
               }
             }
 
-            // Busca produtos por id_api_produto
-            const prodsMap = new Map();
-            if (idsApi.length > 0) {
-              const prods = await db`SELECT id_produto, id_api_produto, sku, nome FROM public.produtos WHERE id_api_produto = ANY(${idsApi}::int[])`;
-              for (const p of prods) prodsMap.set(Number(p.id_api_produto), p);
+            // 3. Busca produtos por id_api_produto (mapeia id_api_produto -> produto)
+            const produtosPorIdApi = new Map();
+            if (idsApiLidos.size > 0) {
+              const prods = await db`SELECT id_produto, id_api_produto, sku, nome FROM public.produtos WHERE id_api_produto = ANY(${[...idsApiLidos]}::int[])`;
+              for (const p of prods) produtosPorIdApi.set(Number(p.id_api_produto), p);
             }
 
-            // Agrupa por id_api_produto
-            const groups = {};
+            // 4. Mapeia cada id_api_produto lido para seu produto_id
+            const produtoIdsLidos = new Set();
+            const contagemPorProdutoId = new Map(); // produto_id -> { count, epcs, idApi }
             for (const epc of leituras) {
-              let idApi = null;
               if (epc.length >= 13 && /^\d{24}$/.test(epc)) {
-                idApi = parseInt(epc.slice(4, 13), 10);
-                if (isNaN(idApi) || idApi <= 0) idApi = null;
+                const idApi = parseInt(epc.slice(4, 13), 10);
+                if (!isNaN(idApi) && idApi > 0) {
+                  const prod = produtosPorIdApi.get(idApi);
+                  const pid = prod ? Number(prod.id_produto) : null;
+                  if (pid) {
+                    produtoIdsLidos.add(pid);
+                    if (!contagemPorProdutoId.has(pid)) contagemPorProdutoId.set(pid, { count: 0, epcs: [], idApi, nome: prod.nome, sku: prod.sku });
+                    const g = contagemPorProdutoId.get(pid);
+                    g.count++;
+                    g.epcs.push(epc);
+                  }
+                }
               }
-              const key = idApi || epc;
-              if (!groups[key]) groups[key] = { epcs: [], count: 0, idApi };
-              groups[key].epcs.push(epc);
-              groups[key].count++;
             }
 
-            // Monta relatorio
+            // 5. Busca estoque esperado no local selecionado
+            const estoquePorProdutoId = new Map();
+            if (produtoIdsLidos.size > 0) {
+              const stockRows = await db`SELECT produto_id, saldo_fisico::int, reservado::int, disponivel::int FROM alissonerp.vw_saldo_estoque_comercial_v2 WHERE local_estoque_id = ${localId} AND produto_id = ANY(${[...produtoIdsLidos]}::int[])`;
+              for (const r of stockRows) estoquePorProdutoId.set(Number(r.produto_id), { saldo: Number(r.saldo_fisico ?? 0), reservado: Number(r.reservado ?? 0), disponivel: Number(r.disponivel ?? 0) });
+            }
+
+            // 6. Busca todos os produtos com estoque no local (para mostrar os que faltam)
+            const todosComEstoque = await db`SELECT produto_id, saldo_fisico::int, reservado::int, disponivel::int FROM alissonerp.vw_saldo_estoque_comercial_v2 WHERE local_estoque_id = ${localId}`;
+            for (const r of todosComEstoque) {
+              const pid = Number(r.produto_id);
+              if (!estoquePorProdutoId.has(pid)) estoquePorProdutoId.set(pid, { saldo: Number(r.saldo_fisico ?? 0), reservado: Number(r.reservado ?? 0), disponivel: Number(r.disponivel ?? 0) });
+            }
+
+            // 7. Busca nomes/skus dos produtos que tem estoque mas nao foram lidos
+            const todosProdutoIds = [...estoquePorProdutoId.keys()];
+            const infoProdutos = new Map();
+            if (todosProdutoIds.length > 0) {
+              const prods = await db`SELECT id_produto, sku, nome FROM public.produtos WHERE id_produto = ANY(${todosProdutoIds}::int[])`;
+              for (const p of prods) infoProdutos.set(Number(p.id_produto), { sku: p.sku, nome: p.nome });
+            }
+
+            // 8. Monta relatorio completo
             const produtos = [];
             let totalEsperado = 0, totalEncontrado = 0;
-            for (const [key, g] of Object.entries(groups)) {
-              const prod = g.idApi ? prodsMap.get(g.idApi) : null;
-              if (prod) totalEncontrado += g.count;
-              const status = !prod ? "nao_cadastrado" : "ok";
+
+            // 8a. Produtos que foram escaneados (ou tem estoque)
+            const todosPids = new Set([...produtoIdsLidos, ...todosProdutoIds]);
+            for (const pid of todosPids) {
+              const g = contagemPorProdutoId.get(pid);
+              const info = infoProdutos.get(pid);
+              const stock = estoquePorProdutoId.get(pid);
+              const esperadoQty = stock?.saldo ?? 0;
+              const encontradoQty = g?.count ?? 0;
+              const divergencia = encontradoQty - esperadoQty;
+
+              let status = "ok";
+              if (!stock || esperadoQty === 0) {
+                if (encontradoQty > 0) status = "excedente";
+                else continue; // produto sem estoque e sem leitura - ignora
+              } else if (divergencia < 0) status = "faltando";
+              else if (divergencia > 0) status = "excedente";
+
+              totalEsperado += esperadoQty;
+              totalEncontrado += encontradoQty;
+
+              const idApi = g?.idApi ?? null;
+
               produtos.push({
-                produto_id: prod?.id_produto ?? null,
-                id_api_produto: g.idApi,
-                sku: prod?.sku ?? null,
-                nome: prod?.nome ?? null,
-                esperado: 0, encontrado: g.count,
-                divergencia: 0, epcs: g.epcs, status,
+                produto_id: pid,
+                id_api_produto: idApi,
+                sku: info?.sku ?? g?.sku ?? null,
+                nome: info?.nome ?? g?.nome ?? null,
+                esperado: esperadoQty,
+                encontrado: encontradoQty,
+                divergencia,
+                epcs: g?.epcs ?? [],
+                status,
               });
             }
 
             const resultado = {
-              ok: true, local_estoque_id: b.local_estoque_id ?? 2,
+              ok: true, local_estoque_id: localId,
               local_nome: "Loja", total_epcs_unicos: leituras.length,
-              nao_identificados: naoCadastrados.filter(e => !/^\d{24}$/.test(e)),
+              nao_identificados: naoIdentificados,
               produtos,
               resumo: {
                 total_produtos: produtos.length, total_esperado: totalEsperado,
-                total_encontrado: totalEncontrado, produtos_com_divergencia: 0,
-                faltando: 0, excedente: 0, nao_cadastrado: produtos.filter(p => p.status === "nao_cadastrado").length,
+                total_encontrado: totalEncontrado,
+                produtos_com_divergencia: produtos.filter(p => p.divergencia !== 0).length,
+                faltando: produtos.filter(p => p.status === "faltando").length,
+                excedente: produtos.filter(p => p.status === "excedente").length,
+                nao_cadastrado: produtos.filter(p => p.status === "nao_cadastrado").length,
               },
             };
 
