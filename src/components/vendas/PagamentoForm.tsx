@@ -704,7 +704,7 @@ export default function PagamentoForm({
       {mode === "edicao" && vendaId && pagForma !== "Múltiplas" && pagForma !== "Manual (MP)" && (
         <button
           onClick={() => handleAddPagamento(pagFormValor || undefined)}
-          disabled={saving || totalVenda <= 0 || (pagForma === "Ouro" && (!ouroValidacaoIA?.match || !ouroFotoPreview))}
+          disabled={saving || totalVenda <= 0 || (pagForma === "Ouro" && (!ouroValidacaoIA?.match || !ouroFotoPreview || !parseFloat(ouroPeso.replace(",", ".")) || !parseFloat(ouroValorGrama.replace(",", "."))))}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
           style={{ backgroundColor: C.esmeralda, color: C.creme }}
         >

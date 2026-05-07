@@ -999,6 +999,20 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       if (newPagForma === "Vale-Troca") {
         body.vale_numero = newPagValeNumero.trim();
       }
+      if (newPagForma === "Ouro") {
+        const peso = parseFloat(ouroPeso.replace(",", "."));
+        const valorGrama = parseFloat(ouroValorGrama.replace(",", "."));
+        if (!peso || peso <= 0) { setSaveErr("Informe o peso do ouro."); return; }
+        if (!valorGrama || valorGrama <= 0) { setSaveErr("Informe o valor da grama."); return; }
+        if (!ouroFotoFile) { setSaveErr("Foto da balança obrigatória."); return; }
+        if (!ouroValidacaoIA?.match) { setSaveErr("O peso precisa ser confirmado pela IA antes de salvar."); return; }
+        const path = await uploadOuroFoto(ouroFotoFile, venda.id);
+        if (!path) return;
+        body.ouro_peso = peso;
+        body.ouro_valor_grama = valorGrama;
+        body.ouro_foto_path = path;
+        body.valor = +(peso * valorGrama).toFixed(2);
+      }
       const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -2641,6 +2655,20 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                 const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas };
                 if (newPagForma === "Cartão de Crédito") body.gateway = newPagGateway;
                 if (newPagForma === "Vale-Troca") body.vale_numero = valeNumero.trim();
+                if (newPagForma === "Ouro") {
+                  const peso = parseFloat(ouroPeso.replace(",", "."));
+                  const valorGrama = parseFloat(ouroValorGrama.replace(",", "."));
+                  if (!peso || peso <= 0) { setSaveErr("Informe o peso do ouro."); return; }
+                  if (!valorGrama || valorGrama <= 0) { setSaveErr("Informe o valor da grama."); return; }
+                  if (!ouroFotoFile) { setSaveErr("Foto da balança obrigatória."); return; }
+                  if (!ouroValidacaoIA?.match) { setSaveErr("O peso precisa ser confirmado pela IA antes de salvar."); return; }
+                  const path = await uploadOuroFoto(ouroFotoFile, venda.id);
+                  if (!path) return;
+                  body.ouro_peso = peso;
+                  body.ouro_valor_grama = valorGrama;
+                  body.ouro_foto_path = path;
+                  body.valor = +(peso * valorGrama).toFixed(2);
+                }
 
                 const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
                   method: "POST", headers: { "Content-Type": "application/json" },

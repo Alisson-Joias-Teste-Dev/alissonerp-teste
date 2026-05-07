@@ -63,7 +63,8 @@ export async function GET(
     SELECT
       id, forma, gateway, valor, parcelas,
       status, gateway_id, data_confirmacao, created_at,
-      valor_liquido, taxas_mp
+      valor_liquido, taxas_mp,
+      ouro_peso, ouro_valor_grama, ouro_foto_path
     FROM alissonerp.pagamentos_venda
     WHERE venda_id = ${vendaId}
     ORDER BY id
