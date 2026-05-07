@@ -5,9 +5,11 @@ import postgres from "postgres";
 import fs from "fs";
 import path from "path";
 
-// Carrega .env.local do projeto principal
+// Carrega .env.local do projeto principal (scripts/tsl-bridge/ -> ../..)
 try {
-  const envPath = path.resolve(process.cwd(), ".env.local");
+  const dir = path.dirname(new URL(import.meta.url).pathname);
+  const root = path.resolve(dir, "..", "..");
+  const envPath = path.join(root, ".env.local");
   if (fs.existsSync(envPath)) {
     for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
       const trimmed = line.trim();
