@@ -35,6 +35,10 @@ export async function PATCH(
     peso_metal_negociado?: number | null;
   };
 
+  // Normaliza enums: view retorna display (Criado) mas enum espera lowercase (criado)
+  if (body.situacao)   body.situacao   = body.situacao.toLowerCase();
+  if (body.tipo_ordem) body.tipo_ordem = body.tipo_ordem.toLowerCase();
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = await (sql as any).begin(async (tx: typeof sql) => {
