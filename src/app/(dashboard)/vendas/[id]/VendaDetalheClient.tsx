@@ -633,9 +633,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     if (venda.situacao === "rascunho")
       return { full: true, limited: true, metadata: true, readOnly: false };
     if (venda.situacao === "aprovado") {
-      const temSaldoPendente = Number(venda.total_pago ?? 0) < Number(venda.total_venda ?? 0);
-      const podeAdicionarPag = podeEditarAprovado || temSaldoPendente;
-      return { full: false, limited: podeAdicionarPag, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
+      return { full: false, limited: podeEditarAprovado, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
     }
     if (venda.situacao === "enviado" || venda.situacao === "entregue")
       return { full: false, limited: false, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
