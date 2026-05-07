@@ -503,6 +503,10 @@ function startHttpServer() {
             if (leituras.length === 0) throw new Error("Nenhuma leitura");
             const localId = b.local_estoque_id ?? 2;
 
+            console.log(`[inventario] EPCs recebidos: ${leituras.length}`);
+            console.log(`[inventario] Primeiro EPC: ${leituras[0]}`);
+            console.log(`[inventario] Local ID: ${localId}`);
+
             // 1. Registra leituras
             for (const epc of leituras) {
               await db`INSERT INTO alissonerp.joias_leituras (epc, evento, localizacao, leitor_id, lido_em) VALUES (${epc}, 'inventario', 'RFID', 'TSL-1128', now())`;
@@ -546,6 +550,10 @@ function startHttpServer() {
                 }
               }
             }
+            console.log(`[inventario] idsApi extraidos: ${[...idsApiLidos].join(",")}`);
+            console.log(`[inventario] produtos encontrados: ${produtosPorIdApi.size}`);
+            console.log(`[inventario] produto_ids escaneados: ${[...produtoIdsLidos].join(",")}`);
+            console.log(`[inventario] idsApi SEM produto no banco: ${[...idsApiLidos].filter(a => !produtosPorIdApi.has(a)).join(",")}`);
 
             // 5. Busca estoque esperado no local selecionado
             const estoquePorProdutoId = new Map();
@@ -553,9 +561,11 @@ function startHttpServer() {
               const stockRows = await db`SELECT produto_id, saldo_fisico::int, reservado::int, disponivel::int FROM alissonerp.vw_saldo_estoque_comercial_v2 WHERE local_estoque_id = ${localId} AND produto_id = ANY(${[...produtoIdsLidos]}::int[])`;
               for (const r of stockRows) estoquePorProdutoId.set(Number(r.produto_id), { saldo: Number(r.saldo_fisico ?? 0), reservado: Number(r.reservado ?? 0), disponivel: Number(r.disponivel ?? 0) });
             }
+            console.log(`[inventario] estoque encontrado para produtos lidos: ${estoquePorProdutoId.size}`);
 
             // 6. Busca todos os produtos com estoque no local (para mostrar os que faltam)
             const todosComEstoque = await db`SELECT produto_id, saldo_fisico::int, reservado::int, disponivel::int FROM alissonerp.vw_saldo_estoque_comercial_v2 WHERE local_estoque_id = ${localId}`;
+            console.log(`[inventario] total de produtos com estoque no local: ${todosComEstoque.length}`);
             for (const r of todosComEstoque) {
               const pid = Number(r.produto_id);
               if (!estoquePorProdutoId.has(pid)) estoquePorProdutoId.set(pid, { saldo: Number(r.saldo_fisico ?? 0), reservado: Number(r.reservado ?? 0), disponivel: Number(r.disponivel ?? 0) });
