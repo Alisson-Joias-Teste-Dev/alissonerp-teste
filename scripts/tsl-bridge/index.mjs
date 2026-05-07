@@ -216,6 +216,7 @@ td{padding:10px 6px;border-bottom:1px solid #F3F4F6}
 .badge-ok{background:#D1FAE5;color:#065F46}
 .badge-warn{background:#FEE2E2;color:#991B1B}
 .badge-exc{background:#FEF3C7;color:#92400E}
+.badge-info{background:#DBEAFE;color:#1E40AF}
 .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .stat-card{background:#fff;border:1px solid #E8DCC8;border-radius:10px;padding:12px;text-align:center}
 .stat-card .num{font-size:26px;font-weight:700;color:#184036}
@@ -359,8 +360,8 @@ function showResult(d) {
   $("controls").style.display = "none";
   let rows = "";
   for (const p of d.produtos || []) {
-    const cl = p.status==="ok"?"badge-ok":p.status==="faltando"?"badge-warn":p.status==="excedente"?"badge-exc":"";
-    const lb = p.status==="ok"?"OK":p.status==="faltando"?"Faltando":p.status==="excedente"?"Excedente":"Nao cadastrado";
+    const cl = p.status==="ok"?"badge-ok":p.status==="faltando"?"badge-warn":p.status==="excedente"?"badge-exc":"badge-info";
+    const lb = p.status==="ok"?"OK":p.status==="faltando"?"Faltando":p.status==="excedente"?"Excedente":p.status==="sem_estoque"?"Sem estoque":"Nao cadastrado";
     rows += '<tr><td>' + (p.nome||"API #"+p.id_api_produto) + '</td><td>' + (p.sku||"-") + '</td><td>' +
       p.esperado + '</td><td>' + p.encontrado + '</td><td style="color:' +
       (p.divergencia===0?"#6B7280":p.divergencia<0?"#DC2626":"#F59E0B") + '">' +
@@ -524,92 +525,78 @@ function startHttpServer() {
               }
             }
 
-            // 3. Busca produtos por id_api_produto (mapeia id_api_produto -> produto)
-            const produtosPorIdApi = new Map();
+            // 3. Busca produtos por id_api_produto (mapeia id_api_produto -> sku)
+            const prodPorIdApi = new Map();
             if (idsApiLidos.size > 0) {
-              const prods = await db`SELECT id_produto, id_api_produto, sku, nome FROM public.produtos WHERE id_api_produto = ANY(${[...idsApiLidos]}::int[])`;
-              for (const p of prods) produtosPorIdApi.set(Number(p.id_api_produto), p);
+              const prods = await db`SELECT id_api_produto, sku, nome FROM public.produtos WHERE id_api_produto = ANY(${[...idsApiLidos]}::int[])`;
+              for (const p of prods) prodPorIdApi.set(Number(p.id_api_produto), { sku: p.sku, nome: p.nome });
             }
+            console.log(`[inventario] produtos encontrados: ${prodPorIdApi.size}`);
 
-            // 4. Mapeia cada id_api_produto lido para seu produto_id
-            const produtoIdsLidos = new Set();
-            const contagemPorProdutoId = new Map(); // produto_id -> { count, epcs, idApi }
+            // 4. Agrupa EPCs por SKU (via id_api_produto -> public.produtos.sku)
+            const contagemPorSku = new Map(); // sku -> { count, epcs, nome, idApi }
+            const skusLidos = new Set();
             for (const epc of leituras) {
               if (epc.length >= 13 && /^\d{24}$/.test(epc)) {
                 const idApi = parseInt(epc.slice(4, 13), 10);
                 if (!isNaN(idApi) && idApi > 0) {
-                  const prod = produtosPorIdApi.get(idApi);
-                  const pid = prod ? Number(prod.id_produto) : null;
-                  if (pid) {
-                    produtoIdsLidos.add(pid);
-                    if (!contagemPorProdutoId.has(pid)) contagemPorProdutoId.set(pid, { count: 0, epcs: [], idApi, nome: prod.nome, sku: prod.sku });
-                    const g = contagemPorProdutoId.get(pid);
+                  const prod = prodPorIdApi.get(idApi);
+                  const sku = prod?.sku;
+                  if (sku) {
+                    skusLidos.add(sku);
+                    if (!contagemPorSku.has(sku)) contagemPorSku.set(sku, { count: 0, epcs: [], idApi, nome: prod.nome });
+                    const g = contagemPorSku.get(sku);
                     g.count++;
                     g.epcs.push(epc);
                   }
                 }
               }
             }
-            console.log(`[inventario] idsApi extraidos: ${[...idsApiLidos].join(",")}`);
-            console.log(`[inventario] produtos encontrados: ${produtosPorIdApi.size}`);
-            console.log(`[inventario] produto_ids escaneados: ${[...produtoIdsLidos].join(",")}`);
-            console.log(`[inventario] idsApi SEM produto no banco: ${[...idsApiLidos].filter(a => !produtosPorIdApi.has(a)).join(",")}`);
+            console.log(`[inventario] skus escaneados: ${[...skusLidos].join(",")}`);
+            console.log(`[inventario] idsApi sem produto: ${[...idsApiLidos].filter(a => !prodPorIdApi.has(a)).join(",")}`);
 
-            // 5. Busca estoque esperado no local selecionado
-            const estoquePorProdutoId = new Map();
-            if (produtoIdsLidos.size > 0) {
-              const stockRows = await db`SELECT produto_id, saldo_fisico::int, reservado::int, disponivel::int FROM alissonerp.vw_saldo_estoque_comercial_v2 WHERE local_estoque_id = ${localId} AND produto_id = ANY(${[...produtoIdsLidos]}::int[])`;
-              for (const r of stockRows) estoquePorProdutoId.set(Number(r.produto_id), { saldo: Number(r.saldo_fisico ?? 0), reservado: Number(r.reservado ?? 0), disponivel: Number(r.disponivel ?? 0) });
-            }
-            console.log(`[inventario] estoque encontrado para produtos lidos: ${estoquePorProdutoId.size}`);
-
-            // 6. Busca todos os produtos com estoque no local (para mostrar os que faltam)
-            const todosComEstoque = await db`SELECT produto_id, saldo_fisico::int, reservado::int, disponivel::int FROM alissonerp.vw_saldo_estoque_comercial_v2 WHERE local_estoque_id = ${localId}`;
-            console.log(`[inventario] total de produtos com estoque no local: ${todosComEstoque.length}`);
-            for (const r of todosComEstoque) {
-              const pid = Number(r.produto_id);
-              if (!estoquePorProdutoId.has(pid)) estoquePorProdutoId.set(pid, { saldo: Number(r.saldo_fisico ?? 0), reservado: Number(r.reservado ?? 0), disponivel: Number(r.disponivel ?? 0) });
+            // 5. Busca estoque por SKU em vw_estoque_comercial_alerta_v2
+            const estoquePorSku = new Map(); // sku -> saldo_fisico
+            if (skusLidos.size > 0) {
+              const skuArr = [...skusLidos];
+              const alertRows = await db`SELECT sku, saldo_fisico::int FROM alissonerp.vw_estoque_comercial_alerta_v2 WHERE sku = ANY(${skuArr}::text[])`;
+              console.log(`[inventario] estoque alerta encontrado: ${alertRows.length}`);
+              for (const r of alertRows) estoquePorSku.set(String(r.sku), Number(r.saldo_fisico ?? 0));
             }
 
-            // 7. Busca nomes/skus dos produtos que tem estoque mas nao foram lidos
-            const todosProdutoIds = [...estoquePorProdutoId.keys()];
-            const infoProdutos = new Map();
-            if (todosProdutoIds.length > 0) {
-              const prods = await db`SELECT id_produto, sku, nome FROM public.produtos WHERE id_produto = ANY(${todosProdutoIds}::int[])`;
-              for (const p of prods) infoProdutos.set(Number(p.id_produto), { sku: p.sku, nome: p.nome });
+            // 6. Busca TODOS os SKUs com estoque no alerta (para mostrar faltantes)
+            const todosAlertas = await db`SELECT sku, saldo_fisico::int FROM alissonerp.vw_estoque_comercial_alerta_v2`;
+            console.log(`[inventario] total produtos no alerta: ${todosAlertas.length}`);
+            for (const r of todosAlertas) {
+              const sku = String(r.sku);
+              if (!estoquePorSku.has(sku)) estoquePorSku.set(sku, Number(r.saldo_fisico ?? 0));
             }
 
-            // 8. Monta relatorio completo
+            // 7. Monta relatorio
             const produtos = [];
             let totalEsperado = 0, totalEncontrado = 0;
+            const todosSkus = new Set([...skusLidos, ...estoquePorSku.keys()]);
 
-            // 8a. Produtos que foram escaneados (ou tem estoque)
-            const todosPids = new Set([...produtoIdsLidos, ...todosProdutoIds]);
-            for (const pid of todosPids) {
-              const g = contagemPorProdutoId.get(pid);
-              const info = infoProdutos.get(pid);
-              const stock = estoquePorProdutoId.get(pid);
-              const esperadoQty = stock?.saldo ?? 0;
+            for (const sku of todosSkus) {
+              const g = contagemPorSku.get(sku);
+              const esperadoQty = estoquePorSku.get(sku) ?? 0;
               const encontradoQty = g?.count ?? 0;
               const divergencia = encontradoQty - esperadoQty;
 
               let status = "ok";
-              if (!stock || esperadoQty === 0) {
-                if (encontradoQty > 0) status = "excedente";
-                else continue; // produto sem estoque e sem leitura - ignora
-              } else if (divergencia < 0) status = "faltando";
+              if (esperadoQty === 0 && encontradoQty > 0) status = "sem_estoque";
+              else if (divergencia < 0) status = "faltando";
               else if (divergencia > 0) status = "excedente";
+              else if (esperadoQty === 0 && encontradoQty === 0) continue;
 
               totalEsperado += esperadoQty;
               totalEncontrado += encontradoQty;
 
-              const idApi = g?.idApi ?? null;
-
               produtos.push({
-                produto_id: pid,
-                id_api_produto: idApi,
-                sku: info?.sku ?? g?.sku ?? null,
-                nome: info?.nome ?? g?.nome ?? null,
+                produto_id: null,
+                id_api_produto: g?.idApi ?? null,
+                sku,
+                nome: g?.nome ?? null,
                 esperado: esperadoQty,
                 encontrado: encontradoQty,
                 divergencia,
@@ -626,10 +613,11 @@ function startHttpServer() {
               resumo: {
                 total_produtos: produtos.length, total_esperado: totalEsperado,
                 total_encontrado: totalEncontrado,
-                produtos_com_divergencia: produtos.filter(p => p.divergencia !== 0).length,
+                produtos_com_divergencia: produtos.filter(p => p.status !== "ok" && p.status !== "sem_estoque").length,
                 faltando: produtos.filter(p => p.status === "faltando").length,
                 excedente: produtos.filter(p => p.status === "excedente").length,
-                nao_cadastrado: produtos.filter(p => p.status === "nao_cadastrado").length,
+                sem_estoque: produtos.filter(p => p.status === "sem_estoque").length,
+                nao_cadastrado: 0,
               },
             };
 
