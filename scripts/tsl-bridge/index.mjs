@@ -5,26 +5,6 @@ import postgres from "postgres";
 import fs from "fs";
 import path from "path";
 
-// Carrega .env.local do projeto principal (scripts/tsl-bridge/ -> ../..)
-try {
-  const dir = path.dirname(new URL(import.meta.url).pathname);
-  const root = path.resolve(dir, "..", "..");
-  const envPath = path.join(root, ".env.local");
-  if (fs.existsSync(envPath)) {
-    for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eq = trimmed.indexOf("=");
-      if (eq > 0) {
-        const key = trimmed.slice(0, eq).trim();
-        const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-        if (!process.env[key]) process.env[key] = val;
-      }
-    }
-    console.log("[tsl-bridge] .env.local carregado");
-  }
-} catch { /* ignore */ }
-
 const PORT = process.env.TSL_PORT || "COM3";
 const BAUD = parseInt(process.env.TSL_BAUD || "115200", 10);
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || "9101", 10);
