@@ -2,6 +2,26 @@ import { SerialPort } from "serialport";
 import { ReadlineParser } from "@serialport/parser-readline";
 import http from "http";
 import postgres from "postgres";
+import fs from "fs";
+import path from "path";
+
+// Carrega .env.local do projeto principal
+try {
+  const envPath = path.resolve(process.cwd(), ".env.local");
+  if (fs.existsSync(envPath)) {
+    for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq > 0) {
+        const key = trimmed.slice(0, eq).trim();
+        const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+        if (!process.env[key]) process.env[key] = val;
+      }
+    }
+    console.log("[tsl-bridge] .env.local carregado");
+  }
+} catch { /* ignore */ }
 
 const PORT = process.env.TSL_PORT || "COM3";
 const BAUD = parseInt(process.env.TSL_BAUD || "115200", 10);
@@ -337,12 +357,18 @@ async function reset() {
 
 async function sendInventory() {
   const localId = parseInt($("localSelect").value);
-  const data = await apiPost("/proxy", {
-    url: "/api/rfid/inventario",
-    method: "POST",
-    body: {leituras: epcs.map(e=>e.epc), leitor_id:"TSL-1128", local_estoque_id: localId}
-  });
-  showResult(data);
+  try {
+    const data = await apiPost("/proxy", {
+      url: "/api/rfid/inventario",
+      method: "POST",
+      body: {leituras: epcs.map(e=>e.epc), leitor_id:"TSL-1128", local_estoque_id: localId}
+    });
+    if (data.error) { alert("Erro: " + data.error); return; }
+    if (!data.resumo) { alert("Erro: resposta invalida do servidor"); console.error(data); return; }
+    showResult(data);
+  } catch(e) {
+    alert("Erro ao enviar: " + e.message);
+  }
 }
 
 function showResult(d) {
