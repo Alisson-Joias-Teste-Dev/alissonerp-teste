@@ -75,15 +75,23 @@ export function invalidarCacheAuth() {
 }
 
 let authChangeHooked = false;
+let authChangeTimer: ReturnType<typeof setTimeout> | null = null;
 function hookAuthChangeOnce() {
   if (authChangeHooked) return;
   authChangeHooked = true;
   const supabase = createClient();
-  supabase.auth.onAuthStateChange(() => {
-    cachedState = null;
-    cachedAt = null;
-    inflightPromise = null;
-    ensureLoaded().catch(() => {});
+  supabase.auth.onAuthStateChange((event) => {
+    // Ignora INITIAL_SESSION (disparado ao subscrever) — o useEffect já chama ensureLoaded
+    if (event === "INITIAL_SESSION") return;
+    // Debounce de 2s para evitar múltiplas chamadas em rápida sucessão (token refresh, etc.)
+    if (authChangeTimer) clearTimeout(authChangeTimer);
+    authChangeTimer = setTimeout(() => {
+      cachedState = null;
+      cachedAt = null;
+      inflightPromise = null;
+      authChangeTimer = null;
+      ensureLoaded().catch(() => {});
+    }, 2000);
   });
 }
 

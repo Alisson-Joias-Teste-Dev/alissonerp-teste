@@ -39,6 +39,7 @@ export function useTslReader() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const epcsRef = useRef<EPCRead[]>([]);
   const knownEpcsRef = useRef<Set<string>>(new Set());
+  const onlineRef = useRef(false);
 
   const updateState = useCallback((patch: Partial<TSLReaderState>) => {
     setState((prev) => ({ ...prev, ...patch }));
@@ -47,9 +48,16 @@ export function useTslReader() {
   useEffect(() => {
     async function poll() {
       try {
-        const res = await fetch(`${BASE_URL}/status`);
-        if (!res.ok) return;
+        const res = await fetch(`${BASE_URL}/status`, {
+          mode: "cors",
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          onlineRef.current = false;
+          return;
+        }
         const data = await res.json();
+        onlineRef.current = true;
 
         updateState({
           status: {
@@ -76,19 +84,26 @@ export function useTslReader() {
           }
         }
       } catch (err) {
-        updateState({
-          status: { connected: false },
-          scanning: false,
-          lastError: err instanceof Error ? err.message : "Erro de conexao",
-        });
+        onlineRef.current = false;
       }
     }
 
+    // Poll interval
     poll();
     pollRef.current = setInterval(poll, POLL_MS);
 
+    // Check bridge health via XMLHttpRequest (bypasses some CORS checks)
+    const healthInterval = setInterval(async () => {
+      try {
+        const img = new Image();
+        img.src = `${BASE_URL}/health?t=${Date.now()}`;
+        // Image loads don't have CORS issues
+      } catch { /* ignore */ }
+    }, 2000);
+
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      clearInterval(healthInterval);
     };
   }, [updateState]);
 
@@ -98,6 +113,7 @@ export function useTslReader() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cmd }),
+        mode: "cors",
       });
     } catch {
       // silently fail

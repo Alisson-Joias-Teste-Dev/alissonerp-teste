@@ -16,6 +16,7 @@ let scanning = false;
 let retryTimer = null;
 let retryCount = 0;
 let db = null;
+let lastResult = null;
 const recentEpcs = [];
 const MAX_EPCS = 10000;
 const statusLog = { connected: false };
@@ -243,6 +244,8 @@ td{padding:10px 6px;border-bottom:1px solid #F3F4F6}
   <div class="summary">
     <label style="font-size:13px;font-weight:600;color:#6B7280">Local:</label>
     <select id="localSelect"></select>
+    <label style="font-size:13px;font-weight:600;color:#6B7280;margin-left:8px">Categoria:</label>
+    <select id="catSelect"><option value="">Todas</option></select>
     <span id="timer" style="font-family:monospace;color:#2563EB;display:none"></span>
     <span id="count" style="font-weight:600;color:#184036">0 pecas</span>
   </div>
@@ -280,8 +283,24 @@ apiPost("/proxy", {url:"/api/locais-estoque"}).then(d => {
   if (Array.isArray(d)) {
     const sel = $("localSelect");
     sel.innerHTML = d.map(l => '<option value="'+l.id+'">'+l.nome+'</option>').join("");
+    loadCategorias();
   }
 }).catch(() => {});
+
+// Carrega categorias via proxy
+function loadCategorias() {
+  const localId = parseInt($("localSelect").value) || 2;
+  apiPost("/proxy", {url:"/api/categorias", body:{local_estoque_id: localId}}).then(d => {
+    if (Array.isArray(d)) {
+      const sel = $("catSelect");
+      const currentVal = sel.value;
+      sel.innerHTML = '<option value="">Todas</option>' + d.map(c => '<option value="'+c.categoria+'">'+c.categoria+' ('+c.total+')</option>').join("");
+      sel.value = currentVal;
+    }
+  }).catch(() => {});
+}
+// Recarrega categorias quando mudar de local
+$("localSelect").addEventListener("change", loadCategorias);
 
 // Poll status
 setInterval(async () => {
@@ -340,11 +359,12 @@ async function reset() {
 
 async function sendInventory() {
   const localId = parseInt($("localSelect").value);
+  const categoria = $("catSelect").value;
   try {
     const data = await apiPost("/proxy", {
       url: "/api/rfid/inventario",
       method: "POST",
-      body: {leituras: epcs.map(e=>e.epc), leitor_id:"TSL-1128", local_estoque_id: localId}
+      body: {leituras: epcs.map(e=>e.epc), leitor_id:"TSL-1128", local_estoque_id: localId, categoria}
     });
     if (data.error) { alert("Erro: " + data.error); return; }
     if (!data.resumo) { alert("Erro: resposta invalida do servidor"); console.error(data); return; }
@@ -363,11 +383,29 @@ function showResult(d) {
     const cl = p.status==="ok"?"badge-ok":p.status==="faltando"?"badge-warn":p.status==="excedente"?"badge-exc":"badge-info";
     const lb = p.status==="ok"?"OK":p.status==="faltando"?"Faltando":p.status==="excedente"?"Excedente":p.status==="sem_estoque"?"Sem estoque":"Nao cadastrado";
     rows += '<tr><td>' + (p.nome||"API #"+p.id_api_produto) + '</td><td>' + (p.sku||"-") + '</td><td>' +
+      (p.categoria||"-") + '</td><td>' +
       p.esperado + '</td><td>' + p.encontrado + '</td><td style="color:' +
       (p.divergencia===0?"#6B7280":p.divergencia<0?"#DC2626":"#F59E0B") + '">' +
       (p.divergencia>0?"+":"") + p.divergencia + '</td><td><span class="badge ' + cl + '">' + lb + '</span></td></tr>';
   }
   const diff = d.resumo.total_encontrado - d.resumo.total_esperado;
+
+  // Resumo por categoria
+  const catMap = new Map();
+  for (const p of d.produtos || []) {
+    const cat = p.categoria || "Sem categoria";
+    if (!catMap.has(cat)) catMap.set(cat, { esperado: 0, encontrado: 0, produtos: 0 });
+    const c = catMap.get(cat);
+    c.esperado += p.esperado;
+    c.encontrado += p.encontrado;
+    c.produtos++;
+  }
+  let catRows = "";
+  for (const [cat, c] of [...catMap.entries()].sort((a,b) => b[1].encontrado - a[1].encontrado || b[1].esperado - a[1].esperado)) {
+    const cd = c.encontrado - c.esperado;
+    catRows += '<tr><td>' + cat + '</td><td>' + c.produtos + '</td><td>' + c.esperado + '</td><td>' + c.encontrado + '</td><td style="color:' + (cd===0?"#6B7280":cd<0?"#DC2626":"#059669") + '">' + (cd>0?"+":"") + cd + '</td></tr>';
+  }
+
   $("resultArea").innerHTML =
     '<div class="card"><h2 style="margin-bottom:12px">Resultado — ' + d.local_nome + '</h2>' +
     '<div class="grid-4">' +
@@ -377,16 +415,34 @@ function showResult(d) {
       '<div class="stat-card"><div class="num" style="color:' + (diff===0?"#059669":"#DC2626") + '">' + (diff>0?"+":"") + diff + '</div><div class="lbl">Diferenca</div></div>' +
     '</div>' +
     (d.nao_identificados?.length ? '<p style="margin:10px 0;font-size:12px;color:#9CA3AF">' + d.nao_identificados.length + ' EPCs nao identificados</p>' : "") +
-    '<table>' + (rows ? '<thead><tr><th>Produto</th><th>SKU</th><th>Esperado</th><th>Lido</th><th>Div.</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody>' : "") + '</table>' +
+    (catRows ? '<details style="margin:10px 0"><summary style="font-weight:600;font-size:13px;color:#184036;cursor:pointer">Resumo por Categoria (' + catMap.size + ')</summary><table style="margin-top:6px"><thead><tr><th>Categoria</th><th>Produtos</th><th>Esperado</th><th>Lido</th><th>Div.</th></tr></thead><tbody>' + catRows + '</tbody></table></details>' : "") +
+    '<table>' + (rows ? '<thead><tr><th>Produto</th><th>SKU</th><th>Categoria</th><th>Esperado</th><th>Lido</th><th>Div.</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody>' : "") + '</table>' +
     '<div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">' +
       '<button class="btn btn-gray" onclick="resetResult()">Refazer contagem</button>' +
-      '<button class="btn btn-success" onclick="concludeInv()">Concluir Inventario</button>' +
+      '<button id="btnSave" class="btn btn-success" onclick="saveInventory()">Salvar no Sistema</button>' +
     '</div></div>';
 }
 
 function resetResult() { $("resultArea").style.display = "none"; $("logArea").style.display = ""; $("controls").style.display = ""; epcs = []; known.clear(); renderLog(); }
 
-function concludeInv() { alert("Inventario concluido com sucesso!"); resetResult(); }
+async function saveInventory() {
+  const btn = $("btnSave");
+  btn.disabled = true;
+  btn.textContent = "Salvando...";
+  try {
+    const localId = parseInt($("localSelect").value);
+    const categoria = $("catSelect").value;
+    const r = await apiPost("/salvar", { local_estoque_id: localId, categoria: categoria || undefined });
+    if (r.error) { alert("Erro: " + r.error); btn.disabled = false; btn.textContent = "Salvar no Sistema"; return; }
+    alert("Inventario #" + r.inventario_id + " salvo com " + r.itens_atualizados + " itens contados! Acesse: /estoque-comercial/inventario");
+    resetResult();
+  } catch(e) {
+    alert("Erro ao salvar: " + e.message);
+    btn.disabled = false;
+    btn.textContent = "Salvar no Sistema";
+  }
+}
+
 </script>
 </body></html>`;
 }
@@ -498,15 +554,47 @@ function startHttpServer() {
             return;
           }
 
+          if (msg.url === "/api/categorias") {
+            const localId = msg.body?.local_estoque_id || 2;
+            const rows = await db`
+              WITH categorias_estoque AS (
+                SELECT p.categoria, COUNT(*)::int as total_produtos, COALESCE(SUM(v.saldo_fisico),0)::int as total
+                FROM alissonerp.vw_saldo_estoque_comercial_v2 v
+                JOIN public.produtos p ON p.id_produto = v.produto_id
+                WHERE v.local_estoque_id = ${localId || 2}
+                  AND p.categoria IS NOT NULL AND p.categoria != ''
+                GROUP BY p.categoria
+              ),
+              categorias_config AS (
+                SELECT p.categoria, COUNT(*)::int as total_produtos, 0::int as total
+                FROM alissonerp.estoque_comercial_config cfg
+                JOIN public.produtos p ON p.id_produto = cfg.produto_id
+                WHERE cfg.ativo = true
+                  AND p.categoria IS NOT NULL AND p.categoria != ''
+                  AND NOT EXISTS (SELECT 1 FROM categorias_estoque c WHERE c.categoria = p.categoria)
+                GROUP BY p.categoria
+              )
+              SELECT categoria, total_produtos, total FROM categorias_estoque
+              UNION ALL
+              SELECT categoria, total_produtos, total FROM categorias_config
+              ORDER BY total DESC, categoria
+            `;
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(rows));
+            return;
+          }
+
           if (msg.url === "/api/rfid/inventario" && msg.body) {
             const b = msg.body;
             const leituras = [...new Set((b.leituras || []).map(l => String(l).trim()).filter(Boolean))];
             if (leituras.length === 0) throw new Error("Nenhuma leitura");
             const localId = b.local_estoque_id ?? 2;
+            const categoriaFiltro = b.categoria || null;
 
             console.log(`[inventario] EPCs recebidos: ${leituras.length}`);
             console.log(`[inventario] Primeiro EPC: ${leituras[0]}`);
-            console.log(`[inventario] Local ID: ${localId}`);
+            console.log(`[inventario] Local ID: ${localId}` + (categoriaFiltro ? ` Categoria: ${categoriaFiltro}` : ""));
 
             // 1. Registra leituras
             for (const epc of leituras) {
@@ -528,8 +616,8 @@ function startHttpServer() {
             // 3. Busca produtos por id_api_produto (mapeia id_api_produto -> sku)
             const prodPorIdApi = new Map();
             if (idsApiLidos.size > 0) {
-              const prods = await db`SELECT id_api_produto, sku, nome FROM public.produtos WHERE id_api_produto = ANY(${[...idsApiLidos]}::int[])`;
-              for (const p of prods) prodPorIdApi.set(Number(p.id_api_produto), { sku: p.sku, nome: p.nome });
+              const prods = await db`SELECT id_produto, id_api_produto, sku, nome, COALESCE(categoria,'') as categoria FROM public.produtos WHERE id_api_produto = ANY(${[...idsApiLidos]}::int[])`;
+              for (const p of prods) prodPorIdApi.set(Number(p.id_api_produto), { id_produto: p.id_produto, sku: p.sku, nome: p.nome, categoria: p.categoria });
             }
             console.log(`[inventario] produtos encontrados: ${prodPorIdApi.size}`);
 
@@ -544,7 +632,7 @@ function startHttpServer() {
                   const sku = prod?.sku;
                   if (sku) {
                     skusLidos.add(sku);
-                    if (!contagemPorSku.has(sku)) contagemPorSku.set(sku, { count: 0, epcs: [], idApi, nome: prod.nome });
+                    if (!contagemPorSku.has(sku)) contagemPorSku.set(sku, { count: 0, epcs: [], idApi, id_produto: prod.id_produto, nome: prod.nome, categoria: prod.categoria });
                     const g = contagemPorSku.get(sku);
                     g.count++;
                     g.epcs.push(epc);
@@ -555,27 +643,49 @@ function startHttpServer() {
             console.log(`[inventario] skus escaneados: ${[...skusLidos].join(",")}`);
             console.log(`[inventario] idsApi sem produto: ${[...idsApiLidos].filter(a => !prodPorIdApi.has(a)).join(",")}`);
 
-            // 5. Busca estoque por SKU em vw_estoque_comercial_alerta_v2
+            // 5. Busca estoque por SKU em vw_saldo_estoque_comercial_v2 (filtrado por local e opcionalmente categoria)
             const estoquePorSku = new Map(); // sku -> saldo_fisico
             if (skusLidos.size > 0) {
               const skuArr = [...skusLidos];
-              console.log(`[inventario] buscando SKUs: ${skuArr.join(",")}`);
-              const alertRows = await db`SELECT sku, saldo_fisico::int FROM alissonerp.vw_estoque_comercial_alerta_v2 WHERE sku = ANY(${skuArr}::text[])`;
-              console.log(`[inventario] estoque alerta encontrado: ${alertRows.length}`);
+              console.log(`[inventario] buscando SKUs no local ${localId}` + (categoriaFiltro ? ` categoria ${categoriaFiltro}` : "") + `: ${skuArr.join(",")}`);
+              let query = db`SELECT v.sku, v.saldo_fisico::int FROM alissonerp.vw_saldo_estoque_comercial_v2 v WHERE v.local_estoque_id = ${localId} AND v.sku = ANY(${skuArr}::text[])`;
+              if (categoriaFiltro) {
+                query = db`SELECT v.sku, v.saldo_fisico::int FROM alissonerp.vw_saldo_estoque_comercial_v2 v JOIN public.produtos p ON p.id_produto = v.produto_id WHERE v.local_estoque_id = ${localId} AND v.sku = ANY(${skuArr}::text[]) AND p.categoria = ${categoriaFiltro}`;
+              }
+              const alertRows = await query;
+              console.log(`[inventario] estoque encontrado no local ${localId}: ${alertRows.length}`);
               for (const r of alertRows) estoquePorSku.set(String(r.sku), Number(r.saldo_fisico ?? 0));
-              if (alertRows.length === 0) {
-                // Debug: ver SKUs disponiveis
-                const amostra = await db`SELECT sku, saldo_fisico FROM alissonerp.vw_estoque_comercial_alerta_v2 LIMIT 10`;
-                console.log(`[inventario] amostra alerta: ${JSON.stringify(amostra.map(r=>({sku:r.sku, saldo:r.saldo_fisico})))}`);
+            }
+
+            // 5b. Fallback: busca em public.estoque para SKUs nao encontrados no local
+            const skusSemLocal = [...skusLidos].filter(s => !estoquePorSku.has(s));
+            if (skusSemLocal.length > 0) {
+              const tinyRows = await db`SELECT sku, saldo::int FROM public.estoque WHERE sku = ANY(${skusSemLocal}::text[])`;
+              for (const r of tinyRows) {
+                if (!estoquePorSku.has(String(r.sku))) estoquePorSku.set(String(r.sku), Number(r.saldo ?? 0));
               }
             }
 
-            // 6. Busca TODOS os SKUs com estoque no alerta (para mostrar faltantes)
-            const todosAlertas = await db`SELECT sku, saldo_fisico::int FROM alissonerp.vw_estoque_comercial_alerta_v2`;
-            console.log(`[inventario] total produtos no alerta: ${todosAlertas.length}`);
-            for (const r of todosAlertas) {
+            // 6. Busca TODOS os SKUs com estoque nesse local (para mostrar faltantes), filtrando por categoria se definido
+            let todosQuery = db`SELECT v.sku, v.saldo_fisico::int FROM alissonerp.vw_saldo_estoque_comercial_v2 v WHERE v.local_estoque_id = ${localId}`;
+            if (categoriaFiltro) {
+              todosQuery = db`SELECT v.sku, v.saldo_fisico::int FROM alissonerp.vw_saldo_estoque_comercial_v2 v JOIN public.produtos p ON p.id_produto = v.produto_id WHERE v.local_estoque_id = ${localId} AND p.categoria = ${categoriaFiltro}`;
+            }
+            const todosLocal = await todosQuery;
+            console.log(`[inventario] total produtos no local ${localId}` + (categoriaFiltro ? ` categoria ${categoriaFiltro}` : "") + `: ${todosLocal.length}`);
+            for (const r of todosLocal) {
               const sku = String(r.sku);
               if (!estoquePorSku.has(sku)) estoquePorSku.set(sku, Number(r.saldo_fisico ?? 0));
+            }
+
+            // 6.5 Busca nome/produto_id para SKUs com estoque mas nao escaneados
+            const skusNaoLidos = [...estoquePorSku.keys()].filter(s => !skusLidos.has(s));
+            if (skusNaoLidos.length > 0) {
+              const prodsFaltantes = await db`SELECT id_produto, id_api_produto, sku, nome, COALESCE(categoria,'') as categoria FROM public.produtos WHERE sku = ANY(${skusNaoLidos}::text[])`;
+              for (const p of prodsFaltantes) {
+                const s = String(p.sku);
+                if (!contagemPorSku.has(s)) contagemPorSku.set(s, { count: 0, epcs: [], idApi: Number(p.id_api_produto), id_produto: p.id_produto, nome: p.nome, categoria: p.categoria });
+              }
             }
 
             // 7. Monta relatorio
@@ -599,10 +709,11 @@ function startHttpServer() {
               totalEncontrado += encontradoQty;
 
               produtos.push({
-                produto_id: null,
+                produto_id: g?.id_produto ?? null,
                 id_api_produto: g?.idApi ?? null,
                 sku,
                 nome: g?.nome ?? null,
+                categoria: g?.categoria ?? null,
                 esperado: esperadoQty,
                 encontrado: encontradoQty,
                 divergencia,
@@ -611,9 +722,13 @@ function startHttpServer() {
               });
             }
 
+            // Busca nome do local
+            const [localInfo] = await db`SELECT nome FROM alissonerp.locais_estoque WHERE id = ${localId}`;
+            const localNome = localInfo?.nome ?? "Local " + localId;
+
             const resultado = {
               ok: true, local_estoque_id: localId,
-              local_nome: "Loja", total_epcs_unicos: leituras.length,
+              local_nome: localNome, total_epcs_unicos: leituras.length,
               nao_identificados: naoIdentificados,
               produtos,
               resumo: {
@@ -626,6 +741,8 @@ function startHttpServer() {
                 nao_cadastrado: 0,
               },
             };
+
+            lastResult = resultado;
 
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(resultado));
@@ -642,13 +759,85 @@ function startHttpServer() {
       return;
     }
 
+    if (path === "/salvar" && req.method === "POST" && db) {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", async () => {
+        try {
+          const msg = JSON.parse(body);
+          const localId = msg.local_estoque_id;
+          const cat = msg.categoria?.trim() || null;
+          if (!lastResult) throw new Error("Nenhum resultado para salvar. Execute 'Conferir' primeiro.");
+          if (!localId) throw new Error("local_estoque_id obrigatorio");
+
+          const [existente] = await db`SELECT id FROM alissonerp.inventarios_comercial WHERE local_estoque_id = ${localId} AND status IN ('aberto','em_contagem')`;
+          if (existente) throw new Error(`Ja existe inventario aberto para esse local (ID: ${existente.id}). Conclua ou cancele primeiro.`);
+
+          const [inv] = await db`INSERT INTO alissonerp.inventarios_comercial (local_estoque_id, status, obs, categoria) VALUES (${localId}, 'em_contagem', 'Inventario via RFID TSL-1128', ${cat}) RETURNING id`;
+
+          if (cat) {
+            // Com filtro de categoria
+            await db`INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
+              SELECT ${inv.id}, v.produto_id, COALESCE(v.saldo_fisico,0)::INTEGER
+              FROM alissonerp.vw_saldo_estoque_comercial_v2 v
+              JOIN public.produtos p ON p.id_produto = v.produto_id
+              WHERE v.local_estoque_id = ${localId} AND v.saldo_fisico IS NOT NULL AND p.categoria = ${cat}`;
+
+            await db`INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
+              SELECT ${inv.id}, cfg.produto_id, 0
+              FROM alissonerp.estoque_comercial_config cfg
+              JOIN public.produtos p ON p.id_produto = cfg.produto_id
+              WHERE cfg.ativo = true AND p.categoria = ${cat}
+                AND NOT EXISTS (SELECT 1 FROM alissonerp.itens_inventario_comercial ii WHERE ii.inventario_id = ${inv.id} AND ii.produto_id = cfg.produto_id)`;
+          } else {
+            // Sem filtro de categoria
+            await db`INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
+              SELECT ${inv.id}, v.produto_id, COALESCE(v.saldo_fisico,0)::INTEGER
+              FROM alissonerp.vw_saldo_estoque_comercial_v2 v
+              WHERE v.local_estoque_id = ${localId} AND v.saldo_fisico IS NOT NULL`;
+
+            await db`INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
+              SELECT ${inv.id}, cfg.produto_id, 0
+              FROM alissonerp.estoque_comercial_config cfg
+              WHERE cfg.ativo = true
+                AND NOT EXISTS (SELECT 1 FROM alissonerp.itens_inventario_comercial ii WHERE ii.inventario_id = ${inv.id} AND ii.produto_id = cfg.produto_id)`;
+          }
+
+
+          let atualizados = 0;
+          for (const p of (lastResult.produtos || [])) {
+            if (!p.sku || p.encontrado <= 0) continue;
+            await db`
+              UPDATE alissonerp.itens_inventario_comercial ii
+              SET quantidade_contada = ${p.encontrado}
+              FROM public.produtos pr
+              WHERE ii.inventario_id = ${inv.id}
+                AND ii.produto_id = pr.id_produto
+                AND pr.sku = ${p.sku}
+            `;
+            atualizados++;
+          }
+
+          console.log(`[salvar] Inventario ${inv.id} criado, ${atualizados} itens atualizados`);
+          lastResult = null;
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, inventario_id: inv.id, itens_atualizados: atualizados }));
+        } catch (e) {
+          console.error("[salvar] Erro:", e.message);
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
     res.writeHead(404);
     res.end();
   });
 
   server.listen(HTTP_PORT, () => {
     console.log(`[tsl-bridge] Servidor HTTP em http://localhost:${HTTP_PORT}`);
-    console.log(`[tsl-bridge] Endpoints: /health /status /command`);
+    console.log(`[tsl-bridge] Endpoints: /health /status /command /salvar`);
     console.log(`[tsl-bridge] Tentando conectar em ${PORT} @ ${BAUD} baud`);
     console.log(`[tsl-bridge] TSL_PORT=COM3 npm run tsl-bridge`);
   });

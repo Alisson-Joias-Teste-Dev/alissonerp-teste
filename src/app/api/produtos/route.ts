@@ -833,11 +833,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Sincronização com Tiny (síncrona imediata + fila como fallback) ────
+    // ── Sincronização com Tiny (não-bloqueante) ──────────────────────────
+    // Antes o sync era síncrono: para N variações, esperava N × 12s (timeout HTTP).
+    // Isso causava erro 500 (timeout Vercel 10s) com produtos de 35+ variações.
+    // Agora roda em background — se falhar, o CRON (tiny_sync_produtos) completa.
     const todosSyncIds = [result.pai.id_produto, ...result.variacoes.map((v: { produto_id: number }) => v.produto_id)];
-    const syncResults: { produto_id: number; ok: boolean; erro?: string }[] = [];
+
+    // 1. Enfileira todos na fila (rápido, só INSERT no banco)
     for (const pid of todosSyncIds) {
-      // Enfileira na fila (fallback para o CRON)
       try {
         await sql`
           INSERT INTO alissonerp.tiny_sync_produtos (produto_id, operacao, status)
@@ -847,9 +850,14 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         console.warn("[POST /api/produtos] falha ao enfileirar sync Tiny:", err);
       }
-      // Tenta envio síncrono imediato
-      const r = await syncProdutoToTiny(pid, "create");
-      syncResults.push({ produto_id: pid, ...r });
+    }
+
+    // 2. Dispara syncs em background (fire-and-forget) — não bloqueia a resposta.
+    //    A fila tiny_sync_produtos já garante fallback via CRON se falhar.
+    for (const pid of todosSyncIds) {
+      syncProdutoToTiny(pid, "create").catch((err) => {
+        console.warn(`[POST /api/produtos] sync background falhou pid=${pid}:`, err);
+      });
     }
 
     // Notifica o site em background
@@ -868,7 +876,7 @@ export async function POST(req: NextRequest) {
         erp: result.erp,
         variacoes: result.variacoes,
         totalCriados: 1 + result.variacoes.length,
-        tiny_sync: syncResults,
+        tiny_sync: "background", // syncs rodam em background — fila tiny_sync_produtos garante fallback
       },
       { status: 201 }
     );
