@@ -798,10 +798,16 @@ export async function POST(req: NextRequest) {
     });
 
     // ── Recalcular preço de pedras (fora da transação) ───────────────────────
+    // Protegido por try-catch — se falhar (ex: tabela markup_pedras ausente),
+    // não quebra o cadastro. O preço das pedras pode ser recalculado depois.
     if (temPedra) {
-      await recalcularPrecoPedras(result.pai.id_produto);
-      for (const v of result.variacoes) {
-        await recalcularPrecoPedras(v.produto_id);
+      try {
+        await recalcularPrecoPedras(result.pai.id_produto);
+        for (const v of result.variacoes) {
+          await recalcularPrecoPedras(v.produto_id);
+        }
+      } catch (err) {
+        console.warn("[POST /api/produtos] falha ao recalcular preço das pedras:", err);
       }
     }
 
