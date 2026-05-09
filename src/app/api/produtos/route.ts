@@ -190,24 +190,24 @@ export async function GET(req: NextRequest) {
       : sql`AND (TRIM(p.categoria) = ${categoria} OR TRIM(p.categoria) ILIKE ${`${categoria} -> %`})`
     : sql``;
 
-  // Apenas com saldo >= 1 em public.estoque (join por SKU, agregando para
-  // Saldo vem de 3 fontes: public.estoque (Tiny) + vw_estoque_directus_saldo (legado)
-  // + FILHOS (variações do pai com estoque em public.estoque).
+  // Apenas com saldo >= 1 (estoque comercial alissonerp + directus legado + filhos)
+  // Centralizado no schema alissonerp (não usa mais public.estoque).
   const wEstoque = apenasComEstoque
     ? sql`AND (
-        EXISTS (SELECT 1 FROM public.estoque e
-                WHERE e.sku = p.sku AND e.saldo >= 1)
+        COALESCE((
+          SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END)
+          FROM alissonerp.movimentacoes_estoque_comercial m
+          WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'
+        ), 0) >= 1
         OR EXISTS (SELECT 1 FROM alissonerp.vw_estoque_directus_saldo v
                    WHERE v.insumo_sku = p.sku AND v.saldo >= 1)
-        OR EXISTS (
-          SELECT 1
+        OR (
+          SELECT COALESCE(SUM(CASE WHEN m2.tipo = 'entrada' THEN m2.quantidade ELSE -m2.quantidade END), 0)
           FROM alissonerp.erp_produtos pai_ep
           INNER JOIN alissonerp.erp_produtos filho_ep ON filho_ep.parent_id = pai_ep.id
-          INNER JOIN public.produtos filho_prod ON filho_prod.id_produto = filho_ep.produto_id
-          INNER JOIN public.estoque e2 ON e2.sku = filho_prod.sku
-          WHERE pai_ep.produto_id = p.id_produto
-            AND e2.saldo >= 1
-        )
+          INNER JOIN alissonerp.movimentacoes_estoque_comercial m2 ON m2.produto_id = filho_ep.produto_id
+          WHERE pai_ep.produto_id = p.id_produto AND m2.status = 'efetivado'
+        ) >= 1
       )`
     : sql``;
 
@@ -279,18 +279,17 @@ export async function GET(req: NextRequest) {
           vc.url_capa AS foto_produto,
           COALESCE(vi.imagens, '[]'::jsonb) AS imagens,
           -- Saldo consolidado: MAIOR valor entre 3 fontes (próprio, filhos, directus).
-          -- Usa GREATEST (não COALESCE) pra pais com linha em public.estoque = 0
+          -- Usa GREATEST (não COALESCE) pra pais com linha em movimentacoes = 0
           -- não ficarem "presos" a esse 0 e sim mostrarem a soma dos filhos.
           GREATEST(
-            COALESCE((SELECT e.saldo FROM public.estoque e WHERE e.sku = p.sku LIMIT 1), 0)::int,
+            COALESCE((SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END) FROM alissonerp.movimentacoes_estoque_comercial m WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'), 0)::int,
             COALESCE((SELECT SUM(v.saldo) FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku), 0)::int,
             COALESCE((
-              SELECT SUM(e_f.saldo)::int
+              SELECT SUM(CASE WHEN m_f.tipo = 'entrada' THEN m_f.quantidade ELSE -m_f.quantidade END)::int
               FROM alissonerp.erp_produtos pai_e
               INNER JOIN alissonerp.erp_produtos filho_e ON filho_e.parent_id = pai_e.id
-              INNER JOIN public.produtos prod_f ON prod_f.id_produto = filho_e.produto_id
-              INNER JOIN public.estoque e_f ON e_f.sku = prod_f.sku
-              WHERE pai_e.produto_id = p.id_produto
+              INNER JOIN alissonerp.movimentacoes_estoque_comercial m_f ON m_f.produto_id = filho_e.produto_id
+              WHERE pai_e.produto_id = p.id_produto AND m_f.status = 'efetivado'
             ), 0)
           ) AS saldo_estoque,
           -- Preço mínimo das variações filhas (quando pai com variable).
@@ -390,7 +389,7 @@ export async function GET(req: NextRequest) {
         vc.url_capa   AS foto_produto,
         COALESCE(vi.imagens, '[]'::jsonb) AS imagens,
         GREATEST(
-          COALESCE((SELECT e.saldo FROM public.estoque e WHERE e.sku = p.sku LIMIT 1), 0)::int,
+          COALESCE((SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END) FROM alissonerp.movimentacoes_estoque_comercial m WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'), 0)::int,
           COALESCE((SELECT SUM(v.saldo) FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku), 0)::int
         ) AS saldo_estoque,
         NULL::int AS preco_filhos_min,

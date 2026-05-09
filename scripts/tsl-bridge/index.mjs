@@ -657,11 +657,17 @@ function startHttpServer() {
               for (const r of alertRows) estoquePorSku.set(String(r.sku), Number(r.saldo_fisico ?? 0));
             }
 
-            // 5b. Fallback: busca em public.estoque para SKUs nao encontrados no local
+            // 5b. Fallback: busca saldo consolidado (movimentacoes_estoque_comercial) para SKUs nao encontrados no local
             const skusSemLocal = [...skusLidos].filter(s => !estoquePorSku.has(s));
             if (skusSemLocal.length > 0) {
-              const tinyRows = await db`SELECT sku, saldo::int FROM public.estoque WHERE sku = ANY(${skusSemLocal}::text[])`;
-              for (const r of tinyRows) {
+              const movRows = await db`
+                SELECT p.sku, COALESCE(SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END), 0)::int AS saldo
+                FROM public.produtos p
+                LEFT JOIN alissonerp.movimentacoes_estoque_comercial m ON m.produto_id = p.id_produto AND m.status = 'efetivado'
+                WHERE p.sku = ANY(${skusSemLocal}::text[])
+                GROUP BY p.sku
+              `;
+              for (const r of movRows) {
                 if (!estoquePorSku.has(String(r.sku))) estoquePorSku.set(String(r.sku), Number(r.saldo ?? 0));
               }
             }
