@@ -91,25 +91,11 @@ interface Props {
   onCountChange?: (count: number) => void;
 }
 
-// COMENTÁRIOS DESATIVADOS globalmente (Opção B).
-// O input de novo comentário e os botões de editar/deletar foram ocultados.
-// A lista de comentários existentes permanece visível para consulta.
-// Reativar: remover a flag COMENTARIOS_DESATIVADOS e restaurar seções marcadas.
-const COMENTARIOS_DESATIVADOS = true;
+// SOMENTE LEITURA: a lista de comentários existentes fica visível para consulta,
+// mas o input de novo comentário e os botões de editar/deletar foram ocultados.
+const SOMENTE_LEITURA = true;
 
 export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
-  if (COMENTARIOS_DESATIVADOS) {
-    return (
-      <div className="py-6 text-center">
-        <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>
-          Comentários
-        </p>
-        <p className="text-[11px] mt-1" style={{ color: "#9CA3AF" }}>
-          Os comentários estão desativados.
-        </p>
-      </div>
-    );
-  }
   const { user, role } = useAuth();
   const isAdmin = role === "admin" || role === "desenvolvedor";
 
@@ -461,8 +447,8 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
                       )}
                     </div>
                   </div>
-                  {/* Ações */}
-                  {!isEditando && !isDeletando && (
+                  {/* Ações (ocultas em modo somente leitura) */}
+                  {!SOMENTE_LEITURA && !isEditando && !isDeletando && (
                     <div className="flex gap-1 shrink-0">
                       {podeEditar && (
                         <button
@@ -575,7 +561,8 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
         )}
       </div>
 
-      {/* Input de novo comentário */}
+      {/* Input de novo comentário (oculto em modo somente leitura) */}
+      {!SOMENTE_LEITURA && (
       <div className="relative">
         {/* Dropdown @mention */}
         {showMention && mentionResults.length > 0 && (
@@ -700,6 +687,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
