@@ -768,29 +768,34 @@ export async function POST(req: NextRequest) {
         contador++;
       }
 
-      // ── Estoque inicial: insere saldo em public.estoque por variação ──────
+      // ── Estoque inicial: registra entrada em movimentacoes_estoque_comercial ─
       // body.quantidades = { "16": 2, "18": 1 } → casa com combo.numeracao.
-      // UPSERT por SKU para ser idempotente (e preservar produto_id_api se vier do Tiny).
+      // Centralizado no schema alissonerp (não usa mais public.estoque).
+      const temColLocalEstoque = await colunaExiste("alissonerp", "movimentacoes_estoque_comercial", "local_estoque_id", tx);
       if (quantidades && Object.keys(quantidades).length > 0) {
         for (const v of variacoesCriadas) {
-          // numeracao vem do sufixo "-N" do sku (ex: "1701-3" → 3). Mais seguro
-          // é casar pela posição mas aqui usamos a convenção: sufixo = contador.
           const match = v.sku.match(/-(\d+)$/);
           if (!match) continue;
-          const posContador = match[1];
-          // Mapear posContador → numeração do combo correspondente (pelo índice)
           const idxCombo = variacoesCriadas.findIndex((x) => x.sku === v.sku);
           const comboN = combos[idxCombo]?.numeracao;
           if (comboN == null) continue;
           const qtd = quantidades[String(comboN)];
           if (!qtd || qtd <= 0) continue;
-          await tx`
-            INSERT INTO public.estoque (sku, saldo, estoque_loja)
-            VALUES (${v.sku}, ${qtd}, ${qtd})
-            ON CONFLICT (sku) DO UPDATE SET
-              saldo        = public.estoque.saldo        + EXCLUDED.saldo,
-              estoque_loja = public.estoque.estoque_loja + EXCLUDED.estoque_loja
-          `;
+          if (temColLocalEstoque) {
+            await tx`
+              INSERT INTO alissonerp.movimentacoes_estoque_comercial
+                (produto_id, tipo, quantidade, motivo, local_estoque_id, status, created_by)
+              VALUES
+                (${v.produto_id}, 'entrada', ${qtd}, 'estoque_inicial_cadastro', 2, 'efetivado', ${user.id})
+            `;
+          } else {
+            await tx`
+              INSERT INTO alissonerp.movimentacoes_estoque_comercial
+                (produto_id, tipo, quantidade, motivo, status, created_by)
+              VALUES
+                (${v.produto_id}, 'entrada', ${qtd}, 'estoque_inicial_cadastro', 'efetivado', ${user.id})
+            `;
+          }
         }
       }
 
