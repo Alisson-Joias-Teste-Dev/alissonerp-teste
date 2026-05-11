@@ -88,7 +88,7 @@ export const DEFAULT_PARAMS: RingParams = {
   stoneDrill: true,
   stoneHalfMoon: false,
   stoneFull: false,
-  stoneType: "Zircônia",
+  stoneType: "Zirconia", // sem acento — bate com os botões da UI
   textEnabled: false,
   textFontType: 1,
   textContent: "",

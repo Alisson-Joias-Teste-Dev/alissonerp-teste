@@ -12,10 +12,16 @@ import {
   type CurvaCategoriaInput,
 } from "@/lib/curva-precificacao";
 import { createClient } from "@/lib/supabase/client";
+import AplicarTemplateModal from "@/components/produtos/AplicarTemplateModal";
 
 // Roles que veem o bloco de Precificação automática (preview de markup/preço).
 // Demais usuários (admin, gerentes, etc.) NÃO vêem esse cálculo.
-const ROLES_VE_PRECIFICACAO = new Set(["desenvolvedor", "diretor"]);
+const ROLES_VE_PRECIFICACAO = new Set(["desenvolvedor", "diretor", "admin"]);
+
+// Roles que podem cadastrar produto com campos vazios (bypass das validações
+// obrigatórias). Útil pra Alisson cadastrar rascunho rápido — fábrica/loja
+// continua exigindo 100% preenchido.
+const ROLES_BYPASS_VALIDACAO = new Set(["desenvolvedor", "diretor", "admin"]);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -535,6 +541,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   const [estoqueMinimo, setEstoqueMinimo] = useState("0");
   const [tempoFabricacaoDias, setTempoFabricacaoDias] = useState("");
   const [rotaEtapas, setRotaEtapas] = useState<number[]>([]); // setor_ids na ordem desejada
+  const [mostrarTemplate, setMostrarTemplate] = useState(false);
 
   // Step 2: BOM
   const [bom, setBom] = useState<BomItemLocal[]>([]);
@@ -732,9 +739,14 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   // ── Validações por step ────────────────────────────────────────────────────
 
   // Validações do Step 1 (Dados Básicos) — usado pelo nextStep
+  // Roles elevados (Alisson) podem cadastrar com campos vazios — bypass total
+  // exceto SKU e Nome (mínimo absoluto pra não quebrar PK/UX).
+  const bypassValidacao = userRole != null && ROLES_BYPASS_VALIDACAO.has(userRole);
+
   function validateStep1(): string | null {
     if (!nome.trim()) return "Nome do produto é obrigatório";
     if (!sku.trim()) return "SKU é obrigatório";
+    if (bypassValidacao) return null;
     if (!tipoMetal.trim()) return "Tipo de metal é obrigatório";
     if (!categoriaGeral.trim()) return "Categoria é obrigatória — verifique o nome do produto (não foi possível detectar automaticamente)";
     if (!peso || parseNumericInput(peso) <= 0) return "Peso base deve ser maior que 0";
@@ -757,6 +769,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   function validateAll(): { erro: string | null; abrir?: "apontamento" | "ficha" } {
     const e1 = validateStep1();
     if (e1) return { erro: e1 };
+    if (bypassValidacao) return { erro: null };
     if (bom.length === 0) {
       return {
         erro: "Apontamento Padrão é obrigatório — adicione pelo menos 1 item (ouro/pedra/outro). Abri a seção pra você.",
@@ -1119,13 +1132,24 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
 
                   {/* Rota de Fabricação */}
                   <div className="rounded-lg border-2 p-3" style={{ borderColor: "#A7D7B8", backgroundColor: "#F0F7F4" }}>
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between mb-2 gap-2">
                       <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.esmeralda }}>
                         Rota de Fabricação
                       </label>
-                      <span className="text-[10px]" style={{ color: "#6B7280" }}>
-                        {rotaEtapas.length} etapa(s)
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setMostrarTemplate(true)}
+                          className="text-[11px] font-semibold px-2 py-1 rounded border hover:bg-white"
+                          style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+                          title="Aplicar um template de rota cadastrado em /rotas-padrao"
+                        >
+                          📋 Aplicar template…
+                        </button>
+                        <span className="text-[10px]" style={{ color: "#6B7280" }}>
+                          {rotaEtapas.length} etapa(s)
+                        </span>
+                      </div>
                     </div>
 
                     {rotaEtapas.length === 0 ? (
@@ -1387,8 +1411,59 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
               {expandMed && (
                 <div className="space-y-3 mt-2 p-4 bg-white rounded-lg border" style={{ borderColor: C.cremeBorder }}>
                   <p className="text-xs text-gray-500">
-                    Foto técnica do produto (desenho, esquema dimensional ou referência). Opcional — pode ser anexada depois no drawer do produto.
+                    Foto técnica do produto + medidas (largura, altura, base). Tudo opcional — preenche o que tiver.
                   </p>
+
+                  {/* Medidas — largura, altura, base (mm) */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-widest mb-1">
+                        Largura (mm)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={larguraAro}
+                        onChange={(e) => setLarguraAro(e.target.value)}
+                        className="w-full px-2 py-1.5 rounded-md border text-sm outline-none"
+                        style={{ borderColor: C.cremeBorder }}
+                        placeholder="0,00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-widest mb-1">
+                        Altura (mm)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={alturaAro}
+                        onChange={(e) => setAlturaAro(e.target.value)}
+                        className="w-full px-2 py-1.5 rounded-md border text-sm outline-none"
+                        style={{ borderColor: C.cremeBorder }}
+                        placeholder="0,00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-widest mb-1">
+                        Base (mm)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={base}
+                        onChange={(e) => setBase(e.target.value)}
+                        className="w-full px-2 py-1.5 rounded-md border text-sm outline-none"
+                        style={{ borderColor: C.cremeBorder }}
+                        placeholder="0,00"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Foto da ficha técnica */}
                   <input
                     ref={fichaTecnicaInputRef}
                     type="file"
@@ -1510,6 +1585,15 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
           </button>
         </div>
       </div>
+
+      {mostrarTemplate && (
+        <AplicarTemplateModal
+          produtoId={null /* produto novo — pré-popula localmente */}
+          categoriaProduto={categoria || null}
+          onClose={() => setMostrarTemplate(false)}
+          onSelecionar={(_id, setorIds) => setRotaEtapas(setorIds)}
+        />
+      )}
     </div>
   );
 }
