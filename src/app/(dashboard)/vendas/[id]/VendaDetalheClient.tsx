@@ -1488,7 +1488,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
   const situacaoStyle = SITUACAO_COLOR[venda.situacao] ?? SITUACAO_COLOR.rascunho;
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
-  const podeCancelar = isFullAccess && !["cancelado", "concluido", "entregue"].includes(venda.situacao);
+  const podeCancelar =
+    (isFullAccess && !["cancelado", "concluido", "entregue"].includes(venda.situacao)) ||
+    (role === "consultora" && venda.situacao === "rascunho");
 
   // Validação para aprovar: cliente + vendedor + forma_envio + itens + pagamento obrigatórios
   const podeAprovar = !!(

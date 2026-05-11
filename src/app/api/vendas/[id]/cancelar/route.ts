@@ -16,12 +16,14 @@ export async function POST(
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const [usuario] = await sql`
-    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+    SELECT role, vendedor_id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
   if (!usuario) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
 
   const PODE_CANCELAR = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
-  if (!PODE_CANCELAR.includes(usuario.role) && !isFullAccess(usuario.role)) {
+  const ehConsultora = usuario.role === "consultora";
+  const temAcessoPleno = PODE_CANCELAR.includes(usuario.role) || isFullAccess(usuario.role);
+  if (!temAcessoPleno && !ehConsultora) {
     return NextResponse.json({ error: "Sem permissão para cancelar vendas" }, { status: 403 });
   }
 
@@ -33,6 +35,12 @@ export async function POST(
     SELECT id, situacao, bloqueado FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
+  if (ehConsultora && !temAcessoPleno && venda.situacao !== "rascunho") {
+    return NextResponse.json(
+      { error: "Consultoras só podem cancelar vendas em rascunho" },
+      { status: 403 }
+    );
+  }
   if (venda.situacao === "cancelado") {
     return NextResponse.json({ error: "Venda já cancelada" }, { status: 409 });
   }
