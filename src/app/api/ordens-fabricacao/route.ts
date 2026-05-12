@@ -94,10 +94,17 @@ export async function POST(req: NextRequest) {
       SELECT id FROM alissonerp.pcp WHERE ordem_id = ${ordem.id} LIMIT 1
     `;
 
+    // Atribui operador: atualiza pcp.deposito_id E ordens.local_atual
+    // (source of truth da view vw_pcp_erp é ordens.local_atual — mesmo padrão
+    // do endpoint /api/pcp/[id]/atribuir-operador).
     if (deposito_id != null && pcp?.id) {
       await tx`
         UPDATE alissonerp.pcp SET deposito_id = ${deposito_id}, updated_at = NOW()
         WHERE id = ${pcp.id}
+      `;
+      await tx`
+        UPDATE alissonerp.ordens SET local_atual = ${deposito_id}, updated_at = NOW()
+        WHERE id = ${ordem.id}
       `;
     }
 
