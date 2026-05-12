@@ -13,11 +13,13 @@ interface InventarioHeader {
   local_nome: string;
   status: string;
   obs: string | null;
+  categoria: string | null;
   data_abertura: string;
   data_conclusao: string | null;
   criado_por_email: string | null;
   concluido_por_email: string | null;
 }
+
 
 interface ItemInventario {
   id: number;
@@ -173,6 +175,14 @@ export default function InventarioDetalhePage() {
           <p className="text-sm text-gray-500 mt-0.5">
             {inventario.local_nome} - {fmtDate(inventario.data_abertura)}
           </p>
+          {inventario.categoria && (
+            <p className="text-xs mt-1">
+              <span className="px-2 py-0.5 rounded" style={{ background: "#F3EADA", color: "#7A5A4A" }}>
+                Categoria: {inventario.categoria}
+              </span>
+            </p>
+          )}
+
         </div>
         <div className="flex items-center gap-2">
           {isAberto && (

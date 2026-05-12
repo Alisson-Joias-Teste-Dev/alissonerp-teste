@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Volume2, VolumeX, Clock, Bell, BellOff } from "lucide-react";
+import { AlertTriangle, Volume2, VolumeX, Bell, BellOff } from "lucide-react";
 
 interface Pendente {
   id: number;
@@ -22,7 +22,8 @@ interface Resposta {
 }
 
 // ─── Constantes ────────────────────────────────────────────────────────────
-const POLL_INTERVAL_MS = 10_000; // 10s — rápido o suficiente p/ sentir "agora"
+const POLL_INTERVAL_MS = 30_000; // 30s — reduz carga no servidor (evita rate limit 429)
+const POLL_BACKOFF_MS  = 60_000; // 60s — backoff após erro (rede/429)
 const TICK_INTERVAL_MS = 1000;   // 1 bip por segundo (1s bip, 1s silêncio)
 const TICK_FREQUENCY   = 880;    // Hz — A5, bem audível em qualquer speaker
 const TICK_DURATION_S  = 0.20;   // 200ms por bip (um pouco mais longo)
@@ -63,11 +64,19 @@ export default function MencaoAlarme() {
   const somSilenciado = silenciadoAte != null
     && new Date(silenciadoAte).getTime() > Date.now();
 
+  // ── Backoff ref (evita recriação do fetchPendentes) ────────────────────
+  // Usamos useRef em vez de useState para que fetchPendentes mantenha
+  // referência estável e o setInterval do polling não precise reiniciar.
+  const backoffAteRef = useRef<number | null>(null);
+
   // ── Fetch das pendências ───────────────────────────────────────────────
   // Guard: se a request anterior ainda não terminou, aborta antes de iniciar nova.
   // Sem isso, em rede lenta os polls de 10s empilham e saturam o limite de 6 conexões do browser.
   const inflightCtrlRef = useRef<AbortController | null>(null);
   const fetchPendentes = useCallback(async () => {
+    // Se estiver em backoff, pula a requisição
+    if (backoffAteRef.current && Date.now() < backoffAteRef.current) return;
+
     if (inflightCtrlRef.current) {
       inflightCtrlRef.current.abort();
     }
@@ -79,19 +88,26 @@ export default function MencaoAlarme() {
         signal: ctrl.signal,
       });
       if (!r.ok) {
+        // 429 = rate limit; 5xx = servidor sobrecarregado → ativa backoff
+        if (r.status === 429 || r.status >= 500) {
+          backoffAteRef.current = Date.now() + POLL_BACKOFF_MS;
+        }
         setPendentes([]);
         setSilenciadoAte(null);
         return;
       }
+      // Sucesso: reseta backoff
+      backoffAteRef.current = null;
       const data = (await r.json()) as Resposta;
       setPendentes(Array.isArray(data.itens) ? data.itens : []);
       setSilenciadoAte(data.silenciado_ate ?? null);
     } catch {
-      // Rede caiu / aborted — próxima tentativa em 10s
+      // Rede caiu / aborted — ativa backoff para não sobrecarregar
+      backoffAteRef.current = Date.now() + POLL_BACKOFF_MS;
     } finally {
       if (inflightCtrlRef.current === ctrl) inflightCtrlRef.current = null;
     }
-  }, []);
+  }, []); // ← sem dependências de estado: referência estável!
 
   // ── Criar AudioContext (chamado no click "Ativar som" OU na 1ª interação) ──
   const ensureAudio = useCallback(() => {

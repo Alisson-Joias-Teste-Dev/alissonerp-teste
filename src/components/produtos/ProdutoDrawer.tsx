@@ -14,6 +14,7 @@ import {
   Search,
   GitFork,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { formatPeso } from "@/lib/formatters";
 import {
@@ -478,6 +479,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   const [precoTinyEdit, setPrecoTinyEdit] = useState("");
   const [tipoItemEdit, setTipoItemEdit] = useState<"" | "joia" | "insumo">("");
   const [saving, setSaving] = useState(false);
+  const [syncingTiny, setSyncingTiny] = useState(false);
+  const [tinySyncMsg, setTinySyncMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   // Foto agora é gerenciada pelo <GaleriaProduto> (galeria multi-imagem com capa).
   // Modo simplificado é o padrão: mostra só nome/SKU/situação + peso + preço.
@@ -805,12 +808,13 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
         const b = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(b.error ?? "Erro ao salvar");
       }
-      const data = await res.json() as { produto: ProdutoDetalhe };
-      setProduto((prev) => prev ? { ...prev, ...data.produto } : prev);
+      const data = await res.json() as { produto: ProdutoDetalhe; tiny_sync?: { ok: boolean; erro?: string } };
+      setProduto((prev) => prev ? { ...prev, ...data.produto, tiny_sync_status: data.tiny_sync?.ok ? "ok" : (data.tiny_sync ? "erro" : prev.tiny_sync_status), tiny_sync_erro: data.tiny_sync?.erro ?? prev.tiny_sync_erro } : prev);
       setSaveMsg({ ok: true, texto: "Alterações salvas com sucesso." });
       onSaved?.();
       setTimeout(() => setSaveMsg(null), 3000);
-      // Oferecer propagação para variações se for pai
+      // Oferecer propagação manual para medidas/BOM (campos simples já foram
+      // propagados automaticamente pelo backend).
       if (produto.eh_pai && variacoes.length > 0 && Object.keys(body).length > 0) {
         setShowPropagar(true);
       }
@@ -835,11 +839,36 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       if (!res.ok) throw new Error(b.error ?? "Erro ao propagar");
       setPropagarMsg({ ok: true, texto: `Propagado para ${b.propagado ?? variacoes.length} variação(ões).` });
       setShowPropagar(false);
-      setTimeout(() => setPropagarMsg(null), 4000);
+      // Fechar drawer após propagar
+      setTimeout(() => {
+        onClose();
+      }, 1000);
     } catch (e) {
       setPropagarMsg({ ok: false, texto: e instanceof Error ? e.message : "Erro ao propagar" });
     } finally {
       setPropagando(false);
+    }
+  }
+
+  async function handleSyncTiny() {
+    if (!produto) return;
+    setSyncingTiny(true);
+    setTinySyncMsg(null);
+    try {
+      const res = await fetch(`/api/produtos/${produto.id_produto}/tiny-sync`, { method: "POST" });
+      if (res.ok) {
+        setTinySyncMsg({ ok: true, texto: "Produto sincronizado com Tiny com sucesso." });
+        const b = await res.json() as { tinyId?: number };
+        setProduto((prev) => prev ? { ...prev, id_api_produto: b.tinyId ?? prev.id_api_produto, tiny_sync_status: "ok", tiny_sync_erro: null } : prev);
+      } else {
+        const b = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(b.error ?? "Erro ao sincronizar com Tiny");
+      }
+    } catch (e) {
+      setTinySyncMsg({ ok: false, texto: e instanceof Error ? e.message : "Erro ao sincronizar" });
+    } finally {
+      setSyncingTiny(false);
+      setTimeout(() => setTinySyncMsg(null), 8000);
     }
   }
 
@@ -926,6 +955,20 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                   )}
                   {!produto.id_api_produto && !produto.tiny_sync_status && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">Sem ID Tiny</span>
+                  )}
+                  {produto.id_api_produto && !produto.tiny_sync_status && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">Sincronizado Tiny</span>
+                  )}
+                  {podeEditar && (
+                    <button
+                      onClick={handleSyncTiny}
+                      disabled={syncingTiny}
+                      className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors disabled:opacity-50 hover:bg-gray-100 text-gray-500 border border-gray-200"
+                      title="Sincronizar com Tiny ERP"
+                    >
+                      <RefreshCw size={10} className={syncingTiny ? "animate-spin" : ""} />
+                      {syncingTiny ? "Sincronizando..." : "Sync Tiny"}
+                    </button>
                   )}
                 </div>
               </>
@@ -1981,7 +2024,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                     Ambos
                   </button>
                   <button
-                    onClick={() => setShowPropagar(false)}
+                    onClick={() => { setShowPropagar(false); onClose(); }}
                     className="px-2.5 py-1.5 rounded-md text-xs text-gray-500 hover:text-gray-700 transition-colors"
                   >
                     Só no pai
@@ -1999,6 +2042,18 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
               >
                 <AlertCircle size={12} />
                 {propagarMsg.texto}
+              </div>
+            )}
+            {tinySyncMsg && (
+              <div
+                className={`mb-3 flex items-center gap-2 text-xs rounded-lg px-3 py-2 border ${
+                  tinySyncMsg.ok
+                    ? "bg-green-50 text-green-700 border-green-100"
+                    : "bg-red-50 text-red-600 border-red-100"
+                }`}
+              >
+                <AlertCircle size={12} />
+                {tinySyncMsg.texto}
               </div>
             )}
             {saveMsg && (

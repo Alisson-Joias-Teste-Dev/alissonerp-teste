@@ -88,38 +88,38 @@ export async function submeterVendaParaAprovacaoCredito(
   const tipo: "gerente" | "diretor" = valorAReceber <= saldoAtual ? "gerente" : "diretor";
 
   // 5. Encontrar aprovador
-  let aprovadorId: string;
-  if (tipo === "gerente") {
-    // Buscar aprovadora configurada (Germana); fallback para primeira gerente_loja
-    const [config] = await sql`
-      SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadora_credito_gerente'
-    `;
-    if (config?.valor) {
-      const [gerenteConfig] = await sql`
-        SELECT id FROM alissonerp.usuarios WHERE id = ${config.valor}::uuid AND ativo = true
+    let aprovadorId = "";
+    if (tipo === "gerente") {
+      // Buscar aprovadora configurada (Germana); fallback para primeira gerente_loja
+      const [config] = await sql`
+        SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadora_credito_gerente'
       `;
-      aprovadorId = gerenteConfig?.id;
-    }
-    if (!aprovadorId!) {
-      const [gerente] = await sql`
+      if (config?.valor) {
+        const [gerenteConfig] = await sql`
+          SELECT id FROM alissonerp.usuarios WHERE id = ${config.valor}::uuid AND ativo = true
+        `;
+        if (gerenteConfig?.id) aprovadorId = gerenteConfig.id;
+      }
+      if (!aprovadorId) {
+        const [gerente] = await sql`
+          SELECT id FROM alissonerp.usuarios
+          WHERE role = 'gerente_loja' AND ativo = true
+          ORDER BY id LIMIT 1
+        `;
+        if (!gerente) throw new Error("Nenhum gerente de loja ativo encontrado");
+        aprovadorId = gerente.id;
+      }
+    } else {
+      // Diretor, fallback para admin
+      const [diretor] = await sql`
         SELECT id FROM alissonerp.usuarios
-        WHERE role = 'gerente_loja' AND ativo = true
-        ORDER BY id LIMIT 1
+        WHERE role IN ('diretor', 'admin', 'desenvolvedor') AND ativo = true
+        ORDER BY CASE role WHEN 'diretor' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END
+        LIMIT 1
       `;
-      if (!gerente) throw new Error("Nenhum gerente de loja ativo encontrado");
-      aprovadorId = gerente.id;
+      if (!diretor) throw new Error("Nenhum diretor ou admin ativo encontrado");
+      aprovadorId = diretor.id;
     }
-  } else {
-    // Diretor, fallback para admin
-    const [diretor] = await sql`
-      SELECT id FROM alissonerp.usuarios
-      WHERE role IN ('diretor', 'admin', 'desenvolvedor') AND ativo = true
-      ORDER BY CASE role WHEN 'diretor' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END
-      LIMIT 1
-    `;
-    if (!diretor) throw new Error("Nenhum diretor ou admin ativo encontrado");
-    aprovadorId = diretor.id;
-  }
 
   // 6. Buscar nome do solicitante
   const [solicitante] = await sql`

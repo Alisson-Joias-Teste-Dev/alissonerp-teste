@@ -75,6 +75,11 @@ export async function POST(
   };
 
   if (!body.forma) return NextResponse.json({ error: "forma obrigatória" }, { status: 400 });
+  // Bloqueia "Múltiplas" como forma única — deve ser decomposto em pagamentos individuais
+  if (body.forma === "Múltiplas") return NextResponse.json(
+    { error: "Use pagamentos individuais (Dinheiro, Cartão, Pix, etc.) em vez de 'Múltiplas'. A opção Múltiplas existe para o formulário de checkout, mas cada pagamento deve ser registrado separadamente." },
+    { status: 400 }
+  );
   // Ouro calcula o valor server-side — não valida o campo valor aqui
   if (body.forma !== "Ouro" && (!body.valor || body.valor <= 0))
     return NextResponse.json({ error: "valor inválido" }, { status: 400 });

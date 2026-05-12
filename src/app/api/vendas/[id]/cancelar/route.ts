@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { ensureTinyToken } from "@/lib/vendas-aprovar";
 
 // ─── POST /api/vendas/[id]/cancelar ───────────────────────────────────────────
 // Cancela venda (apenas gerente+ ou admin/dev).
@@ -15,12 +16,14 @@ export async function POST(
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const [usuario] = await sql`
-    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+    SELECT role, vendedor_id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
   if (!usuario) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
 
   const PODE_CANCELAR = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
-  if (!PODE_CANCELAR.includes(usuario.role) && !isFullAccess(usuario.role)) {
+  const ehConsultora = usuario.role === "consultora";
+  const temAcessoPleno = PODE_CANCELAR.includes(usuario.role) || isFullAccess(usuario.role);
+  if (!temAcessoPleno && !ehConsultora) {
     return NextResponse.json({ error: "Sem permissão para cancelar vendas" }, { status: 403 });
   }
 
@@ -32,6 +35,12 @@ export async function POST(
     SELECT id, situacao, bloqueado FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
+  if (ehConsultora && !temAcessoPleno && venda.situacao !== "rascunho") {
+    return NextResponse.json(
+      { error: "Consultoras só podem cancelar vendas em rascunho" },
+      { status: 403 }
+    );
+  }
   if (venda.situacao === "cancelado") {
     return NextResponse.json({ error: "Venda já cancelada" }, { status: 409 });
   }
@@ -58,6 +67,12 @@ export async function POST(
   `;
   const creditoUsado = parseFloat(vendaCredito?.credito_gerente_usado ?? "0");
 
+  // Carregar tiny_pedido_id antes da transação
+  const [vendaTiny] = await sql`
+    SELECT tiny_pedido_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+  `;
+  const tinyPedidoId = vendaTiny?.tiny_pedido_id;
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (sql as any).begin(async (tx: typeof sql) => {
@@ -76,6 +91,38 @@ export async function POST(
     console.error("[cancelar] Falha ao cancelar venda:", err);
     const msg = err instanceof Error ? err.message : "Falha ao cancelar. Tente novamente.";
     return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
+  // Cancelar pedido no Tiny (best-effort: não bloqueia o cancelamento local)
+  if (tinyPedidoId) {
+    try {
+      const token = await ensureTinyToken();
+      const res = await fetch(
+        `https://api.tiny.com.br/public-api/v3/pedidos/${tinyPedidoId}/situacao`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({ situacao: 2 }),
+          signal: AbortSignal.timeout(10000),
+        },
+      );
+      if (res.ok) {
+        await sql`
+          UPDATE alissonerp.vendas_erp
+          SET tiny_sync_status = 'cancelado', tiny_sync_at = NOW(), tiny_sync_erro = NULL
+          WHERE id = ${vendaId}
+        `;
+        console.log(`[cancelar] Pedido Tiny ${tinyPedidoId} cancelado`);
+      } else {
+        const errBody = await res.text();
+        console.error(`[cancelar] Tiny cancelar pedido ${tinyPedidoId} falhou: ${res.status} ${errBody.slice(0, 200)}`);
+      }
+    } catch (err) {
+      console.error(`[cancelar] Tiny cancelar pedido ${tinyPedidoId} erro:`, err instanceof Error ? err.message : err);
+    }
   }
 
   return NextResponse.json({ ok: true });

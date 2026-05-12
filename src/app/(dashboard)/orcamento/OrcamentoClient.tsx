@@ -406,6 +406,27 @@ export default function OrcamentoClient({
   // disparos via `pedraSelecionada` + `derivedStoneCount`. A duplicação
   // causava race condition perdendo `corte` customizado.)
 
+  // Auto-format do textContent ao trocar de perfil (mantido do main).
+  // Bordas Elevadas permite espaços/maiúsculas; outros perfis formatam.
+  useEffect(() => {
+    if (profile !== ProfileType.QuadradoCanal && params.textContent.trim()) {
+      const raw = params.textContent.replace(/\s/g, "");
+      const formatted = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : "";
+      if (formatted !== params.textContent) {
+        setParams((prev) => ({ ...prev, textContent: formatted }));
+      }
+    }
+  }, [profile]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (profile2 !== ProfileType.QuadradoCanal && params2.textContent.trim()) {
+      const raw = params2.textContent.replace(/\s/g, "");
+      const formatted = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : "";
+      if (formatted !== params2.textContent) {
+        setParams2((prev) => ({ ...prev, textContent: formatted }));
+      }
+    }
+  }, [profile2]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [clientName, setClientName] = useState("");
   const [clienteId, setClienteId] = useState<number | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2608,15 +2629,18 @@ export default function OrcamentoClient({
                 {/* Primeiro nome — incluso */}
                 <div>
                   <label className="text-[8px] text-gray-400 block">Nome principal <span className="text-emerald-500">(incluso)</span></label>
-                  <input type="text" maxLength={20} value={activeParams.textContent}
+                  <input type="text" maxLength={activeProfile === ProfileType.QuadradoCanal ? 50 : 20} value={activeParams.textContent}
                     onChange={(e) => {
-                      // Sem espaços, só 1ª letra maiúscula, resto minúsculo
-                      const raw = e.target.value.replace(/\s/g, "");
-                      if (!raw) { updateParam("textContent", ""); return; }
-                      const formatted = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
-                      updateParam("textContent", formatted);
+                      if (activeProfile === ProfileType.QuadradoCanal) {
+                        updateParam("textContent", e.target.value);
+                      } else {
+                        const raw = e.target.value.replace(/\s/g, "");
+                        if (!raw) { updateParam("textContent", ""); return; }
+                        const formatted = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+                        updateParam("textContent", formatted);
+                      }
                     }}
-                    placeholder="Nome (sem espaco)"
+                    placeholder={activeProfile === ProfileType.QuadradoCanal ? "Nome a gravar" : "Nome (sem espaco)"}
                     className="w-full px-3 py-1.5 text-[11px] rounded-lg border outline-none bg-white" style={{ borderColor: C.cremeBorder }} />
                 </div>
                 {/* Textos adicionais — R$ cada (exceto Bordas Elevadas: ilimitado e grátis) */}
@@ -2632,11 +2656,15 @@ export default function OrcamentoClient({
                         : <span className="text-amber-500">+R$ {precoGravacao.toFixed(0)}</span>}
                     </label>
                     <div className="flex gap-1">
-                      <input type="text" maxLength={20} value={txt}
+                      <input type="text" maxLength={activeProfile === ProfileType.QuadradoCanal ? 50 : 20} value={txt}
                         onChange={(e) => {
-                          const raw = e.target.value.replace(/\s/g, "");
-                          const formatted = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : "";
-                          const u = [...extras]; u[idx] = formatted; setExtras(u);
+                          if (activeProfile === ProfileType.QuadradoCanal) {
+                            const u = [...extras]; u[idx] = e.target.value; setExtras(u);
+                          } else {
+                            const raw = e.target.value.replace(/\s/g, "");
+                            const formatted = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : "";
+                            const u = [...extras]; u[idx] = formatted; setExtras(u);
+                          }
                         }}
                         placeholder="Nome ou data (sem espaco)"
                         className="flex-1 px-3 py-1.5 text-[11px] rounded-lg border outline-none bg-white" style={{ borderColor: C.cremeBorder }} />

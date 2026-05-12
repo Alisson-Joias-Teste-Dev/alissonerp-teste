@@ -205,15 +205,12 @@ export default function Sidebar() {
         table: "notificacoes",
       }, () => {
         fetchContagem();
-        // Se drawer estiver aberto, recarrega lista
-        setDrawerAberto((prev) => {
-          if (prev) abrirDrawer();
-          return prev;
-        });
+        // Se drawer estiver aberto, recarrega lista na próxima tick
+        setDrawerAberto((prev) => prev); // força re-render
+        setTimeout(() => abrirDrawer(), 0);
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-   
   }, [fetchContagem]);
 
   useEffect(() => {

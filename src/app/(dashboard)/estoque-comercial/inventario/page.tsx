@@ -13,6 +13,7 @@ interface Inventario {
   local_nome: string;
   status: string;
   obs: string | null;
+  categoria: string | null;
   data_abertura: string;
   data_conclusao: string | null;
   total_itens: number;
@@ -23,6 +24,8 @@ interface Inventario {
 }
 
 interface LocalEstoque { id: number; nome: string; }
+interface Categoria { categoria: string; total_produtos: number; total_estoque?: number; }
+
 
 function fmtDate(d: string) {
   return new Date(d).toLocaleString("pt-BR", {
@@ -40,14 +43,17 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> 
 
 export default function InventarioPage() {
   const router = useRouter();
-  const [items,   setItems]   = useState<Inventario[]>([]);
-  const [locais,  setLocais]  = useState<LocalEstoque[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [novoOpen, setNovoOpen] = useState(false);
-  const [novoLocal, setNovoLocal] = useState(2);
-  const [novoObs,   setNovoObs]   = useState("");
-  const [criando,   setCriando]   = useState(false);
-  const [err,        setErr]      = useState("");
+  const [items,       setItems]      = useState<Inventario[]>([]);
+  const [locais,      setLocais]     = useState<LocalEstoque[]>([]);
+  const [categorias,  setCategorias] = useState<Categoria[]>([]);
+  const [loading,     setLoading]    = useState(true);
+  const [novoOpen,    setNovoOpen]   = useState(false);
+  const [novoLocal,   setNovoLocal]  = useState(2);
+  const [novoCategoria, setNovoCategoria] = useState("");
+  const [novoObs,     setNovoObs]    = useState("");
+  const [criando,     setCriando]    = useState(false);
+  const [err,          setErr]       = useState("");
+
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -64,6 +70,18 @@ export default function InventarioPage() {
     } catch { /* ignore */ }
   }, []);
 
+  const fetchCategorias = useCallback(async (localId: number) => {
+    try {
+      const r = await fetch(`/api/estoque-comercial/categorias?local_estoque_id=${localId}`);
+      if (r.ok) setCategorias(await r.json());
+    } catch { /* ignore */ }
+  }, []);
+
+  // Carregar categorias ao abrir modal ou mudar local
+  useEffect(() => {
+    if (novoOpen) fetchCategorias(novoLocal);
+  }, [novoOpen, novoLocal, fetchCategorias]);
+
   useEffect(() => { fetchData(); fetchLocais(); }, [fetchData, fetchLocais]);
 
   async function handleCriar() {
@@ -72,8 +90,13 @@ export default function InventarioPage() {
       const r = await fetch("/api/estoque-comercial/inventario", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ local_estoque_id: novoLocal, obs: novoObs || undefined }),
+        body: JSON.stringify({
+          local_estoque_id: novoLocal,
+          obs: novoObs || undefined,
+          categoria: novoCategoria || undefined,
+        }),
       });
+
       if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? "Erro");
       const data = await r.json() as { id: number };
       setNovoOpen(false);
@@ -148,6 +171,12 @@ export default function InventarioPage() {
                         Inventario #{inv.id}
                       </span>
                       <span className="text-xs text-gray-400 ml-2">{inv.local_nome}</span>
+                      {inv.categoria && (
+                        <span className="text-[10px] ml-1 px-1.5 py-0.5 rounded" style={{ background: "#F3EADA", color: "#7A5A4A" }}>
+                          {inv.categoria}
+                        </span>
+                      )}
+
                     </div>
                   </div>
                   <span
@@ -197,9 +226,27 @@ export default function InventarioPage() {
                 className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
                 style={{ borderColor: "#E8DCC8" }}
                 value={novoLocal}
-                onChange={e => setNovoLocal(Number(e.target.value))}
+                onChange={e => { setNovoLocal(Number(e.target.value)); setNovoCategoria(""); }}
               >
                 {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+              </select>
+            </div>
+            <div className="mb-3">
+              <label className="block text-xs font-semibold mb-1 text-gray-500">
+                Categoria <span className="text-gray-400 font-normal">(opcional — filtra os itens)</span>
+              </label>
+              <select
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                style={{ borderColor: "#E8DCC8" }}
+                value={novoCategoria}
+                onChange={e => setNovoCategoria(e.target.value)}
+              >
+                <option value="">Todas as categorias</option>
+                {categorias.map(c => (
+                  <option key={c.categoria} value={c.categoria}>
+                    {c.categoria} ({c.total_produtos} prod.)
+                  </option>
+                ))}
               </select>
             </div>
             <div className="mb-4">
@@ -212,6 +259,7 @@ export default function InventarioPage() {
               />
             </div>
             {err && <p className="text-xs text-red-500 mb-3">{err}</p>}
+
             <button
               className="w-full py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
               style={{ background: "#184036", color: "#F3EADA" }}

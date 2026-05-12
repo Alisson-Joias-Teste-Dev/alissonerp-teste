@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Package, AlertTriangle, CheckCircle, Plus, Search,
+  Package, AlertTriangle, CheckCircle, Search,
   RefreshCw, ArrowUpCircle, ArrowDownCircle, Settings2,
-  Loader2, X, ArrowRightLeft, ClipboardList,
+  Loader2, X, ClipboardList, ScanLine, Printer,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -57,128 +57,6 @@ const MOTIVOS_SAIDA = [
   { value: "ajuste_saida",    label: "Ajuste de saída"  },
   { value: "inventario",      label: "Inventário"       },
 ];
-
-// ─── AddProdutoModal ──────────────────────────────────────────────────────────
-function AddProdutoModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
-  const [query,    setQuery]    = useState("");
-  const [results,  setResults]  = useState<{ id_produto: number; nome: string; sku: string }[]>([]);
-  const [loading,  setLoading]  = useState(false);
-  const [min,      setMin]      = useState(0);
-  const [selected, setSelected] = useState<{ id_produto: number; nome: string } | null>(null);
-  const [saving,   setSaving]   = useState(false);
-  const [err,      setErr]      = useState("");
-
-  useEffect(() => {
-    if (query.length < 2) { setResults([]); return; }
-    const t = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const r = await fetch(`/api/produtos/busca?q=${encodeURIComponent(query)}&limit=8`);
-        if (r.ok) setResults(await r.json());
-      } finally { setLoading(false); }
-    }, 300);
-    return () => clearTimeout(t);
-  }, [query]);
-
-  async function handleAdd() {
-    if (!selected) return;
-    setSaving(true); setErr("");
-    try {
-      const r = await fetch(`/api/estoque-comercial/config/${selected.id_produto}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ estoque_minimo: min, ativo: true }),
-      });
-      if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? "Erro");
-      onAdded();
-      onClose();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Erro");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-bold text-lg" style={{ color: "#184036" }}>Adicionar Produto</h2>
-          <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
-        </div>
-
-        {!selected ? (
-          <>
-            <div className="relative mb-3">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                className="w-full border rounded-lg pl-8 pr-3 py-2 text-sm outline-none"
-                style={{ borderColor: "#E8DCC8" }}
-                placeholder="Buscar produto por nome ou SKU..."
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                autoFocus
-              />
-            </div>
-            {loading && <p className="text-xs text-gray-400 text-center py-2">Buscando...</p>}
-            <ul className="divide-y max-h-56 overflow-y-auto">
-              {results.map(p => (
-                <li
-                  key={p.id_produto}
-                  className="py-2 px-1 cursor-pointer hover:bg-gray-50 rounded"
-                  onClick={() => { setSelected(p); setQuery(""); setResults([]); }}
-                >
-                  <p className="text-sm font-medium" style={{ color: "#184036" }}>{p.nome}</p>
-                  {p.sku && <p className="text-xs text-gray-400">{p.sku}</p>}
-                </li>
-              ))}
-              {!loading && query.length >= 2 && results.length === 0 && (
-                <li className="py-3 text-xs text-center text-gray-400">Nenhum produto encontrado</li>
-              )}
-            </ul>
-          </>
-        ) : (
-          <>
-            <div className="rounded-xl p-3 mb-4" style={{ backgroundColor: "#FAFAF7", border: "1px solid #E8DCC8" }}>
-              <p className="font-medium text-sm" style={{ color: "#184036" }}>{selected.nome}</p>
-            </div>
-            <div className="mb-4">
-              <label className="block text-xs font-semibold mb-1 text-gray-500">Estoque minimo</label>
-              <input
-                type="number"
-                min={0}
-                className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
-                style={{ borderColor: "#E8DCC8" }}
-                value={min}
-                onChange={e => setMin(Number(e.target.value))}
-              />
-              <p className="text-xs text-gray-400 mt-1">Alerta quando o saldo ficar abaixo deste valor.</p>
-            </div>
-            {err && <p className="text-xs text-red-500 mb-3">{err}</p>}
-            <div className="flex gap-2">
-              <button
-                className="flex-1 py-2 rounded-xl text-sm font-medium"
-                style={{ background: "#F3EADA", color: "#184036" }}
-                onClick={() => setSelected(null)}
-              >
-                Voltar
-              </button>
-              <button
-                className="flex-1 py-2 rounded-xl text-sm font-medium flex items-center justify-center gap-1"
-                style={{ background: "#184036", color: "#F3EADA" }}
-                onClick={handleAdd}
-                disabled={saving}
-              >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-                Adicionar
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ─── MovimentacaoModal ────────────────────────────────────────────────────────
 function MovimentacaoModal({
@@ -309,7 +187,6 @@ export default function EstoqueComercialClient() {
   const [items,     setItems]     = useState<ItemEstoque[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState("");
-  const [addOpen,   setAddOpen]   = useState(false);
   const [movModal,  setMovModal]  = useState<MovModal | null>(null);
   const [locais,    setLocais]    = useState<LocalEstoque[]>([]);
 
@@ -357,13 +234,22 @@ export default function EstoqueComercialClient() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => router.push("/estoque-comercial/transferencias")}
+            onClick={() => router.push("/rfid/testar")}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium hover:bg-gray-100 transition-colors"
             style={{ color: "#184036" }}
-            title="Transferencias"
+            title="Imprimir etiqueta RFID"
           >
-            <ArrowRightLeft size={15} />
-            <span className="hidden sm:inline">Transferencias</span>
+            <Printer size={15} />
+            <span className="hidden sm:inline">Etiqueta</span>
+          </button>
+          <button
+            onClick={() => router.push("/estoque-comercial/entrada-scanner")}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium hover:bg-gray-100 transition-colors"
+            style={{ color: "#184036" }}
+            title="Entrada por scanner"
+          >
+            <ScanLine size={15} />
+            <span className="hidden sm:inline">Scanner</span>
           </button>
           <button
             onClick={() => router.push("/estoque-comercial/inventario")}
@@ -380,14 +266,6 @@ export default function EstoqueComercialClient() {
             title="Atualizar"
           >
             <RefreshCw size={16} className="text-gray-500" />
-          </button>
-          <button
-            onClick={() => setAddOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
-            style={{ background: "#184036", color: "#F3EADA" }}
-          >
-            <Plus size={15} />
-            Adicionar produto
           </button>
         </div>
       </div>
@@ -439,13 +317,7 @@ export default function EstoqueComercialClient() {
             {search ? "Nenhum produto encontrado." : "Nenhum produto no estoque comercial."}
           </p>
           {!search && (
-            <button
-              className="mt-3 text-sm underline"
-              style={{ color: "#184036" }}
-              onClick={() => setAddOpen(true)}
-            >
-              Adicionar o primeiro produto
-            </button>
+            <p className="text-xs text-gray-400 mt-1">Use o inventário para ajustar o estoque.</p>
           )}
         </div>
       ) : (
@@ -561,12 +433,6 @@ export default function EstoqueComercialClient() {
       )}
 
       {/* Modals */}
-      {addOpen && (
-        <AddProdutoModal
-          onClose={() => setAddOpen(false)}
-          onAdded={fetchData}
-        />
-      )}
       {movModal && (
         <MovimentacaoModal
           mov={movModal}

@@ -19,10 +19,11 @@ export async function GET(
   const [inventario] = await sql`
     SELECT
       i.id, i.local_estoque_id, le.nome AS local_nome,
-      i.status, i.obs, i.data_abertura, i.data_conclusao,
+      i.status, i.obs, i.categoria, i.data_abertura, i.data_conclusao,
       uc.email AS criado_por_email,
       uf.email AS concluido_por_email
     FROM alissonerp.inventarios_comercial i
+
     LEFT JOIN alissonerp.locais_estoque le ON le.id = i.local_estoque_id
     LEFT JOIN auth.users uc ON uc.id = i.created_by
     LEFT JOIN auth.users uf ON uf.id = i.concluido_por
