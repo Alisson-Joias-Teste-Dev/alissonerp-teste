@@ -554,6 +554,37 @@ export default function OrcamentoClient({
     const raw = (config as any)?.risco_depth;
     return raw ? Number(raw) : 0.2;
   });
+  // ── Promoção do orçamento ──
+  // Datas no formato YYYY-MM-DD (input type="date"). Quando hoje ∈ [inicio, fim]
+  // E a faixa de preço tem `desconto_promocao > 0`, o R$/g é reduzido.
+  const [promocaoInicio, setPromocaoInicio] = useState<string>(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = (config as any)?.promocao_inicio;
+    return raw ? String(raw).slice(0, 10) : "";
+  });
+  const [promocaoFim, setPromocaoFim] = useState<string>(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = (config as any)?.promocao_fim;
+    return raw ? String(raw).slice(0, 10) : "";
+  });
+  // Promoção está ATIVA hoje?
+  const promocaoAtiva = useMemo(() => {
+    if (!promocaoInicio || !promocaoFim) return false;
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const ini = new Date(promocaoInicio + "T00:00:00");
+    const fim = new Date(promocaoFim + "T23:59:59");
+    return hoje >= ini && hoje <= fim;
+  }, [promocaoInicio, promocaoFim]);
+  // Status visual da promo: ativa / programada (futura) / expirada / sem datas
+  const promocaoStatus: "ativa" | "programada" | "expirada" | "nenhuma" = useMemo(() => {
+    if (!promocaoInicio || !promocaoFim) return "nenhuma";
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const ini = new Date(promocaoInicio + "T00:00:00");
+    const fim = new Date(promocaoFim + "T23:59:59");
+    if (hoje < ini) return "programada";
+    if (hoje > fim) return "expirada";
+    return "ativa";
+  }, [promocaoInicio, promocaoFim]);
   // Espessura (altura) mínima por modelo de aliança — bloqueia inputs abaixo desse valor.
   // Chaves no JSONB são snake_case; profile (ProfileType) é PascalCase. Mapa abaixo
   // converte entre os dois.
@@ -978,9 +1009,16 @@ export default function OrcamentoClient({
   }, [params2.hasStones, params2.stoneType, params2.stoneSize]);
 
   const weightEst = useMemo(() => computeWeight(params, profile), [params, profile]);
+  // Helper: pega o desconto da promoção da faixa que cobre esse peso (0 se inativa)
+  function descPromoParaPeso(weight: number): number {
+    if (!promocaoAtiva) return 0;
+    const { activeCategory } = computeCalculatedCategories(params.startMkp, pricingCategories, weight);
+    return Number(activeCategory?.desconto_promocao ?? 0);
+  }
   const pricing: PricingResult = useMemo(
-    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, params.discountPercent, pricingCategories),
-    [weightEst.weight, params.goldPrice, params.startMkp, params.discountPercent, pricingCategories]
+    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, params.discountPercent, pricingCategories, descPromoParaPeso(weightEst.weight)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [weightEst.weight, params.goldPrice, params.startMkp, params.discountPercent, pricingCategories, promocaoAtiva]
   );
   const cameraDistance = useMemo(() => {
     const radius = params.diameter / 2 + params.height + params.width * 0.6;
@@ -991,8 +1029,9 @@ export default function OrcamentoClient({
   // Pricing aliança 2 (par)
   const weightEst2 = useMemo(() => computeWeight(params2, profile2), [params2, profile2]);
   const pricing2: PricingResult = useMemo(
-    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, params2.discountPercent, pricingCategories),
-    [weightEst2.weight, params2.goldPrice, params2.startMkp, params2.discountPercent, pricingCategories]
+    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, params2.discountPercent, pricingCategories, descPromoParaPeso(weightEst2.weight)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [weightEst2.weight, params2.goldPrice, params2.startMkp, params2.discountPercent, pricingCategories, promocaoAtiva]
   );
   const cameraDistance2 = useMemo(() => {
     const radius = params2.diameter / 2 + params2.height + params2.width * 0.6;
@@ -1204,6 +1243,8 @@ export default function OrcamentoClient({
           risco_depth: riscoDepth,
           preco_gravacao: precoGravacao,
           espessura_minima_por_modelo: espessuraMinimaPorModelo,
+          promocao_inicio: promocaoInicio || null,
+          promocao_fim: promocaoFim || null,
         }),
       });
       if (!res.ok) throw new Error();
@@ -1224,10 +1265,11 @@ export default function OrcamentoClient({
     URL.revokeObjectURL(url);
   }, [currentMesh]);
 
-  // Pricing peça personalizada
+  // Pricing peça personalizada (também respeita a promoção quando ativa)
   const pecaPricing = useMemo(
-    () => computePricing(pecaPeso, cotacaoOuro, params.startMkp, params.discountPercent, pricingCategories),
-    [pecaPeso, cotacaoOuro, params.startMkp, params.discountPercent, pricingCategories]
+    () => computePricing(pecaPeso, cotacaoOuro, params.startMkp, params.discountPercent, pricingCategories, descPromoParaPeso(pecaPeso)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pecaPeso, cotacaoOuro, params.startMkp, params.discountPercent, pricingCategories, promocaoAtiva]
   );
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1920,25 +1962,111 @@ export default function OrcamentoClient({
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
           <h3 className="text-sm font-bold text-gray-800">Faixas de preco do ouro</h3>
           <p className="text-[10px] text-gray-400">Markup base: <strong>{params.startMkp}×</strong> · Ouro: <strong>R$ {cotacaoOuro.toFixed(2)}/g</strong></p>
+
+          {/* Bloco de Promoção */}
+          <div className="rounded-lg border p-3 space-y-2" style={{
+            borderColor: promocaoStatus === "ativa" ? "#10B981" : C.cremeBorder,
+            backgroundColor: promocaoStatus === "ativa" ? "#F0FDF4" : "#FAFAF7",
+          }}>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: C.esmeralda }}>Promoção</span>
+                {promocaoStatus === "ativa"     && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: "#10B981", color: "#fff" }}>🟢 ATIVA</span>}
+                {promocaoStatus === "programada" && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: "#0EA5E9", color: "#fff" }}>⏸ PROGRAMADA</span>}
+                {promocaoStatus === "expirada"  && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: "#6B7280", color: "#fff" }}>⚫ EXPIRADA</span>}
+                {promocaoStatus === "nenhuma"   && <span className="text-[10px] text-gray-400">sem datas</span>}
+              </div>
+              {(promocaoInicio || promocaoFim) && (
+                <button
+                  type="button"
+                  onClick={() => { setPromocaoInicio(""); setPromocaoFim(""); }}
+                  className="text-[10px] text-red-500 hover:text-red-700 font-semibold"
+                >
+                  Limpar promoção
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 mb-1">Início</label>
+                <input
+                  type="date"
+                  value={promocaoInicio}
+                  onChange={(e) => setPromocaoInicio(e.target.value)}
+                  className="w-full px-2 py-1.5 text-sm rounded-lg border outline-none"
+                  style={{ borderColor: C.cremeBorder }}
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 mb-1">Fim</label>
+                <input
+                  type="date"
+                  value={promocaoFim}
+                  onChange={(e) => setPromocaoFim(e.target.value)}
+                  min={promocaoInicio || undefined}
+                  className="w-full px-2 py-1.5 text-sm rounded-lg border outline-none"
+                  style={{ borderColor: C.cremeBorder }}
+                />
+              </div>
+            </div>
+            <p className="text-[10px] text-gray-500">
+              Dentro do período, cada faixa aplica seu <strong>Desc. promo (%)</strong> direto no R$/g final.
+              Fora do período, preço cheio.
+            </p>
+          </div>
+
           <table className="w-full text-sm">
             <thead><tr className="border-b" style={{ borderColor: C.cremeBorder }}>
               <th className="text-left py-2 text-xs text-gray-500">Nome</th>
               <th className="text-left py-2 text-xs text-gray-500">Peso max</th>
               <th className="text-left py-2 text-xs text-gray-500">Variacao</th>
               <th className="text-right py-2 text-xs text-gray-500">Mkp</th>
+              <th className="text-right py-2 text-xs text-gray-500">Desc. promo (%)</th>
               <th className="text-right py-2 text-xs text-gray-500">R$/g</th>
               <th className="w-8"></th>
             </tr></thead>
             <tbody>{pricingCategories.map((cat, i) => {
               const mkpFaixa = catCalc[i]?.targetMkp ?? params.startMkp;
-              const valorGrama = cotacaoOuro * mkpFaixa;
+              const valorGramaCheio = cotacaoOuro * mkpFaixa;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const descPromo = Number((cat as any).desconto_promocao ?? 0);
+              const valorGramaPromo = promocaoAtiva && descPromo > 0
+                ? valorGramaCheio * (1 - descPromo / 100)
+                : valorGramaCheio;
+              const mostraDesconto = promocaoAtiva && descPromo > 0 && valorGramaPromo !== valorGramaCheio;
               return (
               <tr key={cat.id} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
                 <td className="py-2 pr-2"><input type="text" value={cat.name} onChange={(e) => { const u = [...pricingCategories]; u[i] = { ...u[i], name: e.target.value }; setPricingCategories(u); }} className="w-full px-2 py-1 text-sm rounded border outline-none" style={{ borderColor: C.cremeBorder }} /></td>
                 <td className="py-2 pr-2"><input type="number" value={cat.maxWeight} step={0.5} onChange={(e) => { const u = [...pricingCategories]; u[i] = { ...u[i], maxWeight: parseFloat(e.target.value) || 0 }; setPricingCategories(u); }} className="w-24 px-2 py-1 text-sm rounded border outline-none" style={{ borderColor: C.cremeBorder }} /></td>
                 <td className="py-2 pr-2"><input type="number" value={cat.variation} step={0.1} onChange={(e) => { const u = [...pricingCategories]; u[i] = { ...u[i], variation: parseFloat(e.target.value) || 0 }; setPricingCategories(u); }} className="w-20 px-2 py-1 text-sm rounded border outline-none" style={{ borderColor: C.cremeBorder }} /></td>
                 <td className="py-2 pr-2 text-right font-mono text-[11px] font-bold" style={{ color: C.esmeralda }}>{mkpFaixa.toFixed(1)}×</td>
-                <td className="py-2 pr-2 text-right font-mono text-[11px] font-bold" style={{ color: C.esmeralda }}>R$ {valorGrama.toFixed(2).replace(".", ",")}</td>
+                <td className="py-2 pr-2">
+                  <input
+                    type="number"
+                    value={descPromo || ""}
+                    step={1} min={0} max={100}
+                    placeholder="0"
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      const u = [...pricingCategories];
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      (u[i] as any) = { ...u[i], desconto_promocao: isNaN(v) ? 0 : Math.max(0, Math.min(100, v)) };
+                      setPricingCategories(u);
+                    }}
+                    className="w-20 px-2 py-1 text-sm rounded border outline-none text-right"
+                    style={{ borderColor: C.cremeBorder }}
+                  />
+                </td>
+                <td className="py-2 pr-2 text-right">
+                  {mostraDesconto ? (
+                    <div className="flex flex-col items-end">
+                      <span className="text-[11px] font-mono font-bold" style={{ color: "#10B981" }}>R$ {valorGramaPromo.toFixed(2).replace(".", ",")}</span>
+                      <span className="text-[9px] font-mono line-through text-gray-400">R$ {valorGramaCheio.toFixed(2).replace(".", ",")}</span>
+                    </div>
+                  ) : (
+                    <span className="font-mono text-[11px] font-bold" style={{ color: C.esmeralda }}>R$ {valorGramaCheio.toFixed(2).replace(".", ",")}</span>
+                  )}
+                </td>
                 <td><button onClick={() => setPricingCategories(pricingCategories.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 text-xs">X</button></td>
               </tr>
               );
