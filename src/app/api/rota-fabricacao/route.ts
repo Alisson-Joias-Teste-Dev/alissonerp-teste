@@ -29,10 +29,22 @@ interface SetorRow {
   operadores: { deposito_id: number; deposito_nome: string }[];
 }
 
+// Roles que veem TUDO (sem filtro por depósito). Outros roles (ex: ourives)
+// só veem PCPs do depósito ao qual estão vinculados.
+const ROLES_VE_TUDO = ["admin", "desenvolvedor", "gerente_fabrica", "pcp", "gerente_loja"];
+
 export async function GET() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // Filtro por depósito: leitor que NÃO é gerente/admin só vê PCPs do próprio dep.
+  const [usuario] = await sql`
+    SELECT role::text AS role, deposito_id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+  `;
+  const userRole = (usuario?.role as string | null) ?? null;
+  const userDepositoId = (usuario?.deposito_id as number | null) ?? null;
+  const filtraPorDeposito = userRole && !ROLES_VE_TUDO.includes(userRole) && userDepositoId != null;
 
   try {
     // 1. Setores ativos + colaboradores responsáveis
@@ -89,7 +101,8 @@ export async function GET() {
         pcp.operador_atribuido_id,
         dop.nome    AS operador_atribuido_nome,
         (o.produto_reposicao_id IS NOT NULL) AS eh_reposicao,
-        COALESCE(o.produto_reposicao_id, io.produto_id) AS produto_id
+        COALESCE(o.produto_reposicao_id, io.produto_id) AS produto_id,
+        prod.nome AS produto_nome
       FROM alissonerp.vw_pcp_erp v
       JOIN alissonerp.pcp pcp ON pcp.id = v.id
       JOIN alissonerp.ordens o ON o.id = v.ordem_id
@@ -102,6 +115,7 @@ export async function GET() {
         AND pr.ordem = COALESCE(pcp.rota_etapa_atual, 1)
       LEFT JOIN alissonerp.setores sr ON sr.id = pr.setor_id
       LEFT JOIN alissonerp.depositos dop ON dop.id = pcp.operador_atribuido_id
+      LEFT JOIN public.produtos prod ON prod.id_produto = COALESCE(o.produto_reposicao_id, io.produto_id)
       WHERE v.etapas_cod NOT IN ('concluido', 'cancelado')
         AND NOT EXISTS (
           SELECT 1 FROM alissonerp.servicos s3
@@ -112,6 +126,11 @@ export async function GET() {
           SELECT 1 FROM alissonerp.transferencias_ordem t
           WHERE t.pcp_id = v.id
             AND t.tipo_transferencia = 'service'
+        )
+        AND (
+          ${!filtraPorDeposito}::boolean
+          OR pcp.deposito_id = ${userDepositoId}
+          OR pcp.operador_atribuido_id = ${userDepositoId}
         )
       ORDER BY v.id DESC
       LIMIT 500

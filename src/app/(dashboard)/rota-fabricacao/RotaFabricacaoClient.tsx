@@ -7,6 +7,7 @@ import PCPDetalheModal from "@/components/forms/PCPDetalheModal";
 import ApontamentoPCPModal from "@/components/forms/ApontamentoPCPModal";
 import TransferenciaPCPModal from "@/components/forms/TransferenciaPCPModal";
 import SaidaOrdemModal from "@/components/forms/SaidaOrdemModal";
+import CadastrarRotaModal from "@/components/forms/CadastrarRotaModal";
 
 const C = {
   esmeralda:   "#184036",
@@ -40,11 +41,12 @@ interface KanbanData {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ActiveModal =
-  | { type: "detalhe";       data: OFItem }
-  | { type: "apontamento";   data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean } }
-  | { type: "transferencia"; data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean } }
-  | { type: "saida";         data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean; pesoMetalExterno?: number } }
-  | { type: "atribuir";      data: OFItem }
+  | { type: "detalhe";        data: OFItem }
+  | { type: "apontamento";    data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean } }
+  | { type: "transferencia";  data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean } }
+  | { type: "saida";          data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean; pesoMetalExterno?: number } }
+  | { type: "atribuir";       data: OFItem }
+  | { type: "cadastrar_rota"; data: { pcpId: number; produtoId: number; produtoNome: string | null } }
   | null;
 
 export default function RotaFabricacaoClient() {
@@ -134,7 +136,7 @@ export default function RotaFabricacaoClient() {
   }
 
   async function excluirSetor(s: Setor) {
-    if (!confirm(`Inativar setor "${s.nome}"? OFs ainda nesse setor cairão na coluna "Sem rota".`)) return;
+    if (!confirm(`Inativar setor "${s.nome}"? OFs ainda nesse setor cairão na coluna "Novas Ordens".`)) return;
     setSetorBusy(true); setSetorErr(null);
     try {
       const r = await fetch(`/api/setores/${s.id}`, { method: "DELETE" });
@@ -233,7 +235,7 @@ export default function RotaFabricacaoClient() {
     const pcpId = Number(pcpIdRaw);
     if (!pcpId) return;
     if (setorIdAlvo === "sem-rota") {
-      setMoverErr("Não é possível mover de volta pra 'Sem rota'. Configure a rota do produto.");
+      setMoverErr("Não é possível mover de volta pra 'Novas Ordens'. Configure a rota do produto.");
       setDraggingPcpId(null);
       return;
     }
@@ -311,6 +313,16 @@ export default function RotaFabricacaoClient() {
   function abrirAtribuir(pcp: OFItem) {
     setActiveModal({ type: "atribuir", data: pcp });
   }
+  function abrirCadastrarRota(pcp: OFItem) {
+    setActiveModal({
+      type: "cadastrar_rota",
+      data: {
+        pcpId: Number(pcp.id),
+        produtoId: Number(pcp.produto_id),
+        produtoNome: pcp.produto_nome ?? null,
+      },
+    });
+  }
   function fecharModal() { setActiveModal(null); }
   function onSuccessModal() { setActiveModal(null); carregar(); }
 
@@ -368,7 +380,9 @@ export default function RotaFabricacaoClient() {
       >
         <GripVertical size={13} />
         <span>
-          Arraste o card de uma coluna pra outra pra mover a OF entre setores. O setor alvo precisa estar na rota cadastrada do produto.
+          Ordens caem em <strong>"Novas Ordens"</strong>. Clique em <strong>"Definir Rota"</strong> no card pra
+          mapear os setores do produto — depois disso o card é distribuído automaticamente.
+          Cards já em setores podem ser arrastados pra mover entre etapas.
         </span>
       </div>
 
@@ -402,6 +416,7 @@ export default function RotaFabricacaoClient() {
                 onTransferir={abrirTransferir}
                 onSaida={abrirSaida}
                 onAtribuir={abrirAtribuir}
+                onCadastrarRota={abrirCadastrarRota}
                 editandoSetorId={editandoSetorId}
                 editandoNome={editandoNome}
                 setorBusy={setorBusy}
@@ -487,6 +502,17 @@ export default function RotaFabricacaoClient() {
           onSuccess={onSuccessModal}
         />
       )}
+      {activeModal?.type === "cadastrar_rota" && (
+        <CadastrarRotaModal
+          isOpen={true}
+          produtoId={activeModal.data.produtoId}
+          produtoNome={activeModal.data.produtoNome}
+          pcpId={activeModal.data.pcpId}
+          setoresDisponiveis={(data?.setores ?? []).map((s) => ({ id: s.id, nome: s.nome }))}
+          onClose={fecharModal}
+          onSuccess={onSuccessModal}
+        />
+      )}
     </div>
   );
 }
@@ -507,6 +533,7 @@ function KanbanColuna({
   onTransferir,
   onSaida,
   onAtribuir,
+  onCadastrarRota,
   editandoSetorId,
   editandoNome,
   setorBusy,
@@ -534,6 +561,7 @@ function KanbanColuna({
   onTransferir: (pcp: OFItem) => void;
   onSaida: (pcp: OFItem) => void;
   onAtribuir: (pcp: OFItem) => void;
+  onCadastrarRota: (pcp: OFItem) => void;
   editandoSetorId: number | null;
   editandoNome: string;
   setorBusy: boolean;
@@ -599,7 +627,7 @@ function KanbanColuna({
             />
           ) : (
             <span className="text-[11px] font-bold uppercase tracking-wider truncate" style={{ color: isSemRota ? "#374151" : (requerPeso ? "#92400E" : "#3730A3") }}>
-              {setor?.nome ?? "Sem rota"}
+              {setor?.nome ?? "Novas Ordens"}
             </span>
           )}
           <div className="flex items-center gap-1">
@@ -737,6 +765,7 @@ function KanbanColuna({
               REPO
             </span>
           ) : null;
+          const podeDefinirRota = isSemRota && of.produto_id != null;
           return (
             <div key={of.id} style={{ opacity: isDragging ? 0.4 : 1 }}>
               <KanbanCard
@@ -751,6 +780,25 @@ function KanbanColuna({
                 onAtribuir={onAtribuir}
                 extraBadges={extra}
               />
+              {/* Botão "Definir Rota" — aparece apenas nos cards de "Novas
+                  Ordens" que têm produto vinculado. Clicando, abre o modal
+                  pra gerente preencher a sequência de setores e distribuir
+                  automaticamente. */}
+              {podeDefinirRota && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onCadastrarRota(of); }}
+                  className="mt-1 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-bold border-2 border-dashed hover:bg-emerald-50"
+                  style={{ borderColor: "#10B981", color: "#059669" }}
+                >
+                  ➜ Definir Rota
+                </button>
+              )}
+              {isSemRota && of.produto_id == null && (
+                <p className="mt-1 px-2 py-1 text-[10px] text-amber-700 bg-amber-50 rounded">
+                  Sem produto vinculado — não dá pra cadastrar rota.
+                </p>
+              )}
             </div>
           );
         })}

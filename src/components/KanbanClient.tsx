@@ -2,12 +2,10 @@
 
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, FlaskConical, UserCheck, X, Loader2, SlidersHorizontal, ExternalLink } from "lucide-react";
+import { FlaskConical, UserCheck, X, Loader2, SlidersHorizontal } from "lucide-react";
 import ApontamentoPCPModal   from "@/components/forms/ApontamentoPCPModal";
 import TransferenciaPCPModal from "@/components/forms/TransferenciaPCPModal";
 import SaidaOrdemModal       from "@/components/forms/SaidaOrdemModal";
-import NovaPCPModal          from "@/components/forms/NovaPCPModal";
-import NovaFabricacaoModal   from "@/components/forms/NovaFabricacaoModal";
 import PCPDetalheModal       from "@/components/forms/PCPDetalheModal";
 import OrdemTesteModal       from "@/components/forms/OrdemTesteModal";
 import KanbanCard, {
@@ -202,8 +200,6 @@ type ActiveModal =
   | { type: "transferencia";     data: ModalState }
   | { type: "saida";             data: ModalState }
   | { type: "atribuir_operador"; data: { pcpId: number } }
-  | { type: "nova_pcp";          data: null }
-  | { type: "nova_fabricacao";   data: null }
   | { type: "ordem_teste";       data: null }
   | null;
 
@@ -420,26 +416,9 @@ export default function KanbanClient({
               Ordem Teste
             </button>
           )}
-          {(() => {
-            // Tab ativa = único tipo selecionado (ou "todos" se vazio)
-            const tipoAtivo = tiposSelecionados.size === 1
-              ? Array.from(tiposSelecionados)[0]
-              : "todos";
-            const isFabricacao = tipoAtivo === "fabricacao";
-            return (
-              <button
-                onClick={() => setActiveModal({
-                  type: isFabricacao ? "nova_fabricacao" : "nova_pcp",
-                  data: null,
-                })}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold"
-                style={{ backgroundColor: "#184036", color: "#F3EADA" }}
-              >
-                <Plus size={13} strokeWidth={2.5} />
-                {isFabricacao ? "Nova Fabricação" : "Nova Ordem"}
-              </button>
-            );
-          })()}
+          {/* Botão "Nova Ordem" removido: fábrica não cria ordens, só executa.
+              Ordens entram automaticamente via trigger trg_auto_auditoria_loja
+              quando a loja cria a ordem. */}
           <div className="relative w-full md:w-72">
             <input
               type="text"
@@ -677,30 +656,6 @@ export default function KanbanClient({
         );
       })()}
 
-      {/* Banner contextual — quando a tab Fabricação está ativa, sugere o
-          kanban especializado por setores (/rota-fabricacao). A página de
-          Rota de Fabricação organiza colunas pelos setores do produto_rota
-          e tem drag-and-drop entre setores. */}
-      {tiposSelecionados.size === 1 && tiposSelecionados.has("fabricacao") && (
-        <div
-          className="mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-lg border"
-          style={{ backgroundColor: "#FEF3C7", borderColor: "#FDE68A" }}
-        >
-          <p className="text-[13px]" style={{ color: "#78350F" }}>
-            <strong>Dica:</strong> pra visualizar as ordens de fabricação organizadas pelos
-            setores do produto (com drag-and-drop entre etapas), use o kanban especializado.
-          </p>
-          <a
-            href="/rota-fabricacao"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-semibold shrink-0"
-            style={{ backgroundColor: "#184036", color: "#F3EADA" }}
-          >
-            Abrir Rota de Fabricação
-            <ExternalLink size={12} />
-          </a>
-        </div>
-      )}
-
       {/* Kanban board */}
       <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-4 md:snap-none">
         {ETAPAS.map((etapa) => {
@@ -776,20 +731,6 @@ export default function KanbanClient({
       {activeModal?.type === "detalhe" && (
         <PCPDetalheModal
           pcp={activeModal.data}
-          onClose={handleClose}
-          onSuccess={handleSuccess}
-        />
-      )}
-      {activeModal?.type === "nova_pcp" && (
-        <NovaPCPModal
-          isOpen={true}
-          onClose={handleClose}
-          onSuccess={handleSuccess}
-        />
-      )}
-      {activeModal?.type === "nova_fabricacao" && (
-        <NovaFabricacaoModal
-          isOpen={true}
           onClose={handleClose}
           onSuccess={handleSuccess}
         />
