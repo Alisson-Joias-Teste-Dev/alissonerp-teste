@@ -91,9 +91,7 @@ interface Props {
   onCountChange?: (count: number) => void;
 }
 
-// SOMENTE LEITURA: a lista de comentários existentes fica visível para consulta,
-// mas o input de novo comentário e os botões de editar/deletar foram ocultados.
-const SOMENTE_LEITURA = true;
+const SOMENTE_LEITURA = false;
 
 export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   const { user, role } = useAuth();
