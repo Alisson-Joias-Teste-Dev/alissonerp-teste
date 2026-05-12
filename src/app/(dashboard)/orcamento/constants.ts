@@ -221,14 +221,21 @@ export function computePricing(
   goldPrice: number,
   startMkp: number,
   discountPercent: number,
-  categories: PricingCategory[]
+  categories: PricingCategory[],
+  /** Desconto da promoção (%, 0-100). Aplicado em cima do markup, ANTES
+   *  do discountPercent manual. Default 0 = comportamento original preservado. */
+  descontoPromocao: number = 0,
 ): PricingResult {
   // Busca o markup correto pela faixa de peso
   const { activeCategory } = computeCalculatedCategories(startMkp, categories, weight);
   const mkp = activeCategory?.targetMkp ?? startMkp;
   const cost = weight * goldPrice;
-  const price = cost * mkp;
-  const discountPriceRaw = price * (1 - discountPercent / 100);
+  const priceBase = cost * mkp;
+  // Aplica desconto da promoção (se houver) antes do desconto manual
+  const pricePromo = descontoPromocao > 0
+    ? priceBase * (1 - Math.min(100, Math.max(0, descontoPromocao)) / 100)
+    : priceBase;
+  const discountPriceRaw = pricePromo * (1 - discountPercent / 100);
   const discountInt = Math.round(discountPriceRaw);
   const remainder = discountInt % 10;
   const discountPrice = remainder < 5 ? discountInt - remainder : discountInt + (10 - remainder);
@@ -237,8 +244,8 @@ export function computePricing(
     category: "—",
     mkp,
     cost,
-    price,
-    discountPrice,
+    price: priceBase, // preço cheio sem promo (referência)
+    discountPrice,    // preço final com promo + desconto aplicados
   };
 }
 

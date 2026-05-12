@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
             : !isAdmin
               ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid)`
               : sql``}
-      ${visao === "aguardando_aprovacao"
+      ${(visao === "aguardando_aprovacao" || visao === "aguardando")
         ? (isAdmin
             ? sql`AND t.status = 'aguardando_aprovacao'`
             : sql`AND t.status = 'aguardando_aprovacao' AND t.responsavel_id = ${userId}::uuid`)
