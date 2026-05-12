@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft, ArrowUpCircle, ArrowDownCircle,
   Settings2, Loader2, Save, AlertTriangle,
-  RotateCcw, ArrowRightLeft, Bookmark, X,
+  RotateCcw, ArrowRightLeft, Bookmark, X, TrendingDown,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Consolidado {
@@ -197,11 +198,21 @@ function TransferirModal({
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId: number }) {
   const router  = useRouter();
+  const { role } = useAuth();
+  const podeAdminDev = role === "admin" || role === "desenvolvedor";
+
   const [data,    setData]    = useState<DetalheData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab,     setTab]     = useState<TabId>("movimentos");
   const [estornando, setEstornando] = useState<number | null>(null);
   const [transferindo, setTransferindo] = useState(false);
+
+  // Baixa manual
+  const [baixaModal,   setBaixaModal]   = useState(false);
+  const [baixaQtd,     setBaixaQtd]     = useState("1");
+  const [baixaDesc,    setBaixaDesc]    = useState("");
+  const [baixaErr,     setBaixaErr]     = useState("");
+  const [baixaLoading, setBaixaLoading] = useState(false);
 
   // Config edit
   const [editMin,    setEditMin]    = useState(0);
@@ -267,6 +278,36 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
     }
   }
 
+  async function handleBaixaManual() {
+    const qtd = parseInt(baixaQtd, 10);
+    if (!qtd || qtd < 1) { setBaixaErr("Quantidade inválida"); return; }
+    if (!baixaDesc.trim()) { setBaixaErr("Descrição obrigatória"); return; }
+    setBaixaLoading(true); setBaixaErr("");
+    try {
+      const r = await fetch("/api/estoque-comercial/movimentos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          produto_id: produtoId,
+          tipo: "saida",
+          motivo: "ajuste_saida",
+          quantidade: qtd,
+          observacao: baixaDesc.trim(),
+          local_estoque_id: 2,
+        }),
+      });
+      if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? "Erro");
+      setBaixaModal(false);
+      setBaixaQtd("1");
+      setBaixaDesc("");
+      await fetchData();
+    } catch (e) {
+      setBaixaErr(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setBaixaLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -317,6 +358,17 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
             )}
           </div>
           <div className="flex items-center gap-3 shrink-0">
+            {podeAdminDev && (
+              <button
+                onClick={() => { setBaixaModal(true); setBaixaErr(""); setBaixaQtd("1"); setBaixaDesc(""); }}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                style={{ background: "#FEE2E2", color: "#991B1B", border: "1px solid #FECACA" }}
+                title="Registrar baixa manual no estoque"
+              >
+                <TrendingDown size={15} />
+                Baixa Manual
+              </button>
+            )}
             <button
               onClick={() => setTransferindo(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
@@ -633,6 +685,76 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
           onClose={() => setTransferindo(false)}
           onDone={fetchData}
         />
+      )}
+
+      {/* Baixa Manual Modal */}
+      {baixaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <TrendingDown size={18} style={{ color: "#DC2626" }} />
+                <h2 className="font-bold text-lg" style={{ color: "#184036" }}>Baixa Manual</h2>
+              </div>
+              <button onClick={() => setBaixaModal(false)}><X size={18} className="text-gray-400" /></button>
+            </div>
+
+            <p className="text-sm text-gray-500 mb-4">{c?.nome_produto}</p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
+                <input
+                  type="number"
+                  min={1}
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                  style={{ borderColor: "#E8DCC8" }}
+                  value={baixaQtd}
+                  onChange={e => setBaixaQtd(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-gray-500">
+                  Descrição <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none resize-none"
+                  style={{ borderColor: "#E8DCC8" }}
+                  placeholder="Motivo da baixa manual..."
+                  value={baixaDesc}
+                  onChange={e => setBaixaDesc(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {baixaErr && (
+              <p className="text-xs text-red-500 mt-2 flex items-center gap-1">
+                <AlertTriangle size={12} /> {baixaErr}
+              </p>
+            )}
+
+            <div className="flex gap-2 mt-5">
+              <button
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium border"
+                style={{ color: "#6B7280", borderColor: "#E5E7EB" }}
+                onClick={() => setBaixaModal(false)}
+                disabled={baixaLoading}
+              >
+                Cancelar
+              </button>
+              <button
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
+                style={{ background: "#DC2626", color: "#fff" }}
+                onClick={handleBaixaManual}
+                disabled={baixaLoading}
+              >
+                {baixaLoading ? <Loader2 size={14} className="animate-spin" /> : <TrendingDown size={14} />}
+                Confirmar Baixa
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
