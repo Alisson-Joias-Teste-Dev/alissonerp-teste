@@ -596,6 +596,73 @@ export default function KanbanClient({
         </div>
       </div>
 
+      {/* Tabs de fluxo — atalho rápido pra alternar entre Serviço e Fabricação.
+          Sincronizado com tiposSelecionados: se exatamente 1 tipo está marcado,
+          a tab correspondente fica ativa. "Todos" = nenhum filtro de tipo. */}
+      {(() => {
+        const tipoTabAtual: "todos" | TipoFiltro =
+          tiposSelecionados.size === 1
+            ? (Array.from(tiposSelecionados)[0] as TipoFiltro)
+            : "todos";
+        const TABS: Array<{ key: "todos" | TipoFiltro; label: string }> = [
+          { key: "todos",      label: "Todos" },
+          { key: "servico",    label: "Serviço" },
+          { key: "fabricacao", label: "Fabricação" },
+        ];
+        const setTab = (key: "todos" | TipoFiltro) => {
+          if (key === "todos") {
+            setTiposSelecionados(new Set());
+          } else {
+            setTiposSelecionados(new Set([key]));
+          }
+        };
+        // Conta por tipo (com base nos filtros não-tipo já aplicados)
+        const contagem = baseList.reduce(
+          (acc: Record<string, number>, p: PCPItem) => {
+            const t = p.tipo_ordem ?? "";
+            (Object.keys(TIPO_FILTRO_ENUMS) as TipoFiltro[]).forEach((k) => {
+              if (TIPO_FILTRO_ENUMS[k].includes(t)) acc[k] = (acc[k] ?? 0) + 1;
+            });
+            acc.todos = (acc.todos ?? 0) + 1;
+            return acc;
+          },
+          {} as Record<string, number>
+        );
+
+        return (
+          <div className="mb-4 flex gap-1 border-b" style={{ borderColor: "#E8DCC8" }}>
+            {TABS.map((t) => {
+              const ativo = tipoTabAtual === t.key;
+              const n = contagem[t.key] ?? 0;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  className="px-4 py-2 text-[13px] font-semibold transition-colors -mb-px border-b-2"
+                  style={{
+                    borderBottomColor: ativo ? "#184036" : "transparent",
+                    color: ativo ? "#184036" : "#6B7280",
+                    backgroundColor: ativo ? "#F3EADA50" : "transparent",
+                  }}
+                >
+                  {t.label}
+                  <span
+                    className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{
+                      backgroundColor: ativo ? "#184036" : "#E8DCC8",
+                      color: ativo ? "#F3EADA" : "#6B7280",
+                    }}
+                  >
+                    {n}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {/* Kanban board */}
       <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-4 md:snap-none">
         {ETAPAS.map((etapa) => {
