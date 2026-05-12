@@ -663,6 +663,108 @@ export default function OrcamentoClient({
     }
   }
 
+  // ── Histórico de campanhas de promoção ──
+  // Lista de campanhas salvas (nome + datas + descontos). Permite reativar
+  // promoções antigas sem redigitar tudo.
+  interface PromoHistorico {
+    id: number;
+    nome: string;
+    data_inicio: string;
+    data_fim: string;
+    descontos: Array<{ categoria_id?: number; nome?: string; desconto_promocao?: number }>;
+    criado_em: string;
+    ativada_em: string | null;
+  }
+  const [campanhaNome, setCampanhaNome] = useState("");
+  const [promocoesHistorico, setPromocoesHistorico] = useState<PromoHistorico[]>([]);
+  const [savingPromocao, setSavingPromocao] = useState(false);
+  const [promocaoMsg, setPromocaoMsg] = useState<string | null>(null);
+
+  // Carrega histórico ao montar (só pra quem tem permissão de config — falha silenciosa)
+  useEffect(() => {
+    if (!canManageConfig) return;
+    fetch("/api/orcamento/promocoes")
+      .then((r) => r.ok ? r.json() : { promocoes: [] })
+      .then((d) => setPromocoesHistorico(Array.isArray(d?.promocoes) ? d.promocoes : []))
+      .catch(() => { /* silencioso */ });
+  }, [canManageConfig]);
+
+  async function salvarPromocao() {
+    const nome = campanhaNome.trim();
+    if (!nome) { setPromocaoMsg("Informe o nome da campanha"); return; }
+    if (!promocaoInicio || !promocaoFim) { setPromocaoMsg("Defina início e fim"); return; }
+    setSavingPromocao(true); setPromocaoMsg(null);
+    try {
+      const descontos = pricingCategories.map((c) => ({
+        categoria_id: c.id,
+        nome: c.name,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        desconto_promocao: Number((c as any).desconto_promocao ?? 0),
+      }));
+      const res = await fetch("/api/orcamento/promocoes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nome,
+          data_inicio: promocaoInicio,
+          data_fim: promocaoFim,
+          descontos,
+        }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setPromocaoMsg((b as { error?: string }).error ?? `Erro ${res.status}`);
+        return;
+      }
+      const data = await res.json();
+      if (data?.promocao) {
+        setPromocoesHistorico((prev) => [data.promocao, ...prev]);
+      }
+      setCampanhaNome("");
+      setPromocaoMsg("Campanha salva e ativada!");
+      setTimeout(() => setPromocaoMsg(null), 3000);
+    } catch (e) {
+      setPromocaoMsg(e instanceof Error ? e.message : "Erro de rede");
+    } finally {
+      setSavingPromocao(false);
+    }
+  }
+
+  async function ativarPromocaoHistorico(promo: PromoHistorico) {
+    setSavingPromocao(true); setPromocaoMsg(null);
+    try {
+      const res = await fetch(`/api/orcamento/promocoes/${promo.id}/ativar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setPromocaoMsg((b as { error?: string }).error ?? `Erro ${res.status}`);
+        return;
+      }
+      // Atualiza UI local: datas + descontos por categoria
+      setPromocaoInicio(String(promo.data_inicio).slice(0, 10));
+      setPromocaoFim(String(promo.data_fim).slice(0, 10));
+      const mapDesc = new Map<number, number>();
+      for (const d of promo.descontos) {
+        if (d?.categoria_id != null) mapDesc.set(Number(d.categoria_id), Number(d.desconto_promocao ?? 0));
+      }
+      setPricingCategories((prev) => prev.map((c) => ({
+        ...c,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        desconto_promocao: mapDesc.has(c.id) ? (mapDesc.get(c.id) ?? 0) : 0,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)));
+      setPromocaoMsg(`"${promo.nome}" reativada!`);
+      setTimeout(() => setPromocaoMsg(null), 3000);
+    } catch (e) {
+      setPromocaoMsg(e instanceof Error ? e.message : "Erro de rede");
+    } finally {
+      setSavingPromocao(false);
+    }
+  }
+
   const updateParam = <K extends keyof RingParams>(key: K, value: RingParams[K]) => {
     const setter = activeRing === 1 ? setParams : setParams2;
     setter((prev) => {
@@ -1015,10 +1117,22 @@ export default function OrcamentoClient({
     const { activeCategory } = computeCalculatedCategories(params.startMkp, pricingCategories, weight);
     return Number(activeCategory?.desconto_promocao ?? 0);
   }
+  // Desconto efetivo no orçamento = max(manual da vendedora, promoção da faixa).
+  // Promo entra direto no campo desconto — a faixa_comissao (DB) então
+  // aplica a tier mínima automaticamente quando esse % cair sobre a venda.
+  const descPromo1 = descPromoParaPeso(weightEst.weight);
+  const effDiscount1 = Math.max(params.discountPercent, descPromo1);
+  // Vendedora (sem canManageConfig) não pode mexer no desconto quando promo ativa pra faixa
+  const lockDiscount1 = !canManageConfig && descPromo1 > 0;
   const pricing: PricingResult = useMemo(
-    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, params.discountPercent, pricingCategories, descPromoParaPeso(weightEst.weight)),
+    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, effDiscount1, pricingCategories, 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [weightEst.weight, params.goldPrice, params.startMkp, params.discountPercent, pricingCategories, promocaoAtiva]
+    [weightEst.weight, params.goldPrice, params.startMkp, effDiscount1, pricingCategories]
+  );
+  // Preço cheio (sem promo + sem desconto manual) — usado para mostrar "De R$ X"
+  const pricingCheio: PricingResult = useMemo(
+    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, 0, pricingCategories, 0),
+    [weightEst.weight, params.goldPrice, params.startMkp, pricingCategories]
   );
   const cameraDistance = useMemo(() => {
     const radius = params.diameter / 2 + params.height + params.width * 0.6;
@@ -1028,10 +1142,17 @@ export default function OrcamentoClient({
 
   // Pricing aliança 2 (par)
   const weightEst2 = useMemo(() => computeWeight(params2, profile2), [params2, profile2]);
+  const descPromo2 = descPromoParaPeso(weightEst2.weight);
+  const effDiscount2 = Math.max(params2.discountPercent, descPromo2);
+  const lockDiscount2 = !canManageConfig && descPromo2 > 0;
   const pricing2: PricingResult = useMemo(
-    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, params2.discountPercent, pricingCategories, descPromoParaPeso(weightEst2.weight)),
+    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories, 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [weightEst2.weight, params2.goldPrice, params2.startMkp, params2.discountPercent, pricingCategories, promocaoAtiva]
+    [weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories]
+  );
+  const pricingCheio2: PricingResult = useMemo(
+    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, 0, pricingCategories, 0),
+    [weightEst2.weight, params2.goldPrice, params2.startMkp, pricingCategories]
   );
   const cameraDistance2 = useMemo(() => {
     const radius = params2.diameter / 2 + params2.height + params2.width * 0.6;
@@ -1266,10 +1387,12 @@ export default function OrcamentoClient({
   }, [currentMesh]);
 
   // Pricing peça personalizada (também respeita a promoção quando ativa)
+  const descPromoPeca = descPromoParaPeso(pecaPeso);
+  const effDiscountPeca = Math.max(params.discountPercent, descPromoPeca);
   const pecaPricing = useMemo(
-    () => computePricing(pecaPeso, cotacaoOuro, params.startMkp, params.discountPercent, pricingCategories, descPromoParaPeso(pecaPeso)),
+    () => computePricing(pecaPeso, cotacaoOuro, params.startMkp, effDiscountPeca, pricingCategories, 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pecaPeso, cotacaoOuro, params.startMkp, params.discountPercent, pricingCategories, promocaoAtiva]
+    [pecaPeso, cotacaoOuro, params.startMkp, effDiscountPeca, pricingCategories]
   );
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -2013,6 +2136,64 @@ export default function OrcamentoClient({
               Dentro do período, cada faixa aplica seu <strong>Desc. promo (%)</strong> direto no R$/g final.
               Fora do período, preço cheio.
             </p>
+
+            {/* Nome da campanha + Salvar */}
+            <div className="pt-2 border-t" style={{ borderColor: C.cremeBorder }}>
+              <label className="block text-[10px] font-medium text-gray-500 mb-1">Nome da campanha</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={campanhaNome}
+                  onChange={(e) => setCampanhaNome(e.target.value)}
+                  placeholder="Ex: Dia das Mães 2025"
+                  className="flex-1 px-2 py-1.5 text-sm rounded-lg border outline-none"
+                  style={{ borderColor: C.cremeBorder }}
+                />
+                <button
+                  type="button"
+                  onClick={salvarPromocao}
+                  disabled={savingPromocao || !campanhaNome.trim() || !promocaoInicio || !promocaoFim}
+                  className="px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50"
+                  style={{ backgroundColor: C.esmeralda, color: "#fff" }}
+                >
+                  {savingPromocao ? "Salvando..." : "Salvar promoção"}
+                </button>
+              </div>
+              {promocaoMsg && (
+                <p className={`text-[10px] mt-1 ${promocaoMsg.includes("Erro") || promocaoMsg.includes("Informe") || promocaoMsg.includes("Defina") ? "text-red-500" : "text-emerald-600"}`}>
+                  {promocaoMsg}
+                </p>
+              )}
+            </div>
+
+            {/* Histórico */}
+            {promocoesHistorico.length > 0 && (
+              <div className="pt-2 border-t space-y-1" style={{ borderColor: C.cremeBorder }}>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Histórico ({promocoesHistorico.length})</p>
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {promocoesHistorico.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded border bg-white" style={{ borderColor: C.cremeBorder }}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold truncate" style={{ color: C.esmeralda }}>{p.nome}</p>
+                        <p className="text-[10px] text-gray-500">
+                          {String(p.data_inicio).slice(0, 10)} → {String(p.data_fim).slice(0, 10)}
+                          {p.ativada_em && <span className="ml-2 text-emerald-600">• ativada</span>}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => ativarPromocaoHistorico(p)}
+                        disabled={savingPromocao}
+                        className="text-[10px] font-bold px-2 py-1 rounded disabled:opacity-50"
+                        style={{ borderColor: C.cremeBorder, backgroundColor: "#F0FDF4", color: "#059669", border: "1px solid #D1FAE5" }}
+                      >
+                        Ativar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <table className="w-full text-sm">
@@ -2860,35 +3041,8 @@ export default function OrcamentoClient({
           {/* Resultado compacto */}
           <div className="rounded-xl border px-4 py-2.5 shrink-0" style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}>
             <div className="flex items-center justify-between gap-4">
-              {allianceMode === "par" ? (
-                <>
-                  <Pill
-                    label={showRawWeight ? "Peso 1 (real)" : "Peso 1"}
-                    value={`${(showRawWeight ? weightEst.weightRaw : pricing.weight).toFixed(showRawWeight ? 3 : 1)}g`}
-                    onDoubleClick={toggleRawWeight}
-                    title={showRawWeight ? `Arredondado: ${pricing.weight.toFixed(1)}g (clique 2× para voltar)` : `Peso real: ${weightEst.weightRaw.toFixed(3)}g (clique 2× para ver)`}
-                  />
-                  <Pill
-                    label={showRawWeight ? "Peso 2 (real)" : "Peso 2"}
-                    value={`${(showRawWeight ? weightEst2.weightRaw : pricing2.weight).toFixed(showRawWeight ? 3 : 1)}g`}
-                    onDoubleClick={toggleRawWeight}
-                    title={showRawWeight ? `Arredondado: ${pricing2.weight.toFixed(1)}g (clique 2× para voltar)` : `Peso real: ${weightEst2.weightRaw.toFixed(3)}g (clique 2× para ver)`}
-                  />
-                  <Pill
-                    label={showRawWeight ? "Total (real)" : "Total"}
-                    value={`${(showRawWeight ? (weightEst.weightRaw + weightEst2.weightRaw) : pricingTotal.weight).toFixed(showRawWeight ? 3 : 1)}g`}
-                    onDoubleClick={toggleRawWeight}
-                    title={showRawWeight ? `Arredondado: ${pricingTotal.weight.toFixed(1)}g (clique 2× para voltar)` : `Peso real: ${(weightEst.weightRaw + weightEst2.weightRaw).toFixed(3)}g (clique 2× para ver)`}
-                  />
-                </>
-              ) : (
-                <Pill
-                  label={showRawWeight ? "Peso (real)" : "Peso"}
-                  value={`${(showRawWeight ? weightEst.weightRaw : pricing.weight).toFixed(showRawWeight ? 3 : 1)}g`}
-                  onDoubleClick={toggleRawWeight}
-                  title={showRawWeight ? `Arredondado: ${pricing.weight.toFixed(1)}g (clique 2× para voltar)` : `Peso real: ${weightEst.weightRaw.toFixed(3)}g (clique 2× para ver)`}
-                />
-              )}
+              {/* Peso oculto na UI do orçamento — continua disponível na ficha técnica.
+                  Admin ainda pode ver via double-click no preço final (toggle). */}
               {/* Pills de ouro e pedras (só quando há pedras preciosas) */}
               {(() => {
                 const ouroTotal = allianceMode === "par" ? pricing.discountPrice + pricing2.discountPrice : pricing.discountPrice;
@@ -2919,38 +3073,97 @@ export default function OrcamentoClient({
                 );
               })()}
               <div className="flex items-center gap-3">
-                <div className="text-center">
-                  <p className="text-[9px] uppercase tracking-wider text-gray-400">Desconto</p>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => updateParam("discountPercent", Math.max(0, (activeRing === 1 ? params : params2).discountPercent - 1))}
-                      className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs">-</button>
-                    <span className="text-sm font-bold w-8 text-center" style={{ color: (activeRing === 1 ? params : params2).discountPercent > 0 ? "#DC2626" : C.esmeralda }}>
-                      {(activeRing === 1 ? params : params2).discountPercent}%
-                    </span>
-                    <button onClick={() => {
-                      const limit = canManageConfig ? 50 : (maxDesconto || 0);
-                      const curr = (activeRing === 1 ? params : params2).discountPercent;
-                      updateParam("discountPercent", Math.min(limit, curr + 1));
-                    }}
-                      className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs">+</button>
-                  </div>
-                  {!canManageConfig && maxDesconto > 0 && (
-                    <p className="text-[8px] text-gray-300">max {maxDesconto}%</p>
-                  )}
-                </div>
+                {(() => {
+                  // Desconto exibido = efetivo do anel ativo (promo já consolidada).
+                  const effActive = activeRing === 1 ? effDiscount1 : effDiscount2;
+                  const lockActive = activeRing === 1 ? lockDiscount1 : lockDiscount2;
+                  const descPromoActive = activeRing === 1 ? descPromo1 : descPromo2;
+                  return (
+                    <div className="text-center">
+                      <p className="text-[9px] uppercase tracking-wider text-gray-400">
+                        Desconto {descPromoActive > 0 && <span className="text-emerald-600 font-bold">PROMO</span>}
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <button
+                          disabled={lockActive}
+                          onClick={() => {
+                            if (lockActive) return;
+                            const curr = (activeRing === 1 ? params : params2).discountPercent;
+                            // Admin não pode descer abaixo do desconto da promo
+                            const minimo = descPromoActive;
+                            updateParam("discountPercent", Math.max(minimo, curr - 1));
+                          }}
+                          className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                        >-</button>
+                        <span
+                          className="text-sm font-bold w-8 text-center"
+                          style={{ color: effActive > 0 ? (descPromoActive > 0 ? "#059669" : "#DC2626") : C.esmeralda }}
+                          title={lockActive ? "Campanha em vigor — desconto fixo" : undefined}
+                        >
+                          {effActive}%
+                        </span>
+                        <button
+                          disabled={lockActive}
+                          onClick={() => {
+                            if (lockActive) return;
+                            const limit = canManageConfig ? 50 : (maxDesconto || 0);
+                            const curr = (activeRing === 1 ? params : params2).discountPercent;
+                            updateParam("discountPercent", Math.min(limit, curr + 1));
+                          }}
+                          className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                        >+</button>
+                      </div>
+                      {lockActive && (
+                        <p className="text-[8px] text-emerald-600">campanha ativa</p>
+                      )}
+                      {!lockActive && !canManageConfig && maxDesconto > 0 && (
+                        <p className="text-[8px] text-gray-300">max {maxDesconto}%</p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
               <div className="text-right shrink-0">
                 <p className="text-[9px] uppercase tracking-wide" style={{ color: C.gold }}>
                   {allianceMode === "par" ? "Preço Total Par" : "Preco Final"}
                 </p>
-                <p className="text-2xl font-black tracking-tight" style={{ color: C.esmeralda }}>
-                  R$ {pricingTotal.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-                {allianceMode === "par" && (
-                  <p className="text-[9px] text-gray-400">
-                    A1: R$ {pricing.discountPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | A2: R$ {pricing2.discountPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
-                )}
+                {(() => {
+                  // Preço cheio (de) = sem promo + sem desconto manual, incluindo pedras + gravação
+                  const cheioOuro = allianceMode === "par"
+                    ? pricingCheio.price + pricingCheio2.price
+                    : pricingCheio.price;
+                  const cheioTotal = cheioOuro + (allianceMode === "par" ? pedrasCost + pedrasCost2 : pedrasCost)
+                                              + (allianceMode === "par" ? gravacaoCost + gravacaoCost2 : gravacaoCost);
+                  const pesoMostrado = allianceMode === "par"
+                    ? `${pricing.weight.toFixed(1)}g + ${pricing2.weight.toFixed(1)}g = ${pricingTotal.weight.toFixed(1)}g`
+                    : `${pricing.weight.toFixed(1)}g`;
+                  const mostraDePor = cheioTotal > pricingTotal.price + 0.005;
+                  // Tooltip: peso + de/por (com pedras incluídas)
+                  const tooltip = mostraDePor
+                    ? `Peso: ${pesoMostrado}\nDe: R$ ${cheioTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nPor: R$ ${pricingTotal.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (com pedras)`
+                    : `Peso: ${pesoMostrado}`;
+                  return (
+                    <div
+                      onDoubleClick={toggleRawWeight}
+                      title={tooltip}
+                      style={{ cursor: "help" }}
+                    >
+                      {mostraDePor && (
+                        <p className="text-[10px] text-gray-400 line-through">
+                          De R$ {cheioTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      )}
+                      <p className="text-2xl font-black tracking-tight" style={{ color: C.esmeralda }}>
+                        R$ {pricingTotal.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                      {allianceMode === "par" && (
+                        <p className="text-[9px] text-gray-400">
+                          A1: R$ {pricing.discountPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | A2: R$ {pricing2.discountPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
