@@ -7,6 +7,7 @@ import ApontamentoPCPModal   from "@/components/forms/ApontamentoPCPModal";
 import TransferenciaPCPModal from "@/components/forms/TransferenciaPCPModal";
 import SaidaOrdemModal       from "@/components/forms/SaidaOrdemModal";
 import NovaPCPModal          from "@/components/forms/NovaPCPModal";
+import NovaFabricacaoModal   from "@/components/forms/NovaFabricacaoModal";
 import PCPDetalheModal       from "@/components/forms/PCPDetalheModal";
 import OrdemTesteModal       from "@/components/forms/OrdemTesteModal";
 import KanbanCard, {
@@ -202,6 +203,7 @@ type ActiveModal =
   | { type: "saida";             data: ModalState }
   | { type: "atribuir_operador"; data: { pcpId: number } }
   | { type: "nova_pcp";          data: null }
+  | { type: "nova_fabricacao";   data: null }
   | { type: "ordem_teste";       data: null }
   | null;
 
@@ -418,14 +420,26 @@ export default function KanbanClient({
               Ordem Teste
             </button>
           )}
-          <button
-            onClick={() => setActiveModal({ type: "nova_pcp", data: null })}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold"
-            style={{ backgroundColor: "#184036", color: "#F3EADA" }}
-          >
-            <Plus size={13} strokeWidth={2.5} />
-            Nova Ordem
-          </button>
+          {(() => {
+            // Tab ativa = único tipo selecionado (ou "todos" se vazio)
+            const tipoAtivo = tiposSelecionados.size === 1
+              ? Array.from(tiposSelecionados)[0]
+              : "todos";
+            const isFabricacao = tipoAtivo === "fabricacao";
+            return (
+              <button
+                onClick={() => setActiveModal({
+                  type: isFabricacao ? "nova_fabricacao" : "nova_pcp",
+                  data: null,
+                })}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold"
+                style={{ backgroundColor: "#184036", color: "#F3EADA" }}
+              >
+                <Plus size={13} strokeWidth={2.5} />
+                {isFabricacao ? "Nova Fabricação" : "Nova Ordem"}
+              </button>
+            );
+          })()}
           <div className="relative w-full md:w-72">
             <input
               type="text"
@@ -744,6 +758,13 @@ export default function KanbanClient({
       )}
       {activeModal?.type === "nova_pcp" && (
         <NovaPCPModal
+          isOpen={true}
+          onClose={handleClose}
+          onSuccess={handleSuccess}
+        />
+      )}
+      {activeModal?.type === "nova_fabricacao" && (
+        <NovaFabricacaoModal
           isOpen={true}
           onClose={handleClose}
           onSuccess={handleSuccess}
