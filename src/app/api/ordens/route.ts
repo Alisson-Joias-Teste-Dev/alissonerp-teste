@@ -4,8 +4,8 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, deleteFile } from "@/lib/storage";
 import { validarFichaTecnicaServer } from "@/lib/validar-ficha-tecnica";
 import {
-  personalizacaoParaObservacao,
-  type PersonalizacaoAplicada,
+  personalizacaoParaTexto,
+  type PersonalizacaoQualquer,
 } from "@/lib/personalizacao-validacao";
 
 const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
@@ -274,7 +274,7 @@ export async function POST(req: NextRequest) {
     //    quando a ordem for criada com venda_item_ids. Caso contrario, pode vir
     //    no body do item como { personalizacao: { valor, ... } }.
     //    Se houver, o texto legivel e concatenado em observacao (ourives ler la).
-    const personalizacoesPorProdutoId: Map<number, PersonalizacaoAplicada> = new Map();
+    const personalizacoesPorProdutoId: Map<number, PersonalizacaoQualquer> = new Map();
     if (venda_id && vendaItemIdsVal.length > 0) {
       const itensPersonalizados = await tx`
         SELECT produto_id, personalizacao
@@ -286,7 +286,7 @@ export async function POST(req: NextRequest) {
         if (it.produto_id != null && it.personalizacao) {
           personalizacoesPorProdutoId.set(
             Number(it.produto_id),
-            it.personalizacao as PersonalizacaoAplicada,
+            it.personalizacao as PersonalizacaoQualquer,
           );
         }
       }
@@ -308,16 +308,16 @@ export async function POST(req: NextRequest) {
 
       // Personalizacao: da venda vinculada (prioridade) ou do body direto
       const produtoIdNum = Number(produto.id_produto);
-      const personalizacao: PersonalizacaoAplicada | null =
+      const personalizacao: PersonalizacaoQualquer | null =
         personalizacoesPorProdutoId.get(produtoIdNum) ??
-        (item.personalizacao && typeof item.personalizacao === "object" && item.personalizacao.valor
-          ? (item.personalizacao as PersonalizacaoAplicada)
+        (item.personalizacao && typeof item.personalizacao === "object"
+          ? (item.personalizacao as PersonalizacaoQualquer)
           : null);
 
       // observacao: se houver personalizacao, append texto legivel
       const observacaoFinal =
         personalizacao
-          ? [item.observacao ?? null, personalizacaoParaObservacao(personalizacao)]
+          ? [item.observacao ?? null, personalizacaoParaTexto(personalizacao)]
               .filter(Boolean)
               .join("\n")
           : (item.observacao ?? null);

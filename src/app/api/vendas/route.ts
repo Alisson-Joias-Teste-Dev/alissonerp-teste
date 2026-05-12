@@ -6,12 +6,17 @@ import { logAudit } from "@/lib/audit";
 import {
   validarPersonalizacao,
   normalizarPersonalizacao,
+  normalizarPersonalizacaoMulti,
   appendPersonalizacaoObservacao,
   calcularPrecoPorLetra,
   calcularPesoPorLetra,
+  isMultiCampo,
   type ConfigPersonalizacao,
   type CaracteresPermitidos,
   type PersonalizacaoAplicada,
+  type PersonalizacaoAplicadaMulti,
+  type PersonalizacaoQualquer,
+  type CampoPersonalizacao,
 } from "@/lib/personalizacao-validacao";
 
 // ─── GET /api/vendas ───────────────────────────────────────────────────────────
@@ -277,10 +282,11 @@ export async function POST(req: NextRequest) {
           throw new Error("total_item deve ser >= 0 em item");
         }
 
-        // ── Personalizacao: valida contra config do produto (se existir) ──
-        // Alem disso, se config tem preco_por_letra > 0, RECALCULA preco_unitario
-        // e total_item server-side (seguranca — body pode vir adulterado).
-        let personalizacaoJson: PersonalizacaoAplicada | null = null;
+        // ── Personalizacao: suporta formato LEGADO (1 campo) e MULTI-CAMPOS ──
+        // Legado: item.personalizagem = { valor: "JOAO" }
+        // Multi:  item.personalizagem = { campos: [{ label: "Nome 1", valor: "Maria" }, ...] }
+        // Se config tem preco_por_letra/ peso_por_letra, recalcula server-side.
+        let personalizacaoJson: PersonalizacaoQualquer | null = null;
         let observacaoItem = item.observacao ?? null;
         let precoListaFinal    = item.preco_lista;
         let precoUnitarioFinal = item.preco_unitario;
@@ -291,60 +297,119 @@ export async function POST(req: NextRequest) {
         if (item.produto_id) {
           const [cfg] = await tx`
             SELECT
-              tipo, obrigatorio,
-              min_caracteres, max_caracteres, caracteres_permitidos,
-              label, preco_por_letra, peso_por_letra
-            FROM alissonerp.produto_personalizacao
-            WHERE produto_id = ${item.produto_id}
-              AND ativo = true
+              pp.id,
+              pp.tipo, pp.obrigatorio,
+              pp.min_caracteres, pp.max_caracteres, pp.caracteres_permitidos,
+              pp.label, pp.preco_por_letra, pp.peso_por_letra,
+              (SELECT COUNT(*) FROM alissonerp.produto_personalizacao_campos pc
+               WHERE pc.config_id = pp.id) AS qtd_campos
+            FROM alissonerp.produto_personalizacao pp
+            WHERE pp.produto_id = ${item.produto_id}
+              AND pp.ativo = true
           `;
           if (cfg) {
-            const config: ConfigPersonalizacao = {
-              tipo: cfg.tipo as string,
-              obrigatorio: Boolean(cfg.obrigatorio),
-              min_caracteres: Number(cfg.min_caracteres),
-              max_caracteres: Number(cfg.max_caracteres),
-              caracteres_permitidos: cfg.caracteres_permitidos as CaracteresPermitidos,
-              label: cfg.label as string,
-            };
-            const valor = item.personalizacao?.valor;
-            const val = validarPersonalizacao(valor, config);
-            if (!val.ok) {
-              throw new Error(
-                `Personalizacao invalida no item "${item.sku ?? item.nome_produto}": ${val.erro}`,
-              );
-            }
-            if (valor?.trim()) {
-              personalizacaoJson = normalizarPersonalizacao(valor, config);
-              observacaoItem = appendPersonalizacaoObservacao(observacaoItem, personalizacaoJson);
+            const qtdCampos = Number(cfg.qtd_campos);
 
-              // Recalculo server-side se preco_por_letra esta configurado
-              const precoPorLetra = cfg.preco_por_letra != null ? Number(cfg.preco_por_letra) : null;
-              if (precoPorLetra != null && precoPorLetra > 0) {
-                const calc = calcularPrecoPorLetra(
-                  { ...config, preco_por_letra: precoPorLetra },
-                  valor,
-                  item.pct_desconto ?? 0,
-                  item.quantidade ?? 1,
-                  item.pct_comissao ?? 0,
-                );
-                if (calc) {
-                  precoListaFinal    = calc.preco_lista;
-                  precoUnitarioFinal = calc.preco_unitario;
-                  totalItemFinal     = calc.total_item;
-                  valorComissaoFinal = calc.valor_comissao;
+            if (qtdCampos > 0) {
+              // ── MODO MULTI-CAMPOS ──────────────────────────────────────
+              // Busca config dos campos no banco
+              const camposConfig = await tx`
+                SELECT label, tipo, obrigatorio, min_caracteres, max_caracteres, caracteres_permitidos, posicao
+                FROM alissonerp.produto_personalizacao_campos
+                WHERE config_id = ${Number(cfg.id)}
+                ORDER BY posicao ASC
+              `;
+
+              const personalizacaoMulti = item.personalizacao as { campos?: Array<Record<string, unknown>> } | null;
+              const camposRecebidos = personalizacaoMulti?.campos ?? [];
+
+              // Validar cada campo recebido contra sua config
+              for (let i = 0; i < camposConfig.length; i++) {
+                const cc = camposConfig[i] as Record<string, unknown>;
+                const recebido = camposRecebidos[i] as Record<string, unknown> | undefined;
+
+                const configCampo: ConfigPersonalizacao = {
+                  tipo: String(cc.tipo),
+                  obrigatorio: Boolean(cc.obrigatorio),
+                  min_caracteres: Number(cc.min_caracteres),
+                  max_caracteres: Number(cc.max_caracteres),
+                  caracteres_permitidos: String(cc.caracteres_permitidos) as CaracteresPermitidos,
+                  label: String(cc.label),
+                };
+
+                const valor = typeof recebido?.valor === "string" ? recebido.valor : null;
+                const val = validarPersonalizacao(valor, configCampo);
+                if (!val.ok) {
+                  throw new Error(
+                    `Personalizacao invalida no item "${item.sku ?? item.nome_produto}" - ${configCampo.label}: ${val.erro}`,
+                  );
                 }
               }
 
-              // Recalculo server-side de peso_estimado se peso_por_letra esta configurado
-              const pesoPorLetra = cfg.peso_por_letra != null ? Number(cfg.peso_por_letra) : null;
-              if (pesoPorLetra != null && pesoPorLetra > 0) {
-                const pesoCalc = calcularPesoPorLetra(
-                  { ...config, peso_por_letra: pesoPorLetra },
-                  valor,
+              // Montar array de campos validados
+              const camposParaSalvar: CampoPersonalizacao[] = camposConfig.map((cc: Record<string, unknown>, idx: number) => {
+                const recebido = camposRecebidos[idx] as Record<string, unknown> | undefined;
+                return {
+                  label: String(cc.label),
+                  valor: typeof recebido?.valor === "string" && recebido.valor.trim() ? recebido.valor.trim() : null,
+                  max_caracteres: Number(cc.max_caracteres),
+                  obrigatorio: Boolean(cc.obrigatorio),
+                };
+              });
+
+              personalizacaoJson = normalizarPersonalizacaoMulti(camposParaSalvar);
+              observacaoItem = appendPersonalizacaoObservacao(observacaoItem, personalizacaoJson);
+
+            } else {
+              // ── MODO LEGADO (1 campo, sem campos configurados) ──────────
+              const config: ConfigPersonalizacao = {
+                tipo: cfg.tipo as string,
+                obrigatorio: Boolean(cfg.obrigatorio),
+                min_caracteres: Number(cfg.min_caracteres),
+                max_caracteres: Number(cfg.max_caracteres),
+                caracteres_permitidos: cfg.caracteres_permitidos as CaracteresPermitidos,
+                label: cfg.label as string,
+              };
+              const valor = item.personalizacao?.valor;
+              const val = validarPersonalizacao(valor, config);
+              if (!val.ok) {
+                throw new Error(
+                  `Personalizacao invalida no item "${item.sku ?? item.nome_produto}": ${val.erro}`,
                 );
-                if (pesoCalc != null) {
-                  pesoEstimadoFinal = pesoCalc;
+              }
+              if (valor?.trim()) {
+                const personalizacaoLegado = normalizarPersonalizacao(valor, config);
+                personalizacaoJson = personalizacaoLegado;
+                observacaoItem = appendPersonalizacaoObservacao(observacaoItem, personalizacaoLegado);
+
+                // Recalculo server-side se preco_por_letra esta configurado
+                const precoPorLetra = cfg.preco_por_letra != null ? Number(cfg.preco_por_letra) : null;
+                if (precoPorLetra != null && precoPorLetra > 0) {
+                  const calc = calcularPrecoPorLetra(
+                    { ...config, preco_por_letra: precoPorLetra },
+                    valor,
+                    item.pct_desconto ?? 0,
+                    item.quantidade ?? 1,
+                    item.pct_comissao ?? 0,
+                  );
+                  if (calc) {
+                    precoListaFinal    = calc.preco_lista;
+                    precoUnitarioFinal = calc.preco_unitario;
+                    totalItemFinal     = calc.total_item;
+                    valorComissaoFinal = calc.valor_comissao;
+                  }
+                }
+
+                // Recalculo server-side de peso_estimado se peso_por_letra esta configurado
+                const pesoPorLetra = cfg.peso_por_letra != null ? Number(cfg.peso_por_letra) : null;
+                if (pesoPorLetra != null && pesoPorLetra > 0) {
+                  const pesoCalc = calcularPesoPorLetra(
+                    { ...config, peso_por_letra: pesoPorLetra },
+                    valor,
+                  );
+                  if (pesoCalc != null) {
+                    pesoEstimadoFinal = pesoCalc;
+                  }
                 }
               }
             }

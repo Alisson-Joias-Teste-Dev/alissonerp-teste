@@ -4,6 +4,7 @@ import DashboardHeader from "@/components/dashboard-comercial/DashboardHeader";
 import Podium from "@/components/dashboard-comercial/Podium";
 import ConsultoraAvatar from "@/components/dashboard-comercial/ConsultoraAvatar";
 import { LoadingBlock, ErrorBlock } from "@/components/dashboard-comercial/LoadingBlock";
+import PremiacaoCard from "@/components/dashboard-comercial/PremiacaoCard";
 import { P, METAS_COR } from "@/components/dashboard-comercial/theme";
 import { formatBRL, formatPercent } from "@/lib/dashboard-comercial/utils";
 import { useDateRange, useRanking } from "@/hooks/dashboard-comercial/useDashboardData";
@@ -123,6 +124,8 @@ export default function RankingPage() {
               </table>
             </div>
           </div>
+
+          <PremiacaoCard />
         </>
       )}
     </div>

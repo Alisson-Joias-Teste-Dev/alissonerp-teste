@@ -6,7 +6,7 @@ import { hasRole, isFullAccess } from "@/lib/roles";
 /**
  * Config de personalizacao por produto.
  *
- *   GET    /api/produtos/[id]/personalizacao  → retorna config (ou null)
+ *   GET    /api/produtos/[id]/personalizacao  → retorna config + campos (ou null)
  *   POST   /api/produtos/[id]/personalizacao  → upsert (admin)
  *   DELETE /api/produtos/[id]/personalizacao  → soft delete (ativo=false)
  */
@@ -62,46 +62,114 @@ export async function GET(
   }
 
   try {
+    // Busca config mae
     const [row] = await sql`
       SELECT
-        produto_id,
+        pp.id,
+        pp.produto_id,
+        pp.tipo,
+        pp.obrigatorio,
+        pp.min_caracteres,
+        pp.max_caracteres,
+        pp.caracteres_permitidos,
+        pp.label,
+        pp.placeholder,
+        pp.exemplo,
+        pp.observacao,
+        pp.ativo,
+        pp.preco_por_letra,
+        pp.peso_por_letra,
+        pp.campos_gratis,
+        pp.preco_campo_adicional,
+        -- regras de formatacao (LEFT JOIN = opcional)
+        r.primeira_letra_maiuscula,
+        r.sem_espacos,
+        r.sem_numeros,
+        r.sem_simbolos,
+        r.sem_acentos
+      FROM alissonerp.produto_personalizacao pp
+      LEFT JOIN alissonerp.produto_personalizacao_regras r ON r.config_id = pp.id
+      WHERE pp.produto_id = ${produtoId}
+        AND pp.ativo = true
+    `;
+
+    if (!row) {
+      return NextResponse.json({ config: null, campos: [] });
+    }
+
+    // Busca campos (multi-campos) — pode vir vazio se for config legada
+    const campos = await sql`
+      SELECT
+        id,
+        config_id,
+        label,
+        placeholder,
+        exemplo,
         tipo,
         obrigatorio,
         min_caracteres,
         max_caracteres,
         caracteres_permitidos,
-        label,
-        placeholder,
-        exemplo,
-        observacao,
-        ativo,
-        preco_por_letra,
-        peso_por_letra
-      FROM alissonerp.produto_personalizacao
-      WHERE produto_id = ${produtoId}
-        AND ativo = true
+        posicao
+      FROM alissonerp.produto_personalizacao_campos
+      WHERE config_id = ${Number(row.id)}
+      ORDER BY posicao ASC, id ASC
     `;
 
-    if (!row) {
-      return NextResponse.json({ config: null });
+    const regras = row.primeira_letra_maiuscula != null ? {
+      primeira_letra_maiuscula: Boolean(row.primeira_letra_maiuscula),
+      sem_espacos:              Boolean(row.sem_espacos),
+      sem_numeros:              Boolean(row.sem_numeros),
+      sem_simbolos:             Boolean(row.sem_simbolos),
+      sem_acentos:              Boolean(row.sem_acentos),
+    } : null;
+
+    const configBase = {
+      config_id:              Number(row.id),
+      produto_id:             Number(row.produto_id),
+      tipo:                   row.tipo as string,
+      obrigatorio:            Boolean(row.obrigatorio),
+      min_caracteres:         Number(row.min_caracteres),
+      max_caracteres:         Number(row.max_caracteres),
+      caracteres_permitidos:  row.caracteres_permitidos as string,
+      label:                  row.label as string,
+      placeholder:            (row.placeholder as string | null) ?? null,
+      exemplo:                (row.exemplo as string | null) ?? null,
+      observacao:             (row.observacao as string | null) ?? null,
+      ativo:                  Boolean(row.ativo),
+      preco_por_letra:        row.preco_por_letra != null ? Number(row.preco_por_letra) : null,
+      peso_por_letra:         row.peso_por_letra  != null ? Number(row.peso_por_letra)  : null,
+      campos_gratis:          row.campos_gratis != null ? Number(row.campos_gratis) : 1,
+      preco_campo_adicional:  row.preco_campo_adicional != null ? Number(row.preco_campo_adicional) : null,
+      regras,
+    };
+
+    // Se tem campos, retorna no formato multi-campos
+    if (campos.length > 0) {
+      return NextResponse.json({
+        config: {
+          ...configBase,
+          // multi-campos: cada campo tem suas proprias regras
+          campos: campos.map((c: Record<string, unknown>) => ({
+            id: Number(c.id),
+            config_id: Number(c.config_id),
+            label: String(c.label),
+            placeholder: c.placeholder ? String(c.placeholder) : null,
+            exemplo: c.exemplo ? String(c.exemplo) : null,
+            tipo: String(c.tipo),
+            obrigatorio: Boolean(c.obrigatorio),
+            min_caracteres: Number(c.min_caracteres),
+            max_caracteres: Number(c.max_caracteres),
+            caracteres_permitidos: String(c.caracteres_permitidos),
+            posicao: Number(c.posicao),
+          })),
+        },
+      });
     }
 
+    // Fallback: config legada (1 campo)
     return NextResponse.json({
-      config: {
-        produto_id:             Number(row.produto_id),
-        tipo:                   row.tipo as string,
-        obrigatorio:            Boolean(row.obrigatorio),
-        min_caracteres:         Number(row.min_caracteres),
-        max_caracteres:         Number(row.max_caracteres),
-        caracteres_permitidos:  row.caracteres_permitidos as string,
-        label:                  row.label as string,
-        placeholder:            (row.placeholder as string | null) ?? null,
-        exemplo:                (row.exemplo as string | null) ?? null,
-        observacao:             (row.observacao as string | null) ?? null,
-        ativo:                  Boolean(row.ativo),
-        preco_por_letra:        row.preco_por_letra != null ? Number(row.preco_por_letra) : null,
-        peso_por_letra:         row.peso_por_letra  != null ? Number(row.peso_por_letra)  : null,
-      },
+      config: configBase,
     });
   } catch (err) {
     console.error("[GET /api/produtos/[id]/personalizacao]", err);

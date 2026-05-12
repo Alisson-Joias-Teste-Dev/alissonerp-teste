@@ -23,6 +23,7 @@ import {
 } from "@/lib/curva-precificacao";
 import GaleriaProduto from "./GaleriaProduto";
 import AplicarTemplateModal from "@/components/produtos/AplicarTemplateModal";
+import ChatPersonalizacao from "./ChatPersonalizacao";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -502,7 +503,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
 
   // Reposição automática + Tempo de fabricação + Rota
   const [estoqueMinimoEdit, setEstoqueMinimoEdit] = useState("0");
-  const [reposicaoAtiva, setReposicaoAtiva] = useState(true);
+  const [reposicaoAtiva, setReposicaoAtiva] = useState(false);
   const [tempoFabricacaoDias, setTempoFabricacaoDias] = useState("");
   const [rotaEtapas, setRotaEtapas] = useState<number[]>([]);
   const [mostrarTemplate, setMostrarTemplate] = useState(false);
@@ -560,7 +561,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
         setTempoFabricacaoDias(j.config.tempo_fabricacao_dias != null ? String(j.config.tempo_fabricacao_dias) : "");
       } else {
         setEstoqueMinimoEdit("0");
-        setReposicaoAtiva(true);
+        setReposicaoAtiva(false);
         setTempoFabricacaoDias("");
       }
     }).catch(() => { /* ignore */ });
@@ -1352,6 +1353,28 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                   )}
                   </>)}
                 </div>
+              </section>
+
+              {/* ── PERSONALIZAÇÃO COM LIA ── (chat com IA) */}
+              <section>
+                <p className={sectionTitleCls}>
+                  Personalização{" "}
+                  <span
+                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                    style={{ backgroundColor: "#F0F7F4", color: "#184036" }}
+                  >
+                    💬 LIA
+                  </span>
+                </p>
+                <p className="text-[10px] text-gray-500 mb-2">
+                  Converse com a LIA para configurar as regras de personalização
+                  (quantos campos, preço por campo extra, formatação, etc.).
+                </p>
+                <ChatPersonalizacao
+                  produtoId={produto.id_produto}
+                  produtoNome={produto.nome}
+                  produtoSku={produto.sku}
+                />
               </section>
 
               {/* ── BOM (COMPOSIÇÃO) ── (só modo avançado) */}

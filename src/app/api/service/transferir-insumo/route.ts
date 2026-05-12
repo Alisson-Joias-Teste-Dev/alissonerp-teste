@@ -109,8 +109,8 @@ export async function POST(req: NextRequest) {
     const [origemDeposito] = await sql`
       SELECT local_estoque_id FROM alissonerp.depositos WHERE id = ${origemId}
     `;
-    const localOrigem = (origemDeposito?.local_estoque_id ?? 3) as number;
-    const localDest   = (destDeposito.local_estoque_id   ?? 3) as number;
+    const localOrigem = (origemDeposito?.local_estoque_id ?? 1) as number;
+    const localDest   = (destDeposito.local_estoque_id   ?? 1) as number;
 
     const operadorNome = (caller.nome ?? "operador") as string;
     const obs = `Transferência ${insumo.nome as string}: ${operadorNome} → ${destDeposito.nome as string}`;

@@ -12,6 +12,7 @@ import CartaoInline from "@/components/vendas/CartaoInline";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import PagamentoForm from "@/components/vendas/PagamentoForm";
 import { maskCpfCnpj, formatDateBR } from "@/lib/formatters";
+import { normalizarCampoPersonalizacao } from "@/lib/personalizacao-validacao";
 import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
 import { createClient } from "@/lib/supabase/client";
 
@@ -59,6 +60,19 @@ interface FaixaComissao {
 }
 
 
+interface CampoPersonalizacaoValor {
+  label: string;
+  valor: string;
+  max_caracteres: number;
+  obrigatorio: boolean;
+}
+
+interface PersonalizacaoMulti {
+  campos: CampoPersonalizacaoValor[];
+}
+
+type PersonalizacaoItem = { valor: string } | PersonalizacaoMulti;
+
 interface ItemVenda {
   _key: string;
   produto_id: number | null;
@@ -73,7 +87,7 @@ interface ItemVenda {
   valor_comissao: number;
   peso_estimado: number | null;
   saldo_disponivel: number;
-  personalizacao?: { valor: string };
+  personalizacao?: PersonalizacaoItem;
 }
 
 // Config de personalizacao (config vinda de /api/produtos/[id]/personalizacao)
@@ -86,7 +100,30 @@ type CaracteresPermitidos =
   | "numero"
   | "qualquer";
 
+interface CampoPersonalizacaoConfig {
+  id: number;
+  config_id: number;
+  label: string;
+  placeholder: string | null;
+  exemplo: string | null;
+  tipo: string;
+  obrigatorio: boolean;
+  min_caracteres: number;
+  max_caracteres: number;
+  caracteres_permitidos: CaracteresPermitidos;
+  posicao: number;
+}
+
+interface RegrasFormatacao {
+  primeira_letra_maiuscula: boolean;
+  sem_espacos: boolean;
+  sem_numeros: boolean;
+  sem_simbolos: boolean;
+  sem_acentos: boolean;
+}
+
 interface ConfigPersonalizacao {
+  config_id?: number;
   produto_id: number;
   tipo: string;
   obrigatorio: boolean;
@@ -100,6 +137,11 @@ interface ConfigPersonalizacao {
   ativo: boolean;
   preco_por_letra?: number | null;
   peso_por_letra?:  number | null;
+  campos_gratis?: number;
+  preco_campo_adicional?: number | null;
+  regras?: RegrasFormatacao | null;
+  /** Campos individuais (multi-campos). Se presente e length>0, cada campo tem suas proprias regras. */
+  campos?: CampoPersonalizacaoConfig[];
 }
 
 const REGEX_PERSONALIZACAO: Record<CaracteresPermitidos, RegExp> = {
@@ -111,6 +153,27 @@ const REGEX_PERSONALIZACAO: Record<CaracteresPermitidos, RegExp> = {
   numero:                /^[0-9]+$/,
   qualquer:              /^.+$/,
 };
+
+// ─── Helpers de personalizacao ──────────────────────────────────────────────
+function getPersValor(item: ItemVenda): string {
+  if (!item.personalizacao) return "";
+  if ("valor" in item.personalizacao) return item.personalizacao.valor ?? "";
+  return item.personalizacao.campos[0]?.valor ?? "";
+}
+function getPersTotalLetras(item: ItemVenda): number {
+  if (!item.personalizacao) return 0;
+  if ("valor" in item.personalizacao) return (item.personalizacao.valor ?? "").trim().length;
+  return item.personalizacao.campos.reduce((s, c) => s + (c.valor ?? "").trim().length, 0);
+}
+function getPersCampo(item: ItemVenda, idx: number): string {
+  if (!item.personalizacao) return "";
+  if ("valor" in item.personalizacao) return idx === 0 ? (item.personalizacao.valor ?? "") : "";
+  return item.personalizacao.campos[idx]?.valor ?? "";
+}
+function isPersMulti(item: ItemVenda): boolean {
+  return !!item.personalizacao && "campos" in item.personalizacao;
+}
+
 
 interface Pagamento {
   _key: string;
@@ -903,9 +966,10 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       const precoPorLetra = cfg?.preco_por_letra;
       let precoLista = item.preco_lista;
       if (precoPorLetra != null && precoPorLetra > 0) {
-        const qtdLetras = item.personalizacao?.valor?.trim().length ?? 0;
+        const qtdLetras = getPersTotalLetras(item);
         precoLista = qtdLetras === 0 ? 0 : Math.round(qtdLetras * precoPorLetra * 100) / 100;
       }
+
       // Preço unitário: preserva valor digitado para evitar drift de arredondamento.
       // Se auth cortou o desconto ou personalização mudou o preço_lista, recalcula.
       const precoUnit = (precoUnitDigitado !== null && !authCapped && precoLista === item.preco_lista)
@@ -997,7 +1061,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     config: ConfigPersonalizacao | null | undefined,
   ): string | null {
     if (!config) return null;
-    const valor = item.personalizacao?.valor?.trim() ?? "";
+    const valor = getPersValor(item).trim();
+
     if (config.obrigatorio && !valor) {
       return `${config.label} é obrigatório`;
     }
@@ -1019,12 +1084,14 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     setItens(prev =>
       prev.map(it => {
         if (it._key !== itemKey) return it;
-        const novaPers = { valor };
         const cfg = it.produto_id != null ? personalizacoesCache[it.produto_id] : null;
+        // Aplica regras de formatacao automaticamente (sem_espacos, sem_numeros, primeira_letra_maiuscula, etc.)
+        const valorFormatado = normalizarCampoPersonalizacao(valor, cfg?.regras ?? null, cfg?.max_caracteres ?? 999);
+        const novaPers = { valor: valorFormatado };
         const precoPorLetra = cfg?.preco_por_letra;
         const pesoPorLetra  = cfg?.peso_por_letra;
         const r2 = (n: number) => Math.round(n * 100) / 100;
-        const qtdLetras = valor.trim().length;
+        const qtdLetras = valorFormatado.trim().length;
 
         // Recalcula peso_estimado se peso_por_letra configurado
         let pesoEstimadoNovo: number | null = it.peso_estimado;
@@ -1129,8 +1196,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
         preco_unitario: i.preco_unitario, total_item: i.total_item,
         pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao, peso_estimado: i.peso_estimado,
-        personalizacao: i.personalizacao?.valor?.trim()
-          ? { valor: i.personalizacao.valor.trim() }
+        personalizacao: getPersValor(i).trim()
+          ? { valor: getPersValor(i).trim() }
           : null,
       })),
       pagamentos: pagamentosBody,
@@ -2420,7 +2487,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <input
                                     type="text"
-                                    value={item.personalizacao?.valor ?? ""}
+                                    value={getPersValor(item)}
                                     onChange={(e) => atualizarPersonalizacao(item._key, e.target.value)}
                                     maxLength={configPers.max_caracteres}
                                     placeholder={configPers.placeholder ?? "Ex: JOAO"}
@@ -2428,7 +2495,6 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                     style={{
                                       borderColor: erroPers ? "#EF4444" : C.cremeBorder,
                                       letterSpacing: "0.05em",
-                                      textTransform: "uppercase",
                                     }}
                                   />
                                   <span
@@ -2437,9 +2503,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                     }`}
                                     style={{ backgroundColor: erroPers ? "#FEE2E2" : "#F3F4F6" }}
                                   >
-                                    {(item.personalizacao?.valor?.length ?? 0)}/{configPers.max_caracteres}
+                                    {getPersValor(item).length}/{configPers.max_caracteres}
                                   </span>
-                                  {!erroPers && item.personalizacao?.valor && (
+                                  {!erroPers && getPersValor(item) && (
                                     <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                                   )}
                                 </div>
@@ -2449,7 +2515,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                     {erroPers}
                                   </p>
                                 )}
-                                {configPers.exemplo && !item.personalizacao?.valor && !erroPers && (
+                                {configPers.exemplo && !getPersValor(item) && !erroPers && (
                                   <p className="text-[10px] text-gray-400 mt-1">
                                     Exemplo: {configPers.exemplo}
                                   </p>
@@ -2462,10 +2528,10 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                   >
                                     <Calculator className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#D4A843" }} />
                                     <span style={{ color: "#6B7280" }}>
-                                      {item.personalizacao?.valor?.trim().length ?? 0} letras × {fmt(configPers.preco_por_letra)} =
+                                      {getPersTotalLetras(item)} letras × {fmt(configPers.preco_por_letra)} =
                                     </span>
                                     <span className="font-semibold tabular-nums" style={{ color: C.esmeralda }}>
-                                      {fmt((item.personalizacao?.valor?.trim().length ?? 0) * configPers.preco_por_letra)}
+                                      {fmt(getPersTotalLetras(item) * configPers.preco_por_letra)}
                                     </span>
                                   </div>
                                 )}
@@ -2477,10 +2543,10 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                   >
                                     <Scale className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#059669" }} />
                                     <span style={{ color: "#6B7280" }}>
-                                      {item.personalizacao?.valor?.trim().length ?? 0} letras × {configPers.peso_por_letra.toFixed(2)} g =
+                                      {getPersTotalLetras(item)} letras × {configPers.peso_por_letra.toFixed(2)} g =
                                     </span>
                                     <span className="font-semibold tabular-nums" style={{ color: "#065F46" }}>
-                                      {((item.personalizacao?.valor?.trim().length ?? 0) * configPers.peso_por_letra).toFixed(2)} g
+                                      {(getPersTotalLetras(item) * configPers.peso_por_letra).toFixed(2)} g
                                     </span>
                                   </div>
                                 )}
