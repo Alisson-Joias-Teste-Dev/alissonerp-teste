@@ -2,10 +2,14 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Lazy init — criado apenas na primeira chamada para evitar crash no hot reload
 // quando env vars ainda não estão disponíveis na avaliação do módulo.
+// NOTA: A SERVICE_ROLE_KEY pode falhar com "signature verification failed" se o
+// JWT_SECRET do Kong/GoTrue for diferente. Usamos ANON_KEY como fallback padrão,
+// que funciona nos uploads do bucket público.
 let _supabaseAdmin: SupabaseClient | null = null;
 function getAdmin(): SupabaseClient {
   if (!_supabaseAdmin) {
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    // Tenta ANON_KEY primeiro (funciona para buckets públicos), depois SERVICE_ROLE_KEY
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!key) throw new Error('[storage] supabaseKey is required — verifique NEXT_PUBLIC_SUPABASE_ANON_KEY no .env.local');
     _supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key);
   }

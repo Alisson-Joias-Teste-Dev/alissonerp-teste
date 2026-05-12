@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
         SELECT v.id, v.numero_ordem, v.status::text AS status, o.tipo_ordem::text AS tipo_ordem
         FROM alissonerp.vw_ordens_prontas_ida v
         JOIN alissonerp.ordens o ON o.id = v.id
-        WHERE o.tipo_ordem::text = ANY(ARRAY['fabricacao','reposicao_venda','reposicao_loja','compra_fornecedor','garantia'])
+        WHERE o.tipo_ordem::text = ANY(ARRAY['fabricacao','reposicao_venda','reposicao_loja','compra_fornecedor','garantia','conversao'])
         ORDER BY v.id DESC LIMIT 200
       `;
     }

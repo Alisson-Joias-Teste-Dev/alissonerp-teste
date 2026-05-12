@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { ROLES_CONCLUIR_PROTOCOLO } from "@/lib/roles";
+import { uploadFile, ensureBucket } from "@/lib/storage";
 
 // GET /api/protocolo/[protocoloId] — ordens do protocolo
 export async function GET(
@@ -27,17 +28,20 @@ export async function GET(
 }
 
 // PATCH /api/protocolo/[protocoloId] — atualiza etapas + recebedor + foto_conclusao
+//   + ordens_detalhes para conversao: [{ ordem_id, foto_base64 }]
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ protocoloId: string }> }
 ) {
   const { protocoloId } = await params;
   const id = parseInt(protocoloId);
-  const { etapas, recebedor_id, foto_conclusao } = await req.json() as {
+  const body = await req.json() as {
     etapas: string;
     recebedor_id?: string;
     foto_conclusao?: string;
+    ordens_detalhes?: { ordem_id: number; foto_base64: string }[];
   };
+  const { etapas, recebedor_id, foto_conclusao, ordens_detalhes } = body;
 
   // Validar role ao concluir
   if (etapas === "concluido" && recebedor_id) {
@@ -55,6 +59,7 @@ export async function PATCH(
     }
   }
 
+  // Atualizar protocolo
   const rows = await sql`
     UPDATE alissonerp.protocolos
     SET
@@ -69,5 +74,32 @@ export async function PATCH(
   if (rows.length === 0) {
     return NextResponse.json({ error: "Protocolo não encontrado" }, { status: 404 });
   }
+
+  // Processar ordens_detalhes (fotos da balança para conversão)
+  if (ordens_detalhes && ordens_detalhes.length > 0) {
+    await ensureBucket("conversao-fotos");
+
+    for (const det of ordens_detalhes) {
+      // Upload da foto da balança para cada ordem de conversão
+      const fotoPath = `balanca/${det.ordem_id}/${Date.now()}_${id}.jpg`;
+      const uploadResult = await uploadFile("conversao-fotos", fotoPath, det.foto_base64, "image/jpeg");
+
+      if ("error" in uploadResult) {
+        console.error(`[protocolo] Erro upload foto balança ordem ${det.ordem_id}:`, uploadResult.error);
+        continue; // Não falha o protocolo todo por causa de uma foto
+      }
+
+      // Vincular a foto aos itens da conversão (via ordem_id → conversao_id)
+      await sql`
+        UPDATE alissonerp.conversao_itens ci
+        SET foto_item = ${uploadResult.path}
+        FROM alissonerp.conversoes_estoque ce
+        WHERE ci.conversao_id = ce.id
+          AND ce.ordem_id = ${det.ordem_id}
+          AND ci.foto_item IS NULL
+      `;
+    }
+  }
+
   return NextResponse.json(rows[0]);
 }

@@ -12,8 +12,10 @@ const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
 const ALL_TIPOS = [
   "servico_venda", "servico_loja", "fabricacao", "reposicao_venda",
   "reposicao_loja", "compra_fornecedor", "garantia", "servico_interno",
+  "conversao",
 ];
 const SERVICO_TIPOS = ["servico_venda", "servico_loja", "garantia", "servico_interno"];
+const CONVERSAO_TIPOS = ["conversao"];
 
 // POST /api/ordens — cria uma nova ordem no ERP
 // Body: { tipo_ordem, cliente_id?, vendedor_id?, data_entrega?, peso_metal_negociado?,
@@ -185,8 +187,10 @@ export async function POST(req: NextRequest) {
 
   // ── Determinar rota ──────────────────────────────────────────────────────
   // Rota: fabricação permite override (PCP ou Protocolo), demais seguem regra padrão
+  // Conversão: sempre protocolo
   const rota = tipo_ordem === "fabricacao" && rota_override
     ? (rota_override === "protocolo" ? "protocolo" : "pcp")
+    : CONVERSAO_TIPOS.includes(tipo_ordem) ? "protocolo"
     : SERVICO_TIPOS.includes(tipo_ordem) ? "protocolo" : "pcp";
 
   // ── Data de entrega: fabricação usa data informada ou +10 dias úteis ─────

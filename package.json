@@ -9,7 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "husky || true",
+    "prepare": "npx --yes husky || echo \"husky not available\"",
     "db:homolog": "bash scripts/switch-to-homolog.sh",
     "db:producao": "bash scripts/switch-to-producao.sh",
     "tsl-bridge": "cd scripts/tsl-bridge && node index.mjs"

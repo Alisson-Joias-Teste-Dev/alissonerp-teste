@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Loader2, CheckCircle, AlertCircle, Camera, RotateCcw, Package } from "lucide-react";
+import { X, Loader2, CheckCircle, AlertCircle, Camera, RotateCcw, Package, RefreshCw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ROLES_CONCLUIR_PROTOCOLO } from "@/lib/roles";
 
@@ -15,6 +15,7 @@ const TIPO_LABEL: Record<string, string> = {
   compra_fornecedor: "Compra",
   garantia: "Garantia",
   servico_interno: "S. Interno",
+  conversao: "Conversão",
 };
 function fmtTipo(t: string | null) { return t ? (TIPO_LABEL[t] ?? t) : "—"; }
 
@@ -24,6 +25,12 @@ interface OrdemRow {
   tipo_ordem: string | null;
   peso_metal_negociado: number | null;
   cliente_nome: string | null;
+}
+
+interface OrdemDetalheFoto {
+  ordem_id: number;
+  fotoFile: File | null;
+  fotoPreview: string | null;
 }
 
 interface Props {
@@ -43,6 +50,7 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
   const [fotoFile, setFotoFile] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
   const [ordens, setOrdens] = useState<OrdemRow[] | null>(null);
+  const [ordensDetalhes, setOrdensDetalhes] = useState<OrdemDetalheFoto[]>([]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -51,6 +59,7 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
     setFotoFile(null);
     setFotoPreview(null);
     setOrdens(null);
+    setOrdensDetalhes([]);
     setUserRole("");
 
     const supabase = createClient();
@@ -63,13 +72,43 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
 
     fetch(`/api/protocolo/${protocoloId}`)
       .then((r) => r.json())
-      .then((data) => setOrdens(Array.isArray(data) ? data : []))
+      .then((data) => {
+        const ordensData = Array.isArray(data) ? data : [];
+        setOrdens(ordensData);
+        // Inicializar fotos para ordens de conversão
+        const conversaoOrdens = ordensData.filter(o => o.tipo_ordem === 'conversao');
+        if (conversaoOrdens.length > 0) {
+          setOrdensDetalhes(conversaoOrdens.map(o => ({
+            ordem_id: o.ordem_id,
+            fotoFile: null,
+            fotoPreview: null,
+          })));
+        }
+      })
       .catch(() => setOrdens([]));
   }, [isOpen, protocoloId]);
 
+  function updateOrdemFoto(ordemId: number, file: File | null) {
+    setOrdensDetalhes(prev => prev.map(od =>
+      od.ordem_id === ordemId
+        ? { ...od, fotoFile: file, fotoPreview: file ? URL.createObjectURL(file) : null }
+        : od
+    ));
+  }
+
   async function handleSubmit() {
     setError("");
+
+    // Validar foto de confirmação geral
     if (!fotoFile) { setError("Foto de confirmação é obrigatória."); return; }
+
+    // Validar fotos das ordens de conversão
+    const conversaoFotosFaltando = ordensDetalhes.filter(od => !od.fotoFile);
+    if (conversaoFotosFaltando.length > 0) {
+      setError(`Foto da balança obrigatória para ${conversaoFotosFaltando.length} ordem(ns) de conversão.`);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -83,6 +122,19 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
         .upload(fotoPath, fotoFile, { contentType: fotoFile.type || "image/jpeg", upsert: false });
       if (uploadErr) throw new Error(`Upload foto: ${uploadErr.message}`);
 
+      // Upload das fotos de cada ordem de conversão e montar ordens_detalhes array
+      const ordensDetalhesPayload: { ordem_id: number; foto_base64: string }[] = [];
+      for (const od of ordensDetalhes) {
+        if (!od.fotoFile) continue;
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(od.fotoFile!);
+        });
+        ordensDetalhesPayload.push({ ordem_id: od.ordem_id, foto_base64: base64 });
+      }
+
       const res = await fetch(`/api/protocolo/${protocoloId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -90,6 +142,7 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
           etapas: "concluido",
           recebedor_id: user?.id,
           foto_conclusao: fotoPath,
+          ordens_detalhes: ordensDetalhesPayload.length > 0 ? ordensDetalhesPayload : undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -118,6 +171,7 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
     : `Isso criará ${totalOrdens} aprovação(ões) de consultora automaticamente.`;
 
   const bloqueado = userRole !== "" && !ROLES_CONCLUIR_PROTOCOLO.includes(userRole as typeof ROLES_CONCLUIR_PROTOCOLO[number]);
+  const todasFotosConversaoOK = ordensDetalhes.length === 0 || ordensDetalhes.every(od => od.fotoFile !== null);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={handleClose}>
@@ -213,6 +267,59 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
                   </label>
                 )}
               </div>
+
+              {/* Fotos por ordem de conversão (balança) */}
+              {ordensDetalhes.length > 0 && (
+                <div className="space-y-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: "#9CA3AF" }}>
+                    <RefreshCw size={11} />
+                    Fotos da Balança — Conversão de Estoque
+                  </p>
+                  {ordensDetalhes.map(od => {
+                    const ordem = ordens?.find(o => o.ordem_id === od.ordem_id);
+                    const label = ordem?.numero_ordem ?? `#${od.ordem_id}`;
+                    return (
+                      <div key={od.ordem_id} className="rounded-xl p-3" style={{ border: `1px solid ${C.cremeBorder}`, backgroundColor: "#FAFAF7" }}>
+                        <p className="text-xs font-semibold mb-2" style={{ color: "#374151" }}>
+                          <RefreshCw size={11} className="inline mr-1" style={{ color: "#6D28D9" }} />
+                          {label} — Foto da Balança <span style={{ color: "#DC2626" }}>*</span>
+                        </p>
+                        {od.fotoPreview ? (
+                          <div className="relative rounded-xl overflow-hidden max-h-32">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={od.fotoPreview} alt={`Balança ${label}`} className="w-full max-h-32 object-cover rounded-xl" />
+                            <button
+                              onClick={() => updateOrdemFoto(od.ordem_id, null)}
+                              className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center"
+                              style={{ backgroundColor: "rgba(0,0,0,0.55)" }}
+                            >
+                              <RotateCcw size={13} color="white" />
+                            </button>
+                          </div>
+                        ) : (
+                          <label
+                            className="flex flex-col items-center justify-center h-20 rounded-xl cursor-pointer transition-colors"
+                            style={{ border: `2px dashed ${C.cremeBorder}`, backgroundColor: "#FFFFFF" }}
+                          >
+                            <Camera size={18} style={{ color: "#9CA3AF" }} />
+                            <span className="text-[11px] mt-1" style={{ color: "#9CA3AF" }}>Foto da balança</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) updateOrdemFoto(od.ordem_id, file);
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
 
@@ -233,7 +340,7 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
           {!bloqueado && (
             <button
               onClick={handleSubmit}
-              disabled={loading || success || !fotoFile}
+              disabled={loading || success || !fotoFile || !todasFotosConversaoOK}
               className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
               style={{ backgroundColor: C.esmeralda, color: C.creme }}
             >
