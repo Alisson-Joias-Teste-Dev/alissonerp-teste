@@ -22,6 +22,7 @@ import {
   type CurvaConfig,
 } from "@/lib/curva-precificacao";
 import GaleriaProduto from "./GaleriaProduto";
+import AplicarTemplateModal from "@/components/produtos/AplicarTemplateModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -504,6 +505,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   const [reposicaoAtiva, setReposicaoAtiva] = useState(true);
   const [tempoFabricacaoDias, setTempoFabricacaoDias] = useState("");
   const [rotaEtapas, setRotaEtapas] = useState<number[]>([]);
+  const [mostrarTemplate, setMostrarTemplate] = useState(false);
   const [setoresDisponiveis, setSetoresDisponiveis] = useState<{ id: number; nome: string }[]>([]);
   const [extrasDirty, setExtrasDirty] = useState(false);
 
@@ -729,7 +731,19 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
 
       if (nomeEdit.trim() !== (produto.nome ?? "").trim()) body.nome = nomeEdit.trim();
       if ((tipoMetalEdit || "") !== (produto.tipo_metal ?? "")) body.tipo_metal = tipoMetalEdit || null;
-      if ((categoriaEdit || "") !== (produto.categoria_geral ?? "")) body.categoria_geral = categoriaEdit || null;
+      if ((categoriaEdit || "") !== (produto.categoria_geral ?? "")) {
+        body.categoria_geral = categoriaEdit || null;
+        // Se produto é Alisson e categoria mudou, perguntar se quer aplicar
+        // a rota padrão da nova categoria. Resposta SIM → backend sobrescreve
+        // produto_rota com etapas do template default.
+        const FORN_ALISSON = ["Fabricação Própria", "ARAS Indústria (Fábrica Alisson)"];
+        const fornAtual = fornecedorEdit.trim() || produto.fornecedor || "";
+        if (FORN_ALISSON.includes(fornAtual) && (categoriaEdit || "").trim()) {
+          if (confirm(`Categoria mudou para "${categoriaEdit}". Aplicar a rota padrão dessa categoria? Isso vai sobrescrever a rota atual do produto.`)) {
+            body.aplicar_rota_padrao = true;
+          }
+        }
+      }
       if (situacaoEdit !== (produto.situacao ?? "A")) body.situacao = situacaoEdit;
 
       // Precificação — aceita formato brasileiro:
@@ -1470,9 +1484,50 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
               </section>
               )}
 
-              {/* ── FICHA TÉCNICA (foto) ── */}
+              {/* ── FICHA TÉCNICA (foto + medidas) ── */}
               <section>
                 <p className={sectionTitleCls}>Ficha Técnica</p>
+
+                {/* Medidas — largura, altura, base (mm). Opcionais. */}
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                  <div>
+                    <p className={labelCls}>Largura (mm)</p>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={larguraAro}
+                      onChange={(e) => setLarguraAro(e.target.value)}
+                      placeholder="—"
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                    />
+                  </div>
+                  <div>
+                    <p className={labelCls}>Altura (mm)</p>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={alturaAro}
+                      onChange={(e) => setAlturaAro(e.target.value)}
+                      placeholder="—"
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                    />
+                  </div>
+                  <div>
+                    <p className={labelCls}>Base (mm)</p>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={baseVal}
+                      onChange={(e) => setBaseVal(e.target.value)}
+                      placeholder="—"
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                    />
+                  </div>
+                </div>
+
                 <input
                   ref={fichaTecnicaInputRef}
                   type="file"
@@ -1766,7 +1821,18 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
               </section>
 
               <section>
-                <p className={sectionTitleCls}>Rota de Fabricação</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className={sectionTitleCls}>Rota de Fabricação</p>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarTemplate(true)}
+                    className="text-[11px] font-semibold px-2 py-1 rounded border hover:bg-white"
+                    style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+                    title="Aplicar template cadastrado em /rotas-padrao"
+                  >
+                    📋 Aplicar template…
+                  </button>
+                </div>
                 <div
                   className="rounded-lg border-2 p-3"
                   style={{ borderColor: "#A7D7B8", backgroundColor: "#F0F7F4" }}
@@ -2014,6 +2080,24 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
           </div>
         )}
       </div>
+
+      {mostrarTemplate && produto && (
+        <AplicarTemplateModal
+          produtoId={produto.id_produto}
+          categoriaProduto={categoriaEdit || null}
+          onClose={() => setMostrarTemplate(false)}
+          onAplicado={async () => {
+            // Após aplicar via API, recarrega etapas locais
+            try {
+              const r = await fetch(`/api/produtos/${produto.id_produto}/rota`);
+              if (r.ok) {
+                const d = await r.json() as { etapas?: { setor_id: number }[] };
+                setRotaEtapas((d.etapas ?? []).map((e) => Number(e.setor_id)));
+              }
+            } catch { /* ignore */ }
+          }}
+        />
+      )}
     </>
   );
 }

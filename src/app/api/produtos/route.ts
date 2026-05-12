@@ -826,6 +826,18 @@ export async function POST(req: NextRequest) {
       console.warn("[POST /api/produtos] falha ao aplicar curva:", err);
     }
 
+    // ── Aplicar rota padrão (Alisson + categoria com template default) ───────
+    // Só aplica em produtos NOVOS — nunca sobrescreve rota já cadastrada.
+    try {
+      const { aplicarRotaPadrao } = await import("@/lib/aplicar-rota-padrao");
+      await aplicarRotaPadrao(result.pai.id_produto);
+      for (const v of result.variacoes) {
+        await aplicarRotaPadrao(v.produto_id);
+      }
+    } catch (err) {
+      console.warn("[POST /api/produtos] falha ao aplicar rota padrão:", err);
+    }
+
     // ── Upload de foto ────────────────────────────────────────────────────────
     if (foto_base64 && typeof foto_base64 === "string" && foto_base64.startsWith("data:")) {
       try {

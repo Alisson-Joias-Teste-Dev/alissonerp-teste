@@ -545,6 +545,19 @@ export async function PATCH(
       }
     }
 
+    // ── Aplicar rota padrão (quando categoria mudou + cliente confirmou) ─────
+    // O cliente envia `aplicar_rota_padrao: true` quando o usuário confirmou
+    // no modal. Sobrescreve a rota existente. Se categoria não mudou ou
+    // cliente não pediu, não faz nada — a rota atual é preservada.
+    if (body.aplicar_rota_padrao === true && pubUpdate.categoria !== undefined) {
+      try {
+        const { aplicarRotaPadrao } = await import("@/lib/aplicar-rota-padrao");
+        await aplicarRotaPadrao(produtoId, { sobrescrever: true });
+      } catch (err) {
+        console.warn("[PATCH /api/produtos/[id]] falha ao aplicar rota padrão:", err);
+      }
+    }
+
     // ── Propagar campos simples para variações (se for pai) ──────────────────
     const camposAlterados = [
       ...Object.keys(pubUpdate),
