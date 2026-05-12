@@ -63,6 +63,13 @@ export async function GET(req: NextRequest) {
       p.situacao = 'A'
       AND (p.sku ILIKE ${'%' + q + '%'} OR ${termos.map(t => sql`p.nome ILIKE ${'%' + t + '%'}`).reduce((a, b) => sql`${a} AND ${b}`)})
       AND (ep.eh_pai IS NULL OR ep.eh_pai = false)
+      AND (
+        COALESCE(est.saldo, 0) > 0
+        OR EXISTS (
+          SELECT 1 FROM alissonerp.produto_reposicao_config prc
+          WHERE prc.produto_id = p.id_produto AND prc.ativo = true
+        )
+      )
     ORDER BY
       (p.situacao = 'A')                     DESC,
       (p.preco_sync IS NOT NULL AND p.preco_sync > 0) DESC,
