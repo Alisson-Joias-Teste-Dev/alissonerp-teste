@@ -61,9 +61,12 @@ export async function POST(
     for (const d of descontos) {
       if (d?.categoria_id != null) mapDesc.set(Number(d.categoria_id), Number(d.desconto_promocao ?? 0));
     }
+    // Merge preserva descontos de faixas que NÃO estavam na campanha original.
+    // Mesma semântica do POST /api/orcamento/promocoes — campanhas históricas
+    // não conheciam faixas adicionadas depois e zerar surpreenderia o usuário.
     const merged = cats.map((c) => {
       const cid = Number(c.id);
-      const novo = mapDesc.has(cid) ? mapDesc.get(cid) : 0;
+      const novo = mapDesc.has(cid) ? mapDesc.get(cid) : Number(c.desconto_promocao ?? 0);
       return { ...c, desconto_promocao: novo ?? 0 };
     });
 

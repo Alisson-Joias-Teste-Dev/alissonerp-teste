@@ -44,6 +44,14 @@ export default function NovaFabricacaoModal({ isOpen, onClose, onSuccess }: Prop
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<{ numero_ordem: string; pcp_id: number | null } | null>(null);
+  // Timer de "fechar após sucesso" — cancelado se modal desmontar antes
+  const closeTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
+    };
+  }, []);
 
   // Reset ao abrir
   useEffect(() => {
@@ -119,7 +127,7 @@ export default function NovaFabricacaoModal({ isOpen, onClose, onSuccess }: Prop
       }
       const data = await res.json() as { numero_ordem: string; pcp_id: number | null };
       setSuccess(data);
-      setTimeout(() => { onSuccess?.(); onClose(); }, 1500);
+      closeTimerRef.current = window.setTimeout(() => { onSuccess?.(); onClose(); }, 1500);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro de rede");
       setLoading(false);

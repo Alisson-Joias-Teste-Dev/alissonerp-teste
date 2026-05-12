@@ -55,6 +55,15 @@ export async function POST(req: NextRequest) {
   if (!Number.isFinite(peso) || peso <= 0) {
     return NextResponse.json({ error: "peso_metal_negociado deve ser > 0" }, { status: 400 });
   }
+  // Defesa em profundidade: Almoxarifado Central (ID=1) nunca pode ser operador
+  // (mesma regra de /api/pcp/[id]/atribuir-operador). UI já filtra, mas chamadas
+  // diretas à API precisam ser bloqueadas aqui.
+  if (deposito_id != null && deposito_id === 1) {
+    return NextResponse.json(
+      { error: "Almoxarifado Central nao pode ser operador" },
+      { status: 400 }
+    );
+  }
 
   // Confirma que produto existe
   const [prod] = await sql`SELECT id_produto, nome, sku FROM public.produtos WHERE id_produto = ${produto_id} LIMIT 1`;
