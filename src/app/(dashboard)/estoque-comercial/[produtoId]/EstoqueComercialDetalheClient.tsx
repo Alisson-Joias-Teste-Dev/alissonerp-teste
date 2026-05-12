@@ -211,7 +211,6 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
   const [ajusteTipo,    setAjusteTipo]    = useState<"entrada" | "saida" | null>(null);
   const [ajusteQtd,     setAjusteQtd]     = useState("1");
   const [ajusteDesc,    setAjusteDesc]    = useState("");
-  const [ajusteDataHora, setAjusteDataHora] = useState("");
   const [ajusteErr,     setAjusteErr]     = useState("");
   const [ajusteLoading, setAjusteLoading] = useState(false);
 
@@ -280,13 +279,9 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
   }
 
   function abrirAjuste(tipo: "entrada" | "saida") {
-    const agora = new Date();
-    const local = new Date(agora.getTime() - agora.getTimezoneOffset() * 60000)
-      .toISOString().slice(0, 16);
     setAjusteTipo(tipo);
     setAjusteQtd("1");
     setAjusteDesc("");
-    setAjusteDataHora(local);
     setAjusteErr("");
   }
 
@@ -307,7 +302,6 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
           quantidade: qtd,
           observacao: ajusteDesc.trim(),
           local_estoque_id: 2,
-          data_hora: ajusteDataHora || undefined,
         }),
       });
       if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? "Erro");
@@ -729,16 +723,6 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
             <p className="text-sm text-gray-500 mb-4">{c?.nome_produto}</p>
 
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-semibold mb-1 text-gray-500">Data e Hora</label>
-                <input
-                  type="datetime-local"
-                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
-                  style={{ borderColor: "#E8DCC8" }}
-                  value={ajusteDataHora}
-                  onChange={e => setAjusteDataHora(e.target.value)}
-                />
-              </div>
               <div>
                 <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
                 <input
