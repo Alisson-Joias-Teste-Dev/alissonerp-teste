@@ -7,13 +7,17 @@ const ROLES_CONFIG = ["desenvolvedor", "admin", "gerente_loja"] as const;
 
 // ─── GET /api/orcamento/promocoes ────────────────────────────────────────────
 // Lista o histórico de campanhas (mais recentes primeiro).
+// Datas serializadas como YYYY-MM-DD pra evitar shift de timezone no client.
 export async function GET() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
 
   const rows = await sql`
-    SELECT id, nome, data_inicio, data_fim, descontos, criado_em, ativada_em
+    SELECT id, nome,
+           to_char(data_inicio, 'YYYY-MM-DD') AS data_inicio,
+           to_char(data_fim,    'YYYY-MM-DD') AS data_fim,
+           descontos, criado_em, ativada_em
     FROM alissonerp.config_orcamento_promocoes
     ORDER BY criado_em DESC
     LIMIT 50
@@ -68,7 +72,10 @@ export async function POST(req: NextRequest) {
         ${user.id}::uuid,
         NOW()
       )
-      RETURNING id, nome, data_inicio, data_fim, descontos, criado_em, ativada_em
+      RETURNING id, nome,
+                to_char(data_inicio, 'YYYY-MM-DD') AS data_inicio,
+                to_char(data_fim,    'YYYY-MM-DD') AS data_fim,
+                descontos, criado_em, ativada_em
     `;
 
     // Carrega pricing_categories atual, mescla os descontos da campanha por categoria_id

@@ -40,8 +40,14 @@ export async function POST(
     `;
     if (!promo) throw new Error("PROMO_NOT_FOUND");
 
-    const data_inicio = body.data_inicio || String(promo.data_inicio).slice(0, 10);
-    const data_fim    = body.data_fim    || String(promo.data_fim).slice(0, 10);
+    // postgres.js retorna DATE como Date object em UTC midnight.
+    // toISOString().slice(0,10) recupera a data armazenada sem shift de TZ.
+    const toISODate = (v: unknown): string => {
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      return String(v).slice(0, 10);
+    };
+    const data_inicio = body.data_inicio || toISODate(promo.data_inicio);
+    const data_fim    = body.data_fim    || toISODate(promo.data_fim);
     if (data_inicio > data_fim) throw new Error("DATA_INVALIDA");
 
     const descontos: Array<{ categoria_id?: number; desconto_promocao?: number }> =
