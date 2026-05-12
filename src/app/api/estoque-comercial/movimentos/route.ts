@@ -26,9 +26,10 @@ export async function POST(req: NextRequest) {
     motivo: string;
     local_estoque_id?: number;
     observacao?: string;
+    data_hora?: string;
   };
 
-  const { produto_id, tipo, quantidade, motivo, observacao } = body;
+  const { produto_id, tipo, quantidade, motivo, observacao, data_hora } = body;
 
   if (!produto_id || !tipo || !quantidade || !motivo) {
     return NextResponse.json({ error: "Campos obrigatórios: produto_id, tipo, quantidade, motivo" }, { status: 400 });
@@ -83,23 +84,28 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const tsCustom = data_hora ? new Date(data_hora) : null;
+
   // INSERT com ou sem colunas v2
   if (hasLocalCol) {
     const local_estoque_id = body.local_estoque_id ?? 2;
     const [mov] = await sql`
       INSERT INTO alissonerp.movimentacoes_estoque_comercial
-        (produto_id, tipo, quantidade, motivo, local_estoque_id, status, observacao, created_by)
+        (produto_id, tipo, quantidade, motivo, local_estoque_id, status, observacao, created_by, created_at)
       VALUES
-        (${produto_id}, ${tipo}, ${quantidade}, ${motivo}, ${local_estoque_id}, 'efetivado', ${observacao ?? null}, ${user.id})
+        (${produto_id}, ${tipo}, ${quantidade}, ${motivo}, ${local_estoque_id}, 'efetivado',
+         ${observacao ?? null}, ${user.id},
+         ${tsCustom ? tsCustom.toISOString() : sql`now()`})
       RETURNING id, created_at
     `;
     return NextResponse.json({ id: mov.id, created_at: mov.created_at }, { status: 201 });
   } else {
     const [mov] = await sql`
       INSERT INTO alissonerp.movimentacoes_estoque_comercial
-        (produto_id, tipo, quantidade, motivo, observacao, created_by)
+        (produto_id, tipo, quantidade, motivo, observacao, created_by, created_at)
       VALUES
-        (${produto_id}, ${tipo}, ${quantidade}, ${motivo}, ${observacao ?? null}, ${user.id})
+        (${produto_id}, ${tipo}, ${quantidade}, ${motivo}, ${observacao ?? null}, ${user.id},
+         ${tsCustom ? tsCustom.toISOString() : sql`now()`})
       RETURNING id, created_at
     `;
     return NextResponse.json({ id: mov.id, created_at: mov.created_at }, { status: 201 });

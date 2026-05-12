@@ -207,12 +207,13 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
   const [estornando, setEstornando] = useState<number | null>(null);
   const [transferindo, setTransferindo] = useState(false);
 
-  // Baixa manual
-  const [baixaModal,   setBaixaModal]   = useState(false);
-  const [baixaQtd,     setBaixaQtd]     = useState("1");
-  const [baixaDesc,    setBaixaDesc]    = useState("");
-  const [baixaErr,     setBaixaErr]     = useState("");
-  const [baixaLoading, setBaixaLoading] = useState(false);
+  // Ajuste manual (entrada ou saída)
+  const [ajusteTipo,    setAjusteTipo]    = useState<"entrada" | "saida" | null>(null);
+  const [ajusteQtd,     setAjusteQtd]     = useState("1");
+  const [ajusteDesc,    setAjusteDesc]    = useState("");
+  const [ajusteDataHora, setAjusteDataHora] = useState("");
+  const [ajusteErr,     setAjusteErr]     = useState("");
+  const [ajusteLoading, setAjusteLoading] = useState(false);
 
   // Config edit
   const [editMin,    setEditMin]    = useState(0);
@@ -278,33 +279,44 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
     }
   }
 
-  async function handleBaixaManual() {
-    const qtd = parseInt(baixaQtd, 10);
-    if (!qtd || qtd < 1) { setBaixaErr("Quantidade inválida"); return; }
-    if (!baixaDesc.trim()) { setBaixaErr("Descrição obrigatória"); return; }
-    setBaixaLoading(true); setBaixaErr("");
+  function abrirAjuste(tipo: "entrada" | "saida") {
+    const agora = new Date();
+    const local = new Date(agora.getTime() - agora.getTimezoneOffset() * 60000)
+      .toISOString().slice(0, 16);
+    setAjusteTipo(tipo);
+    setAjusteQtd("1");
+    setAjusteDesc("");
+    setAjusteDataHora(local);
+    setAjusteErr("");
+  }
+
+  async function handleAjusteManual() {
+    if (!ajusteTipo) return;
+    const qtd = parseInt(ajusteQtd, 10);
+    if (!qtd || qtd < 1) { setAjusteErr("Quantidade inválida"); return; }
+    if (!ajusteDesc.trim()) { setAjusteErr("Descrição obrigatória"); return; }
+    setAjusteLoading(true); setAjusteErr("");
     try {
       const r = await fetch("/api/estoque-comercial/movimentos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           produto_id: produtoId,
-          tipo: "saida",
-          motivo: "ajuste_saida",
+          tipo: ajusteTipo,
+          motivo: ajusteTipo === "entrada" ? "ajuste_entrada" : "ajuste_saida",
           quantidade: qtd,
-          observacao: baixaDesc.trim(),
+          observacao: ajusteDesc.trim(),
           local_estoque_id: 2,
+          data_hora: ajusteDataHora || undefined,
         }),
       });
       if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? "Erro");
-      setBaixaModal(false);
-      setBaixaQtd("1");
-      setBaixaDesc("");
+      setAjusteTipo(null);
       await fetchData();
     } catch (e) {
-      setBaixaErr(e instanceof Error ? e.message : "Erro");
+      setAjusteErr(e instanceof Error ? e.message : "Erro");
     } finally {
-      setBaixaLoading(false);
+      setAjusteLoading(false);
     }
   }
 
@@ -359,15 +371,26 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
           </div>
           <div className="flex items-center gap-3 shrink-0">
             {podeAdminDev && (
-              <button
-                onClick={() => { setBaixaModal(true); setBaixaErr(""); setBaixaQtd("1"); setBaixaDesc(""); }}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-                style={{ background: "#FEE2E2", color: "#991B1B", border: "1px solid #FECACA" }}
-                title="Registrar baixa manual no estoque"
-              >
-                <TrendingDown size={15} />
-                Baixa Manual
-              </button>
+              <>
+                <button
+                  onClick={() => abrirAjuste("entrada")}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                  style={{ background: "#D1FAE5", color: "#065F46", border: "1px solid #6EE7B7" }}
+                  title="Registrar entrada manual no estoque"
+                >
+                  <ArrowUpCircle size={15} />
+                  Entrada Manual
+                </button>
+                <button
+                  onClick={() => abrirAjuste("saida")}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                  style={{ background: "#FEE2E2", color: "#991B1B", border: "1px solid #FECACA" }}
+                  title="Registrar baixa manual no estoque"
+                >
+                  <TrendingDown size={15} />
+                  Baixa Manual
+                </button>
+              </>
             )}
             <button
               onClick={() => setTransferindo(true)}
@@ -687,21 +710,35 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
         />
       )}
 
-      {/* Baixa Manual Modal */}
-      {baixaModal && (
+      {/* Ajuste Manual Modal (entrada ou saída) */}
+      {ajusteTipo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <TrendingDown size={18} style={{ color: "#DC2626" }} />
-                <h2 className="font-bold text-lg" style={{ color: "#184036" }}>Baixa Manual</h2>
+                {ajusteTipo === "entrada"
+                  ? <ArrowUpCircle size={18} style={{ color: "#059669" }} />
+                  : <TrendingDown size={18} style={{ color: "#DC2626" }} />}
+                <h2 className="font-bold text-lg" style={{ color: "#184036" }}>
+                  {ajusteTipo === "entrada" ? "Entrada Manual" : "Baixa Manual"}
+                </h2>
               </div>
-              <button onClick={() => setBaixaModal(false)}><X size={18} className="text-gray-400" /></button>
+              <button onClick={() => setAjusteTipo(null)}><X size={18} className="text-gray-400" /></button>
             </div>
 
             <p className="text-sm text-gray-500 mb-4">{c?.nome_produto}</p>
 
             <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-gray-500">Data e Hora</label>
+                <input
+                  type="datetime-local"
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                  style={{ borderColor: "#E8DCC8" }}
+                  value={ajusteDataHora}
+                  onChange={e => setAjusteDataHora(e.target.value)}
+                />
+              </div>
               <div>
                 <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
                 <input
@@ -709,8 +746,8 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
                   min={1}
                   className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
                   style={{ borderColor: "#E8DCC8" }}
-                  value={baixaQtd}
-                  onChange={e => setBaixaQtd(e.target.value)}
+                  value={ajusteQtd}
+                  onChange={e => setAjusteQtd(e.target.value)}
                 />
               </div>
               <div>
@@ -721,16 +758,16 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
                   rows={3}
                   className="w-full border rounded-lg px-3 py-2 text-sm outline-none resize-none"
                   style={{ borderColor: "#E8DCC8" }}
-                  placeholder="Motivo da baixa manual..."
-                  value={baixaDesc}
-                  onChange={e => setBaixaDesc(e.target.value)}
+                  placeholder={ajusteTipo === "entrada" ? "Motivo da entrada manual..." : "Motivo da baixa manual..."}
+                  value={ajusteDesc}
+                  onChange={e => setAjusteDesc(e.target.value)}
                 />
               </div>
             </div>
 
-            {baixaErr && (
+            {ajusteErr && (
               <p className="text-xs text-red-500 mt-2 flex items-center gap-1">
-                <AlertTriangle size={12} /> {baixaErr}
+                <AlertTriangle size={12} /> {ajusteErr}
               </p>
             )}
 
@@ -738,19 +775,26 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
               <button
                 className="flex-1 py-2.5 rounded-xl text-sm font-medium border"
                 style={{ color: "#6B7280", borderColor: "#E5E7EB" }}
-                onClick={() => setBaixaModal(false)}
-                disabled={baixaLoading}
+                onClick={() => setAjusteTipo(null)}
+                disabled={ajusteLoading}
               >
                 Cancelar
               </button>
               <button
                 className="flex-1 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
-                style={{ background: "#DC2626", color: "#fff" }}
-                onClick={handleBaixaManual}
-                disabled={baixaLoading}
+                style={{
+                  background: ajusteTipo === "entrada" ? "#059669" : "#DC2626",
+                  color: "#fff",
+                }}
+                onClick={handleAjusteManual}
+                disabled={ajusteLoading}
               >
-                {baixaLoading ? <Loader2 size={14} className="animate-spin" /> : <TrendingDown size={14} />}
-                Confirmar Baixa
+                {ajusteLoading
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : ajusteTipo === "entrada"
+                    ? <ArrowUpCircle size={14} />
+                    : <TrendingDown size={14} />}
+                {ajusteTipo === "entrada" ? "Confirmar Entrada" : "Confirmar Baixa"}
               </button>
             </div>
           </div>
