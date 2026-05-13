@@ -40,7 +40,9 @@ export default function RotasPadraoClient() {
     try {
       const [tplRes, catRes, setRes] = await Promise.all([
         fetch("/api/rotas-template"),
-        fetch("/api/produtos/categorias-distinct"),
+        // joias_only=1 → exclui Insumos, Ferramentas, Matéria Prima, Serviços
+        // e similares (rota de fabricação só faz sentido pra peça acabada).
+        fetch("/api/produtos/categorias-distinct?joias_only=1"),
         fetch("/api/setores"),
       ]);
       if (!tplRes.ok) throw new Error("Erro ao carregar templates");
