@@ -205,9 +205,15 @@ interface Props {
   userRole: string | null;
 }
 
+// Roles "operacionais" — colaboradores de execução que só precisam ver a
+// ficha técnica da peça (não veem Produção, Apontamentos, Mov. Estoque ou
+// Transferências). Gestão (admin, gerente, pcp, consultora) vê tudo.
+const ROLES_SO_FICHA = ["ourives", "motoboy", "estoquista_fabrica", "estoquista_loja"];
+
 export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline, userRole }: Props) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("producao");
+  const soFicha = userRole != null && ROLES_SO_FICHA.includes(userRole);
+  const [tab, setTab] = useState<Tab>(soFicha ? "ficha" : "producao");
   const [comentariosCount, setComentariosCount] = useState(0);
 
   // ── Modal de edição (apenas desenvolvedor) ───────────────────────────────
@@ -304,13 +310,19 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
   // Encontrar o passo atual (primeiro não-concluido)
   const passoAtualIdx = timeline.findIndex((ev) => ev.status !== "concluido");
 
-  const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: "producao",       label: "Produção" },
-    { key: "apontamentos",   label: "Apontamentos",   count: apontamentos.length },
-    { key: "estoque",        label: "Mov. Estoque",   count: movEstoque.length },
-    { key: "transferencias", label: "Transferências", count: transferencias.length },
-    { key: "ficha",          label: "Ficha Técnica",  count: fichaTecnica?._origem === "erp_multi" ? (fichaTecnica.fichas?.length ?? 0) : fichaTecnica ? 1 : 0 },
-  ];
+  const fichaCount = fichaTecnica?._origem === "erp_multi" ? (fichaTecnica.fichas?.length ?? 0) : fichaTecnica ? 1 : 0;
+  const tabs: { key: Tab; label: string; count?: number }[] = soFicha
+    ? [
+        // Colaborador (ourives etc.): só ficha técnica
+        { key: "ficha", label: "Ficha Técnica", count: fichaCount },
+      ]
+    : [
+        { key: "producao",       label: "Produção" },
+        { key: "apontamentos",   label: "Apontamentos",   count: apontamentos.length },
+        { key: "estoque",        label: "Mov. Estoque",   count: movEstoque.length },
+        { key: "transferencias", label: "Transferências", count: transferencias.length },
+        { key: "ficha",          label: "Ficha Técnica",  count: fichaCount },
+      ];
 
   return (
     <>
