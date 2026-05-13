@@ -1,0 +1,235 @@
+/**
+ * POST /api/produtos/peca-avulsa
+ *
+ * Cadastra UMA pedra avulsa (peça única) como produto independente.
+ * Diferença do /pedras-bulk: foco em pedra única (não em lote de 30+ tamanhos)
+ * e a descrição é livre, definida pelo usuário (ex: "Safira pear 3x5mm AAA").
+ *
+ * Fórmula: preco_venda = peso_ct * custo_usd_ct * dolar * markup
+ *
+ * Convenções (mesmas do pedras-bulk):
+ *   • categoria       = 'Pedras'
+ *   • tipo_metal      = NULL
+ *   • markup / fator  = 1 (preço final vem de preco_tiny)
+ *   • preco_tiny      = preço de venda calculado, arredondado p/ inteiro
+ *   • tem_pedra_preciosa = true
+ *   • eh_pai = eh_variacao = false
+ *   • peso_precificado = ct * 0.2 (1 ct = 0.2 g) — trigger arredonda pra cima
+ *   • peso_ct fiel salvo em alissonerp.produto_pedra_extras
+ *
+ * Dedup: se já existir produto ativo com mesmo nome + categoria='Pedras',
+ * atualiza preço + peso_ct e retorna criado=false.
+ *
+ * Body:
+ * {
+ *   tipo_pedra: string;     // ex: "diamante", "safira" (slug de STONE_TYPES)
+ *   descricao: string;      // nome do produto (3..200 chars)
+ *   peso_ct: number;        // > 0
+ *   custo_usd_ct: number;   // > 0
+ *   markup: number;         // > 0
+ *   criar_estoque: boolean; // se true, insere/incrementa +1 em public.estoque
+ * }
+ *
+ * Resposta 201:
+ * { ok, id_produto, sku, nome, preco_venda, dolar, criado }
+ */
+
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { createServerSupabase } from "@/lib/supabase/server";
+import { temAcessoModulo } from "@/lib/permissoes";
+import sql from "@/lib/db";
+
+const InputSchema = z.object({
+  tipo_pedra: z.string().trim().min(2),
+  descricao: z.string().trim().min(3).max(200),
+  peso_ct: z.number().positive(),
+  custo_usd_ct: z.number().positive(),
+  markup: z.number().positive(),
+  criar_estoque: z.boolean(),
+});
+
+export async function POST(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  const role = user.user_metadata?.role as string | undefined;
+  if (!(await temAcessoModulo(role ?? "", "produtos", "escrever"))) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
+  const raw = await req.json().catch(() => ({}));
+  const parsed = InputSchema.safeParse(raw);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Payload inválido", detalhes: parsed.error.issues },
+      { status: 400 },
+    );
+  }
+  const input = parsed.data;
+
+  try {
+    const [cot] = await sql<{ dollar: string | number | null }[]>`
+      SELECT dollar FROM public.parametros LIMIT 1
+    `;
+    const dolar = Number(cot?.dollar ?? 0);
+    if (!Number.isFinite(dolar) || dolar <= 0) {
+      return NextResponse.json(
+        { error: "Dólar não cadastrado em public.parametros" },
+        { status: 422 },
+      );
+    }
+
+    const precoVenda = Math.round(
+      input.peso_ct * input.custo_usd_ct * dolar * input.markup,
+    );
+    if (!Number.isFinite(precoVenda) || precoVenda <= 0) {
+      return NextResponse.json(
+        { error: "Preço calculado inválido" },
+        { status: 422 },
+      );
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await (sql as any).begin(async (tx: any) => {
+      const nome = input.descricao.trim();
+
+      // Dedup: nome (case-insensitive, trimmed) + categoria Pedras + ativo
+      const [dup] = await tx<{ id_produto: string; sku: string; preco_tiny: string | null }[]>`
+        SELECT id_produto, sku, preco_tiny
+        FROM public.produtos
+        WHERE LOWER(TRIM(nome)) = LOWER(${nome})
+          AND situacao = 'A'
+          AND categoria ILIKE 'Pedras%'
+        LIMIT 1
+      `;
+
+      if (dup) {
+        const idProduto = Number(dup.id_produto);
+        const precoAntes = Number(dup.preco_tiny ?? 0);
+        if (Math.abs(precoAntes - precoVenda) >= 0.5) {
+          await tx`
+            UPDATE public.produtos
+            SET preco_tiny = ${precoVenda}
+            WHERE id_produto = ${idProduto}
+          `;
+        }
+        await tx`
+          INSERT INTO alissonerp.produto_pedra_extras (produto_id, peso_ct)
+          VALUES (${idProduto}, ${Number(input.peso_ct.toFixed(4))})
+          ON CONFLICT (produto_id) DO UPDATE SET peso_ct = EXCLUDED.peso_ct, updated_at = NOW()
+        `;
+
+        if (input.criar_estoque) {
+          await upsertEstoque(tx, dup.sku, 1);
+        }
+
+        return {
+          id_produto: idProduto,
+          sku: dup.sku,
+          nome,
+          criado: false,
+        };
+      }
+
+      // Próximo SKU único em AMBAS as tabelas
+      const [skuRow] = await tx<{ next: number }[]>`
+        SELECT (COALESCE(
+          GREATEST(
+            (SELECT MAX(sku::integer) FROM public.produtos         WHERE sku ~ '^[0-9]+$'),
+            (SELECT MAX(sku::integer) FROM alissonerp.erp_produtos WHERE sku ~ '^[0-9]+$')
+          ),
+          1603
+        ) + 1)::int AS next
+      `;
+      let proxSku = Number(skuRow?.next ?? 1604);
+      let sku = String(proxSku);
+      while (true) {
+        const [ex] = await tx`
+          SELECT 1
+          WHERE EXISTS (SELECT 1 FROM public.produtos         WHERE sku = ${sku})
+             OR EXISTS (SELECT 1 FROM alissonerp.erp_produtos WHERE sku = ${sku})
+        `;
+        if (!ex) break;
+        proxSku += 1;
+        sku = String(proxSku);
+      }
+
+      const pesoG = Math.max(Number((input.peso_ct * 0.2).toFixed(4)), 0.0001);
+
+      const [seq] = await tx<{ id: string }[]>`
+        SELECT nextval('alissonerp.seq_produto_id') AS id
+      `;
+      const idProduto = Number(seq.id);
+
+      await tx`
+        INSERT INTO public.produtos
+          (id_produto, sku, nome, tipo_metal, situacao,
+           peso_precificado, markup, fator,
+           categoria_precificacao, categoria, tem_pedra_preciosa,
+           preco_tiny)
+        VALUES
+          (${idProduto}, ${sku}, ${nome}, ${null}, 'A',
+           ${pesoG}, 1, 1,
+           ${null}, 'Pedras', true,
+           ${precoVenda})
+      `;
+
+      await tx`
+        INSERT INTO alissonerp.erp_produtos
+          (produto_id, sku, nome, eh_pai, eh_variacao)
+        VALUES
+          (${idProduto}, ${sku}, ${nome}, false, false)
+      `;
+
+      await tx`
+        INSERT INTO alissonerp.produto_pedra_extras (produto_id, peso_ct)
+        VALUES (${idProduto}, ${Number(input.peso_ct.toFixed(4))})
+        ON CONFLICT (produto_id) DO UPDATE SET peso_ct = EXCLUDED.peso_ct, updated_at = NOW()
+      `;
+
+      if (input.criar_estoque) {
+        await upsertEstoque(tx, sku, 1);
+      }
+
+      return { id_produto: idProduto, sku, nome, criado: true };
+    });
+
+    return NextResponse.json(
+      {
+        ok: true,
+        id_produto: result.id_produto,
+        sku: result.sku,
+        nome: result.nome,
+        preco_venda: precoVenda,
+        dolar,
+        criado: result.criado,
+      },
+      { status: 201 },
+    );
+  } catch (err) {
+    console.error("[POST /api/produtos/peca-avulsa]", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Erro ao cadastrar peça avulsa" },
+      { status: 500 },
+    );
+  }
+}
+
+// UPSERT manual: public.estoque.sku não tem UNIQUE — replica padrão do pedras-bulk.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function upsertEstoque(tx: any, sku: string, qtd: number) {
+  const updRes = await tx`
+    UPDATE public.estoque
+    SET saldo        = saldo        + ${qtd},
+        estoque_loja = estoque_loja + ${qtd}
+    WHERE sku = ${sku}
+  `;
+  if ((updRes.count ?? 0) === 0) {
+    await tx`
+      INSERT INTO public.estoque (sku, saldo, estoque_loja)
+      VALUES (${sku}, ${qtd}, ${qtd})
+    `;
+  }
+}

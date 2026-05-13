@@ -14,6 +14,7 @@ import { formatPeso } from "@/lib/formatters";
 import ProdutoDrawer from "@/components/produtos/ProdutoDrawer";
 import CadastroProdutoModal from "@/components/produtos/CadastroProdutoModal";
 import ModalPersonalizacao from "@/components/produtos/ModalPersonalizacao";
+import CadastrarPecaAvulsaModal from "@/components/produtos/CadastrarPecaAvulsaModal";
 import BulkEditModal from "@/components/produtos/BulkEditModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -187,6 +188,7 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
   // Cadastro modal
   const [showCadastro, setShowCadastro] = useState(false);
   const [showPersonalizado, setShowPersonalizado] = useState(false);
+  const [showPecaAvulsa, setShowPecaAvulsa] = useState(false);
 
   // Seleção em massa
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
@@ -388,6 +390,14 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
               title="Cadastrar regras de personalização (nome gravado, preço por letra)"
             >
               🏷️ + Personalizado
+            </button>
+            <button
+              onClick={() => setShowPecaAvulsa(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border hover:bg-purple-50"
+              style={{ borderColor: "#7C3AED", color: "#184036" }}
+              title="Cadastrar pedra avulsa (peso + custo USD + markup)"
+            >
+              ✨ + Peça Avulsa
             </button>
             <button
               onClick={() => setShowCadastro(true)}
@@ -864,6 +874,13 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
 
       {showPersonalizado && (
         <ModalPersonalizacao onClose={() => setShowPersonalizado(false)} />
+      )}
+
+      {showPecaAvulsa && (
+        <CadastrarPecaAvulsaModal
+          onClose={() => setShowPecaAvulsa(false)}
+          onSuccess={() => { fetchProdutos(); bumpRefresh(); }}
+        />
       )}
     </div>
   );
