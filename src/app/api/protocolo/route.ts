@@ -98,6 +98,16 @@ export async function POST(req: NextRequest) {
   const rows = ordem_ids.map((ordem_id) => ({ protocolo_id: prot.id, ordem_id }));
   await sql`INSERT INTO alissonerp.protocolo_ordens ${sql(rows)}`;
 
+  // Se for protocolo de ida, marcar conversões como 'em_rota'
+  if (direcao === "ida") {
+    await sql`
+      UPDATE alissonerp.conversoes_estoque
+      SET status_conversao = 'em_rota', updated_at = NOW()
+      WHERE ordem_id = ANY(${ordem_ids}::int[])
+        AND status_conversao = 'aprovado'
+    `;
+  }
+
   await logAudit(sql, {
     tabela: "protocolos",
     operacao: "INSERT",
