@@ -224,19 +224,34 @@ export default function RotaFabricacaoClient() {
       .sort((a, b) => a.nome.localeCompare(b.nome));
   }, [data]);
 
-  // Agrupa OFs por setor da ROTA (setor_id_rota), não pelo setor do operador.
-  // "Sem rota" SEMPRE no início — é o pool das OFs que ainda precisam ser
-  // configuradas e o gerente costuma trabalhar a partir dela.
+  // Separa OFs em 3 grupos pelo etapas_cod (label/cod do vw_pcp_erp):
+  //   - ativas: NÃO concluido/cancelado → caem nos setores ou em "Novas Ordens"
+  //   - concluidas: etapas_cod = 'concluido' → coluna ✅ Concluído (fixa)
+  //   - canceladas: etapas_cod = 'cancelado' → coluna 🚫 Cancelado (fixa)
+  const ofsAtivas = useMemo(
+    () => ofsFiltradas.filter((o: OFItem) => o.etapas_cod !== "concluido" && o.etapas_cod !== "cancelado"),
+    [ofsFiltradas],
+  );
+  const ofsConcluidas = useMemo(
+    () => ofsFiltradas.filter((o: OFItem) => o.etapas_cod === "concluido"),
+    [ofsFiltradas],
+  );
+  const ofsCanceladas = useMemo(
+    () => ofsFiltradas.filter((o: OFItem) => o.etapas_cod === "cancelado"),
+    [ofsFiltradas],
+  );
+
+  // Colunas de SETORES (só com OFs ativas). "Novas Ordens" no início.
   const colunas = useMemo(() => {
     if (!data) return [];
     const out: { setor: Setor | null; ofs: OFItem[] }[] = [];
-    const semRota = ofsFiltradas.filter((o) => o.setor_id_rota == null);
+    const semRota = ofsAtivas.filter((o) => o.setor_id_rota == null);
     out.push({ setor: null, ofs: semRota });
     for (const s of data.setores) {
-      out.push({ setor: s, ofs: ofsFiltradas.filter((o) => Number(o.setor_id_rota) === s.id) });
+      out.push({ setor: s, ofs: ofsAtivas.filter((o) => Number(o.setor_id_rota) === s.id) });
     }
     return out;
-  }, [data, ofsFiltradas]);
+  }, [data, ofsAtivas]);
 
   const totalOFs = data?.ofs.length ?? 0;
   const totalOFsFiltradas = ofsFiltradas.length;
@@ -532,7 +547,7 @@ export default function RotaFabricacaoClient() {
             );
           })}
 
-          {/* Coluna "+ Novo setor" — sempre no fim */}
+          {/* Coluna "+ Novo setor" — sempre no fim das colunas dinâmicas */}
           <NovoSetorColuna
             criando={criandoSetor}
             nome={novoSetorNome}
@@ -542,6 +557,32 @@ export default function RotaFabricacaoClient() {
             onCancelar={() => { setCriandoSetor(false); setNovoSetorNome(""); }}
             onConfirmar={criarSetor}
           />
+
+          {/* Colunas FIXAS: Concluído e Cancelado — só aparecem se tem cards.
+              Não aceitam drop, não têm CRUD inline. Servem só pra histórico
+              visual quando o filtro Status está em concluidas/canceladas/todas. */}
+          {ofsConcluidas.length > 0 && (
+            <ColunaFinalizada
+              tipo="concluido"
+              ofs={ofsConcluidas}
+              onDetalhe={abrirDetalhe}
+              onApontar={abrirApontar}
+              onTransferir={abrirTransferir}
+              onSaida={abrirSaida}
+              onAtribuir={abrirAtribuir}
+            />
+          )}
+          {ofsCanceladas.length > 0 && (
+            <ColunaFinalizada
+              tipo="cancelado"
+              ofs={ofsCanceladas}
+              onDetalhe={abrirDetalhe}
+              onApontar={abrirApontar}
+              onTransferir={abrirTransferir}
+              onSaida={abrirSaida}
+              onAtribuir={abrirAtribuir}
+            />
+          )}
 
           {colunas.length === 0 && !criandoSetor && (
             <p className="text-sm py-12 px-4" style={{ color: "#9CA3AF" }}>
@@ -1131,6 +1172,90 @@ function ModalAtribuir({
               ))}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Coluna fixa de histórico (Concluído / Cancelado) ───────────────────────
+// Não aceita drag-drop, não tem CRUD. Só mostra cards finalizados.
+function ColunaFinalizada({
+  tipo,
+  ofs,
+  onDetalhe,
+  onApontar,
+  onTransferir,
+  onSaida,
+  onAtribuir,
+}: {
+  tipo: "concluido" | "cancelado";
+  ofs: OFItem[];
+  onDetalhe: (pcp: OFItem) => void;
+  onApontar: (pcp: OFItem) => void;
+  onTransferir: (pcp: OFItem) => void;
+  onSaida: (pcp: OFItem) => void;
+  onAtribuir: (pcp: OFItem) => void;
+}) {
+  const config = tipo === "concluido"
+    ? { label: "Concluído", emoji: "✅", borda: "#10B981", header: "#D1FAE5", textoHeader: "#065F46", bg: "#F0FDF4" }
+    : { label: "Cancelado", emoji: "🚫", borda: "#EF4444", header: "#FEE2E2", textoHeader: "#991B1B", bg: "#FEF2F2" };
+
+  return (
+    <div
+      className="flex-shrink-0 w-72 snap-start rounded-xl flex flex-col"
+      style={{ backgroundColor: config.bg, minHeight: 240 }}
+    >
+      {/* Header */}
+      <div
+        className="px-3 py-2.5 rounded-t-xl"
+        style={{ backgroundColor: config.header, borderBottom: `2px solid ${config.borda}` }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: config.textoHeader }}>
+            {config.emoji} {config.label}
+          </span>
+          <span
+            className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full"
+            style={{ backgroundColor: config.borda, color: "#fff" }}
+          >
+            {ofs.length}
+          </span>
+        </div>
+        <p className="mt-1 text-[10px]" style={{ color: config.textoHeader, opacity: 0.7 }}>
+          Histórico — últimos 30 dias
+        </p>
+      </div>
+
+      {/* Cards */}
+      <div className="flex flex-col gap-2 p-2 flex-1 overflow-y-auto" style={{ maxHeight: "70vh" }}>
+        {ofs.length === 0 && (
+          <p className="text-center text-[11px] py-4" style={{ color: "#9CA3AF" }}>
+            Vazio
+          </p>
+        )}
+        {ofs.map((of) => {
+          const extra = of.eh_reposicao ? (
+            <span
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+              style={{ backgroundColor: "#DBEAFE", color: "#1E40AF" }}
+            >
+              REPO
+            </span>
+          ) : null;
+          return (
+            <div key={of.id} style={{ opacity: 0.85 }}>
+              <KanbanCard
+                pcp={of}
+                onDetalhe={onDetalhe}
+                onApontar={onApontar}
+                onTransferir={onTransferir}
+                onSaida={onSaida}
+                onAtribuir={onAtribuir}
+                extraBadges={extra}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
