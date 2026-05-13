@@ -66,6 +66,10 @@ export default function RotaFabricacaoClient() {
   const [setorBusy, setSetorBusy] = useState(false);
   const [setorErr, setSetorErr] = useState<string | null>(null);
 
+  // Filtros aplicados client-side nas OFs antes de agrupar por setor
+  const [filtroVendedorId, setFiltroVendedorId] = useState<number | "">("");
+  const [filtroReposicao, setFiltroReposicao] = useState(false);
+
   const carregar = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -193,21 +197,47 @@ export default function RotaFabricacaoClient() {
     }
   }
 
+  // OFs filtradas client-side (vendedora / reposição)
+  const ofsFiltradas = useMemo(() => {
+    if (!data) return [] as OFItem[];
+    return data.ofs.filter((o: OFItem) => {
+      if (filtroReposicao && !o.eh_reposicao) return false;
+      if (filtroVendedorId !== "" && Number(o.vendedor_id) !== Number(filtroVendedorId)) return false;
+      return true;
+    });
+  }, [data, filtroVendedorId, filtroReposicao]);
+
+  // Lista de vendedoras únicas presentes nas OFs (pra popular o select)
+  const vendedoresDisponiveis = useMemo(() => {
+    if (!data) return [] as { id: number; nome: string }[];
+    const mapa = new Map<number, string>();
+    for (const o of data.ofs as OFItem[]) {
+      if (o.vendedor_id != null && o.vendedor_nome) {
+        mapa.set(Number(o.vendedor_id), String(o.vendedor_nome));
+      }
+    }
+    return Array.from(mapa.entries())
+      .map(([id, nome]) => ({ id, nome }))
+      .sort((a, b) => a.nome.localeCompare(b.nome));
+  }, [data]);
+
   // Agrupa OFs por setor da ROTA (setor_id_rota), não pelo setor do operador.
   // "Sem rota" SEMPRE no início — é o pool das OFs que ainda precisam ser
   // configuradas e o gerente costuma trabalhar a partir dela.
   const colunas = useMemo(() => {
     if (!data) return [];
     const out: { setor: Setor | null; ofs: OFItem[] }[] = [];
-    const semRota = data.ofs.filter((o) => o.setor_id_rota == null);
+    const semRota = ofsFiltradas.filter((o) => o.setor_id_rota == null);
     out.push({ setor: null, ofs: semRota });
     for (const s of data.setores) {
-      out.push({ setor: s, ofs: data.ofs.filter((o) => Number(o.setor_id_rota) === s.id) });
+      out.push({ setor: s, ofs: ofsFiltradas.filter((o) => Number(o.setor_id_rota) === s.id) });
     }
     return out;
-  }, [data]);
+  }, [data, ofsFiltradas]);
 
   const totalOFs = data?.ofs.length ?? 0;
+  const totalOFsFiltradas = ofsFiltradas.length;
+  const filtrosAtivos = (filtroVendedorId !== "" ? 1 : 0) + (filtroReposicao ? 1 : 0);
 
   // ─── Drag & Drop ────────────────────────────────────────────────────────
   function onDragStart(e: React.DragEvent<HTMLDivElement>, of: OFItem) {
@@ -338,18 +368,67 @@ export default function RotaFabricacaoClient() {
             Rota de Fabricação
           </h2>
           <p className="text-sm mt-1" style={{ color: "#6B7280" }}>
-            Kanban de OFs ativas por setor · {totalOFs} OF(s) · {data?.setores.length ?? 0} setor(es) ativos
+            Kanban de OFs ativas por setor ·{" "}
+            {filtrosAtivos > 0 ? (
+              <>
+                <span className="font-semibold" style={{ color: C.esmeralda }}>{totalOFsFiltradas}</span> de {totalOFs} OF(s)
+                <span className="ml-1" style={{ color: C.esmeralda }}>· {filtrosAtivos} filtro(s)</span>
+              </>
+            ) : (
+              <>{totalOFs} OF(s)</>
+            )}{" "}
+            · {data?.setores.length ?? 0} setor(es) ativos
           </p>
         </div>
-        <button
-          onClick={carregar}
-          disabled={loading || movendo}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold border"
-          style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
-        >
-          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-          Atualizar
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Filtro vendedora */}
+          <select
+            value={filtroVendedorId}
+            onChange={(e) => setFiltroVendedorId(e.target.value === "" ? "" : Number(e.target.value))}
+            className="px-3 py-2 rounded-lg border text-[12px] bg-white outline-none"
+            style={{ borderColor: filtroVendedorId !== "" ? C.esmeralda : C.cremeBorder, color: C.esmeralda }}
+            title="Filtrar por vendedora"
+          >
+            <option value="">Todas as vendedoras</option>
+            {vendedoresDisponiveis.map((v) => (
+              <option key={v.id} value={v.id}>{v.nome}</option>
+            ))}
+          </select>
+          {/* Toggle reposição */}
+          <button
+            type="button"
+            onClick={() => setFiltroReposicao((v) => !v)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold border"
+            style={{
+              borderColor: filtroReposicao ? "#1E40AF" : C.cremeBorder,
+              backgroundColor: filtroReposicao ? "#DBEAFE" : "#fff",
+              color: filtroReposicao ? "#1E40AF" : "#6B7280",
+            }}
+            title="Mostrar só ordens de reposição automática (REPO)"
+          >
+            🔄 Só reposição
+          </button>
+          {/* Limpar filtros (quando algum está ativo) */}
+          {filtrosAtivos > 0 && (
+            <button
+              type="button"
+              onClick={() => { setFiltroVendedorId(""); setFiltroReposicao(false); }}
+              className="text-[11px] font-semibold text-red-500 hover:text-red-700 px-2"
+              title="Limpar filtros"
+            >
+              ✕ Limpar
+            </button>
+          )}
+          <button
+            onClick={carregar}
+            disabled={loading || movendo}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold border"
+            style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            Atualizar
+          </button>
+        </div>
       </div>
 
       {error && (

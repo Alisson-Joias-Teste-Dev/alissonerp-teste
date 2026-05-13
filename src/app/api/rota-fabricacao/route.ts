@@ -80,6 +80,7 @@ export async function GET() {
       SELECT
         v.id, v.ordem_id, v.etapas, v.etapas_cod, v.numero_ordem,
         v.cliente_nome, v.vendedor_nome, v.setor_nome,
+        o.vendedor_id,
         v.peso_final, v.total_metal, v.data_conclusao,
         v.created_at, v.deposito_id,
         v.deposito_nome, v.total_apontamentos,
