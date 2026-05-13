@@ -63,6 +63,28 @@ export async function POST(req: NextRequest) {
   if (typeof updates.situacao === "string" && (updates.situacao === "A" || updates.situacao === "I")) {
     up.situacao = updates.situacao;
   }
+
+  // Guard inativação em lote: nenhum ID da lista pode ter estoque > 0.
+  // Se houver, retorna 422 com a lista dos bloqueados (UX: usuário sabe
+  // quais zerar). Mesma regra do PATCH single.
+  if (up.situacao === "I") {
+    const bloqueados = await sql<{ produto_id: number; sku: string | null; nome: string | null; saldo: number }[]>`
+      SELECT v.produto_id, p.sku, p.nome, COALESCE(SUM(v.saldo_fisico),0)::int AS saldo
+      FROM alissonerp.vw_saldo_estoque_comercial_v2 v
+      JOIN public.produtos p ON p.id_produto = v.produto_id
+      WHERE v.produto_id = ANY(${ids}::bigint[])
+      GROUP BY v.produto_id, p.sku, p.nome
+      HAVING SUM(v.saldo_fisico) > 0
+    `;
+    if (bloqueados.length > 0) {
+      return NextResponse.json({
+        error: `Não é possível inativar ${bloqueados.length} produto(s) — têm estoque. Zere o estoque antes.`,
+        bloqueados: bloqueados.map((b) => ({
+          produto_id: Number(b.produto_id), sku: b.sku, nome: b.nome, saldo: Number(b.saldo),
+        })),
+      }, { status: 422 });
+    }
+  }
   if (typeof updates.tem_pedra_preciosa === "boolean") {
     up.tem_pedra_preciosa = updates.tem_pedra_preciosa;
   }

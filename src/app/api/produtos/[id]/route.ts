@@ -316,6 +316,22 @@ export async function PATCH(
     pubUpdate.categoria = c ? c : null;
   }
   if (typeof body.situacao === "string" && (body.situacao === "A" || body.situacao === "I")) {
+    // Guard: não permite inativar produto com estoque físico > 0.
+    // Produtos inativos com estoque ficam invisíveis nos filtros e podem
+    // gerar "vazamento" contábil (ouro/pedra não trackeado). Se houver
+    // saldo, exige que o estoque seja zerado antes.
+    if (body.situacao === "I") {
+      const [estoque] = await sql`
+        SELECT COALESCE(SUM(saldo_fisico), 0)::int AS saldo
+        FROM alissonerp.vw_saldo_estoque_comercial_v2
+        WHERE produto_id = ${produtoId}
+      `;
+      if (Number(estoque?.saldo ?? 0) > 0) {
+        return NextResponse.json({
+          error: `Não é possível inativar — produto tem ${estoque.saldo} un em estoque. Zere o estoque antes de inativar.`,
+        }, { status: 422 });
+      }
+    }
     pubUpdate.situacao = body.situacao;
   }
   if (body.peso_precificado !== undefined) {
