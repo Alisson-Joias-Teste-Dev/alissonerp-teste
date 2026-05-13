@@ -23,6 +23,12 @@ const LEVEL_CONFIG = {
     icon:   <Info size={18} className="shrink-0 text-blue-200" />,
     label:  "Info",
   },
+  success: {
+    bg:     "#065F46",
+    border: "#059669",
+    icon:   <Info size={18} className="shrink-0 text-green-200" />,
+    label:  "Sucesso",
+  },
 };
 
 function ErrorCard({ err, onDismiss }: { err: GlobalError; onDismiss: () => void }) {
