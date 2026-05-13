@@ -139,10 +139,10 @@ export async function POST(req: NextRequest) {
       const [mov] = await tx`
         INSERT INTO alissonerp.movimentacoes_estoque_comercial
           (produto_id, tipo, quantidade, motivo, local_estoque_id, status,
-           ordem_id, observacao, created_by)
+           ordem_id, referencia_id, observacao, created_by)
         VALUES
           (${item.produto_id}, 'saida', ${item.quantidade}, 'reservado_conversao', 2, 'efetivado',
-           ${ordem.id}, 'Reservado para conversão de estoque', ${user.id})
+           ${ordem.id}, ${ordem.id}, 'Reservado para conversão de estoque', ${user.id})
         RETURNING id
       `;
 
