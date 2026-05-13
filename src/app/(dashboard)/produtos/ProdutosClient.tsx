@@ -48,6 +48,11 @@ export interface Produto {
   sufixo_variacao: string | null;
   numeracao: string | null;
   qtd_variacoes: number;
+  // Promocao vigente (migration 248)
+  preco_vigente?: string | number | null;
+  em_promocao?: boolean | null;
+  nome_campanha?: string | null;
+  promo_data_fim?: string | null;
 }
 
 interface CategoriaPai {
@@ -737,16 +742,33 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
                               )}
                             </td>
 
-                            {/* Preço Venda — pedras: preco_tiny (manual); joias: preco_curva (cotação atual) */}
+                            {/* Preço Venda — pedras: preco_tiny (manual); joias: preco_curva (cotação atual);
+                                promo: preco_vigente sobrescreve quando em_promocao=true */}
                             <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
                               {(() => {
-                                const precoExibir = isPedra
+                                const precoLista = isPedra
                                   ? p.preco_tiny
                                   : (p.preco_curva != null ? String(p.preco_curva) : (p.preco_sync ?? p.preco_tiny));
-                                if (precoExibir != null && parseFloat(precoExibir) > 0) {
+                                const emPromo = !!p.em_promocao;
+                                const precoPromo = p.preco_vigente != null ? String(p.preco_vigente) : null;
+                                if (emPromo && precoPromo != null && parseFloat(precoPromo) > 0 && precoLista != null) {
+                                  return (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <s className="text-gray-400 font-normal">{formatPreco(precoLista)}</s>
+                                      <span className="font-bold" style={{ color: "#047857" }}>{formatPreco(precoPromo)}</span>
+                                      <span
+                                        className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-300"
+                                        title={p.nome_campanha ? `Campanha: ${p.nome_campanha}` : "Em promocao"}
+                                      >
+                                        PROMO
+                                      </span>
+                                    </span>
+                                  );
+                                }
+                                if (precoLista != null && parseFloat(precoLista) > 0) {
                                   return (
                                     <span className="font-semibold" style={{ color: "#184036" }}>
-                                      {formatPreco(precoExibir)}
+                                      {formatPreco(precoLista)}
                                     </span>
                                   );
                                 } else if (p.preco_filhos_min != null && p.preco_filhos_min > 0) {

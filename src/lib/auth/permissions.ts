@@ -55,6 +55,7 @@ const ALL_MENUS: MenuItem[] = [
   { label: "Devoluções",         href: "/devolucoes",         icon: "RotateCcw"       },
   { label: "Vales-Troca",        href: "/vale-troca",         icon: "Ticket"          },
   { label: "Produtos",           href: "/produtos",           icon: "Tag"             },
+  { label: "Promocoes",          href: "/comercial/promocoes", icon: "Tag"            },
   { label: "Precificação",       href: "/precificacao",       icon: "TrendingUp"      },
   { label: "Auditoria",          href: "/auditoria",          icon: "ClipboardCheck"  },
   { label: "Tarefas",            href: "/tarefas",            icon: "ListTodo"        },
@@ -71,8 +72,8 @@ const ALL_MENUS: MenuItem[] = [
 ];
 
 const ROLE_MENUS: Record<Role, string[]> = {
-  desenvolvedor:      ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/rfid/cadastro", "/vendas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/crediario", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/site", "/editor-ia"],
-  admin:              ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/rfid/cadastro", "/vendas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/crediario", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/site", "/editor-ia"],
+  desenvolvedor:      ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/rfid/cadastro", "/vendas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/crediario", "/produtos", "/comercial/promocoes", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/site", "/editor-ia"],
+  admin:              ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/insumos", "/rfid/cadastro", "/vendas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/crediario", "/produtos", "/comercial/promocoes", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/site", "/editor-ia"],
   gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/insumos", "/rfid/cadastro", "/vendas", "/estoque-comercial", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/editor-ia"],
   gerente_loja:       ["/dashboard-comercial", "/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/editor-ia", "/crediario"],
   ourives:            ["/ordens", "/pcp", "/editor-ia"],
@@ -90,7 +91,7 @@ const MENU_GROUPS: MenuGroup[] = [
   { type: "group", label: "Logística",   icon: "Truck",       items: ["/protocolo", "/conferencia", "/entrega"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Qualidade",   icon: "ShieldCheck", items: ["/auditoria"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Gestão",     icon: "ListTodo",    items: ["/tarefas", "/relatorios", "/gestao-estoque"].map(h => ALL_MENUS.find(m => m.href === h)!) },
-  { type: "group", label: "Comercial",   icon: "Briefcase",   items: ["/dashboard-comercial", "/vendas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/produtos", "/orcamento"].map(h => ALL_MENUS.find(m => m.href === h)!) },
+  { type: "group", label: "Comercial",   icon: "Briefcase",   items: ["/dashboard-comercial", "/vendas", "/estoque-comercial", "/devolucoes", "/vale-troca", "/produtos", "/comercial/promocoes", "/orcamento"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Finanças",    icon: "DollarSign",  items: ["/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/crediario", "/precificacao"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Fiscal",      icon: "Receipt",     items: ["/fiscal/emitentes", "/fiscal/regras"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "E-Commerce",  icon: "Globe",       items: ["/site"].map(h => ALL_MENUS.find(m => m.href === h)!) },
@@ -152,6 +153,7 @@ const HREF_TO_MODULO: Record<string, string> = {
   "/financeiro/conciliacao":       "financeiro",
   "/crediario":                    "crediario",
   "/produtos":          "produtos",
+  "/comercial/promocoes": "promocoes",
   "/precificacao":      "precificacao",
   "/configuracoes":     "configuracoes",
   "/tarefas":           "tarefas",

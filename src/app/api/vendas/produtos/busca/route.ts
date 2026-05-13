@@ -4,6 +4,10 @@ import sql from "@/lib/db";
 // ─── GET /api/vendas/produtos/busca?q=&limit= ─────────────────────────────────
 // Busca produtos em public.produtos (READONLY)
 // Retorna id, sku, nome, preco_venda, peso_precificado e estoque agregado
+//
+// Promocao: se o produto tem promo ativa (migration 248), preco_promo vem
+// preenchido + em_promocao=true. O preco_venda continua sendo o de lista
+// (curva atual ou preco_tiny) - o POS aplica o desconto no calcItem.
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const q       = (searchParams.get("q")?.trim() ?? "").replace(",", ".");
@@ -44,9 +48,14 @@ export async function GET(req: NextRequest) {
       ep.largura_aro,
       COALESCE(est.saldo, 0) AS saldo_disponivel,
       (ftp.id IS NOT NULL) AS tem_ficha_tecnica,
-      COALESCE(rfid.qtd, 0) AS rfid_disponivel
+      COALESCE(rfid.qtd, 0) AS rfid_disponivel,
+      -- Promocao vigente (migration 248)
+      CASE WHEN vpv.em_promocao THEN vpv.preco_vigente ELSE NULL END AS preco_promo,
+      COALESCE(vpv.em_promocao, false) AS em_promocao,
+      vpv.nome_campanha AS promocao_nome
     FROM public.produtos p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+    LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
     LEFT JOIN (
       SELECT produto_id, SUM(disponivel) AS saldo
       FROM alissonerp.vw_saldo_estoque_comercial
@@ -81,6 +90,9 @@ export async function GET(req: NextRequest) {
       saldo_disponivel:  Number(p.saldo_disponivel ?? 0),
       tem_ficha_tecnica: Boolean(p.tem_ficha_tecnica),
       rfid_disponivel:   Number(p.rfid_disponivel ?? 0),
+      preco_promo:       p.preco_promo       != null ? Number(p.preco_promo)       : null,
+      em_promocao:       Boolean(p.em_promocao),
+      promocao_nome:     p.promocao_nome ?? null,
     }))
   );
 }
