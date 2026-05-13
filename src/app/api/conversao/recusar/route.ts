@@ -21,19 +21,15 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json() as {
     tarefa_id: number;
-    conversao_id: number;
+    conversao_id?: number;
     motivo?: string;
-    foto_base64: string;
+    foto_base64?: string;
   };
 
   const { tarefa_id, conversao_id, motivo, foto_base64 } = body;
 
-  if (!tarefa_id || !conversao_id) {
-    return NextResponse.json({ error: "tarefa_id e conversao_id são obrigatórios" }, { status: 400 });
-  }
-
-  if (!foto_base64) {
-    return NextResponse.json({ error: "foto_base64 é obrigatória (foto da balança na recusa)" }, { status: 400 });
+  if (!tarefa_id) {
+    return NextResponse.json({ error: "tarefa_id é obrigatório" }, { status: 400 });
   }
 
   // Verificar se tarefa existe e está 'aguardando_aprovacao'
@@ -49,12 +45,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Tarefa já foi ${tarefa.status}` }, { status: 409 });
   }
 
-  // Verificar conversao e seus itens
-  const [conversao] = await sql`
-    SELECT id, status_conversao, ordem_id, foto_abertura
-    FROM alissonerp.conversoes_estoque WHERE id = ${conversao_id}
-    LIMIT 1
-  `;
+  // Buscar conversao pelo ordem_id da tarefa (ou pelo conversao_id enviado)
+  const [conversao] = conversao_id
+    ? await sql`
+        SELECT id, status_conversao, ordem_id, foto_abertura
+        FROM alissonerp.conversoes_estoque WHERE id = ${conversao_id}
+        LIMIT 1
+      `
+    : await sql`
+        SELECT id, status_conversao, ordem_id, foto_abertura
+        FROM alissonerp.conversoes_estoque WHERE ordem_id = ${tarefa.ordem_id}
+        LIMIT 1
+      `;
   if (!conversao) {
     return NextResponse.json({ error: "Conversão não encontrada" }, { status: 404 });
   }
@@ -62,12 +64,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Conversão já está "${conversao.status_conversao}"` }, { status: 409 });
   }
 
-  // Upload da foto de recusa
-  await ensureBucket("conversao-fotos");
-  const fotoPath = `recusa/${Date.now()}_${user.id}.jpg`;
-  const r = await uploadFile("conversao-fotos", fotoPath, foto_base64, "image/jpeg");
-  if ("error" in r) {
-    return NextResponse.json({ error: `Erro ao enviar foto de recusa: ${r.error}` }, { status: 500 });
+  // Upload da foto de recusa (opcional)
+  let fotoPath: string | null = null;
+  if (foto_base64) {
+    try {
+      await ensureBucket("conversao-fotos");
+    } catch {
+      console.warn("[recusar] ensureBucket falhou — continuando sem foto");
+    }
+    if (foto_base64) {
+      fotoPath = `recusa/${Date.now()}_${user.id}.jpg`;
+      const r = await uploadFile("conversao-fotos", fotoPath, foto_base64, "image/jpeg");
+      if ("error" in r) {
+        console.warn(`[recusar] Upload da foto falhou — continuando sem foto: ${r.error}`);
+        fotoPath = null;
+      }
+    }
   }
 
   // Buscar itens da conversão para estornar movimentações
@@ -75,7 +87,7 @@ export async function POST(req: NextRequest) {
     SELECT ci.*, p.nome AS produto_nome
     FROM alissonerp.conversao_itens ci
     JOIN public.produtos p ON p.id_produto = ci.produto_id
-    WHERE ci.conversao_id = ${conversao_id}
+    WHERE ci.conversao_id = ${conversao.id}
   `;
 
   // Transação: atualizar tudo + estornar movimentações
@@ -96,7 +108,7 @@ export async function POST(req: NextRequest) {
           foto_recusa = ${fotoPath},
           motivo_recusa = ${motivo ?? null},
           updated_at = NOW()
-      WHERE id = ${conversao_id}
+      WHERE id = ${conversao.id}
     `;
 
     // Para cada item: cancelar a reserva (libera estoque sem criar movimento)
