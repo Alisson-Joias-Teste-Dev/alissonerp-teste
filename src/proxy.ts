@@ -17,8 +17,9 @@ async function maybeRefreshTinyToken() {
 }
 
 // ─── Rate limiter in-memory ────────────────────────────────────────────────────
-// 300 req/min não autenticado, 1000 req/min autenticado. Limpeza a cada 60s.
-// Aumentado em 3x para acomodar polling de múltiplos componentes de pagamento.
+// 5000 req/min não autenticado, 10000 req/min autenticado. Limpeza a cada 60s.
+// Limites altos o bastante para nunca bloquear uso normal, mas ainda protegem
+// contra abuso extremo (bots/scripts).
 const rateHits = new Map<string, { count: number; reset: number }>();
 
 function checkRateLimit(key: string, max: number): boolean {
@@ -158,7 +159,7 @@ export async function proxy(request: NextRequest) {
         ?? request.headers.get("x-real-ip")
         ?? "unknown";
       const hasAuth = request.cookies.has("sb-access-token") || request.cookies.has("sb-refresh-token");
-      if (!checkRateLimit(ip, hasAuth ? 1000 : 300)) {
+      if (!checkRateLimit(ip, hasAuth ? 10000 : 5000)) {
         if (typeof process !== "undefined" && process.env.NODE_ENV !== "production") {
           console.warn(`[429] IP=${ip} path=${pathname} authed=${hasAuth}`);
         }
