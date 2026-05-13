@@ -99,18 +99,15 @@ export async function POST(req: NextRequest) {
       WHERE id = ${conversao_id}
     `;
 
-    // Para cada item: criar movimentação de entrada (devolução ao estoque)
+    // Para cada item: cancelar a reserva (libera estoque sem criar movimento)
     for (const item of itens) {
-      await tx`
-        INSERT INTO alissonerp.movimentacoes_estoque_comercial
-          (produto_id, tipo, quantidade, motivo, local_estoque_id, status,
-           ordem_id, observacao, created_by)
-        VALUES
-          (${item.produto_id}, 'entrada', ${item.quantidade}, 'recusado_conversao', 2, 'efetivado',
-           ${conversao.ordem_id},
-           'Devolução ao estoque — conversão recusada (' || ${motivo ?? "Sem motivo"} || ')',
-           ${user.id})
-      `;
+      if (item.reserva_id) {
+        await tx`
+          UPDATE alissonerp.reservas_estoque_comercial
+          SET status = 'cancelado', cancelado_em = NOW()
+          WHERE id = ${item.reserva_id} AND status = 'ativo'
+        `;
+      }
     }
 
     // Atualizar ordem para cancelado

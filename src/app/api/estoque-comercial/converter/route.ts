@@ -135,23 +135,21 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Criar movimentação de saída — motivo 'reservado_conversao'
-      const [mov] = await tx`
-        INSERT INTO alissonerp.movimentacoes_estoque_comercial
-          (produto_id, tipo, quantidade, motivo, local_estoque_id, status,
-           ordem_id, referencia_id, observacao, created_by)
+      // Criar reserva de estoque — 'ativo' (similar ao PDV), não deduz saldo_fisico
+      const [reserva] = await tx`
+        INSERT INTO alissonerp.reservas_estoque_comercial
+          (produto_id, quantidade, local_estoque_id, status, ordem_id)
         VALUES
-          (${item.produto_id}, 'saida', ${item.quantidade}, 'reservado_conversao', 2, 'efetivado',
-           ${ordem.id}, ${ordem.id}, 'Reservado para conversão de estoque', ${user.id})
+          (${item.produto_id}, ${item.quantidade}, 2, 'ativo', ${ordem.id})
         RETURNING id
       `;
 
-      // Criar conversao_item com vínculo do movimento de reserva
+      // Criar conversao_item com vínculo da reserva
       await tx`
         INSERT INTO alissonerp.conversao_itens
-          (conversao_id, produto_id, peso_individual, quantidade, movimento_reserva_id)
+          (conversao_id, produto_id, peso_individual, quantidade, reserva_id)
         VALUES
-          (${conversao.id}, ${item.produto_id}, ${item.peso_individual}, ${item.quantidade}, ${mov.id})
+          (${conversao.id}, ${item.produto_id}, ${item.peso_individual}, ${item.quantidade}, ${reserva.id})
       `;
     }
 
