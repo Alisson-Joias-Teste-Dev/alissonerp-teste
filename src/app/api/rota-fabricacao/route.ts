@@ -3,7 +3,7 @@
  *
  * Estrutura do kanban da Rota de Fabricação. Retorna:
  *   • setores  — setores ativos (cada um com requer_peso e operadores responsáveis)
- *   • ofs      — OFs (PCPs) ativas com a MESMA shape do vw_pcp_erp usado pelo
+ *   • ofs      — OFs (PCPs) com a MESMA shape do vw_pcp_erp usado pelo
  *                kanban PCP, enriquecida com:
  *                  - setor_id_rota / setor_nome_rota → setor derivado da rota
  *                    (produto_rota[rota_etapa_atual]) ≠ pcp.setor_id (operador)
@@ -14,12 +14,21 @@
  *   Observação: o KanbanCard agrupa pelo *setor_id_rota* — pra usar no kanban
  *   de Rota de Fabricação, sobrescrevemos pcp.setor_id com setor_id_rota.
  *
- * OFs ativas = etapas NOT IN ('concluido', 'cancelado').
+ * Query params:
+ *   status=ativas (default) | concluidas | canceladas | todas
+ *     - ativas      → etapas_cod NOT IN ('concluido','cancelado')
+ *     - concluidas  → etapas_cod = 'concluido' (últimos 30 dias)
+ *     - canceladas  → etapas_cod = 'cancelado' (últimos 30 dias)
+ *     - todas       → sem filtro de etapa (últimos 30 dias pra finalizadas)
  */
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+
+const JANELA_FINALIZADAS_DIAS = 30;
+
+type StatusFiltro = "ativas" | "concluidas" | "canceladas" | "todas";
 
 interface SetorRow {
   id: number;
@@ -33,7 +42,7 @@ interface SetorRow {
 // só veem PCPs do depósito ao qual estão vinculados.
 const ROLES_VE_TUDO = ["admin", "desenvolvedor", "gerente_fabrica", "pcp", "gerente_loja"];
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
@@ -45,6 +54,11 @@ export async function GET() {
   const userRole = (usuario?.role as string | null) ?? null;
   const userDepositoId = (usuario?.deposito_id as number | null) ?? null;
   const filtraPorDeposito = userRole && !ROLES_VE_TUDO.includes(userRole) && userDepositoId != null;
+
+  // Status filter — default 'ativas' (igual o comportamento anterior)
+  const statusRaw = req.nextUrl.searchParams.get("status") ?? "ativas";
+  const status: StatusFiltro = (["ativas", "concluidas", "canceladas", "todas"] as const)
+    .includes(statusRaw as StatusFiltro) ? (statusRaw as StatusFiltro) : "ativas";
 
   try {
     // 1. Setores ativos + colaboradores responsáveis
@@ -117,7 +131,23 @@ export async function GET() {
       LEFT JOIN alissonerp.setores sr ON sr.id = pr.setor_id
       LEFT JOIN alissonerp.depositos dop ON dop.id = pcp.operador_atribuido_id
       LEFT JOIN public.produtos prod ON prod.id_produto = COALESCE(o.produto_reposicao_id, io.produto_id)
-      WHERE v.etapas_cod NOT IN ('concluido', 'cancelado')
+      WHERE
+        -- Filtro por STATUS:
+        -- ativas: ativas (nada concluido/cancelado)
+        -- concluidas: só etapas_cod='concluido' (últimos N dias)
+        -- canceladas: só etapas_cod='cancelado' (últimos N dias)
+        -- todas: sem restrição de etapa, mas finalizadas só dos últimos N dias
+        (
+          (${status}::text = 'ativas' AND v.etapas_cod NOT IN ('concluido', 'cancelado'))
+          OR (${status}::text = 'concluidas' AND v.etapas_cod = 'concluido'
+              AND v.data_conclusao >= NOW() - (${JANELA_FINALIZADAS_DIAS} || ' days')::interval)
+          OR (${status}::text = 'canceladas' AND v.etapas_cod = 'cancelado'
+              AND v.data_conclusao >= NOW() - (${JANELA_FINALIZADAS_DIAS} || ' days')::interval)
+          OR (${status}::text = 'todas' AND (
+              v.etapas_cod NOT IN ('concluido', 'cancelado')
+              OR v.data_conclusao >= NOW() - (${JANELA_FINALIZADAS_DIAS} || ' days')::interval
+          ))
+        )
         AND NOT EXISTS (
           SELECT 1 FROM alissonerp.servicos s3
           WHERE s3.pcp_id = v.id

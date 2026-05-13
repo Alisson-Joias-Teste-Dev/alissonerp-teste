@@ -69,12 +69,15 @@ export default function RotaFabricacaoClient() {
   // Filtros aplicados client-side nas OFs antes de agrupar por setor
   const [filtroVendedorId, setFiltroVendedorId] = useState<number | "">("");
   const [filtroReposicao, setFiltroReposicao] = useState(false);
+  // Filtro de status — server-side (recarrega a API com query param)
+  type StatusFiltro = "ativas" | "concluidas" | "canceladas" | "todas";
+  const [filtroStatus, setFiltroStatus] = useState<StatusFiltro>("ativas");
 
   const carregar = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch("/api/rota-fabricacao");
+      const r = await fetch(`/api/rota-fabricacao?status=${filtroStatus}`);
       if (!r.ok) {
         const b = await r.json().catch(() => ({}));
         throw new Error((b as { error?: string }).error ?? `HTTP ${r.status}`);
@@ -85,7 +88,7 @@ export default function RotaFabricacaoClient() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filtroStatus]);
 
   useEffect(() => { carregar(); }, [carregar]);
 
@@ -381,6 +384,23 @@ export default function RotaFabricacaoClient() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Filtro de STATUS (server-side — recarrega a API) */}
+          <select
+            value={filtroStatus}
+            onChange={(e) => setFiltroStatus(e.target.value as StatusFiltro)}
+            disabled={loading}
+            className="px-3 py-2 rounded-lg border text-[12px] bg-white outline-none font-semibold"
+            style={{
+              borderColor: filtroStatus !== "ativas" ? C.esmeralda : C.cremeBorder,
+              color: C.esmeralda,
+            }}
+            title="Status das OFs exibidas"
+          >
+            <option value="ativas">🟢 Ativas</option>
+            <option value="concluidas">⚫ Concluídas (30d)</option>
+            <option value="canceladas">🔴 Canceladas (30d)</option>
+            <option value="todas">📋 Todas (30d)</option>
+          </select>
           {/* Filtro vendedora */}
           <select
             value={filtroVendedorId}
