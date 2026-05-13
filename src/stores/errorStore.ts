@@ -6,7 +6,7 @@ export interface GlobalError {
   detail?: string;
   timestamp: number;
   /** "critical" → vermelho forte, "warning" → laranja, "info" → cinza */
-  level: "critical" | "warning" | "info";
+  level: "critical" | "warning" | "info" | "success";
 }
 
 interface ErrorStore {
