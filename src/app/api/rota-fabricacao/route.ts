@@ -148,15 +148,23 @@ export async function GET(req: NextRequest) {
               OR v.data_conclusao >= NOW() - (${JANELA_FINALIZADAS_DIAS} || ' days')::interval
           ))
         )
-        AND NOT EXISTS (
-          SELECT 1 FROM alissonerp.servicos s3
-          WHERE s3.pcp_id = v.id
-            AND s3.status IN ('em_servico', 'aguardando', 'concluido')
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM alissonerp.transferencias_ordem t
-          WHERE t.pcp_id = v.id
-            AND t.tipo_transferencia = 'service'
+        -- Exclui OFs em service SOMENTE quando status=ativas. Pra histórico
+        -- (concluidas/canceladas/todas) mostrar tudo, mesmo se a OF passou
+        -- por service em algum momento — afinal a fabricação terminou.
+        AND (
+          ${status}::text <> 'ativas'
+          OR (
+            NOT EXISTS (
+              SELECT 1 FROM alissonerp.servicos s3
+              WHERE s3.pcp_id = v.id
+                AND s3.status IN ('em_servico', 'aguardando', 'concluido')
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM alissonerp.transferencias_ordem t
+              WHERE t.pcp_id = v.id
+                AND t.tipo_transferencia = 'service'
+            )
+          )
         )
         AND (
           ${!filtraPorDeposito}::boolean
