@@ -26,7 +26,7 @@ interface SearchResult {
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (result: { ordem_id: number; numero_ordem: string; conversao_id: number }) => void;
   produtoPreSelecionado?: { id: number; nome: string; sku: string; disponivel?: number } | null;
 }
 
@@ -173,7 +173,7 @@ export default function ConversaoModal({ isOpen, onClose, onSuccess, produtoPreS
       if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
 
       setSuccess(true);
-      setTimeout(() => { onSuccess?.(); onClose(); }, 1500);
+      setTimeout(() => { onSuccess?.(data); onClose(); }, 1500);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Erro ao converter");
     } finally {

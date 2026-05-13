@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
-import ConversaoModal from "@/components/forms/ConversaoModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Consolidado {
@@ -207,7 +206,6 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
   const [tab,     setTab]     = useState<TabId>("movimentos");
   const [estornando, setEstornando] = useState<number | null>(null);
   const [transferindo, setTransferindo] = useState(false);
-  const [showConversao, setShowConversao] = useState(false);
 
   // Ajuste manual (entrada ou saída)
   const [ajusteTipo,    setAjusteTipo]    = useState<"entrada" | "saida" | null>(null);
@@ -388,15 +386,6 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
                 </button>
               </>
             )}
-            <button
-              onClick={() => setShowConversao(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-              style={{ background: "#EDE9FE", color: "#6D28D9", border: "1px solid #DDD6FE" }}
-              title="Converter este produto em metal (ouro bruto)"
-            >
-              <RefreshCw size={15} />
-              Converter
-            </button>
             <button
               onClick={() => setTransferindo(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
@@ -796,15 +785,6 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
         </div>
       )}
 
-      {/* Conversao Modal */}
-      {showConversao && (
-        <ConversaoModal
-          isOpen={showConversao}
-          onClose={() => setShowConversao(false)}
-          onSuccess={fetchData}
-          produtoPreSelecionado={c ? { id: c.produto_id, nome: c.nome_produto, sku: c.sku ?? "" } : null}
-        />
-      )}
     </div>
   );
 }

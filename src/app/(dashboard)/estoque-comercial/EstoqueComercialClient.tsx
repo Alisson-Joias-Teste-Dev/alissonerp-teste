@@ -3,10 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Package, AlertTriangle, CheckCircle, Search,
-  RefreshCw, Loader2, X, ClipboardList, ScanLine, Printer, RotateCcw,
+  RefreshCw, Loader2, X, ClipboardList, ScanLine, Printer,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import ConversaoModal from "@/components/forms/ConversaoModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ItemEstoque {
@@ -40,8 +39,6 @@ export default function EstoqueComercialClient() {
   const [items,     setItems]   = useState<ItemEstoque[]>([]);
   const [loading,   setLoading] = useState(true);
   const [search,    setSearch]  = useState("");
-  const [showConversao, setShowConversao] = useState(false);
-  const [conversaoTarget, setConversaoTarget] = useState<{ id: number; nome: string; sku: string } | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -105,16 +102,7 @@ export default function EstoqueComercialClient() {
           >
             <ClipboardList size={15} />
             <span className="hidden sm:inline">Inventario</span>
-          </button>
-          <button
-            onClick={() => { setConversaoTarget(null); setShowConversao(true); }}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-colors"
-            style={{ color: "#6D28D9", background: "#EDE9FE" }}
-            title="Converter estoque em metal"
-          >
-            <RotateCcw size={15} />
-            <span className="hidden sm:inline">Converter</span>
-          </button>
+           </button>
           <button
             onClick={fetchData}
             className="p-2 rounded-xl hover:bg-gray-100 transition-colors"
@@ -249,14 +237,6 @@ export default function EstoqueComercialClient() {
           </table>
         </div>
       )}
-
-      {/* Conversao Modal */}
-      <ConversaoModal
-        isOpen={showConversao}
-        onClose={() => setShowConversao(false)}
-        onSuccess={() => { setShowConversao(false); fetchData(); }}
-        produtoPreSelecionado={conversaoTarget}
-      />
 
     </div>
   );
