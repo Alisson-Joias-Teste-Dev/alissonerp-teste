@@ -24,7 +24,7 @@ export interface TSLReaderState {
 }
 
 const BASE_URL = process.env.NEXT_PUBLIC_TSL_HTTP_URL || "http://127.0.0.1:9101";
-const POLL_MS = 500;
+const POLL_MS = 2000;
 const DEDUP_MS = 3000;
 
 export function useTslReader() {
@@ -88,22 +88,12 @@ export function useTslReader() {
       }
     }
 
-    // Poll interval
+    // Poll interval — redução de 500ms para 2000ms para evitar sobrecarga
     poll();
     pollRef.current = setInterval(poll, POLL_MS);
 
-    // Check bridge health via XMLHttpRequest (bypasses some CORS checks)
-    const healthInterval = setInterval(async () => {
-      try {
-        const img = new Image();
-        img.src = `${BASE_URL}/health?t=${Date.now()}`;
-        // Image loads don't have CORS issues
-      } catch { /* ignore */ }
-    }, 2000);
-
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
-      clearInterval(healthInterval);
     };
   }, [updateState]);
 

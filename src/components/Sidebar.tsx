@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -171,27 +172,25 @@ export default function Sidebar() {
   const [perfilAberto, setPerfilAberto] = useState(false);
 
   // Notificações
-  const [naoLidas, setNaoLidas] = useState(0);
   const [drawerAberto, setDrawerAberto] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [notificacoes, setNotificacoes] = useState<any[]>([]);
   const [carregandoNotifs, setCarregandoNotifs] = useState(false);
 
-  // Busca contagem de notificações não lidas
-  const fetchContagem = useCallback(async () => {
-    try {
+  // Busca contagem de notificações não lidas (com React Query)
+  const queryClient = useQueryClient();
+  const { data: contagem } = useQuery({
+    queryKey: ["notificacoes", "contagem"],
+    queryFn: async () => {
       const res = await fetch("/api/notificacoes/contagem");
-      if (!res.ok) return;
-      const data = await res.json();
-      setNaoLidas(data.nao_lidas || 0);
-    } catch {
-      // silencioso
-    }
-  }, []);
+      if (!res.ok) return { nao_lidas: 0 };
+      return res.json() as Promise<{ nao_lidas: number }>;
+    },
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
 
-  useEffect(() => {
-    fetchContagem();
-  }, [fetchContagem]);
+  const naoLidas = (contagem?.nao_lidas as number | undefined) ?? 0;
 
   // Realtime: atualiza badge imediatamente ao receber nova notificação
   useEffect(() => {
@@ -204,19 +203,14 @@ export default function Sidebar() {
         schema: "alissonerp",
         table: "notificacoes",
       }, () => {
-        fetchContagem();
+        queryClient.invalidateQueries({ queryKey: ["notificacoes", "contagem"] });
         // Se drawer estiver aberto, recarrega lista na próxima tick
         setDrawerAberto((prev) => prev); // força re-render
         setTimeout(() => abrirDrawer(), 0);
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [fetchContagem]);
-
-  useEffect(() => {
-    const interval = setInterval(fetchContagem, 60000);
-    return () => clearInterval(interval);
-  }, [fetchContagem]);
+  }, [queryClient]);
 
   // Abre automaticamente o grupo da rota ativa ao carregar
   useEffect(() => {
@@ -267,7 +261,9 @@ export default function Sidebar() {
       setNotificacoes((prev: any[]) =>
         prev.map((n) => (n.id === id ? { ...n, lida: true } : n))
       );
-      setNaoLidas((prev) => Math.max(0, prev - 1));
+      queryClient.setQueryData(["notificacoes", "contagem"], (prev: { nao_lidas: number } | undefined) => ({
+        nao_lidas: prev ? Math.max(0, prev.nao_lidas - 1) : 0,
+      }));
       if (link) {
         router.push(link);
         setDrawerAberto(false);
@@ -282,7 +278,7 @@ export default function Sidebar() {
       await fetch("/api/notificacoes/ler-todas", { method: "PATCH" });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setNotificacoes((prev: any[]) => prev.map((n) => ({ ...n, lida: true })));
-      setNaoLidas(0);
+      queryClient.setQueryData(["notificacoes", "contagem"], { nao_lidas: 0 });
     } catch {
       // silencioso
     }
