@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
           aprovado_por = ${user.id}::uuid,
           aprovado_em = NOW(),
           updated_at = NOW()
-      WHERE id = ${conversao_id}
+      WHERE id = ${conversao.id}
     `;
 
     // Registrar no histórico da tarefa
