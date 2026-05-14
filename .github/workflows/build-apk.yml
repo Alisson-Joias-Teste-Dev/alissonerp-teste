@@ -38,9 +38,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Accept Android Licenses
-        run: yes | $ANDROID_HOME/tools/bin/sdkmanager --licenses || true
-
       - name: Build Debug APK (auto-assinado com debug keystore)
         run: |
           cd android-rfid-app
