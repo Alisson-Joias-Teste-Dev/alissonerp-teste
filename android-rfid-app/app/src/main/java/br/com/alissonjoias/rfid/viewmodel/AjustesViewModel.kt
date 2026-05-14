@@ -25,6 +25,7 @@ data class AjustesUiState(
     val dispositivos: List<DispositivoBt> = emptyList(),
     val conectando: Boolean = false,
     val mockMode: Boolean = false,
+    val erro: String? = null,
 )
 
 class AjustesViewModel : ViewModel() {
@@ -73,11 +74,24 @@ class AjustesViewModel : ViewModel() {
 
     fun conectar(endereco: String) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(conectando = true)
+            _uiState.value = _uiState.value.copy(conectando = true, erro = null)
             val device = tslManager.getPairedDevices().find { it.address == endereco }
             if (device != null) {
                 tslManager.disconnect()
-                tslManager.connect(device)
+                tslManager.connect(device).fold(
+                    onSuccess = { _uiState.value = _uiState.value.copy(erro = null) },
+                    onFailure = { e ->
+                        _uiState.value = _uiState.value.copy(
+                            conectando = false,
+                            erro = "Falha ao conectar: ${e.message}",
+                        )
+                    },
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    conectando = false,
+                    erro = "Dispositivo nao encontrado. Verifique se ele esta pareado.",
+                )
             }
         }
     }
@@ -108,13 +122,31 @@ class AjustesViewModel : ViewModel() {
 
     fun reconectar() {
         viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(conectando = true, erro = null)
             tslManager.disconnect()
             delay(300)
             val devices = tslManager.getPairedDevices()
             if (devices.isNotEmpty()) {
-                tslManager.connect(devices.first())
+                tslManager.connect(devices.first()).fold(
+                    onSuccess = { _uiState.value = _uiState.value.copy(erro = null) },
+                    onFailure = { e ->
+                        _uiState.value = _uiState.value.copy(
+                            conectando = false,
+                            erro = "Falha ao conectar: ${e.message}",
+                        )
+                    },
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    conectando = false,
+                    erro = "Nenhum dispositivo TSL pareado encontrado.",
+                )
             }
         }
+    }
+
+    fun limparErro() {
+        _uiState.value = _uiState.value.copy(erro = null)
     }
 
     fun desconectar() {

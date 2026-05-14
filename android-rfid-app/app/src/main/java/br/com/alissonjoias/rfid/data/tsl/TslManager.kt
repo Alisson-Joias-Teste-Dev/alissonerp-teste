@@ -44,10 +44,14 @@ class TslManager {
     }
 
     fun getPairedDevices(): List<BluetoothDevice> {
-        return BluetoothAdapter.getDefaultAdapter()
-            ?.bondedDevices
-            ?.filter { it.name?.contains("TSL", ignoreCase = true) == true }
-            ?.toList() ?: emptyList()
+        return try {
+            BluetoothAdapter.getDefaultAdapter()
+                ?.bondedDevices
+                ?.toList() ?: emptyList()
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Sem permissao Bluetooth: ${e.message}")
+            emptyList()
+        }
     }
 
     suspend fun connect(device: BluetoothDevice): Result<Unit> = withContext(Dispatchers.IO) {
