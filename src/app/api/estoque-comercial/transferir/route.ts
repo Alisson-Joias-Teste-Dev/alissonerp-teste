@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   const rows = await sql`
     SELECT
-      t.id, t.produto_id, t.quantidade, t.status, t.obs,
+      t.id, t.produto_id, t.quantidade, t.status, t.obs, t.ordem_solicitacao,
       t.local_origem_id, lo.nome AS local_origem_nome,
       t.local_destino_id, ld.nome AS local_destino_nome,
       p.nome AS nome_produto, p.sku,
@@ -55,13 +55,17 @@ export async function POST(req: NextRequest) {
       quantidade: number;
       local_origem_id: number;
       local_destino_id: number;
+      ordem_solicitacao: string;
       obs?: string;
     };
 
-    const { produto_id, quantidade, local_origem_id, local_destino_id, obs } = body;
+    const { produto_id, quantidade, local_origem_id, local_destino_id, ordem_solicitacao, obs } = body;
 
     if (!produto_id || !quantidade || !local_origem_id || !local_destino_id) {
       return NextResponse.json({ error: "Campos obrigatórios: produto_id, quantidade, local_origem_id, local_destino_id" }, { status: 400 });
+    }
+    if (!ordem_solicitacao || ordem_solicitacao.trim() === "") {
+      return NextResponse.json({ error: "Ordem de solicitação é obrigatória" }, { status: 400 });
     }
     if (quantidade <= 0) {
       return NextResponse.json({ error: "quantidade deve ser > 0" }, { status: 400 });
@@ -86,9 +90,9 @@ export async function POST(req: NextRequest) {
     // INSERT com status='pendente' → trigger fn_transferencia_ec_envio cria saída
     const [transf] = await sql`
       INSERT INTO alissonerp.transferencias_estoque_comercial
-        (produto_id, quantidade, local_origem_id, local_destino_id, obs, created_by)
+        (produto_id, quantidade, local_origem_id, local_destino_id, ordem_solicitacao, obs, created_by)
       VALUES
-        (${produto_id}, ${quantidade}, ${local_origem_id}, ${local_destino_id}, ${obs ?? null}, ${user.id})
+        (${produto_id}, ${quantidade}, ${local_origem_id}, ${local_destino_id}, ${ordem_solicitacao.trim()}, ${obs ?? null}, ${user.id})
       RETURNING id, created_at, movimento_saida_id
     `;
 

@@ -65,6 +65,7 @@ interface Transferencia {
   status:              string;
   local_origem_nome:   string;
   local_destino_nome:  string;
+  ordem_solicitacao:   string;
   obs:                 string | null;
   created_at:          string;
   enviado_por_email:   string | null;
@@ -125,6 +126,7 @@ function TransferirModal({
   const [origem, setOrigem] = useState(0);
   const [destino, setDestino] = useState(0);
   const [quantidade, setQuantidade] = useState(1);
+  const [ordemSol, setOrdemSol] = useState("");
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState("");
@@ -144,6 +146,7 @@ function TransferirModal({
 
   async function handleTransferir() {
     if (origem === destino) { setErr("Origem e destino devem ser diferentes"); return; }
+    if (!ordemSol.trim()) { setErr("Ordem de solicitação é obrigatória"); return; }
     setSaving(true); setErr("");
     try {
       const r = await fetch("/api/estoque-comercial/transferir", {
@@ -154,6 +157,7 @@ function TransferirModal({
           quantidade,
           local_origem_id: origem,
           local_destino_id: destino,
+          ordem_solicitacao: ordemSol.trim(),
         }),
       });
       if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? "Erro");
@@ -206,42 +210,51 @@ function TransferirModal({
           <h2 className="font-bold text-lg" style={{ color: "#184036" }}>Transferir Produto</h2>
           <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
         </div>
-        <div className="space-y-3 mb-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold mb-1 text-gray-500">Origem</label>
-              <select
-                className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
-                style={{ borderColor: "#E8DCC8" }}
-                value={origem}
-                onChange={e => setOrigem(Number(e.target.value))}
-              >
-                {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
-              </select>
+          <div className="space-y-3 mb-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-gray-500">Origem</label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                  style={{ borderColor: "#E8DCC8" }}
+                  value={origem}
+                  onChange={e => setOrigem(Number(e.target.value))}
+                >
+                  {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-gray-500">Destino</label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                  style={{ borderColor: "#E8DCC8" }}
+                  value={destino}
+                  onChange={e => setDestino(Number(e.target.value))}
+                >
+                  {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+                </select>
+              </div>
             </div>
             <div>
-              <label className="block text-xs font-semibold mb-1 text-gray-500">Destino</label>
-              <select
-                className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+              <label className="block text-xs font-semibold mb-1 text-gray-500">Ordem de solicitacao <span className="text-red-400">*</span></label>
+              <input
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
                 style={{ borderColor: "#E8DCC8" }}
-                value={destino}
-                onChange={e => setDestino(Number(e.target.value))}
-              >
-                {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
-              </select>
+                placeholder="Ex: SOL-2026-00123"
+                value={ordemSol} onChange={e => setOrdemSol(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
+              <input
+                type="number" min={1}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                style={{ borderColor: "#E8DCC8" }}
+                value={quantidade}
+                onChange={e => setQuantidade(Math.max(1, Number(e.target.value)))}
+              />
             </div>
           </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
-            <input
-              type="number" min={1}
-              className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
-              style={{ borderColor: "#E8DCC8" }}
-              value={quantidade}
-              onChange={e => setQuantidade(Math.max(1, Number(e.target.value)))}
-            />
-          </div>
-        </div>
         {err && <p className="text-xs text-red-500 mb-3">{err}</p>}
         <button
           className="w-full py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
@@ -713,6 +726,7 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
                   <span className="text-sm text-gray-500 ml-2">
                     {t.local_origem_nome} &rarr; {t.local_destino_nome}
                   </span>
+                  <span className="text-xs text-gray-400 ml-2">Ordem: {t.ordem_solicitacao}</span>
                   <span
                     className="text-xs ml-2 px-1.5 py-0.5 rounded"
                     style={{
