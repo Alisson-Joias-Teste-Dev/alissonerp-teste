@@ -13,8 +13,8 @@ android {
         applicationId = "br.com.alissonjoias.rfid"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         buildConfigField("String", "ERP_BASE_URL", "\"https://erp.alisson.api.br\"")
         buildConfigField("String", "SUPABASE_URL", "\"https://api.alisson.api.br\"")
