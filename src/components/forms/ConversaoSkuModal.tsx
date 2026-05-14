@@ -30,6 +30,7 @@ export default function ConversaoSkuModal({ isOpen, onClose, onSuccess }: Props)
   const [quantidade, setQuantidade] = useState("1");
   const [peso, setPeso] = useState("");
   const [qtdDesejada, setQtdDesejada] = useState("1");
+  const [motivo, setMotivo] = useState("");
   const [fotoFile, setFotoFile] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -163,6 +164,7 @@ export default function ConversaoSkuModal({ isOpen, onClose, onSuccess }: Props)
           sku_destino_id: skuDestino.id_produto,
           sku_destino_quantidade_desejada: parseInt(qtdDesejada),
           local_destino_id: localDestinoId,
+          motivo: motivo.trim() || undefined,
           foto_base64: base64,
         }),
       });
@@ -384,6 +386,21 @@ export default function ConversaoSkuModal({ isOpen, onClose, onSuccess }: Props)
                   {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
                 </select>
               </div>
+            </div>
+          )}
+
+          {/* Motivo */}
+          {skuOrigem && skuDestino && (
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider mb-0.5" style={{ color: "#9CA3AF" }}>
+                Motivo da Conversão
+              </label>
+              <textarea
+                rows={2} value={motivo} onChange={e => setMotivo(e.target.value)}
+                placeholder="Ex: Cliente solicitou transformação do produto..."
+                className="w-full px-2 py-1.5 rounded-lg border text-sm outline-none bg-white resize-none"
+                style={{ borderColor: C.cremeBorder }}
+              />
             </div>
           )}
 

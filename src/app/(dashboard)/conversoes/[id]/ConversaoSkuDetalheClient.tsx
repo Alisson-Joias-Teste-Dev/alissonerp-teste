@@ -152,6 +152,9 @@ export default function ConversaoSkuDetalheClient({ ordem, conversao, tarefa, us
             <Row label="Ordem Serviço" value={`${conversao.servico_numero} (${conversao.servico_status})`} />
           )}
 
+          {conversao.motivo && (
+            <Row label="Motivo" value={conversao.motivo} />
+          )}
           {conversao.aprovado_por && (
             <Row label="Aprovado por" value={`${conversao.aprovado_por_nome} em ${format(new Date(conversao.aprovado_em), "dd/MM HH:mm")}`} />
           )}

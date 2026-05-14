@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS alissonerp.conversoes_sku (
   quebra                NUMERIC(10,3), -- sobra_calculado - sobra_real (se positivo)
   insumo_destino_sobra  INTEGER DEFAULT 1,
 
+  -- Motivo da conversão
+  motivo TEXT,
+
   -- Abertura
   foto_abertura TEXT,
 
@@ -225,6 +228,7 @@ BEGIN
                     '   Qtd: ' || v_conv.sku_origem_quantidade || chr(10) ||
                     'DESTINO: ' || COALESCE(v_destino_nome, 'N/D') || chr(10) ||
                     '   Qtd desejada: ' || v_conv.sku_destino_quantidade_desejada || chr(10) ||
+                    CASE WHEN v_conv.motivo IS NOT NULL THEN 'MOTIVO: ' || v_conv.motivo || chr(10) ELSE '' END ||
                     'Para concluir informe: peso final, qtd produzida, foto balanca, peso sobra e foto sobra.';
 
       UPDATE alissonerp.ordens

@@ -7,7 +7,7 @@ const ROLES_PERMITIDOS = ["estoquista_loja", "gerente_loja", "admin", "desenvolv
 
 // POST /api/conversao-sku
 // Cria uma solicitação de conversão SKU
-// Body: { sku_origem_id, sku_origem_quantidade, sku_origem_peso, local_origem_id, sku_destino_id, sku_destino_quantidade_desejada, local_destino_id, foto_base64 }
+// Body: { sku_origem_id, sku_origem_quantidade, sku_origem_peso, local_origem_id, sku_destino_id, sku_destino_quantidade_desejada, local_destino_id, foto_base64, motivo? }
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -29,12 +29,13 @@ export async function POST(req: NextRequest) {
     sku_destino_quantidade_desejada: number;
     local_destino_id: number;
     foto_base64?: string;
+    motivo?: string;
   };
 
   const {
     sku_origem_id, sku_origem_quantidade, sku_origem_peso,
     local_origem_id, sku_destino_id, sku_destino_quantidade_desejada,
-    local_destino_id, foto_base64,
+    local_destino_id, foto_base64, motivo,
   } = body;
 
   // Validações
@@ -128,12 +129,12 @@ export async function POST(req: NextRequest) {
         ordem_id,
         sku_origem_id, sku_origem_quantidade, sku_origem_peso, local_origem_id,
         sku_destino_id, sku_destino_quantidade_desejada, local_destino_id,
-        foto_abertura, reserva_id, created_by
+        foto_abertura, reserva_id, motivo, created_by
       ) VALUES (
         ${ordem.id},
         ${sku_origem_id}, ${sku_origem_quantidade}, ${sku_origem_peso}, ${local_origem_id},
         ${sku_destino_id}, ${sku_destino_quantidade_desejada}, ${local_destino_id},
-        ${fotoPath}, ${reserva.id}, ${user.id}::uuid
+        ${fotoPath}, ${reserva.id}, ${motivo ?? null}, ${user.id}::uuid
       )
       RETURNING id
     `;
