@@ -24,6 +24,9 @@ class TslManager {
     private var outputStream: OutputStream? = null
     private var readerThread: Thread? = null
     private var running = false
+    private var mockActive = false
+    private var mockThread: Thread? = null
+    private var mockScanning = false
 
     private val _state = MutableStateFlow(TslState())
     val state: StateFlow<TslState> = _state.asStateFlow()
@@ -95,31 +98,6 @@ class TslManager {
         readerThread = null
         _state.value = TslState()
         Log.d(TAG, "Desconectado")
-    }
-
-    suspend fun startInventory(): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            sendCommandAsync(".iv")
-            _state.value = _state.value.copy(scanning = true, error = null)
-            Log.d(TAG, "Inventario iniciado (.iv)")
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Log.e(TAG, "Erro ao iniciar: ${e.message}")
-            _state.value = _state.value.copy(error = e.message)
-            Result.failure(e)
-        }
-    }
-
-    suspend fun stop(): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            sendCommandAsync(".")
-            _state.value = _state.value.copy(scanning = false, error = null)
-            Log.d(TAG, "Leitura parada (.)")
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Log.e(TAG, "Erro ao parar: ${e.message}")
-            Result.failure(e)
-        }
     }
 
     suspend fun setPower(dBm: Int): Result<Unit> = withContext(Dispatchers.IO) {
@@ -282,6 +260,81 @@ class TslManager {
     private fun handleVersionLine(line: String) {
         val fw = line.removePrefix("VR:").trim()
         _state.value = _state.value.copy(firmware = fw)
+    }
+
+    fun setMockMode(enabled: Boolean) {
+        mockActive = enabled
+        if (enabled) {
+            _state.value = TslState(connected = true, deviceName = "MOCK TSL", firmware = "mock-v1.0")
+            Log.d(TAG, "Modo simulação ATIVADO")
+        } else {
+            if (!socket?.isConnected!!) {
+                _state.value = TslState()
+            }
+            Log.d(TAG, "Modo simulação DESATIVADO")
+        }
+    }
+
+    suspend fun startInventory(): Result<Unit> = withContext(Dispatchers.IO) {
+        if (mockActive) {
+            mockScanning = true
+            _state.value = _state.value.copy(scanning = true, error = null)
+            startMockReading()
+            return@withContext Result.success(Unit)
+        }
+        try {
+            sendCommandAsync(".iv")
+            _state.value = _state.value.copy(scanning = true, error = null)
+            Log.d(TAG, "Inventario iniciado (.iv)")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Erro ao iniciar: ${e.message}")
+            _state.value = _state.value.copy(error = e.message)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun stop(): Result<Unit> = withContext(Dispatchers.IO) {
+        if (mockActive) {
+            mockScanning = false
+            mockThread?.interrupt()
+            mockThread = null
+            _state.value = _state.value.copy(scanning = false, error = null)
+            return@withContext Result.success(Unit)
+        }
+        try {
+            sendCommandAsync(".")
+            _state.value = _state.value.copy(scanning = false, error = null)
+            Log.d(TAG, "Leitura parada (.)")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Erro ao parar: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    private fun startMockReading() {
+        mockThread?.interrupt()
+        mockThread = Thread({
+            val epcs = listOf(
+                "AJ250000001", "AJ250000042", "AJ250000087",
+                "AJ250000123", "AJ250000456", "AJ250000789",
+            )
+            var index = 0
+            while (mockScanning) {
+                try {
+                    val epc = epcs[index % epcs.size]
+                    val rssi = -60 + (index % 40)
+                    index++
+                    Log.d(TAG, "[MOCK] EPC: $epc, RSSI: $rssi")
+                    _onEpcReceived?.invoke(epc, rssi)
+                    Thread.sleep(2000)
+                } catch (e: InterruptedException) {
+                    break
+                } catch (_: Exception) { break }
+            }
+        })
+        mockThread?.start()
     }
 
     companion object {
