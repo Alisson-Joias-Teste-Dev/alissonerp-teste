@@ -6,7 +6,10 @@ export async function GET(req: NextRequest) {
 
   if (direcao === "volta") {
     const rows = await sql`
-      SELECT id, numero_ordem, status::text as status
+      SELECT id, numero_ordem, status::text as status, 'regular' AS tipo
+      FROM alissonerp.vw_ordens_prontas_ida
+      UNION ALL
+      SELECT id, numero_ordem, status::text as status, 'conversao_sku' AS tipo
       FROM alissonerp.vw_ordens_prontas_volta
       ORDER BY id DESC
     `;
