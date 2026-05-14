@@ -16,6 +16,7 @@ const TIPO_LABEL: Record<string, string> = {
   garantia: "Garantia",
   servico_interno: "S. Interno",
   conversao: "Conversão",
+  conversao_sku: "Conv. SKU",
 };
 function fmtTipo(t: string | null) { return t ? (TIPO_LABEL[t] ?? t) : "—"; }
 
@@ -75,7 +76,7 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
       .then((data) => {
         const ordensData = Array.isArray(data) ? data : [];
         setOrdens(ordensData);
-        // Inicializar fotos para ordens de conversão
+        // Inicializar fotos para ordens de conversão (metal apenas, SKU fotos são na execução)
         const conversaoOrdens = ordensData.filter(o => o.tipo_ordem === 'conversao');
         if (conversaoOrdens.length > 0) {
           setOrdensDetalhes(conversaoOrdens.map(o => ({

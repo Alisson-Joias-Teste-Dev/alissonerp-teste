@@ -15,12 +15,13 @@ export default async function OrdemDetalhePage({
 
   if (isNaN(ordemId)) return notFound();
 
-  const [ordens, apontamentos, movEstoque, transferencias, fichas, timeline] = await Promise.all([
+  const [ordens, apontamentos, movEstoque, transferencias, fichas, timeline, conversaoSku] = await Promise.all([
     sql`
       SELECT vod.*,
         u_criador.nome AS created_by_nome,
         o2.created_by::text AS created_by_uuid,
-        COALESCE(o2.venda_id, ve_fallback.id) AS venda_id
+        COALESCE(o2.venda_id, ve_fallback.id) AS venda_id,
+        o2.tipo_ordem::text AS tipo_ordem
       FROM alissonerp.vw_ordem_detalhe vod
       LEFT JOIN alissonerp.ordens o2 ON o2.id = vod.id
       LEFT JOIN alissonerp.usuarios u_criador ON u_criador.id = o2.created_by
@@ -59,6 +60,15 @@ export default async function OrdemDetalhePage({
       FROM alissonerp.vw_timeline_ordem
       WHERE ordem_id = ${ordemId}
       ORDER BY passo
+    `,
+    sql`
+      SELECT cs.*, p_orig.nome AS sku_origem_nome, p_orig.sku AS sku_origem_cod,
+             p_dest.nome AS sku_destino_nome, p_dest.sku AS sku_destino_cod
+      FROM alissonerp.conversoes_sku cs
+      LEFT JOIN public.produtos p_orig ON p_orig.id_produto = cs.sku_origem_id
+      LEFT JOIN public.produtos p_dest ON p_dest.id_produto = cs.sku_destino_id
+      WHERE cs.ordem_id = ${ordemId}
+      LIMIT 1
     `,
   ]);
 
@@ -107,6 +117,7 @@ export default async function OrdemDetalhePage({
       fichaTecnica={fichaTecnica}
       timeline={timeline as any[]}
       userRole={userRole}
+      conversaoSku={conversaoSku[0] ?? null}
     />
   );
 }
