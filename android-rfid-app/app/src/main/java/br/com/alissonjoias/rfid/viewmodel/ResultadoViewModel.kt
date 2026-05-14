@@ -52,10 +52,7 @@ class ResultadoViewModel(
             val epcs = repo.getEpcsSync(inventarioId)
 
             val resultados = itens.map { item ->
-                val epcsDoProduto = epcs.filter { it.produtoId == item.produtoId || it.produtoId == null }
-                val lido = epcsDoProduto.size.coerceAtLeast(
-                    item.quantidadeContada ?: 0
-                )
+                val lido = item.quantidadeContada ?: 0
                 val status = StatusItem.from(lido, item.quantidadeSistema)
                 ItemResultado(item = item, lido = lido, status = status)
             }
@@ -86,7 +83,7 @@ class ResultadoViewModel(
             val itens = repo.getItensSync(inventarioId)
             val epcs = repo.getEpcsSync(inventarioId)
 
-            val result = repo.enviarParaSistema(inventarioId, itens, epcs.map { it.epc })
+            val result = repo.enviarParaSistema(inventarioId, itens, epcs)
 
             result.fold(
                 onSuccess = {
