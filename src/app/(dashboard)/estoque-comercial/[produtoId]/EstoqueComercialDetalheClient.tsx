@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft, ArrowUpCircle, ArrowDownCircle,
-  Settings2, Loader2, Save, AlertTriangle,
+  Settings2, Loader2, Save, AlertTriangle, CheckCircle,
   RotateCcw, ArrowRightLeft, Bookmark, X, TrendingDown, RefreshCw,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -120,32 +120,83 @@ type TabId = "movimentos" | "reservas" | "transferencias" | "rfid";
 function TransferirModal({
   produtoId, onClose, onDone,
 }: { produtoId: number; onClose: () => void; onDone: () => void }) {
-  const [destino, setDestino] = useState(5); // default: Motoboy
+  const router = useRouter();
+  const [locais, setLocais] = useState<{ id: number; nome: string }[]>([]);
+  const [origem, setOrigem] = useState(0);
+  const [destino, setDestino] = useState(0);
   const [quantidade, setQuantidade] = useState(1);
   const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
   const [err, setErr] = useState("");
 
+  useEffect(() => {
+    fetch("/api/locais-estoque")
+      .then(r => r.json())
+      .then((data: { id: number; nome: string }[]) => {
+        setLocais(data);
+        if (data.length >= 2) {
+          setOrigem(data[0].id);
+          setDestino(data[1].id);
+        }
+      })
+      .catch(() => setErr("Erro ao carregar locais de estoque"));
+  }, []);
+
   async function handleTransferir() {
+    if (origem === destino) { setErr("Origem e destino devem ser diferentes"); return; }
     setSaving(true); setErr("");
     try {
-      const r = await fetch("/api/estoque-comercial/transferir-motoboy", {
+      const r = await fetch("/api/estoque-comercial/transferir", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: destino === 2 ? "receber_na_loja" : "enviar_para_motoboy",
           produto_id: produtoId,
           quantidade,
-          motoboy_id: destino === 1 ? "fabrica" : undefined,
+          local_origem_id: origem,
+          local_destino_id: destino,
         }),
       });
       if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? "Erro");
+      setDone(true);
       onDone();
-      onClose();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Erro");
     } finally {
       setSaving(false);
     }
+  }
+
+  if (done) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 text-center">
+          <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
+            <CheckCircle size={24} style={{ color: "#059669" }} />
+          </div>
+          <h2 className="font-bold text-lg mb-1" style={{ color: "#184036" }}>Transferencia Criada!</h2>
+          <p className="text-sm text-gray-500 mb-5">
+            O produto esta em transito. Va em Transferencias para concluir o recebimento.
+          </p>
+          <div className="flex gap-2">
+            <button
+              className="flex-1 py-2.5 rounded-xl text-sm font-medium border"
+              style={{ color: "#6B7280", borderColor: "#E5E7EB" }}
+              onClick={onClose}
+            >
+              Fechar
+            </button>
+            <button
+              className="flex-1 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
+              style={{ background: "#184036", color: "#F3EADA" }}
+              onClick={() => router.push("/estoque-comercial/transferencias")}
+            >
+              <ArrowRightLeft size={14} />
+              Ver Transferencias
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -156,18 +207,29 @@ function TransferirModal({
           <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
         </div>
         <div className="space-y-3 mb-4">
-          <div>
-            <label className="block text-xs font-semibold mb-1 text-gray-500">Destino</label>
-            <select
-              className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
-              style={{ borderColor: "#E8DCC8" }}
-              value={destino}
-              onChange={e => setDestino(Number(e.target.value))}
-            >
-              <option value={5}>Motoboy [Nome] (Fabrica → Motoboy)</option>
-              <option value={2}>Loja (Motoboy → Loja)</option>
-              <option value={1}>Fabrica (devolver)</option>
-            </select>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold mb-1 text-gray-500">Origem</label>
+              <select
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                style={{ borderColor: "#E8DCC8" }}
+                value={origem}
+                onChange={e => setOrigem(Number(e.target.value))}
+              >
+                {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1 text-gray-500">Destino</label>
+              <select
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                style={{ borderColor: "#E8DCC8" }}
+                value={destino}
+                onChange={e => setDestino(Number(e.target.value))}
+              >
+                {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+              </select>
+            </div>
           </div>
           <div>
             <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
@@ -185,7 +247,7 @@ function TransferirModal({
           className="w-full py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
           style={{ background: "#D97706", color: "#fff" }}
           onClick={handleTransferir}
-          disabled={saving}
+          disabled={saving || locais.length === 0}
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <ArrowRightLeft size={14} />}
           Transferir
@@ -329,15 +391,26 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
 
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto">
-      {/* Back */}
-      <button
-        className="flex items-center gap-1.5 text-sm mb-5 hover:opacity-70 transition-opacity"
-        style={{ color: "#184036" }}
-        onClick={() => router.push("/estoque-comercial")}
-      >
-        <ArrowLeft size={15} />
-        Estoque Comercial
-      </button>
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-sm mb-5">
+        <button
+          className="flex items-center gap-1.5 hover:opacity-70 transition-opacity"
+          style={{ color: "#184036" }}
+          onClick={() => router.push("/estoque-comercial")}
+        >
+          <ArrowLeft size={15} />
+          Estoque Comercial
+        </button>
+        <span className="text-gray-300">|</span>
+        <button
+          className="flex items-center gap-1.5 hover:opacity-70 transition-opacity"
+          style={{ color: "#D97706" }}
+          onClick={() => router.push("/estoque-comercial/transferencias")}
+        >
+          <ArrowRightLeft size={14} />
+          Transferencias
+        </button>
+      </div>
 
       {/* Hero Section */}
       <div className="rounded-2xl p-5 sm:p-6 mb-6" style={{ background: "#FAFAF7", border: "1px solid #E8DCC8" }}>

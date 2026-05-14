@@ -40,56 +40,62 @@ export async function GET(req: NextRequest) {
 
 // POST /api/estoque-comercial/transferir — criar nova transferência
 export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  try {
+    const supabase = await createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-  if (!usuario || !ROLES_PERMITIDOS.includes(usuario.role)) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
+    if (!usuario || !ROLES_PERMITIDOS.includes(usuario.role)) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
+
+    const body = await req.json() as {
+      produto_id: number;
+      quantidade: number;
+      local_origem_id: number;
+      local_destino_id: number;
+      obs?: string;
+    };
+
+    const { produto_id, quantidade, local_origem_id, local_destino_id, obs } = body;
+
+    if (!produto_id || !quantidade || !local_origem_id || !local_destino_id) {
+      return NextResponse.json({ error: "Campos obrigatórios: produto_id, quantidade, local_origem_id, local_destino_id" }, { status: 400 });
+    }
+    if (quantidade <= 0) {
+      return NextResponse.json({ error: "quantidade deve ser > 0" }, { status: 400 });
+    }
+    if (local_origem_id === local_destino_id) {
+      return NextResponse.json({ error: "Origem e destino devem ser diferentes" }, { status: 400 });
+    }
+
+    // Verificar saldo disponível no local de origem
+    const [saldo] = await sql`
+      SELECT COALESCE(SUM(disponivel), 0) AS disponivel
+      FROM alissonerp.vw_saldo_estoque_comercial_v2
+      WHERE produto_id = ${produto_id} AND local_estoque_id = ${local_origem_id}
+    `;
+    if (!saldo || Number(saldo.disponivel) < quantidade) {
+      return NextResponse.json(
+        { error: `Saldo disponível insuficiente na origem. Disponível: ${saldo?.disponivel ?? 0}` },
+        { status: 409 }
+      );
+    }
+
+    // INSERT com status='pendente' → trigger fn_transferencia_ec_envio cria saída
+    const [transf] = await sql`
+      INSERT INTO alissonerp.transferencias_estoque_comercial
+        (produto_id, quantidade, local_origem_id, local_destino_id, obs, created_by)
+      VALUES
+        (${produto_id}, ${quantidade}, ${local_origem_id}, ${local_destino_id}, ${obs ?? null}, ${user.id})
+      RETURNING id, created_at, movimento_saida_id
+    `;
+
+    return NextResponse.json({ id: transf.id, created_at: transf.created_at }, { status: 201 });
+  } catch (err) {
+    console.error("ERRO ao criar transferência:", err);
+    const message = err instanceof Error ? err.message : "Erro interno";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const body = await req.json() as {
-    produto_id: number;
-    quantidade: number;
-    local_origem_id: number;
-    local_destino_id: number;
-    obs?: string;
-  };
-
-  const { produto_id, quantidade, local_origem_id, local_destino_id, obs } = body;
-
-  if (!produto_id || !quantidade || !local_origem_id || !local_destino_id) {
-    return NextResponse.json({ error: "Campos obrigatórios: produto_id, quantidade, local_origem_id, local_destino_id" }, { status: 400 });
-  }
-  if (quantidade <= 0) {
-    return NextResponse.json({ error: "quantidade deve ser > 0" }, { status: 400 });
-  }
-  if (local_origem_id === local_destino_id) {
-    return NextResponse.json({ error: "Origem e destino devem ser diferentes" }, { status: 400 });
-  }
-
-  // Verificar saldo disponível no local de origem
-  const [saldo] = await sql`
-    SELECT COALESCE(SUM(disponivel), 0) AS disponivel
-    FROM alissonerp.vw_saldo_estoque_comercial_v2
-    WHERE produto_id = ${produto_id} AND local_estoque_id = ${local_origem_id}
-  `;
-  if (!saldo || Number(saldo.disponivel) < quantidade) {
-    return NextResponse.json(
-      { error: `Saldo disponível insuficiente na origem. Disponível: ${saldo?.disponivel ?? 0}` },
-      { status: 409 }
-    );
-  }
-
-  // INSERT com status='pendente' → trigger fn_transferencia_ec_envio cria saída
-  const [transf] = await sql`
-    INSERT INTO alissonerp.transferencias_estoque_comercial
-      (produto_id, quantidade, local_origem_id, local_destino_id, obs, created_by)
-    VALUES
-      (${produto_id}, ${quantidade}, ${local_origem_id}, ${local_destino_id}, ${obs ?? null}, ${user.id})
-    RETURNING id, created_at, movimento_saida_id
-  `;
-
-  return NextResponse.json({ id: transf.id, created_at: transf.created_at }, { status: 201 });
 }
