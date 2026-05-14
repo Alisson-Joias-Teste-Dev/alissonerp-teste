@@ -63,7 +63,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.0")
 
-    implementation("com.uk.tsl:ascii-protocol-library:1.5.1")
+    // TSL 1128 via Bluetooth SPP (protocolo ASCII puro - sem SDK externo)
 
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
