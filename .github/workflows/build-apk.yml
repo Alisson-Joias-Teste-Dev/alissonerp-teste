@@ -38,7 +38,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Build Debug APK (auto-assinado com debug keystore)
+      - name: Build APK
         run: |
           cd android-rfid-app
           chmod +x gradlew
