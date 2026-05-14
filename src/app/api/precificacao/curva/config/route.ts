@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isPrecificacaoAccess, isFullAccess } from "@/lib/roles";
+import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { normalizeConfigRow } from "@/lib/curva-precificacao";
 
@@ -17,11 +17,6 @@ export async function GET() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const role = user.user_metadata?.role as string | undefined;
-  if (!isPrecificacaoAccess(role)) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
-  }
 
   try {
     const rows = await sql`
