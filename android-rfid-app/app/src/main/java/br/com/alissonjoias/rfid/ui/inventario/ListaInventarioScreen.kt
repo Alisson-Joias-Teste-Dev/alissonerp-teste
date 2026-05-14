@@ -218,7 +218,7 @@ fun ListaInventarioScreen(
                                 modifier = Modifier.padding(vertical = 4.dp),
                             )
                         }
-                        items(enviados, key = { it.id }) { inv ->
+                        items(enviados, key = { item -> item.id }) { inv ->
                             InventarioCard(
                                 inventario = inv,
                                 onAction = { },

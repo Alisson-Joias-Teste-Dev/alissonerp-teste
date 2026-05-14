@@ -1,14 +1,12 @@
 package br.com.alissonjoias.rfid.auth
 
 import android.util.Log
-import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.createSupabaseClient
-import io.github.jan.supabase.gotrue.Auth
-import io.github.jan.supabase.gotrue.providers.builtin.Email
 import br.com.alissonjoias.rfid.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.net.HttpURLConnection
+import java.net.URL
 
 data class AuthState(
     val isLoggedIn: Boolean = false,
@@ -21,65 +19,65 @@ data class AuthState(
 object SupabaseAuth {
     private val TAG = "SupabaseAuth"
 
-    private val client: SupabaseClient = createSupabaseClient(
-        supabaseUrl = BuildConfig.SUPABASE_URL,
-        supabaseKey = BuildConfig.SUPABASE_ANON_KEY
-    ) {
-        install(Auth)
-    }
-
     private val _authState = MutableStateFlow(AuthState())
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
     suspend fun signIn(email: String, password: String): Result<String> {
         _authState.value = _authState.value.copy(isLoading = true, error = null)
         return try {
-            val session = client.auth.signInWith(Email) {
-                this.email = email
-                this.password = password
+            val url = URL("${BuildConfig.SUPABASE_URL}/auth/v1/token?grant_type=password")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            conn.doOutput = true
+
+            val body = """{"email":"$email","password":"$password"}"""
+            conn.outputStream.write(body.toByteArray())
+
+            val code = conn.responseCode
+            val response = if (code in 200..299) {
+                conn.inputStream.bufferedReader().readText()
+            } else {
+                conn.errorStream?.bufferedReader()?.readText() ?: "{\"error\":\"$code\"}"
             }
-            val token = session.accessToken
-            _authState.value = _authState.value.copy(
-                isLoggedIn = true,
-                isLoading = false,
-                accessToken = token,
-                email = email,
-            )
-            Log.d(TAG, "Login bem-sucedido: $email")
-            Result.success(token)
+            conn.disconnect()
+
+            if (code in 200..299) {
+                val json = org.json.JSONObject(response)
+                val token = json.getString("access_token")
+                val userEmail = json.optString("email", email)
+
+                _authState.value = AuthState(
+                    isLoggedIn = true,
+                    isLoading = false,
+                    accessToken = token,
+                    email = userEmail,
+                )
+                Log.d(TAG, "Login OK: $userEmail")
+                Result.success(token)
+            } else {
+                val msg = try {
+                    org.json.JSONObject(response).optString("error_description", "Erro no login")
+                } catch (_: Exception) { "Erro no login (código $code)" }
+                Log.e(TAG, "Login falhou: $msg")
+                _authState.value = _authState.value.copy(isLoading = false, error = msg)
+                Result.failure(Exception(msg))
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Erro no login: ${e.message}")
-            _authState.value = _authState.value.copy(
-                isLoading = false,
-                error = e.message ?: "Erro desconhecido no login"
-            )
+            _authState.value = _authState.value.copy(isLoading = false, error = e.message)
             Result.failure(e)
         }
     }
 
     fun getAccessToken(): String? = _authState.value.accessToken
-        ?: runCatching { client.auth.currentSessionOrNull()?.accessToken }.getOrNull()
 
     suspend fun signOut() {
-        try {
-            client.auth.signOut()
-        } catch (_: Exception) {}
         _authState.value = AuthState()
     }
 
     fun restoreSession(): Boolean {
-        return try {
-            val session = client.auth.currentSessionOrNull()
-            if (session != null) {
-                _authState.value = AuthState(
-                    isLoggedIn = true,
-                    accessToken = session.accessToken,
-                    email = session.user?.email,
-                )
-                true
-            } else false
-        } catch (_: Exception) {
-            false
-        }
+        return _authState.value.isLoggedIn
     }
 }

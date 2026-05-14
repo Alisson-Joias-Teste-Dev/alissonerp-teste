@@ -227,7 +227,8 @@ class TslManager {
                     break
                 }
             }
-        }.also { it.start() })
+        })
+        readerThread?.start()
     }
 
     private fun processBuffer(sb: StringBuilder) {

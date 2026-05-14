@@ -205,11 +205,10 @@ fun AjustesScreen(
 
                 OutlinedTextField(
                     value = state.erpUrl,
-                    onValueChange = viewModel::onErpUrlChanged,
+                    onValueChange = { viewModel.onErpUrlChanged(it) },
                     label = { Text("URL da API") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    fontFamily = FontFamily.Monospace,
                 )
             }
         }

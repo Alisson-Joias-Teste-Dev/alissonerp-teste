@@ -85,12 +85,11 @@ fun ProcurarScreen(
 
             OutlinedTextField(
                 value = state.targetEpc,
-                onValueChange = viewModel::onTargetEpcChanged,
+                onValueChange = { viewModel.onTargetEpcChanged(it) },
                 label = { Text("EPC ou SKU") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 enabled = !state.procurando,
-                fontFamily = FontFamily.Monospace,
             )
 
             Spacer(modifier = Modifier.height(16.dp))
