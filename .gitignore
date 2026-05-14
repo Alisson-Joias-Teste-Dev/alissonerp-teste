@@ -27,7 +27,7 @@
 # APK build artifacts
 android-rfid-app/app/build/
 android-rfid-app/.gradle/
-public/apk/alisson-rfid.apk
+# APK e baixado via GitHub Actions e copiado manualmente para producao
 
 # debug
 npm-debug.log*
