@@ -58,8 +58,8 @@ fun ContagemScreen(
     onResultado: (Int) -> Unit,
     viewModel: ContagemViewModel,
 ) {
-    val state by viewModel.uiState.collectAsState()
-    val resumo by viewModel.resumo
+    val state = viewModel.uiState.collectAsState().value
+    val resumo = viewModel.resumo.collectAsState().value
     val snackbarHostState = remember { SnackbarHostState() }
 
     val tempoFormatado = formatTempo(state.tempoLeitura)

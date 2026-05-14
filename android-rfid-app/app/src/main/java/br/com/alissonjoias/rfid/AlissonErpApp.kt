@@ -14,8 +14,7 @@ class AlissonErpApp : Application() {
         private set
     lateinit var erpApi: ErpApi
         private set
-    lateinit var tslManager: TslManager
-        private set
+    val tslManager: TslManager = TslManager()
 
     override fun onCreate() {
         super.onCreate()
@@ -24,7 +23,6 @@ class AlissonErpApp : Application() {
         database = AppDatabase.getInstance(this)
         preferences = AppPreferences.getInstance(this)
         erpApi = ErpApi.create()
-        tslManager = TslManager(this)
     }
 
     companion object {

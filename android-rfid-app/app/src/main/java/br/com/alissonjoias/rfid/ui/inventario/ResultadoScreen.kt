@@ -61,8 +61,8 @@ fun ResultadoScreen(
     onEnviado: () -> Unit,
     viewModel: ResultadoViewModel,
 ) {
-    val state by viewModel.uiState.collectAsState()
-    val resumo by viewModel.resumo
+    val state = viewModel.uiState.collectAsState().value
+    val resumo = viewModel.resumo.collectAsState().value
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(state.erro) {

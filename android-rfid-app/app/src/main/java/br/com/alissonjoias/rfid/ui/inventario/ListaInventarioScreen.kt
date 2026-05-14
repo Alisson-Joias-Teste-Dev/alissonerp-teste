@@ -49,8 +49,8 @@ fun ListaInventarioScreen(
     onIniciarContagem: (Int) -> Unit,
     viewModel: ListaInventarioViewModel = viewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val inventarios by viewModel.inventarios
+    val uiState = viewModel.uiState.collectAsState().value
+    val inventarios = viewModel.inventarios.collectAsState().value
     val snackbarHostState = remember { SnackbarHostState() }
     val pullRefreshState = rememberPullToRefreshState()
 
@@ -164,7 +164,7 @@ fun ListaInventarioScreen(
                                 modifier = Modifier.padding(vertical = 4.dp),
                             )
                         }
-                        items(pendentes, key = { it.id }) { inv ->
+                        items(pendentes, key = { p -> p.id }) { inv ->
                             InventarioCard(
                                 inventario = inv,
                                 onAction = { onIniciarContagem(inv.id) },
@@ -182,7 +182,7 @@ fun ListaInventarioScreen(
                                 modifier = Modifier.padding(vertical = 4.dp),
                             )
                         }
-                        items(contando, key = { it.id }) { inv ->
+                        items(contando, key = { c -> c.id }) { inv ->
                             InventarioCard(
                                 inventario = inv,
                                 onAction = { onIniciarContagem(inv.id) },
@@ -200,7 +200,7 @@ fun ListaInventarioScreen(
                                 modifier = Modifier.padding(vertical = 4.dp),
                             )
                         }
-                        items(concluidos, key = { it.id }) { inv ->
+                        items(concluidos, key = { cv -> cv.id }) { inv ->
                             InventarioCard(
                                 inventario = inv,
                                 onAction = { onIniciarContagem(inv.id) },
