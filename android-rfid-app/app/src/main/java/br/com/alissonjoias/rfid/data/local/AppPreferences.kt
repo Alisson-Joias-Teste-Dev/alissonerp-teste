@@ -31,7 +31,7 @@ class AppPreferences(private val context: Context) {
     }
 
     val erpBaseUrl: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[ERP_BASE_URL] ?: "https://api.alisson.api.br"
+        prefs[ERP_BASE_URL] ?: "https://erp.alisson.api.br"
     }
 
     val tslPowerDbm: Flow<Int> = context.dataStore.data.map { prefs ->

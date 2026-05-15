@@ -16,7 +16,7 @@ android {
         versionCode = 2
         versionName = "1.0.1"
 
-        buildConfigField("String", "ERP_BASE_URL", "\"https://api.alisson.api.br\"")
+        buildConfigField("String", "ERP_BASE_URL", "\"https://erp.alissonjoias.com.br\"")
         buildConfigField("String", "SUPABASE_URL", "\"https://api.alisson.api.br\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InNlbGYtaG9zdCIsImlhdCI6MTc1NzMwMzUzNiwiZXhwIjoyMDcyNjYzNTM2fQ.6aDnTwDlKSnfMP4M1lt59KVZ1Np3yf0t70tiTYSy_fI\"")
     }
