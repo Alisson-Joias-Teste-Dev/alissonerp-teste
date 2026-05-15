@@ -45,7 +45,10 @@ export async function createServerSupabase() {
   // Wrap getUser com cache para evitar chamadas repetidas ao GoTrue
   const auth = supabase.auth;
   const origGetUser = auth.getUser.bind(auth);
-  auth.getUser = async () => {
+  auth.getUser = async (jwt?: string) => {
+    if (jwt) {
+      return origGetUser(jwt);
+    }
     const cookieStr = JSON.stringify(cookieStore.getAll());
     const cached = userCache.get(cookieStr);
     if (cached && cached.exp > Date.now()) {
