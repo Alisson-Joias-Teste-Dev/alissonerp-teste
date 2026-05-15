@@ -7,6 +7,7 @@ import PCPDetalheModal from "@/components/forms/PCPDetalheModal";
 import ApontamentoPCPModal from "@/components/forms/ApontamentoPCPModal";
 import TransferenciaPCPModal from "@/components/forms/TransferenciaPCPModal";
 import SaidaOrdemModal from "@/components/forms/SaidaOrdemModal";
+import CadastrarRotaModal from "@/components/forms/CadastrarRotaModal";
 
 const C = {
   esmeralda:   "#184036",
@@ -40,11 +41,12 @@ interface KanbanData {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ActiveModal =
-  | { type: "detalhe";       data: OFItem }
-  | { type: "apontamento";   data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean } }
-  | { type: "transferencia"; data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean } }
-  | { type: "saida";         data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean; pesoMetalExterno?: number } }
-  | { type: "atribuir";      data: OFItem }
+  | { type: "detalhe";        data: OFItem }
+  | { type: "apontamento";    data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean } }
+  | { type: "transferencia";  data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean } }
+  | { type: "saida";          data: { pcpId: number; ordemId: number; depositoId: number; setorId: number | null; depositoAtribuido: boolean; pesoMetalExterno?: number } }
+  | { type: "atribuir";       data: OFItem }
+  | { type: "cadastrar_rota"; data: { pcpId: number; produtoId: number; produtoNome: string | null } }
   | null;
 
 export default function RotaFabricacaoClient() {
@@ -64,11 +66,18 @@ export default function RotaFabricacaoClient() {
   const [setorBusy, setSetorBusy] = useState(false);
   const [setorErr, setSetorErr] = useState<string | null>(null);
 
+  // Filtros aplicados client-side nas OFs antes de agrupar por setor
+  const [filtroVendedorId, setFiltroVendedorId] = useState<number | "">("");
+  const [filtroReposicao, setFiltroReposicao] = useState(false);
+  // Filtro de status — server-side (recarrega a API com query param)
+  type StatusFiltro = "ativas" | "concluidas" | "canceladas" | "todas";
+  const [filtroStatus, setFiltroStatus] = useState<StatusFiltro>("ativas");
+
   const carregar = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch("/api/rota-fabricacao");
+      const r = await fetch(`/api/rota-fabricacao?status=${filtroStatus}`);
       if (!r.ok) {
         const b = await r.json().catch(() => ({}));
         throw new Error((b as { error?: string }).error ?? `HTTP ${r.status}`);
@@ -79,7 +88,7 @@ export default function RotaFabricacaoClient() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filtroStatus]);
 
   useEffect(() => { carregar(); }, [carregar]);
 
@@ -134,7 +143,7 @@ export default function RotaFabricacaoClient() {
   }
 
   async function excluirSetor(s: Setor) {
-    if (!confirm(`Inativar setor "${s.nome}"? OFs ainda nesse setor cairão na coluna "Sem rota".`)) return;
+    if (!confirm(`Inativar setor "${s.nome}"? OFs ainda nesse setor cairão na coluna "Novas Ordens".`)) return;
     setSetorBusy(true); setSetorErr(null);
     try {
       const r = await fetch(`/api/setores/${s.id}`, { method: "DELETE" });
@@ -191,21 +200,62 @@ export default function RotaFabricacaoClient() {
     }
   }
 
-  // Agrupa OFs por setor da ROTA (setor_id_rota), não pelo setor do operador.
-  // "Sem rota" SEMPRE no início — é o pool das OFs que ainda precisam ser
-  // configuradas e o gerente costuma trabalhar a partir dela.
+  // OFs filtradas client-side (vendedora / reposição)
+  const ofsFiltradas = useMemo(() => {
+    if (!data) return [] as OFItem[];
+    return data.ofs.filter((o: OFItem) => {
+      if (filtroReposicao && !o.eh_reposicao) return false;
+      if (filtroVendedorId !== "" && Number(o.vendedor_id) !== Number(filtroVendedorId)) return false;
+      return true;
+    });
+  }, [data, filtroVendedorId, filtroReposicao]);
+
+  // Lista de vendedoras únicas presentes nas OFs (pra popular o select)
+  const vendedoresDisponiveis = useMemo(() => {
+    if (!data) return [] as { id: number; nome: string }[];
+    const mapa = new Map<number, string>();
+    for (const o of data.ofs as OFItem[]) {
+      if (o.vendedor_id != null && o.vendedor_nome) {
+        mapa.set(Number(o.vendedor_id), String(o.vendedor_nome));
+      }
+    }
+    return Array.from(mapa.entries())
+      .map(([id, nome]) => ({ id, nome }))
+      .sort((a, b) => a.nome.localeCompare(b.nome));
+  }, [data]);
+
+  // Separa OFs em 3 grupos pelo etapas_cod (label/cod do vw_pcp_erp):
+  //   - ativas: NÃO concluido/cancelado → caem nos setores ou em "Novas Ordens"
+  //   - concluidas: etapas_cod = 'concluido' → coluna ✅ Concluído (fixa)
+  //   - canceladas: etapas_cod = 'cancelado' → coluna 🚫 Cancelado (fixa)
+  const ofsAtivas = useMemo(
+    () => ofsFiltradas.filter((o: OFItem) => o.etapas_cod !== "concluido" && o.etapas_cod !== "cancelado"),
+    [ofsFiltradas],
+  );
+  const ofsConcluidas = useMemo(
+    () => ofsFiltradas.filter((o: OFItem) => o.etapas_cod === "concluido"),
+    [ofsFiltradas],
+  );
+  const ofsCanceladas = useMemo(
+    () => ofsFiltradas.filter((o: OFItem) => o.etapas_cod === "cancelado"),
+    [ofsFiltradas],
+  );
+
+  // Colunas de SETORES (só com OFs ativas). "Novas Ordens" no início.
   const colunas = useMemo(() => {
     if (!data) return [];
     const out: { setor: Setor | null; ofs: OFItem[] }[] = [];
-    const semRota = data.ofs.filter((o) => o.setor_id_rota == null);
+    const semRota = ofsAtivas.filter((o) => o.setor_id_rota == null);
     out.push({ setor: null, ofs: semRota });
     for (const s of data.setores) {
-      out.push({ setor: s, ofs: data.ofs.filter((o) => Number(o.setor_id_rota) === s.id) });
+      out.push({ setor: s, ofs: ofsAtivas.filter((o) => Number(o.setor_id_rota) === s.id) });
     }
     return out;
-  }, [data]);
+  }, [data, ofsAtivas]);
 
   const totalOFs = data?.ofs.length ?? 0;
+  const totalOFsFiltradas = ofsFiltradas.length;
+  const filtrosAtivos = (filtroVendedorId !== "" ? 1 : 0) + (filtroReposicao ? 1 : 0);
 
   // ─── Drag & Drop ────────────────────────────────────────────────────────
   function onDragStart(e: React.DragEvent<HTMLDivElement>, of: OFItem) {
@@ -233,7 +283,7 @@ export default function RotaFabricacaoClient() {
     const pcpId = Number(pcpIdRaw);
     if (!pcpId) return;
     if (setorIdAlvo === "sem-rota") {
-      setMoverErr("Não é possível mover de volta pra 'Sem rota'. Configure a rota do produto.");
+      setMoverErr("Não é possível mover de volta pra 'Novas Ordens'. Configure a rota do produto.");
       setDraggingPcpId(null);
       return;
     }
@@ -311,6 +361,16 @@ export default function RotaFabricacaoClient() {
   function abrirAtribuir(pcp: OFItem) {
     setActiveModal({ type: "atribuir", data: pcp });
   }
+  function abrirCadastrarRota(pcp: OFItem) {
+    setActiveModal({
+      type: "cadastrar_rota",
+      data: {
+        pcpId: Number(pcp.id),
+        produtoId: Number(pcp.produto_id),
+        produtoNome: pcp.produto_nome ?? null,
+      },
+    });
+  }
   function fecharModal() { setActiveModal(null); }
   function onSuccessModal() { setActiveModal(null); carregar(); }
 
@@ -326,18 +386,84 @@ export default function RotaFabricacaoClient() {
             Rota de Fabricação
           </h2>
           <p className="text-sm mt-1" style={{ color: "#6B7280" }}>
-            Kanban de OFs ativas por setor · {totalOFs} OF(s) · {data?.setores.length ?? 0} setor(es) ativos
+            Kanban de OFs ativas por setor ·{" "}
+            {filtrosAtivos > 0 ? (
+              <>
+                <span className="font-semibold" style={{ color: C.esmeralda }}>{totalOFsFiltradas}</span> de {totalOFs} OF(s)
+                <span className="ml-1" style={{ color: C.esmeralda }}>· {filtrosAtivos} filtro(s)</span>
+              </>
+            ) : (
+              <>{totalOFs} OF(s)</>
+            )}{" "}
+            · {data?.setores.length ?? 0} setor(es) ativos
           </p>
         </div>
-        <button
-          onClick={carregar}
-          disabled={loading || movendo}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold border"
-          style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
-        >
-          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-          Atualizar
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Filtro de STATUS (server-side — recarrega a API) */}
+          <select
+            value={filtroStatus}
+            onChange={(e) => setFiltroStatus(e.target.value as StatusFiltro)}
+            disabled={loading}
+            className="px-3 py-2 rounded-lg border text-[12px] bg-white outline-none font-semibold"
+            style={{
+              borderColor: filtroStatus !== "ativas" ? C.esmeralda : C.cremeBorder,
+              color: C.esmeralda,
+            }}
+            title="Status das OFs exibidas"
+          >
+            <option value="ativas">🟢 Ativas</option>
+            <option value="concluidas">⚫ Concluídas (30d)</option>
+            <option value="canceladas">🔴 Canceladas (30d)</option>
+            <option value="todas">📋 Todas (30d)</option>
+          </select>
+          {/* Filtro vendedora */}
+          <select
+            value={filtroVendedorId}
+            onChange={(e) => setFiltroVendedorId(e.target.value === "" ? "" : Number(e.target.value))}
+            className="px-3 py-2 rounded-lg border text-[12px] bg-white outline-none"
+            style={{ borderColor: filtroVendedorId !== "" ? C.esmeralda : C.cremeBorder, color: C.esmeralda }}
+            title="Filtrar por vendedora"
+          >
+            <option value="">Todas as vendedoras</option>
+            {vendedoresDisponiveis.map((v) => (
+              <option key={v.id} value={v.id}>{v.nome}</option>
+            ))}
+          </select>
+          {/* Toggle reposição */}
+          <button
+            type="button"
+            onClick={() => setFiltroReposicao((v) => !v)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold border"
+            style={{
+              borderColor: filtroReposicao ? "#1E40AF" : C.cremeBorder,
+              backgroundColor: filtroReposicao ? "#DBEAFE" : "#fff",
+              color: filtroReposicao ? "#1E40AF" : "#6B7280",
+            }}
+            title="Mostrar só ordens de reposição automática (REPO)"
+          >
+            🔄 Só reposição
+          </button>
+          {/* Limpar filtros (quando algum está ativo) */}
+          {filtrosAtivos > 0 && (
+            <button
+              type="button"
+              onClick={() => { setFiltroVendedorId(""); setFiltroReposicao(false); }}
+              className="text-[11px] font-semibold text-red-500 hover:text-red-700 px-2"
+              title="Limpar filtros"
+            >
+              ✕ Limpar
+            </button>
+          )}
+          <button
+            onClick={carregar}
+            disabled={loading || movendo}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold border"
+            style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            Atualizar
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -368,7 +494,9 @@ export default function RotaFabricacaoClient() {
       >
         <GripVertical size={13} />
         <span>
-          Arraste o card de uma coluna pra outra pra mover a OF entre setores. O setor alvo precisa estar na rota cadastrada do produto.
+          Ordens caem em <strong>"Novas Ordens"</strong>. Clique em <strong>"Definir Rota"</strong> no card pra
+          mapear os setores do produto — depois disso o card é distribuído automaticamente.
+          Cards já em setores podem ser arrastados pra mover entre etapas.
         </span>
       </div>
 
@@ -402,6 +530,7 @@ export default function RotaFabricacaoClient() {
                 onTransferir={abrirTransferir}
                 onSaida={abrirSaida}
                 onAtribuir={abrirAtribuir}
+                onCadastrarRota={abrirCadastrarRota}
                 editandoSetorId={editandoSetorId}
                 editandoNome={editandoNome}
                 setorBusy={setorBusy}
@@ -418,7 +547,7 @@ export default function RotaFabricacaoClient() {
             );
           })}
 
-          {/* Coluna "+ Novo setor" — sempre no fim */}
+          {/* Coluna "+ Novo setor" — sempre no fim das colunas dinâmicas */}
           <NovoSetorColuna
             criando={criandoSetor}
             nome={novoSetorNome}
@@ -428,6 +557,32 @@ export default function RotaFabricacaoClient() {
             onCancelar={() => { setCriandoSetor(false); setNovoSetorNome(""); }}
             onConfirmar={criarSetor}
           />
+
+          {/* Colunas FIXAS: Concluído e Cancelado — só aparecem se tem cards.
+              Não aceitam drop, não têm CRUD inline. Servem só pra histórico
+              visual quando o filtro Status está em concluidas/canceladas/todas. */}
+          {ofsConcluidas.length > 0 && (
+            <ColunaFinalizada
+              tipo="concluido"
+              ofs={ofsConcluidas}
+              onDetalhe={abrirDetalhe}
+              onApontar={abrirApontar}
+              onTransferir={abrirTransferir}
+              onSaida={abrirSaida}
+              onAtribuir={abrirAtribuir}
+            />
+          )}
+          {ofsCanceladas.length > 0 && (
+            <ColunaFinalizada
+              tipo="cancelado"
+              ofs={ofsCanceladas}
+              onDetalhe={abrirDetalhe}
+              onApontar={abrirApontar}
+              onTransferir={abrirTransferir}
+              onSaida={abrirSaida}
+              onAtribuir={abrirAtribuir}
+            />
+          )}
 
           {colunas.length === 0 && !criandoSetor && (
             <p className="text-sm py-12 px-4" style={{ color: "#9CA3AF" }}>
@@ -487,6 +642,17 @@ export default function RotaFabricacaoClient() {
           onSuccess={onSuccessModal}
         />
       )}
+      {activeModal?.type === "cadastrar_rota" && (
+        <CadastrarRotaModal
+          isOpen={true}
+          produtoId={activeModal.data.produtoId}
+          produtoNome={activeModal.data.produtoNome}
+          pcpId={activeModal.data.pcpId}
+          setoresDisponiveis={(data?.setores ?? []).map((s) => ({ id: s.id, nome: s.nome }))}
+          onClose={fecharModal}
+          onSuccess={onSuccessModal}
+        />
+      )}
     </div>
   );
 }
@@ -507,6 +673,7 @@ function KanbanColuna({
   onTransferir,
   onSaida,
   onAtribuir,
+  onCadastrarRota,
   editandoSetorId,
   editandoNome,
   setorBusy,
@@ -534,6 +701,7 @@ function KanbanColuna({
   onTransferir: (pcp: OFItem) => void;
   onSaida: (pcp: OFItem) => void;
   onAtribuir: (pcp: OFItem) => void;
+  onCadastrarRota: (pcp: OFItem) => void;
   editandoSetorId: number | null;
   editandoNome: string;
   setorBusy: boolean;
@@ -599,7 +767,7 @@ function KanbanColuna({
             />
           ) : (
             <span className="text-[11px] font-bold uppercase tracking-wider truncate" style={{ color: isSemRota ? "#374151" : (requerPeso ? "#92400E" : "#3730A3") }}>
-              {setor?.nome ?? "Sem rota"}
+              {setor?.nome ?? "Novas Ordens"}
             </span>
           )}
           <div className="flex items-center gap-1">
@@ -737,6 +905,7 @@ function KanbanColuna({
               REPO
             </span>
           ) : null;
+          const podeDefinirRota = isSemRota && of.produto_id != null;
           return (
             <div key={of.id} style={{ opacity: isDragging ? 0.4 : 1 }}>
               <KanbanCard
@@ -751,6 +920,25 @@ function KanbanColuna({
                 onAtribuir={onAtribuir}
                 extraBadges={extra}
               />
+              {/* Botão "Definir Rota" — aparece apenas nos cards de "Novas
+                  Ordens" que têm produto vinculado. Clicando, abre o modal
+                  pra gerente preencher a sequência de setores e distribuir
+                  automaticamente. */}
+              {podeDefinirRota && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onCadastrarRota(of); }}
+                  className="mt-1 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-bold border-2 border-dashed hover:bg-emerald-50"
+                  style={{ borderColor: "#10B981", color: "#059669" }}
+                >
+                  ➜ Definir Rota
+                </button>
+              )}
+              {isSemRota && of.produto_id == null && (
+                <p className="mt-1 px-2 py-1 text-[10px] text-amber-700 bg-amber-50 rounded">
+                  Sem produto vinculado — não dá pra cadastrar rota.
+                </p>
+              )}
             </div>
           );
         })}
@@ -984,6 +1172,90 @@ function ModalAtribuir({
               ))}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Coluna fixa de histórico (Concluído / Cancelado) ───────────────────────
+// Não aceita drag-drop, não tem CRUD. Só mostra cards finalizados.
+function ColunaFinalizada({
+  tipo,
+  ofs,
+  onDetalhe,
+  onApontar,
+  onTransferir,
+  onSaida,
+  onAtribuir,
+}: {
+  tipo: "concluido" | "cancelado";
+  ofs: OFItem[];
+  onDetalhe: (pcp: OFItem) => void;
+  onApontar: (pcp: OFItem) => void;
+  onTransferir: (pcp: OFItem) => void;
+  onSaida: (pcp: OFItem) => void;
+  onAtribuir: (pcp: OFItem) => void;
+}) {
+  const config = tipo === "concluido"
+    ? { label: "Concluído", emoji: "✅", borda: "#10B981", header: "#D1FAE5", textoHeader: "#065F46", bg: "#F0FDF4" }
+    : { label: "Cancelado", emoji: "🚫", borda: "#EF4444", header: "#FEE2E2", textoHeader: "#991B1B", bg: "#FEF2F2" };
+
+  return (
+    <div
+      className="flex-shrink-0 w-72 snap-start rounded-xl flex flex-col"
+      style={{ backgroundColor: config.bg, minHeight: 240 }}
+    >
+      {/* Header */}
+      <div
+        className="px-3 py-2.5 rounded-t-xl"
+        style={{ backgroundColor: config.header, borderBottom: `2px solid ${config.borda}` }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: config.textoHeader }}>
+            {config.emoji} {config.label}
+          </span>
+          <span
+            className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full"
+            style={{ backgroundColor: config.borda, color: "#fff" }}
+          >
+            {ofs.length}
+          </span>
+        </div>
+        <p className="mt-1 text-[10px]" style={{ color: config.textoHeader, opacity: 0.7 }}>
+          Histórico — últimos 30 dias
+        </p>
+      </div>
+
+      {/* Cards */}
+      <div className="flex flex-col gap-2 p-2 flex-1 overflow-y-auto" style={{ maxHeight: "70vh" }}>
+        {ofs.length === 0 && (
+          <p className="text-center text-[11px] py-4" style={{ color: "#9CA3AF" }}>
+            Vazio
+          </p>
+        )}
+        {ofs.map((of) => {
+          const extra = of.eh_reposicao ? (
+            <span
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+              style={{ backgroundColor: "#DBEAFE", color: "#1E40AF" }}
+            >
+              REPO
+            </span>
+          ) : null;
+          return (
+            <div key={of.id} style={{ opacity: 0.85 }}>
+              <KanbanCard
+                pcp={of}
+                onDetalhe={onDetalhe}
+                onApontar={onApontar}
+                onTransferir={onTransferir}
+                onSaida={onSaida}
+                onAtribuir={onAtribuir}
+                extraBadges={extra}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );

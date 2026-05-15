@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState, useRef, useEffect } from "react";
+import BadgePromo from "@/components/ui/BadgePromo";
 import { TableRow, DashboardProps, SchemaName } from "@/lib/gestao-estoque/types";
 import { updateRecord, saveTableConfig, loadTableConfig } from "@/lib/gestao-estoque/service";
 import { 
@@ -521,10 +522,13 @@ const Dashboard: React.FC<DashboardProps> = ({
        const uniqueId = idKey && row[idKey] ? String(row[idKey]) : `row-${idx}`;
 
        const stock = stockKey ? (parseFloat(row[stockKey]) || 0) : 0;
-       // preco_curva pode ser null (sem peso/markup) → cai em preco_tiny
-       const price = priceKey
-         ? (parseFloat(String(row['preco_curva'] ?? row['preco_tiny'] ?? row[priceKey] ?? 0)) || 0)
-         : 0;
+       // preco_curva pode ser null (sem peso/markup) → cai em preco_tiny.
+       // Promo: se em_promocao=true, prioriza preco_vigente para refletir valor atual.
+       const emPromo = Boolean(row['em_promocao']);
+       const precoFonte = emPromo
+         ? (row['preco_vigente'] ?? row['preco_curva'] ?? row['preco_tiny'])
+         : (row['preco_curva'] ?? row['preco_tiny'] ?? (priceKey ? row[priceKey] : 0));
+       const price = priceKey ? (parseFloat(String(precoFonte ?? 0)) || 0) : 0;
        const weight = weightKey ? (parseFloat(row[weightKey]) || 0) : 0;
        
        const totalValue = stock * price;
@@ -2538,6 +2542,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                           {visibleColumns.map(colKey => {
                             // preco_curva null → fallback preco_tiny para exibição
                             const rawVal = row.original[colKey];
+                            const emPromocaoRow = Boolean(row.original['em_promocao']);
+                            const precoVigenteRow = row.original['preco_vigente'];
                             const val = (colKey === 'preco_curva' && (rawVal === null || rawVal === undefined))
                               ? (row.original['preco_tiny'] ?? null)
                               : rawVal;
@@ -2655,8 +2661,19 @@ const Dashboard: React.FC<DashboardProps> = ({
                                 display = <span className="font-mono text-gray-900">{val}</span>;
                               }
                               // ── precos: formato completo pt-BR sem decimais (R$ 4.950) ──
+                              // se em_promocao=true e a coluna eh um preco, mostra lista riscada + promo + badge
                               else if (typeof val === 'number' && (colKey.includes('price') || colKey.includes('valor') || colKey.includes('preco'))) {
-                                display = <span className="font-mono tabular-nums text-gray-900">{formatCurrencyFull(val)}</span>;
+                                if (emPromocaoRow && (colKey === 'preco_curva' || colKey === 'preco_tiny') && typeof precoVigenteRow === 'number' && precoVigenteRow > 0 && precoVigenteRow !== val) {
+                                  display = (
+                                    <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
+                                      <s className="text-gray-400">{formatCurrencyFull(val)}</s>
+                                      <span className="text-emerald-700 font-bold">{formatCurrencyFull(precoVigenteRow)}</span>
+                                      <BadgePromo campanha={row.original['nome_campanha'] as string | null | undefined} />
+                                    </span>
+                                  );
+                                } else {
+                                  display = <span className="font-mono tabular-nums text-gray-900">{formatCurrencyFull(val)}</span>;
+                                }
                               }
                               // ── saldo/estoque: número simples ──
                               else if (typeof val === 'number' && colKey.match(/saldo|estoque|qtd_|quantidade/)) {

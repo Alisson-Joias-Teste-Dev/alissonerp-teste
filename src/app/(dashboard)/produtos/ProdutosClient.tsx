@@ -14,6 +14,8 @@ import { formatPeso } from "@/lib/formatters";
 import ProdutoDrawer from "@/components/produtos/ProdutoDrawer";
 import CadastroProdutoModal from "@/components/produtos/CadastroProdutoModal";
 import ModalPersonalizacao from "@/components/produtos/ModalPersonalizacao";
+import CadastrarPecaAvulsaModal from "@/components/produtos/CadastrarPecaAvulsaModal";
+import BadgePromo from "@/components/ui/BadgePromo";
 import BulkEditModal from "@/components/produtos/BulkEditModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -47,6 +49,11 @@ export interface Produto {
   sufixo_variacao: string | null;
   numeracao: string | null;
   qtd_variacoes: number;
+  // Promocao vigente (migration 248)
+  preco_vigente?: string | number | null;
+  em_promocao?: boolean | null;
+  nome_campanha?: string | null;
+  promo_data_fim?: string | null;
 }
 
 interface CategoriaPai {
@@ -187,6 +194,7 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
   // Cadastro modal
   const [showCadastro, setShowCadastro] = useState(false);
   const [showPersonalizado, setShowPersonalizado] = useState(false);
+  const [showPecaAvulsa, setShowPecaAvulsa] = useState(false);
 
   // Seleção em massa
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
@@ -388,6 +396,14 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
               title="Cadastrar regras de personalização (nome gravado, preço por letra)"
             >
               🏷️ + Personalizado
+            </button>
+            <button
+              onClick={() => setShowPecaAvulsa(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border hover:bg-purple-50"
+              style={{ borderColor: "#7C3AED", color: "#184036" }}
+              title="Cadastrar pedra avulsa (peso + custo USD + markup)"
+            >
+              ✨ + Peça Avulsa
             </button>
             <button
               onClick={() => setShowCadastro(true)}
@@ -727,16 +743,28 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
                               )}
                             </td>
 
-                            {/* Preço Venda — pedras: preco_tiny (manual); joias: preco_curva (cotação atual) */}
+                            {/* Preço Venda — pedras: preco_tiny (manual); joias: preco_curva (cotação atual);
+                                promo: preco_vigente sobrescreve quando em_promocao=true */}
                             <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
                               {(() => {
-                                const precoExibir = isPedra
+                                const precoLista = isPedra
                                   ? p.preco_tiny
                                   : (p.preco_curva != null ? String(p.preco_curva) : (p.preco_sync ?? p.preco_tiny));
-                                if (precoExibir != null && parseFloat(precoExibir) > 0) {
+                                const emPromo = !!p.em_promocao;
+                                const precoPromo = p.preco_vigente != null ? String(p.preco_vigente) : null;
+                                if (emPromo && precoPromo != null && parseFloat(precoPromo) > 0 && precoLista != null) {
+                                  return (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <s className="text-gray-400 font-normal">{formatPreco(precoLista)}</s>
+                                      <span className="font-bold" style={{ color: "#047857" }}>{formatPreco(precoPromo)}</span>
+                                      <BadgePromo campanha={p.nome_campanha} />
+                                    </span>
+                                  );
+                                }
+                                if (precoLista != null && parseFloat(precoLista) > 0) {
                                   return (
                                     <span className="font-semibold" style={{ color: "#184036" }}>
-                                      {formatPreco(precoExibir)}
+                                      {formatPreco(precoLista)}
                                     </span>
                                   );
                                 } else if (p.preco_filhos_min != null && p.preco_filhos_min > 0) {
@@ -864,6 +892,13 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
 
       {showPersonalizado && (
         <ModalPersonalizacao onClose={() => setShowPersonalizado(false)} />
+      )}
+
+      {showPecaAvulsa && (
+        <CadastrarPecaAvulsaModal
+          onClose={() => setShowPecaAvulsa(false)}
+          onSuccess={() => { fetchProdutos(); bumpRefresh(); }}
+        />
       )}
     </div>
   );

@@ -309,6 +309,11 @@ export async function GET(req: NextRequest) {
             CASE WHEN ${wSemPeso}  THEN 'sem_peso'      END,
             CASE WHEN ${wSemPreco} THEN 'sem_preco'     END
           ], NULL) AS pendencias,
+          -- Promocao vigente (migration 248) - preco_tiny do produto continua intacto.
+          vpv.preco_vigente,
+          vpv.em_promocao,
+          vpv.nome_campanha,
+          vpv.data_fim AS promo_data_fim,
           -- Preço da curva = peso × cotação_ouro × markup_aplicado × fator, arredondado à dezena.
           -- Usa markup_aplicado de produto_curva_aplicada (se a curva foi aplicada);
           -- senão usa o markup da própria public.produtos. Cotação buscada de public.parametros.
@@ -348,6 +353,7 @@ export async function GET(req: NextRequest) {
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
+        LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
         WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wVariacoes} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
         ORDER BY ${orderVariacoes}
         LIMIT  ${limit}
@@ -399,6 +405,11 @@ export async function GET(req: NextRequest) {
           CASE WHEN ${wSemPeso}  THEN 'sem_peso'      END,
           CASE WHEN ${wSemPreco} THEN 'sem_preco'     END
         ], NULL) AS pendencias,
+        -- Promocao vigente (migration 248)
+        vpv.preco_vigente,
+        vpv.em_promocao,
+        vpv.nome_campanha,
+        vpv.data_fim AS promo_data_fim,
         -- Pedras ficam fora do cálculo (ver comentário na query principal).
         CASE
           WHEN p.categoria ILIKE 'Pedras%' THEN NULL
@@ -427,6 +438,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
+      LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
       WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
       ORDER BY ${orderFieldIdent} ${orderDir} NULLS LAST
       LIMIT  ${limit}

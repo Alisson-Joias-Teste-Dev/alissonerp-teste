@@ -105,6 +105,12 @@ export async function GET(req: NextRequest) {
         COALESCE(r12.receita_total_12m, 0)::numeric AS receita_total_12m,
         p.data_ultima_compra      AS data_ultima_compra,
         p.data_ultima_compra      AS ultima_compra,
+        -- Promocao vigente (migration 248). preco_tiny do produto continua intacto.
+        vpv.preco_vigente,
+        vpv.em_promocao,
+        vpv.promocao_id,
+        vpv.nome_campanha,
+        vpv.data_fim              AS promo_data_fim,
         cpa.markup_aplicado,
         cpa.comissao_pct,
         cpa.max_desconto_pct,
@@ -129,6 +135,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN vendas_90d v90        ON v90.produto_id = p.id_produto
       LEFT JOIN receita_12m r12       ON r12.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
+      LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
       WHERE p.situacao = 'A'
     `;
 

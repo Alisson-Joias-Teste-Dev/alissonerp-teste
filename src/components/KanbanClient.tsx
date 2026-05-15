@@ -2,11 +2,10 @@
 
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, FlaskConical, UserCheck, X, Loader2, SlidersHorizontal } from "lucide-react";
+import { FlaskConical, UserCheck, X, Loader2, SlidersHorizontal } from "lucide-react";
 import ApontamentoPCPModal   from "@/components/forms/ApontamentoPCPModal";
 import TransferenciaPCPModal from "@/components/forms/TransferenciaPCPModal";
 import SaidaOrdemModal       from "@/components/forms/SaidaOrdemModal";
-import NovaPCPModal          from "@/components/forms/NovaPCPModal";
 import PCPDetalheModal       from "@/components/forms/PCPDetalheModal";
 import OrdemTesteModal       from "@/components/forms/OrdemTesteModal";
 import KanbanCard, {
@@ -201,7 +200,6 @@ type ActiveModal =
   | { type: "transferencia";     data: ModalState }
   | { type: "saida";             data: ModalState }
   | { type: "atribuir_operador"; data: { pcpId: number } }
-  | { type: "nova_pcp";          data: null }
   | { type: "ordem_teste";       data: null }
   | null;
 
@@ -418,14 +416,9 @@ export default function KanbanClient({
               Ordem Teste
             </button>
           )}
-          <button
-            onClick={() => setActiveModal({ type: "nova_pcp", data: null })}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold"
-            style={{ backgroundColor: "#184036", color: "#F3EADA" }}
-          >
-            <Plus size={13} strokeWidth={2.5} />
-            Nova Ordem
-          </button>
+          {/* Botão "Nova Ordem" removido: fábrica não cria ordens, só executa.
+              Ordens entram automaticamente via trigger trg_auto_auditoria_loja
+              quando a loja cria a ordem. */}
           <div className="relative w-full md:w-72">
             <input
               type="text"
@@ -596,6 +589,73 @@ export default function KanbanClient({
         </div>
       </div>
 
+      {/* Tabs de fluxo — atalho rápido pra alternar entre Serviço e Fabricação.
+          Sincronizado com tiposSelecionados: se exatamente 1 tipo está marcado,
+          a tab correspondente fica ativa. "Todos" = nenhum filtro de tipo. */}
+      {(() => {
+        const tipoTabAtual: "todos" | TipoFiltro =
+          tiposSelecionados.size === 1
+            ? (Array.from(tiposSelecionados)[0] as TipoFiltro)
+            : "todos";
+        const TABS: Array<{ key: "todos" | TipoFiltro; label: string }> = [
+          { key: "todos",      label: "Todos" },
+          { key: "servico",    label: "Serviço" },
+          { key: "fabricacao", label: "Fabricação" },
+        ];
+        const setTab = (key: "todos" | TipoFiltro) => {
+          if (key === "todos") {
+            setTiposSelecionados(new Set());
+          } else {
+            setTiposSelecionados(new Set([key]));
+          }
+        };
+        // Conta por tipo (com base nos filtros não-tipo já aplicados)
+        const contagem = baseList.reduce(
+          (acc: Record<string, number>, p: PCPItem) => {
+            const t = p.tipo_ordem ?? "";
+            (Object.keys(TIPO_FILTRO_ENUMS) as TipoFiltro[]).forEach((k) => {
+              if (TIPO_FILTRO_ENUMS[k].includes(t)) acc[k] = (acc[k] ?? 0) + 1;
+            });
+            acc.todos = (acc.todos ?? 0) + 1;
+            return acc;
+          },
+          {} as Record<string, number>
+        );
+
+        return (
+          <div className="mb-4 flex gap-1 border-b" style={{ borderColor: "#E8DCC8" }}>
+            {TABS.map((t) => {
+              const ativo = tipoTabAtual === t.key;
+              const n = contagem[t.key] ?? 0;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  className="px-4 py-2 text-[13px] font-semibold transition-colors -mb-px border-b-2"
+                  style={{
+                    borderBottomColor: ativo ? "#184036" : "transparent",
+                    color: ativo ? "#184036" : "#6B7280",
+                    backgroundColor: ativo ? "#F3EADA50" : "transparent",
+                  }}
+                >
+                  {t.label}
+                  <span
+                    className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{
+                      backgroundColor: ativo ? "#184036" : "#E8DCC8",
+                      color: ativo ? "#F3EADA" : "#6B7280",
+                    }}
+                  >
+                    {n}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {/* Kanban board */}
       <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-4 md:snap-none">
         {ETAPAS.map((etapa) => {
@@ -671,13 +731,6 @@ export default function KanbanClient({
       {activeModal?.type === "detalhe" && (
         <PCPDetalheModal
           pcp={activeModal.data}
-          onClose={handleClose}
-          onSuccess={handleSuccess}
-        />
-      )}
-      {activeModal?.type === "nova_pcp" && (
-        <NovaPCPModal
-          isOpen={true}
           onClose={handleClose}
           onSuccess={handleSuccess}
         />

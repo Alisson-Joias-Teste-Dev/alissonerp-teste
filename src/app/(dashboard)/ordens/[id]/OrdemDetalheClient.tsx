@@ -7,8 +7,7 @@ import ComentariosOrdem from "@/components/ComentariosOrdem";
 import GaleriaFotosOrdem from "@/components/ordem/GaleriaFotosOrdem";
 import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
 import FichaTecnicaForm, { TIPOS_ITEM, type TipoItem, type FichaTecnicaDados, validarFichaTecnica } from "@/components/ordens/FichaTecnicaForm";
-import { Pencil, X, Save, Loader2, AlertCircle, Ban, Repeat2, Wrench, CheckCircle, ArrowRight } from "lucide-react";
-import ConcluirConversaoSkuModal from "@/components/forms/ConcluirConversaoSkuModal";
+import { Pencil, X, Save, Loader2, AlertCircle, Ban } from "lucide-react";
 import { formatDateBR } from "@/lib/formatters";
 
 const C = {
@@ -204,14 +203,18 @@ interface Props {
   fichaTecnica: any | null;
   timeline: any[];
   userRole: string | null;
-  conversaoSku?: any;
 }
 
-export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline, userRole, conversaoSku }: Props) {
+// Roles "operacionais" — colaboradores de execução que só precisam ver a
+// ficha técnica da peça (não veem Produção, Apontamentos, Mov. Estoque ou
+// Transferências). Gestão (admin, gerente, pcp, consultora) vê tudo.
+const ROLES_SO_FICHA = ["ourives", "motoboy", "estoquista_fabrica", "estoquista_loja"];
+
+export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline, userRole }: Props) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("producao");
+  const soFicha = userRole != null && ROLES_SO_FICHA.includes(userRole);
+  const [tab, setTab] = useState<Tab>(soFicha ? "ficha" : "producao");
   const [comentariosCount, setComentariosCount] = useState(0);
-  const [showConvSku, setShowConvSku] = useState(false);
 
   // ── Modal de edição (apenas desenvolvedor) ───────────────────────────────
   const [editOpen,    setEditOpen]    = useState(false);
@@ -307,13 +310,19 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
   // Encontrar o passo atual (primeiro não-concluido)
   const passoAtualIdx = timeline.findIndex((ev) => ev.status !== "concluido");
 
-  const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: "producao",       label: "Produção" },
-    { key: "apontamentos",   label: "Apontamentos",   count: apontamentos.length },
-    { key: "estoque",        label: "Mov. Estoque",   count: movEstoque.length },
-    { key: "transferencias", label: "Transferências", count: transferencias.length },
-    { key: "ficha",          label: "Ficha Técnica",  count: fichaTecnica?._origem === "erp_multi" ? (fichaTecnica.fichas?.length ?? 0) : fichaTecnica ? 1 : 0 },
-  ];
+  const fichaCount = fichaTecnica?._origem === "erp_multi" ? (fichaTecnica.fichas?.length ?? 0) : fichaTecnica ? 1 : 0;
+  const tabs: { key: Tab; label: string; count?: number }[] = soFicha
+    ? [
+        // Colaborador (ourives etc.): só ficha técnica
+        { key: "ficha", label: "Ficha Técnica", count: fichaCount },
+      ]
+    : [
+        { key: "producao",       label: "Produção" },
+        { key: "apontamentos",   label: "Apontamentos",   count: apontamentos.length },
+        { key: "estoque",        label: "Mov. Estoque",   count: movEstoque.length },
+        { key: "transferencias", label: "Transferências", count: transferencias.length },
+        { key: "ficha",          label: "Ficha Técnica",  count: fichaCount },
+      ];
 
   return (
     <>
@@ -502,66 +511,6 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
 
           {/* Itens da Ordem (produtos da venda) */}
           <ItensOrdemSection ordemId={ordem.id} />
-
-          {/* ── Card Conversão SKU ── */}
-          {conversaoSku && (
-            <div className="bg-white rounded-xl border p-5" style={{ borderColor: "#E8DCC8" }}>
-              <div className="flex items-center gap-2 mb-3">
-                <div style={{ width: 28, height: 28, borderRadius: "50%", backgroundColor: "#EDE9FE", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <Repeat2 size={14} color="#7C3AED" />
-                </div>
-                <p className="text-[13px] font-semibold" style={{ color: "#7C3AED" }}>Conversão de SKU</p>
-                <span style={{ marginLeft: "auto", fontSize: 11, padding: "2px 8px", borderRadius: 999, fontWeight: 600,
-                  color: conversaoSku.status_conversao === "concluido" ? "#065F46" : conversaoSku.status_conversao === "em_fabrica" ? "#7C3AED" : "#92400E",
-                  backgroundColor: conversaoSku.status_conversao === "concluido" ? "#D1FAE5" : conversaoSku.status_conversao === "em_fabrica" ? "#EDE9FE" : "#FEF3C7",
-                }}>
-                  {conversaoSku.status_conversao}
-                </span>
-              </div>
-              <div style={{ display: "flex", gap: 16, fontSize: 13, lineHeight: 1.6 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ color: "#6B7280", fontSize: 11, marginBottom: 2 }}>ORIGEM</div>
-                  <div style={{ color: "#1F2937", fontWeight: 600 }}>{conversaoSku.sku_origem_nome || "—"}</div>
-                  <div style={{ color: "#6B7280", fontSize: 12 }}>
-                    {conversaoSku.sku_origem_cod || ""} · {conversaoSku.sku_origem_quantidade} un · {Number(conversaoSku.sku_origem_peso).toFixed(2)}g
-                  </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", color: "#7C3AED" }}>
-                  <ArrowRight size={16} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ color: "#6B7280", fontSize: 11, marginBottom: 2 }}>DESTINO</div>
-                  <div style={{ color: "#1F2937", fontWeight: 600 }}>{conversaoSku.sku_destino_nome || "—"}</div>
-                  <div style={{ color: "#6B7280", fontSize: 12 }}>
-                    {conversaoSku.sku_destino_cod || ""} · Qtd desejada: {conversaoSku.sku_destino_quantidade_desejada}
-                  </div>
-                </div>
-              </div>
-
-              {conversaoSku.quantidade_produzida && (
-                <div style={{ marginTop: 12, padding: 8, borderRadius: 8, backgroundColor: "#F3F4F6", fontSize: 12 }}>
-                  <span style={{ fontWeight: 600 }}>Resultado:</span> {conversaoSku.quantidade_produzida} un · {Number(conversaoSku.peso_final).toFixed(2)}g
-                  {Number(conversaoSku.quebra) > 0 && <span style={{ color: "#DC2626" }}> · Quebra: {Number(conversaoSku.quebra).toFixed(2)}g</span>}
-                </div>
-              )}
-
-              {conversaoSku.status_conversao === "em_fabrica" && (
-                <button onClick={() => setShowConvSku(true)}
-                  className="w-full mt-3 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-colors"
-                  style={{ backgroundColor: "#7C3AED", color: "#fff" }}>
-                  <Wrench size={15} />
-                  Executar Conversão SKU
-                </button>
-              )}
-            </div>
-          )}
-
-          <ConcluirConversaoSkuModal
-            isOpen={showConvSku}
-            onClose={() => setShowConvSku(false)}
-            conversao={conversaoSku}
-            onSuccess={() => { window.location.reload(); }}
-          />
 
           {/* Detalhes da Ordem — só exibe quando preenchido */}
           {ordem.detalhes_ordem && (

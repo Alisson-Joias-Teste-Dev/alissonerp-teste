@@ -12,8 +12,8 @@ import {
   fetchTableData,
   fetchDashboardData,
   deleteRecord,
-  updateRecord,
 } from "@/lib/gestao-estoque/service";
+import type { PromotionConflito } from "@/components/gestao-estoque/PromotionModal";
 import {
   SchemaName,
   TableRow,
@@ -184,45 +184,45 @@ export default function GestaoEstoqueClient() {
     setIsPromotionOpen(true);
   };
 
-  const handlePromotionConfirm = async (
-    updates: Record<string, { basePrice?: number; promoPrice?: number }>
-  ) => {
+  const handlePromotionConfirm = async (payload: {
+    nome_campanha: string;
+    data_inicio: string;
+    data_fim: string;
+    itens: { produto_id: number; preco_promo: number }[];
+  }): Promise<PromotionConflito[] | null> => {
     setPromoLoading(true);
-    let successCount = 0;
-    let failCount = 0;
-
-    // Esquema ERP: usa preco_tiny como preço principal de venda
-    const priceCol = "preco_tiny";
-    const pkCol = "id_produto";
-
-    for (const [id, update] of Object.entries(updates)) {
-      const payload: Partial<TableRow> = {};
-      if (update.basePrice !== undefined) payload[priceCol] = update.basePrice;
-      if (update.promoPrice !== undefined) payload[priceCol] = update.promoPrice;
-
-      if (Object.keys(payload).length > 0) {
-        const { success } = await updateRecord(FIXED_SCHEMA, FIXED_TABLE, id, payload, pkCol);
-        if (success) successCount++;
-        else failCount++;
-      } else {
-        successCount++;
+    try {
+      const res = await fetch("/api/promocoes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.status === 409) {
+        const body = await res.json();
+        return (body.conflitos ?? []) as PromotionConflito[];
       }
-    }
-
-    setPromoLoading(false);
-    setIsPromotionOpen(false);
-
-    if (successCount > 0) {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setNotification({ msg: body.error ?? "Falha ao criar promocao", type: "error" });
+        setTimeout(() => setNotification(null), 3000);
+        return null;
+      }
+      const data = await res.json();
+      setIsPromotionOpen(false);
       setNotification({
-        msg: `Preços atualizados para ${successCount} itens.${failCount > 0 ? ` (${failCount} falhas)` : ""}`,
+        msg: `Campanha "${data.nome_campanha}" criada com ${data.itens_count} itens.`,
         type: "success",
       });
+      setTimeout(() => setNotification(null), 4000);
       loadData();
-    } else {
-      setNotification({ msg: "Falha ao atualizar preços.", type: "error" });
+      return null;
+    } catch (err) {
+      setNotification({ msg: `Erro de rede: ${String(err)}`, type: "error" });
+      setTimeout(() => setNotification(null), 3000);
+      return null;
+    } finally {
+      setPromoLoading(false);
     }
-
-    setTimeout(() => setNotification(null), 3000);
   };
 
   return (

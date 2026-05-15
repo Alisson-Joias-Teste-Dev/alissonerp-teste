@@ -85,7 +85,6 @@ export async function POST(req: NextRequest) {
       }, { status: 422 });
     }
   }
-
   if (typeof updates.tem_pedra_preciosa === "boolean") {
     up.tem_pedra_preciosa = updates.tem_pedra_preciosa;
   }
