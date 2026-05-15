@@ -1,0 +1,1853 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Admin · Catálogo</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300&family=Manrope:wght@300;400;500;600;700&display=swap" />
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="page-settings.js?v=2"></script>
+<script src="erp-api.js?v=4"></script>
+<script src="catalog-overrides.js?v=3"></script>
+
+<style>
+  :root {
+    --green: #184036;
+    --green-deep: #0f2b24;
+    --champagne: #f3eada;
+    --champagne-soft: #f9f3e8;
+    --white: #ffffff;
+    --ink: #1a1a1a;
+    --muted: #8a8372;
+    --line: rgba(24,64,54,.14);
+    --sans: 'Filson Pro', 'Manrope', system-ui, sans-serif;
+    --serif: 'The Seasons', 'Fraunces', Georgia, serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #f8f5ef; color: var(--ink); min-height: 100%; }
+  body { font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  button, input, select, textarea { font-family: inherit; }
+
+  /* ─── LAYOUT ──────────────────────────────────────────── */
+  .admin-shell {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    min-height: 100vh;
+  }
+  .sidebar {
+    background: var(--green-deep);
+    color: var(--champagne);
+    padding: 28px 20px;
+    display: flex; flex-direction: column; gap: 4px;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .sidebar-brand {
+    font-family: var(--serif);
+    font-size: 18px; letter-spacing: .22em; text-transform: uppercase;
+    font-weight: 300;
+    padding: 8px 12px 28px;
+    border-bottom: 1px solid rgba(243,234,218,.12);
+    margin-bottom: 16px;
+  }
+  .sidebar-brand small {
+    display: block; font-size: 9.5px; letter-spacing: .3em;
+    opacity: .55; margin-top: 6px; font-family: var(--sans);
+  }
+  .sidebar-nav {
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .sidebar-link {
+    padding: 10px 14px;
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase; font-weight: 500;
+    color: rgba(243,234,218,.72);
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 10px;
+    transition: background .25s, color .25s;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    width: 100%;
+  }
+  .sidebar-link:hover { color: var(--champagne); background: rgba(243,234,218,.06); }
+  .sidebar-link.active { color: var(--champagne); background: rgba(243,234,218,.1); }
+  .sidebar-link .dot {
+    width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .6;
+  }
+  .sidebar-divider {
+    height: 1px; background: rgba(245, 230, 195, 0.18);
+    margin: 12px 14px;
+  }
+  .sidebar-foot {
+    margin-top: auto;
+    padding-top: 20px;
+    border-top: 1px solid rgba(243,234,218,.12);
+    font-size: 11px; color: rgba(243,234,218,.5);
+    line-height: 1.6;
+  }
+
+  .main { padding: 40px 48px 80px; }
+  .breadcrumb {
+    font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 12px;
+  }
+  .page-title {
+    font-family: var(--serif); font-weight: 300;
+    font-size: 40px; color: var(--green-deep); letter-spacing: -.01em;
+    margin-bottom: 8px;
+  }
+  .page-sub { color: var(--muted); font-size: 14px; margin-bottom: 36px; }
+
+  /* ─── CARD / SECTION ─────────────────────────────────── */
+  .card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    padding: 36px 40px;
+    margin-bottom: 24px;
+  }
+  .card-title {
+    font-family: var(--serif); font-weight: 400;
+    font-size: 20px; color: var(--green-deep);
+    margin-bottom: 4px;
+  }
+  .card-sub { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+
+  /* ─── FORM ───────────────────────────────────────────── */
+  .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px 24px; }
+  .form-grid .full { grid-column: 1 / -1; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label {
+    font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase;
+    font-weight: 600; color: var(--green-deep);
+  }
+  .field label .req { color: #c04b3a; margin-left: 3px; }
+  .field input, .field select, .field textarea {
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    background: var(--white);
+    font-size: 14px;
+    color: var(--ink);
+    outline: none;
+    transition: border-color .2s, background .2s;
+    width: 100%;
+    border-radius: 0;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus {
+    border-color: var(--green-deep);
+    background: #fdfcf9;
+  }
+  .field textarea { resize: vertical; min-height: 90px; font-family: inherit; }
+  .field .hint { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 2px; }
+
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* ─── UPLOAD ─────────────────────────────────────────── */
+  .uploader {
+    border: 1.5px dashed var(--line);
+    padding: 24px;
+    text-align: center;
+    background: var(--champagne-soft);
+    cursor: pointer;
+    transition: border-color .25s, background .25s;
+  }
+  .uploader:hover, .uploader.drag {
+    border-color: var(--green-deep);
+    background: #f5efe2;
+  }
+  .uploader-icon {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--white); color: var(--green-deep);
+    display: grid; place-items: center; margin: 0 auto 10px;
+    border: 1px solid var(--line);
+  }
+  .uploader-text { font-size: 13px; color: var(--green-deep); font-weight: 500; }
+  .uploader-sub { font-size: 11px; color: var(--muted); margin-top: 4px; letter-spacing: .08em; text-transform: uppercase; }
+
+  .thumbs {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 12px; margin-top: 16px;
+  }
+  .thumb {
+    position: relative;
+    aspect-ratio: 1/1;
+    background: var(--champagne-soft);
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb-rm {
+    position: absolute; top: 6px; right: 6px;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: rgba(0,0,0,.6); color: #fff;
+    border: 0; cursor: pointer;
+    display: grid; place-items: center;
+    font-size: 14px;
+  }
+  .thumb-rm:hover { background: #c04b3a; }
+  .thumb .badge {
+    position: absolute; bottom: 6px; left: 6px;
+    background: rgba(24,64,54,.9); color: var(--champagne);
+    font-size: 9px; padding: 2px 6px;
+    letter-spacing: .12em; text-transform: uppercase;
+  }
+
+  /* ─── BUTTONS ────────────────────────────────────────── */
+  .btn-solid {
+    background: var(--green-deep); color: var(--champagne);
+    padding: 14px 28px; border: 0;
+    font-size: 11px; letter-spacing: .2em; text-transform: uppercase; font-weight: 500;
+    cursor: pointer; transition: background .25s;
+  }
+  .btn-solid:hover { background: var(--green); }
+  .btn-ghost {
+    background: transparent; color: var(--green-deep);
+    padding: 14px 20px; border: 0;
+    font-size: 11px; letter-spacing: .2em; text-transform: uppercase; font-weight: 500;
+    cursor: pointer;
+  }
+  .btn-ghost:hover { color: var(--green); }
+  .btn-outline {
+    background: transparent; color: var(--green-deep);
+    padding: 11px 20px; border: 1px solid var(--green-deep);
+    font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase; font-weight: 500;
+    cursor: pointer; transition: background .25s, color .25s;
+  }
+  .btn-outline:hover { background: var(--green-deep); color: var(--champagne); }
+  .btn-danger {
+    background: transparent; color: #c04b3a;
+    border: 1px solid #c04b3a;
+    padding: 8px 14px;
+    font-size: 10px; letter-spacing: .16em; text-transform: uppercase; font-weight: 500;
+    cursor: pointer; transition: background .25s, color .25s;
+  }
+  .btn-danger:hover { background: #c04b3a; color: #fff; }
+
+  .form-actions {
+    display: flex; gap: 12px; justify-content: flex-end;
+    margin-top: 8px; padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  /* ─── STATS ──────────────────────────────────────────── */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+  .stat {
+    background: var(--white); border: 1px solid var(--line);
+    padding: 22px 24px;
+  }
+  .stat-label { font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); }
+  .stat-value { font-family: var(--serif); font-weight: 300; font-size: 36px; color: var(--green-deep); margin-top: 6px; }
+  .stat-delta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* ─── TABLE ──────────────────────────────────────────── */
+  .prod-table {
+    width: 100%; border-collapse: collapse;
+    background: var(--white);
+    border: 1px solid var(--line);
+  }
+  .prod-table th, .prod-table td {
+    padding: 14px 18px; text-align: left;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px; vertical-align: middle;
+  }
+  .prod-table th {
+    font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); font-weight: 500;
+    background: var(--champagne-soft);
+  }
+  .prod-table tr:hover td { background: #fdfcf9; }
+  .prod-table .prod-thumb {
+    width: 44px; height: 44px;
+    background: var(--champagne-soft); border: 1px solid var(--line);
+    object-fit: cover;
+  }
+  .prod-table .prod-name {
+    font-family: var(--serif); font-size: 15px; color: var(--green-deep);
+  }
+  .prod-table .prod-ref { font-size: 11px; color: var(--muted); letter-spacing: .1em; }
+  .tag {
+    display: inline-block; padding: 3px 10px;
+    font-size: 10px; letter-spacing: .15em; text-transform: uppercase;
+    background: var(--champagne); color: var(--green-deep);
+    font-weight: 500;
+  }
+  .tag.published { background: #d9ead3; color: #2a5a1a; }
+  .tag.draft { background: #f0e6d5; color: #8a6a2a; }
+
+  /* ─── TOAST ──────────────────────────────────────────── */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 100;
+    background: var(--green-deep); color: var(--champagne);
+    padding: 16px 22px;
+    font-size: 12px; letter-spacing: .1em;
+    box-shadow: 0 12px 30px rgba(0,0,0,.18);
+    display: flex; align-items: center; gap: 10px;
+    animation: toast-in .3s cubic-bezier(.2,.7,.2,1);
+  }
+  .toast.err { background: #c04b3a; color: #fff; }
+  @keyframes toast-in { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  /* ─── ERP STATUS ─────────────────────────────────────── */
+  .erp-status {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px;
+    background: var(--champagne-soft);
+    border: 1px solid var(--line);
+    font-size: 12px;
+    margin-bottom: 16px;
+  }
+  .erp-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #2a8f4a;
+    box-shadow: 0 0 0 4px rgba(42,143,74,.15);
+  }
+  .erp-dot.off { background: #c04b3a; box-shadow: 0 0 0 4px rgba(192,75,58,.15); }
+
+  @media (max-width: 900px) {
+    .admin-shell { grid-template-columns: 1fr; }
+    .sidebar { position: relative; height: auto; flex-direction: row; overflow-x: auto; padding: 16px; }
+    .sidebar-brand { border: 0; padding: 0 16px 0 0; margin: 0; white-space: nowrap; }
+    .sidebar-nav { flex-direction: row; }
+    .sidebar-foot { display: none; }
+    .form-grid { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .main { padding: 28px 20px 60px; }
+  }
+
+  /* ─── SHOWCASE / PRODUCT CARDS ───────────────────────── */
+  .vitrine-chips {
+    display: flex; flex-wrap: wrap; gap: 8px;
+  }
+  .vit-chip {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 10px 16px;
+    background: var(--white);
+    border: 1px solid var(--line);
+    cursor: pointer;
+    transition: background .2s, border-color .2s;
+    font-family: inherit;
+  }
+  .vit-chip:hover { background: var(--champagne-soft); border-color: var(--green-deep); }
+  .vit-chip.active {
+    background: var(--green-deep); color: var(--champagne);
+    border-color: var(--green-deep);
+  }
+  .vit-chip .chip-label {
+    font-size: 12px; letter-spacing: .08em; font-weight: 500;
+  }
+  .vit-chip .chip-count {
+    font-size: 11px; padding: 2px 8px;
+    background: var(--champagne-soft); color: var(--green-deep);
+    border-radius: 10px; min-width: 22px; text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .vit-chip.active .chip-count {
+    background: rgba(243,234,218,.2); color: var(--champagne);
+  }
+
+  /* Drag-and-drop list (Showcase Order Panel) */
+  .so-list { display: flex; flex-direction: column; gap: 6px; }
+  .so-row {
+    display: grid;
+    grid-template-columns: 18px 32px 56px 1fr auto auto;
+    align-items: center; gap: 12px;
+    padding: 10px 14px;
+    background: var(--white);
+    border: 1px solid var(--line);
+    cursor: grab;
+    transition: background .15s, border-color .15s, transform .15s;
+  }
+  .so-row:hover { background: var(--champagne-soft); }
+  .so-row.dragging { opacity: .4; cursor: grabbing; }
+  .so-row.drag-over { border-color: var(--green-deep); background: #f5efe2; }
+  .so-handle {
+    color: var(--muted); font-size: 16px; line-height: 1;
+    user-select: none; cursor: grab;
+  }
+  .so-pos {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 11px; color: var(--muted); text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .so-thumb {
+    width: 56px; height: 56px; object-fit: cover;
+    background: var(--champagne-soft); border: 1px solid var(--line);
+  }
+  .so-thumb-empty {
+    display: grid; place-items: center;
+    color: var(--muted); font-size: 18px;
+  }
+  .so-info { min-width: 0; }
+  .so-name {
+    font-family: var(--serif); font-size: 15px; color: var(--green-deep);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .so-meta {
+    font-size: 11px; color: var(--muted); margin-top: 2px;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
+  .so-meta code {
+    background: var(--champagne-soft); padding: 1px 6px;
+    font-family: 'SF Mono', Monaco, monospace; font-size: 10.5px;
+  }
+  .so-flag {
+    padding: 1px 6px; font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+    font-weight: 500;
+  }
+  .so-flag.featured { background: #fff4d4; color: #8a6a2a; }
+  .so-flag.hidden { background: #faecea; color: #9a3322; }
+
+  /* Product grid cards */
+  .prod-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .pc {
+    background: var(--white);
+    border: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .pc:hover { border-color: var(--green-deep); box-shadow: 0 4px 16px rgba(15,43,36,.06); }
+  .pc.is-hidden { opacity: .55; }
+  .pc-media {
+    position: relative;
+    aspect-ratio: 4/3;
+    background: var(--champagne-soft);
+    overflow: hidden;
+  }
+  .pc-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pc-empty {
+    width: 100%; height: 100%;
+    display: grid; place-items: center;
+    color: var(--muted); font-size: 12px; letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .pc-badge {
+    position: absolute; top: 8px;
+    padding: 3px 8px;
+    font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase;
+    font-weight: 500;
+  }
+  .pc-badge.edited { right: 8px; background: #fff7e0; color: #8a6a2a; }
+  .pc-badge.feat { left: 8px; background: rgba(24,64,54,.92); color: var(--champagne); }
+  .pc-badge.hide { left: 8px; top: 32px; background: #faecea; color: #9a3322; }
+  .pc-body {
+    padding: 14px 16px 16px;
+    display: flex; flex-direction: column; gap: 6px;
+    flex: 1;
+  }
+  .pc-name {
+    font-family: var(--serif); font-size: 16px; color: var(--green-deep);
+    line-height: 1.2;
+  }
+  .pc-meta {
+    font-size: 10.5px; color: var(--muted); letter-spacing: .04em;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .pc-meta code {
+    background: var(--champagne-soft); padding: 1px 6px;
+    font-family: 'SF Mono', Monaco, monospace; font-size: 10px;
+  }
+  .pc-price {
+    font-size: 14px; color: var(--green-deep); font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+  }
+  .pc-from {
+    font-size: 12px; color: var(--muted); text-decoration: line-through;
+    margin-right: 6px; font-weight: 400;
+  }
+  .pc-section-label {
+    font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600;
+    margin-top: 12px;
+    padding-top: 12px; border-top: 1px solid var(--line);
+  }
+  .pc-checks {
+    display: flex; flex-direction: column; gap: 4px;
+    margin: 4px 0 8px;
+  }
+  .pc-check {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 6px;
+    font-size: 12px; color: var(--ink);
+    cursor: pointer; border-radius: 2px;
+    transition: background .15s;
+  }
+  .pc-check:hover { background: var(--champagne-soft); }
+  .pc-check input { width: 14px; height: 14px; accent-color: var(--green-deep); }
+  .pc-check.on { color: var(--green-deep); font-weight: 500; }
+  .pc-check.highlight { background: var(--champagne); }
+  .pc-actions { margin-top: auto; padding-top: 8px; }
+  .pc-actions .btn-outline { width: 100%; padding: 8px 12px; font-size: 10px; }
+
+  /* ─── PAGE SETTINGS (Home & Categorias) ─────────────────── */
+  .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .field-hint { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 4px; display: block; }
+  .actions-bar {
+    display: flex; gap: 12px; justify-content: flex-end;
+    padding: 24px 0;
+    margin-top: 24px;
+    border-top: 1px solid var(--line);
+    position: sticky; bottom: 0;
+    background: linear-gradient(180deg, transparent, var(--champagne-soft) 30%);
+    z-index: 5;
+  }
+  .btn-primary {
+    background: var(--green-deep); color: var(--champagne);
+    padding: 12px 24px; border: 0;
+    font-size: 11px; letter-spacing: .2em; text-transform: uppercase; font-weight: 500;
+    cursor: pointer; transition: background .25s;
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--green); }
+  .btn-primary:disabled { opacity: .35; cursor: not-allowed; }
+  .btn-cta {
+    background: linear-gradient(135deg, var(--green-deep), #2a5547);
+  }
+  .btn-ghost-mini {
+    background: transparent; color: #c04b3a;
+    border: none; cursor: pointer;
+    font-size: 10px; letter-spacing: .2em; text-transform: uppercase; font-weight: 500;
+    padding: 6px 10px;
+  }
+  .btn-ghost-mini:hover { text-decoration: underline; }
+  .btn-add-cat {
+    width: 100%;
+    padding: 18px;
+    background: var(--champagne-soft);
+    border: 1.5px dashed var(--line);
+    cursor: pointer;
+    font-size: 12px; letter-spacing: .2em; text-transform: uppercase; font-weight: 500;
+    color: var(--green-deep);
+    transition: background .25s, border-color .25s;
+    margin-top: 8px;
+    margin-bottom: 24px;
+  }
+  .btn-add-cat:hover { background: #f5efe2; border-color: var(--green-deep); }
+
+  /* Coleções list (Home tab) */
+  .col-list { display: flex; flex-direction: column; gap: 12px; }
+  .col-item {
+    background: #fafaf6; border: 1px solid var(--line);
+    transition: opacity .25s;
+  }
+  .col-item.is-disabled { opacity: .55; }
+  .col-item-head {
+    display: flex; align-items: center; gap: 16px;
+    padding: 16px 20px;
+  }
+  .col-item-info { flex: 1; }
+  .col-item-title {
+    font-family: var(--serif); font-size: 17px; color: var(--green-deep);
+    line-height: 1.2;
+  }
+  .col-item-id {
+    font-size: 10px; color: var(--muted); letter-spacing: .15em;
+    text-transform: uppercase; margin-top: 2px;
+  }
+  .col-item-order { display: flex; flex-direction: column; gap: 2px; }
+  .col-item-order button {
+    width: 24px; height: 18px;
+    background: var(--white); border: 1px solid var(--line);
+    cursor: pointer; font-size: 9px;
+    color: var(--green-deep);
+    line-height: 1;
+  }
+  .col-item-order button:hover:not(:disabled) { background: var(--champagne-soft); }
+  .col-item-order button:disabled { opacity: .3; cursor: not-allowed; }
+  .col-item-edit {
+    padding: 0 20px 20px 60px;
+    display: grid; gap: 12px;
+  }
+
+  /* Collection product picker (within HomeSettingsTab) */
+  .vit-picker {
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    display: grid; gap: 12px;
+  }
+  .vit-picker-title {
+    display: flex; align-items: baseline; justify-content: space-between;
+    font-size: 10px; letter-spacing: .2em; text-transform: uppercase;
+    color: var(--green-deep); font-weight: 600;
+  }
+  .vit-picker-count {
+    font-size: 10px; letter-spacing: .12em; text-transform: none;
+    color: var(--muted); font-weight: 400;
+  }
+  .vit-picker-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .vit-picker-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 12px;
+    background: var(--white);
+    border: 1px solid var(--line);
+  }
+  .vit-picker-row.is-assigned { background: var(--champagne-soft); }
+  .vit-picker-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .vit-picker-info strong {
+    font-size: 13px; color: var(--ink); font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .vit-picker-info small {
+    font-size: 10px; color: var(--muted); letter-spacing: .08em;
+  }
+  .vit-picker-empty {
+    font-size: 12px; color: var(--muted);
+    padding: 8px 0; font-style: italic;
+  }
+  .vit-picker-search {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    background: var(--white);
+    font: inherit; font-size: 13px;
+    outline: none;
+  }
+  .vit-picker-search:focus { border-color: var(--green); }
+  .vit-picker-add { display: grid; gap: 8px; }
+
+  /* Add / remove vitrine */
+  .btn-add-vitrine {
+    margin-top: 16px;
+    width: 100%;
+    padding: 14px;
+    background: var(--white);
+    border: 1px dashed var(--green);
+    color: var(--green-deep);
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  .btn-add-vitrine:hover { background: var(--champagne-soft); }
+  .btn-ghost-mini.btn-danger {
+    color: #c04b3a;
+    margin-left: 4px;
+    padding: 6px 10px;
+    line-height: 1;
+    font-size: 16px;
+  }
+  .btn-ghost-mini.btn-danger:hover { background: #fbe7e3; border-color: #c04b3a; }
+
+  /* Editor de características (feats) */
+  .feat-list {
+    list-style: none; padding: 0; margin: 0 0 12px 0;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .feat-row {
+    display: grid;
+    grid-template-columns: auto 1fr 1.4fr auto auto;
+    align-items: center; gap: 10px;
+    padding: 8px 12px;
+    background: var(--white);
+    border: 1px solid var(--line);
+  }
+  .feat-row.is-disabled { opacity: .55; }
+  .feat-row input[type="text"],
+  .feat-row .feat-label-input,
+  .feat-row .feat-value-input {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    background: var(--white);
+    font: inherit; font-size: 13px;
+    outline: none;
+  }
+  .feat-row .feat-label-input { font-weight: 500; }
+  .feat-row .feat-label-input:focus,
+  .feat-row .feat-value-input:focus { border-color: var(--green); }
+
+  /* Editorial gallery — admin */
+  .ed-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+  .ed-row {
+    display: grid;
+    grid-template-columns: 140px 1fr auto;
+    gap: 16px;
+    padding: 12px;
+    background: var(--white);
+    border: 1px solid var(--line);
+  }
+  .ed-thumb {
+    background: var(--champagne-soft);
+    overflow: hidden;
+    width: 140px;
+  }
+  .ed-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .ed-thumb-square { aspect-ratio: 1 / 1; }
+  .ed-thumb-wide { aspect-ratio: 16 / 9; }
+  .ed-thumb-tall { aspect-ratio: 4 / 5; }
+  .ed-thumb-portrait { aspect-ratio: 3 / 4; }
+  .ed-fields { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .ed-field-row { display: grid; grid-template-columns: 140px 1fr; gap: 10px; align-items: center; }
+  .ed-mini-label { font-size: 9px; letter-spacing: .2em; color: var(--muted); font-weight: 600; }
+  .ed-field-row select,
+  .ed-field-row input[type="text"],
+  .ed-field-row input[type="search"] {
+    width: 100%; padding: 8px 10px;
+    border: 1px solid var(--line); background: var(--white);
+    font: inherit; font-size: 13px; outline: none;
+  }
+  .ed-field-row select:focus,
+  .ed-field-row input:focus { border-color: var(--green); }
+  .ed-linked {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 12px; background: var(--champagne-soft);
+    border: 1px solid var(--line);
+  }
+  .ed-linked strong { font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ed-linked small { font-size: 10px; color: var(--muted); letter-spacing: .08em; }
+  .ed-search { position: relative; }
+  .ed-search-results {
+    list-style: none; padding: 0; margin: 4px 0 0 0;
+    background: var(--white); border: 1px solid var(--line);
+    max-height: 240px; overflow-y: auto;
+  }
+  .ed-search-results li { border-bottom: 1px solid var(--line); }
+  .ed-search-results li:last-child { border-bottom: 0; }
+  .ed-search-results button {
+    display: flex; flex-direction: column; gap: 2px;
+    width: 100%; padding: 8px 12px; text-align: left;
+    background: transparent; border: 0; cursor: pointer;
+  }
+  .ed-search-results button:hover { background: var(--champagne-soft); }
+  .ed-search-results strong { font-size: 13px; }
+  .ed-search-results small { font-size: 10px; color: var(--muted); letter-spacing: .08em; }
+  .ed-actions { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+
+  /* Switch (toggle) */
+  .switch {
+    position: relative;
+    width: 38px; height: 22px;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .switch input {
+    position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0;
+    cursor: pointer; z-index: 1;
+  }
+  .switch span {
+    display: block; width: 100%; height: 100%;
+    background: #ccc6b8;
+    border-radius: 22px;
+    position: relative;
+    transition: background .2s;
+  }
+  .switch span::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 18px; height: 18px;
+    background: var(--white);
+    border-radius: 50%;
+    transition: transform .2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .switch input:checked + span { background: var(--green-deep); }
+  .switch input:checked + span::after { transform: translateX(16px); }
+  .switch-inline {
+    display: inline-flex; align-items: center; gap: 12px;
+    cursor: pointer;
+    font-size: 13px; color: var(--green-deep);
+  }
+  .switch-inline input { margin: 0; }
+  .field-inline { padding: 8px 0; }
+
+  /* Categorias */
+  .cat-list { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
+  .cat-card {
+    background: var(--white); border: 1px solid var(--line);
+    transition: opacity .25s;
+  }
+  .cat-card.is-disabled { opacity: .6; }
+  .cat-card-head {
+    display: flex; align-items: center; gap: 16px;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--line);
+  }
+  .cat-card.is-disabled .cat-card-head { border-bottom-color: transparent; }
+  .cat-card-id { flex: 1; }
+  .cat-label {
+    font-family: var(--serif); font-size: 19px; color: var(--green-deep);
+    line-height: 1.2;
+  }
+  .cat-meta {
+    font-size: 10px; color: var(--muted); letter-spacing: .14em;
+    text-transform: uppercase; margin-top: 2px;
+  }
+  .cat-meta code {
+    font-family: 'SF Mono', Monaco, monospace;
+    background: var(--champagne-soft); padding: 1px 6px;
+    text-transform: none; letter-spacing: 0;
+    font-size: 11px;
+  }
+  .cat-card-body {
+    padding: 22px; display: grid; gap: 16px;
+    background: #fdfcf9;
+  }
+  .sub-section {
+    font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase;
+    font-weight: 600; color: var(--green-deep);
+    margin: 8px 0 -4px 0;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+
+  /* ─── VARIAÇÕES ──────────────────────────────────── */
+  .sku-readonly input {
+    background: #ececec;
+    cursor: not-allowed;
+    color: #666;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 13px;
+    letter-spacing: .04em;
+  }
+  .sku-readonly .lock-icon {
+    margin-left: 2px;
+    font-size: 11px;
+    opacity: .7;
+  }
+  .v-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+  }
+  .v-table th, .v-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .v-table th {
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    background: var(--champagne-soft);
+  }
+  .v-sku {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .v-rm {
+    background: transparent;
+    color: #c04b3a;
+    border: 0;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 6px;
+  }
+  .v-rm:hover { background: #fbe7e3; }
+  .v-add {
+    padding: 10px 16px;
+    background: var(--champagne-soft);
+    border: 1px dashed var(--line);
+    cursor: pointer;
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    font-weight: 500;
+    color: var(--green-deep);
+    width: 100%;
+    margin-top: 8px;
+  }
+  .v-add:hover { background: #f5efe2; border-color: var(--green-deep); }
+  .v-info {
+    font-size: 11px;
+    color: var(--muted);
+    font-style: italic;
+    margin-top: 6px;
+  }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" src="admin-page-tabs.jsx?v=2"></script>
+  <script type="text/babel" src="admin-showcase-tab.jsx?v=2"></script>
+  <script type="text/babel">
+  const { useState, useEffect, useRef, useMemo } = React;
+
+  // ─── COLEÇÕES DISPONÍVEIS ─────────────────────────────────
+  const COLLECTION_OPTS = [
+    { id: 'heranca',    label: 'Herança Imperial' },
+    { id: 'luz-aurora', label: 'Luz de Aurora' },
+    { id: 'jardim',     label: 'Jardim Secreto' },
+    { id: 'constelacao',label: 'Constelação' },
+    { id: 'noite',      label: 'Noite de Gala' },
+  ];
+  const CATEGORIES = ['anel', 'corrente', 'brinco', 'pulseira', 'pingente'];
+
+  // ─── HELPERS STORAGE ─────────────────────────────────────
+  const loadProducts = () => {
+    try { return JSON.parse(localStorage.getItem('catalog_products') || '[]'); }
+    catch { return []; }
+  };
+  const saveProducts = (list) => {
+    localStorage.setItem('catalog_products', JSON.stringify(list));
+  };
+  const loadErpCfg = () => {
+    try { return JSON.parse(localStorage.getItem('catalog_erp_cfg') || 'null') || { url: '', token: '', autoSync: false }; }
+    catch { return { url: '', token: '', autoSync: false }; }
+  };
+  const saveErpCfg = (cfg) => localStorage.setItem('catalog_erp_cfg', JSON.stringify(cfg));
+
+  // ─── INTEGRAÇÃO ERP ─────────────────────────────────────
+  // Envia o produto via webhook ao ERP configurado. Estrutura JSON canônica.
+  async function sendToErp(product, cfg) {
+    if (!cfg?.url) throw new Error('URL do ERP não configurada');
+    const payload = {
+      event: 'product.upsert',
+      source: 'catalog-web',
+      timestamp: new Date().toISOString(),
+      product: {
+        reference: product.ref,
+        name: product.name,
+        description: product.desc,
+        long_description: product.longDesc,
+        collection_id: product.collectionId,
+        category: product.category,
+        price: {
+          from: product.from,
+          to: product.to,
+          currency: 'BRL',
+        },
+        specs: product.specs,
+        images: (product.images || []).map((im) => ({ url: im, type: 'base64' })),
+        status: product.status || 'published',
+      },
+    };
+    const res = await fetch(cfg.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(cfg.token ? { 'Authorization': `Bearer ${cfg.token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`ERP retornou ${res.status}`);
+    return res.json().catch(() => ({ ok: true }));
+  }
+
+  // ─── APP ─────────────────────────────────────────────────
+  const ACCESS_KEY = '301021';
+
+  function Gate({ onOk }) {
+    const [v, setV] = useState('');
+    const [err, setErr] = useState(false);
+    const submit = (e) => {
+      e.preventDefault();
+      if (v === ACCESS_KEY) {
+        sessionStorage.setItem('admin_auth', '1');
+        onOk();
+      } else { setErr(true); setTimeout(() => setErr(false), 2000); }
+    };
+    return (
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#0f2b24' }}>
+        <form onSubmit={submit} style={{ background: '#fff', padding: 48, width: 360, textAlign: 'center' }}>
+          <div style={{ fontFamily: 'Fraunces, serif', fontSize: 22, letterSpacing: '.22em', color: '#0f2b24', marginBottom: 6 }}>CATÁLOGO</div>
+          <div style={{ fontSize: 10, letterSpacing: '.3em', color: '#8a8372', marginBottom: 32 }}>PAINEL ADMINISTRATIVO</div>
+          <label style={{ fontSize: 10.5, letterSpacing: '.18em', textTransform: 'uppercase', color: '#0f2b24', fontWeight: 600 }}>Chave de acesso</label>
+          <input type="password" autoFocus value={v} onChange={(e) => setV(e.target.value)}
+                 style={{ width: '100%', padding: 12, border: `1px solid ${err ? '#c04b3a' : 'rgba(24,64,54,.14)'}`, marginTop: 8, fontSize: 14, outline: 'none' }} />
+          {err && <div style={{ color: '#c04b3a', fontSize: 12, marginTop: 8 }}>Chave inválida</div>}
+          <button type="submit" style={{ marginTop: 20, width: '100%', background: '#0f2b24', color: '#f3eada', border: 0, padding: 14, letterSpacing: '.2em', textTransform: 'uppercase', fontSize: 11, fontWeight: 500, cursor: 'pointer' }}>Entrar</button>
+        </form>
+      </div>
+    );
+  }
+
+  function App() {
+    const [authed, setAuthed] = useState(() => sessionStorage.getItem('admin_auth') === '1');
+    if (!authed) return <Gate onOk={() => setAuthed(true)} />;
+    return <AdminApp />;
+  }
+
+  function AdminApp() {
+    const [tab, setTab] = useState('dashboard');
+    const [products, setProducts] = useState(loadProducts);
+    const [editing, setEditing] = useState(null);
+    const [toast, setToast] = useState(null);
+    const [erpCfg, setErpCfg] = useState(loadErpCfg);
+    const [pageSettings, setPageSettings] = useState(window.PageSettingsAPI.loadPageSettings);
+
+    useEffect(() => { saveProducts(products); }, [products]);
+    useEffect(() => { saveErpCfg(erpCfg); }, [erpCfg]);
+
+    const updatePageSettings = (next) => {
+      setPageSettings(next);
+      window.PageSettingsAPI.savePageSettings(next);
+    };
+
+    const show = (msg, err = false) => {
+      setToast({ msg, err });
+      setTimeout(() => setToast(null), 3200);
+    };
+
+    // ─── SKU generation ──────────────────────────────────
+    const generateSimpleSku = () => {
+      const overrides = window.CatalogOverrides?.loadOverrides?.() || {};
+      const allRefs = [...products.map(p => p.ref), ...Object.keys(overrides)];
+      let max = 0;
+      allRefs.forEach(ref => {
+        const m = ref?.match(/^AJ(\d+)$/);
+        if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+      });
+      return `AJ${String(max + 1).padStart(4, '0')}`;
+    };
+
+    const generateVariableSku = () => {
+      const overrides = window.CatalogOverrides?.loadOverrides?.() || {};
+      const allRefs = [...products.map(p => p.ref), ...Object.keys(overrides)];
+      let max = 0;
+      allRefs.forEach(ref => {
+        // SKU pai numérico puro (4+ dígitos, sem prefixo, sem traço)
+        const m = ref?.match(/^(\d{4,})$/);
+        if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+      });
+      return String(max + 1);
+    };
+
+    const saveToCatalog = (list) => {
+      let next = [...products];
+      list.forEach(prod => {
+        const idx = next.findIndex(p => p.ref === prod.ref);
+        if (idx >= 0) next = next.map((p, i) => i === idx ? prod : p);
+        else next = [prod, ...next];
+      });
+      setProducts(next);
+
+      const count = list.length;
+      if (erpCfg.autoSync && erpCfg.url) {
+        sendToErp(list[0], erpCfg)
+          .then(() => show(`${count} produto(s) salvo(s) e sincronizado(s)`))
+          .catch(e => show(`${count} produto(s) salvo(s) localmente. Falha ERP: ${e.message}`, true));
+      } else {
+        show(`${count} produto(s) salvo(s)`);
+      }
+      setEditing(null);
+      setTab('produtos');
+    };
+
+    const upsert = async (prod) => {
+      saveToCatalog([prod]);
+    };
+
+    const remove = (ref) => {
+      if (!confirm('Remover este produto do catálogo?')) return;
+      setProducts(products.filter((p) => p.ref !== ref));
+      show('Produto removido');
+    };
+
+    const syncAll = async () => {
+      if (!erpCfg.url) { show('Configure o webhook do ERP primeiro', true); return; }
+      let ok = 0, fail = 0;
+      for (const p of products) {
+        try { await sendToErp(p, erpCfg); ok++; } catch { fail++; }
+      }
+      show(`Sincronização: ${ok} ok, ${fail} falhas`, fail > 0);
+    };
+
+    return (
+      <>
+        <div className="admin-shell">
+          <aside className="sidebar">
+            <div className="sidebar-brand">
+              Catálogo
+              <small>PAINEL ADMIN</small>
+            </div>
+            <nav className="sidebar-nav">
+              <button className={`sidebar-link ${tab === 'dashboard' ? 'active' : ''}`} onClick={() => setTab('dashboard')}>
+                <span className="dot" /> Dashboard
+              </button>
+              <button className={`sidebar-link ${tab === 'novo' ? 'active' : ''}`} onClick={() => { setEditing(null); setTab('novo'); }}>
+                <span className="dot" /> Novo produto
+              </button>
+              <button className={`sidebar-link ${tab === 'produtos' ? 'active' : ''}`} onClick={() => setTab('produtos')}>
+                <span className="dot" /> Produtos ({products.length})
+              </button>
+              <button className={`sidebar-link ${tab === 'erp' ? 'active' : ''}`} onClick={() => setTab('erp')}>
+                <span className="dot" /> Integração ERP
+              </button>
+              <div className="sidebar-divider" />
+              <button className={`sidebar-link ${tab === 'vitrines' ? 'active' : ''}`} onClick={() => setTab('vitrines')}>
+                <span className="dot" /> Vitrines & Catálogo
+              </button>
+              <button className={`sidebar-link ${tab === 'home' ? 'active' : ''}`} onClick={() => setTab('home')}>
+                <span className="dot" /> Página Inicial
+              </button>
+              <button className={`sidebar-link ${tab === 'categorias' ? 'active' : ''}`} onClick={() => setTab('categorias')}>
+                <span className="dot" /> Categorias
+              </button>
+              <button className={`sidebar-link ${tab === 'editorial' ? 'active' : ''}`} onClick={() => setTab('editorial')}>
+                <span className="dot" /> Galeria Conceitual
+              </button>
+              <button className={`sidebar-link ${tab === 'vitrine' ? 'active' : ''}`} onClick={() => window.location.href = 'Catalogo.html'}>
+                <span className="dot" /> ↗ Ver catálogo
+              </button>
+            </nav>
+            <div className="sidebar-foot">
+              Dados armazenados localmente no navegador e enviados ao ERP via webhook.
+            </div>
+          </aside>
+
+          <main className="main">
+            {tab === 'dashboard' && <Dashboard products={products} erpCfg={erpCfg} onSyncAll={syncAll} onNewProduct={() => { setEditing(null); setTab('novo'); }} />}
+            {(tab === 'novo' || editing) && <ProductForm initial={editing} onSave={saveToCatalog} onCancel={() => { setEditing(null); setTab('produtos'); }} erpCfg={erpCfg} genSimpleSku={generateSimpleSku} genVariableSku={generateVariableSku} products={products} />}
+            {tab === 'produtos' && !editing && <ProductList products={products} onEdit={(p) => { setEditing(p); }} onRemove={remove} onSync={async (p) => {
+              if (!erpCfg.url) { show('Configure o webhook do ERP primeiro', true); return; }
+              try { await sendToErp(p, erpCfg); show(`${p.ref} enviado ao ERP`); }
+              catch (e) { show(`Falha: ${e.message}`, true); }
+            }} />}
+            {tab === 'erp' && <ErpTab cfg={erpCfg} setCfg={setErpCfg} show={show} />}
+            {tab === 'vitrines' && <window.AdminShowcaseTab.ShowcaseTab pageSettings={pageSettings} show={show} />}
+            {tab === 'home' && <window.AdminPageTabs.HomeSettingsTab settings={pageSettings} onSave={updatePageSettings} products={products} show={show} />}
+            {tab === 'categorias' && <window.AdminPageTabs.CategoriesSettingsTab settings={pageSettings} onSave={updatePageSettings} show={show} />}
+            {tab === 'editorial' && <window.AdminPageTabs.EditorialGalleryTab products={products} show={show} />}
+          </main>
+        </div>
+
+        {toast && <div className={`toast ${toast.err ? 'err' : ''}`}>{toast.msg}</div>}
+      </>
+    );
+  }
+
+  // ─── DASHBOARD ───────────────────────────────────────────
+  function Dashboard({ products, erpCfg, onSyncAll, onNewProduct }) {
+    const totalValue = products.reduce((s, p) => s + (p.to || 0), 0);
+    const byColl = useMemo(() => {
+      const m = {};
+      products.forEach((p) => { m[p.collectionId] = (m[p.collectionId] || 0) + 1; });
+      return m;
+    }, [products]);
+
+    return (
+      <>
+        <div className="breadcrumb">ADMIN · DASHBOARD</div>
+        <h1 className="page-title">Bem-vindo</h1>
+        <p className="page-sub">Gerencie os produtos do catálogo e mantenha o ERP sincronizado.</p>
+
+        <div className="erp-status">
+          <span className={`erp-dot ${erpCfg.url ? '' : 'off'}`} />
+          {erpCfg.url
+            ? <span><strong>ERP conectado</strong> — webhook ativo em <code>{new URL(erpCfg.url).host}</code></span>
+            : <span><strong>ERP não configurado.</strong> Vá em Integração ERP para habilitar a sincronização automática.</span>}
+        </div>
+
+        <div className="stats">
+          <div className="stat">
+            <div className="stat-label">Produtos ativos</div>
+            <div className="stat-value">{products.length}</div>
+            <div className="stat-delta">cadastrados neste painel</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Valor em catálogo</div>
+            <div className="stat-value">R$ {totalValue.toLocaleString('pt-BR')}</div>
+            <div className="stat-delta">somado dos preços "Por"</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Coleções usadas</div>
+            <div className="stat-value">{Object.keys(byColl).length}/{COLLECTION_OPTS.length}</div>
+            <div className="stat-delta">{Object.entries(byColl).map(([k, v]) => `${k}: ${v}`).join(' · ') || '—'}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Sincronização ERP</div>
+            <div className="stat-value" style={{ fontSize: 22 }}>{erpCfg.autoSync ? 'Automática' : 'Manual'}</div>
+            <div className="stat-delta">{erpCfg.url ? 'webhook configurado' : 'não configurado'}</div>
+          </div>
+        </div>
+
+        <div className="card">
+          <h3 className="card-title">Ações rápidas</h3>
+          <p className="card-sub">Operações comuns do dia a dia.</p>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <button className="btn-solid" onClick={onNewProduct}>+ Cadastrar produto</button>
+            <button className="btn-outline" onClick={onSyncAll} disabled={!erpCfg.url}>
+              Sincronizar todos com ERP
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ─── FORMULÁRIO ──────────────────────────────────────────
+  function ProductForm({ initial, onSave, onCancel, erpCfg, genSimpleSku, genVariableSku, products }) {
+    const isEditing = !!initial;
+    const emptyForm = {
+      ref: genSimpleSku(),
+      type: 'simple',
+      name: '', desc: '', longDesc: '',
+      collectionId: 'heranca', category: 'anel',
+      from: '', to: '',
+      status: 'published',
+      images: [],
+      specs: {
+        metal: 'Ouro amarelo 18k',
+        peso: '',
+        pedra: '',
+        quilates: '',
+        acabamento: 'Polido',
+        origem: 'Atelier próprio',
+        garantia: '2 anos',
+      },
+    };
+
+    const buildInitial = () => {
+      if (initial) return initial;
+      const e = { ...emptyForm };
+      e.ref = genSimpleSku();
+      return e;
+    };
+
+    const [f, setF] = useState(buildInitial);
+    const [drag, setDrag] = useState(false);
+    const [variations, setVariations] = useState(() => {
+      if (initial?._variationRefs) {
+        return initial._variationRefs.map(r => {
+          const p = products.find(p2 => p2.ref === r);
+          return p?._variationValue || r.split('-').slice(1).join('-');
+        });
+      }
+      return [];
+    });
+    const fileRef = useRef(null);
+
+    const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+    const setSpec = (k, v) => setF((s) => ({ ...s, specs: { ...s.specs, [k]: v } }));
+
+    const handleTypeChange = (newType) => {
+      const newRef = newType === 'simple' ? genSimpleSku() : genVariableSku();
+      setF(s => ({ ...s, type: newType, ref: newRef }));
+      if (newType === 'simple') setVariations([]);
+    };
+
+    const addVariation = () => {
+      setVariations(v => [...v, '']);
+    };
+
+    const setVariationValue = (idx, val) => {
+      setVariations(v => v.map((v2, i) => i === idx ? val : v2));
+    };
+
+    const removeVariation = (idx) => {
+      setVariations(v => v.filter((_, i) => i !== idx));
+    };
+
+    const handleFiles = async (files) => {
+      const arr = Array.from(files).filter((f) => f.type.startsWith('image/'));
+      const readers = arr.map((file) => new Promise((res) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.readAsDataURL(file);
+      }));
+      const data = await Promise.all(readers);
+      set('images', [...(f.images || []), ...data]);
+    };
+
+    const submit = (e) => {
+      e.preventDefault();
+      if (!f.name || !f.to) {
+        alert('Preencha pelo menos Nome e Preço final.');
+        return;
+      }
+      if (f.type === 'variable' && !isEditing && variations.length === 0) {
+        alert('Adicione pelo menos uma variação.');
+        return;
+      }
+      if (f.type === 'variable' && variations.some(v => !v.trim())) {
+        alert('Preencha todos os valores das variações.');
+        return;
+      }
+
+      const clean = {
+        ...f,
+        from: Number(f.from) || Number(f.to),
+        to: Number(f.to),
+      };
+
+      if (f.type === 'variable' && !isEditing) {
+        const varRefs = variations.map((_, i) => `${f.ref}-${i + 1}`);
+        clean._hasVariations = true;
+        clean._variationType = 'Numeração';
+        clean._variationRefs = varRefs;
+
+        const varProducts = variations.map((val, i) => ({
+          ref: varRefs[i],
+          name: `${f.name} — Num. ${val}`,
+          type: 'variation',
+          _parentRef: f.ref,
+          _variationValue: val,
+          desc: f.desc,
+          longDesc: f.longDesc,
+          collectionId: f.collectionId,
+          category: f.category,
+          from: Number(f.from) || Number(f.to),
+          to: Number(f.to),
+          status: f.status,
+          images: f.images,
+          specs: { ...f.specs },
+        }));
+
+        onSave([clean, ...varProducts]);
+      } else {
+        onSave([clean]);
+      }
+    };
+
+    const skuHint = f.type === 'simple'
+      ? 'Gerado automaticamente — formato AJ0000'
+      : 'Gerado automaticamente — numérico sequencial';
+
+    return (
+      <>
+        <div className="breadcrumb">ADMIN · {initial ? 'EDITAR PRODUTO' : 'NOVO PRODUTO'}</div>
+        <h1 className="page-title">{initial ? f.name || 'Editar produto' : 'Cadastrar nova peça'}</h1>
+        <p className="page-sub">Os dados serão adicionados ao catálogo e {erpCfg.autoSync && erpCfg.url ? 'sincronizados automaticamente com o ERP.' : 'você poderá sincronizar com o ERP depois.'}</p>
+
+        <form onSubmit={submit}>
+          <div className="card">
+            <h3 className="card-title">Informações básicas</h3>
+            <p className="card-sub">Identificação e categorização da peça.</p>
+
+            <div className="form-grid">
+              <div className="field full">
+                <label>Tipo de produto<span className="req">*</span></label>
+                <select value={f.type || 'simple'} onChange={(e) => handleTypeChange(e.target.value)}
+                        disabled={isEditing}>
+                  <option value="simple">Simples — SKU automático (AJ0000)</option>
+                  <option value="variable">Com variações — SKU numérico (1000, 1001…)</option>
+                </select>
+                <span className="hint">Define o formato do SKU gerado</span>
+              </div>
+              <div className="field">
+                <label>Referência (SKU)<span className="req">*</span> <span className="lock-icon">&#128274;</span></label>
+                <div className="sku-readonly">
+                  <input value={f.ref} readOnly tabIndex={-1} />
+                </div>
+                <span className="hint">{skuHint}</span>
+              </div>
+              <div className="field">
+                <label>Status</label>
+                <select value={f.status} onChange={(e) => set('status', e.target.value)}>
+                  <option value="published">Publicado</option>
+                  <option value="draft">Rascunho</option>
+                  <option value="archived">Arquivado</option>
+                </select>
+              </div>
+              <div className="field full">
+                <label>Nome da peça<span className="req">*</span></label>
+                <input value={f.name} onChange={(e) => set('name', e.target.value)}
+                       placeholder="Ex.: Anel Solitário Imperial" />
+              </div>
+              <div className="field">
+                <label>Coleção<span className="req">*</span></label>
+                <select value={f.collectionId} onChange={(e) => set('collectionId', e.target.value)}>
+                  {COLLECTION_OPTS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Categoria<span className="req">*</span></label>
+                <select value={f.category} onChange={(e) => set('category', e.target.value)}>
+                  {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div className="field full">
+                <label>Descrição curta</label>
+                <input value={f.desc} onChange={(e) => set('desc', e.target.value)}
+                       placeholder="Ouro amarelo 18k com diamante central" />
+                <span className="hint">Aparece no card do produto</span>
+              </div>
+              <div className="field full">
+                <label>Descrição completa</label>
+                <textarea value={f.longDesc} onChange={(e) => set('longDesc', e.target.value)}
+                          placeholder="Descreva detalhes, inspiração, processo artesanal…" />
+                <span className="hint">Aparece na página de detalhes</span>
+              </div>
+            </div>
+          </div>
+
+          {f.type === 'variable' && (
+            <div className="card">
+              <h3 className="card-title">Variações</h3>
+              <p className="card-sub">Cada variação gera um SKU automático no formato SKU-PAI-Nº.</p>
+
+              {isEditing ? (
+                <p className="v-info">Variações já cadastradas (não editáveis):</p>
+              ) : null}
+
+              {variations.length > 0 ? (
+                <table className="v-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 50 }}>#</th>
+                      <th>{isEditing ? 'Valor' : 'Valor da variação'}</th>
+                      <th style={{ width: 120 }}>SKU gerado</th>
+                      {!isEditing && <th style={{ width: 40 }}></th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {variations.map((val, i) => (
+                      <tr key={i}>
+                        <td>{i + 1}</td>
+                        <td>
+                          {isEditing ? (
+                            <span>{val}</span>
+                          ) : (
+                            <input
+                              value={val}
+                              onChange={(e) => setVariationValue(i, e.target.value)}
+                              placeholder={`Ex: ${i + 3}`}
+                              style={{
+                                padding: '8px 10px', border: '1px solid var(--line)',
+                                background: 'var(--white)', fontSize: 13, outline: 'none',
+                                width: '100%', fontFamily: 'inherit',
+                              }}
+                            />
+                          )}
+                        </td>
+                        <td><span className="v-sku">{f.ref}-{i + 1}</span></td>
+                        {!isEditing && (
+                          <td>
+                            <button type="button" className="v-rm" onClick={() => removeVariation(i)}>×</button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p style={{ color: 'var(--muted)', fontSize: 12, fontStyle: 'italic', margin: '8px 0' }}>
+                  Nenhuma variação adicionada.
+                </p>
+              )}
+
+              {!isEditing && (
+                <button type="button" className="v-add" onClick={addVariation}>
+                  + Adicionar variação
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="card">
+            <h3 className="card-title">Preço</h3>
+            <p className="card-sub">Formato "De / Por" em Reais.</p>
+            <div className="form-grid">
+              <div className="field">
+                <label>Preço "De:" (R$)</label>
+                <input type="number" min="0" step="0.01" value={f.from}
+                       onChange={(e) => set('from', e.target.value)} placeholder="18900" />
+                <span className="hint">Valor original; opcional</span>
+              </div>
+              <div className="field">
+                <label>Preço "Por:" (R$)<span className="req">*</span></label>
+                <input type="number" min="0" step="0.01" value={f.to}
+                       onChange={(e) => set('to', e.target.value)} placeholder="15420" />
+                <span className="hint">Valor de venda</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="card-title">Galeria</h3>
+            <p className="card-sub">Adicione múltiplas fotos da peça. A primeira será a capa.</p>
+
+            <div
+              className={`uploader ${drag ? 'drag' : ''}`}
+              onClick={() => fileRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={(e) => { e.preventDefault(); setDrag(false); handleFiles(e.dataTransfer.files); }}
+            >
+              <div className="uploader-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </div>
+              <div className="uploader-text">Arraste imagens ou clique para selecionar</div>
+              <div className="uploader-sub">JPG, PNG, WEBP · máx. ~5MB cada</div>
+              <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
+                     onChange={(e) => handleFiles(e.target.files)} />
+            </div>
+
+            {f.images?.length > 0 && (
+              <div className="thumbs">
+                {f.images.map((src, i) => (
+                  <div key={i} className="thumb">
+                    <img src={src} alt={`foto ${i + 1}`} />
+                    {i === 0 && <span className="badge">Capa</span>}
+                    <button type="button" className="thumb-rm"
+                            onClick={() => set('images', f.images.filter((_, j) => j !== i))}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <h3 className="card-title">Ficha técnica</h3>
+            <p className="card-sub">Especificações que aparecem na página do produto.</p>
+            <div className="form-grid">
+              <div className="field">
+                <label>Metal</label>
+                <input value={f.specs.metal} onChange={(e) => setSpec('metal', e.target.value)} placeholder="Ouro amarelo 18k" />
+              </div>
+              <div className="field">
+                <label>Peso</label>
+                <input value={f.specs.peso} onChange={(e) => setSpec('peso', e.target.value)} placeholder="4,2g" />
+              </div>
+              <div className="field">
+                <label>Pedra principal</label>
+                <input value={f.specs.pedra} onChange={(e) => setSpec('pedra', e.target.value)} placeholder="Diamante natural" />
+              </div>
+              <div className="field">
+                <label>Quilates</label>
+                <input value={f.specs.quilates} onChange={(e) => setSpec('quilates', e.target.value)} placeholder="0,35 ct" />
+              </div>
+              <div className="field">
+                <label>Acabamento</label>
+                <input value={f.specs.acabamento} onChange={(e) => setSpec('acabamento', e.target.value)} placeholder="Polido espelhado" />
+              </div>
+              <div className="field">
+                <label>Origem</label>
+                <input value={f.specs.origem} onChange={(e) => setSpec('origem', e.target.value)} placeholder="Atelier próprio — São Paulo" />
+              </div>
+              <div className="field">
+                <label>Garantia</label>
+                <input value={f.specs.garantia} onChange={(e) => setSpec('garantia', e.target.value)} placeholder="2 anos" />
+              </div>
+            </div>
+          </div>
+
+          <div className="form-actions">
+            <button type="button" className="btn-ghost" onClick={onCancel}>Cancelar</button>
+            <button type="submit" className="btn-solid">
+              {initial ? 'Salvar alterações' : 'Publicar no catálogo'}
+            </button>
+          </div>
+        </form>
+      </>
+    );
+  }
+
+  // ─── LISTA DE PRODUTOS ───────────────────────────────────
+  function ProductList({ products, onEdit, onRemove, onSync }) {
+    return (
+      <>
+        <div className="breadcrumb">ADMIN · PRODUTOS</div>
+        <h1 className="page-title">Produtos cadastrados</h1>
+        <p className="page-sub">{products.length} {products.length === 1 ? 'peça' : 'peças'} no catálogo.</p>
+
+        {products.length === 0 ? (
+          <div className="card" style={{ textAlign: 'center', padding: 60 }}>
+            <p style={{ color: 'var(--muted)', marginBottom: 20 }}>Nenhum produto cadastrado ainda.</p>
+            <button className="btn-solid" onClick={() => onEdit(null)}>+ Cadastrar primeiro produto</button>
+          </div>
+        ) : (
+          <table className="prod-table">
+            <thead>
+              <tr>
+                <th style={{ width: 60 }}></th>
+                <th>Produto</th>
+                <th>Coleção</th>
+                <th>Categoria</th>
+                <th>Preço</th>
+                <th>Status</th>
+                <th style={{ textAlign: 'right' }}>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((p) => (
+                <tr key={p.ref}>
+                  <td>
+                    {p.images?.[0]
+                      ? <img className="prod-thumb" src={p.images[0]} alt="" />
+                      : <div className="prod-thumb" style={{ display: 'grid', placeItems: 'center', color: 'var(--muted)', fontSize: 10 }}>sem foto</div>}
+                  </td>
+                  <td>
+                    <div className="prod-name">{p.name}</div>
+                    <div className="prod-ref">{p.ref}</div>
+                  </td>
+                  <td>{COLLECTION_OPTS.find((c) => c.id === p.collectionId)?.label || p.collectionId}</td>
+                  <td style={{ textTransform: 'capitalize' }}>{p.category}</td>
+                  <td>
+                    R$ {Number(p.to).toLocaleString('pt-BR')}
+                    {p.from && p.from > p.to && <div style={{ fontSize: 11, color: 'var(--muted)' }}><s>R$ {Number(p.from).toLocaleString('pt-BR')}</s></div>}
+                  </td>
+                  <td><span className={`tag ${p.status === 'published' ? 'published' : 'draft'}`}>{p.status}</span></td>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button className="btn-outline" style={{ marginRight: 6 }} onClick={() => onSync(p)}>ERP</button>
+                    <button className="btn-outline" style={{ marginRight: 6 }} onClick={() => onEdit(p)}>Editar</button>
+                    <button className="btn-danger" onClick={() => onRemove(p.ref)}>Remover</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </>
+    );
+  }
+
+  // ─── ABA ERP ─────────────────────────────────────────────
+  // Nova versão: integra com a API Pública do Alisson ERP (read-only).
+  // Lista produtos remotos, permite filtrar e sincronizar pra cache local.
+  function ErpTab({ cfg, setCfg, show }) {
+    const [products, setProducts] = useState(() => {
+      const c = window.ErpAPI.loadCache();
+      return c?.products || [];
+    });
+    const [cachedAt, setCachedAt] = useState(() => {
+      const c = window.ErpAPI.loadCache();
+      return c?.ts || null;
+    });
+    const [loading, setLoading] = useState(false);
+    const [progress, setProgress] = useState(null);
+    const [error, setError] = useState(null);
+    const [filters, setFilters] = useState({ busca: '', categoria: '', tipo_metal: '', com_estoque: false });
+
+    const sync = async () => {
+      setLoading(true); setError(null); setProgress(null);
+      try {
+        const all = await window.ErpAPI.fetchAllProducts({}, (p) => setProgress(p));
+        const mapped = all.map(window.ErpAPI.mapErpToCatalogProduct).filter(Boolean);
+        window.ErpAPI.saveCache(mapped);
+        setProducts(mapped);
+        setCachedAt(Date.now());
+        show(`${mapped.length} produtos importados do ERP`);
+      } catch (e) {
+        setError(e.message || String(e));
+        show(`Falha ao sincronizar: ${e.message}`, true);
+      } finally {
+        setLoading(false);
+        setProgress(null);
+      }
+    };
+
+    const clearCache = () => {
+      if (!confirm('Limpar todos os produtos importados do ERP do cache local?')) return;
+      window.ErpAPI.clearCache();
+      setProducts([]);
+      setCachedAt(null);
+      show('Cache do ERP limpo');
+    };
+
+    // Stats
+    const allCategories = [...new Set(products.map(p => p._erpRaw?.categoria).filter(Boolean))].sort();
+    const allMetals = [...new Set(products.map(p => p._erpRaw?.tipo_metal).filter(Boolean))].sort();
+    const filtered = window.ErpAPI.filterProducts(products, filters);
+    const inStock = products.filter(p => p._hasStock).length;
+    const totalValue = products.reduce((s, p) => s + (p.to || 0), 0);
+    const cachedAgo = cachedAt ? formatAgo(Date.now() - cachedAt) : null;
+
+    return (
+      <>
+        <div className="breadcrumb">ADMIN · INTEGRAÇÃO ERP</div>
+        <h1 className="page-title">Alisson ERP</h1>
+        <p className="page-sub">Importe produtos diretamente do seu ERP. Conexão somente leitura, sem autenticação necessária.</p>
+
+        {/* STATUS */}
+        <div className="erp-status" style={{ marginBottom: 24 }}>
+          <span className={`erp-dot ${products.length ? '' : 'off'}`} />
+          {products.length ? (
+            <span>
+              <strong>{products.length} produtos</strong> sincronizados do ERP
+              {cachedAgo && <> · atualizado {cachedAgo}</>}
+              {error && <> · <span style={{ color: '#c04b3a' }}>última sincronização falhou</span></>}
+            </span>
+          ) : (
+            <span><strong>Nenhum produto importado.</strong> Clique em "Sincronizar agora" para buscar do ERP.</span>
+          )}
+        </div>
+
+        {/* SYNC ACTIONS */}
+        <div className="card">
+          <h3 className="card-title">Sincronização</h3>
+          <p className="card-sub">
+            Endpoint: <code style={{ fontSize: 12 }}>{window.ErpAPI.BASE_URL}</code>
+          </p>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginTop: 16 }}>
+            <button className="btn-solid" onClick={sync} disabled={loading}>
+              {loading
+                ? (progress ? `Importando ${progress.loaded}/${progress.total}…` : 'Sincronizando…')
+                : (products.length ? 'Sincronizar novamente' : 'Sincronizar agora')}
+            </button>
+            {products.length > 0 && (
+              <button className="btn-ghost" onClick={clearCache} disabled={loading}>Limpar cache</button>
+            )}
+          </div>
+          {error && (
+            <div style={{
+              marginTop: 16, padding: '12px 16px',
+              background: '#fef2f0', border: '1px solid #f5cfc7',
+              color: '#9a3322', fontSize: 13,
+            }}>
+              <strong>Erro:</strong> {error}
+            </div>
+          )}
+        </div>
+
+        {/* PRODUTOS IMPORTADOS */}
+        {products.length > 0 && (
+          <>
+            <div className="stats" style={{ margin: '8px 0 24px' }}>
+              <div className="stat">
+                <div className="stat-label">Produtos</div>
+                <div className="stat-value">{products.length}</div>
+                <div className="stat-delta">{filtered.length !== products.length ? `${filtered.length} visíveis com filtros` : 'todos importados'}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Em estoque</div>
+                <div className="stat-value">{inStock}</div>
+                <div className="stat-delta">{Math.round(inStock / products.length * 100)}% disponíveis</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Categorias</div>
+                <div className="stat-value">{allCategories.length}</div>
+                <div className="stat-delta">{allCategories.slice(0, 3).join(' · ') || '—'}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Valor total (preço de tabela)</div>
+                <div className="stat-value" style={{ fontSize: 22 }}>{brl(totalValue)}</div>
+                <div className="stat-delta">soma do catálogo</div>
+              </div>
+            </div>
+
+            {/* FILTROS */}
+            <div className="card" style={{ paddingBottom: 0 }}>
+              <h3 className="card-title">Filtrar produtos</h3>
+              <div className="form-grid" style={{ marginBottom: 16 }}>
+                <div className="field full">
+                  <label>Buscar por nome ou SKU</label>
+                  <input value={filters.busca} onChange={(e) => setFilters(f => ({ ...f, busca: e.target.value }))} placeholder="Ex: anel, AN042…" />
+                </div>
+                <div className="field">
+                  <label>Categoria</label>
+                  <select value={filters.categoria} onChange={(e) => setFilters(f => ({ ...f, categoria: e.target.value }))}>
+                    <option value="">Todas</option>
+                    {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Metal</label>
+                  <select value={filters.tipo_metal} onChange={(e) => setFilters(f => ({ ...f, tipo_metal: e.target.value }))}>
+                    <option value="">Todos</option>
+                    {allMetals.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div className="field full" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <input id="cm-est" type="checkbox" checked={filters.com_estoque}
+                         onChange={(e) => setFilters(f => ({ ...f, com_estoque: e.target.checked }))}
+                         style={{ width: 16, height: 16 }} />
+                  <label htmlFor="cm-est" style={{ letterSpacing: '.05em', textTransform: 'none', fontSize: 13, fontWeight: 400, color: 'var(--ink)' }}>
+                    Apenas com estoque disponível
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* TABELA */}
+            <table className="prod-table" style={{ marginTop: 24 }}>
+              <thead>
+                <tr>
+                  <th>Foto</th>
+                  <th>Produto</th>
+                  <th>Categoria</th>
+                  <th>Metal</th>
+                  <th style={{ textAlign: 'right' }}>Preço</th>
+                  <th style={{ textAlign: 'center' }}>Estoque</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr><td colSpan={6} style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--muted)', fontStyle: 'italic' }}>
+                    Nenhum produto corresponde aos filtros.
+                  </td></tr>
+                ) : (
+                  filtered.slice(0, 200).map(p => (
+                    <tr key={p.ref}>
+                      <td>
+                        {p.img ? (
+                          <img src={p.img} alt={p.name} className="prod-thumb" loading="lazy" />
+                        ) : (
+                          <div className="prod-thumb" />
+                        )}
+                      </td>
+                      <td>
+                        <div className="prod-name">{p.name}</div>
+                        <div className="prod-ref">{p.sku || p.ref}</div>
+                      </td>
+                      <td>{p._erpRaw?.categoria || '—'}</td>
+                      <td style={{ fontSize: 12, color: 'var(--muted)' }}>{p._erpRaw?.tipo_metal || '—'}</td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{brl(p.to)}</td>
+                      <td style={{ textAlign: 'center' }}>
+                        {p._hasStock ? (
+                          <span className="tag" style={{ background: '#e7f3ec', color: '#1f6244' }}>{p._stock}</span>
+                        ) : (
+                          <span className="tag" style={{ background: '#faecea', color: '#9a3322' }}>0</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+            {filtered.length > 200 && (
+              <p style={{ textAlign: 'center', padding: 16, color: 'var(--muted)', fontSize: 12, fontStyle: 'italic' }}>
+                Exibindo primeiros 200 de {filtered.length} resultados — refine os filtros para ver mais.
+              </p>
+            )}
+          </>
+        )}
+
+        {/* INFO */}
+        <div className="card" style={{ marginTop: 24, background: '#fafaf6' }}>
+          <h3 className="card-title" style={{ fontSize: 16 }}>Sobre esta integração</h3>
+          <ul style={{ fontSize: 13, lineHeight: 1.8, color: 'var(--ink)', paddingLeft: 18 }}>
+            <li>Conexão somente leitura — produtos não podem ser editados aqui (são gerenciados no ERP).</li>
+            <li>Os produtos importados aparecem automaticamente no <code>Catalogo.html</code>, agrupados por categoria.</li>
+            <li>Cache local: produtos ficam disponíveis offline por até 5 minutos antes de sugerir nova sincronização.</li>
+            <li>Para forçar atualização imediata, clique em <strong>Sincronizar novamente</strong>.</li>
+          </ul>
+        </div>
+      </>
+    );
+  }
+
+  function brl(n) {
+    return Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  }
+  function formatAgo(ms) {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `há ${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `há ${m} min`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `há ${h}h`;
+    const d = Math.floor(h / 24);
+    return `há ${d} dia${d > 1 ? 's' : ''}`;
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
