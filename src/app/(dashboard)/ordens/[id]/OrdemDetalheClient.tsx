@@ -203,6 +203,7 @@ interface Props {
   fichaTecnica: any | null;
   timeline: any[];
   userRole: string | null;
+  conversaoSku?: any | null;
 }
 
 // Roles "operacionais" — colaboradores de execução que só precisam ver a
