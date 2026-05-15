@@ -220,6 +220,33 @@ class ContagemViewModel(
         }
     }
 
+    fun recontar() {
+        viewModelScope.launch {
+            tslManager.stop()
+            timerJob?.cancel()
+            epcSet.clear()
+            lastEpcTimestamps.clear()
+            repo.limparLeituras(inventarioId)
+            repo.syncStatus(inventarioId, "pendente")
+            _uiState.value = _uiState.value.copy(
+                totalEpcsUnicos = 0,
+                tempoLeitura = 0L,
+                modoResultado = false,
+                epcsLidos = emptyList(),
+            )
+            tslManager.startInventory().fold(
+                onSuccess = {
+                    scanStartTime = System.currentTimeMillis()
+                    startTimer()
+                    _uiState.value = _uiState.value.copy(erro = null)
+                },
+                onFailure = { e ->
+                    _uiState.value = _uiState.value.copy(erro = "Erro ao recontar: ${e.message}")
+                }
+            )
+        }
+    }
+
     fun limparErro() {
         _uiState.value = _uiState.value.copy(erro = null)
     }

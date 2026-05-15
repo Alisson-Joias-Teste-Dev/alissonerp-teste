@@ -67,6 +67,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         await tx`
           UPDATE alissonerp.itens_inventario_comercial
           SET quantidade_contada = ${c.quantidade_contada},
+              diferenca = ${c.quantidade_contada} - quantidade_sistema,
               contado_por = ${user.id}::uuid,
               contado_em = now()
           WHERE id = ${c.item_id} AND inventario_id = ${invId}

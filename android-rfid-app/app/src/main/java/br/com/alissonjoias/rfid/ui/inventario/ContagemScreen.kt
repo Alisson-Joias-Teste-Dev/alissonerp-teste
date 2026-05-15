@@ -225,12 +225,24 @@ fun ContagemScreen(
 
             if (state.totalEpcsUnicos > 0 && !state.scanning) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = viewModel::irParaResultado,
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = AzulPrimario),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Conferir e ver resultado")
+                    Button(
+                        onClick = viewModel::irParaResultado,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = AzulPrimario),
+                    ) {
+                        Text("Conferir resultado")
+                    }
+                    Button(
+                        onClick = viewModel::recontar,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = GreenOk),
+                    ) {
+                        Text("Recontar")
+                    }
                 }
             }
 

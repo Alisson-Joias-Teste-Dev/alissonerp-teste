@@ -50,5 +50,13 @@ export async function GET(
       p.nome
   `;
 
-  return NextResponse.json({ inventario, itens });
+  const leituras = await sql`
+    SELECT epc, evento, lido_em, operador::text AS operador
+    FROM alissonerp.joias_leituras
+    WHERE evento = 'inventario' AND localizacao = ${inventario.local_nome}
+    ORDER BY lido_em DESC
+    LIMIT 200
+  `;
+
+  return NextResponse.json({ inventario, itens, leituras });
 }

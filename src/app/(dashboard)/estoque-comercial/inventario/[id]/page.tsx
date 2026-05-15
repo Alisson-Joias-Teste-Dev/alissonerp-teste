@@ -33,6 +33,13 @@ interface ItemInventario {
   contado_em: string | null;
 }
 
+interface LeiturasEPC {
+  epc: string;
+  evento: string;
+  lido_em: string;
+  operador: string;
+}
+
 function fmtDate(d: string) {
   return new Date(d).toLocaleString("pt-BR", {
     day: "2-digit", month: "2-digit", year: "numeric",
@@ -47,6 +54,7 @@ export default function InventarioDetalhePage() {
 
   const [inventario, setInventario] = useState<InventarioHeader | null>(null);
   const [itens,      setItens]      = useState<ItemInventario[]>([]);
+  const [leituras,   setLeituras]   = useState<LeiturasEPC[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [contagens,  setContagens]  = useState<Record<number, string>>({});
   const [salvando,   setSalvando]   = useState(false);
@@ -60,9 +68,10 @@ export default function InventarioDetalhePage() {
     try {
       const r = await fetch(`/api/estoque-comercial/inventario/${invId}`);
       if (r.ok) {
-        const d = await r.json() as { inventario: InventarioHeader; itens: ItemInventario[] };
+        const d = await r.json() as { inventario: InventarioHeader; itens: ItemInventario[]; leituras?: LeiturasEPC[] };
         setInventario(d.inventario);
         setItens(d.itens);
+        setLeituras(d.leituras ?? []);
         // Preencher contagens com valores existentes
         const c: Record<number, string> = {};
         d.itens.forEach(item => {
@@ -278,6 +287,7 @@ export default function InventarioDetalhePage() {
               <th className="text-center px-3 py-3 font-semibold text-xs uppercase" style={{ color: "#9CA3AF" }}>Sistema</th>
               <th className="text-center px-3 py-3 font-semibold text-xs uppercase" style={{ color: "#9CA3AF" }}>Contagem</th>
               <th className="text-center px-3 py-3 font-semibold text-xs uppercase" style={{ color: "#9CA3AF" }}>Diferenca</th>
+              <th className="text-left px-3 py-3 font-semibold text-xs uppercase" style={{ color: "#9CA3AF" }}>Contado por</th>
             </tr>
           </thead>
           <tbody>
@@ -325,12 +335,53 @@ export default function InventarioDetalhePage() {
                       <span className="text-xs text-gray-300">-</span>
                     )}
                   </td>
+                  <td className="px-3 py-3 text-xs text-gray-500">
+                    {item.contado_por_email ? (
+                      <div>
+                        <span>{item.contado_por_email}</span>
+                        {item.contado_em && (
+                          <span className="block text-gray-400">{fmtDate(item.contado_em)}</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-300">-</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
-        </table>
-      </div>
+          </table>
+        </div>
+
+      {/* Leituras EPC (do app Android) */}
+      {leituras.length > 0 && (
+        <div className="mt-8">
+          <h3 className="text-sm font-semibold mb-3" style={{ color: "#184036" }}>
+            Etiquetas lidas ({leituras.length})
+          </h3>
+          <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid #E8DCC8" }}>
+            <table className="w-full text-sm">
+              <thead style={{ background: "#F9F6F0" }}>
+                <tr>
+                  <th className="text-left px-4 py-2 font-semibold text-xs uppercase" style={{ color: "#9CA3AF" }}>EPC</th>
+                  <th className="text-left px-4 py-2 font-semibold text-xs uppercase" style={{ color: "#9CA3AF" }}>Lido em</th>
+                  <th className="text-left px-4 py-2 font-semibold text-xs uppercase" style={{ color: "#9CA3AF" }}>Operador</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leituras.map((l, i) => (
+                  <tr key={i} style={{ borderTop: i === 0 ? "none" : "1px solid #F3F4F6" }}>
+                    <td className="px-4 py-2 font-mono text-xs" style={{ color: "#184036" }}>{l.epc}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{fmtDate(l.lido_em)}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{l.operador}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
