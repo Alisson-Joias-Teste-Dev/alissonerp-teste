@@ -35,6 +35,10 @@ class ListaInventarioViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(ListaInventarioUiState())
     val uiState: StateFlow<ListaInventarioUiState> = _uiState.asStateFlow()
 
+    init {
+        sincronizar()
+    }
+
     fun sincronizar() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(sincronizando = true, error = null)
