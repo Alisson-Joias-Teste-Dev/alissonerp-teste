@@ -1,0 +1,39 @@
+import { NextRequest, NextResponse } from "next/server";
+import sql from "@/lib/db";
+
+interface Params { params: Promise<{ clienteId: string }> }
+
+// GET /api/vendas/por-cliente/[clienteId]
+// Retorna todas as vendas de um cliente (para seleção na ordem de garantia)
+export async function GET(
+  _req: NextRequest,
+  { params }: Params
+) {
+  const { clienteId } = await params;
+  const id = Number(clienteId);
+  if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
+  const vendas = await sql`
+    SELECT
+      v.id,
+      v.numero_venda,
+      v.data_venda,
+      v.total_venda,
+      v.situacao,
+      COALESCE(v.qtd_itens, 0)   AS qtd_itens,
+      COALESCE(v.total_pago, 0)  AS total_pago
+    FROM alissonerp.vw_vendas_erp_completa v
+    WHERE v.cliente_id = ${id}
+    ORDER BY v.data_venda DESC
+    LIMIT 50
+  `;
+
+  return NextResponse.json(
+    vendas.map(v => ({
+      ...v,
+      total_venda: Number(v.total_venda),
+      total_pago:  Number(v.total_pago),
+      qtd_itens:   Number(v.qtd_itens),
+    }))
+  );
+}

@@ -1,0 +1,12 @@
+Aplicando migration 242 — Conversao de Estoque...
+
+Lido SQL: 19720 bytes
+
+OK: Migration 242 aplicada com sucesso!
+
+OK: Tabela alissonerp.conversoes_estoque existe
+OK: Tabela alissonerp.conversao_itens existe
+OK: Enum conversao existe em enum_tipo_ordem
+OK: Parametro INSUMO_CONVERSAO_PADRAO configurado
+
+Migration 242 concluida.

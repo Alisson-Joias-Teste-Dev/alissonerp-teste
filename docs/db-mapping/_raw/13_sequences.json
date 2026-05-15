@@ -1,0 +1,2282 @@
+[
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "api_chaves_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "api_log_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "apontamentos_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "apontamentos_pcp_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "apontamentos_pote_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "apontamentos_servico_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "aprovacoes_consultora_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "aprovacoes_tarefa_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "audit_log_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "auditorias_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "automacoes_execucoes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "automacoes_tarefa_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "categorias_insumo_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "comentarios_ordem_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "comentarios_tarefa_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "compras_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "comunicacoes_crediario_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "config_orcamento_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "configuracoes_secrets_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "configuracoes_sistema_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "contas_pagar_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "contas_receber_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "curva_categorias_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "dashboard_configs_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "depositos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "devolucoes_itens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "devolucoes_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "devolucoes_venda_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "distribuicao_ordens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "distribuicao_saida_pedras_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "distribuicoes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "editor_ia_historico_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "empresas_emitentes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "erp_produtos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "estoque_comercial_config_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "estornos_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "faixas_comissao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fechamentos_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fechamentos_fabrica_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fichas_tecnicas_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fichas_tecnicas_produto_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fila_sync_externo_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fin_caixa_baixas_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fin_conciliacoes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fin_extratos_bancarios_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fin_gateways_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fin_lancamentos_bancarios_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fornecedores_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "fretes_bairro_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "gateways_pagamento_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "insumos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "inter_sync_log_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "inventarios_comercial_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "itens_compra_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "itens_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "itens_inventario_comercial_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "itens_ordem_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "itens_ordem_insumos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "itens_ordem_produtos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "itens_venda_erp_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "joias_leituras_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "lancamentos_avulso_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "liga_tipo_ouro_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "ligacoes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "locais_estoque_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "markup_alteracoes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "markup_pedras_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "metas_vendedoras_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "movimentacoes_estoque_comercial_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "movimentacoes_estoque_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "mp_point_devices_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "notas_fiscais_eventos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "notas_fiscais_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "notas_fiscais_itens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "notificacoes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "orcamento_fichas_tecnicas_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "orcamento_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "orcamentos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "ordem_comentario_mencoes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "ordem_comentarios_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "ordens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "outros_insumos_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "outros_insumos_pcp_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "pagamentos_venda_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "pcp_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "pedras_ordens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "permissoes_usuario_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "preparacoes_entrega_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "produto_composicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "produto_imagens_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "produto_personalizacao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "protocolo_fotos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "protocolo_ordens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "protocolos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "purificacoes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "quebra_operador_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "reembolsos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "regras_fiscais_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "reservas_estoque_comercial_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "role_permissoes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "saidas_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "saidas_ordem_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "saldo_credito_loja_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "seq_produto_id",
+    "data_type": "bigint",
+    "start_value": "90000000",
+    "minimum_value": "90000000",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "seq_sku_pz",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9999",
+    "increment": "1",
+    "cycle_option": "YES"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "servicos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "setores_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "site_produtos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "solicitacoes_desconto_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "tarefas_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "teores_ouro_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "tipos_apontamento_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "tipos_servico_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "transferencias_estoque_comercial_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "transferencias_ordem_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "user_views_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "uso_maquina_reserva_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "vale_troca_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "vale_troca_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "vendas_erp_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "webhook_config_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "alissonerp",
+    "sequence_name": "webhook_log_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "auth",
+    "sequence_name": "refresh_tokens_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "crm",
+    "sequence_name": "audit_log_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "crm",
+    "sequence_name": "oportunidade_historico_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "apontamento_distribuicao_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "apontamento_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "apontamento_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "apontamento_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "apontamentos_pote_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "aprovar_consultora_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "aprovar_consultora_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "auditar_financeiro_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "cadastro_produtos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "categoria_insumo_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "compras_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "compras_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "controle_estoque_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "deposito_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "directus_activity_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "directus_fields_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "directus_notifications_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "directus_permissions_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "directus_presets_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "directus_relations_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "directus_revisions_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "directus_settings_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "directus_webhooks_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "distribuicao_ordens_1_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "distribuicao_ordens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "fechamento_distribuicao_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "fechamento_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "fechamento_distribuicao_itens_disttribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "fechamento_distribuicao_ordens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "fechamento_distribuicao_outros_insumos_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "fechamento_fabrica_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "ficha_tecnica_ordem_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "formulario_venda_antiga_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "formulario_venda_antiga_produtos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "insumos_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "insumos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "itens_compras_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "itens_disttribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "itens_disttribuicao_outros_insumos_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "itens_ordem_1_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "itens_ordem_compra_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "itens_ordem_compra_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "itens_ordem_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "lancamento_avulso_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "lancamento_avulso_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "logistica_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "logistica_ordens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "ordemCompra_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "ordemCompra_produtos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "ordem_comentario_mencoes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "ordem_comentarios_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "ordens_estoque_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "ordens_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "ordens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "outros_insumos_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "outros_insumos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "pcp_fechamento_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "pcp_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "pcp_teste_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "peca_pre_acabada_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "peca_pre_acabada_insumos_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "pedras_ordens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "preparando_entrega_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "produtos_files_1_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "produtos_files_2_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "produtos_files_3_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "produtos_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "protocolo_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "protocolo_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "protocolo_loja_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "protocolo_loja_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "protocolo_loja_ordens_1_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "protocolo_loja_ordens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "protocolo_ordens_1_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "protocolo_ordens_2_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "protocolo_ordens_3_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "protocolo_ordens_4_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "protocolo_ordens_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "saida_distribuicao_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "saida_distribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "saida_distribuicao_itens_disttribuicao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "saida_ordem_files_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "saida_ordem_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "saida_ordem_itens_ordem_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "seq_ordens_estoque_num",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "seq_ordens_numero",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "setor_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "tipo_apontamento_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "tipo_ocorrencia_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "transferencia_ordem_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "directus",
+    "sequence_name": "transferencia_ordem_itens_ordem_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "public",
+    "sequence_name": "controle_entregas_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "public",
+    "sequence_name": "fin_conciliacoes_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "public",
+    "sequence_name": "fin_extratos_bancarios_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "public",
+    "sequence_name": "fin_lancamentos_bancarios_id_seq",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "public",
+    "sequence_name": "itens_venda_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "public",
+    "sequence_name": "notificacoes_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "public",
+    "sequence_name": "seq_vendas_numero_pedido",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "public",
+    "sequence_name": "seq_vendas_pedido_numero",
+    "data_type": "bigint",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "9223372036854775807",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "public",
+    "sequence_name": "staging_markup_aprovacao_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "public",
+    "sequence_name": "suporte_conversas_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  },
+  {
+    "sequence_schema": "public",
+    "sequence_name": "vendas_id_seq",
+    "data_type": "integer",
+    "start_value": "1",
+    "minimum_value": "1",
+    "maximum_value": "2147483647",
+    "increment": "1",
+    "cycle_option": "NO"
+  }
+]

@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/* =============================================
+   DESIGN SYSTEM — ALISSON JOALHERIA
+   Tailwind v4: cores via @theme
+   ============================================= */
+
+@theme {
+  /* Esmeralda */
+  --color-esmeralda-50:  #E8F0ED;
+  --color-esmeralda-100: #C5D9D1;
+  --color-esmeralda-200: #9FBFB3;
+  --color-esmeralda-300: #80A795;
+  --color-esmeralda-400: #4D7D6A;
+  --color-esmeralda-500: #184036;
+  --color-esmeralda-600: #143830;
+  --color-esmeralda-700: #0F2922;
+  --color-esmeralda-800: #0A1D17;
+  --color-esmeralda-900: #06120E;
+
+  /* Creme */
+  --color-creme-50:  #FAFAF7;
+  --color-creme-100: #F3EADA;
+  --color-creme-200: #E8DCC8;
+  --color-creme-300: #D4C9B0;
+  --color-creme-400: #BFB69A;
+
+  /* Dourado */
+  --color-dourado-light:   #FEDDB4;
+  --color-dourado-DEFAULT: #DB9864;
+  --color-dourado-dark:    #C4823E;
+
+  /* Alias para o módulo Gestão de Estoque (mantém identidade ao usar esmeralda do ERP) */
+  --color-alisson-gold:    #184036;
+  --color-alisson-black:   #FFFFFF;
+
+  /* Fontes */
+  --font-display: var(--font-playfair), Georgia, serif;
+  --font-sans:    var(--font-dm-sans), system-ui, sans-serif;
+  --font-mono:    var(--font-jetbrains), ui-monospace, monospace;
+}
+
+/* Pulse suave para alertas (A Vencer / Vencidas) */
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.65; }
+}
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
+}
+
+/* Base */
+body {
+  background-color: #FAFAF7;
+  color: #1A1A1A;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

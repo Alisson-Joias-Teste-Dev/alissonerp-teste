@@ -1,0 +1,134 @@
+handoff:
+  from_agent: "po"
+  to_agent: "sm"
+  timestamp: "2026-04-29T23:30:00Z"
+  consumed: false
+
+  story_context:
+    epic_id: "EPIC-001-FONTE-DA-VERDADE"
+    epic_path: "docs/prd/EPIC-001-FONTE-DA-VERDADE.md"
+    epic_status: "Approved v1.1 + 23/23 stories validated by PO"
+    current_task: "Priorizar primeira sprint diária + handoff para @dev"
+    branch: "main"
+    target_branch: "homolog"
+
+  context_summary: |
+    Pax (PO) completou validação 10-point de todas 23 stories do EPIC-001.
+    Resultado: 23/23 GO, score médio 9.1/10, zero rejeições.
+    Todas stories agora têm Status: Ready em docs/stories/*.md.
+
+    River (SM), você é responsável pela próxima fase: priorizar e organizar a primeira sprint diária para devs executarem.
+
+  decisions_made_by_po:
+    - "23/23 stories aprovadas (todas GO ≥ 7/10)"
+    - "Score médio: 9.1/10"
+    - "Status atualizado: Draft → Ready em todas as 23 stories"
+    - "Pacote Dia 1 (sugestão Atlas) tecnicamente viável conforme validação"
+    - "Story 2.1 marcada como GATE crítico — primeira da Fase 2"
+    - "Fix menor aplicado: Story 1.1 Task 3 atualizada para '42+' (era '11 rotas')"
+
+  files_created:
+    - "docs/qa/po-validation-log-2026-04-29.md"
+
+  files_updated:
+    - "docs/prd/EPIC-001-FONTE-DA-VERDADE.md (sign-off PO em §12)"
+    - "docs/stories/1.1.parametros-sistema.md (Status: Ready + fix Task 3)"
+    - "docs/stories/1.2.transacionalidade-vendas-tiny.md (Status: Ready)"
+    - "docs/stories/1.3.useauth-react-query-ttl.md (Status: Ready)"
+    - "docs/stories/1.4.zod-wrapper-helpers.md (Status: Ready)"
+    - "docs/stories/1.5.ci-github-actions-janela-restrita.md (Status: Ready)"
+    - "docs/stories/1.6.sync-directus-monitorado.md (Status: Ready)"
+    - "docs/stories/2.1.setup-ambiente-teste-producao.md (Status: Ready) ← GATE"
+    - "docs/stories/2.2.cobertura-vendas.md (Status: Ready)"
+    - "docs/stories/2.3.cobertura-pcp-estoque.md (Status: Ready)"
+    - "docs/stories/2.4.cobertura-protocolo-crediario.md (Status: Ready)"
+    - "docs/stories/2.5.setup-playwright.md (Status: Ready)"
+    - "docs/stories/2.6.e2e-criticos.md (Status: Ready)"
+    - "docs/stories/3.1.caca-erros-silenciados.md (Status: Ready)"
+    - "docs/stories/3.2.versioning-mutations-concorrentes.md (Status: Ready)"
+    - "docs/stories/3.3.audit-log-completo.md (Status: Ready)"
+    - "docs/stories/3.4.fila-sync-retry-completo.md (Status: Ready)"
+    - "docs/stories/3.5.guard-duplicacao-fechamento-dist.md (Status: Ready)"
+    - "docs/stories/3.6.unificar-dupla-entrada.md (Status: Ready)"
+    - "docs/stories/4.1.schema-spec-auto-gerado.md (Status: Ready)"
+    - "docs/stories/4.2.openapi-3-1-from-zod.md (Status: Ready)"
+    - "docs/stories/4.3.adrs-criticas.md (Status: Ready)"
+    - "docs/stories/4.4.runbooks-operacionais.md (Status: Ready)"
+    - "docs/stories/4.5.atualizar-docs-existentes.md (Status: Ready)"
+    - "docs/stories/4.6.auditoria-final.md (Status: Ready)"
+    - "docs/stories/4.7.banco-teste-real.md (Status: Ready)"
+
+  blockers:
+    - "Nenhum bloqueio para SM iniciar trabalho"
+
+  next_action: |
+    River (SM), você precisa executar:
+
+    1. ABRIR PRIMEIRO SPRINT (Dia 1)
+       Pacote sugerido pelo Atlas (validado pelo PO):
+       - 1.1 (completa) — parametros_sistema [3h]
+       - 1.2 (parcial) — Ordens em tx + Fila Tiny [3h]
+       - 1.3 (mini) — TTL useAuth [1h]
+       - 3.5 (completa) — Guard fechamento [1h]
+       - 3.1 (parcial) — Caça catches top 5 [1.5h]
+       - 3.3 (parcial) — Audit log 5 rotas críticas [1.5h]
+       Total Dia 1: ~11h
+
+    2. CONFIRMAR ESCOPO DIA 1 COM JONATHAN
+       Antes de delegar ao dev, perguntar ao Jonathan:
+       - Confirma este pacote para hoje?
+       - Quer ajustar prioridades?
+       - Há algo do mapa que deve entrar antes?
+
+    3. ASSIGN STORIES PARA AGENTS DEV
+       Conforme docs/stories/{id}.md owner field:
+       - @data-engineer (ou /backend do projeto): Story 1.1, 3.5, 3.3 (parcial)
+       - @dev (ou /backend do projeto): Story 1.2 (parcial)
+       - @dev frontend (ou /frontend do projeto): Story 1.3, 3.1 (parcial)
+
+    4. STATUS TRANSITION
+       Quando assign feito, mudar status de cada story atribuída:
+       Ready → InProgress (responsabilidade @dev quando começar implementação)
+
+    5. ACOMPANHAMENTO
+       Daily standup (formato compacto §11.4 do plano operacional):
+       - 🔥 ONTEM: <stories concluídas>
+       - 🟡 HOJE: <stories em curso>
+       - 🔴 BLOQUEIOS: <itens travados>
+       - 📊 PROGRESSO: <X de 23 stories Done, Y%>
+
+    6. HANDOFF PARA @dev / @backend / @frontend
+       Cada story atribuída → handoff específico ao agent dev correspondente.
+       Conforme regra do projeto fabricaAJ (CLAUDE.md), os agents do projeto são:
+       - /gerente — coordenador
+       - /backend — DB + API
+       - /frontend — UI + componentes
+       - /dev — desenvolvimento geral
+       - /hotfix — correção produção
+
+       SM pode optar por delegar TUDO via @aiox-master + /gerente do projeto, ou direto a /backend e /frontend.
+
+  acceptance_criteria_for_sm_phase:
+    - "Pacote Dia 1 confirmado com Jonathan"
+    - "Stories do Dia 1 atribuídas a agents específicos"
+    - "Daily standup criado em docs/standups/2026-04-29.md"
+    - "Handoff para @dev / @backend / @frontend criado"
+    - "Status das stories Dia 1: Ready → InProgress quando dev começar"
+
+  reference_documents:
+    primary:
+      - "docs/prd/EPIC-001-FONTE-DA-VERDADE.md v1.1"
+      - "docs/qa/po-validation-log-2026-04-29.md"
+      - "docs/prd/dependencies-matrix.md"
+      - "docs/plano-fonte-da-verdade.md §11 (cadência diária)"
+    supporting:
+      - "docs/architecture/impact-matrix.md (arquivos por story)"
+      - "CLAUDE.md (regras do projeto fabricaAJ)"
+      - ".claude/rules/agent-authority.md"
+      - ".claude/rules/story-lifecycle.md (transições de status)"
+
+  notes:
+    - "Story 2.1 (Setup teste produção) é GATE crítico — deve ser a primeira de qualquer sprint que envolva testes integration"
+    - "Não acionar dev até Jonathan confirmar Pacote Dia 1"
+    - "Cadência diária: cada dia entrega ~11h foco; resto vira task amanhã"
+    - "Branch: trabalhar sempre em homolog. Push em main só após Jonathan testar"

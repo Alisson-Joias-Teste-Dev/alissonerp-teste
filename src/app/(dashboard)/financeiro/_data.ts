@@ -1,0 +1,113 @@
+import sql from "@/lib/db";
+import { createServerSupabase } from "@/lib/supabase/server";
+
+export async function getFinanceiroData() {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const [usuario, pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas] = await Promise.all([
+    user ? sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1` : Promise.resolve([]),
+    sql`
+      SELECT
+        id, descricao, valor,
+        data_vencimento::text AS data_vencimento,
+        data_pagamento::text  AS data_pagamento,
+        situacao, categoria, obs,
+        created_at::text AS created_at
+      FROM alissonerp.contas_pagar
+      ORDER BY data_vencimento ASC NULLS LAST, id DESC
+      LIMIT 200
+    `,
+    sql`
+      SELECT
+        cr.id, cr.descricao, cr.valor,
+        cr.data_vencimento::text  AS data_vencimento,
+        cr.data_recebimento::text AS data_recebimento,
+        cr.situacao, cr.categoria, cr.obs,
+        cr.created_at::text AS created_at,
+        cr.venda_erp_id,
+        v.created_at::text  AS venda_created_at,
+        v.numero_venda      AS venda_numero,
+        (
+          SELECT SUM(p.valor_liquido)
+          FROM alissonerp.pagamentos_venda p
+          WHERE p.venda_id = cr.venda_erp_id
+            AND p.status = 'confirmado'
+            AND p.valor_liquido IS NOT NULL
+        ) AS valor_liquido,
+        (
+          SELECT SUM(p.taxas_mp)
+          FROM alissonerp.pagamentos_venda p
+          WHERE p.venda_id = cr.venda_erp_id
+            AND p.status = 'confirmado'
+            AND p.taxas_mp IS NOT NULL
+        ) AS taxas_mp
+      FROM alissonerp.contas_receber cr
+      LEFT JOIN alissonerp.vendas_erp v ON v.id = cr.venda_erp_id
+      ORDER BY cr.data_vencimento ASC NULLS LAST, cr.id DESC
+      LIMIT 200
+    `,
+    sql`
+      SELECT
+        id, banco, agencia, conta,
+        data_inicio::text AS data_inicio,
+        data_fim::text    AS data_fim,
+        arquivo_nome, processado, total_lancamentos,
+        created_at::text AS created_at
+      FROM alissonerp.fin_extratos_bancarios
+      ORDER BY id DESC
+      LIMIT 50
+    `,
+    sql`
+      SELECT
+        lb.id, lb.fitid, lb.tipo, lb.valor,
+        lb.data_transacao::text AS data_transacao,
+        lb.descricao, lb.memo, lb.conciliado,
+        lb.extrato_id,
+        e.banco
+      FROM alissonerp.fin_lancamentos_bancarios lb
+      LEFT JOIN alissonerp.fin_extratos_bancarios e ON e.id = lb.extrato_id
+      ORDER BY lb.data_transacao DESC, lb.id DESC
+      LIMIT 300
+    `,
+    sql`
+      SELECT
+        p.id,
+        p.forma,
+        p.valor,
+        p.caixa_baixa_id,
+        p.data_confirmacao::text AS data_confirmacao,
+        v.numero_venda,
+        v.id AS venda_id,
+        vend.nome AS vendedor_nome,
+        COALESCE(p.ouro_peso, p.ouro_gramas) AS ouro_gramas,
+        p.ouro_valor_grama
+      FROM alissonerp.pagamentos_venda p
+      JOIN alissonerp.vendas_erp v ON v.id = p.venda_id
+      LEFT JOIN public.vendedores vend ON vend.id_vendedor = v.vendedor_id
+      WHERE p.status = 'confirmado'
+        AND p.forma NOT IN ('Vale-Troca', 'A Receber')
+      ORDER BY p.data_confirmacao DESC NULLS LAST, p.id DESC
+      LIMIT 1000
+    `,
+    sql`
+      SELECT
+        id, total, qtd_pagamentos,
+        realizado_nome, obs,
+        created_at::text AS created_at
+      FROM alissonerp.fin_caixa_baixas
+      ORDER BY id DESC
+      LIMIT 50
+    `,
+  ]);
+
+  return {
+    userRole: (usuario as any[])[0]?.role ?? null,
+    pagar:           pagar as any[],
+    receber:         receber as any[],
+    extratos:        extratos as any[],
+    lancamentos:     lancamentos as any[],
+    caixaPagamentos: caixaPagamentos as any[],
+    caixaBaixas:     caixaBaixas as any[],
+  };
+}

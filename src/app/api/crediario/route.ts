@@ -1,0 +1,125 @@
+import { NextRequest, NextResponse } from "next/server";
+import sql from "@/lib/db";
+import { createServerSupabase } from "@/lib/supabase/server";
+
+const ROLES_CREDIARIO = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
+
+// GET /api/crediario
+// Params: situacao, status_aging, vendedor_id (admin/gerente only), page, limit
+export async function GET(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  const [usuario] = await sql`
+    SELECT role, vendedor_id FROM alissonerp.usuarios
+    WHERE id = ${user.id}::uuid LIMIT 1
+  `;
+  if (!usuario || !ROLES_CREDIARIO.includes(usuario.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
+  const url = new URL(req.url);
+  const situacao    = url.searchParams.get("situacao") ?? "";     // pendente | pago | cancelado
+  const statusAging = url.searchParams.get("status_aging") ?? ""; // vencido | vence_em_breve | em_dia
+  const page        = Math.max(1, Number(url.searchParams.get("page")) || 1);
+  const limit       = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 50));
+  const offset      = (page - 1) * limit;
+
+  // Filtro de vendedor: consultora vê só as suas, gerente/admin veem tudo (ou filtrado)
+  const isConsultora = usuario.role === "consultora";
+  const vendedorIdParam = url.searchParams.get("vendedor_id");
+  const vendedorId = isConsultora
+    ? (usuario.vendedor_id as number | null)
+    : vendedorIdParam ? Number(vendedorIdParam) : null;
+
+  // Consultora sem vendedor_id configurado não vê nada
+  if (isConsultora && !vendedorId) {
+    return NextResponse.json({ items: [], total: 0, page, limit, totalPages: 0 });
+  }
+
+  const whereVendedor = vendedorId !== null
+    ? sql`AND vendedor_id = ${vendedorId}`
+    : sql``;
+
+  const whereSituacao = situacao
+    ? sql`AND situacao = ${situacao}`
+    : sql``;
+
+  const whereAging = statusAging
+    ? sql`AND status_aging = ${statusAging}`
+    : sql``;
+
+  // Pagos: ordenar por data_recebimento DESC (mais recente primeiro)
+  // Pendentes/todos: urgência (vencido→breve→em_dia), depois vencimento ASC
+  const isPago = situacao === "pago";
+
+  const [items, countResult] = await Promise.all([
+    sql`
+      SELECT
+        conta_receber_id,
+        descricao,
+        valor,
+        data_vencimento,
+        data_recebimento,
+        situacao,
+        status_aging,
+        dias_atraso,
+        obs,
+        created_at,
+        venda_id,
+        numero_venda,
+        total_venda,
+        venda_situacao,
+        venda_bloqueada,
+        credito_gerente_usado,
+        venda_created_at,
+        cliente_id,
+        cliente_nome,
+        cliente_telefone,
+        vendedor_id,
+        vendedor_nome,
+        consultora_uuid,
+        consultora_nome
+      FROM alissonerp.vw_crediario
+      WHERE 1=1
+        ${whereVendedor}
+        ${whereSituacao}
+        ${whereAging}
+      ORDER BY
+        CASE WHEN ${isPago} THEN 0 ELSE
+          CASE WHEN status_aging = 'vencido' THEN 0
+               WHEN status_aging = 'vence_em_breve' THEN 1
+               ELSE 2 END
+        END,
+        CASE WHEN ${isPago} THEN data_recebimento END DESC NULLS LAST,
+        CASE WHEN NOT ${isPago} THEN data_vencimento END ASC NULLS LAST,
+        conta_receber_id DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `,
+    sql`
+      SELECT COUNT(*)::integer AS total
+      FROM alissonerp.vw_crediario
+      WHERE 1=1
+        ${whereVendedor}
+        ${whereSituacao}
+        ${whereAging}
+    `,
+  ]);
+
+  const total = countResult[0].total as number;
+
+  return NextResponse.json({
+    items: items.map((r) => ({
+      ...r,
+      valor:               Number(r.valor),
+      total_venda:         r.total_venda ? Number(r.total_venda) : null,
+      credito_gerente_usado: r.credito_gerente_usado ? Number(r.credito_gerente_usado) : null,
+      dias_atraso:         Number(r.dias_atraso ?? 0),
+    })),
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  });
+}
