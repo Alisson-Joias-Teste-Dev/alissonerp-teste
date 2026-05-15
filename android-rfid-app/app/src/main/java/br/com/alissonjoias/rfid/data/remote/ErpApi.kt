@@ -5,6 +5,7 @@ import br.com.alissonjoias.rfid.data.remote.dto.FinalizarRequest
 import br.com.alissonjoias.rfid.data.remote.dto.FinalizarResponse
 import br.com.alissonjoias.rfid.data.remote.dto.InventarioAppResponse
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -32,7 +33,9 @@ interface ErpApi {
             }
 
             val client = OkHttpClient.Builder()
+                .protocols(listOf(Protocol.HTTP_1_1))
                 .addInterceptor(AuthInterceptor())
+                .addInterceptor(HostOverrideInterceptor())
                 .addInterceptor(logging)
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
