@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { headers } from "next/headers";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { gerarAjustesDivergencias } from "@/lib/inventario-helpers";
@@ -12,7 +13,18 @@ const ROLES_CONTAR = [
 
 export async function POST(req: NextRequest, { params }: Params) {
   const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
+
+  const authHeader = (await headers()).get("authorization");
+  let user = null;
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.substring(7);
+    const { data } = await supabase.auth.getUser(token);
+    user = data.user;
+  } else {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  }
+
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const [usuario] = await sql`
