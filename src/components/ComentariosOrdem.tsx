@@ -91,6 +91,10 @@ interface Props {
   onCountChange?: (count: number) => void;
 }
 
+// SOMENTE LEITURA: a lista de comentários existentes fica visível para consulta,
+// mas o input de novo comentário e os botões de editar/deletar foram ocultados.
+const SOMENTE_LEITURA = true;
+
 export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   const { user, role } = useAuth();
   const isAdmin = role === "admin" || role === "desenvolvedor";
@@ -443,8 +447,8 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
                       )}
                     </div>
                   </div>
-                  {/* Ações */}
-                  {!isEditando && !isDeletando && (
+                  {/* Ações (ocultas em modo somente leitura) */}
+                  {!SOMENTE_LEITURA && !isEditando && !isDeletando && (
                     <div className="flex gap-1 shrink-0">
                       {podeEditar && (
                         <button
@@ -557,7 +561,8 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
         )}
       </div>
 
-      {/* Input de novo comentário */}
+      {/* Input de novo comentário (oculto em modo somente leitura) */}
+      {!SOMENTE_LEITURA && (
       <div className="relative">
         {/* Dropdown @mention */}
         {showMention && mentionResults.length > 0 && (
@@ -682,6 +687,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -13,6 +13,7 @@ import {
   Plus,
   Scale,
 } from "lucide-react";
+import CamposPersonalizaveisEditor from "@/components/produtos/CamposPersonalizaveisEditor";
 
 // ─── Paleta ERP ────────────────────────────────────────────────────────────
 const C = {
@@ -795,6 +796,25 @@ export default function ModalPersonalizacao({
               </div>
             </div>
           </section>
+
+          {/* ── CAMPOS EXTRAS ── (múltiplos campos personalizáveis além da gravação) */}
+          {modoEdicao && produtoEdicao && (
+            <section
+              className="px-5 py-4 border-t"
+              style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <Tag className="w-4 h-4" style={{ color: C.dourado }} />
+                <h3 className="text-sm font-semibold" style={{ color: C.esmeralda }}>
+                  Campos extras
+                </h3>
+                <span className="text-[11px]" style={{ color: "#6B7280" }}>
+                  além da gravação acima — ex: cor da pedra, tamanho, acabamento
+                </span>
+              </div>
+              <CamposPersonalizaveisEditor produtoId={produtoEdicao.id} />
+            </section>
+          )}
         </div>
 
         {/* Footer */}

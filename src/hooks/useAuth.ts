@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import type { Role } from "@/lib/auth/permissions";
@@ -75,15 +75,23 @@ export function invalidarCacheAuth() {
 }
 
 let authChangeHooked = false;
+let authChangeTimer: ReturnType<typeof setTimeout> | null = null;
 function hookAuthChangeOnce() {
   if (authChangeHooked) return;
   authChangeHooked = true;
   const supabase = createClient();
-  supabase.auth.onAuthStateChange(() => {
-    cachedState = null;
-    cachedAt = null;
-    inflightPromise = null;
-    ensureLoaded().catch(() => {});
+  supabase.auth.onAuthStateChange((event) => {
+    // Ignora INITIAL_SESSION (disparado ao subscrever) — o useEffect já chama ensureLoaded
+    if (event === "INITIAL_SESSION") return;
+    // Debounce de 2s para evitar múltiplas chamadas em rápida sucessão (token refresh, etc.)
+    if (authChangeTimer) clearTimeout(authChangeTimer);
+    authChangeTimer = setTimeout(() => {
+      cachedState = null;
+      cachedAt = null;
+      inflightPromise = null;
+      authChangeTimer = null;
+      ensureLoaded().catch(() => {});
+    }, 2000);
   });
 }
 
@@ -115,6 +123,20 @@ export function useAuth(): AuthState {
     }
     return () => { subscribers.delete(sub); };
   }, []);
+
+  // ── Tiny OAuth2 keepalive: renova token a cada 30 min (admin/dev apenas) ──
+  const keepaliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (state.loading) return;
+    const roleOk = state.role === "admin" || state.role === "desenvolvedor";
+    if (!roleOk || keepaliveRef.current) return;
+    keepaliveRef.current = setInterval(() => {
+      fetch("/api/admin/tiny-keepalive").catch(() => {});
+    }, 30 * 60 * 1000);
+    return () => {
+      if (keepaliveRef.current) { clearInterval(keepaliveRef.current); keepaliveRef.current = null; }
+    };
+  }, [state.loading, state.role]);
 
   return state;
 }

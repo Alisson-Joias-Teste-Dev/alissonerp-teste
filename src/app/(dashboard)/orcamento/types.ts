@@ -23,6 +23,8 @@ export interface PricingCategory {
   step?: number;
   color: string;
   targetMkp?: number;
+  /** Desconto percentual aplicado durante o período de promoção (0-100). */
+  desconto_promocao?: number;
 }
 
 export interface GrooveRule {

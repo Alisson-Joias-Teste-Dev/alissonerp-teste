@@ -11,6 +11,7 @@ import Link from "next/link";
 import { maskCpfCnpj } from "@/lib/formatters";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import CartaoInline from "@/components/vendas/CartaoInline";
+import BadgePromo from "@/components/ui/BadgePromo";
 import { useErrorStore } from "@/stores/errorStore";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -33,6 +34,9 @@ interface Produto {
   id: number; sku: string; nome: string;
   preco_venda: number | null; peso_precificado: number | null;
   unidade: string | null; sufixo_variacao: string | null; numeracao: string | null;
+  preco_promo?: number | null;
+  em_promocao?: boolean;
+  promocao_nome?: string | null;
 }
 interface FaixaComissao { desconto_pct: number; comissao_pct: number; }
 interface ItemVenda {
@@ -40,6 +44,9 @@ interface ItemVenda {
   quantidade: number; preco_lista: number; pct_desconto: number;
   preco_unitario: number; total_item: number; pct_comissao: number;
   valor_comissao: number; peso_estimado: number | null; unidade: string | null;
+  // Promocao vigente no momento da adicao (piso do preco_unitario)
+  preco_promo?: number | null;
+  promocao_nome?: string | null;
 }
 interface Pagamento { _key: string; forma: string; valor: number; parcelas: number; vale_numero?: string; }
 interface ParcelaRow { num: number; dias: number; data: string; valor: number; }
@@ -328,32 +335,60 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
 
   function calcItem(produto: Produto, q: number, pct: number): Omit<ItemVenda, "_key"> {
     const precoLista  = produto.preco_venda ?? 0;
-    const precoUnit   = precoLista * (1 - pct / 100);
+    // Promocao ativa: piso preco_promo. pct_desconto e o desconto TOTAL (lista->unitario),
+    // pode passar do maxDesconto da vendedora (e a comissao usa o pct total real).
+    const temPromo = !!produto.em_promocao && produto.preco_promo != null && produto.preco_promo >= 0;
+    const pctEfetivo = temPromo && precoLista > 0
+      ? Math.max(pct, ((precoLista - (produto.preco_promo ?? 0)) / precoLista) * 100)
+      : pct;
+    const precoUnit   = precoLista * (1 - pctEfetivo / 100);
     const totalItem   = precoUnit * q;
-    const pctComissao = getComissao(pct);
+    const pctComissao = getComissao(pctEfetivo);
     return {
       produto_id: produto.id, nome_produto: produto.nome, sku: produto.sku,
-      quantidade: q, preco_lista: precoLista, pct_desconto: pct,
+      quantidade: q, preco_lista: precoLista, pct_desconto: pctEfetivo,
       preco_unitario: precoUnit, total_item: totalItem,
       pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100,
       peso_estimado: produto.peso_precificado, unidade: produto.unidade,
+      preco_promo: temPromo ? produto.preco_promo : null,
+      promocao_nome: temPromo ? (produto.promocao_nome ?? null) : null,
     };
   }
 
   function updateItem(key: string, field: "quantidade" | "pct_desconto" | "desconto_valor", raw: string) {
     setItens(prev => prev.map(item => {
       if (item._key !== key) return item;
+      // Piso de desconto vindo da promo (pct equivalente preco_promo).
+      // O usuario nao pode digitar abaixo desse piso (= preco_unitario < preco_promo).
+      const pctPromoMin = item.preco_promo != null && item.preco_promo > 0 && item.preco_lista > 0
+        ? ((item.preco_lista - item.preco_promo) / item.preco_lista) * 100
+        : 0;
+      // Trava total de promocao: vendedora (nao-full-access) nao pode mexer em preco/desconto.
+      const promoTotalLock = item.preco_promo != null && item.preco_promo > 0 && !isFullAccess;
+      if (promoTotalLock && field !== "quantidade") {
+        return item;
+      }
+      // Teto: pct adicional acima da promo limitado a maxDesconto. Quando ha promo,
+      // o teto efetivo no input vendedor e pctPromoMin + maxDesconto (a vendedora pode
+      // descontar ate maxDesconto ALEM do preco promo).
+      const pctMax = Math.max(maxDesconto, pctPromoMin + maxDesconto);
       let q = item.quantidade;
       let pct = item.pct_desconto;
       if (field === "quantidade") q = Math.max(1, parseInt(raw) || 1);
-      if (field === "pct_desconto") pct = Math.min(maxDesconto, Math.max(0, parseFloat(raw.replace(",", ".")) || 0));
+      if (field === "pct_desconto") {
+        pct = Math.max(0, parseFloat(raw.replace(",", ".")) || 0);
+        pct = Math.max(pctPromoMin, Math.min(pctMax, pct));
+      }
       if (field === "desconto_valor") {
         const valorDesc = parseFloat(raw.replace(",", ".")) || 0;
-        pct = item.preco_lista > 0 ? Math.min(maxDesconto, Math.max(0, (valorDesc / item.preco_lista) * 100)) : 0;
+        const pctBruto = item.preco_lista > 0 ? (valorDesc / item.preco_lista) * 100 : 0;
+        pct = Math.max(pctPromoMin, Math.min(pctMax, Math.max(0, pctBruto)));
         pct = Math.round(pct * 100) / 100;
       }
       const precoUnit = item.preco_lista * (1 - pct / 100);
       const totalItem = precoUnit * q;
+      // Comissao usa o pct TOTAL real (sem clamp pelo maxDesconto) para nao
+      // cair em faixa errada quando a promo ja passa de maxDesconto.
       const pctComissao = getComissao(pct);
       return { ...item, quantidade: q, pct_desconto: pct, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
     }));
@@ -1054,7 +1089,14 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                     {itens.map((item, idx) => (
                       <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                         <td className="px-3 py-2.5 text-xs tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
-                        <td className="px-3 py-2.5 max-w-[180px] truncate font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
+                        <td className="px-3 py-2.5 max-w-[180px] truncate font-medium" style={{ color: "#1A1A1A" }}>
+                          <span>
+                            {item.nome_produto}
+                            {item.preco_promo != null && (
+                              <BadgePromo campanha={item.promocao_nome} className="ml-1.5 align-middle" />
+                            )}
+                          </span>
+                        </td>
                         <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku}</td>
                         <td className="px-3 py-2.5">
                           <input type="number" min={1} value={item.quantidade}
@@ -1064,11 +1106,24 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
                         <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{item.unidade ?? "un"}</td>
                         <td className="px-3 py-2.5 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
                         <td className="px-3 py-2.5">
-                          <input type="number" min={0} max={maxDesconto} step={0.01}
-                            value={item.pct_desconto || ""}
-                            onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
-                            placeholder="0"
-                            className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none" style={{ borderColor: C.cremeBorder }} />
+                          {(() => {
+                            const pctPromoMin = item.preco_promo != null && item.preco_promo > 0 && item.preco_lista > 0
+                              ? ((item.preco_lista - item.preco_promo) / item.preco_lista) * 100
+                              : 0;
+                            const atingiuPisoPromo = pctPromoMin > 0 && item.pct_desconto <= pctPromoMin + 0.01;
+                            return (
+                              <input type="number" min={0} step={0.01}
+                                value={item.pct_desconto || ""}
+                                onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
+                                placeholder="0"
+                                title={pctPromoMin > 0 ? `Promo${item.promocao_nome ? ` ${item.promocao_nome}` : ""} - piso ${fmt(item.preco_promo ?? 0)} (${pctPromoMin.toFixed(2)}%)` : undefined}
+                                className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none"
+                                style={{
+                                  borderColor: atingiuPisoPromo ? "#059669" : C.cremeBorder,
+                                  color: atingiuPisoPromo ? "#059669" : undefined,
+                                }} />
+                            );
+                          })()}
                         </td>
                         <td className="px-3 py-2.5">
                           <DescontoValorInput

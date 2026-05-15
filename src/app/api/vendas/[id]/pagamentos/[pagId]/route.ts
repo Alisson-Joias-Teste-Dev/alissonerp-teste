@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { estornarVenda, concluirVenda } from "@/lib/vendas-aprovar";
+import { approveVenda } from "@/lib/vendas-aprovar";
 
 // ─── PATCH /api/vendas/[id]/pagamentos/[pagId] ─────────────────────────────────
 // Atualiza status do pagamento (confirmar, cancelar, estornar)
@@ -19,13 +21,15 @@ export async function PATCH(
   if (isNaN(vendaId) || isNaN(pId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [pag] = await sql`
-    SELECT p.id, v.bloqueado
+    SELECT p.id, v.bloqueado, v.situacao AS venda_situacao
     FROM alissonerp.pagamentos_venda p
     JOIN alissonerp.vendas_erp v ON v.id = p.venda_id
     WHERE p.id = ${pId} AND p.venda_id = ${vendaId}
   `;
   if (!pag) return NextResponse.json({ error: "Pagamento não encontrado" }, { status: 404 });
   if (pag.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
+  if (pag.venda_situacao === "cancelado") return NextResponse.json({ error: "Venda cancelada" }, { status: 409 });
+  if (pag.venda_situacao === "concluido") return NextResponse.json({ error: "Venda concluída não permite alteração de pagamento" }, { status: 409 });
 
   const body = await req.json() as {
     status:             string;
@@ -38,13 +42,63 @@ export async function PATCH(
     return NextResponse.json({ error: "Status inválido" }, { status: 400 });
   }
 
-  await sql`
-    UPDATE alissonerp.pagamentos_venda SET
-      status           = ${body.status},
-      data_confirmacao = COALESCE(${body.data_confirmacao ?? null}::timestamptz, data_confirmacao),
-      gateway_id       = COALESCE(${body.gateway_id      ?? null},              gateway_id)
-    WHERE id = ${pId}
-  `;
+  // Força data_confirmacao ao confirmar (evita pagamento fantasma sem timestamp)
+  if (body.status === "confirmado") {
+    await sql`
+      UPDATE alissonerp.pagamentos_venda SET
+        status           = 'confirmado',
+        data_confirmacao = COALESCE(data_confirmacao, NOW()),
+        gateway_id       = COALESCE(${body.gateway_id ?? null}, gateway_id)
+      WHERE id = ${pId}
+    `;
+    // Auto-aprovar + auto-concluir se todos pagamentos confirmados
+    try {
+      const [pvenda] = await sql`
+        SELECT v.situacao, v.aprovacao_credito_tipo
+        FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
+      `;
+      const [pendentes] = await sql`
+        SELECT COUNT(*)::int AS cnt FROM alissonerp.pagamentos_venda
+        WHERE venda_id = ${vendaId} AND status = 'pendente'
+      `;
+      const todosPagos = Number(pendentes.cnt) === 0;
+
+      if (pvenda?.situacao === "rascunho" && pvenda?.aprovacao_credito_tipo) {
+        const [outrosPend] = await sql`
+          SELECT COUNT(*)::int AS cnt FROM alissonerp.pagamentos_venda
+          WHERE venda_id = ${vendaId} AND forma != 'A Receber' AND status = 'pendente'
+        `;
+        if (Number(outrosPend.cnt) === 0) {
+          await approveVenda(vendaId, user.id, { tinyBestEffort: true });
+        }
+      }
+
+      if (todosPagos) {
+        const [atual] = await sql`SELECT situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
+        if (atual?.situacao === "aprovado") {
+          await concluirVenda(vendaId, user.id, { tinyBestEffort: true });
+        }
+      }
+    } catch (e) {
+      console.error(`[pagamentos/PATCH] auto-aprovar/concluir venda=${vendaId}:`, e);
+    }
+  } else {
+    await sql`
+      UPDATE alissonerp.pagamentos_venda SET
+        status           = ${body.status},
+        data_confirmacao = COALESCE(${body.data_confirmacao ?? null}::timestamptz, data_confirmacao),
+        gateway_id       = COALESCE(${body.gateway_id      ?? null},              gateway_id)
+      WHERE id = ${pId}
+    `;
+    // Estorno: reabrir/reverter venda conforme regras de negócio
+    if (body.status === "estornado") {
+      try {
+        await estornarVenda(vendaId, pId, { motivo: "Estorno manual via painel" });
+      } catch (e) {
+        console.error(`[pagamentos/PATCH] estornarVenda venda=${vendaId} pag=${pId}:`, e);
+      }
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

@@ -1,21 +1,28 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   X,
   Save,
   Loader2,
   Plus,
   Trash2,
+  Camera,
   Edit2,
   Check,
   AlertCircle,
   Search,
   GitFork,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { formatPeso } from "@/lib/formatters";
+import {
+  calcularPrecoSync,
+  type CurvaConfig,
+} from "@/lib/curva-precificacao";
 import GaleriaProduto from "./GaleriaProduto";
+import AplicarTemplateModal from "@/components/produtos/AplicarTemplateModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -472,6 +479,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   const [precoTinyEdit, setPrecoTinyEdit] = useState("");
   const [tipoItemEdit, setTipoItemEdit] = useState<"" | "joia" | "insumo">("");
   const [saving, setSaving] = useState(false);
+  const [syncingTiny, setSyncingTiny] = useState(false);
+  const [tinySyncMsg, setTinySyncMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   // Foto agora é gerenciada pelo <GaleriaProduto> (galeria multi-imagem com capa).
   // Modo simplificado é o padrão: mostra só nome/SKU/situação + peso + preço.
@@ -487,10 +496,23 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   const [quantidadePedraEdit, setQuantidadePedraEdit] = useState("");
   // Faixas de markup das pedras (para preview em runtime)
   const [markupPedras, setMarkupPedras] = useState<Array<{ tamanho_min: number; tamanho_max: number; markup: number }>>([]);
-  // Categorias de precificação (curva) para auto-preenchimento de markup pelo peso
-  // Shape ainda indefinido (WIP de auto-precificação) — tipar quando a feature for concluída.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [categoriasCurva, setCategoriasCurva] = useState<unknown[]>([]);
+  // Curva de precificação canônica (mesma fonte da aba /precificacao).
+  // Usada para arredondamento + goldCostPercentage no preview de preço.
+  const [curvaConfig, setCurvaConfig] = useState<CurvaConfig | null>(null);
+
+  // Reposição automática + Tempo de fabricação + Rota
+  const [estoqueMinimoEdit, setEstoqueMinimoEdit] = useState("0");
+  const [reposicaoAtiva, setReposicaoAtiva] = useState(true);
+  const [tempoFabricacaoDias, setTempoFabricacaoDias] = useState("");
+  const [rotaEtapas, setRotaEtapas] = useState<number[]>([]);
+  const [mostrarTemplate, setMostrarTemplate] = useState(false);
+  const [setoresDisponiveis, setSetoresDisponiveis] = useState<{ id: number; nome: string }[]>([]);
+  const [extrasDirty, setExtrasDirty] = useState(false);
+
+  // Ficha técnica (foto)
+  const [fichaTecnicaUrl, setFichaTecnicaUrl] = useState<string | null>(null);
+  const [fichaTecnicaUploadBase64, setFichaTecnicaUploadBase64] = useState<string | null>(null);
+  const fichaTecnicaInputRef = useRef<HTMLInputElement>(null);
 
   // Variações (quando eh_pai)
   const [variacoes, setVariacoes] = useState<Variacao[]>([]);
@@ -515,6 +537,45 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       if (!r.ok) return;
       const j = await r.json() as { fornecedores: Array<{ nome: string }> };
       setFornecedoresOpts((j.fornecedores ?? []).map((f) => f.nome).filter(Boolean));
+    }).catch(() => { /* ignore */ });
+    // Curva de precificação (config) — não bloqueia o load principal
+    fetch("/api/precificacao/curva/config").then(async (r) => {
+      if (!r.ok) return;
+      const j = await r.json() as { config: CurvaConfig };
+      setCurvaConfig(j.config);
+    }).catch(() => { /* ignore */ });
+    // Setores cadastrados (para rota de fabricação)
+    fetch("/api/setores").then(async (r) => {
+      if (!r.ok) return;
+      const arr = await r.json() as Array<{ id: number; nome: string; ativo: boolean }>;
+      setSetoresDisponiveis((arr ?? []).filter((s) => s.ativo).map((s) => ({ id: s.id, nome: s.nome })));
+    }).catch(() => { /* ignore */ });
+    // Reposição automática + tempo de fabricação do produto
+    fetch(`/api/produtos/${produtoId}/reposicao`).then(async (r) => {
+      if (!r.ok) return;
+      const j = await r.json() as { config: { estoque_minimo: number; ativo: boolean; tempo_fabricacao_dias: number | null } | null };
+      if (j.config) {
+        setEstoqueMinimoEdit(String(j.config.estoque_minimo));
+        setReposicaoAtiva(j.config.ativo);
+        setTempoFabricacaoDias(j.config.tempo_fabricacao_dias != null ? String(j.config.tempo_fabricacao_dias) : "");
+      } else {
+        setEstoqueMinimoEdit("0");
+        setReposicaoAtiva(true);
+        setTempoFabricacaoDias("");
+      }
+    }).catch(() => { /* ignore */ });
+    // Rota de fabricação do produto
+    fetch(`/api/produtos/${produtoId}/rota`).then(async (r) => {
+      if (!r.ok) return;
+      const j = await r.json() as { etapas: Array<{ ordem: number; setor_id: number }> };
+      setRotaEtapas((j.etapas ?? []).sort((a, b) => a.ordem - b.ordem).map((e) => e.setor_id));
+    }).catch(() => { /* ignore */ });
+    // Ficha técnica (foto) — reset upload pendente ao carregar produto
+    setFichaTecnicaUploadBase64(null);
+    fetch(`/api/produtos/${produtoId}/ficha-tecnica`).then(async (r) => {
+      if (!r.ok) return;
+      const j = await r.json() as { ficha: { url: string } | null };
+      setFichaTecnicaUrl(j.ficha?.url ?? null);
     }).catch(() => { /* ignore */ });
     try {
       const res = await fetch(`/api/produtos/${produtoId}`);
@@ -600,13 +661,61 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
     return () => document.removeEventListener("keydown", handleKey);
   }, [aberto, onClose]);
 
+  async function persistirReposicaoERota(produtoId: number): Promise<boolean> {
+    let ok = true;
+    // Reposição + tempo de fabricação
+    try {
+      const minimoNum = parseInt(estoqueMinimoEdit || "0", 10);
+      const tempoNum = tempoFabricacaoDias.trim() ? parseInt(tempoFabricacaoDias, 10) : null;
+      const r = await fetch(`/api/produtos/${produtoId}/reposicao`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ estoque_minimo: minimoNum, ativo: reposicaoAtiva, tempo_fabricacao_dias: tempoNum }),
+      });
+      if (!r.ok) ok = false;
+    } catch { ok = false; }
+    // Rota
+    try {
+      const r = await fetch(`/api/produtos/${produtoId}/rota`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ etapas: rotaEtapas.map((sid) => ({ setor_id: sid })) }),
+      });
+      if (!r.ok) ok = false;
+    } catch { ok = false; }
+    // Ficha técnica (só envia se houver upload novo pendente)
+    if (fichaTecnicaUploadBase64) {
+      try {
+        const r = await fetch(`/api/produtos/${produtoId}/ficha-tecnica`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ foto_base64: fichaTecnicaUploadBase64 }),
+        });
+        if (r.ok) {
+          const j = await r.json() as { ficha: { url: string } };
+          setFichaTecnicaUrl(j.ficha?.url ?? null);
+          setFichaTecnicaUploadBase64(null);
+        } else {
+          ok = false;
+        }
+      } catch { ok = false; }
+    }
+    return ok;
+  }
+
   async function handleSave() {
     if (!produto) return;
     setSaving(true);
     setSaveMsg(null);
     try {
       const body: Record<string, unknown> = {};
-      if (temPedra !== produto.tem_pedra_preciosa) body.tem_pedra_preciosa = temPedra;
+      // tem_pedra_preciosa: auto-detectado do Apontamento Padrão (composição).
+      // Só atualiza se a composição estiver populada (>=1 item) — inferência
+      // confiável. Composição vazia → preserva flag antiga (produtos legados).
+      if (composicao.length > 0) {
+        const temPedraAuto = composicao.some((c) => c.tipo === "pedra");
+        if (temPedraAuto !== produto.tem_pedra_preciosa) body.tem_pedra_preciosa = temPedraAuto;
+      }
       const obs = observacaoErp.trim() || null;
       const obsOriginal = produto.observacao_erp?.trim() || null;
       if (obs !== obsOriginal) body.observacao_erp = obs;
@@ -622,7 +731,19 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
 
       if (nomeEdit.trim() !== (produto.nome ?? "").trim()) body.nome = nomeEdit.trim();
       if ((tipoMetalEdit || "") !== (produto.tipo_metal ?? "")) body.tipo_metal = tipoMetalEdit || null;
-      if ((categoriaEdit || "") !== (produto.categoria_geral ?? "")) body.categoria_geral = categoriaEdit || null;
+      if ((categoriaEdit || "") !== (produto.categoria_geral ?? "")) {
+        body.categoria_geral = categoriaEdit || null;
+        // Se produto é Alisson e categoria mudou, perguntar se quer aplicar
+        // a rota padrão da nova categoria. Resposta SIM → backend sobrescreve
+        // produto_rota com etapas do template default.
+        const FORN_ALISSON = ["Fabricação Própria", "ARAS Indústria (Fábrica Alisson)"];
+        const fornAtual = fornecedorEdit.trim() || produto.fornecedor || "";
+        if (FORN_ALISSON.includes(fornAtual) && (categoriaEdit || "").trim()) {
+          if (confirm(`Categoria mudou para "${categoriaEdit}". Aplicar a rota padrão dessa categoria? Isso vai sobrescrever a rota atual do produto.`)) {
+            body.aplicar_rota_padrao = true;
+          }
+        }
+      }
       if (situacaoEdit !== (produto.situacao ?? "A")) body.situacao = situacaoEdit;
 
       // Precificação — aceita formato brasileiro:
@@ -667,8 +788,13 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       }
       if (tipoItemEdit !== (produto.tipo_item ?? "")) body.tipo_item = tipoItemEdit || null;
 
+      // Persiste rota/reposição mesmo quando body do PATCH principal está vazio.
+      // (Esses dois endpoints são separados — UPSERT idempotente, sem dirty-check.)
+      const extrasOk = await persistirReposicaoERota(produto.id_produto);
+      if (extrasOk) setExtrasDirty(false);
+
       if (Object.keys(body).length === 0) {
-        setSaveMsg({ ok: true, texto: "Nenhuma alteração para salvar." });
+        setSaveMsg({ ok: extrasOk, texto: extrasOk ? "Alterações salvas com sucesso." : "Erro ao salvar reposição/rota." });
         setSaving(false);
         return;
       }
@@ -682,12 +808,13 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
         const b = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(b.error ?? "Erro ao salvar");
       }
-      const data = await res.json() as { produto: ProdutoDetalhe };
-      setProduto((prev) => prev ? { ...prev, ...data.produto } : prev);
+      const data = await res.json() as { produto: ProdutoDetalhe; tiny_sync?: { ok: boolean; erro?: string } };
+      setProduto((prev) => prev ? { ...prev, ...data.produto, tiny_sync_status: data.tiny_sync?.ok ? "ok" : (data.tiny_sync ? "erro" : prev.tiny_sync_status), tiny_sync_erro: data.tiny_sync?.erro ?? prev.tiny_sync_erro } : prev);
       setSaveMsg({ ok: true, texto: "Alterações salvas com sucesso." });
       onSaved?.();
       setTimeout(() => setSaveMsg(null), 3000);
-      // Oferecer propagação para variações se for pai
+      // Oferecer propagação manual para medidas/BOM (campos simples já foram
+      // propagados automaticamente pelo backend).
       if (produto.eh_pai && variacoes.length > 0 && Object.keys(body).length > 0) {
         setShowPropagar(true);
       }
@@ -712,11 +839,36 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       if (!res.ok) throw new Error(b.error ?? "Erro ao propagar");
       setPropagarMsg({ ok: true, texto: `Propagado para ${b.propagado ?? variacoes.length} variação(ões).` });
       setShowPropagar(false);
-      setTimeout(() => setPropagarMsg(null), 4000);
+      // Fechar drawer após propagar
+      setTimeout(() => {
+        onClose();
+      }, 1000);
     } catch (e) {
       setPropagarMsg({ ok: false, texto: e instanceof Error ? e.message : "Erro ao propagar" });
     } finally {
       setPropagando(false);
+    }
+  }
+
+  async function handleSyncTiny() {
+    if (!produto) return;
+    setSyncingTiny(true);
+    setTinySyncMsg(null);
+    try {
+      const res = await fetch(`/api/produtos/${produto.id_produto}/tiny-sync`, { method: "POST" });
+      if (res.ok) {
+        setTinySyncMsg({ ok: true, texto: "Produto sincronizado com Tiny com sucesso." });
+        const b = await res.json() as { tinyId?: number };
+        setProduto((prev) => prev ? { ...prev, id_api_produto: b.tinyId ?? prev.id_api_produto, tiny_sync_status: "ok", tiny_sync_erro: null } : prev);
+      } else {
+        const b = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(b.error ?? "Erro ao sincronizar com Tiny");
+      }
+    } catch (e) {
+      setTinySyncMsg({ ok: false, texto: e instanceof Error ? e.message : "Erro ao sincronizar" });
+    } finally {
+      setSyncingTiny(false);
+      setTimeout(() => setTinySyncMsg(null), 8000);
     }
   }
 
@@ -750,8 +902,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
 
   const hasChanges =
     produto !== null &&
-    (temPedra !== produto.tem_pedra_preciosa ||
-      (observacaoErp.trim() || null) !== (produto.observacao_erp?.trim() || null) ||
+    ((observacaoErp.trim() || null) !== (produto.observacao_erp?.trim() || null) ||
       (fornecedorEdit.trim() || null) !== ((produto.fornecedor ?? "").trim() || null) ||
       (larguraAro || "") !== (produto.largura_aro ?? "") ||
       (alturaAro  || "") !== (produto.altura_aro  ?? "") ||
@@ -769,7 +920,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
          ? ((precoCompraUsdEdit || "") !== (produto.preco_compra_usd != null ? String(produto.preco_compra_usd) : "") ||
             (quantidadePedraEdit || "") !== (produto.quantidade_pedra != null ? String(produto.quantidade_pedra) : ""))
          : false)) ||
-      tipoItemEdit           !== (produto.tipo_item ?? ""));
+      tipoItemEdit           !== (produto.tipo_item ?? "") ||
+      extrasDirty);
 
   return (
     <>
@@ -803,6 +955,20 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                   )}
                   {!produto.id_api_produto && !produto.tiny_sync_status && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">Sem ID Tiny</span>
+                  )}
+                  {produto.id_api_produto && !produto.tiny_sync_status && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">Sincronizado Tiny</span>
+                  )}
+                  {podeEditar && (
+                    <button
+                      onClick={handleSyncTiny}
+                      disabled={syncingTiny}
+                      className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors disabled:opacity-50 hover:bg-gray-100 text-gray-500 border border-gray-200"
+                      title="Sincronizar com Tiny ERP"
+                    >
+                      <RefreshCw size={10} className={syncingTiny ? "animate-spin" : ""} />
+                      {syncingTiny ? "Sincronizando..." : "Sync Tiny"}
+                    </button>
                   )}
                 </div>
               </>
@@ -1192,7 +1358,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
               {showAvancado && (
               <section>
                 <div className="flex items-center justify-between mb-2">
-                  <p className={sectionTitleCls}>Composição (BOM)</p>
+                  <p className={sectionTitleCls}>Apontamento Padrão</p>
                   {!showAddForm && !editingItem && (
                     <button
                       onClick={() => setShowAddForm(true)}
@@ -1318,44 +1484,117 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
               </section>
               )}
 
-              {/* ── MEDIDAS (ficha técnica) ── (só modo avançado) */}
-              {showAvancado && (
+              {/* ── FICHA TÉCNICA (foto + medidas) ── */}
               <section>
-                <p className={sectionTitleCls}>Medidas</p>
-                <div className="grid grid-cols-3 gap-2">
+                <p className={sectionTitleCls}>Ficha Técnica</p>
+
+                {/* Medidas — largura, altura, base (mm). Opcionais. */}
+                <div className="grid grid-cols-3 gap-2 mb-3">
                   <div>
-                    <label className={labelCls}>Largura aro (mm)</label>
+                    <p className={labelCls}>Largura (mm)</p>
                     <input
-                      type="number" step="any" min="0"
+                      type="number"
+                      step="0.01"
+                      min="0"
                       value={larguraAro}
                       onChange={(e) => setLarguraAro(e.target.value)}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036] transition-colors"
                       placeholder="—"
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
                     />
                   </div>
                   <div>
-                    <label className={labelCls}>Altura aro (mm)</label>
+                    <p className={labelCls}>Altura (mm)</p>
                     <input
-                      type="number" step="any" min="0"
+                      type="number"
+                      step="0.01"
+                      min="0"
                       value={alturaAro}
                       onChange={(e) => setAlturaAro(e.target.value)}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036] transition-colors"
                       placeholder="—"
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
                     />
                   </div>
                   <div>
-                    <label className={labelCls}>Base (mm)</label>
+                    <p className={labelCls}>Base (mm)</p>
                     <input
-                      type="number" step="any" min="0"
+                      type="number"
+                      step="0.01"
+                      min="0"
                       value={baseVal}
                       onChange={(e) => setBaseVal(e.target.value)}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036] transition-colors"
                       placeholder="—"
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
                     />
                   </div>
                 </div>
+
+                <input
+                  ref={fichaTecnicaInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => { setFichaTecnicaUploadBase64(ev.target?.result as string); setExtrasDirty(true); };
+                    reader.readAsDataURL(f);
+                    e.target.value = "";
+                  }}
+                />
+                {(fichaTecnicaUploadBase64 || fichaTecnicaUrl) ? (
+                  <div className="relative rounded-lg overflow-hidden border" style={{ borderColor: C.cremeBorder }}>
+                    <img
+                      src={fichaTecnicaUploadBase64 ?? fichaTecnicaUrl ?? ""}
+                      alt="Ficha técnica"
+                      className="w-full h-48 object-contain bg-gray-50"
+                    />
+                    <div className="absolute top-2 right-2 flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => fichaTecnicaInputRef.current?.click()}
+                        className="p-1.5 rounded-lg bg-white/95 hover:bg-white shadow-md text-gray-700"
+                        title="Trocar foto"
+                      >
+                        <Camera className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (fichaTecnicaUploadBase64) {
+                            // Apenas descarta upload pendente (não foi salvo ainda)
+                            setFichaTecnicaUploadBase64(null);
+                          } else if (produto) {
+                            if (!confirm("Remover foto de ficha técnica?")) return;
+                            await fetch(`/api/produtos/${produto.id_produto}/ficha-tecnica`, { method: "DELETE" });
+                            setFichaTecnicaUrl(null);
+                          }
+                        }}
+                        className="p-1.5 rounded-lg bg-white/95 hover:bg-white shadow-md text-red-500"
+                        title="Remover"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => fichaTecnicaInputRef.current?.click()}
+                    className="w-full border-2 border-dashed rounded-lg py-8 text-center hover:bg-gray-50"
+                    style={{ borderColor: C.cremeBorder }}
+                  >
+                    <Camera className="w-6 h-6 mx-auto mb-1 text-gray-400" />
+                    <p className="text-sm text-gray-500">Adicionar foto da ficha técnica</p>
+                    <p className="text-[10px] text-gray-400">JPG, PNG, WEBP</p>
+                  </button>
+                )}
+                {fichaTecnicaUploadBase64 && (
+                  <p className="text-[10px] mt-1 text-blue-600">
+                    Foto será salva ao clicar em &quot;Salvar alterações&quot;.
+                  </p>
+                )}
               </section>
-              )}
 
               {/* ── PRECIFICAÇÃO (editável) ── sempre visível */}
               <section>
@@ -1439,9 +1678,18 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                       const pesoLive   = parseNum(pesoEdit);
                       const markupLive = parseNum(markupEdit);
                       const fatorLive  = parseNum(fatorEdit) || 1;
-                      const podeCalc = pesoLive > 0 && markupLive > 0 && cotacaoOuro > 0;
+                      const podeCalc = pesoLive > 0 && markupLive > 0 && cotacaoOuro > 0 && curvaConfig != null;
+                      // Curva canônica (mesma fórmula da aba /precificacao):
+                      //   preço = peso × (cotacao × fator) × (goldCostPct/100) × markup → arredondado
+                      // O `fator` é específico do SKU e multiplica a cotação (default 1 quando ausente).
                       const precoLive = podeCalc
-                        ? Math.round((pesoLive * cotacaoOuro * markupLive * fatorLive) / 10) * 10
+                        ? calcularPrecoSync(
+                            pesoLive,
+                            cotacaoOuro * fatorLive,
+                            markupLive,
+                            curvaConfig!.arredondamento,
+                            curvaConfig!.goldCostPercentage,
+                          )
                         : null;
                       const toStrCmp = (v: unknown) => (v == null ? "" : String(v));
                       const editando =
@@ -1498,27 +1746,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
               <section>
                 <p className={sectionTitleCls}>Dados ERP (editável)</p>
                 <div className="space-y-3">
-                  {/* tem_pedra_preciosa toggle */}
-                  <div className="flex items-center justify-between py-2 px-3 border border-gray-200 rounded-lg">
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Tem pedra preciosa</p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        Afeta cálculo de preço das pedras
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setTemPedra((v) => !v)}
-                      className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
-                      style={{ backgroundColor: temPedra ? C.esmeralda : "#D1D5DB" }}
-                      role="switch"
-                      aria-checked={temPedra}
-                    >
-                      <span
-                        className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
-                        style={{ transform: temPedra ? "translateX(18px)" : "translateX(2px)" }}
-                      />
-                    </button>
-                  </div>
+                  {/* tem_pedra_preciosa: detectado automaticamente no save a
+                      partir do Apontamento Padrão (composição). Toggle removido. */}
 
                   {/* observacao_erp */}
                   <div>
@@ -1534,6 +1763,174 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                 </div>
               </section>
               )}
+
+              {/* ── PRODUÇÃO: REPOSIÇÃO + TEMPO DE FABRICAÇÃO ── */}
+              <section>
+                <p className={sectionTitleCls}>Produção</p>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className={labelCls}>Estoque mínimo</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={estoqueMinimoEdit}
+                        onChange={(e) => { setEstoqueMinimoEdit(e.target.value); setExtrasDirty(true); }}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm tabular-nums bg-white focus:outline-none focus:border-[#184036]"
+                        placeholder="0"
+                      />
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        Abaixo disso → OF automática.
+                      </p>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Tempo fabricação (dias)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={tempoFabricacaoDias}
+                        onChange={(e) => { setTempoFabricacaoDias(e.target.value); setExtrasDirty(true); }}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm tabular-nums bg-white focus:outline-none focus:border-[#184036]"
+                        placeholder="—"
+                      />
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        Prazo padrão pro cliente.
+                      </p>
+                    </div>
+                    <div className="flex flex-col">
+                      <label className={labelCls}>Reposição ativa</label>
+                      <button
+                        type="button"
+                        onClick={() => { setReposicaoAtiva((v) => !v); setExtrasDirty(true); }}
+                        className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none mt-2"
+                        style={{ backgroundColor: reposicaoAtiva ? C.esmeralda : "#D1D5DB" }}
+                        role="switch"
+                        aria-checked={reposicaoAtiva}
+                      >
+                        <span
+                          className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+                          style={{ transform: reposicaoAtiva ? "translateX(18px)" : "translateX(2px)" }}
+                        />
+                      </button>
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        Liga/desliga OFs auto.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <div className="flex items-center justify-between gap-2">
+                  <p className={sectionTitleCls}>Rota de Fabricação</p>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarTemplate(true)}
+                    className="text-[11px] font-semibold px-2 py-1 rounded border hover:bg-white"
+                    style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+                    title="Aplicar template cadastrado em /rotas-padrao"
+                  >
+                    📋 Aplicar template…
+                  </button>
+                </div>
+                <div
+                  className="rounded-lg border-2 p-3"
+                  style={{ borderColor: "#A7D7B8", backgroundColor: "#F0F7F4" }}
+                >
+                  {rotaEtapas.length === 0 ? (
+                    <p className="text-[12px] py-2" style={{ color: "#6B7280" }}>
+                      Nenhuma etapa cadastrada.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 mb-2">
+                      {rotaEtapas.map((sid, idx) => {
+                        const setor = setoresDisponiveis.find((s) => s.id === sid);
+                        return (
+                          <div
+                            key={`${sid}-${idx}`}
+                            className="flex items-center gap-2 bg-white rounded-md px-2 py-1.5 border"
+                            style={{ borderColor: C.cremeBorder }}
+                          >
+                            <span
+                              className="text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center"
+                              style={{ backgroundColor: C.esmeralda, color: "#F3EADA" }}
+                            >
+                              {idx + 1}
+                            </span>
+                            <span className="flex-1 text-sm" style={{ color: "#111827" }}>
+                              {setor?.nome ?? `Setor #${sid}`}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (idx === 0) return;
+                                const arr = [...rotaEtapas];
+                                [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
+                                setRotaEtapas(arr); setExtrasDirty(true);
+                              }}
+                              disabled={idx === 0}
+                              className="text-[11px] px-1 disabled:opacity-30"
+                              title="Subir"
+                            >
+                              ▲
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (idx === rotaEtapas.length - 1) return;
+                                const arr = [...rotaEtapas];
+                                [arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]];
+                                setRotaEtapas(arr); setExtrasDirty(true);
+                              }}
+                              disabled={idx === rotaEtapas.length - 1}
+                              className="text-[11px] px-1 disabled:opacity-30"
+                              title="Descer"
+                            >
+                              ▼
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setRotaEtapas(rotaEtapas.filter((_, i) => i !== idx)); setExtrasDirty(true); }}
+                              className="p-1 rounded hover:bg-red-50 text-red-500"
+                              title="Remover"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <select
+                    onChange={(e) => {
+                      const sid = parseInt(e.target.value);
+                      if (Number.isInteger(sid) && sid > 0) {
+                        setRotaEtapas([...rotaEtapas, sid]); setExtrasDirty(true);
+                        e.target.value = "";
+                      }
+                    }}
+                    defaultValue=""
+                    className="w-full border rounded-md px-2 py-1.5 text-sm bg-white outline-none"
+                    style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                  >
+                    <option value="" disabled>+ Adicionar etapa…</option>
+                    {setoresDisponiveis.length === 0 && (
+                      <option value="" disabled>Nenhum setor cadastrado — cadastre em /setores</option>
+                    )}
+                    {setoresDisponiveis.map((s) => (
+                      <option key={s.id} value={s.id}>{s.nome}</option>
+                    ))}
+                  </select>
+
+                  {setoresDisponiveis.length === 0 && (
+                    <p className="text-[10px] mt-1" style={{ color: "#9A3412" }}>
+                      Vá até <a href="/setores" target="_blank" rel="noopener" className="underline font-semibold">/setores</a> pra cadastrar setores.
+                    </p>
+                  )}
+                </div>
+              </section>
+
 
               {/* ── VARIAÇÕES (só se for pai) ── (só modo avançado) */}
               {showAvancado && produto.eh_pai && variacoes.length > 0 && (
@@ -1627,7 +2024,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                     Ambos
                   </button>
                   <button
-                    onClick={() => setShowPropagar(false)}
+                    onClick={() => { setShowPropagar(false); onClose(); }}
                     className="px-2.5 py-1.5 rounded-md text-xs text-gray-500 hover:text-gray-700 transition-colors"
                   >
                     Só no pai
@@ -1645,6 +2042,18 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
               >
                 <AlertCircle size={12} />
                 {propagarMsg.texto}
+              </div>
+            )}
+            {tinySyncMsg && (
+              <div
+                className={`mb-3 flex items-center gap-2 text-xs rounded-lg px-3 py-2 border ${
+                  tinySyncMsg.ok
+                    ? "bg-green-50 text-green-700 border-green-100"
+                    : "bg-red-50 text-red-600 border-red-100"
+                }`}
+              >
+                <AlertCircle size={12} />
+                {tinySyncMsg.texto}
               </div>
             )}
             {saveMsg && (
@@ -1671,6 +2080,24 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
           </div>
         )}
       </div>
+
+      {mostrarTemplate && produto && (
+        <AplicarTemplateModal
+          produtoId={produto.id_produto}
+          categoriaProduto={categoriaEdit || null}
+          onClose={() => setMostrarTemplate(false)}
+          onAplicado={async () => {
+            // Após aplicar via API, recarrega etapas locais
+            try {
+              const r = await fetch(`/api/produtos/${produto.id_produto}/rota`);
+              if (r.ok) {
+                const d = await r.json() as { etapas?: { setor_id: number }[] };
+                setRotaEtapas((d.etapas ?? []).map((e) => Number(e.setor_id)));
+              }
+            } catch { /* ignore */ }
+          }}
+        />
+      )}
     </>
   );
 }

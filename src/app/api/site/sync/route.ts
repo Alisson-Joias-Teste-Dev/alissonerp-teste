@@ -148,12 +148,17 @@ export async function POST(_req: NextRequest) {
           0
         ) AS preco,
         GREATEST(
-          COALESCE(e.saldo, 0)::int,
           COALESCE((
-            SELECT SUM(ef.saldo)::int FROM alissonerp.erp_produtos pp
+            SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END)::int
+            FROM alissonerp.movimentacoes_estoque_comercial m
+            WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'
+          ), 0),
+          COALESCE((
+            SELECT SUM(CASE WHEN m_f.tipo = 'entrada' THEN m_f.quantidade ELSE -m_f.quantidade END)::int
+            FROM alissonerp.erp_produtos pp
             INNER JOIN alissonerp.erp_produtos fp ON fp.parent_id = pp.id
             INNER JOIN public.produtos fpr ON fpr.id_produto = fp.produto_id
-            INNER JOIN public.estoque ef ON ef.sku = fpr.sku
+            INNER JOIN alissonerp.movimentacoes_estoque_comercial m_f ON m_f.produto_id = fpr.id_produto AND m_f.status = 'efetivado'
             WHERE pp.produto_id = p.id_produto
           ), 0),
           COALESCE((
@@ -164,7 +169,6 @@ export async function POST(_req: NextRequest) {
         sp.wc_product_id
       FROM alissonerp.site_produtos sp
       JOIN public.produtos p ON p.id_produto = sp.produto_id
-      LEFT JOIN public.estoque e ON e.sku = p.sku
       WHERE sp.publicado_no_site = true AND p.situacao = 'A'
     `;
 
@@ -211,9 +215,12 @@ export async function POST(_req: NextRequest) {
                      NULLIF(p.preco_tiny::numeric, 0),
                      0
                    )::float                                 AS preco,
-                   COALESCE(e.saldo, 0)::int                AS saldo
+                   COALESCE((
+                     SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END)::int
+                     FROM alissonerp.movimentacoes_estoque_comercial m
+                     WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'
+                   ), 0)::int                               AS saldo
             FROM public.produtos p
-            LEFT JOIN public.estoque e ON e.sku = p.sku
             WHERE p.sku LIKE ${alvo.sku + "-%"}
           `;
           const porSku = new Map(filhos.map(f => [f.sku, { preco: Number(f.preco), saldo: Number(f.saldo) }]));

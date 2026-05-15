@@ -34,6 +34,7 @@ import { aplicarCurvaProduto } from "@/lib/aplicar-curva-produto";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { dispararWebhookBackground } from "@/lib/webhooks-server";
+import { syncProdutoToTiny } from "@/lib/produto-tiny-sync";
 
 // ── Helpers para geração de variações ─────────────────────────────────────────
 
@@ -189,24 +190,24 @@ export async function GET(req: NextRequest) {
       : sql`AND (TRIM(p.categoria) = ${categoria} OR TRIM(p.categoria) ILIKE ${`${categoria} -> %`})`
     : sql``;
 
-  // Apenas com saldo >= 1 em public.estoque (join por SKU, agregando para
-  // Saldo vem de 3 fontes: public.estoque (Tiny) + vw_estoque_directus_saldo (legado)
-  // + FILHOS (variações do pai com estoque em public.estoque).
+  // Apenas com saldo >= 1 (estoque comercial alissonerp + directus legado + filhos)
+  // Centralizado no schema alissonerp (não usa mais public.estoque).
   const wEstoque = apenasComEstoque
     ? sql`AND (
-        EXISTS (SELECT 1 FROM public.estoque e
-                WHERE e.sku = p.sku AND e.saldo >= 1)
+        COALESCE((
+          SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END)
+          FROM alissonerp.movimentacoes_estoque_comercial m
+          WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'
+        ), 0) >= 1
         OR EXISTS (SELECT 1 FROM alissonerp.vw_estoque_directus_saldo v
                    WHERE v.insumo_sku = p.sku AND v.saldo >= 1)
-        OR EXISTS (
-          SELECT 1
+        OR (
+          SELECT COALESCE(SUM(CASE WHEN m2.tipo = 'entrada' THEN m2.quantidade ELSE -m2.quantidade END), 0)
           FROM alissonerp.erp_produtos pai_ep
           INNER JOIN alissonerp.erp_produtos filho_ep ON filho_ep.parent_id = pai_ep.id
-          INNER JOIN public.produtos filho_prod ON filho_prod.id_produto = filho_ep.produto_id
-          INNER JOIN public.estoque e2 ON e2.sku = filho_prod.sku
-          WHERE pai_ep.produto_id = p.id_produto
-            AND e2.saldo >= 1
-        )
+          INNER JOIN alissonerp.movimentacoes_estoque_comercial m2 ON m2.produto_id = filho_ep.produto_id
+          WHERE pai_ep.produto_id = p.id_produto AND m2.status = 'efetivado'
+        ) >= 1
       )`
     : sql``;
 
@@ -278,18 +279,17 @@ export async function GET(req: NextRequest) {
           vc.url_capa AS foto_produto,
           COALESCE(vi.imagens, '[]'::jsonb) AS imagens,
           -- Saldo consolidado: MAIOR valor entre 3 fontes (próprio, filhos, directus).
-          -- Usa GREATEST (não COALESCE) pra pais com linha em public.estoque = 0
+          -- Usa GREATEST (não COALESCE) pra pais com linha em movimentacoes = 0
           -- não ficarem "presos" a esse 0 e sim mostrarem a soma dos filhos.
           GREATEST(
-            COALESCE((SELECT e.saldo FROM public.estoque e WHERE e.sku = p.sku LIMIT 1), 0)::int,
+            COALESCE((SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END) FROM alissonerp.movimentacoes_estoque_comercial m WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'), 0)::int,
             COALESCE((SELECT SUM(v.saldo) FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku), 0)::int,
             COALESCE((
-              SELECT SUM(e_f.saldo)::int
+              SELECT SUM(CASE WHEN m_f.tipo = 'entrada' THEN m_f.quantidade ELSE -m_f.quantidade END)::int
               FROM alissonerp.erp_produtos pai_e
               INNER JOIN alissonerp.erp_produtos filho_e ON filho_e.parent_id = pai_e.id
-              INNER JOIN public.produtos prod_f ON prod_f.id_produto = filho_e.produto_id
-              INNER JOIN public.estoque e_f ON e_f.sku = prod_f.sku
-              WHERE pai_e.produto_id = p.id_produto
+              INNER JOIN alissonerp.movimentacoes_estoque_comercial m_f ON m_f.produto_id = filho_e.produto_id
+              WHERE pai_e.produto_id = p.id_produto AND m_f.status = 'efetivado'
             ), 0)
           ) AS saldo_estoque,
           -- Preço mínimo das variações filhas (quando pai com variable).
@@ -309,6 +309,11 @@ export async function GET(req: NextRequest) {
             CASE WHEN ${wSemPeso}  THEN 'sem_peso'      END,
             CASE WHEN ${wSemPreco} THEN 'sem_preco'     END
           ], NULL) AS pendencias,
+          -- Promocao vigente (migration 248) - preco_tiny do produto continua intacto.
+          vpv.preco_vigente,
+          vpv.em_promocao,
+          vpv.nome_campanha,
+          vpv.data_fim AS promo_data_fim,
           -- Preço da curva = peso × cotação_ouro × markup_aplicado × fator, arredondado à dezena.
           -- Usa markup_aplicado de produto_curva_aplicada (se a curva foi aplicada);
           -- senão usa o markup da própria public.produtos. Cotação buscada de public.parametros.
@@ -348,6 +353,7 @@ export async function GET(req: NextRequest) {
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
+        LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
         WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wVariacoes} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
         ORDER BY ${orderVariacoes}
         LIMIT  ${limit}
@@ -389,7 +395,7 @@ export async function GET(req: NextRequest) {
         vc.url_capa   AS foto_produto,
         COALESCE(vi.imagens, '[]'::jsonb) AS imagens,
         GREATEST(
-          COALESCE((SELECT e.saldo FROM public.estoque e WHERE e.sku = p.sku LIMIT 1), 0)::int,
+          COALESCE((SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END) FROM alissonerp.movimentacoes_estoque_comercial m WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'), 0)::int,
           COALESCE((SELECT SUM(v.saldo) FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku), 0)::int
         ) AS saldo_estoque,
         NULL::int AS preco_filhos_min,
@@ -399,6 +405,11 @@ export async function GET(req: NextRequest) {
           CASE WHEN ${wSemPeso}  THEN 'sem_peso'      END,
           CASE WHEN ${wSemPreco} THEN 'sem_preco'     END
         ], NULL) AS pendencias,
+        -- Promocao vigente (migration 248)
+        vpv.preco_vigente,
+        vpv.em_promocao,
+        vpv.nome_campanha,
+        vpv.data_fim AS promo_data_fim,
         -- Pedras ficam fora do cálculo (ver comentário na query principal).
         CASE
           WHEN p.categoria ILIKE 'Pedras%' THEN NULL
@@ -427,6 +438,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
+      LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
       WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
       ORDER BY ${orderFieldIdent} ${orderDir} NULLS LAST
       LIMIT  ${limit}
@@ -767,29 +779,34 @@ export async function POST(req: NextRequest) {
         contador++;
       }
 
-      // ── Estoque inicial: insere saldo em public.estoque por variação ──────
+      // ── Estoque inicial: registra entrada em movimentacoes_estoque_comercial ─
       // body.quantidades = { "16": 2, "18": 1 } → casa com combo.numeracao.
-      // UPSERT por SKU para ser idempotente (e preservar produto_id_api se vier do Tiny).
+      // Centralizado no schema alissonerp (não usa mais public.estoque).
+      const temColLocalEstoque = await colunaExiste("alissonerp", "movimentacoes_estoque_comercial", "local_estoque_id", tx);
       if (quantidades && Object.keys(quantidades).length > 0) {
         for (const v of variacoesCriadas) {
-          // numeracao vem do sufixo "-N" do sku (ex: "1701-3" → 3). Mais seguro
-          // é casar pela posição mas aqui usamos a convenção: sufixo = contador.
           const match = v.sku.match(/-(\d+)$/);
           if (!match) continue;
-          const posContador = match[1];
-          // Mapear posContador → numeração do combo correspondente (pelo índice)
           const idxCombo = variacoesCriadas.findIndex((x) => x.sku === v.sku);
           const comboN = combos[idxCombo]?.numeracao;
           if (comboN == null) continue;
           const qtd = quantidades[String(comboN)];
           if (!qtd || qtd <= 0) continue;
-          await tx`
-            INSERT INTO public.estoque (sku, saldo, estoque_loja)
-            VALUES (${v.sku}, ${qtd}, ${qtd})
-            ON CONFLICT (sku) DO UPDATE SET
-              saldo        = public.estoque.saldo        + EXCLUDED.saldo,
-              estoque_loja = public.estoque.estoque_loja + EXCLUDED.estoque_loja
-          `;
+          if (temColLocalEstoque) {
+            await tx`
+              INSERT INTO alissonerp.movimentacoes_estoque_comercial
+                (produto_id, tipo, quantidade, motivo, local_estoque_id, status, created_by)
+              VALUES
+                (${v.produto_id}, 'entrada', ${qtd}, 'estoque_inicial_cadastro', 2, 'efetivado', ${user.id})
+            `;
+          } else {
+            await tx`
+              INSERT INTO alissonerp.movimentacoes_estoque_comercial
+                (produto_id, tipo, quantidade, motivo, status, created_by)
+              VALUES
+                (${v.produto_id}, 'entrada', ${qtd}, 'estoque_inicial_cadastro', 'efetivado', ${user.id})
+            `;
+          }
         }
       }
 
@@ -797,10 +814,16 @@ export async function POST(req: NextRequest) {
     });
 
     // ── Recalcular preço de pedras (fora da transação) ───────────────────────
+    // Protegido por try-catch — se falhar (ex: tabela markup_pedras ausente),
+    // não quebra o cadastro. O preço das pedras pode ser recalculado depois.
     if (temPedra) {
-      await recalcularPrecoPedras(result.pai.id_produto);
-      for (const v of result.variacoes) {
-        await recalcularPrecoPedras(v.produto_id);
+      try {
+        await recalcularPrecoPedras(result.pai.id_produto);
+        for (const v of result.variacoes) {
+          await recalcularPrecoPedras(v.produto_id);
+        }
+      } catch (err) {
+        console.warn("[POST /api/produtos] falha ao recalcular preço das pedras:", err);
       }
     }
 
@@ -813,6 +836,18 @@ export async function POST(req: NextRequest) {
       }
     } catch (err) {
       console.warn("[POST /api/produtos] falha ao aplicar curva:", err);
+    }
+
+    // ── Aplicar rota padrão (Alisson + categoria com template default) ───────
+    // Só aplica em produtos NOVOS — nunca sobrescreve rota já cadastrada.
+    try {
+      const { aplicarRotaPadrao } = await import("@/lib/aplicar-rota-padrao");
+      await aplicarRotaPadrao(result.pai.id_produto);
+      for (const v of result.variacoes) {
+        await aplicarRotaPadrao(v.produto_id);
+      }
+    } catch (err) {
+      console.warn("[POST /api/produtos] falha ao aplicar rota padrão:", err);
     }
 
     // ── Upload de foto ────────────────────────────────────────────────────────
@@ -832,18 +867,31 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Enfileirar sincronização com Tiny ────────────────────────────────────
+    // ── Sincronização com Tiny (não-bloqueante) ──────────────────────────
+    // Antes o sync era síncrono: para N variações, esperava N × 12s (timeout HTTP).
+    // Isso causava erro 500 (timeout Vercel 10s) com produtos de 35+ variações.
+    // Agora roda em background — se falhar, o CRON (tiny_sync_produtos) completa.
     const todosSyncIds = [result.pai.id_produto, ...result.variacoes.map((v: { produto_id: number }) => v.produto_id)];
-    try {
-      for (const pid of todosSyncIds) {
+
+    // 1. Enfileira todos na fila (rápido, só INSERT no banco)
+    for (const pid of todosSyncIds) {
+      try {
         await sql`
           INSERT INTO alissonerp.tiny_sync_produtos (produto_id, operacao, status)
           VALUES (${pid}, 'create', 'pendente')
           ON CONFLICT (produto_id) DO UPDATE SET operacao = 'create', status = 'pendente', tentativas = 0, updated_at = NOW()
         `;
+      } catch (err) {
+        console.warn("[POST /api/produtos] falha ao enfileirar sync Tiny:", err);
       }
-    } catch (err) {
-      console.warn("[POST /api/produtos] falha ao enfileirar sync Tiny:", err);
+    }
+
+    // 2. Dispara syncs em background (fire-and-forget) — não bloqueia a resposta.
+    //    A fila tiny_sync_produtos já garante fallback via CRON se falhar.
+    for (const pid of todosSyncIds) {
+      syncProdutoToTiny(pid, "create").catch((err) => {
+        console.warn(`[POST /api/produtos] sync background falhou pid=${pid}:`, err);
+      });
     }
 
     // Notifica o site em background
@@ -862,6 +910,7 @@ export async function POST(req: NextRequest) {
         erp: result.erp,
         variacoes: result.variacoes,
         totalCriados: 1 + result.variacoes.length,
+        tiny_sync: "background", // syncs rodam em background — fila tiny_sync_produtos garante fallback
       },
       { status: 201 }
     );

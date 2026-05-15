@@ -66,26 +66,27 @@ export function buildFiltrosProdutos(sp: Sp, opts: FiltrosOpts = {}) {
     sql``
   );
 
-  // Saldo pode vir de 3 fontes (em ordem de prioridade):
-  //   1. public.estoque (produto acabado do Tiny, casa por SKU)
+  // Saldo pode vir de 3 fontes (centralizado no schema alissonerp):
+  //   1. alissonerp.movimentacoes_estoque_comercial (estoque comercial, por produto_id)
   //   2. alissonerp.vw_estoque_directus_saldo (insumos/pedras do Directus legado)
   //   3. FILHOS: se o produto é pai (eh_pai=true ou simples com filhos em erp_produtos),
   //      considera com estoque se QUALQUER variação dele tem saldo >= 1.
   const wEstoque = has(opts, "apenas_com_estoque") && apenasComEstoque
     ? sql`AND (
-        EXISTS (SELECT 1 FROM public.estoque e
-                WHERE e.sku = p.sku AND e.saldo >= 1)
+        COALESCE((
+          SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END)
+          FROM alissonerp.movimentacoes_estoque_comercial m
+          WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'
+        ), 0) >= 1
         OR EXISTS (SELECT 1 FROM alissonerp.vw_estoque_directus_saldo v
                    WHERE v.insumo_sku = p.sku AND v.saldo >= 1)
-        OR EXISTS (
-          SELECT 1
+        OR (
+          SELECT COALESCE(SUM(CASE WHEN m2.tipo = 'entrada' THEN m2.quantidade ELSE -m2.quantidade END), 0)
           FROM alissonerp.erp_produtos pai_ep
           INNER JOIN alissonerp.erp_produtos filho_ep ON filho_ep.parent_id = pai_ep.id
-          INNER JOIN public.produtos filho_prod ON filho_prod.id_produto = filho_ep.produto_id
-          INNER JOIN public.estoque e2 ON e2.sku = filho_prod.sku
-          WHERE pai_ep.produto_id = p.id_produto
-            AND e2.saldo >= 1
-        )
+          INNER JOIN alissonerp.movimentacoes_estoque_comercial m2 ON m2.produto_id = filho_ep.produto_id
+          WHERE pai_ep.produto_id = p.id_produto AND m2.status = 'efetivado'
+        ) >= 1
       )`
     : sql``;
 

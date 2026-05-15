@@ -2,7 +2,8 @@
  * GET /api/site/produtos
  *
  * Lista produtos do ERP com o status da integração com o site.
- * Cruza public.produtos × public.estoque × alissonerp.site_produtos.
+  * Cruza public.produtos × alissonerp.site_produtos.
+  * Estoque centralizado em alissonerp.movimentacoes_estoque_comercial.
  *
  * Query params:
  *   busca       — filtra nome/sku
@@ -97,18 +98,17 @@ export async function GET(req: NextRequest) {
           0
         )                                               AS preco,
         -- Saldo consolidado (3 fontes, maior delas):
-        --   1. public.estoque do próprio SKU
+        --   1. alissonerp.movimentacoes_estoque_comercial do próprio produto
         --   2. SUM de saldo dos filhos (se for pai com variações)
         --   3. vw_estoque_directus_saldo (insumos/pedras)
         GREATEST(
-          COALESCE(e.saldo, 0)::int,
+          COALESCE((SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END) FROM alissonerp.movimentacoes_estoque_comercial m WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'), 0)::int,
           COALESCE((
-            SELECT SUM(e_filho.saldo)::int
+            SELECT SUM(CASE WHEN m_f.tipo = 'entrada' THEN m_f.quantidade ELSE -m_f.quantidade END)::int
             FROM alissonerp.erp_produtos pai_ep
             INNER JOIN alissonerp.erp_produtos filho_ep ON filho_ep.parent_id = pai_ep.id
-            INNER JOIN public.produtos filho_prod ON filho_prod.id_produto = filho_ep.produto_id
-            INNER JOIN public.estoque e_filho ON e_filho.sku = filho_prod.sku
-            WHERE pai_ep.produto_id = p.id_produto
+            INNER JOIN alissonerp.movimentacoes_estoque_comercial m_f ON m_f.produto_id = filho_ep.produto_id
+            WHERE pai_ep.produto_id = p.id_produto AND m_f.status = 'efetivado'
           ), 0),
           COALESCE((
             SELECT SUM(v.saldo)::int
@@ -124,7 +124,6 @@ export async function GET(req: NextRequest) {
         sp.ultima_tentativa_at
       FROM public.produtos p
       LEFT JOIN alissonerp.erp_produtos ep   ON ep.produto_id = p.id_produto
-      LEFT JOIN public.estoque e             ON e.sku = p.sku
       LEFT JOIN alissonerp.site_produtos sp  ON sp.produto_id = p.id_produto
       WHERE p.situacao = 'A'
         AND (ep.eh_variacao = false OR ep.id IS NULL)
@@ -139,15 +138,19 @@ export async function GET(req: NextRequest) {
           : sql``}
         ${apenasComEstoque
           ? sql`AND (
-                EXISTS (SELECT 1 FROM public.estoque e2 WHERE e2.sku = p.sku AND e2.saldo >= 1)
+                COALESCE((
+                  SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END)
+                  FROM alissonerp.movimentacoes_estoque_comercial m
+                  WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'
+                ), 0) >= 1
                 OR EXISTS (SELECT 1 FROM alissonerp.vw_estoque_directus_saldo v WHERE v.insumo_sku = p.sku AND v.saldo >= 1)
-                OR EXISTS (
-                  SELECT 1 FROM alissonerp.erp_produtos pai_ep
+                OR (
+                  SELECT COALESCE(SUM(CASE WHEN m2.tipo = 'entrada' THEN m2.quantidade ELSE -m2.quantidade END), 0)
+                  FROM alissonerp.erp_produtos pai_ep
                   INNER JOIN alissonerp.erp_produtos filho_ep ON filho_ep.parent_id = pai_ep.id
-                  INNER JOIN public.produtos filho_prod ON filho_prod.id_produto = filho_ep.produto_id
-                  INNER JOIN public.estoque e3 ON e3.sku = filho_prod.sku
-                  WHERE pai_ep.produto_id = p.id_produto AND e3.saldo >= 1
-                )
+                  INNER JOIN alissonerp.movimentacoes_estoque_comercial m2 ON m2.produto_id = filho_ep.produto_id
+                  WHERE pai_ep.produto_id = p.id_produto AND m2.status = 'efetivado'
+                ) >= 1
               )`
           : sql``}
       ORDER BY publicado_no_site DESC, p.nome ASC

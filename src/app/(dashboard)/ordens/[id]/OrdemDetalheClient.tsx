@@ -7,7 +7,7 @@ import ComentariosOrdem from "@/components/ComentariosOrdem";
 import GaleriaFotosOrdem from "@/components/ordem/GaleriaFotosOrdem";
 import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
 import FichaTecnicaForm, { TIPOS_ITEM, type TipoItem, type FichaTecnicaDados, validarFichaTecnica } from "@/components/ordens/FichaTecnicaForm";
-import { Pencil, X, Save, Loader2, AlertCircle } from "lucide-react";
+import { Pencil, X, Save, Loader2, AlertCircle, Ban } from "lucide-react";
 import { formatDateBR } from "@/lib/formatters";
 
 const C = {
@@ -205,15 +205,22 @@ interface Props {
   userRole: string | null;
 }
 
+// Roles "operacionais" — colaboradores de execução que só precisam ver a
+// ficha técnica da peça (não veem Produção, Apontamentos, Mov. Estoque ou
+// Transferências). Gestão (admin, gerente, pcp, consultora) vê tudo.
+const ROLES_SO_FICHA = ["ourives", "motoboy", "estoquista_fabrica", "estoquista_loja"];
+
 export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline, userRole }: Props) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("producao");
+  const soFicha = userRole != null && ROLES_SO_FICHA.includes(userRole);
+  const [tab, setTab] = useState<Tab>(soFicha ? "ficha" : "producao");
   const [comentariosCount, setComentariosCount] = useState(0);
 
   // ── Modal de edição (apenas desenvolvedor) ───────────────────────────────
   const [editOpen,    setEditOpen]    = useState(false);
   const [editSaving,  setEditSaving]  = useState(false);
   const [editError,   setEditError]   = useState<string | null>(null);
+  const [canceling,   setCanceling]   = useState(false);
   const [editFields,  setEditFields]  = useState({
     data_entrega:         ordem.data_entrega ? new Date(ordem.data_entrega).toISOString().slice(0, 10) : "",
     detalhes_ordem:       ordem.detalhes_ordem ?? "",
@@ -242,6 +249,24 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
     if (!res.ok) { setEditError(data?.error ?? "Erro ao salvar"); return; }
     setEditOpen(false);
     router.refresh();
+  }
+
+  // ── Cancelar ordem ──────────────────────────────────────────────────────
+  const podeCancelar = ordem.situacao !== "cancelado" && ordem.status !== "concluido";
+  async function cancelarOrdem() {
+    if (!confirm("Tem certeza que deseja cancelar esta ordem? Esta ação cancela também o PCP vinculado.")) return;
+    setCanceling(true);
+    setEditError(null);
+    try {
+      const res = await fetch(`/api/ordens/${ordem.id}/cancelar`, { method: "PATCH" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
+      router.refresh();
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : "Erro ao cancelar ordem");
+    } finally {
+      setCanceling(false);
+    }
   }
 
   // ── Ficha técnica pendente ──────────────────────────────────────────────────
@@ -285,13 +310,19 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
   // Encontrar o passo atual (primeiro não-concluido)
   const passoAtualIdx = timeline.findIndex((ev) => ev.status !== "concluido");
 
-  const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: "producao",       label: "Produção" },
-    { key: "apontamentos",   label: "Apontamentos",   count: apontamentos.length },
-    { key: "estoque",        label: "Mov. Estoque",   count: movEstoque.length },
-    { key: "transferencias", label: "Transferências", count: transferencias.length },
-    { key: "ficha",          label: "Ficha Técnica",  count: fichaTecnica?._origem === "erp_multi" ? (fichaTecnica.fichas?.length ?? 0) : fichaTecnica ? 1 : 0 },
-  ];
+  const fichaCount = fichaTecnica?._origem === "erp_multi" ? (fichaTecnica.fichas?.length ?? 0) : fichaTecnica ? 1 : 0;
+  const tabs: { key: Tab; label: string; count?: number }[] = soFicha
+    ? [
+        // Colaborador (ourives etc.): só ficha técnica
+        { key: "ficha", label: "Ficha Técnica", count: fichaCount },
+      ]
+    : [
+        { key: "producao",       label: "Produção" },
+        { key: "apontamentos",   label: "Apontamentos",   count: apontamentos.length },
+        { key: "estoque",        label: "Mov. Estoque",   count: movEstoque.length },
+        { key: "transferencias", label: "Transferências", count: transferencias.length },
+        { key: "ficha",          label: "Ficha Técnica",  count: fichaCount },
+      ];
 
   return (
     <>
@@ -334,6 +365,17 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
             style={{ borderColor: C.dourado, color: C.dourado }}
           >
             <Pencil size={13} /> Editar
+          </button>
+        )}
+        {podeCancelar && (
+          <button
+            onClick={cancelarOrdem}
+            disabled={canceling}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors hover:bg-red-50 disabled:opacity-40"
+            style={{ borderColor: C.danger, color: C.danger }}
+          >
+            {canceling ? <Loader2 size={13} className="animate-spin" /> : <Ban size={13} />}
+            Cancelar Ordem
           </button>
         )}
       </div>

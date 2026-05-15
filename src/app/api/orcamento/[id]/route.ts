@@ -167,21 +167,41 @@ export async function PATCH(
       `;
       const [vendaFinal] = await tx`SELECT numero_venda FROM alissonerp.vendas_erp WHERE id = ${venda.id}`;
 
-      // 3. Criar item da venda
+      // 3. Criar item da venda com comissão calculada via faixas_comissao
+      // Usa nome_modelo salvo (preserva friso, par, label customizado).
+      // Fallback p/ orçamentos antigos sem nome_modelo: monta via perfilNomes.
+      const nomeModeloSaved = orc.nome_modelo as string | null;
+      const nomeFallback = perfilNomes[orc.perfil as string] ?? orc.modelo ?? "Personalizada";
       const nomeItem = orc.tipo === "alianca"
-        ? `Aliança ${perfilNomes[orc.perfil as string] ?? orc.modelo ?? "Personalizada"}`
+        ? (nomeModeloSaved
+            ? (nomeModeloSaved.startsWith("Par:")
+                ? `Alianças (${nomeModeloSaved.replace(/^Par:\s*/, "")})`
+                : `Aliança ${nomeModeloSaved}`)
+            : `Aliança ${nomeFallback}`)
         : `Peça Personalizada`;
       // Buscar valor e peso diretamente do orçamento (evitar conflito de colunas com ft.*)
       const [orcValores] = await tx`SELECT valor, peso FROM alissonerp.orcamentos WHERE id = ${orcId}`;
       const valorItem = Number(orcValores?.valor ?? 0);
       const pesoItem = Number(orcValores?.peso ?? orc.peso_estimado ?? 0);
+
+      // Calcular comissão baseada na faixa (desconto 0% → mesma lógica do frontend)
+      const [faixa] = await tx`
+        SELECT comissao_pct FROM alissonerp.faixas_comissao
+        WHERE desconto_pct = 0 AND ativo = true
+        LIMIT 1
+      `;
+      const pctComissao = Number(faixa?.comissao_pct ?? 0);
+      const valorComissao = Math.round(valorItem * pctComissao) / 100;
+
       await tx`
         INSERT INTO alissonerp.itens_venda_erp (
           venda_id, nome_produto, quantidade, preco_lista,
-          pct_desconto, preco_unitario, total_item, peso_estimado, observacao
+          pct_desconto, preco_unitario, total_item, peso_estimado,
+          pct_comissao, valor_comissao, observacao
         ) VALUES (
           ${venda.id}, ${nomeItem}, 1, ${valorItem},
           0, ${valorItem}, ${valorItem}, ${pesoItem},
+          ${pctComissao}, ${valorComissao},
           ${'Orçamento ' + orc.numero_orcamento}
         )
       `;
@@ -293,6 +313,11 @@ export async function PUT(
           friso_profundidade = ${ficha.friso_profundidade ?? null},
           friso_offset = ${ficha.friso_offset ?? null},
           dome_porcentagem = ${ficha.dome_porcentagem ?? null},
+          canal_largura = ${ficha.canal_largura ?? null},
+          canal_borda_altura = ${ficha.canal_borda_altura ?? null},
+          chanfro_tamanho = ${ficha.chanfro_tamanho ?? null},
+          pedra_fileiras = ${ficha.pedra_fileiras ?? null},
+          pedras_detalhadas = ${ficha.pedras_detalhadas != null ? sql.json(ficha.pedras_detalhadas) : sql`pedras_detalhadas`},
           pedra_drill = ${ficha.pedra_drill ?? false}, pedra_meia_lua = ${ficha.pedra_meia_lua ?? false},
           pedra_volta_completa = ${ficha.pedra_volta_completa ?? false}
         WHERE id = ${existing.ficha_tecnica_id}
@@ -316,11 +341,17 @@ export async function PUT(
           texto = ${ficha2.texto ?? null}, qtd_pedras = ${ficha2.qtd_pedras ?? null},
           tamanho_pedra = ${ficha2.tamanho_pedra ?? null}, tipo_pedra = ${ficha2.tipo_pedra ?? null},
           tipo_aplicacao_pedra = ${ficha2.tipo_aplicacao_pedra ?? null},
+          profundidade_concava = ${ficha2.profundidade_concava ?? null},
           has_friso = ${ficha2.has_friso ?? false}, friso_kind = ${ficha2.friso_kind ?? "friso"},
           friso_tipo = ${ficha2.friso_tipo ?? null},
           friso_lado = ${ficha2.friso_lado ?? null}, friso_largura = ${ficha2.friso_largura ?? null},
           friso_profundidade = ${ficha2.friso_profundidade ?? null}, friso_offset = ${ficha2.friso_offset ?? null},
           dome_porcentagem = ${ficha2.dome_porcentagem ?? null},
+          canal_largura = ${ficha2.canal_largura ?? null},
+          canal_borda_altura = ${ficha2.canal_borda_altura ?? null},
+          chanfro_tamanho = ${ficha2.chanfro_tamanho ?? null},
+          pedra_fileiras = ${ficha2.pedra_fileiras ?? null},
+          pedras_detalhadas = ${ficha2.pedras_detalhadas != null ? sql.json(ficha2.pedras_detalhadas) : sql`pedras_detalhadas`},
           pedra_drill = ${ficha2.pedra_drill ?? false}, pedra_meia_lua = ${ficha2.pedra_meia_lua ?? false},
           pedra_volta_completa = ${ficha2.pedra_volta_completa ?? false}
         WHERE id = ${existing.ficha_tecnica_2_id}

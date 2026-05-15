@@ -38,7 +38,9 @@ export default async function OrcamentoPage() {
     const rows = await sql`
       SELECT id, name, start_mkp, discount_percent, gold_price, camera_override,
              profile, pricing_categories, groove_rules, stone_markup, stone_prices,
-             risco_width, risco_depth, preco_gravacao, stone_markups_table
+             risco_width, risco_depth, preco_gravacao, stone_markups_table,
+             calibracao, espessura_minima_por_modelo, nomes_modelos,
+             promocao_inicio, promocao_fim
       FROM alissonerp.config_orcamento
       WHERE name = 'default'
       LIMIT 1
@@ -64,6 +66,11 @@ export default async function OrcamentoPage() {
     risco_depth: Number(configRow.risco_depth ?? 0.2),
     preco_gravacao: Number(configRow.preco_gravacao ?? 100),
     stone_markups_table: (typeof configRow.stone_markups_table === "object" && configRow.stone_markups_table) ? configRow.stone_markups_table as Record<string, Record<string, number>> : {},
+    calibracao: (typeof configRow.calibracao === "object" && configRow.calibracao) ? configRow.calibracao : null,
+    espessura_minima_por_modelo: (typeof configRow.espessura_minima_por_modelo === "object" && configRow.espessura_minima_por_modelo) ? configRow.espessura_minima_por_modelo as Record<string, number> : null,
+    nomes_modelos: (typeof configRow.nomes_modelos === "object" && configRow.nomes_modelos) ? configRow.nomes_modelos as Record<string, string> : null,
+    promocao_inicio: configRow.promocao_inicio ? String(configRow.promocao_inicio) : null,
+    promocao_fim: configRow.promocao_fim ? String(configRow.promocao_fim) : null,
   } : null;
 
   // Pode gerenciar config: admin, desenvolvedor, gerente_loja

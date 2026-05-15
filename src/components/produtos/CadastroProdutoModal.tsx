@@ -5,15 +5,25 @@ import {
   X, ChevronRight, ChevronLeft, Plus, Trash2, Search,
   AlertCircle, Loader2, Check, Camera,
 } from "lucide-react";
+import {
+  getPricingFactors,
+  calcularPrecoSync,
+  type CurvaConfig,
+  type CurvaCategoriaInput,
+} from "@/lib/curva-precificacao";
+import { createClient } from "@/lib/supabase/client";
+import AplicarTemplateModal from "@/components/produtos/AplicarTemplateModal";
+
+// Roles que veem o bloco de Precificação automática (preview de markup/preço).
+// Demais usuários (admin, gerentes, etc.) NÃO vêem esse cálculo.
+const ROLES_VE_PRECIFICACAO = new Set(["desenvolvedor", "diretor", "admin"]);
+
+// Roles que podem cadastrar produto com campos vazios (bypass das validações
+// obrigatórias). Útil pra Alisson cadastrar rascunho rápido — fábrica/loja
+// continua exigindo 100% preenchido.
+const ROLES_BYPASS_VALIDACAO = new Set(["desenvolvedor", "diretor", "admin"]);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Categoria {
-  id: number;
-  nome: string;
-  faixa: string;
-  curvePoints?: Array<{ markup: number }> | { markup: number } | null;
-}
 
 interface InsumoOpt {
   id: number;
@@ -78,32 +88,7 @@ function parseNumericInput(value: string | number): number {
   return parseFloat(t) || 0;
 }
 
-// ─── Helpers de precificação automática ───────────────────────────────────────
-
-function parseFaixaPeso(faixa: string): { min: number; max: number } | null {
-  // Aceita formatos "0.1 - 0.5", "0.1g - 0.5g", "0,1 g até 0,5 g", etc.
-  // O [\d.,]+ captura número BR ou US; g? absorve o sufixo opcional.
-  const match = faixa.match(/([\d.,]+)\s*g?\s*[-–até]+\s*([\d.,]+)/i);
-  if (!match) return null;
-  const parseN = (s: string) => parseFloat(s.replace(",", "."));
-  return { min: parseN(match[1]), max: parseN(match[2]) };
-}
-
-function extrairMarkupDaCategoria(cat: Categoria): number {
-  const cp = cat.curvePoints;
-  if (!cp) return 3.0;
-  if (Array.isArray(cp) && cp.length > 0 && cp[0].markup != null) return Number(cp[0].markup);
-  if (typeof cp === "object" && !Array.isArray(cp) && "markup" in cp) return Number((cp as { markup: number }).markup);
-  return 3.0;
-}
-
-function buscarCategoriaPorPeso(peso: number, cats: Categoria[]): Categoria | null {
-  for (const c of cats) {
-    const f = parseFaixaPeso(c.faixa);
-    if (f && peso >= f.min && peso <= f.max) return c;
-  }
-  return null;
-}
+// Precificação canônica: ver src/lib/curva-precificacao.ts (única fonte do sistema)
 
 // ── Detecção automática de categoria pelo nome do produto ────────────────────
 const CAT_KEYWORDS: Record<string, string[]> = {
@@ -232,9 +217,6 @@ function temVariacoesPorCategoria(categoriaCompleta: string | null): boolean {
   return c.includes("anel") || c.includes("alianca") || c.includes("aliança");
 }
 
-function arredondarDezena(valor: number): number {
-  return Math.round(valor / 10) * 10;
-}
 const NUMERACOES = NUMERACOES_1_A_35; // 1-35 (completo)
 const COMPRIMENTOS_DEFAULT = [38, 40, 42, 45, 50, 55, 60];
 
@@ -269,7 +251,7 @@ function calcPesoVariacao(
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function StepIndicator({ step, total }: { step: number; total: number }) {
-  const labels = ["Dados Básicos", "Composição", "Medidas", "Variações"];
+  const labels = ["Dados Básicos", "Apontamento", "Ficha Técnica", "Variações"];
   return (
     <div className="flex items-center gap-0">
       {labels.slice(0, total).map((label, i) => {
@@ -528,8 +510,13 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   // Setup data
   const [nextSku, setNextSku] = useState("");
   const [nextSkuAJ, setNextSkuAJ] = useState("");
-  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [curvaCategorias, setCurvaCategorias] = useState<CurvaCategoriaInput[]>([]);
+  const [curvaConfig, setCurvaConfig] = useState<CurvaConfig | null>(null);
   const [cotacao, setCotacao] = useState({ ouro: 860, dollar: 5.24 });
+  // Setores cadastrados (para rota de fabricação)
+  const [setoresDisponiveis, setSetoresDisponiveis] = useState<{ id: number; nome: string }[]>([]);
+  // Role do usuário logado (controla visibilidade do bloco de precificação)
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [insumos, setInsumos] = useState<InsumoOpt[]>([]);
   const [loadingSetup, setLoadingSetup] = useState(false);
 
@@ -549,15 +536,23 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   const [fornecedoresSugeridos, setFornecedoresSugeridos] = useState<string[]>([]);
   const [foto, setFoto] = useState<string | null>(null);
   const fotoInputRef = useRef<HTMLInputElement>(null);
+  // Estoque inicial + reposição automática + rota de fabricação
+  const [estoqueInicial, setEstoqueInicial] = useState("0");
+  const [estoqueMinimo, setEstoqueMinimo] = useState("0");
+  const [tempoFabricacaoDias, setTempoFabricacaoDias] = useState("");
+  const [rotaEtapas, setRotaEtapas] = useState<number[]>([]); // setor_ids na ordem desejada
+  const [mostrarTemplate, setMostrarTemplate] = useState(false);
 
   // Step 2: BOM
   const [bom, setBom] = useState<BomItemLocal[]>([]);
   const [showBomForm, setShowBomForm] = useState(false);
 
-  // Step 3: Medidas
+  // Step 3: Ficha Técnica (substituiu Medidas — campos legados mantidos só por compat)
   const [larguraAro, setLarguraAro] = useState("");
   const [alturaAro, setAlturaAro] = useState("");
   const [base, setBase] = useState("");
+  const [fotoFichaTecnica, setFotoFichaTecnica] = useState<string | null>(null);
+  const fichaTecnicaInputRef = useRef<HTMLInputElement>(null);
 
   // Step 4: Variações
   // gerarVariacoes é alias de temVariacoes (sincronizados)
@@ -585,28 +580,31 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
     setNome(""); setTemVariacoes(true); setTipoMetal("Ouro Amarelo 18k"); setCorMetal("Amarelo");
     setPeso(""); setMarkup(""); setCategoria(""); setTemPedra(false); setFornecedor("");
     setBom([]); setShowBomForm(false);
-    setLarguraAro(""); setAlturaAro(""); setBase("");
+    setLarguraAro(""); setAlturaAro(""); setBase(""); setFotoFichaTecnica(null);
     setEixoNumeracao(false); setEixoCorMetal(false); setEixoComprimento(false);
     setNumeracoesSel(NUMERACOES_1_A_35); setCoresSel(["Amarelo"]);
     setComprimentosSel([40, 45, 50]); setTipoRegra("incremental");
     setBaseNumeracao(16); setIncremento(0.1); setTabelaPeso({}); setQuantidadesVar({});
+    setEstoqueInicial("0"); setEstoqueMinimo("0"); setTempoFabricacaoDias(""); setRotaEtapas([]);
     loadSetup();
   }, [open]);
 
   const loadSetup = useCallback(async () => {
     setLoadingSetup(true);
     try {
-      const [setupRes, insumoRes, fornRes] = await Promise.all([
+      const [setupRes, insumoRes, fornRes, curvaConfigRes, curvaCategoriasRes, setoresRes] = await Promise.all([
         fetch("/api/produtos/setup"),
         fetch("/api/produtos/insumos"),
         fetch("/api/fornecedores"),
+        fetch("/api/precificacao/curva/config"),
+        fetch("/api/precificacao/curva/categorias"),
+        fetch("/api/setores"),
       ]);
       if (setupRes.ok) {
-        const d = await setupRes.json() as { nextSku: string; nextSkuAJ: string; categorias: Categoria[]; cotacao: { ouro: number; dollar: number } };
+        const d = await setupRes.json() as { nextSku: string; nextSkuAJ: string; cotacao: { ouro: number; dollar: number } };
         setNextSku(d.nextSku);
         setNextSkuAJ(d.nextSkuAJ ?? "AJ1001");
         setSku(d.nextSku); // default: com variações → numérico
-        setCategorias(d.categorias);
         setCotacao(d.cotacao);
       }
       if (insumoRes.ok) {
@@ -617,6 +615,25 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
         const d = await fornRes.json() as { fornecedores: Array<{ nome: string }> };
         setFornecedoresSugeridos((d.fornecedores ?? []).map((f) => f.nome).filter(Boolean));
       }
+      if (curvaConfigRes.ok) {
+        const d = await curvaConfigRes.json() as { config: CurvaConfig };
+        setCurvaConfig(d.config);
+      }
+      if (curvaCategoriasRes.ok) {
+        const d = await curvaCategoriasRes.json() as { categorias: CurvaCategoriaInput[] };
+        setCurvaCategorias((d.categorias ?? []).filter((c) => c.ativo));
+      }
+      if (setoresRes.ok) {
+        const d = await setoresRes.json() as Array<{ id: number; nome: string; ativo: boolean }>;
+        setSetoresDisponiveis((d ?? []).filter((s) => s.ativo).map((s) => ({ id: s.id, nome: s.nome })));
+      }
+      // Role do usuário logado (controla visibilidade do bloco de precificação)
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        const role = (user?.user_metadata?.role as string | undefined) ?? null;
+        setUserRole(role);
+      } catch { /* non-critical */ }
     } catch { /* non-critical */ }
     finally { setLoadingSetup(false); }
   }, []);
@@ -627,15 +644,14 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   }, [temVariacoes, nextSku, nextSkuAJ]);
 
   // ── Auto-calcular markup/categoria quando peso muda ───────────────────────
+  // Usa curva canônica (mkp interpolado), igual à aba /precificacao.
   useEffect(() => {
-    const p = parseFloat(peso);
-    if (!p || p <= 0 || categorias.length === 0) return;
-    const cat = buscarCategoriaPorPeso(p, categorias);
-    if (cat) {
-      setMarkup(String(extrairMarkupDaCategoria(cat)));
-      setCategoria(cat.nome);
-    }
-  }, [peso, categorias]);
+    const p = parseNumericInput(peso);
+    if (!p || p <= 0 || !curvaConfig || curvaCategorias.length === 0) return;
+    const f = getPricingFactors(p, curvaConfig, curvaCategorias);
+    setMarkup(f.mkp.toFixed(4));
+    setCategoria(f.categoriaNome);
+  }, [peso, curvaConfig, curvaCategorias]);
 
   // ── Auto-detectar categoria + subcategoria + tipo_metal + tem_pedra ───────
   // Trigger: mudança no nome. Sempre sobrescreve valores anteriores para manter
@@ -668,12 +684,28 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   }, [nome]);
 
   // ── Preview de precificação automática ────────────────────────────────────
+  // Usa curva canônica (mesma fórmula da aba /precificacao):
+  //   preço = peso × cotacao × (goldCostPct/100) × markup → arredondado conforme curva_config
+  // No cadastro inicial, fator = 1 (não multiplica cotacao).
   const pesoNum = parseNumericInput(peso);
-  const catAuto = pesoNum > 0 && categorias.length > 0 ? buscarCategoriaPorPeso(pesoNum, categorias) : null;
-  const markupAuto = catAuto ? extrairMarkupDaCategoria(catAuto) : null;
-  const precoEstimadoAuto = catAuto && markupAuto && pesoNum > 0
-    ? arredondarDezena(pesoNum * cotacao.ouro * markupAuto)
+  const podePrecificar = pesoNum > 0 && curvaConfig != null && curvaCategorias.length > 0;
+  const factorsAuto = podePrecificar
+    ? getPricingFactors(pesoNum, curvaConfig!, curvaCategorias)
     : null;
+  const precoEstimadoAuto = factorsAuto && curvaConfig
+    ? calcularPrecoSync(pesoNum, cotacao.ouro, factorsAuto.mkp, curvaConfig.arredondamento, curvaConfig.goldCostPercentage)
+    : null;
+  // Faixa textual da categoria atual (para exibir no preview), construída a partir
+  // da categoria anterior (ordenada por maxWeight) → maxWeight da atual.
+  const faixaAtual = (() => {
+    if (!factorsAuto || curvaCategorias.length === 0) return null;
+    const ordenadas = [...curvaCategorias].sort((a, b) => a.maxWeight - b.maxWeight);
+    const idx = ordenadas.findIndex((c) => c.id === factorsAuto.categoriaId);
+    if (idx < 0) return null;
+    const minW = idx === 0 ? 0.1 : ordenadas[idx - 1].maxWeight;
+    const maxW = ordenadas[idx].maxWeight;
+    return `${minW}g – ${maxW}g`;
+  })();
 
   // ── Variações: combinações e preview ──────────────────────────────────────
 
@@ -696,19 +728,61 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
     : null;
 
   function precoEst(pesoVar: number): string {
-    const p = pesoVar * cotacao.ouro * Number(markup || 1);
-    return isNaN(p) ? "—" : p.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    if (!curvaConfig || curvaCategorias.length === 0 || pesoVar <= 0) return "—";
+    // Para cada variação, recalcula markup pela curva (peso da variação),
+    // pois o markup interpola dentro da faixa.
+    const f = getPricingFactors(pesoVar, curvaConfig, curvaCategorias);
+    const p = calcularPrecoSync(pesoVar, cotacao.ouro, f.mkp, curvaConfig.arredondamento, curvaConfig.goldCostPercentage);
+    return p.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   }
 
   // ── Validações por step ────────────────────────────────────────────────────
 
+  // Validações do Step 1 (Dados Básicos) — usado pelo nextStep
+  // Roles elevados (Alisson) podem cadastrar com campos vazios — bypass total
+  // exceto SKU e Nome (mínimo absoluto pra não quebrar PK/UX).
+  const bypassValidacao = userRole != null && ROLES_BYPASS_VALIDACAO.has(userRole);
+
   function validateStep1(): string | null {
-    if (!nome.trim()) return "Nome obrigatório";
-    if (!sku.trim()) return "SKU obrigatório";
-    if (!peso || parseNumericInput(peso) <= 0) return "Peso deve ser maior que 0";
-    if (!catAuto) return "Peso fora das faixas de precificação cadastradas";
+    if (!nome.trim()) return "Nome do produto é obrigatório";
+    if (!sku.trim()) return "SKU é obrigatório";
+    if (bypassValidacao) return null;
+    if (!tipoMetal.trim()) return "Tipo de metal é obrigatório";
+    if (!categoriaGeral.trim()) return "Categoria é obrigatória — verifique o nome do produto (não foi possível detectar automaticamente)";
+    if (!peso || parseNumericInput(peso) <= 0) return "Peso base deve ser maior que 0";
+    if (!curvaConfig || curvaCategorias.length === 0) return "Curva de precificação não carregada — recarregue a página";
+    const estIniNum = parseInt(estoqueInicial || "", 10);
+    if (!Number.isInteger(estIniNum) || estIniNum < 0) return "Estoque inicial é obrigatório (número ≥ 0)";
+    const estMinNum = parseInt(estoqueMinimo || "", 10);
+    if (!Number.isInteger(estMinNum) || estMinNum < 0) return "Estoque mínimo é obrigatório (número ≥ 0)";
+    const tempoNum = parseInt(tempoFabricacaoDias || "", 10);
+    if (!Number.isInteger(tempoNum) || tempoNum <= 0) return "Tempo de fabricação é obrigatório (dias > 0)";
+    if (rotaEtapas.length === 0) return "Rota de fabricação é obrigatória — adicione pelo menos 1 etapa";
+    if (!fornecedor.trim()) return "Fornecedor é obrigatório";
     if (!foto) return "Foto do produto é obrigatória";
     return null;
+  }
+
+  // Validação completa — bloqueia o salvar se qualquer seção estiver incompleta.
+  // O modal usa accordions (não steps reais), então quando o erro está num
+  // accordion fechado, abrimos ele junto com a mensagem.
+  function validateAll(): { erro: string | null; abrir?: "apontamento" | "ficha" } {
+    const e1 = validateStep1();
+    if (e1) return { erro: e1 };
+    if (bypassValidacao) return { erro: null };
+    if (bom.length === 0) {
+      return {
+        erro: "Apontamento Padrão é obrigatório — adicione pelo menos 1 item (ouro/pedra/outro). Abri a seção pra você.",
+        abrir: "apontamento",
+      };
+    }
+    if (!fotoFichaTecnica) {
+      return {
+        erro: "Ficha Técnica é obrigatória — anexe a foto técnica do produto. Abri a seção pra você.",
+        abrir: "ficha",
+      };
+    }
+    return { erro: null };
   }
 
   function nextStep() {
@@ -728,12 +802,25 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   // ── Submit ──────────────────────────────────────────────────────────────────
 
   async function handleSubmit() {
-    const err = validateStep1();
-    if (err) { setGlobalErr(err); setStep(1); return; }
+    const { erro, abrir } = validateAll();
+    if (erro) {
+      setGlobalErr(erro);
+      // Abre o accordion correspondente pro user ver o campo faltando
+      if (abrir === "apontamento") setExpandComp(true);
+      if (abrir === "ficha") setExpandMed(true);
+      // Rola pro topo do conteúdo (onde o globalErr fica destacado abaixo)
+      const scroller = document.querySelector<HTMLElement>(".cadastro-produto-scroller");
+      scroller?.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
 
     setSaving(true);
     setGlobalErr(null);
     try {
+      // tem_pedra_preciosa: detectado automaticamente — true se BOM tem item tipo='pedra'
+      // OU se já foi inferido pelo nome do produto (lógica antiga preservada).
+      const temPedraAuto = temPedra || bom.some((b) => b.tipo === "pedra");
+
       const body: Record<string, unknown> = {
         nome: nome.trim(),
         sku: sku.trim(),
@@ -744,7 +831,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
         fator: 1,
         categoria_precificacao: categoria || null,
         categoria_geral: categoriaGeral || null,
-        tem_pedra_preciosa: temPedra,
+        tem_pedra_preciosa: temPedraAuto,
         fornecedor: fornecedor.trim() || null,
         foto_base64: foto,
         medidas: {
@@ -787,7 +874,66 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
       const data = await res.json() as { ok?: boolean; produto?: { id_produto: number; sku: string }; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Erro ao criar produto");
 
-      onCreated(data.produto!.id_produto, data.produto!.sku);
+      const produtoId = data.produto!.id_produto;
+
+      // ── Reposição automática + tempo de fabricação ───────────────────────
+      const estoqueMinimoNum = parseInt(estoqueMinimo || "0", 10);
+      const tempoFabNum = tempoFabricacaoDias.trim() ? parseInt(tempoFabricacaoDias, 10) : null;
+      if (estoqueMinimoNum > 0 || (tempoFabNum != null && tempoFabNum > 0)) {
+        try {
+          await fetch(`/api/produtos/${produtoId}/reposicao`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              estoque_minimo: estoqueMinimoNum,
+              ativo: true,
+              tempo_fabricacao_dias: tempoFabNum,
+            }),
+          });
+        } catch (err) { console.warn("Falha ao salvar config de produção:", err); }
+      }
+
+      // ── Rota de Fabricação ────────────────────────────────────────────────
+      if (rotaEtapas.length > 0) {
+        try {
+          await fetch(`/api/produtos/${produtoId}/rota`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ etapas: rotaEtapas.map((setor_id) => ({ setor_id })) }),
+          });
+        } catch (err) { console.warn("Falha ao salvar rota:", err); }
+      }
+
+      // ── Ficha técnica (foto) ──────────────────────────────────────────────
+      if (fotoFichaTecnica) {
+        try {
+          await fetch(`/api/produtos/${produtoId}/ficha-tecnica`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ foto_base64: fotoFichaTecnica }),
+          });
+        } catch (err) { console.warn("Falha ao salvar ficha técnica:", err); }
+      }
+
+      // ── Estoque inicial: registra entrada em movimentações ───────────────
+      const estoqueInicialNum = parseInt(estoqueInicial || "0", 10);
+      if (estoqueInicialNum > 0) {
+        try {
+          await fetch("/api/estoque-comercial/movimentos", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              produto_id: produtoId,
+              tipo: "entrada",
+              quantidade: estoqueInicialNum,
+              motivo: "estoque_inicial_cadastro",
+              observacao: "Estoque inicial registrado no cadastro do produto",
+            }),
+          });
+        } catch (err) { console.warn("Falha ao registrar estoque inicial:", err); }
+      }
+
+      onCreated(produtoId, data.produto!.sku);
     } catch (e) {
       setGlobalErr(e instanceof Error ? e.message : "Erro desconhecido");
     } finally {
@@ -828,7 +974,15 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
         {/* (Stepper removido — tela única com ficha técnica colapsável) */}
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5" style={{ backgroundColor: C.bg }}>
+        <div className="cadastro-produto-scroller flex-1 overflow-y-auto px-6 py-5" style={{ backgroundColor: C.bg }}>
+          {/* Banner de erro no TOPO (visível ao scrollar pro topo após Salvar) */}
+          {globalErr && (
+            <div className="mb-4 flex items-start gap-2 text-red-700 text-sm bg-red-50 rounded-lg px-3 py-2.5 border border-red-200">
+              <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+              <span>{globalErr}</span>
+            </div>
+          )}
+
           {loadingSetup ? (
             <div className="flex items-center justify-center py-12 text-gray-400">
               <Loader2 size={20} className="animate-spin mr-2" /> Carregando...
@@ -902,17 +1056,19 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                     />
                   </div>
 
-                  {/* Preview de precificação automática */}
-                  {pesoNum > 0 && (
+                  {/* Preview de precificação automática (curva canônica /precificacao).
+                      Só visível para roles `desenvolvedor` e `diretor` — demais
+                      usuários (admin, gerentes, vendedores) não vêem o cálculo. */}
+                  {pesoNum > 0 && userRole && ROLES_VE_PRECIFICACAO.has(userRole) && (
                     <div
                       className="rounded-lg px-4 py-3 text-xs space-y-0.5"
-                      style={{ backgroundColor: catAuto ? "#F0FDF4" : "#FFF7ED", color: catAuto ? "#166534" : "#9A3412" }}
+                      style={{ backgroundColor: factorsAuto ? "#F0FDF4" : "#FFF7ED", color: factorsAuto ? "#166534" : "#9A3412" }}
                     >
                       <p className="font-semibold mb-1">Precificação (automática)</p>
-                      {catAuto ? (
+                      {factorsAuto && curvaConfig ? (
                         <>
-                          <p>Categoria: <span className="font-medium">{catAuto.nome} ({catAuto.faixa})</span></p>
-                          <p>Markup: <span className="font-medium">{markupAuto}×</span> · Fator: <span className="font-medium">1.0</span></p>
+                          <p>Categoria: <span className="font-medium">{factorsAuto.categoriaNome}{faixaAtual ? ` (${faixaAtual})` : ""}</span></p>
+                          <p>Markup: <span className="font-medium">{factorsAuto.mkp.toFixed(3)}×</span> · Fator: <span className="font-medium">1.0</span></p>
                           {precoEstimadoAuto != null && (
                             <p className="mt-1 font-semibold text-sm">
                               Preço estimado: {precoEstimadoAuto.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
@@ -920,22 +1076,174 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                           )}
                         </>
                       ) : (
-                        <p>Peso fora das faixas de precificação cadastradas</p>
+                        <p>Curva de precificação não carregada</p>
                       )}
                     </div>
                   )}
 
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="temPedra"
-                      checked={temPedra}
-                      onChange={(e) => setTemPedra(e.target.checked)}
-                      className="w-4 h-4 rounded accent-[#184036]"
-                    />
-                    <label htmlFor="temPedra" className="text-sm text-gray-700 select-none cursor-pointer">
-                      Tem pedra preciosa
-                    </label>
+                  {/* "Tem pedra preciosa" removido — detectado automaticamente
+                      no submit a partir do BOM (apontamento padrão). */}
+
+                  {/* Estoque inicial + mínimo + tempo de fabricação */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className={labelCls}>Estoque inicial</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={estoqueInicial}
+                        onChange={(e) => setEstoqueInicial(e.target.value)}
+                        className={inputCls + " tabular-nums"}
+                        placeholder="0"
+                      />
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        Já em estoque ao cadastrar.
+                      </p>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Estoque mínimo</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={estoqueMinimo}
+                        onChange={(e) => setEstoqueMinimo(e.target.value)}
+                        className={inputCls + " tabular-nums"}
+                        placeholder="0"
+                      />
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        Abaixo disso → OF automática.
+                      </p>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Tempo de fabricação (dias)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={tempoFabricacaoDias}
+                        onChange={(e) => setTempoFabricacaoDias(e.target.value)}
+                        className={inputCls + " tabular-nums"}
+                        placeholder="—"
+                      />
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        Prazo padrão pro cliente.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Rota de Fabricação */}
+                  <div className="rounded-lg border-2 p-3" style={{ borderColor: "#A7D7B8", backgroundColor: "#F0F7F4" }}>
+                    <div className="flex items-center justify-between mb-2 gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.esmeralda }}>
+                        Rota de Fabricação
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setMostrarTemplate(true)}
+                          className="text-[11px] font-semibold px-2 py-1 rounded border hover:bg-white"
+                          style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+                          title="Aplicar um template de rota cadastrado em /rotas-padrao"
+                        >
+                          📋 Aplicar template…
+                        </button>
+                        <span className="text-[10px]" style={{ color: "#6B7280" }}>
+                          {rotaEtapas.length} etapa(s)
+                        </span>
+                      </div>
+                    </div>
+
+                    {rotaEtapas.length === 0 ? (
+                      <p className="text-[12px] py-2" style={{ color: "#6B7280" }}>
+                        Nenhuma etapa. Adicione setores para definir a sequência de fabricação.
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5 mb-2">
+                        {rotaEtapas.map((sid, idx) => {
+                          const setor = setoresDisponiveis.find((s) => s.id === sid);
+                          return (
+                            <div
+                              key={`${sid}-${idx}`}
+                              className="flex items-center gap-2 bg-white rounded-md px-2 py-1.5 border"
+                              style={{ borderColor: C.cremeBorder }}
+                            >
+                              <span
+                                className="text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center"
+                                style={{ backgroundColor: C.esmeralda, color: C.creme }}
+                              >
+                                {idx + 1}
+                              </span>
+                              <span className="flex-1 text-sm" style={{ color: "#111827" }}>
+                                {setor?.nome ?? `Setor #${sid}`}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const idx0 = idx; if (idx0 === 0) return;
+                                  const arr = [...rotaEtapas];
+                                  [arr[idx0 - 1], arr[idx0]] = [arr[idx0], arr[idx0 - 1]];
+                                  setRotaEtapas(arr);
+                                }}
+                                disabled={idx === 0}
+                                className="text-[11px] px-1 disabled:opacity-30"
+                                title="Subir"
+                              >
+                                ▲
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const idx0 = idx; if (idx0 === rotaEtapas.length - 1) return;
+                                  const arr = [...rotaEtapas];
+                                  [arr[idx0], arr[idx0 + 1]] = [arr[idx0 + 1], arr[idx0]];
+                                  setRotaEtapas(arr);
+                                }}
+                                disabled={idx === rotaEtapas.length - 1}
+                                className="text-[11px] px-1 disabled:opacity-30"
+                                title="Descer"
+                              >
+                                ▼
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setRotaEtapas(rotaEtapas.filter((_, i) => i !== idx))}
+                                className="p-1 rounded hover:bg-red-50 text-red-500"
+                                title="Remover"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <select
+                        onChange={(e) => {
+                          const sid = parseInt(e.target.value);
+                          if (Number.isInteger(sid) && sid > 0) {
+                            setRotaEtapas([...rotaEtapas, sid]);
+                            e.target.value = "";
+                          }
+                        }}
+                        defaultValue=""
+                        className="flex-1 border rounded-md px-2 py-1.5 text-sm bg-white outline-none"
+                        style={{ borderColor: C.cremeBorder, color: "#374151" }}
+                      >
+                        <option value="" disabled>+ Adicionar etapa…</option>
+                        {setoresDisponiveis.length === 0 && (
+                          <option value="" disabled>Nenhum setor cadastrado — cadastre em /setores</option>
+                        )}
+                        {setoresDisponiveis.map((s) => (
+                          <option key={s.id} value={s.id}>{s.nome}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {setoresDisponiveis.length === 0 && (
+                      <p className="text-[10px] mt-1" style={{ color: "#9A3412" }}>
+                        Vá até <a href="/setores" target="_blank" rel="noopener" className="underline font-semibold">/setores</a> pra cadastrar.
+                      </p>
+                    )}
                   </div>
 
                   {/* Fornecedor — autocomplete via datalist */}
@@ -1004,7 +1312,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
               {/* ── COMPOSIÇÃO (accordion) ──────────────────────────────── */}
               <div className="mt-6 rounded-lg border bg-white" style={{ borderColor: C.cremeBorder }}>
                 <button type="button" onClick={() => setExpandComp(v => !v)} className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg">
-                  <span>Composição (BOM) <span className="ml-1 text-[10px] text-gray-400">{bom.length > 0 ? `${bom.length} item(s)` : "opcional"}</span></span>
+                  <span>Apontamento Padrão <span className="ml-1 text-[10px] text-gray-400">{bom.length > 0 ? `${bom.length} item(s)` : "ouro + pedras (opcional)"}</span></span>
                   {expandComp ? <ChevronLeft size={14} className="rotate-90" /> : <ChevronRight size={14} />}
                 </button>
               </div>
@@ -1093,56 +1401,107 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                 </div>
               )}
 
-              {/* ── MEDIDAS (accordion) ─────────────────────────────────── */}
+              {/* ── FICHA TÉCNICA (accordion) — upload de foto ──────────── */}
               <div className="mt-3 rounded-lg border bg-white" style={{ borderColor: C.cremeBorder }}>
                 <button type="button" onClick={() => setExpandMed(v => !v)} className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg">
-                  <span>Medidas <span className="ml-1 text-[10px] text-gray-400">largura/altura/base do aro</span></span>
+                  <span>Ficha Técnica <span className="ml-1 text-[10px] text-gray-400">{fotoFichaTecnica ? "foto carregada" : "foto opcional"}</span></span>
                   {expandMed ? <ChevronLeft size={14} className="rotate-90" /> : <ChevronRight size={14} />}
                 </button>
               </div>
               {expandMed && (
-                <div className="space-y-4 mt-2 p-4 bg-white rounded-lg border" style={{ borderColor: C.cremeBorder }}>
+                <div className="space-y-3 mt-2 p-4 bg-white rounded-lg border" style={{ borderColor: C.cremeBorder }}>
                   <p className="text-xs text-gray-500">
-                    Medidas da peça modelo (mm). Campos opcionais — podem ser preenchidos depois no drawer do produto.
+                    Foto técnica do produto + medidas (largura, altura, base). Tudo opcional — preenche o que tiver.
                   </p>
-                  <div className="grid grid-cols-3 gap-3">
+
+                  {/* Medidas — largura, altura, base (mm) */}
+                  <div className="grid grid-cols-3 gap-2">
                     <div>
-                      <label className={labelCls}>Largura Aro (mm)</label>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-widest mb-1">
+                        Largura (mm)
+                      </label>
                       <input
                         type="number"
+                        step="0.01"
                         min="0"
-                        step="0.1"
                         value={larguraAro}
                         onChange={(e) => setLarguraAro(e.target.value)}
-                        className={inputCls}
-                        placeholder="3.5"
+                        className="w-full px-2 py-1.5 rounded-md border text-sm outline-none"
+                        style={{ borderColor: C.cremeBorder }}
+                        placeholder="0,00"
                       />
                     </div>
                     <div>
-                      <label className={labelCls}>Altura Aro (mm)</label>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-widest mb-1">
+                        Altura (mm)
+                      </label>
                       <input
                         type="number"
+                        step="0.01"
                         min="0"
-                        step="0.1"
                         value={alturaAro}
                         onChange={(e) => setAlturaAro(e.target.value)}
-                        className={inputCls}
-                        placeholder="2.0"
+                        className="w-full px-2 py-1.5 rounded-md border text-sm outline-none"
+                        style={{ borderColor: C.cremeBorder }}
+                        placeholder="0,00"
                       />
                     </div>
                     <div>
-                      <label className={labelCls}>Base (mm)</label>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-widest mb-1">
+                        Base (mm)
+                      </label>
                       <input
                         type="number"
+                        step="0.01"
                         min="0"
-                        step="0.1"
                         value={base}
                         onChange={(e) => setBase(e.target.value)}
-                        className={inputCls}
-                        placeholder="1.5"
+                        className="w-full px-2 py-1.5 rounded-md border text-sm outline-none"
+                        style={{ borderColor: C.cremeBorder }}
+                        placeholder="0,00"
                       />
                     </div>
                   </div>
+
+                  {/* Foto da ficha técnica */}
+                  <input
+                    ref={fichaTecnicaInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      const reader = new FileReader();
+                      reader.onload = (ev) => setFotoFichaTecnica(ev.target?.result as string);
+                      reader.readAsDataURL(f);
+                      e.target.value = "";
+                    }}
+                  />
+                  {fotoFichaTecnica ? (
+                    <div className="relative rounded-lg overflow-hidden border" style={{ borderColor: C.cremeBorder }}>
+                      <img src={fotoFichaTecnica} alt="Ficha técnica" className="w-full h-48 object-contain bg-gray-50" />
+                      <button
+                        type="button"
+                        onClick={() => setFotoFichaTecnica(null)}
+                        className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/95 hover:bg-white shadow-md text-red-500"
+                        title="Remover"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => fichaTecnicaInputRef.current?.click()}
+                      className="w-full border-2 border-dashed rounded-lg py-8 text-center hover:bg-gray-50"
+                      style={{ borderColor: C.cremeBorder }}
+                    >
+                      <Camera className="w-6 h-6 mx-auto mb-1 text-gray-400" />
+                      <p className="text-sm text-gray-500">Clique para adicionar foto da ficha técnica</p>
+                      <p className="text-[10px] text-gray-400">JPG, PNG, WEBP</p>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -1195,12 +1554,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
             </>
           )}
 
-          {/* Erro global */}
-          {globalErr && (
-            <div className="mt-4 flex items-center gap-2 text-red-600 text-xs bg-red-50 rounded-lg px-3 py-2 border border-red-100">
-              <AlertCircle size={13} /> {globalErr}
-            </div>
-          )}
+          {/* Erro global agora aparece no TOPO do scroller (ver banner acima) */}
         </div>
 
         {/* Footer */}
@@ -1231,6 +1585,15 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
           </button>
         </div>
       </div>
+
+      {mostrarTemplate && (
+        <AplicarTemplateModal
+          produtoId={null /* produto novo — pré-popula localmente */}
+          categoriaProduto={categoria || null}
+          onClose={() => setMostrarTemplate(false)}
+          onSelecionar={(_id, setorIds) => setRotaEtapas(setorIds)}
+        />
+      )}
     </div>
   );
 }

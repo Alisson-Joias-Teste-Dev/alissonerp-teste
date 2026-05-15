@@ -35,26 +35,38 @@ export async function PATCH(
     peso_metal_negociado?: number | null;
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = await (sql as any).begin(async (tx: typeof sql) => {
-    await tx`SELECT set_config('app.role', 'desenvolvedor', true)`;
-    return tx`
-      UPDATE alissonerp.ordens
-      SET
-        data_entrega         = COALESCE(${body.data_entrega         ?? null}::date,      data_entrega),
-        detalhes_ordem       = COALESCE(${body.detalhes_ordem       ?? null},            detalhes_ordem),
-        situacao             = COALESCE(${body.situacao             ?? null},            situacao),
-        cliente_id           = COALESCE(${body.cliente_id           ?? null}::bigint,    cliente_id),
-        vendedor_id          = COALESCE(${body.vendedor_id          ?? null}::bigint,    vendedor_id),
-        tipo_ordem           = COALESCE(${body.tipo_ordem           ?? null},            tipo_ordem),
-        peso_metal_negociado = COALESCE(${body.peso_metal_negociado ?? null}::numeric,   peso_metal_negociado)
-      WHERE id = ${ordemId}
-      RETURNING id, numero_ordem, data_entrega::text, detalhes_ordem, situacao,
-                cliente_id, vendedor_id, tipo_ordem, peso_metal_negociado
-    `;
-  });
-  const [updated] = rows as Record<string, unknown>[];
+  // Normaliza enums: view retorna display (Criado) mas enum espera lowercase (criado)
+  if (body.situacao)   body.situacao   = body.situacao.toLowerCase();
+  if (body.tipo_ordem) body.tipo_ordem = body.tipo_ordem.toLowerCase();
 
-  if (!updated) return NextResponse.json({ error: "Ordem não encontrada" }, { status: 404 });
-  return NextResponse.json(updated);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows = await (sql as any).begin(async (tx: typeof sql) => {
+      await tx`SELECT set_config('app.role', 'desenvolvedor', true)`;
+      return tx`
+        UPDATE alissonerp.ordens
+        SET
+          data_entrega         = COALESCE(${body.data_entrega         ?? null}::date,      data_entrega),
+          detalhes_ordem       = COALESCE(${body.detalhes_ordem       ?? null},            detalhes_ordem),
+          situacao             = COALESCE(${body.situacao             ?? null},            situacao),
+          cliente_id           = COALESCE(${body.cliente_id           ?? null}::bigint,    cliente_id),
+          vendedor_id          = COALESCE(${body.vendedor_id          ?? null}::bigint,    vendedor_id),
+          tipo_ordem           = COALESCE(${body.tipo_ordem           ?? null},            tipo_ordem),
+          peso_metal_negociado = COALESCE(${body.peso_metal_negociado ?? null}::numeric,   peso_metal_negociado)
+        WHERE id = ${ordemId}
+        RETURNING id, numero_ordem, data_entrega::text, detalhes_ordem, situacao,
+                  cliente_id, vendedor_id, tipo_ordem, peso_metal_negociado
+      `;
+    });
+    const [updated] = rows as Record<string, unknown>[];
+
+    if (!updated) return NextResponse.json({ error: "Ordem não encontrada" }, { status: 404 });
+    return NextResponse.json(updated);
+  } catch (err) {
+    console.error("[PATCH /api/ordens/[id]]", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Erro interno ao salvar" },
+      { status: 500 }
+    );
+  }
 }

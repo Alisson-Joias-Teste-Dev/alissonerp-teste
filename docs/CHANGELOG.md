@@ -4,6 +4,36 @@
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
 
+## feat: Sistema de Promoções de Produtos (em revisão)
+
+Campanhas com janela `[data_inicio, data_fim]` e preço promocional por item.
+Reversão automática via VIEW (sem cron) — quando `CURRENT_DATE` sai da janela
+a view volta a retornar `preco_tiny`.
+
+- Migration `248_promocoes_produtos.sql`: tabelas `promocoes_produtos`,
+  `promocao_itens` + view `vw_produto_preco_vigente` + seed de role_permissoes.
+- API: `POST/GET /api/promocoes`, `GET/PATCH /api/promocoes/[id]`,
+  `PATCH /api/promocoes/[id]/{encerrar,cancelar}`. Conflito (1 produto = 1 promo
+  ativa/agendada) retorna 409 com lista de conflitos.
+- Helper `src/lib/promocoes-helpers.ts`: expansão de produto pai (mesmo % nas
+  variações) + check de conflito.
+- Tela `/comercial/promocoes` (lista + detalhe) com tabs Ativas/Agendadas/
+  Encerradas/Canceladas. Botões: Encerrar, Cancelar, Ver itens.
+- Refator `PromotionModal` (gestão-estoque): agora cria campanha via API ao
+  invés de sobrescrever `preco_tiny`. Tratamento de 409 com remoção rápida de
+  conflitantes.
+- JOIN com `vw_produto_preco_vigente` em `/api/gestao-estoque/produtos`,
+  `/api/produtos`, `/api/vendas/produtos/busca` (campos novos: `preco_vigente`,
+  `em_promocao`, `nome_campanha`, `promo_data_fim`, `preco_promo`,
+  `promocao_nome`).
+- UI POS (`NovaVendaClientV2`): `calcItem` aplica `preco_promo` como piso e
+  recalcula `pct_desconto` (comissão cai na faixa correspondente
+  automaticamente). Badge "PROMO" no dropdown de busca e linha do item. Bloqueio
+  de `preco_unitario` abaixo de `preco_promo`.
+- `/produtos` e `gestao-estoque/Dashboard`: lista riscada + promo + badge.
+- Menu lateral: novo item "Promocoes" no grupo "Comercial" para admin e
+  desenvolvedor.
+
 ## docs (29/04/2026) — Mapeamento Completo do Banco
 
 Entregue em `docs/db-mapping/` (47 arquivos `.md` + 16 JSONs crus, ~5.2 MB):

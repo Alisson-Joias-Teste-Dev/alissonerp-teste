@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { submeterVendaParaAprovacaoCredito } from "@/lib/vendas-credito-aprovar";
 import { approveVenda } from "@/lib/vendas-aprovar";
+import { avaliarRegras, criarTarefaAprovacao } from "@/lib/aprovacao-regras";
 
 // ─── POST /api/vendas/[id]/solicitar-aprovacao ───────────────────────────────
 // Consultora/gerente solicita aprovação de venda.
@@ -53,61 +54,71 @@ export async function POST(
     );
   }
 
-  // ── Aprovação de desconto (>30%) ─────────────────────────────────────────
+  // ── Aprovação de desconto (via engine de regras) ─────────────────────────
   if (tipo === "desconto") {
     if (venda.aprovacao_credito_tarefa_id) {
       return NextResponse.json({ ok: true, aguardando_aprovacao_desconto: true, message: "Já existe aprovação pendente" });
     }
-    const [admin] = await sql`
-      SELECT id FROM alissonerp.usuarios
-      WHERE role IN ('admin', 'desenvolvedor') AND ativo = true
-      ORDER BY id LIMIT 1
+
+    const itensDesconto = await sql`
+      SELECT pct_desconto FROM alissonerp.itens_venda_erp
+      WHERE venda_id = ${vendaId} AND pct_desconto > 0
+      ORDER BY pct_desconto DESC
     `;
-    if (!admin) return NextResponse.json({ error: "Nenhum administrador ativo encontrado" }, { status: 500 });
+    const maiorDesconto = itensDesconto.length > 0
+      ? Math.max(...itensDesconto.map(i => Number(i.pct_desconto)))
+      : 0;
 
     const [vendaInfo] = await sql`
       SELECT numero_venda, total_venda FROM alissonerp.vendas_erp WHERE id = ${vendaId}
     `;
-    const itensDesconto = await sql`
+
+    const regras = await avaliarRegras({
+      tipo: "desconto_acima",
+      venda_id: vendaId,
+      percentual_desconto: maiorDesconto,
+      valor_venda: Number(vendaInfo?.total_venda ?? 0),
+    });
+
+    if (regras.length === 0) {
+      return NextResponse.json({ ok: true, aguardando_aprovacao_desconto: false, message: "Nenhuma regra de aprovação aplicável" });
+    }
+
+    const regra = regras[0];
+
+    const itensDetalhe = await sql`
       SELECT sku, nome_produto, preco_lista, pct_desconto, preco_unitario, quantidade
       FROM alissonerp.itens_venda_erp
       WHERE venda_id = ${vendaId} AND pct_desconto > 30
       ORDER BY id
     `;
-    const linhasItens = itensDesconto.map((it) => {
+    const linhasItens = itensDetalhe.map((it) => {
       const sem = Number(it.preco_lista).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
       const com = Number(it.preco_unitario).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
       return `• ${it.sku} — ${it.nome_produto}\n  Tabela: ${sem} | Desconto: ${Number(it.pct_desconto).toFixed(0)}% | Final: ${com}`;
     }).join("\n");
-    const descricao = `Venda ${vendaInfo.numero_venda} com desconto acima de 30%\nTotal: ${Number(vendaInfo.total_venda).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}\n\nItens com desconto:\n${linhasItens}`;
 
-    const [tarefa] = await sql`
-      INSERT INTO alissonerp.tarefas
-        (titulo, descricao, responsavel_id, criado_por, prioridade, status, venda_id, tags)
-      VALUES
-        (${"Aprovar desconto — " + vendaInfo.numero_venda},
-         ${descricao},
-         ${admin.id}::uuid, ${user.id}::uuid,
-         'alta', 'aguardando_aprovacao', ${vendaId},
-         ${sql.array(["aprovacao_desconto"])})
-      RETURNING id
-    `;
-    await sql`
-      INSERT INTO alissonerp.aprovacoes_tarefa (tarefa_id, solicitante_id, aprovador_id, status)
-      VALUES (${tarefa.id}, ${user.id}::uuid, ${admin.id}::uuid, 'pendente')
-    `;
+    const tarefaId = await criarTarefaAprovacao(
+      regra,
+      {
+        tipo: "desconto_acima",
+        venda_id: vendaId,
+        percentual_desconto: maiorDesconto,
+        valor_venda: Number(vendaInfo?.total_venda ?? 0),
+        venda_numero: vendaInfo?.numero_venda ?? `#${vendaId}`,
+        venda_total: Number(vendaInfo?.total_venda ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+        itens_desconto: linhasItens,
+      },
+      user.id,
+    );
+
     await sql`
       UPDATE alissonerp.vendas_erp
-      SET aprovacao_credito_tarefa_id = ${tarefa.id}, updated_at = NOW()
+      SET aprovacao_credito_tarefa_id = ${tarefaId}, updated_at = NOW()
       WHERE id = ${vendaId}
     `;
-    await sql`
-      INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id, link, venda_id)
-      VALUES (${admin.id}::uuid, 'aprovacao', ${"Aprovar desconto — " + vendaInfo.numero_venda},
-        ${descricao},
-        ${user.id}::uuid, ${`/vendas/${vendaId}`}, ${vendaId})
-    `.catch(() => {});
-    return NextResponse.json({ ok: true, aguardando_aprovacao_desconto: true, tarefa_id: tarefa.id });
+
+    return NextResponse.json({ ok: true, aguardando_aprovacao_desconto: true, tarefa_id: tarefaId });
   }
 
   // Verificar se já tem aprovação pendente (para fluxos não-desconto)

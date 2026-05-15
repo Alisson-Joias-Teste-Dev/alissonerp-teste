@@ -58,6 +58,19 @@ interface ValidacaoIA {
   mensagem: string;
 }
 
+interface ApontamentoPadrao {
+  produto_id: number;
+  sku: string | null;
+  nome: string | null;
+  peso_total: number;
+  peso_pedras: number;
+  peso_ouro_esperado: number;
+}
+
+// Tolerância: diferença em gramas a partir da qual o banner é exibido.
+// Valor escolhido para ser visualmente significativo em joalheria (peças finas).
+const TOLERANCIA_DIFERENCA_OURO = 0.05;
+
 function quebraColor(pct: number): string {
   if (pct <= 3) return "#059669";
   if (pct <= 8) return "#D97706";
@@ -100,6 +113,9 @@ export default function SaidaOrdemModal({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
+  // ── Apontamento padrão (do produto) — para mostrar diferença vs peso real ──
+  const [apontamentoPadrao, setApontamentoPadrao] = useState<ApontamentoPadrao | null>(null);
+
   const supabase = createClient();
 
   // ── Carregar dados ao abrir ──
@@ -107,7 +123,15 @@ export default function SaidaOrdemModal({
     if (!isOpen) return;
     setDados(null);
     setPedras([]);
+    setApontamentoPadrao(null);
     setLoadingDados(true);
+
+    // Apontamento padrão (não bloqueante — banner é informativo)
+    fetch(`/api/pcp/${pcpId}/apontamento-padrao`).then(async (r) => {
+      if (!r.ok) return;
+      const j = await r.json() as { padrao: ApontamentoPadrao | null };
+      setApontamentoPadrao(j.padrao);
+    }).catch(() => { /* ignore */ });
 
     Promise.all([
       fetch(`/api/pcp/${pcpId}`).then((r) => r.json()),
@@ -743,6 +767,43 @@ export default function SaidaOrdemModal({
                       <span style={{ color: "#374151" }}>Ouro real na peça</span>
                       <span className="font-mono" style={{ color: C.esmeralda }}>{formatPeso(pesoOuroReal!)}g</span>
                     </div>
+
+                    {/* Banner de diferença vs apontamento padrão (só quando excede tolerância) */}
+                    {(() => {
+                      if (!apontamentoPadrao || pesoOuroReal == null) return null;
+                      const esperado = apontamentoPadrao.peso_ouro_esperado;
+                      const diff = pesoOuroReal - esperado;
+                      if (Math.abs(diff) <= TOLERANCIA_DIFERENCA_OURO) return null;
+                      const aMais = diff > 0;
+                      return (
+                        <div
+                          className="mt-2 rounded-lg p-3 text-xs space-y-1"
+                          style={{
+                            backgroundColor: aMais ? "#FEF3C7" : "#FEE2E2",
+                            border: `1px solid ${aMais ? "#F59E0B" : "#EF4444"}`,
+                          }}
+                        >
+                          <p className="font-bold" style={{ color: aMais ? "#92400E" : "#991B1B" }}>
+                            ⚠ Diferença em relação ao padrão {apontamentoPadrao.sku ? `(${apontamentoPadrao.sku})` : ""}
+                          </p>
+                          <div className="flex justify-between" style={{ color: "#374151" }}>
+                            <span>Esperado (ouro)</span>
+                            <span className="font-mono">{formatPeso(esperado)}g</span>
+                          </div>
+                          <div className="flex justify-between" style={{ color: "#374151" }}>
+                            <span>Real apontado</span>
+                            <span className="font-mono">{formatPeso(pesoOuroReal!)}g</span>
+                          </div>
+                          <div
+                            className="flex justify-between font-bold pt-1"
+                            style={{ borderTop: `1px solid ${aMais ? "#FBBF24" : "#FCA5A5"}`, color: aMais ? "#92400E" : "#991B1B" }}
+                          >
+                            <span>Diferença ({aMais ? "a mais" : "a menos"})</span>
+                            <span className="font-mono">{aMais ? "+" : ""}{formatPeso(diff)}g</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {/* Bloco 2: pmc = ouro_real − outros − metal_externo */}
                     {(outrosPesosNum > 0 || metalExternoNum > 0) && (
                       <>

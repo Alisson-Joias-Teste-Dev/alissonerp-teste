@@ -40,6 +40,10 @@ export async function POST(req: NextRequest) {
     risco_width, risco_depth,
     preco_gravacao,
     stone_markups_table,
+    espessura_minima_por_modelo,
+    nomes_modelos,
+    promocao_inicio,
+    promocao_fim,
   } = body;
 
   // IMPORTANTE: usar sql.json() em vez de JSON.stringify+::jsonb.
@@ -60,6 +64,10 @@ export async function POST(req: NextRequest) {
       risco_depth = COALESCE(${risco_depth ?? null}::numeric, risco_depth),
       preco_gravacao = COALESCE(${preco_gravacao ?? null}::numeric, preco_gravacao),
       stone_markups_table = COALESCE(${stone_markups_table != null ? sql.json(stone_markups_table) : null}, stone_markups_table),
+      espessura_minima_por_modelo = COALESCE(${espessura_minima_por_modelo != null ? sql.json(espessura_minima_por_modelo) : null}, espessura_minima_por_modelo),
+      nomes_modelos = COALESCE(${nomes_modelos != null ? sql.json(nomes_modelos) : null}, nomes_modelos),
+      promocao_inicio = ${promocao_inicio !== undefined ? promocao_inicio : sql`promocao_inicio`},
+      promocao_fim = ${promocao_fim !== undefined ? promocao_fim : sql`promocao_fim`},
       updated_at = now(),
       updated_by = ${user.id}::uuid
     WHERE name = 'default'

@@ -1,6 +1,46 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+// ─── Tiny OAuth2 keepalive (server-side, independente de admin logado) ──────────
+// Renova o token proativamente a cada 30 min no primeiro request que passar.
+let lastTinyKeepalive = 0;
+const TINY_KEEPALIVE_MS = 30 * 60 * 1000;
+
+async function maybeRefreshTinyToken() {
+  const now = Date.now();
+  if (now - lastTinyKeepalive < TINY_KEEPALIVE_MS) return;
+  lastTinyKeepalive = now;
+  try {
+    const { ensureTinyToken } = await import("@/lib/vendas-aprovar");
+    await ensureTinyToken();
+  } catch { /* token refresh best-effort, não bloqueia requests */ }
+}
+
+// ─── Rate limiter in-memory ────────────────────────────────────────────────────
+// 100 req/min não autenticado, 300 req/min autenticado. Limpeza a cada 60s.
+const rateHits = new Map<string, { count: number; reset: number }>();
+
+function checkRateLimit(key: string, max: number): boolean {
+  const now = Date.now();
+  const entry = rateHits.get(key);
+  if (!entry || now > entry.reset) {
+    rateHits.set(key, { count: 1, reset: now + 60_000 });
+    return true;
+  }
+  if (entry.count >= max) return false;
+  entry.count++;
+  return true;
+}
+
+if (typeof setInterval !== "undefined") {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of rateHits) {
+      if (now > entry.reset) rateHits.delete(key);
+    }
+  }, 60_000);
+}
+
 // Mapa modulo → prefixo de rota (espelho de HREF_TO_MODULO em permissions.ts)
 const MODULO_TO_PREFIX: Record<string, string> = {
   dashboard_fabrica: "/dashboard-fabrica",
@@ -82,6 +122,9 @@ function canAccessModulos(modulos: string[], pathname: string): boolean {
 }
 
 export async function proxy(request: NextRequest) {
+  // Renovação proativa do token Tiny — primeiro request de cada janela de 30 min
+  maybeRefreshTinyToken();
+
   const { pathname } = request.nextUrl;
 
   // 0. Whitelist — passa direto, sem auth nem role check
@@ -95,6 +138,16 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/logo") ||
     pathname.includes(".")
   ) {
+    // Rate-limit para APIs de vendas/ordens/contatos — protege contra enumeração
+    if (pathname.startsWith("/api/")) {
+      const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+        ?? request.headers.get("x-real-ip")
+        ?? "unknown";
+      const hasAuth = request.cookies.has("sb-access-token") || request.cookies.has("sb-refresh-token");
+      if (!checkRateLimit(ip, hasAuth ? 300 : 100)) {
+        return NextResponse.json({ error: "Muitas requisições. Tente novamente em instantes." }, { status: 429 });
+      }
+    }
     return NextResponse.next();
   }
 

@@ -32,10 +32,34 @@ async function imageUrlToDataUrl(url: string): Promise<{ dataUrl: string; format
   } catch { return null; }
 }
 
+export interface PromotionItemPayload {
+  produto_id: number;
+  preco_promo: number;
+}
+
+export interface PromotionConflito {
+  produto_id: number;
+  sku: string | null;
+  nome: string | null;
+  promocao_id: number;
+  nome_campanha: string;
+  data_inicio: string;
+  data_fim: string;
+}
+
 interface PromotionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (updates: Record<string, { basePrice?: number; promoPrice?: number }>) => void;
+  /**
+   * Submete a campanha. Retorna null em sucesso ou a lista de conflitos (409).
+   * O caller eh quem fala com /api/promocoes pra manter a logica de upload no client.
+   */
+  onConfirm: (payload: {
+    nome_campanha: string;
+    data_inicio: string;
+    data_fim: string;
+    itens: PromotionItemPayload[];
+  }) => Promise<PromotionConflito[] | null>;
   selectedItems: TableRow[];
   columns: string[];
   loading?: boolean;
@@ -55,6 +79,11 @@ const PromotionModal: React.FC<PromotionModalProps> = ({
   const [bulkType, setBulkType] = useState<'discount' | 'markup'>('discount');
   const [exportLoading, setExportLoading] = useState(false);
   const [exportProgress, setExportProgress] = useState({ current: 0, total: 0 });
+  const [nomeCampanha, setNomeCampanha] = useState<string>('');
+  const [dataInicio, setDataInicio] = useState<string>('');
+  const [dataFim, setDataFim] = useState<string>('');
+  const [conflitos, setConflitos] = useState<PromotionConflito[] | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Detect columns
   const effectiveColumns = columns.length > 0 ? columns : (selectedItems.length > 0 ? Object.keys(selectedItems[0]) : []);
@@ -71,16 +100,24 @@ const PromotionModal: React.FC<PromotionModalProps> = ({
     if (isOpen) {
       const initialBase: Record<string, string> = {};
       const initialPromo: Record<string, string> = {};
-      
+
       selectedItems.forEach((item, idx) => {
         const id = String(item[pkCol] || idx);
         const val = item[priceCol];
         initialBase[id] = (val !== null && val !== undefined) ? String(val) : '';
-        initialPromo[id] = ''; 
+        initialPromo[id] = '';
       });
-      
+
       setBasePrices(initialBase);
       setPromoPrices(initialPromo);
+      setConflitos(null);
+      setSubmitError(null);
+      // Datas default: hoje -> +7 dias
+      const hoje = new Date();
+      const fim = new Date(hoje); fim.setDate(fim.getDate() + 7);
+      setDataInicio(hoje.toISOString().slice(0, 10));
+      setDataFim(fim.toISOString().slice(0, 10));
+      setNomeCampanha('');
     }
   }, [isOpen, selectedItems, pkCol, priceCol]);
 
@@ -123,27 +160,48 @@ const PromotionModal: React.FC<PromotionModalProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const removerConflitantes = () => {
+    if (!conflitos) return;
+    const idsRemover = new Set(conflitos.map(c => String(c.produto_id)));
+    setPromoPrices(prev => {
+      const next = { ...prev };
+      idsRemover.forEach(id => { delete next[id]; });
+      return next;
+    });
+    setConflitos(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const finalUpdates: Record<string, { basePrice?: number; promoPrice?: number }> = {};
-    
-    const allIds = new Set([...Object.keys(basePrices), ...Object.keys(promoPrices)]);
-    
-    allIds.forEach((id) => {
-      const baseVal = parseFloat(basePrices[id]);
-      const promoVal = parseFloat(promoPrices[id]);
-      
-      const update: { basePrice?: number; promoPrice?: number } = {};
-      if (!isNaN(baseVal)) update.basePrice = baseVal;
-      if (!isNaN(promoVal)) update.promoPrice = promoVal;
-      
-      if (Object.keys(update).length > 0) {
-        finalUpdates[id] = update;
-      }
+    setSubmitError(null);
+    setConflitos(null);
+
+    if (!nomeCampanha.trim()) { setSubmitError('Informe o nome da campanha'); return; }
+    if (!dataInicio || !dataFim) { setSubmitError('Datas obrigatorias'); return; }
+    if (dataFim < dataInicio) { setSubmitError('data_fim deve ser >= data_inicio'); return; }
+
+    const itens: PromotionItemPayload[] = [];
+    Object.entries(promoPrices).forEach(([id, raw]) => {
+      const v = parseFloat(raw);
+      if (!Number.isFinite(v) || v < 0) return;
+      const produtoId = Number(id);
+      if (!Number.isFinite(produtoId)) return;
+      itens.push({ produto_id: produtoId, preco_promo: v });
     });
 
-    if (Object.keys(finalUpdates).length > 0) {
-      onConfirm(finalUpdates);
+    if (itens.length === 0) {
+      setSubmitError('Defina o preco promocional de ao menos 1 item');
+      return;
+    }
+
+    const conf = await onConfirm({
+      nome_campanha: nomeCampanha.trim(),
+      data_inicio: dataInicio,
+      data_fim: dataFim,
+      itens,
+    });
+    if (conf && conf.length > 0) {
+      setConflitos(conf);
     }
   };
 
@@ -454,6 +512,66 @@ const PromotionModal: React.FC<PromotionModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-hidden flex flex-col">
+          {/* Cabecalho da campanha: nome + janela */}
+          <div className="px-6 py-4 bg-white border-b border-creme-200 grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="md:col-span-2">
+              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nome da Campanha</label>
+              <input
+                type="text"
+                value={nomeCampanha}
+                onChange={(e) => setNomeCampanha(e.target.value)}
+                maxLength={200}
+                placeholder="Ex: Dia das Maes 2026"
+                className="mt-1 w-full bg-white border border-creme-200 rounded-lg py-2 px-3 text-xs text-gray-900 focus:outline-none focus:border-alisson-gold/50"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Inicio</label>
+              <input
+                type="date"
+                value={dataInicio}
+                onChange={(e) => setDataInicio(e.target.value)}
+                className="mt-1 w-full bg-white border border-creme-200 rounded-lg py-2 px-3 text-xs text-gray-900 focus:outline-none focus:border-alisson-gold/50"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Fim</label>
+              <input
+                type="date"
+                value={dataFim}
+                onChange={(e) => setDataFim(e.target.value)}
+                className="mt-1 w-full bg-white border border-creme-200 rounded-lg py-2 px-3 text-xs text-gray-900 focus:outline-none focus:border-alisson-gold/50"
+              />
+            </div>
+          </div>
+
+          {(submitError || (conflitos && conflitos.length > 0)) && (
+            <div className="px-6 py-3 bg-red-50 border-b border-red-200 text-xs text-red-700">
+              {submitError && <p className="font-semibold mb-1">{submitError}</p>}
+              {conflitos && conflitos.length > 0 && (
+                <div>
+                  <p className="font-semibold mb-1">
+                    {conflitos.length} produto(s) ja em outra promocao nessa janela:
+                  </p>
+                  <ul className="space-y-0.5 max-h-24 overflow-y-auto">
+                    {conflitos.map(c => (
+                      <li key={`${c.produto_id}-${c.promocao_id}`}>
+                        <span className="font-mono">{c.sku ?? c.produto_id}</span>: ja em &quot;{c.nome_campanha}&quot; ({c.data_inicio.slice(0,10)} - {c.data_fim.slice(0,10)})
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    onClick={removerConflitantes}
+                    className="mt-2 px-3 py-1 text-[10px] font-bold uppercase tracking-widest bg-red-600 text-white rounded hover:bg-red-700"
+                  >
+                    Remover conflitantes
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Bulk Actions Header */}
           <div className="px-6 py-4 bg-creme-50 border-b border-creme-200 flex flex-col md:flex-row items-center gap-4">
             <div className="flex items-center gap-2">

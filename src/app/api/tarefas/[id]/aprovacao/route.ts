@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { processarDecisao } from "@/lib/aprovacao-regras";
 
-// GET /api/tarefas/[id]/aprovacao — lista aprovações da tarefa
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -26,8 +26,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   return NextResponse.json(aprovacoes);
 }
 
-// POST /api/tarefas/[id]/aprovacao — solicitar aprovação
-// Body: { aprovador_id: string }
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -40,7 +38,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "aprovador_id obrigatório" }, { status: 400 });
   }
 
-  // Atualizar status da tarefa para aguardando_aprovacao
   await sql`
     UPDATE alissonerp.tarefas SET status = 'aguardando_aprovacao', updated_at = now()
     WHERE id = ${Number(id)}
@@ -52,7 +49,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     RETURNING id
   `;
 
-  // Notificar aprovador
+  await sql`
+    INSERT INTO alissonerp.tarefas_historico (tarefa_id, usuario_id, acao, created_at)
+    VALUES (${Number(id)}, ${user.id}::uuid, 'aguardando_aprovacao', now())
+  `.catch(() => {});
+
   await sql`
     INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id)
     VALUES (${body.aprovador_id}::uuid, 'aprovacao', 'Aprovação solicitada',
@@ -63,8 +64,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   return NextResponse.json({ id: aprovacao.id }, { status: 201 });
 }
 
-// PATCH /api/tarefas/[id]/aprovacao — responder aprovação (aprovar/rejeitar)
-// Body: { aprovacao_id: number, decisao: 'aprovado'|'rejeitado', motivo?: string }
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -77,7 +76,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "aprovacao_id e decisao obrigatórios" }, { status: 400 });
   }
 
-  // Verificar que o usuário é o aprovador
   const [aprovacao] = await sql`
     SELECT * FROM alissonerp.aprovacoes_tarefa
     WHERE id = ${body.aprovacao_id} AND tarefa_id = ${Number(id)}
@@ -93,15 +91,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     WHERE id = ${body.aprovacao_id}
   `;
 
-  // Atualizar status da tarefa
-  const novoStatus = body.decisao === "aprovado" ? "concluida" : "em_andamento";
+  const novoStatus = body.decisao === "aprovado" ? "aprovada" : "rejeitada";
   await sql`
     UPDATE alissonerp.tarefas SET status = ${novoStatus}, updated_at = now()
     ${body.decisao === "aprovado" ? sql`, concluida_em = now()` : sql``}
     WHERE id = ${Number(id)}
   `;
 
-  // ── Fetch tarefa info e parse de tags ────────────────────────────────────
+  await processarDecisao(Number(id), body.decisao, user.id, body.motivo);
+
   const [tarefaInfo] = await sql`
     SELECT venda_id, tags FROM alissonerp.tarefas WHERE id = ${Number(id)}
   `;
@@ -110,14 +108,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     ? tagsRaw
     : (typeof tagsRaw === "string" ? tagsRaw.replace(/[{}"]/g, "").split(",").filter(Boolean) : []);
 
-  // ── Hook: aprovação de desconto ───────────────────────────────────────────
   if (tags.includes("aprovacao_desconto") && tarefaInfo?.venda_id) {
     const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };
     console.log(`[desconto] inicio`, logCtx);
     try {
       if (body.decisao === "aprovado") {
-        // Libera o bloqueio de desconto mas NÃO aprova a venda —
-        // consultora ainda precisa configurar pagamento e passar pelo fluxo normal.
         await sql`
           UPDATE alissonerp.vendas_erp
           SET aprovacao_credito_tarefa_id = NULL,
@@ -127,7 +122,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           WHERE id = ${tarefaInfo.venda_id}
         `;
         console.log(`[desconto] vendas_erp: lock removido, desconto_aprovado_por gravado`);
-        // Comissão cai para 0,5% em todos os itens quando desconto > 30%
         await sql`
           UPDATE alissonerp.itens_venda_erp
           SET pct_comissao    = 0.5,
@@ -136,7 +130,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         `;
         console.log(`[desconto] itens_venda_erp: comissão → 0,5%`);
       } else {
-        // Rejeição: apenas limpa o lock para a consultora poder reeditar
         await sql`
           UPDATE alissonerp.vendas_erp
           SET aprovacao_credito_tarefa_id = NULL,
@@ -172,7 +165,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  // ── Hook: aprovação de crédito (venda vinculada, excluindo desconto) ──────
   if (tarefaInfo?.venda_id && !tags.includes("aprovacao_desconto")) {
     try {
       const { processarAprovacaoCredito } = await import("@/lib/vendas-credito-aprovar");
@@ -187,7 +179,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  // ── Hook: aprovação de devolução ───────────────────────────────────────────
   const [devLink] = await sql`
     SELECT id FROM alissonerp.devolucoes_venda WHERE tarefa_id = ${Number(id)} LIMIT 1
   `;
@@ -205,7 +196,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  // Notificar solicitante (fluxo normal sem venda)
   await sql`
     INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id)
     VALUES (${String(aprovacao.solicitante_id)}::uuid, 'aprovacao',

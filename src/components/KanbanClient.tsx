@@ -1,15 +1,18 @@
 "use client";
 
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { Plus, ArrowRight, LogOut, FlaskConical, UserCheck, X, Loader2 } from "lucide-react";
+import { FlaskConical, UserCheck, X, Loader2, SlidersHorizontal } from "lucide-react";
 import ApontamentoPCPModal   from "@/components/forms/ApontamentoPCPModal";
 import TransferenciaPCPModal from "@/components/forms/TransferenciaPCPModal";
 import SaidaOrdemModal       from "@/components/forms/SaidaOrdemModal";
-import NovaPCPModal          from "@/components/forms/NovaPCPModal";
 import PCPDetalheModal       from "@/components/forms/PCPDetalheModal";
 import OrdemTesteModal       from "@/components/forms/OrdemTesteModal";
+import KanbanCard, {
+  ETAPAS_APONTAMENTO,
+  ETAPAS_TRANSFERENCIA,
+  ETAPAS_SAIDA,
+} from "@/components/KanbanCard";
 
 // ─── Modal de Atribuir Operador ───────────────────────────────────────────────
 interface AtribuirOperadorModalProps {
@@ -160,9 +163,25 @@ const ETAPAS = [
   { key: "Cancelado",    color: "#EF4444", bg: "#FEF2F2" },
 ];
 
-const ETAPAS_APONTAMENTO   = new Set(["Novas Ordens", "Em Andamento"]);
-const ETAPAS_TRANSFERENCIA = new Set(["Novas Ordens", "Em Andamento"]);
-const ETAPAS_SAIDA         = new Set(["Em Andamento"]);
+// Filtros — mapeamento dos labels visíveis para os enums de tipo_ordem
+type TipoFiltro = "fabricacao" | "garantia" | "servico";
+type DataCampo  = "ordem_created_at" | "pcp_created_at";
+
+const TIPO_FILTRO_LABEL: Record<TipoFiltro, string> = {
+  fabricacao: "Fabricação",
+  garantia:   "Garantia",
+  servico:    "Serviço",
+};
+
+// Cada filtro pode incluir múltiplos enums (ex: Serviço = venda + interno)
+const TIPO_FILTRO_ENUMS: Record<TipoFiltro, string[]> = {
+  fabricacao: ["fabricacao"],
+  garantia:   ["garantia"],
+  servico:    ["servico_venda", "servico_interno"],
+};
+
+// Etapas onde "atrasada" faz sentido (exclui finais)
+const ETAPAS_ATIVAS_ATRASO = new Set(["Novas Ordens", "Pendencia", "Aguardando", "Em Andamento"]);
 
 type PCPItem = any;
 
@@ -181,153 +200,9 @@ type ActiveModal =
   | { type: "transferencia";     data: ModalState }
   | { type: "saida";             data: ModalState }
   | { type: "atribuir_operador"; data: { pcpId: number } }
-  | { type: "nova_pcp";          data: null }
   | { type: "ordem_teste";       data: null }
   | null;
 
-function KanbanCard({
-  pcp,
-  onDetalhe,
-  onApontar,
-  onTransferir,
-  onSaida,
-  onAtribuir,
-}: {
-  pcp:          PCPItem;
-  onDetalhe:    (pcp: PCPItem) => void;
-  onApontar:    (pcp: PCPItem) => void;
-  onTransferir: (pcp: PCPItem) => void;
-  onSaida:      (pcp: PCPItem) => void;
-  onAtribuir:   (pcp: PCPItem) => void;
-}) {
-  const etapa        = pcp.etapas ?? "";
-  const podeApontar    = ETAPAS_APONTAMENTO.has(etapa);
-  const podeTransferir = ETAPAS_TRANSFERENCIA.has(etapa);
-  const podeSaida      = ETAPAS_SAIDA.has(etapa);
-  // Botão atribuir operador: visível quando sem deposito_id e na coluna Novas Ordens
-  const podeAtribuir = pcp.deposito_id == null && etapa === "Novas Ordens";
-
-  return (
-    <div
-      onClick={() => onDetalhe(pcp)}
-      className="bg-white rounded-lg border p-3 text-xs shadow-sm hover:shadow-md hover:ring-1 transition-all cursor-pointer"
-      style={{ borderColor: "#E8DCC8", "--tw-ring-color": "#18403630" } as React.CSSProperties}
-    >
-      <div className="flex items-center justify-between mb-1.5">
-        <Link
-          href={`/ordens/${pcp.ordem_id}`}
-          className="font-semibold text-sm hover:underline"
-          style={{ color: "#184036" }}
-          title="Ver detalhes da ordem"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {pcp.numero_ordem ?? `#${pcp.ordem_id}`}
-        </Link>
-        <div className="flex items-center gap-1.5">
-          {/* Badge Na Service */}
-          {pcp.na_service && (
-            <span
-              className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-              style={{ backgroundColor: "#FFF7ED", color: "#C2410C", border: "1px solid #FED7AA" }}
-            >
-              Na service
-            </span>
-          )}
-          {/* Badge de teste */}
-          {pcp.eh_teste && (
-            <span
-              className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-              style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}
-            >
-              🧪
-            </span>
-          )}
-          {Number(pcp.total_apontamentos) > 0 && (
-            <span
-              className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-              style={{ backgroundColor: "#18403620", color: "#184036" }}
-            >
-              {pcp.total_apontamentos} apt
-            </span>
-          )}
-          <span className="font-mono text-[10px]" style={{ color: "#6B7280" }}>
-            #{pcp.id}
-          </span>
-        </div>
-      </div>
-
-      {pcp.cliente_nome && (
-        <p className="truncate mb-1" style={{ color: "#1A1A1A" }}>
-          {pcp.cliente_nome}
-        </p>
-      )}
-
-      <div className="flex items-center justify-between mt-2 pt-2 border-t" style={{ borderColor: "#F3EADA" }}>
-        <span style={{ color: "#6B7280" }}>{pcp.vendedor_nome ?? "—"}</span>
-        {Number(pcp.peso_final) > 0 ? (
-          <span className="font-mono font-semibold" style={{ color: "#DB9864" }}>
-            {Number(pcp.peso_final).toFixed(2)}g
-          </span>
-        ) : (
-          <span style={{ color: "#9CA3AF" }}>—</span>
-        )}
-      </div>
-
-      {/* Nome do operador atual (se atribuído) */}
-      {pcp.deposito_nome && (
-        <div className="mt-1.5 text-[10px] font-medium truncate" style={{ color: "#6B7280" }}>
-          👤 {pcp.deposito_nome}
-        </div>
-      )}
-
-      {/* Botões contextuais — stopPropagation para não abrir detalhe */}
-      {(podeApontar || podeTransferir || podeSaida || podeAtribuir) && (
-        <div className="mt-2 flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
-          {podeAtribuir && (
-            <button
-              onClick={() => onAtribuir(pcp)}
-              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[11px] font-semibold transition-colors"
-              style={{ backgroundColor: "#7C3AED12", color: "#7C3AED" }}
-            >
-              <UserCheck size={11} strokeWidth={2.5} />
-              Atribuir Operador
-            </button>
-          )}
-          {podeApontar && (
-            <button
-              onClick={() => onApontar(pcp)}
-              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[11px] font-semibold transition-colors"
-              style={{ backgroundColor: "#18403612", color: "#184036" }}
-            >
-              <Plus size={11} strokeWidth={2.5} />
-              Apontar
-            </button>
-          )}
-          {podeTransferir && (
-            <button
-              onClick={() => onTransferir(pcp)}
-              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[11px] font-semibold transition-colors"
-              style={{ backgroundColor: "#0EA5E912", color: "#0284C7" }}
-            >
-              <ArrowRight size={11} strokeWidth={2.5} />
-              Transferir
-            </button>
-          )}
-          {podeSaida && (
-            <button
-              onClick={() => onSaida(pcp)}
-              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[11px] font-semibold transition-colors"
-              style={{ backgroundColor: "#F59E0B12", color: "#B45309" }}
-            >
-              <LogOut size={11} strokeWidth={2.5} />
-              Saída
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default function KanbanClient({
   pcps,
@@ -341,6 +216,47 @@ export default function KanbanClient({
   const router = useRouter();
   const [search, setSearch]           = useState("");
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
+
+  // ─── Filtros ─────────────────────────────────────────────────────────────
+  const [filtrosOpen, setFiltrosOpen] = useState(false);
+  const [apenasAtrasadas, setApenasAtrasadas] = useState(false);
+  const [tiposSelecionados, setTiposSelecionados] = useState<Set<TipoFiltro>>(new Set());
+  const [dataCampo, setDataCampo] = useState<DataCampo>("ordem_created_at");
+  const [dataDe, setDataDe] = useState("");
+  const [dataAte, setDataAte] = useState("");
+  const filtrosRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!filtrosOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (filtrosRef.current && !filtrosRef.current.contains(e.target as Node)) {
+        setFiltrosOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [filtrosOpen]);
+
+  const filtrosAtivos =
+    (apenasAtrasadas ? 1 : 0) +
+    (tiposSelecionados.size > 0 ? 1 : 0) +
+    (dataDe || dataAte ? 1 : 0);
+
+  const limparFiltros = useCallback(() => {
+    setApenasAtrasadas(false);
+    setTiposSelecionados(new Set());
+    setDataDe("");
+    setDataAte("");
+  }, []);
+
+  const toggleTipo = useCallback((tipo: TipoFiltro) => {
+    setTiposSelecionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(tipo)) next.delete(tipo);
+      else next.add(tipo);
+      return next;
+    });
+  }, []);
 
   // Busca server-side (ativada quando search.length >= 2, debounced 300ms).
   // Por default usamos `pcps` (prop do SSR). Quando o usuário digita,
@@ -386,10 +302,44 @@ export default function KanbanClient({
   //   - Se não há busca → prop `pcps` (load inicial)
   //   - Se há busca e serverResults populado → serverResults
   //   - Enquanto aguarda debounce/fetch → último resultado válido (ou prop)
-  const filtered = useMemo(() => {
+  const baseList = useMemo(() => {
     if (serverResults != null) return serverResults;
     return pcps;
   }, [pcps, serverResults]);
+
+  // Filtros aplicados client-side sobre a lista base
+  const filtered = useMemo(() => {
+    if (filtrosAtivos === 0) return baseList;
+
+    const hojeISO = new Date().toISOString().slice(0, 10);
+    const enumsPermitidos = new Set<string>();
+    tiposSelecionados.forEach((t) => TIPO_FILTRO_ENUMS[t].forEach((e) => enumsPermitidos.add(e)));
+
+    return baseList.filter((p: PCPItem) => {
+      // Atrasadas: data_entrega < hoje E etapa ainda ativa
+      if (apenasAtrasadas) {
+        const prazo = p.data_entrega ? String(p.data_entrega).slice(0, 10) : null;
+        if (!prazo || prazo >= hojeISO) return false;
+        if (!ETAPAS_ATIVAS_ATRASO.has(p.etapas ?? "")) return false;
+      }
+
+      // Tipo de ordem (multi)
+      if (enumsPermitidos.size > 0) {
+        if (!p.tipo_ordem || !enumsPermitidos.has(p.tipo_ordem)) return false;
+      }
+
+      // Range de data — campo escolhido pelo usuário
+      if (dataDe || dataAte) {
+        const valor = dataCampo === "ordem_created_at" ? p.ordem_created_at : p.created_at;
+        if (!valor) return false;
+        const iso = String(valor).slice(0, 10);
+        if (dataDe && iso < dataDe) return false;
+        if (dataAte && iso > dataAte) return false;
+      }
+
+      return true;
+    });
+  }, [baseList, filtrosAtivos, apenasAtrasadas, tiposSelecionados, dataDe, dataAte, dataCampo]);
 
   const byEtapa = useMemo(() => {
     const map: Record<string, PCPItem[]> = {};
@@ -438,6 +388,12 @@ export default function KanbanClient({
               <>
                 <span className="font-semibold" style={{ color: "#184036" }}>🔍 {filtered.length}</span>{" "}
                 resultado(s) da busca em todo o histórico
+                {filtrosAtivos > 0 && <> · <span style={{ color: "#184036" }}>{filtrosAtivos} filtro(s)</span></>}
+              </>
+            ) : filtrosAtivos > 0 ? (
+              <>
+                <span className="font-semibold" style={{ color: "#184036" }}>{filtered.length}</span> de {pcps.length}{" "}
+                registros · <span style={{ color: "#184036" }}>{filtrosAtivos} filtro(s) ativo(s)</span>
               </>
             ) : (
               <>
@@ -460,14 +416,9 @@ export default function KanbanClient({
               Ordem Teste
             </button>
           )}
-          <button
-            onClick={() => setActiveModal({ type: "nova_pcp", data: null })}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold"
-            style={{ backgroundColor: "#184036", color: "#F3EADA" }}
-          >
-            <Plus size={13} strokeWidth={2.5} />
-            Nova Ordem
-          </button>
+          {/* Botão "Nova Ordem" removido: fábrica não cria ordens, só executa.
+              Ordens entram automaticamente via trigger trg_auto_auditoria_loja
+              quando a loja cria a ordem. */}
           <div className="relative w-full md:w-72">
             <input
               type="text"
@@ -504,8 +455,206 @@ export default function KanbanClient({
               </p>
             )}
           </div>
+
+          {/* Botão de filtros */}
+          <div ref={filtrosRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setFiltrosOpen((v) => !v)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold border transition-colors"
+              style={{
+                borderColor: filtrosAtivos > 0 ? "#184036" : "#E8DCC8",
+                backgroundColor: filtrosAtivos > 0 ? "#184036" : "#F3EADA",
+                color: filtrosAtivos > 0 ? "#F3EADA" : "#184036",
+              }}
+            >
+              <SlidersHorizontal size={14} />
+              Filtros
+              {filtrosAtivos > 0 && (
+                <span
+                  className="ml-1 text-[10px] font-bold px-1.5 rounded-full"
+                  style={{ backgroundColor: "#F3EADA", color: "#184036" }}
+                >
+                  {filtrosAtivos}
+                </span>
+              )}
+            </button>
+
+            {filtrosOpen && (
+              <div
+                className="absolute right-0 z-30 mt-2 w-80 rounded-xl bg-white shadow-2xl border p-4 space-y-4"
+                style={{ borderColor: "#E8DCC8" }}
+              >
+                {/* Atrasadas */}
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={apenasAtrasadas}
+                    onChange={(e) => setApenasAtrasadas(e.target.checked)}
+                    className="w-4 h-4 cursor-pointer accent-red-600"
+                  />
+                  <span className="text-[13px] font-semibold" style={{ color: "#7F1D1D" }}>
+                    🔴 Apenas atrasadas
+                  </span>
+                </label>
+
+                {/* Tipo de ordem (multi) */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>
+                    Tipo de ordem
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(Object.keys(TIPO_FILTRO_LABEL) as TipoFiltro[]).map((tipo) => {
+                      const ativo = tiposSelecionados.has(tipo);
+                      return (
+                        <button
+                          key={tipo}
+                          type="button"
+                          onClick={() => toggleTipo(tipo)}
+                          className="px-2.5 py-1 rounded-md text-[12px] font-medium transition-colors border"
+                          style={{
+                            borderColor: ativo ? "#184036" : "#E8DCC8",
+                            backgroundColor: ativo ? "#184036" : "#fff",
+                            color: ativo ? "#F3EADA" : "#374151",
+                          }}
+                        >
+                          {TIPO_FILTRO_LABEL[tipo]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Data */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>
+                    Data
+                  </p>
+                  <select
+                    value={dataCampo}
+                    onChange={(e) => setDataCampo(e.target.value as DataCampo)}
+                    className="w-full border rounded-md px-2 py-1.5 text-[12px] outline-none"
+                    style={{ borderColor: "#E8DCC8", color: "#374151", backgroundColor: "#fff" }}
+                  >
+                    <option value="ordem_created_at">Criação da ordem</option>
+                    <option value="pcp_created_at">Entrada no PCP</option>
+                  </select>
+                  <div className="flex gap-2">
+                    <label className="flex-1">
+                      <span className="text-[10px]" style={{ color: "#6B7280" }}>De</span>
+                      <input
+                        type="date"
+                        value={dataDe}
+                        onChange={(e) => setDataDe(e.target.value)}
+                        className="w-full border rounded-md px-2 py-1 text-[12px] outline-none"
+                        style={{ borderColor: "#E8DCC8", color: "#374151" }}
+                      />
+                    </label>
+                    <label className="flex-1">
+                      <span className="text-[10px]" style={{ color: "#6B7280" }}>Até</span>
+                      <input
+                        type="date"
+                        value={dataAte}
+                        onChange={(e) => setDataAte(e.target.value)}
+                        className="w-full border rounded-md px-2 py-1 text-[12px] outline-none"
+                        style={{ borderColor: "#E8DCC8", color: "#374151" }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* Ações */}
+                <div className="flex justify-between items-center pt-2 border-t" style={{ borderColor: "#F3EADA" }}>
+                  <button
+                    type="button"
+                    onClick={limparFiltros}
+                    disabled={filtrosAtivos === 0}
+                    className="text-[12px] font-medium disabled:opacity-30 disabled:cursor-not-allowed"
+                    style={{ color: "#6B7280" }}
+                  >
+                    Limpar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFiltrosOpen(false)}
+                    className="px-3 py-1.5 rounded-md text-[12px] font-semibold"
+                    style={{ backgroundColor: "#184036", color: "#F3EADA" }}
+                  >
+                    Aplicar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Tabs de fluxo — atalho rápido pra alternar entre Serviço e Fabricação.
+          Sincronizado com tiposSelecionados: se exatamente 1 tipo está marcado,
+          a tab correspondente fica ativa. "Todos" = nenhum filtro de tipo. */}
+      {(() => {
+        const tipoTabAtual: "todos" | TipoFiltro =
+          tiposSelecionados.size === 1
+            ? (Array.from(tiposSelecionados)[0] as TipoFiltro)
+            : "todos";
+        const TABS: Array<{ key: "todos" | TipoFiltro; label: string }> = [
+          { key: "todos",      label: "Todos" },
+          { key: "servico",    label: "Serviço" },
+          { key: "fabricacao", label: "Fabricação" },
+        ];
+        const setTab = (key: "todos" | TipoFiltro) => {
+          if (key === "todos") {
+            setTiposSelecionados(new Set());
+          } else {
+            setTiposSelecionados(new Set([key]));
+          }
+        };
+        // Conta por tipo (com base nos filtros não-tipo já aplicados)
+        const contagem = baseList.reduce(
+          (acc: Record<string, number>, p: PCPItem) => {
+            const t = p.tipo_ordem ?? "";
+            (Object.keys(TIPO_FILTRO_ENUMS) as TipoFiltro[]).forEach((k) => {
+              if (TIPO_FILTRO_ENUMS[k].includes(t)) acc[k] = (acc[k] ?? 0) + 1;
+            });
+            acc.todos = (acc.todos ?? 0) + 1;
+            return acc;
+          },
+          {} as Record<string, number>
+        );
+
+        return (
+          <div className="mb-4 flex gap-1 border-b" style={{ borderColor: "#E8DCC8" }}>
+            {TABS.map((t) => {
+              const ativo = tipoTabAtual === t.key;
+              const n = contagem[t.key] ?? 0;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  className="px-4 py-2 text-[13px] font-semibold transition-colors -mb-px border-b-2"
+                  style={{
+                    borderBottomColor: ativo ? "#184036" : "transparent",
+                    color: ativo ? "#184036" : "#6B7280",
+                    backgroundColor: ativo ? "#F3EADA50" : "transparent",
+                  }}
+                >
+                  {t.label}
+                  <span
+                    className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{
+                      backgroundColor: ativo ? "#184036" : "#E8DCC8",
+                      color: ativo ? "#F3EADA" : "#6B7280",
+                    }}
+                  >
+                    {n}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Kanban board */}
       <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-4 md:snap-none">
@@ -582,13 +731,6 @@ export default function KanbanClient({
       {activeModal?.type === "detalhe" && (
         <PCPDetalheModal
           pcp={activeModal.data}
-          onClose={handleClose}
-          onSuccess={handleSuccess}
-        />
-      )}
-      {activeModal?.type === "nova_pcp" && (
-        <NovaPCPModal
-          isOpen={true}
           onClose={handleClose}
           onSuccess={handleSuccess}
         />

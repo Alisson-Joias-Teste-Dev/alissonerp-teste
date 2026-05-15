@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
   // Enfileira sync com Tiny (assíncrono, não bloqueia criação do contato)
   await sql`
     INSERT INTO alissonerp.fila_sync_externo (sistema, acao, payload)
-    VALUES ('tiny', 'sync_contato', ${JSON.stringify({ contato_id: Number(contato.id) })}::jsonb)
+    VALUES ('tiny', 'sync_contato', ${JSON.stringify({ id_contato: Number(contato.id) })}::jsonb)
   `;
 
   return NextResponse.json(contato, { status: 201 });
@@ -118,7 +118,7 @@ export async function PATCH(req: NextRequest) {
   // Enfileira sync com Tiny (assíncrono, não bloqueia atualização do contato)
   await sql`
     INSERT INTO alissonerp.fila_sync_externo (sistema, acao, payload)
-    VALUES ('tiny', 'sync_contato', ${JSON.stringify({ contato_id: body.id })}::jsonb)
+    VALUES ('tiny', 'sync_contato', ${JSON.stringify({ id_contato: body.id })}::jsonb)
   `;
 
   return NextResponse.json(contato);

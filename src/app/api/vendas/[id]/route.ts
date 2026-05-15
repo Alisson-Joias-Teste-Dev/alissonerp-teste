@@ -38,7 +38,8 @@ export async function GET(
       ve.desconto_aprovado_em,
       (SELECT u.nome FROM alissonerp.usuarios u WHERE u.id = ve.desconto_aprovado_por) AS desconto_aprovado_por_nome,
       c.endereco AS cliente_endereco, c.numero AS cliente_numero, c.complemento AS cliente_complemento,
-      c.bairro AS cliente_bairro, c.municipio AS cliente_municipio, c.cep AS cliente_cep, c.uf AS cliente_uf
+      c.bairro AS cliente_bairro, c.municipio AS cliente_municipio, c.cep AS cliente_cep, c.uf AS cliente_uf,
+      c.id_api_contato AS cliente_id_tiny
     FROM alissonerp.vw_vendas_erp_completa v
     LEFT JOIN alissonerp.vendas_erp ve ON ve.id = v.id
     LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
@@ -62,7 +63,8 @@ export async function GET(
     SELECT
       id, forma, gateway, valor, parcelas,
       status, gateway_id, data_confirmacao, created_at,
-      valor_liquido, taxas_mp
+      valor_liquido, taxas_mp,
+      ouro_peso, ouro_valor_grama, ouro_foto_path
     FROM alissonerp.pagamentos_venda
     WHERE venda_id = ${vendaId}
     ORDER BY id
@@ -179,9 +181,22 @@ export async function PATCH(
     client_updated_at?:    string;
   };
 
-  const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "cancelado", "concluido"];
+  const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "entregue", "cancelado", "concluido"];
   if (body.situacao && !SITUACOES_VALIDAS.includes(body.situacao)) {
     return NextResponse.json({ error: "Situação inválida" }, { status: 400 });
+  }
+
+  // ── Guard de versão (lost-update prevention) ────────────────────────────────
+  // Deve rodar ANTES do bloco Tiny, pois o Tiny faz UPDATE em vendas_erp e
+  // dispara o trigger de updated_at — causando falso positivo se checado depois.
+  if (body.client_updated_at) {
+    const [row] = await sql`SELECT updated_at FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
+    if (row && new Date(row.updated_at as string).getTime() !== new Date(body.client_updated_at).getTime()) {
+      return NextResponse.json(
+        { error: "Conflito: registro foi modificado por outro usuário. Recarregue a página." },
+        { status: 409 }
+      );
+    }
   }
 
   // Campos restritos a rascunho
@@ -266,11 +281,9 @@ export async function PATCH(
     }
   }
 
-  // ── Guard: transição para 'concluido' exige pagamento real completo ─────────
-  // Bloqueia diretamente no PATCH antes do UPDATE para evitar bypass dos guards
-  // de concluirVenda. Replica a mesma lógica — data_confirmacao IS NOT NULL
-  // exclui preferences fantasma do cálculo.
-  if (body.situacao === "concluido") {
+  // ── Guard: transições que avançam o status exigem pagamento completo ────────
+  // Aplica para concluido, aprovado, enviado, entregue. Rascunho e cancelado não.
+  if (body.situacao && ["concluido", "aprovado", "enviado", "entregue"].includes(body.situacao)) {
     const [pcCheck] = await sql`
       SELECT
         v.total_venda::numeric AS total_venda,
@@ -302,7 +315,7 @@ export async function PATCH(
   if (body.situacao === "aprovado") {
     // Mapa situacao ERP → situacao Tiny v3
     const SITUACAO_TINY: Record<string, number> = {
-      rascunho: 0, aprovado: 3, confirmado: 3, concluido: 6, cancelado: 2,
+      rascunho: 0, aberto: 1, aprovado: 3, confirmado: 3, concluido: 6, cancelado: 2,
     };
 
     // Buscar venda completa + cliente
@@ -401,7 +414,7 @@ export async function PATCH(
     const pedidoV3: Record<string, unknown> = {
       numeroPedido: vendaFull.numero_venda,
       idContato: Number(vendaFull.cliente_id_tiny) || undefined,
-      situacao: SITUACAO_TINY["aprovado"],
+      situacao: SITUACAO_TINY["aberto"],
       data: dataVenda,
       // NÃO enviar valorDesconto — o desconto já está aplicado no valorUnitario de cada item
       ...(Number(vendaFull.total_frete) > 0 ? { valorFrete: Number(vendaFull.total_frete) } : {}),
@@ -592,18 +605,6 @@ export async function PATCH(
         WHERE id = ${vendaId}
       `;
       tinyErroWarning = erroMsg;
-    }
-  }
-
-  // ── Guard de versão (lost-update prevention) ────────────────────────────────
-  // Opcional: só verifica se o cliente enviou client_updated_at
-  if (body.client_updated_at) {
-    const [row] = await sql`SELECT updated_at FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
-    if (row && new Date(row.updated_at as string).getTime() !== new Date(body.client_updated_at).getTime()) {
-      return NextResponse.json(
-        { error: "Conflito: registro foi modificado por outro usuário. Recarregue a página." },
-        { status: 409 }
-      );
     }
   }
 
