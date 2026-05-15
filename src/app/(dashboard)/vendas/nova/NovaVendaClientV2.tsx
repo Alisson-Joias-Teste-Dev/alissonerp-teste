@@ -15,6 +15,7 @@ import PagamentoForm from "@/components/vendas/PagamentoForm";
 import { maskCpfCnpj, formatDateBR } from "@/lib/formatters";
 import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
 import { createClient } from "@/lib/supabase/client";
+import { isFullAccess } from "@/lib/roles";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -879,6 +880,14 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       const pctPromoMin = item.preco_promo != null && item.preco_promo > 0 && item.preco_lista > 0
         ? ((item.preco_lista - item.preco_promo) / item.preco_lista) * 100
         : 0;
+      // Trava total de promocao: se item esta em promo E user nao e full-access,
+      // bloqueia qualquer alteracao de preco/desconto. Apenas quantidade muda.
+      // Decisao Jonathan: vendedora vende exatamente pelo preco promo, sem desconto adicional.
+      const promoTotalLock = item.preco_promo != null && item.preco_promo > 0 && !isFullAccess(role);
+      if (promoTotalLock && field !== "quantidade") {
+        promoMsgUpdate = `Promo${item.promocao_nome ? ` "${item.promocao_nome}"` : ""}: preço travado em ${fmt(item.preco_promo!)} — sem desconto adicional.`;
+        return item;
+      }
       // Teto: vendedora pode descontar ate maxDesconto ALEM do preco promo.
       const pctMax = Math.max(maxDesconto, pctPromoMin + maxDesconto);
       let q = item.quantidade;

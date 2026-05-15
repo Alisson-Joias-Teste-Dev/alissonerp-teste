@@ -363,6 +363,11 @@ export default function NovaVendaClient({ role, vendedorId, maxDesconto }: Props
       const pctPromoMin = item.preco_promo != null && item.preco_promo > 0 && item.preco_lista > 0
         ? ((item.preco_lista - item.preco_promo) / item.preco_lista) * 100
         : 0;
+      // Trava total de promocao: vendedora (nao-full-access) nao pode mexer em preco/desconto.
+      const promoTotalLock = item.preco_promo != null && item.preco_promo > 0 && !isFullAccess;
+      if (promoTotalLock && field !== "quantidade") {
+        return item;
+      }
       // Teto: pct adicional acima da promo limitado a maxDesconto. Quando ha promo,
       // o teto efetivo no input vendedor e pctPromoMin + maxDesconto (a vendedora pode
       // descontar ate maxDesconto ALEM do preco promo).

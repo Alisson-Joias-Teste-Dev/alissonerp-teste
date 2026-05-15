@@ -356,6 +356,11 @@ export default function NovaVendaClientLegado({ role, vendedorId, maxDesconto }:
       const pctPromoMin = item.preco_promo != null && item.preco_promo > 0 && item.preco_lista > 0
         ? ((item.preco_lista - item.preco_promo) / item.preco_lista) * 100
         : 0;
+      // Trava total de promocao: vendedora (nao-full-access) nao pode mexer em preco/desconto.
+      const promoTotalLock = item.preco_promo != null && item.preco_promo > 0 && !isFullAccess;
+      if (promoTotalLock && field !== "quantidade") {
+        return item;
+      }
       const pctMax = Math.max(maxDesconto, pctPromoMin + maxDesconto);
       let q = item.quantidade;
       let pct = item.pct_desconto;
