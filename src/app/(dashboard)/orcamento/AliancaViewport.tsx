@@ -2,7 +2,7 @@
 
 import React, { useMemo, useRef, useEffect, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, PerspectiveCamera, Environment, ContactShadows, Text } from "@react-three/drei";
+import { OrbitControls, PerspectiveCamera, ContactShadows, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { ProfileType } from "./types";
 import type { RingParams, GrooveType } from "./types";
@@ -688,7 +688,6 @@ function AliancaViewportInner({
             metalColor={params.metalColor}
           />
         )}
-        <Environment preset="warehouse" resolution={512} />
         <OrbitControls enableDamping minDistance={10} maxDistance={60} rotateSpeed={0.6} />
       </Canvas>
     </div>
