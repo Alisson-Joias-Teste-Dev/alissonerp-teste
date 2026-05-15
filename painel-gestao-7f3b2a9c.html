@@ -807,6 +807,75 @@
     padding-top: 8px;
     border-top: 1px solid var(--line);
   }
+
+  /* ─── VARIAÇÕES ──────────────────────────────────── */
+  .sku-readonly input {
+    background: #ececec;
+    cursor: not-allowed;
+    color: #666;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 13px;
+    letter-spacing: .04em;
+  }
+  .sku-readonly .lock-icon {
+    margin-left: 2px;
+    font-size: 11px;
+    opacity: .7;
+  }
+  .v-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+  }
+  .v-table th, .v-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .v-table th {
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    background: var(--champagne-soft);
+  }
+  .v-sku {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .v-rm {
+    background: transparent;
+    color: #c04b3a;
+    border: 0;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 6px;
+  }
+  .v-rm:hover { background: #fbe7e3; }
+  .v-add {
+    padding: 10px 16px;
+    background: var(--champagne-soft);
+    border: 1px dashed var(--line);
+    cursor: pointer;
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    font-weight: 500;
+    color: var(--green-deep);
+    width: 100%;
+    margin-top: 8px;
+  }
+  .v-add:hover { background: #f5efe2; border-color: var(--green-deep); }
+  .v-info {
+    font-size: 11px;
+    color: var(--muted);
+    font-style: italic;
+    margin-top: 6px;
+  }
 </style>
 </head>
 <body>
@@ -933,25 +1002,53 @@
       setTimeout(() => setToast(null), 3200);
     };
 
-    const upsert = async (prod) => {
-      const idx = products.findIndex((p) => p.ref === prod.ref);
-      const next = idx >= 0
-        ? products.map((p, i) => i === idx ? prod : p)
-        : [prod, ...products];
+    // ─── SKU generation ──────────────────────────────────
+    const generateSimpleSku = () => {
+      const overrides = window.CatalogOverrides?.loadOverrides?.() || {};
+      const allRefs = [...products.map(p => p.ref), ...Object.keys(overrides)];
+      let max = 0;
+      allRefs.forEach(ref => {
+        const m = ref?.match(/^AJ(\d+)$/);
+        if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+      });
+      return `AJ${String(max + 1).padStart(4, '0')}`;
+    };
+
+    const generateVariableSku = () => {
+      const overrides = window.CatalogOverrides?.loadOverrides?.() || {};
+      const allRefs = [...products.map(p => p.ref), ...Object.keys(overrides)];
+      let max = 0;
+      allRefs.forEach(ref => {
+        // SKU pai numérico puro (4+ dígitos, sem prefixo, sem traço)
+        const m = ref?.match(/^(\d{4,})$/);
+        if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+      });
+      return String(max + 1);
+    };
+
+    const saveToCatalog = (list) => {
+      let next = [...products];
+      list.forEach(prod => {
+        const idx = next.findIndex(p => p.ref === prod.ref);
+        if (idx >= 0) next = next.map((p, i) => i === idx ? prod : p);
+        else next = [prod, ...next];
+      });
       setProducts(next);
 
+      const count = list.length;
       if (erpCfg.autoSync && erpCfg.url) {
-        try {
-          await sendToErp(prod, erpCfg);
-          show(`Produto ${prod.ref} salvo e sincronizado com o ERP`);
-        } catch (e) {
-          show(`Salvo localmente. Falha ERP: ${e.message}`, true);
-        }
+        sendToErp(list[0], erpCfg)
+          .then(() => show(`${count} produto(s) salvo(s) e sincronizado(s)`))
+          .catch(e => show(`${count} produto(s) salvo(s) localmente. Falha ERP: ${e.message}`, true));
       } else {
-        show(`Produto ${prod.ref} salvo`);
+        show(`${count} produto(s) salvo(s)`);
       }
       setEditing(null);
       setTab('produtos');
+    };
+
+    const upsert = async (prod) => {
+      saveToCatalog([prod]);
     };
 
     const remove = (ref) => {
@@ -1014,7 +1111,7 @@
 
           <main className="main">
             {tab === 'dashboard' && <Dashboard products={products} erpCfg={erpCfg} onSyncAll={syncAll} onNewProduct={() => { setEditing(null); setTab('novo'); }} />}
-            {(tab === 'novo' || editing) && <ProductForm initial={editing} onSave={upsert} onCancel={() => { setEditing(null); setTab('produtos'); }} erpCfg={erpCfg} />}
+            {(tab === 'novo' || editing) && <ProductForm initial={editing} onSave={saveToCatalog} onCancel={() => { setEditing(null); setTab('produtos'); }} erpCfg={erpCfg} genSimpleSku={generateSimpleSku} genVariableSku={generateVariableSku} products={products} />}
             {tab === 'produtos' && !editing && <ProductList products={products} onEdit={(p) => { setEditing(p); }} onRemove={remove} onSync={async (p) => {
               if (!erpCfg.url) { show('Configure o webhook do ERP primeiro', true); return; }
               try { await sendToErp(p, erpCfg); show(`${p.ref} enviado ao ERP`); }
@@ -1093,9 +1190,12 @@
   }
 
   // ─── FORMULÁRIO ──────────────────────────────────────────
-  function ProductForm({ initial, onSave, onCancel, erpCfg }) {
+  function ProductForm({ initial, onSave, onCancel, erpCfg, genSimpleSku, genVariableSku, products }) {
+    const isEditing = !!initial;
     const emptyForm = {
-      ref: '', name: '', desc: '', longDesc: '',
+      ref: genSimpleSku(),
+      type: 'simple',
+      name: '', desc: '', longDesc: '',
       collectionId: 'heranca', category: 'anel',
       from: '', to: '',
       status: 'published',
@@ -1110,12 +1210,47 @@
         garantia: '2 anos',
       },
     };
-    const [f, setF] = useState(initial || emptyForm);
+
+    const buildInitial = () => {
+      if (initial) return initial;
+      const e = { ...emptyForm };
+      e.ref = genSimpleSku();
+      return e;
+    };
+
+    const [f, setF] = useState(buildInitial);
     const [drag, setDrag] = useState(false);
+    const [variations, setVariations] = useState(() => {
+      if (initial?._variationRefs) {
+        return initial._variationRefs.map(r => {
+          const p = products.find(p2 => p2.ref === r);
+          return p?._variationValue || r.split('-').slice(1).join('-');
+        });
+      }
+      return [];
+    });
     const fileRef = useRef(null);
 
     const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
     const setSpec = (k, v) => setF((s) => ({ ...s, specs: { ...s.specs, [k]: v } }));
+
+    const handleTypeChange = (newType) => {
+      const newRef = newType === 'simple' ? genSimpleSku() : genVariableSku();
+      setF(s => ({ ...s, type: newType, ref: newRef }));
+      if (newType === 'simple') setVariations([]);
+    };
+
+    const addVariation = () => {
+      setVariations(v => [...v, '']);
+    };
+
+    const setVariationValue = (idx, val) => {
+      setVariations(v => v.map((v2, i) => i === idx ? val : v2));
+    };
+
+    const removeVariation = (idx) => {
+      setVariations(v => v.filter((_, i) => i !== idx));
+    };
 
     const handleFiles = async (files) => {
       const arr = Array.from(files).filter((f) => f.type.startsWith('image/'));
@@ -1130,17 +1265,57 @@
 
     const submit = (e) => {
       e.preventDefault();
-      if (!f.ref || !f.name || !f.to) {
-        alert('Preencha pelo menos Referência, Nome e Preço final.');
+      if (!f.name || !f.to) {
+        alert('Preencha pelo menos Nome e Preço final.');
         return;
       }
+      if (f.type === 'variable' && !isEditing && variations.length === 0) {
+        alert('Adicione pelo menos uma variação.');
+        return;
+      }
+      if (f.type === 'variable' && variations.some(v => !v.trim())) {
+        alert('Preencha todos os valores das variações.');
+        return;
+      }
+
       const clean = {
         ...f,
         from: Number(f.from) || Number(f.to),
         to: Number(f.to),
       };
-      onSave(clean);
+
+      if (f.type === 'variable' && !isEditing) {
+        const varRefs = variations.map((_, i) => `${f.ref}-${i + 1}`);
+        clean._hasVariations = true;
+        clean._variationType = 'Numeração';
+        clean._variationRefs = varRefs;
+
+        const varProducts = variations.map((val, i) => ({
+          ref: varRefs[i],
+          name: `${f.name} — Num. ${val}`,
+          type: 'variation',
+          _parentRef: f.ref,
+          _variationValue: val,
+          desc: f.desc,
+          longDesc: f.longDesc,
+          collectionId: f.collectionId,
+          category: f.category,
+          from: Number(f.from) || Number(f.to),
+          to: Number(f.to),
+          status: f.status,
+          images: f.images,
+          specs: { ...f.specs },
+        }));
+
+        onSave([clean, ...varProducts]);
+      } else {
+        onSave([clean]);
+      }
     };
+
+    const skuHint = f.type === 'simple'
+      ? 'Gerado automaticamente — formato AJ0000'
+      : 'Gerado automaticamente — numérico sequencial';
 
     return (
       <>
@@ -1154,11 +1329,21 @@
             <p className="card-sub">Identificação e categorização da peça.</p>
 
             <div className="form-grid">
+              <div className="field full">
+                <label>Tipo de produto<span className="req">*</span></label>
+                <select value={f.type || 'simple'} onChange={(e) => handleTypeChange(e.target.value)}
+                        disabled={isEditing}>
+                  <option value="simple">Simples — SKU automático (AJ0000)</option>
+                  <option value="variable">Com variações — SKU numérico (1000, 1001…)</option>
+                </select>
+                <span className="hint">Define o formato do SKU gerado</span>
+              </div>
               <div className="field">
-                <label>Referência (SKU)<span className="req">*</span></label>
-                <input value={f.ref} onChange={(e) => set('ref', e.target.value.toUpperCase())}
-                       placeholder="Ex.: HI-007" maxLength={20} />
-                <span className="hint">Código único do produto no ERP</span>
+                <label>Referência (SKU)<span className="req">*</span> <span className="lock-icon">&#128274;</span></label>
+                <div className="sku-readonly">
+                  <input value={f.ref} readOnly tabIndex={-1} />
+                </div>
+                <span className="hint">{skuHint}</span>
               </div>
               <div className="field">
                 <label>Status</label>
@@ -1199,6 +1384,69 @@
               </div>
             </div>
           </div>
+
+          {f.type === 'variable' && (
+            <div className="card">
+              <h3 className="card-title">Variações</h3>
+              <p className="card-sub">Cada variação gera um SKU automático no formato SKU-PAI-Nº.</p>
+
+              {isEditing ? (
+                <p className="v-info">Variações já cadastradas (não editáveis):</p>
+              ) : null}
+
+              {variations.length > 0 ? (
+                <table className="v-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 50 }}>#</th>
+                      <th>{isEditing ? 'Valor' : 'Valor da variação'}</th>
+                      <th style={{ width: 120 }}>SKU gerado</th>
+                      {!isEditing && <th style={{ width: 40 }}></th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {variations.map((val, i) => (
+                      <tr key={i}>
+                        <td>{i + 1}</td>
+                        <td>
+                          {isEditing ? (
+                            <span>{val}</span>
+                          ) : (
+                            <input
+                              value={val}
+                              onChange={(e) => setVariationValue(i, e.target.value)}
+                              placeholder={`Ex: ${i + 3}`}
+                              style={{
+                                padding: '8px 10px', border: '1px solid var(--line)',
+                                background: 'var(--white)', fontSize: 13, outline: 'none',
+                                width: '100%', fontFamily: 'inherit',
+                              }}
+                            />
+                          )}
+                        </td>
+                        <td><span className="v-sku">{f.ref}-{i + 1}</span></td>
+                        {!isEditing && (
+                          <td>
+                            <button type="button" className="v-rm" onClick={() => removeVariation(i)}>×</button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p style={{ color: 'var(--muted)', fontSize: 12, fontStyle: 'italic', margin: '8px 0' }}>
+                  Nenhuma variação adicionada.
+                </p>
+              )}
+
+              {!isEditing && (
+                <button type="button" className="v-add" onClick={addVariation}>
+                  + Adicionar variação
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="card">
             <h3 className="card-title">Preço</h3>
