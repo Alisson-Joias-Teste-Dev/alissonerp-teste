@@ -10,12 +10,11 @@ import {
 import Link from "next/link";
 import CartaoInline from "@/components/vendas/CartaoInline";
 import PixQrInline from "@/components/vendas/PixQrInline";
-import BadgePromo from "@/components/ui/BadgePromo";
 import PagamentoForm from "@/components/vendas/PagamentoForm";
 import { maskCpfCnpj, formatDateBR } from "@/lib/formatters";
+import { normalizarCampoPersonalizacao } from "@/lib/personalizacao-validacao";
 import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
 import { createClient } from "@/lib/supabase/client";
-import { isFullAccess } from "@/lib/roles";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -53,10 +52,6 @@ interface Produto {
   numeracao: string | null;
   saldo_disponivel: number;
   tem_ficha_tecnica: boolean;
-  // Promocao vigente (migration 248)
-  preco_promo?: number | null;
-  em_promocao?: boolean;
-  promocao_nome?: string | null;
 }
 
 interface FaixaComissao {
@@ -64,6 +59,19 @@ interface FaixaComissao {
   comissao_pct: number;
 }
 
+
+interface CampoPersonalizacaoValor {
+  label: string;
+  valor: string;
+  max_caracteres: number;
+  obrigatorio: boolean;
+}
+
+interface PersonalizacaoMulti {
+  campos: CampoPersonalizacaoValor[];
+}
+
+type PersonalizacaoItem = { valor: string } | PersonalizacaoMulti;
 
 interface ItemVenda {
   _key: string;
@@ -79,10 +87,7 @@ interface ItemVenda {
   valor_comissao: number;
   peso_estimado: number | null;
   saldo_disponivel: number;
-  personalizacao?: { valor: string };
-  // Promocao vigente no momento da adicao
-  preco_promo?: number | null;
-  promocao_nome?: string | null;
+  personalizacao?: PersonalizacaoItem;
 }
 
 // Config de personalizacao (config vinda de /api/produtos/[id]/personalizacao)
@@ -95,7 +100,30 @@ type CaracteresPermitidos =
   | "numero"
   | "qualquer";
 
+interface CampoPersonalizacaoConfig {
+  id: number;
+  config_id: number;
+  label: string;
+  placeholder: string | null;
+  exemplo: string | null;
+  tipo: string;
+  obrigatorio: boolean;
+  min_caracteres: number;
+  max_caracteres: number;
+  caracteres_permitidos: CaracteresPermitidos;
+  posicao: number;
+}
+
+interface RegrasFormatacao {
+  primeira_letra_maiuscula: boolean;
+  sem_espacos: boolean;
+  sem_numeros: boolean;
+  sem_simbolos: boolean;
+  sem_acentos: boolean;
+}
+
 interface ConfigPersonalizacao {
+  config_id?: number;
   produto_id: number;
   tipo: string;
   obrigatorio: boolean;
@@ -109,6 +137,11 @@ interface ConfigPersonalizacao {
   ativo: boolean;
   preco_por_letra?: number | null;
   peso_por_letra?:  number | null;
+  campos_gratis?: number;
+  preco_campo_adicional?: number | null;
+  regras?: RegrasFormatacao | null;
+  /** Campos individuais (multi-campos). Se presente e length>0, cada campo tem suas proprias regras. */
+  campos?: CampoPersonalizacaoConfig[];
 }
 
 const REGEX_PERSONALIZACAO: Record<CaracteresPermitidos, RegExp> = {
@@ -120,6 +153,27 @@ const REGEX_PERSONALIZACAO: Record<CaracteresPermitidos, RegExp> = {
   numero:                /^[0-9]+$/,
   qualquer:              /^.+$/,
 };
+
+// ─── Helpers de personalizacao ──────────────────────────────────────────────
+function getPersValor(item: ItemVenda): string {
+  if (!item.personalizacao) return "";
+  if ("valor" in item.personalizacao) return item.personalizacao.valor ?? "";
+  return item.personalizacao.campos[0]?.valor ?? "";
+}
+function getPersTotalLetras(item: ItemVenda): number {
+  if (!item.personalizacao) return 0;
+  if ("valor" in item.personalizacao) return (item.personalizacao.valor ?? "").trim().length;
+  return item.personalizacao.campos.reduce((s, c) => s + (c.valor ?? "").trim().length, 0);
+}
+function getPersCampo(item: ItemVenda, idx: number): string {
+  if (!item.personalizacao) return "";
+  if ("valor" in item.personalizacao) return idx === 0 ? (item.personalizacao.valor ?? "") : "";
+  return item.personalizacao.campos[idx]?.valor ?? "";
+}
+function isPersMulti(item: ItemVenda): boolean {
+  return !!item.personalizacao && "campos" in item.personalizacao;
+}
+
 
 interface Pagamento {
   _key: string;
@@ -442,16 +496,14 @@ function PrecoListaInput({ value, onCommit }: { value: number; onCommit: (val: s
 // Input para editar o "Preço Un" diretamente. Ao sair do campo (blur),
 // converte o preço digitado em desconto %. Útil para o gerente que quer
 // negociar direto o valor final da peça.
-function PrecoUnitarioInput({ precoUnit, onCommit, promoMsg }: {
+function PrecoUnitarioInput({ precoUnit, onCommit }: {
   precoUnit: number;
   onCommit: (val: string) => void;
-  promoMsg?: string | null;
 }) {
   const formatted = precoUnit > 0 ? precoUnit.toFixed(2).replace(".", ",") : "";
   const [local, setLocal] = useState(formatted);
   const [focused, setFocused] = useState(false);
   useEffect(() => { if (!focused) setLocal(formatted); }, [formatted, focused]);
-  const hasFloor = !!promoMsg;
   return (
     <input
       type="text"
@@ -461,9 +513,8 @@ function PrecoUnitarioInput({ precoUnit, onCommit, promoMsg }: {
       onBlur={() => { setFocused(false); onCommit(local || "0"); }}
       onKeyDown={e => { if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); } }}
       placeholder="0,00"
-      title={promoMsg ?? undefined}
       className="w-24 border rounded px-1.5 py-1 text-sm text-right outline-none tabular-nums"
-      style={{ borderColor: hasFloor ? "#DC2626" : C.cremeBorder, color: hasFloor ? "#B91C1C" : "#374151" }}
+      style={{ borderColor: C.cremeBorder, color: "#374151" }}
     />
   );
 }
@@ -527,9 +578,6 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [descontoErr, setDescontoErr] = useState("");
   const [addingItem, setAddingItem] = useState(false);
   const [pendingAuths, setPendingAuths] = useState<Record<string, PendingAuth>>({});
-  // Mensagem temporaria por item quando o preco digitado e recortado pelo piso da promo.
-  // Some sozinho ao proximo edit do mesmo item.
-  const [promoFloorMsgs, setPromoFloorMsgs] = useState<Record<string, string>>({});
   // Cache de configs de personalização por produto_id.
   //   null  → ja consultado, produto NAO tem config
   //   undefined → ainda nao consultado
@@ -617,8 +665,13 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const pagamentoCobre = pagForma === "Múltiplas" ? Math.abs(totalPago - totalVenda) < 0.01 : true;
   const temAReceber = pagForma === "A Receber" || (pagForma === "Múltiplas" && pagamentos.some(p => p.forma === "A Receber"));
   const LIMITE_DESCONTO_APROVACAO = 30;
+  const LIMITE_DESCONTO_CARTAO = 20;
   // Admin/dev (maxDesconto=100) aprovar diretamente — sem tarefa de aprovação
   const precisaAprovacaoDesconto = role !== "admin" && itens.some(i => i.pct_desconto > LIMITE_DESCONTO_APROVACAO);
+  const temDescontoCartao = itens.some(i => i.pct_desconto > LIMITE_DESCONTO_CARTAO);
+  const [descontoCartaoAprovado, setDescontoCartaoAprovado] = useState(false);
+  const [descontoCartaoAprovadoNome, setDescontoCartaoAprovadoNome] = useState<string | null>(null);
+  const cartaoBloqueado = temDescontoCartao && !descontoCartaoAprovado;
 
   // Reset parcelas se valor muda
   useEffect(() => {
@@ -847,69 +900,34 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
   function calcItem(produto: Produto, q: number, pct: number): Omit<ItemVenda, "_key"> {
     const precoLista = produto.preco_venda ?? 0;
-    // Promocao ativa (migration 248): preco_promo vira o preco_unitario inicial
-    // e pct_desconto eh recalculado a partir de (lista - promo) / lista. Isso
-    // faz a comissao cair na faixa correta automaticamente via getComissao().
-    const temPromo = !!produto.em_promocao && produto.preco_promo != null && produto.preco_promo >= 0;
-    const pctEfetivo = temPromo && precoLista > 0
-      ? Math.max(pct, ((precoLista - (produto.preco_promo ?? 0)) / precoLista) * 100)
-      : pct;
-    const precoUnit = precoLista * (1 - pctEfetivo / 100);
+    const precoUnit = precoLista * (1 - pct / 100);
     const totalItem = precoUnit * q;
-    const pctComissao = getComissao(pctEfetivo);
+    const pctComissao = getComissao(pct);
     return {
       produto_id: produto.id, nome_produto: produto.nome, sku: produto.sku,
-      quantidade: q, preco_lista: precoLista, pct_desconto: pctEfetivo,
+      quantidade: q, preco_lista: precoLista, pct_desconto: pct,
       preco_unitario: precoUnit, total_item: totalItem,
       pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100,
       peso_estimado: produto.peso_precificado,
       saldo_disponivel: produto.saldo_disponivel ?? 0,
-      preco_promo: temPromo ? produto.preco_promo : null,
-      promocao_nome: temPromo ? (produto.promocao_nome ?? null) : null,
     };
   }
 
   function updateItem(key: string, field: "quantidade" | "pct_desconto" | "desconto_valor" | "preco_lista" | "preco_unitario", raw: string) {
     const authThr = descontoAuthThreshold ?? maxDesconto;
-    // Limpa msg de piso ao iniciar nova edicao; pode ser re-setada abaixo.
-    let promoMsgUpdate: string | null = null;
 
     setItens(prev => prev.map(item => {
       if (item._key !== key) return item;
-      // Piso de desconto (em %) vindo da promo: preco_unitario nao pode cair abaixo de preco_promo.
-      const pctPromoMin = item.preco_promo != null && item.preco_promo > 0 && item.preco_lista > 0
-        ? ((item.preco_lista - item.preco_promo) / item.preco_lista) * 100
-        : 0;
-      // Trava total de promocao: se item esta em promo E user nao e full-access,
-      // bloqueia qualquer alteracao de preco/desconto. Apenas quantidade muda.
-      // Decisao Jonathan: vendedora vende exatamente pelo preco promo, sem desconto adicional.
-      const promoTotalLock = item.preco_promo != null && item.preco_promo > 0 && !isFullAccess(role);
-      if (promoTotalLock && field !== "quantidade") {
-        promoMsgUpdate = `Promo${item.promocao_nome ? ` "${item.promocao_nome}"` : ""}: preço travado em ${fmt(item.preco_promo!)} — sem desconto adicional.`;
-        return item;
-      }
-      // Teto: vendedora pode descontar ate maxDesconto ALEM do preco promo.
-      const pctMax = Math.max(maxDesconto, pctPromoMin + maxDesconto);
       let q = item.quantidade;
       let pct = item.pct_desconto;
       let precoUnitDigitado: number | null = null;
 
       if (field === "quantidade") q = Math.max(1, parseInt(raw) || 1);
-      if (field === "pct_desconto") {
-        const pctBruto = Math.max(0, parseFloat(raw.replace(",", ".")) || 0);
-        pct = Math.max(pctPromoMin, Math.min(pctMax, pctBruto));
-        if (pctPromoMin > 0 && pctBruto < pctPromoMin - 0.01) {
-          promoMsgUpdate = `Promo${item.promocao_nome ? ` "${item.promocao_nome}"` : ""}: piso ${fmt(item.preco_promo ?? 0)}`;
-        }
-      }
+      if (field === "pct_desconto") pct = Math.max(0, parseFloat(raw.replace(",", ".")) || 0);
       if (field === "desconto_valor") {
         const valorDesc = parseFloat(raw.replace(",", ".")) || 0;
-        const pctBruto = item.preco_lista > 0 ? (valorDesc / item.preco_lista) * 100 : 0;
-        pct = Math.max(pctPromoMin, Math.min(pctMax, Math.max(0, pctBruto)));
+        pct = item.preco_lista > 0 ? Math.max(0, (valorDesc / item.preco_lista) * 100) : 0;
         pct = Math.round(pct * 100) / 100;
-        if (pctPromoMin > 0 && pctBruto < pctPromoMin - 0.01) {
-          promoMsgUpdate = `Promo${item.promocao_nome ? ` "${item.promocao_nome}"` : ""}: piso ${fmt(item.preco_promo ?? 0)}`;
-        }
       }
       if (field === "preco_lista") {
         // Normaliza formato BR com separador de milhar: "1.500,99" → 1500.99
@@ -923,36 +941,24 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       if (field === "preco_unitario") {
         const novoPreco = parseFloat(raw.replace(",", ".")) || 0;
         if (item.preco_lista > 0 && novoPreco >= 0 && novoPreco <= item.preco_lista) {
-          const precoFloor = item.preco_promo != null && item.preco_promo > 0
-            ? item.preco_promo
-            : 0;
-          const precoEfetivo = Math.max(novoPreco, precoFloor);
-          // pct e o desconto TOTAL real (lista->efetivo), sem clamp por maxDesconto:
-          // a comissao precisa do pct real para nao cair em faixa errada quando a promo
-          // ja passa de maxDesconto.
-          pct = Math.max(0, Math.min(pctMax, ((item.preco_lista - precoEfetivo) / item.preco_lista) * 100));
+          pct = Math.min(maxDesconto, Math.max(0, ((item.preco_lista - novoPreco) / item.preco_lista) * 100));
           pct = Math.round(pct * 100) / 100;
-          precoUnitDigitado = precoEfetivo;
-          if (precoFloor > 0 && novoPreco < precoFloor - 0.005) {
-            promoMsgUpdate = `Promo${item.promocao_nome ? ` "${item.promocao_nome}"` : ""}: piso ${fmt(precoFloor)}`;
-          }
+          precoUnitDigitado = novoPreco;
         }
       }
 
-      // Auth threshold: aplica cap/pendingAuths para o pct ADICIONAL acima da promo.
-      // Sem clamp pelo authThr no pct final salvo (a comissao usa o pct total real).
+      // Auth threshold: só aplica cap/pendingAuths para roles com descontoAuthThreshold (ex: gerente_loja)
       let authCapped = false;
-      const pctAdicional = pct - pctPromoMin;
-      if (descontoAuthThreshold != null && field !== "quantidade" && pctAdicional > authThr) {
+      if (descontoAuthThreshold != null && field !== "quantidade" && pct > authThr) {
         const requestedPct = pct;
         setPendingAuths(prev2 => {
           const existing = prev2[key];
           if (existing?.status === "aprovado" && existing.pct >= requestedPct) return prev2;
           return { ...prev2, [key]: { solicitacaoId: null, pct: requestedPct, status: "local" } };
         });
-        pct = pctPromoMin + authThr;
+        pct = authThr;
         authCapped = true;
-      } else if (descontoAuthThreshold != null && field !== "quantidade" && pctAdicional <= authThr) {
+      } else if (descontoAuthThreshold != null && field !== "quantidade" && pct <= authThr) {
         setPendingAuths(prev2 => {
           if (!prev2[key]) return prev2;
           const next = { ...prev2 };
@@ -965,29 +971,19 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       const precoPorLetra = cfg?.preco_por_letra;
       let precoLista = item.preco_lista;
       if (precoPorLetra != null && precoPorLetra > 0) {
-        const qtdLetras = item.personalizacao?.valor?.trim().length ?? 0;
+        const qtdLetras = getPersTotalLetras(item);
         precoLista = qtdLetras === 0 ? 0 : Math.round(qtdLetras * precoPorLetra * 100) / 100;
       }
+
       // Preço unitário: preserva valor digitado para evitar drift de arredondamento.
       // Se auth cortou o desconto ou personalização mudou o preço_lista, recalcula.
       const precoUnit = (precoUnitDigitado !== null && !authCapped && precoLista === item.preco_lista)
         ? precoUnitDigitado
         : precoLista * (1 - pct / 100);
       const totalItem = precoUnit * q;
-      // Comissao usa pct TOTAL real (sem clamp por maxDesconto) para que vendedora
-      // mantenha a comissao da faixa correspondente a promocao + desconto adicional.
       const pctComissao = getComissao(pct);
       return { ...item, quantidade: q, pct_desconto: pct, preco_lista: precoLista, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
     }));
-
-    // Atualiza msg de piso fora do setItens (separar concerns).
-    setPromoFloorMsgs(prev => {
-      if (promoMsgUpdate) return { ...prev, [key]: promoMsgUpdate };
-      if (prev[key] == null) return prev;
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
   }
 
   async function solicitarAutorizacao(key: string) {
@@ -1070,7 +1066,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     config: ConfigPersonalizacao | null | undefined,
   ): string | null {
     if (!config) return null;
-    const valor = item.personalizacao?.valor?.trim() ?? "";
+    const valor = getPersValor(item).trim();
+
     if (config.obrigatorio && !valor) {
       return `${config.label} é obrigatório`;
     }
@@ -1092,12 +1089,14 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     setItens(prev =>
       prev.map(it => {
         if (it._key !== itemKey) return it;
-        const novaPers = { valor };
         const cfg = it.produto_id != null ? personalizacoesCache[it.produto_id] : null;
+        // Aplica regras de formatacao automaticamente (sem_espacos, sem_numeros, primeira_letra_maiuscula, etc.)
+        const valorFormatado = normalizarCampoPersonalizacao(valor, cfg?.regras ?? null, cfg?.max_caracteres ?? 999);
+        const novaPers = { valor: valorFormatado };
         const precoPorLetra = cfg?.preco_por_letra;
         const pesoPorLetra  = cfg?.peso_por_letra;
         const r2 = (n: number) => Math.round(n * 100) / 100;
-        const qtdLetras = valor.trim().length;
+        const qtdLetras = valorFormatado.trim().length;
 
         // Recalcula peso_estimado se peso_por_letra configurado
         let pesoEstimadoNovo: number | null = it.peso_estimado;
@@ -1202,8 +1201,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
         preco_unitario: i.preco_unitario, total_item: i.total_item,
         pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao, peso_estimado: i.peso_estimado,
-        personalizacao: i.personalizacao?.valor?.trim()
-          ? { valor: i.personalizacao.valor.trim() }
+        personalizacao: getPersValor(i).trim()
+          ? { valor: getPersValor(i).trim() }
           : null,
       })),
       pagamentos: pagamentosBody,
@@ -1374,6 +1373,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     }
     if (step === 3 && tipoVenda !== "servico" && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
     if (step === 3 && precisaAprovacaoDesconto) { setSaveErr("Desconto acima de 30% requer aprovação. Clique em 'Solicitar Aprovação'."); return; }
+    if (step === 3 && cartaoBloqueado && pagForma === "Cartão de Crédito") { setSaveErr("Cartão de crédito bloqueado para esta venda devido a descontos acima de 20%. Solicite aprovação ou escolha outra forma de pagamento."); return; }
     // Valida pendencias de personalizacao no passo 3
     if (step === 3) {
       const pendencias = itens
@@ -1475,6 +1475,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     setConcluindo(true); setSaveErr("");
     if (precisaAprovacaoDesconto) {
       setSaveErr("Esta venda tem desconto acima de 30% aguardando aprovação. Retorne ao passo 3 e clique em 'Solicitar Aprovação'.");
+      setConcluindo(false);
+      return;
+    }
+    if (cartaoBloqueado && pagForma === "Cartão de Crédito") {
+      setSaveErr("Cartão de crédito bloqueado para esta venda. Solicite aprovação ou escolha outra forma de pagamento.");
       setConcluindo(false);
       return;
     }
@@ -2369,12 +2374,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                         <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                           <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
                           <td className="px-3 py-2.5 font-medium" style={{ color: "#1A1A1A", minWidth: "160px" }}>
-                            <span className="block">
-                              {item.nome_produto}
-                              {item.preco_promo != null && (
-                                <BadgePromo campanha={item.promocao_nome} className="ml-1.5 align-middle" />
-                              )}
-                            </span>
+                            <span className="block">{item.nome_produto}</span>
                             {tipoVenda === "produto" && item.saldo_disponivel < item.quantidade && (
                               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded mt-0.5"
                                 style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
@@ -2404,19 +2404,17 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                 const isPending = auth?.status === "local" || auth?.status === "pendente";
                                 const isApproved = auth?.status === "aprovado";
                                 const isRejected = auth?.status === "rejeitado";
-                                const promoMsg = promoFloorMsgs[item._key];
                                 return (
                                   <div className="flex items-center gap-1">
-                                    <input type="number" min={0} step={0.01}
+                                    <input type="number" min={0} max={maxDesconto} step={0.01}
                                       value={displayPct || ""}
                                       onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
                                       readOnly={auth?.status === "pendente"}
                                       placeholder="0"
-                                      title={promoMsg ?? undefined}
                                       className="w-16 border rounded px-1.5 py-1 text-sm text-center outline-none"
                                       style={{
-                                        borderColor: promoMsg ? "#DC2626" : isPending ? "#D97706" : isApproved ? "#059669" : isRejected ? "#EF4444" : C.cremeBorder,
-                                        color: promoMsg ? "#B91C1C" : isPending ? "#D97706" : isApproved ? "#059669" : undefined,
+                                        borderColor: isPending ? "#D97706" : isApproved ? "#059669" : isRejected ? "#EF4444" : C.cremeBorder,
+                                        color: isPending ? "#D97706" : isApproved ? "#059669" : undefined,
                                       }} />
                                     {auth?.status === "local" && (
                                       <button onClick={() => void solicitarAutorizacao(item._key)}
@@ -2436,21 +2434,14 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                     )}
                                   </div>
                                 );
-                              })() : (() => {
-                                const promoMsg = promoFloorMsgs[item._key];
-                                return (
-                                  <input type="number" min={0} step={0.01}
-                                    value={item.pct_desconto || ""}
-                                    onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
-                                    placeholder="0"
-                                    title={promoMsg ?? undefined}
-                                    className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none"
-                                    style={{
-                                      borderColor: promoMsg ? "#DC2626" : item.pct_desconto > maxDesconto ? "#F97316" : C.cremeBorder,
-                                      color: promoMsg ? "#B91C1C" : item.pct_desconto > maxDesconto ? "#EA580C" : undefined,
-                                    }} />
-                                );
-                              })()}
+                              })() : (
+                                <input type="number" min={0} max={maxDesconto} step={0.01}
+                                  value={item.pct_desconto || ""}
+                                  onChange={e => updateItem(item._key, "pct_desconto", e.target.value || "0")}
+                                  placeholder="0"
+                                  className="w-20 border rounded px-1.5 py-1 text-sm text-center outline-none"
+                                  style={{ borderColor: item.pct_desconto > maxDesconto ? "#F97316" : C.cremeBorder, color: item.pct_desconto > maxDesconto ? "#EA580C" : undefined }} />
+                              )}
                             </td>
                             <td className="px-3 py-2.5">
                               <DescontoValorInput
@@ -2465,7 +2456,6 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                               <PrecoUnitarioInput
                                 precoUnit={item.preco_unitario}
                                 onCommit={val => updateItem(item._key, "preco_unitario", val)}
-                                promoMsg={promoFloorMsgs[item._key]}
                               />
                             ) : (
                               <span className="tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_unitario)}</span>
@@ -2508,7 +2498,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <input
                                     type="text"
-                                    value={item.personalizacao?.valor ?? ""}
+                                    value={getPersValor(item)}
                                     onChange={(e) => atualizarPersonalizacao(item._key, e.target.value)}
                                     maxLength={configPers.max_caracteres}
                                     placeholder={configPers.placeholder ?? "Ex: JOAO"}
@@ -2516,7 +2506,6 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                     style={{
                                       borderColor: erroPers ? "#EF4444" : C.cremeBorder,
                                       letterSpacing: "0.05em",
-                                      textTransform: "uppercase",
                                     }}
                                   />
                                   <span
@@ -2525,9 +2514,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                     }`}
                                     style={{ backgroundColor: erroPers ? "#FEE2E2" : "#F3F4F6" }}
                                   >
-                                    {(item.personalizacao?.valor?.length ?? 0)}/{configPers.max_caracteres}
+                                    {getPersValor(item).length}/{configPers.max_caracteres}
                                   </span>
-                                  {!erroPers && item.personalizacao?.valor && (
+                                  {!erroPers && getPersValor(item) && (
                                     <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                                   )}
                                 </div>
@@ -2537,7 +2526,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                     {erroPers}
                                   </p>
                                 )}
-                                {configPers.exemplo && !item.personalizacao?.valor && !erroPers && (
+                                {configPers.exemplo && !getPersValor(item) && !erroPers && (
                                   <p className="text-[10px] text-gray-400 mt-1">
                                     Exemplo: {configPers.exemplo}
                                   </p>
@@ -2550,10 +2539,10 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                   >
                                     <Calculator className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#D4A843" }} />
                                     <span style={{ color: "#6B7280" }}>
-                                      {item.personalizacao?.valor?.trim().length ?? 0} letras × {fmt(configPers.preco_por_letra)} =
+                                      {getPersTotalLetras(item)} letras × {fmt(configPers.preco_por_letra)} =
                                     </span>
                                     <span className="font-semibold tabular-nums" style={{ color: C.esmeralda }}>
-                                      {fmt((item.personalizacao?.valor?.trim().length ?? 0) * configPers.preco_por_letra)}
+                                      {fmt(getPersTotalLetras(item) * configPers.preco_por_letra)}
                                     </span>
                                   </div>
                                 )}
@@ -2565,10 +2554,10 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                   >
                                     <Scale className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#059669" }} />
                                     <span style={{ color: "#6B7280" }}>
-                                      {item.personalizacao?.valor?.trim().length ?? 0} letras × {configPers.peso_por_letra.toFixed(2)} g =
+                                      {getPersTotalLetras(item)} letras × {configPers.peso_por_letra.toFixed(2)} g =
                                     </span>
                                     <span className="font-semibold tabular-nums" style={{ color: "#065F46" }}>
-                                      {((item.personalizacao?.valor?.trim().length ?? 0) * configPers.peso_por_letra).toFixed(2)} g
+                                      {(getPersTotalLetras(item) * configPers.peso_por_letra).toFixed(2)} g
                                     </span>
                                   </div>
                                 )}
@@ -2609,16 +2598,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                       onSearch={async q => { const r = await fetch(`/api/vendas/produtos/busca?q=${encodeURIComponent(q)}&limit=15`); return r.json(); }}
                       renderItem={p => (
                         <div>
-                          <p className="font-medium text-sm flex items-center gap-1.5">
-                            {p.nome}
-                            {p.em_promocao && (
-                              <BadgePromo campanha={p.promocao_nome} />
-                            )}
-                          </p>
+                          <p className="font-medium text-sm">{p.nome}</p>
                           <p className="text-xs" style={{ color: "#9CA3AF" }}>
-                            {p.sku} · {p.em_promocao && p.preco_promo != null
-                              ? (<><s>{p.preco_venda != null ? fmt(p.preco_venda) : "—"}</s> <span style={{ color: "#047857", fontWeight: 700 }}>{fmt(p.preco_promo)}</span></>)
-                              : (p.preco_venda != null ? fmt(p.preco_venda) : "sem preço")}
+                            {p.sku} · {p.preco_venda != null ? fmt(p.preco_venda) : "sem preço"}
                             {" · "}
                             <span style={{ color: p.saldo_disponivel > 0 ? "#059669" : "#D97706", fontWeight: 600 }}>
                               estoque: {p.saldo_disponivel}
@@ -2627,7 +2609,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                         </div>
                       )}
                       onSelect={p => { setProdutoSel(p); setPctDesconto(0); setDescontoErr(""); }}
-                      selectedLabel={produtoSel ? `${produtoSel.nome} · ${fmt(produtoSel.preco_venda ?? 0)}${produtoSel.em_promocao && produtoSel.preco_promo != null ? ` · PROMO ${fmt(produtoSel.preco_promo)}` : ""}` : null}
+                      selectedLabel={produtoSel ? `${produtoSel.nome} · ${fmt(produtoSel.preco_venda ?? 0)}` : null}
                       onClear={() => { setProdutoSel(null); setDescontoErr(""); }}
                     />
                     {produtoSel && (
@@ -2767,6 +2749,31 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               obterVendaId={!vendaId ? salvarRascunho : undefined}
               onPagamentoConfirmado={(id) => { if (tipoVenda === "servico") concluirVenda(id); else router.push(`/vendas/${id}`); }}
               showAReceberWarning={temAReceber}
+              cartaoBloqueado={cartaoBloqueado}
+              onSolicitarAprovacaoCartao={async () => {
+                let idFinal = vendaId;
+                if (!idFinal) {
+                  const { id } = await salvarRascunho({ skipPagamentos: true });
+                  idFinal = id;
+                }
+                setSaving(true);
+                try {
+                  const res = await fetch(`/api/vendas/${idFinal}/solicitar-aprovacao`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ tipo: "cartao_desconto" }),
+                  });
+                  const d = await res.json();
+                  if (!res.ok) throw new Error(d.error ?? "Erro ao solicitar aprovação");
+                  if (d.ja_aprovado) {
+                    setDescontoCartaoAprovado(true);
+                  } else {
+                    alert("Solicitação de aprovação para cartão de crédito enviada.");
+                  }
+                } catch (e) {
+                  setSaveErr(e instanceof Error ? e.message : "Erro ao solicitar aprovação");
+                } finally { setSaving(false); }
+              }}
+              solicitandoAprovacaoCartao={saving}
             />
 
             {/* Resumo totais */}

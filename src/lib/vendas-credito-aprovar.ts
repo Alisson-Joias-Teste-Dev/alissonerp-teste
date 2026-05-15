@@ -24,7 +24,7 @@ interface SubmissaoResult {
 
 interface AprovacaoResult {
   ok: boolean;
-  acao: "aprovado" | "rejeitado" | "erro";
+  acao: "aprovado" | "rejeitado" | "erro" | "cartao_liberado" | "cartao_rejeitado";
   ordem_criada?: string;
   tiny_erro?: string;
   message?: string;
@@ -204,7 +204,7 @@ export async function processarAprovacaoCredito(
 ): Promise<AprovacaoResult> {
   // 1. Buscar tarefa e venda vinculada
   const [tarefa] = await sql`
-    SELECT t.id, t.venda_id, t.criado_por,
+    SELECT t.id, t.venda_id, t.tipo AS tipo_tarefa, t.criado_por,
            v.id AS vid, v.numero_venda, v.situacao, v.aprovacao_credito_tipo,
            v.total_comissao
     FROM alissonerp.tarefas t
@@ -217,6 +217,48 @@ export async function processarAprovacaoCredito(
 
   const vendaId = tarefa.venda_id as number;
   const tipo = tarefa.aprovacao_credito_tipo as "gerente" | "diretor";
+
+  // 1a. Aprovação para Cartão de Crédito (tipo cartao_desconto)
+  if (tarefa.tipo_tarefa === "cartao_desconto") {
+    if (decisao === "aprovado") {
+      await sql`
+        UPDATE alissonerp.vendas_erp
+        SET aprovacao_credito_tarefa_id = NULL,
+            desconto_cartao_aprovado_por = ${aprovadorId}::uuid,
+            desconto_cartao_aprovado_em  = NOW(),
+            updated_at = NOW()
+        WHERE id = ${vendaId}
+      `;
+      if (tarefa.criado_por) {
+        await sql`
+          INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id, venda_id)
+          VALUES (${String(tarefa.criado_por)}::uuid, 'aprovacao',
+            'Cartão de crédito liberado!',
+            'O cartão de crédito foi liberado para a venda ' || ${tarefa.numero_venda} || '.',
+            ${aprovadorId}::uuid,
+            ${vendaId})
+        `.catch(() => {});
+      }
+      return { ok: true, acao: "cartao_liberado", message: "Cartão de crédito liberado para esta venda." };
+    } else {
+      await sql`
+        UPDATE alissonerp.vendas_erp
+        SET aprovacao_credito_tarefa_id = NULL, updated_at = NOW()
+        WHERE id = ${vendaId}
+      `;
+      if (tarefa.criado_por) {
+        await sql`
+          INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id, venda_id)
+          VALUES (${String(tarefa.criado_por)}::uuid, 'aprovacao',
+            'Cartão de crédito não aprovado',
+            ${motivo ?? 'O uso do cartão de crédito foi recusado para a venda ' + tarefa.numero_venda},
+            ${aprovadorId}::uuid,
+            ${vendaId})
+        `.catch(() => {});
+      }
+      return { ok: true, acao: "cartao_rejeitado", message: "Cartão de crédito rejeitado." };
+    }
+  }
 
   // 1b. Bloquear se venda tem desconto >30% não aprovado
   const [descCheck] = await sql`

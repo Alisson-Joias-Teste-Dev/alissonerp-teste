@@ -44,11 +44,12 @@ export async function POST(
 
   const [venda] = await sql`
     SELECT v.id, v.bloqueado, v.situacao,
-           v.desconto_aprovado_por,
-           EXISTS(
-             SELECT 1 FROM alissonerp.itens_venda_erp
-             WHERE venda_id = ${vendaId} AND pct_desconto > 30
-           ) AS tem_desconto_alto
+    v.desconto_aprovado_por,
+    v.desconto_cartao_aprovado_por,
+    EXISTS(
+      SELECT 1 FROM alissonerp.itens_venda_erp
+      WHERE venda_id = ${vendaId} AND pct_desconto > 30
+    ) AS tem_desconto_alto
     FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
@@ -83,6 +84,22 @@ export async function POST(
   // Ouro calcula o valor server-side — não valida o campo valor aqui
   if (body.forma !== "Ouro" && (!body.valor || body.valor <= 0))
     return NextResponse.json({ error: "valor inválido" }, { status: 400 });
+
+  // ── Guard: Cartão de Crédito com desconto >20% sem aprovação ────────────
+  if (body.forma === "Cartão de Crédito") {
+    const [temDescontoCartao] = await sql`
+      SELECT EXISTS(
+        SELECT 1 FROM alissonerp.itens_venda_erp
+        WHERE venda_id = ${vendaId} AND pct_desconto > 20
+      ) AS tem
+    `;
+    if (temDescontoCartao?.tem && !venda.desconto_cartao_aprovado_por) {
+      return NextResponse.json(
+        { error: "Esta venda tem itens com desconto acima de 20%. Para pagar no cartão de crédito, solicite aprovação." },
+        { status: 409 }
+      );
+    }
+  }
 
   // ── Hook: Vale-Troca ─────────────────────────────────────────────────────
   if (body.forma === "Vale-Troca") {

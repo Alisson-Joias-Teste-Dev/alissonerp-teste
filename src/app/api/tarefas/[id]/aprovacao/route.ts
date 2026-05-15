@@ -101,12 +101,54 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   await processarDecisao(Number(id), body.decisao, user.id, body.motivo);
 
   const [tarefaInfo] = await sql`
-    SELECT venda_id, tags FROM alissonerp.tarefas WHERE id = ${Number(id)}
+    SELECT venda_id, tags, tipo FROM alissonerp.tarefas WHERE id = ${Number(id)}
   `;
   const tagsRaw = tarefaInfo?.tags;
   const tags: string[] = Array.isArray(tagsRaw)
     ? tagsRaw
     : (typeof tagsRaw === "string" ? tagsRaw.replace(/[{}"]/g, "").split(",").filter(Boolean) : []);
+
+  if (tarefaInfo?.tipo === "cartao_desconto" && tarefaInfo?.venda_id) {
+    const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };
+    console.log(`[cartao_desconto] inicio`, logCtx);
+    try {
+      if (body.decisao === "aprovado") {
+        await sql`
+          UPDATE alissonerp.vendas_erp
+          SET aprovacao_credito_tarefa_id = NULL,
+              desconto_cartao_aprovado_por = ${user.id}::uuid,
+              desconto_cartao_aprovado_em  = NOW(),
+              updated_at = NOW()
+          WHERE id = ${tarefaInfo.venda_id}
+        `;
+        console.log(`[cartao_desconto] vendas_erp: cartao liberado`);
+      } else {
+        await sql`
+          UPDATE alissonerp.vendas_erp
+          SET aprovacao_credito_tarefa_id = NULL,
+              updated_at = NOW()
+          WHERE id = ${tarefaInfo.venda_id}
+        `;
+        console.log(`[cartao_desconto] vendas_erp: rejeitado`);
+      }
+      const [aprov] = await sql`SELECT solicitante_id FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${Number(id)} LIMIT 1`;
+      if (aprov?.solicitante_id) {
+        await sql`
+          INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id)
+          VALUES (${String(aprov.solicitante_id)}::uuid, 'aprovacao',
+            ${body.decisao === "aprovado" ? "Cartão de crédito liberado!" : "Cartão de crédito não aprovado"},
+            ${body.motivo ?? (body.decisao === "aprovado" ? "O cartão de crédito foi liberado para esta venda." : "O uso do cartão de crédito foi recusado para esta venda.")},
+            ${user.id}::uuid)
+        `.catch(() => {});
+      }
+      console.log(`[cartao_desconto] CONCLUÍDO ok`, logCtx);
+      return NextResponse.json({ ok: true, cartao_desconto: { decisao: body.decisao } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[cartao_desconto] ERRO`, { ...logCtx, erro: msg });
+      return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    }
+  }
 
   if (tags.includes("aprovacao_desconto") && tarefaInfo?.venda_id) {
     const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };
@@ -165,7 +207,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  if (tarefaInfo?.venda_id && !tags.includes("aprovacao_desconto")) {
+  if (tarefaInfo?.venda_id && !tags.includes("aprovacao_desconto") && tarefaInfo?.tipo !== "cartao_desconto") {
     try {
       const { processarAprovacaoCredito } = await import("@/lib/vendas-credito-aprovar");
       const resultado = await processarAprovacaoCredito(

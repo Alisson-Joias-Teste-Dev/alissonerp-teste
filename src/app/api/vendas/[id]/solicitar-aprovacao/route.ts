@@ -33,6 +33,7 @@ export async function POST(
   const [venda] = await sql`
     SELECT v.id, v.situacao, v.bloqueado, v.aprovacao_credito_tarefa_id,
            v.desconto_aprovado_por,
+           v.desconto_cartao_aprovado_por,
            EXISTS(
              SELECT 1 FROM alissonerp.itens_venda_erp
              WHERE venda_id = ${vendaId} AND pct_desconto > 30
@@ -119,6 +120,78 @@ export async function POST(
     `;
 
     return NextResponse.json({ ok: true, aguardando_aprovacao_desconto: true, tarefa_id: tarefaId });
+  }
+
+  // ── Aprovação para Cartão de Crédito com desconto >20% ───────────────────
+  if (tipo === "cartao_desconto") {
+    if (venda.desconto_cartao_aprovado_por) {
+      return NextResponse.json({ ok: true, ja_aprovado: true, message: "Cartão de crédito já foi liberado para esta venda." });
+    }
+    if (venda.aprovacao_credito_tarefa_id) {
+      return NextResponse.json({ ok: true, aguardando_aprovacao_cartao: true, message: "Já existe aprovação pendente para cartão de crédito." });
+    }
+
+    const itensDesconto = await sql`
+      SELECT pct_desconto FROM alissonerp.itens_venda_erp
+      WHERE venda_id = ${vendaId} AND pct_desconto > 20
+      ORDER BY pct_desconto DESC
+    `;
+    if (itensDesconto.length === 0) {
+      return NextResponse.json({ ok: true, message: "Nenhum item com desconto acima de 20%." });
+    }
+
+    const maiorDesconto = Math.max(...itensDesconto.map(i => Number(i.pct_desconto)));
+
+    const [vendaInfo] = await sql`
+      SELECT numero_venda, total_venda FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    `;
+
+    const regras = await avaliarRegras({
+      tipo: "cartao_desconto",
+      venda_id: vendaId,
+      percentual_desconto: maiorDesconto,
+      valor_venda: Number(vendaInfo?.total_venda ?? 0),
+    });
+
+    if (regras.length === 0) {
+      return NextResponse.json({ ok: true, message: "Nenhuma regra de aprovação aplicável para cartão de crédito." });
+    }
+
+    const regra = regras[0];
+
+    const itensDetalhe = await sql`
+      SELECT sku, nome_produto, preco_lista, pct_desconto, preco_unitario, quantidade
+      FROM alissonerp.itens_venda_erp
+      WHERE venda_id = ${vendaId} AND pct_desconto > 20
+      ORDER BY id
+    `;
+    const linhasItens = itensDetalhe.map((it) => {
+      const sem = Number(it.preco_lista).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      const com = Number(it.preco_unitario).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      return `• ${it.sku} — ${it.nome_produto}\n  Tabela: ${sem} | Desconto: ${Number(it.pct_desconto).toFixed(0)}% | Final: ${com}`;
+    }).join("\n");
+
+    const tarefaId = await criarTarefaAprovacao(
+      regra,
+      {
+        tipo: "cartao_desconto",
+        venda_id: vendaId,
+        percentual_desconto: maiorDesconto,
+        valor_venda: Number(vendaInfo?.total_venda ?? 0),
+        venda_numero: vendaInfo?.numero_venda ?? `#${vendaId}`,
+        venda_total: Number(vendaInfo?.total_venda ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+        itens_desconto: linhasItens,
+      },
+      user.id,
+    );
+
+    await sql`
+      UPDATE alissonerp.vendas_erp
+      SET aprovacao_credito_tarefa_id = ${tarefaId}, updated_at = NOW()
+      WHERE id = ${vendaId}
+    `;
+
+    return NextResponse.json({ ok: true, aguardando_aprovacao_cartao: true, tarefa_id: tarefaId });
   }
 
   // Verificar se já tem aprovação pendente (para fluxos não-desconto)

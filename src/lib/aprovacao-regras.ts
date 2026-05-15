@@ -48,6 +48,8 @@ async function avaliarRegras(contexto: ContextoAprovacao): Promise<RegraAprovaca
         return true;
       case "orcamento_acima":
         return (contexto.orcamento_total ?? 0) > (cond.valor ?? 1000);
+      case "cartao_desconto":
+        return (contexto.percentual_desconto ?? 0) > (cond.percentual ?? 20);
       default:
         return true;
     }

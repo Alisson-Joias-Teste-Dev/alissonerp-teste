@@ -152,6 +152,11 @@ export interface PagamentoFormProps {
 
   // Extra
   showAReceberWarning?: boolean;
+
+  // Bloqueio de cartão por desconto >20%
+  cartaoBloqueado?: boolean;
+  onSolicitarAprovacaoCartao?: () => void;
+  solicitandoAprovacaoCartao?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -247,6 +252,9 @@ export default function PagamentoForm({
   onPagamentoConfirmado,
   onPaymentSaved: _onPaymentSaved,
   showAReceberWarning,
+  cartaoBloqueado,
+  onSolicitarAprovacaoCartao,
+  solicitandoAprovacaoCartao,
 }: PagamentoFormProps) {
   const formasPagamento = FORMAS_PAGAMENTO_BASE;
   const totalMult = payments.reduce((s, p) => s + p.valor, 0);
@@ -441,6 +449,30 @@ export default function PagamentoForm({
 
       {/* Cartão inline (só no modo criacao; edicao usa o botão Registrar) */}
       {pagForma === "Cartão de Crédito" && totalVenda > 0 && mode === "criacao" && (() => {
+        if (cartaoBloqueado) {
+          return (
+            <div className="rounded-xl border p-4 space-y-3"
+              style={{ borderColor: "#FED7AA", backgroundColor: "#FFF7ED" }}>
+              <div className="flex items-start gap-2">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" style={{ color: "#9A3412" }} />
+                <div className="text-xs flex-1" style={{ color: "#9A3412" }}>
+                  <p className="font-medium">Cartão de crédito bloqueado</p>
+                  <p className="mt-1">Este pedido possui itens com desconto acima de 20%. Para pagar no cartão de crédito, solicite aprovação.</p>
+                </div>
+              </div>
+              {onSolicitarAprovacaoCartao && (
+                <button
+                  onClick={onSolicitarAprovacaoCartao}
+                  disabled={solicitandoAprovacaoCartao}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+                  style={{ backgroundColor: "#C2410C", color: "#fff" }}>
+                  {solicitandoAprovacaoCartao ? <Loader2 size={14} className="animate-spin" /> : null}
+                  Solicitar Aprovação
+                </button>
+              )}
+            </div>
+          );
+        }
         const installments = pagCondicao === "À vista" ? 1 : parseInt(pagCondicao) || 1;
         return (
           <CartaoInline
