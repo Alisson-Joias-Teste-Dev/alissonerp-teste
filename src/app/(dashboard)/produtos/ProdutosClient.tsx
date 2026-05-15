@@ -15,6 +15,7 @@ import ProdutoDrawer from "@/components/produtos/ProdutoDrawer";
 import CadastroProdutoModal from "@/components/produtos/CadastroProdutoModal";
 import ModalPersonalizacao from "@/components/produtos/ModalPersonalizacao";
 import CadastrarPecaAvulsaModal from "@/components/produtos/CadastrarPecaAvulsaModal";
+import BadgePromo from "@/components/ui/BadgePromo";
 import BulkEditModal from "@/components/produtos/BulkEditModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -756,12 +757,7 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
                                     <span className="inline-flex items-center gap-1.5">
                                       <s className="text-gray-400 font-normal">{formatPreco(precoLista)}</s>
                                       <span className="font-bold" style={{ color: "#047857" }}>{formatPreco(precoPromo)}</span>
-                                      <span
-                                        className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-300"
-                                        title={p.nome_campanha ? `Campanha: ${p.nome_campanha}` : "Em promocao"}
-                                      >
-                                        PROMO
-                                      </span>
+                                      <BadgePromo campanha={p.nome_campanha} />
                                     </span>
                                   );
                                 }

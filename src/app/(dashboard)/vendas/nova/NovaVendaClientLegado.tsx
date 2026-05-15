@@ -10,6 +10,7 @@ import {
 import Link from "next/link";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import CartaoInline from "@/components/vendas/CartaoInline";
+import BadgePromo from "@/components/ui/BadgePromo";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -1073,12 +1074,7 @@ export default function NovaVendaClientLegado({ role, vendedorId, maxDesconto }:
                           <span>
                             {item.nome_produto}
                             {item.preco_promo != null && (
-                              <span
-                                className="ml-1.5 inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300 align-middle"
-                                title={item.promocao_nome ? `Campanha: ${item.promocao_nome}` : "Em promocao"}
-                              >
-                                PROMO
-                              </span>
+                              <BadgePromo campanha={item.promocao_nome} className="ml-1.5 align-middle" />
                             )}
                           </span>
                         </td>

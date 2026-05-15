@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState, useRef, useEffect } from "react";
+import BadgePromo from "@/components/ui/BadgePromo";
 import { TableRow, DashboardProps, SchemaName } from "@/lib/gestao-estoque/types";
 import { updateRecord, saveTableConfig, loadTableConfig } from "@/lib/gestao-estoque/service";
 import { 
@@ -2667,12 +2668,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                                     <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
                                       <s className="text-gray-400">{formatCurrencyFull(val)}</s>
                                       <span className="text-emerald-700 font-bold">{formatCurrencyFull(precoVigenteRow)}</span>
-                                      <span
-                                        className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300"
-                                        title={String(row.original['nome_campanha'] ?? 'Promocao')}
-                                      >
-                                        PROMO
-                                      </span>
+                                      <BadgePromo campanha={row.original['nome_campanha'] as string | null | undefined} />
                                     </span>
                                   );
                                 } else {

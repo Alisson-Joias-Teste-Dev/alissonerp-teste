@@ -10,6 +10,7 @@ import {
 import Link from "next/link";
 import CartaoInline from "@/components/vendas/CartaoInline";
 import PixQrInline from "@/components/vendas/PixQrInline";
+import BadgePromo from "@/components/ui/BadgePromo";
 import PagamentoForm from "@/components/vendas/PagamentoForm";
 import { maskCpfCnpj, formatDateBR } from "@/lib/formatters";
 import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
@@ -2362,12 +2363,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                             <span className="block">
                               {item.nome_produto}
                               {item.preco_promo != null && (
-                                <span
-                                  className="ml-1.5 inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300 align-middle"
-                                  title={item.promocao_nome ? `Campanha: ${item.promocao_nome}` : "Em promocao"}
-                                >
-                                  PROMO
-                                </span>
+                                <BadgePromo campanha={item.promocao_nome} className="ml-1.5 align-middle" />
                               )}
                             </span>
                             {tipoVenda === "produto" && item.saldo_disponivel < item.quantidade && (
@@ -2607,12 +2603,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                           <p className="font-medium text-sm flex items-center gap-1.5">
                             {p.nome}
                             {p.em_promocao && (
-                              <span
-                                className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300"
-                                title={p.promocao_nome ? `Campanha: ${p.promocao_nome}` : "Em promocao"}
-                              >
-                                PROMO
-                              </span>
+                              <BadgePromo campanha={p.promocao_nome} />
                             )}
                           </p>
                           <p className="text-xs" style={{ color: "#9CA3AF" }}>
