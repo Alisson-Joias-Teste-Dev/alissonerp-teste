@@ -168,8 +168,16 @@ export async function PATCH(
       const [vendaFinal] = await tx`SELECT numero_venda FROM alissonerp.vendas_erp WHERE id = ${venda.id}`;
 
       // 3. Criar item da venda com comissão calculada via faixas_comissao
+      // Usa nome_modelo salvo (preserva friso, par, label customizado).
+      // Fallback p/ orçamentos antigos sem nome_modelo: monta via perfilNomes.
+      const nomeModeloSaved = orc.nome_modelo as string | null;
+      const nomeFallback = perfilNomes[orc.perfil as string] ?? orc.modelo ?? "Personalizada";
       const nomeItem = orc.tipo === "alianca"
-        ? `Aliança ${perfilNomes[orc.perfil as string] ?? orc.modelo ?? "Personalizada"}`
+        ? (nomeModeloSaved
+            ? (nomeModeloSaved.startsWith("Par:")
+                ? `Alianças (${nomeModeloSaved.replace(/^Par:\s*/, "")})`
+                : `Aliança ${nomeModeloSaved}`)
+            : `Aliança ${nomeFallback}`)
         : `Peça Personalizada`;
       // Buscar valor e peso diretamente do orçamento (evitar conflito de colunas com ft.*)
       const [orcValores] = await tx`SELECT valor, peso FROM alissonerp.orcamentos WHERE id = ${orcId}`;
