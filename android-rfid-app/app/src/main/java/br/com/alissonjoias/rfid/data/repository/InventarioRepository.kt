@@ -10,6 +10,8 @@ import br.com.alissonjoias.rfid.data.remote.dto.ContagemDto
 import br.com.alissonjoias.rfid.data.remote.dto.FinalizarRequest
 import br.com.alissonjoias.rfid.data.tsl.TslManager
 import kotlinx.coroutines.flow.Flow
+import retrofit2.HttpException
+import java.io.IOException
 
 class InventarioRepository(
     private val inventarioDao: InventarioCacheDao,
@@ -69,7 +71,15 @@ class InventarioRepository(
 
             Result.success(inventarios.size)
         } catch (e: Exception) {
-            Result.failure(e)
+            val msg = when (e) {
+                is HttpException -> {
+                    val body = e.response()?.errorBody()?.string() ?: "HTTP ${e.code()}"
+                    "Erro do servidor: $body"
+                }
+                is IOException -> "Erro de rede: ${e.message}"
+                else -> e.message ?: "Erro desconhecido"
+            }
+            Result.failure(Exception(msg))
         }
     }
 
