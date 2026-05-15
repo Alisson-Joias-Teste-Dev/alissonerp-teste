@@ -19,7 +19,7 @@ data class AjustesUiState(
     val fabricaVersion: String? = null,
     val powerDbm: Int = 25,
     val beeperEnabled: Boolean = true,
-    val erpUrl: String = "https://erp.alisson.api.br",
+    val erpUrl: String = "https://api.alisson.api.br",
     val connected: Boolean = false,
     val deviceName: String? = null,
     val dispositivos: List<DispositivoBt> = emptyList(),

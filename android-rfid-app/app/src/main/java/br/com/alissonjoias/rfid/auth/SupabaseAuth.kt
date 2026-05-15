@@ -61,7 +61,8 @@ object SupabaseAuth {
                     Result.success(token)
                 } else {
                     val msg = try {
-                        org.json.JSONObject(response).optString("error_description", "Erro no login")
+                        val json = org.json.JSONObject(response)
+                        json.optString("msg", json.optString("error_description", "Erro no login"))
                     } catch (_: Exception) { "Erro no login (código $code)" }
                     Log.e(TAG, "Login falhou: $msg")
                     _authState.value = _authState.value.copy(isLoading = false, error = msg)
