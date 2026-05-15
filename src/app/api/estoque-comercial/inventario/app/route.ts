@@ -4,13 +4,15 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 export async function GET(_req: NextRequest) {
+  try {
   const supabase = await createServerSupabase();
 
   const authHeader = (await headers()).get("authorization");
   let user = null;
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.substring(7);
-    const { data } = await supabase.auth.getUser(token);
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error) return NextResponse.json({ error: error.message }, { status: 401 });
     user = data.user;
   } else {
     const { data } = await supabase.auth.getUser();
@@ -78,4 +80,8 @@ export async function GET(_req: NextRequest) {
   }));
 
   return NextResponse.json({ inventarios: resultado });
+  } catch (e: any) {
+    console.error("[inventario/app]", e);
+    return NextResponse.json({ error: e?.message ?? "Erro interno" }, { status: 500 });
+  }
 }
