@@ -55,7 +55,7 @@ export async function GET(
       id, produto_id, nome_produto, sku,
       quantidade,
       preco_lista, pct_desconto, preco_unitario, total_item,
-      pct_comissao, valor_comissao,
+      pct_comissao, valor_comissao, markup_aplicado,
       desconto_autorizado_por, observacao, peso_estimado, personalizacao, created_at
     FROM alissonerp.itens_venda_erp
     WHERE venda_id = ${vendaId}
@@ -115,13 +115,14 @@ export async function GET(
     desconto_cartao_aprovado_em: venda.desconto_cartao_aprovado_em ?? null,
     itens: itens.map((i) => ({
       ...i,
-      quantidade:     Number(i.quantidade),
-      preco_lista:    Number(i.preco_lista),
-      pct_desconto:   Number(i.pct_desconto),
-      preco_unitario: Number(i.preco_unitario),
-      total_item:     Number(i.total_item),
-      pct_comissao:   Number(i.pct_comissao),
-      valor_comissao: Number(i.valor_comissao),
+      quantidade:      Number(i.quantidade),
+      preco_lista:     Number(i.preco_lista),
+      pct_desconto:    Number(i.pct_desconto),
+      preco_unitario:  Number(i.preco_unitario),
+      total_item:      Number(i.total_item),
+      pct_comissao:    Number(i.pct_comissao),
+      valor_comissao:  Number(i.valor_comissao),
+      markup_aplicado: i.markup_aplicado != null ? Number(i.markup_aplicado) : null,
     })),
     pagamentos: pagamentos.map((p) => ({
       ...p,

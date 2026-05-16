@@ -180,10 +180,19 @@ export async function PATCH(
                 : `Aliança ${nomeModeloSaved}`)
             : `Aliança ${nomeFallback}`)
         : `Peça Personalizada`;
-      // Buscar valor e peso diretamente do orçamento (evitar conflito de colunas com ft.*)
-      const [orcValores] = await tx`SELECT valor, peso FROM alissonerp.orcamentos WHERE id = ${orcId}`;
+      // Buscar valor, peso e desconto diretamente do orçamento
+      const [orcValores] = await tx`SELECT valor, peso, desconto_pct FROM alissonerp.orcamentos WHERE id = ${orcId}`;
       const valorItem = Number(orcValores?.valor ?? 0);
       const pesoItem = Number(orcValores?.peso ?? orc.peso_estimado ?? 0);
+      // Replica o desconto do orçamento no item da venda. Reconstrói o preço
+      // cheio para manter coerência: lista × (1 − pct/100) = unitário.
+      // Sem isso, lista ficava como o próprio valor já descontado, e qualquer
+      // desconto adicional na venda aplicava em cascata multiplicativa
+      // (30% no orçamento + 30% na venda = 51% real, não 60% e não 30%).
+      const descontoPctItem = Number(orcValores?.desconto_pct ?? 0);
+      const precoListaItem = descontoPctItem > 0 && descontoPctItem < 100
+        ? Math.round((valorItem / (1 - descontoPctItem / 100)) * 100) / 100
+        : valorItem;
 
       // Comissão derivada do MKP do orçamento, usando a curva de precificação
       // dos produtos como referência. Aliança com mkp 2.4 (faixa Super Leves)
@@ -221,11 +230,11 @@ export async function PATCH(
         INSERT INTO alissonerp.itens_venda_erp (
           venda_id, nome_produto, quantidade, preco_lista,
           pct_desconto, preco_unitario, total_item, peso_estimado,
-          pct_comissao, valor_comissao, observacao
+          pct_comissao, valor_comissao, markup_aplicado, observacao
         ) VALUES (
-          ${venda.id}, ${nomeItem}, 1, ${valorItem},
-          0, ${valorItem}, ${valorItem}, ${pesoItem},
-          ${pctComissao}, ${valorComissao},
+          ${venda.id}, ${nomeItem}, 1, ${precoListaItem},
+          ${descontoPctItem}, ${valorItem}, ${valorItem}, ${pesoItem},
+          ${pctComissao}, ${valorComissao}, ${mkpItem > 0 ? mkpItem : null},
           ${'Orçamento ' + orc.numero_orcamento}
         )
       `;

@@ -1,8 +1,39 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/05/2026 — Versão: v2.39.0 <!-- Revisado 16/05/2026 -->
+> 📋 Última atualização automática: 16/05/2026 — Versão: v2.40.0 <!-- Revisado 16/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(orcamento → venda): Replica desconto + comissão por mkp na tela de venda
+
+Quando o orçamento virava venda, o item era criado com `preco_lista = valor já
+descontado` e `pct_desconto = 0`. Resultado: relatório de desconto mostrava 0%,
+e se a consultora aplicasse +30% na venda, o desconto virava 51% real
+(multiplicativo) sem ninguém perceber. Também a regra de aprovação
+(`LIMITE_DESCONTO_APROVACAO=30`) não travava — só conferia o segundo desconto.
+
+- Migration `256_itens_venda_markup_aplicado.sql`: nova coluna
+  `markup_aplicado` em `alissonerp.itens_venda_erp`.
+- `POST /api/orcamento/[id]` (aprovação) agora:
+  * Reconstrói `preco_lista = valor / (1 − desconto/100)` (preço cheio).
+  * Grava `pct_desconto` real do orçamento (30%, não 0%).
+  * `preco_unitario = valor descontado` (mantém o total).
+  * Grava `markup_aplicado = orc.markup` (faixa pricing_categories).
+- `GET /api/vendas/[id]` retorna `markup_aplicado` em cada item.
+- `VendaDetalheClient`:
+  * Recebe `curvaConfig` + `curvaCategorias` via SSR.
+  * `getComissao(pct, markup_aplicado)`: quando `markup_aplicado` presente,
+    usa `commissionForMarkup` (curva); caso contrário, faixas_comissao por
+    desconto (comportamento de produto).
+  * Todos os recálculos client-side passam `item.markup_aplicado` pro
+    getComissao — comissão de aliança fica consistente mesmo após edição.
+
+Efeitos colaterais positivos:
+- Relatório `analise-comissoes` (comissão perdida = `preco_lista × 0.04 −
+  valor_comissao`) volta a calcular corretamente, já que `preco_lista` agora
+  é o cheio.
+- Limite de aprovação trava naturalmente: aliança já entra com 30%, segundo
+  desconto exige aprovação.
 
 ## feat(orcamento): Comissão de aliança via curva de produto (pelo mkp)
 

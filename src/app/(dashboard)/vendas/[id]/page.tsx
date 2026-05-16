@@ -1,6 +1,7 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
 import VendaDetalheClient from "./VendaDetalheClient";
+import { normalizeConfigRow, normalizeCategoriaRow, type CurvaConfig, type CurvaCategoriaInput } from "@/lib/curva-precificacao";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -45,6 +46,19 @@ export default async function VendaDetalhePage({ params }: Props) {
 
   const descontoAuthThreshold = role === "gerente_loja" ? 30 : undefined;
 
+  // Carrega curva de precificação pra permitir comissão por mkp em itens vindos
+  // de orçamento (alianças/peças com `markup_aplicado` preenchido).
+  let curvaConfig: CurvaConfig | null = null;
+  let curvaCategorias: CurvaCategoriaInput[] = [];
+  try {
+    const [cfgRow] = await sql`SELECT * FROM alissonerp.curva_config WHERE id = 1 LIMIT 1`;
+    if (cfgRow) curvaConfig = normalizeConfigRow(cfgRow);
+    const catRows = await sql`SELECT * FROM alissonerp.curva_categorias WHERE ativo = true ORDER BY ordem`;
+    curvaCategorias = catRows.map((r) => normalizeCategoriaRow(r));
+  } catch {
+    // tabelas ausentes — frontend cai no fallback faixas_comissao
+  }
+
   return (
     <VendaDetalheClient
       vendaId={Number(id)}
@@ -53,6 +67,8 @@ export default async function VendaDetalhePage({ params }: Props) {
       isFullAccess={FULL_ACCESS.includes(role)}
       maxDesconto={maxDesconto}
       descontoAuthThreshold={descontoAuthThreshold}
+      curvaConfig={curvaConfig}
+      curvaCategorias={curvaCategorias}
     />
   );
 }
