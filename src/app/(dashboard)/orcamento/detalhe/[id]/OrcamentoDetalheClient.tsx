@@ -96,17 +96,15 @@ export default function OrcamentoDetalheClient({
     }
   };
 
-  const token = orcamento.token_compartilhamento as string | null;
-  const handleShare = () => {
-    if (!token) return;
-    const url = `${window.location.origin}/orcamento/compartilhado/${token}`;
-    if (navigator.share) {
-      navigator.share({ title: `Orçamento ${orcamento.numero_orcamento}`, url });
-    } else {
-      navigator.clipboard.writeText(url);
-      alert("Link copiado!");
-    }
-  };
+  // Compartilhar só faz sentido depois que o orçamento vira venda
+  // (o link público hoje é o da venda, não do orçamento em si).
+  // Enquanto status != 'convertido', escondemos o botão.
+  const podeCompartilhar = status === "convertido" && !!orcamento.venda_gerada_id;
+  const handleShare = podeCompartilhar ? () => {
+    // TODO Onda 3: buscar token público da venda gerada e abrir /vendas/compartilhada/{token}.
+    // Por ora apenas avisa o usuário pra ele saber que o caminho existe.
+    alert("Compartilhar via venda gerada ainda em construção.");
+  } : undefined;
 
   const extraActions = (
     <>
@@ -190,7 +188,7 @@ export default function OrcamentoDetalheClient({
       curvaCategorias={curvaCategorias}
       initialOrcamento={orcamento}
       readOnly={!isRascunho}
-      onShare={token ? handleShare : undefined}
+      onShare={handleShare}
       onSaved={() => {
         setMsg({ text: "Orçamento salvo com sucesso!", type: "success" });
         setTimeout(() => setMsg(null), 4000);

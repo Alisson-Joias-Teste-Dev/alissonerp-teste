@@ -1,8 +1,46 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/05/2026 — Versão: v2.41.0 <!-- Revisado 16/05/2026 -->
+> 📋 Última atualização automática: 16/05/2026 — Versão: v2.42.0 <!-- Revisado 16/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(orcamento): Snapshot + lock previne sobrescrita silenciosa de valor negociado (v2.42.0)
+
+Reabrir um orçamento recalculava o preço da ficha técnica e descartava o
+valor combinado com o cliente — qualquer Salvar regravava o recalculado por
+cima. Agora o orçamento guarda um snapshot do valor travado; a tela exibe o
+travado, o Salvar não mexe nele, e há um botão Recalcular explícito para
+quando o usuário realmente quer atualizar.
+
+- Migration `258_orcamento_snapshot_lock.sql`: novas colunas `snapshot`
+  (jsonb), `congelado_em` (timestamptz), `valor_negociado_locked` (bool).
+  Flag global `config_orcamento.snapshot_lock_enabled` (default true).
+  Backfill: rascunho/enviado/aprovado recebem snapshot dos valores atuais.
+- `src/lib/orcamento-config.ts`: loader único da config (lista + detalhe
+  usam o mesmo SELECT, com nomes_modelos/promocao/dome/snapshot_lock).
+- `src/app/(dashboard)/orcamento/page.tsx`,
+  `src/app/(dashboard)/orcamento/detalhe/[id]/page.tsx`: usam o loader único.
+- `src/app/api/orcamento/[id]/route.ts`:
+  - `GET` volta a expor `ficha`/`ficha2` como objetos via `row_to_json`,
+    sem colidir `o.id` com `ft.id`.
+  - `PUT` aceita `snapshot`, `valor_negociado_locked`, `valor_ouro`,
+    `valor_pedras`, `cotacao_dolar`. Carimba `congelado_em = NOW()` quando
+    um novo snapshot chega.
+  - Foto 3D: path determinístico `orcamento/ORC-{id}/3d.jpg` com upsert
+    (sem acumular arquivos órfãos), cache-bust via query string.
+- `src/app/(dashboard)/orcamento/OrcamentoClient.tsx`:
+  - Hidrata `savedSnapshot` ao abrir; exibe valor travado enquanto `!dirty`.
+  - Badge dourado "Valor travado · dd/mm/yyyy" + botão Recalcular.
+  - Badge amarelo "Recalculado · era R$ X" + botão Restaurar quando há
+    divergência.
+  - `handleSaveOrder`: persiste snapshot atual quando `!dirty`, novo
+    snapshot quando recalculado, sempre com `valor_negociado_locked=true`.
+  - `pricingTotal` agora arredondado a 2 casas (limpa lixo de centavos).
+- `src/app/(dashboard)/orcamento/detalhe/[id]/OrcamentoDetalheClient.tsx`:
+  esconde botão Compartilhar até o orçamento virar venda.
+- `src/app/(dashboard)/orcamento/types.ts`: campos novos do
+  `ConfigOrcamento` (`snapshot_lock_enabled`, promoção, nomes, etc) e
+  type `OrcamentoSnapshot`.
 
 ## feat(promocoes): Regra de máximo de parcelas no cartão por campanha
 

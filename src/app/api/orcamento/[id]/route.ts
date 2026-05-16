@@ -21,24 +21,23 @@ export async function GET(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
+  // o.* + ft.* causava colisão de `id` (orçamento vs ficha) — o `id` da ficha
+  // sobrescrevia o do orçamento no resultado. Voltamos a ficha como objeto
+  // separado e preservamos `o.id`.
   const [orc] = await sql`
-    SELECT o.*, ft.*,
+    SELECT o.*,
+           row_to_json(ft.*) AS ficha,
+           row_to_json(ft2.*) AS ficha2,
            c.nome AS cliente_nome_contato, c.cpf_cnpj, c.telefone AS cliente_telefone
     FROM alissonerp.orcamentos o
     LEFT JOIN alissonerp.orcamento_fichas_tecnicas ft ON ft.id = o.ficha_tecnica_id
+    LEFT JOIN alissonerp.orcamento_fichas_tecnicas ft2 ON ft2.id = o.ficha_tecnica_2_id
     LEFT JOIN public.contatos c ON c.id_contato = o.cliente_id
     WHERE o.id = ${orcId}
   `;
   if (!orc) return NextResponse.json({ error: "Orçamento não encontrado" }, { status: 404 });
 
-  // Busca ficha2 separadamente para evitar conflito de colunas no JOIN
-  let ficha2 = null;
-  if (orc.ficha_tecnica_2_id) {
-    const [ft2] = await sql`SELECT * FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${orc.ficha_tecnica_2_id}`;
-    ficha2 = ft2 ?? null;
-  }
-
-  return NextResponse.json({ orcamento: { ...orc, ficha2 } });
+  return NextResponse.json({ orcamento: orc });
 }
 
 // PATCH /api/orcamento/[id] — atualizar status (aprovar/rejeitar/enviar)
@@ -262,7 +261,9 @@ export async function PUT(
   const body = await req.json();
   const {
     nome_cliente, nome_modelo, peso, valor, markup, desconto_pct,
-    cotacao_ouro, tipo, ficha, ficha2, quantidade, cliente_id, foto_3d_base64,
+    cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
+    tipo, ficha, ficha2, quantidade, cliente_id, foto_3d_base64,
+    snapshot, valor_negociado_locked,
   } = body;
 
   // ── Validação de travas (bilateral: frontend + backend) ─────────────────
@@ -297,13 +298,14 @@ export async function PUT(
     }
   }
 
-  // Upload foto 3D se enviada
+  // Upload foto 3D se enviada. Path determinístico (3d.jpg) com upsert=true
+  // evita acumular arquivos órfãos a cada save. Cache-bust via query string.
   let foto3dUrl: string | undefined;
   if (foto_3d_base64 && typeof foto_3d_base64 === "string" && foto_3d_base64.startsWith("data:")) {
     const { uploadFile } = await import("@/lib/storage");
-    const path = `orcamento/ORC-${orcId}/3d-${Date.now()}.jpg`;
+    const path = `orcamento/ORC-${orcId}/3d.jpg`;
     const result = await uploadFile("ordem-fotos", path, foto_3d_base64, "image/jpeg");
-    if (!("error" in result)) foto3dUrl = result.url;
+    if (!("error" in result)) foto3dUrl = `${result.url}?v=${Date.now()}`;
   }
 
   // Atualizar ficha técnica 1
@@ -402,7 +404,11 @@ export async function PUT(
     }
   }
 
-  // Atualizar orçamento
+  // snapshot=null → não atualiza; objeto → sobrescreve + carimba congelado_em.
+  // valor_negociado_locked vira true sempre que houver um save (cliente fechou).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const snapshotJsonOrNull = (snapshot != null && typeof snapshot === "object") ? (sql as any).json(snapshot) : null;
+
   await sql`
     UPDATE alissonerp.orcamentos SET
       nome_cliente = COALESCE(${nome_cliente ?? null}, nome_cliente),
@@ -412,11 +418,17 @@ export async function PUT(
       markup = COALESCE(${markup ?? null}, markup),
       desconto_pct = COALESCE(${desconto_pct ?? null}, desconto_pct),
       cotacao_ouro = COALESCE(${cotacao_ouro ?? null}, cotacao_ouro),
+      cotacao_dolar = COALESCE(${cotacao_dolar ?? null}, cotacao_dolar),
+      valor_ouro = COALESCE(${valor_ouro ?? null}, valor_ouro),
+      valor_pedras = COALESCE(${valor_pedras ?? null}, valor_pedras),
       tipo = COALESCE(${tipo ?? null}, tipo),
       quantidade = COALESCE(${quantidade ?? null}, quantidade),
       cliente_id = COALESCE(${cliente_id ?? null}, cliente_id),
       foto_3d = COALESCE(${foto3dUrl ?? null}, foto_3d),
       ficha_tecnica_2_id = COALESCE(${ficha2Id ?? null}, ficha_tecnica_2_id),
+      snapshot = COALESCE(${snapshotJsonOrNull}, snapshot),
+      congelado_em = CASE WHEN ${snapshotJsonOrNull} IS NOT NULL THEN NOW() ELSE congelado_em END,
+      valor_negociado_locked = COALESCE(${valor_negociado_locked ?? null}, valor_negociado_locked),
       updated_at = NOW()
     WHERE id = ${orcId}
   `;
