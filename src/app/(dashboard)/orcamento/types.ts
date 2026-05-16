@@ -102,9 +102,30 @@ export interface ConfigOrcamento {
   stone_markup: number;
   stone_prices: StonePrice[];
   /** Parâmetros de validação configuráveis (migration 132). Opcional pra compat. */
-  calibracao?: CalibracaoDefaults;
+  calibracao?: CalibracaoDefaults | null;
   /** Curvatura padrão (%) aplicada a alianças novas (migration 255). */
   dome_percentage?: number;
+  risco_width?: number;
+  risco_depth?: number;
+  preco_gravacao?: number;
+  stone_markups_table?: Record<string, Record<string, number>>;
+  espessura_minima_por_modelo?: Record<string, number> | null;
+  nomes_modelos?: Record<string, string> | null;
+  promocao_inicio?: string | null;
+  promocao_fim?: string | null;
+  /** Migration 258: liga snapshot/lock do valor negociado. Default true. */
+  snapshot_lock_enabled?: boolean;
+}
+
+export interface OrcamentoSnapshot {
+  valor: number;
+  peso: number;
+  valor_ouro: number;
+  valor_pedras: number;
+  desconto_pct: number;
+  markup: number;
+  cotacao_ouro: number;
+  cotacao_dolar: number;
 }
 
 export interface Orcamento {

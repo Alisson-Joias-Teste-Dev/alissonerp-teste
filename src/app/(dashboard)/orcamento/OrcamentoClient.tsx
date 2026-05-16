@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import {
   CircleDot, ChevronDown, Gem, Type, Ruler, Minus, Plus, Save,
   Printer, Download, Loader2, Settings2, RotateCcw, User, X, Check,
-  FileText,
+  FileText, Lock, RefreshCcw,
 } from "lucide-react";
 import * as THREE from "three";
 import { ProfileType } from "./types";
@@ -15,7 +15,7 @@ import { maskCpfCnpj } from "@/lib/formatters";
 import { calcularPrecoSync, getPricingFactors, type CurvaConfig, type CurvaCategoriaInput } from "@/lib/curva-precificacao";
 import type {
   RingParams, RingSize, PricingCategory, GrooveRule, PricingResult, ConfigOrcamento,
-  StoneEntry, StonePrice, StoneType, StoneCut,
+  StoneEntry, StonePrice, StoneType, StoneCut, OrcamentoSnapshot,
 } from "./types";
 import {
   RING_SIZES, DEFAULT_PARAMS, PROFILE_OPTIONS, METAL_COLORS,
@@ -204,6 +204,20 @@ export default function OrcamentoClient({
   const [rejectId, setRejectId] = useState<number | null>(null);
   const [rejectMotivo, setRejectMotivo] = useState("");
   const [editingOrcId, setEditingOrcId] = useState<number | null>(null);
+
+  // ── Snapshot + lock (migration 258) ───────────────────────────────────────
+  // savedSnapshot guarda o valor negociado travado no DB. Enquanto dirty=false
+  // a tela exibe esse snapshot ao invés do pricingTotal recalculado em runtime,
+  // impedindo que a peça mostre/salve um valor diferente do combinado.
+  const [savedSnapshot, setSavedSnapshot] = useState<(OrcamentoSnapshot & { congelado_em: string | null }) | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const lockEnabled = config?.snapshot_lock_enabled !== false;
+  const isHydratingRef = useRef(false);
+  const markDirty = useCallback(() => {
+    if (isHydratingRef.current) return;
+    setDirty(true);
+  }, []);
+
   const fetchOrcamentos = useCallback(async () => {
     setLoadingOrc(true);
     const res = await fetch("/api/orcamento?limit=100").catch((e) => { useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao carregar orçamentos", { level: "warning" }); return null; });
@@ -215,9 +229,32 @@ export default function OrcamentoClient({
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function aplicarOrcamento(orc: Record<string, any>, orcId: number) {
+    isHydratingRef.current = true;
     setEditingOrcId(orcId);
     setClientName(orc.cliente_nome_contato || orc.nome_cliente || "");
     setClienteId(orc.cliente_id || null);
+
+    // Snapshot salvo: prioriza coluna nova (jsonb). Fallback p/ campos avulsos
+    // (orçamentos antigos pré-migration 258 podem vir sem snapshot mesmo
+    // estando travados pelo backfill — mas se o backfill rodou, snapshot
+    // existe). Só popula se `valor_negociado_locked = true`.
+    if (orc.valor_negociado_locked && orc.snapshot && typeof orc.snapshot === "object") {
+      const s = orc.snapshot as OrcamentoSnapshot;
+      setSavedSnapshot({
+        valor: Number(s.valor ?? orc.valor ?? 0),
+        peso: Number(s.peso ?? orc.peso ?? 0),
+        valor_ouro: Number(s.valor_ouro ?? orc.valor_ouro ?? 0),
+        valor_pedras: Number(s.valor_pedras ?? orc.valor_pedras ?? 0),
+        desconto_pct: Number(s.desconto_pct ?? orc.desconto_pct ?? 0),
+        markup: Number(s.markup ?? orc.markup ?? 0),
+        cotacao_ouro: Number(s.cotacao_ouro ?? orc.cotacao_ouro ?? 0),
+        cotacao_dolar: Number(s.cotacao_dolar ?? orc.cotacao_dolar ?? 0),
+        congelado_em: orc.congelado_em ? String(orc.congelado_em) : null,
+      });
+    } else {
+      setSavedSnapshot(null);
+    }
+    setDirty(false);
     if (orc.tipo === "alianca") {
       setOrcamentoTipo("alianca");
       setAllianceMode(orc.quantidade === 2 ? "par" : "unidade");
@@ -299,6 +336,9 @@ export default function OrcamentoClient({
       if (orc.peso) setPecaPeso(Number(orc.peso));
     }
     setTab("design");
+    // Hidratação termina no próximo tick — depois disso onChange do usuário
+    // marca dirty normalmente.
+    setTimeout(() => { isHydratingRef.current = false; }, 0);
   }
 
   // Quando initialOrcamento é passado (rota /orcamento/[id]), carrega direto
@@ -1151,10 +1191,24 @@ export default function OrcamentoClient({
   const pedrasCost = params.hasStones ? stoneTotalRS : 0;
   const pedrasCost2 = params2.hasStones ? stoneTotalRS2 : 0;
 
-  // Totais do par
-  const pricingTotal = allianceMode === "par"
-    ? { weight: pricing.weight + pricing2.weight, price: pricing.discountPrice + pricing2.discountPrice + pedrasCost + pedrasCost2 + gravacaoCost + gravacaoCost2 }
-    : { weight: pricing.weight, price: pricing.discountPrice + pedrasCost + gravacaoCost };
+  // Totais do par — arredonda a 2 casas pra evitar lixo de centavos vindos
+  // dos somatórios em float (R$ 6199.9999996 etc).
+  const pricingTotal = useMemo(() => {
+    const rawWeight = allianceMode === "par" ? pricing.weight + pricing2.weight : pricing.weight;
+    const rawPrice = allianceMode === "par"
+      ? pricing.discountPrice + pricing2.discountPrice + pedrasCost + pedrasCost2 + gravacaoCost + gravacaoCost2
+      : pricing.discountPrice + pedrasCost + gravacaoCost;
+    return { weight: rawWeight, price: Math.round(rawPrice * 100) / 100 };
+  }, [allianceMode, pricing.weight, pricing.discountPrice, pricing2.weight, pricing2.discountPrice, pedrasCost, pedrasCost2, gravacaoCost, gravacaoCost2]);
+
+  // Quando o valor recalculado da ficha diverge do snapshot travado, marca
+  // dirty automaticamente. isHydratingRef evita marcar durante a carga inicial.
+  useEffect(() => {
+    if (!savedSnapshot || isHydratingRef.current) return;
+    if (Math.abs(pricingTotal.price - savedSnapshot.valor) > 0.01) {
+      markDirty();
+    }
+  }, [pricingTotal.price, savedSnapshot, markDirty]);
 
   const handleSizeChange = (s: RingSize) => { setRingSize(s); updateParam("diameter", s.diameter); };
   const handleSizeChange2 = (s: RingSize) => { setRingSize2(s); setParams2(p => ({ ...p, diameter: s.diameter })); };
@@ -1282,27 +1336,53 @@ export default function OrcamentoClient({
         ? `Par: ${PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile}${grooveLabel(params)} + ${PROFILE_OPTIONS.find((p) => p.id === profile2)?.label ?? profile2}${grooveLabel(params2)}`
         : `${PROFILE_OPTIONS.find((p) => p.id === profile)?.label ?? profile}${grooveLabel(params)}`;
 
-      // Valor total = ouro (ambas) + pedras preciosas (ambas)
-      const valorTotal = isPar
-        ? pricing.discountPrice + pricing2.discountPrice + pedrasCost + pedrasCost2 + gravacaoCost + gravacaoCost2
-        : pricing.discountPrice + pedrasCost + gravacaoCost;
+      // Quando o orçamento está travado e o usuário NÃO mexeu em nada
+      // (dirty=false), persistimos o valor SNAPSHOT — não o recalculado.
+      // Caso contrário, o Salvar sobrescrevia silenciosamente o valor
+      // combinado com o cliente.
+      const usaSnapshotNoSave = !dirty && lockEnabled && !!savedSnapshot;
+
+      const valorOuroCalc = isPar ? pricing.discountPrice + pricing2.discountPrice : pricing.discountPrice;
+      const valorPedrasCalc = isPar ? pedrasCost + pedrasCost2 : pedrasCost;
+      const valorTotalCalc = Math.round((valorOuroCalc + valorPedrasCalc + (isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost)) * 100) / 100;
+
+      const valorTotal = usaSnapshotNoSave ? savedSnapshot!.valor : valorTotalCalc;
+      const pesoTotal = usaSnapshotNoSave ? savedSnapshot!.peso : pricingTotal.weight;
+      const markupSalvar = usaSnapshotNoSave ? savedSnapshot!.markup : pricing.mkp;
+      const descontoPctSalvar = usaSnapshotNoSave ? savedSnapshot!.desconto_pct : params.discountPercent;
+      const cotOuroSalvar = usaSnapshotNoSave ? savedSnapshot!.cotacao_ouro : params.goldPrice;
+      const cotDolarSalvar = usaSnapshotNoSave ? savedSnapshot!.cotacao_dolar : cotacaoDolar;
+      const valorOuroSalvar = usaSnapshotNoSave ? savedSnapshot!.valor_ouro : valorOuroCalc;
+      const valorPedrasSalvar = usaSnapshotNoSave ? savedSnapshot!.valor_pedras : valorPedrasCalc;
+
+      // novoSnapshot=null → backend mantém snapshot atual.
+      // Caso contrário envia o snapshot do estado RECALCULADO (que vira o
+      // novo valor travado após o save).
+      const novoSnapshot: OrcamentoSnapshot | null = usaSnapshotNoSave ? null : {
+        valor: valorTotalCalc, peso: pricingTotal.weight,
+        valor_ouro: valorOuroCalc, valor_pedras: valorPedrasCalc,
+        desconto_pct: params.discountPercent, markup: pricing.mkp,
+        cotacao_ouro: params.goldPrice, cotacao_dolar: cotacaoDolar,
+      };
 
       const body: Record<string, unknown> = {
         nome_cliente: clientName.trim(),
         cliente_id: clienteId,
         nome_modelo: nomeModelo,
-        peso: pricingTotal.weight,
+        peso: pesoTotal,
         valor: valorTotal,
-        markup: pricing.mkp,
-        desconto_pct: params.discountPercent,
-        cotacao_ouro: params.goldPrice,
-        cotacao_dolar: cotacaoDolar,
-        valor_ouro: isPar ? pricing.discountPrice + pricing2.discountPrice : pricing.discountPrice,
-        valor_pedras: isPar ? pedrasCost + pedrasCost2 : pedrasCost,
+        markup: markupSalvar,
+        desconto_pct: descontoPctSalvar,
+        cotacao_ouro: cotOuroSalvar,
+        cotacao_dolar: cotDolarSalvar,
+        valor_ouro: valorOuroSalvar,
+        valor_pedras: valorPedrasSalvar,
         tipo: "alianca",
         quantidade: isPar ? 2 : 1,
         foto_3d_base64: foto3d,
         ficha: buildFicha(params, profile, ringSize, pricing.weight, derivedStoneCount, stoneEntries),
+        snapshot: novoSnapshot,
+        valor_negociado_locked: true,
       };
       if (isPar) {
         const sc2 = computeStoneCapacity(params2.diameter, params2.height, params2.canalBorderHeight, params2.stoneSize, params2.stoneRows, profile2);
@@ -1316,6 +1396,14 @@ export default function OrcamentoClient({
       const data = await res.json() as { ok?: boolean; orcamento?: { id: number; numero_orcamento?: string }; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       const savedId = data.orcamento?.id ?? editingOrcId;
+
+      // Atualiza snapshot local quando gravou um novo valor (o backend congela
+      // congelado_em via NOW()). Mantém o anterior quando preservou.
+      if (novoSnapshot) {
+        setSavedSnapshot({ ...novoSnapshot, congelado_em: new Date().toISOString() });
+      }
+      setDirty(false);
+
       if (onSaved) {
         onSaved();
       } else {
@@ -3118,14 +3206,24 @@ export default function OrcamentoClient({
                     : pricingCheio.price;
                   const cheioTotal = cheioOuro + (allianceMode === "par" ? pedrasCost + pedrasCost2 : pedrasCost)
                                               + (allianceMode === "par" ? gravacaoCost + gravacaoCost2 : gravacaoCost);
+                  // displayPrice/Weight respeitam o snapshot travado (lock). Enquanto
+                  // !dirty, exibe o valor combinado com o cliente; após Recalcular ou
+                  // qualquer mudança, mostra o recalculado + badge de aviso.
+                  const usaSnapshot = !dirty && lockEnabled && !!savedSnapshot;
+                  const displayPrice = usaSnapshot ? savedSnapshot!.valor : pricingTotal.price;
+                  const displayWeight = usaSnapshot ? savedSnapshot!.peso : pricingTotal.weight;
+                  const showLockedBadge = usaSnapshot;
+                  const showRecalcBadge = !!savedSnapshot && lockEnabled && dirty && Math.abs(pricingTotal.price - savedSnapshot.valor) > 0.01;
                   const pesoMostrado = allianceMode === "par"
-                    ? `${pricing.weight.toFixed(1)}g + ${pricing2.weight.toFixed(1)}g = ${pricingTotal.weight.toFixed(1)}g`
-                    : `${pricing.weight.toFixed(1)}g`;
-                  const mostraDePor = cheioTotal > pricingTotal.price + 0.005;
-                  // Tooltip: peso + de/por (com pedras incluídas)
+                    ? `${pricing.weight.toFixed(1)}g + ${pricing2.weight.toFixed(1)}g = ${displayWeight.toFixed(1)}g`
+                    : `${displayWeight.toFixed(1)}g`;
+                  const mostraDePor = !usaSnapshot && cheioTotal > displayPrice + 0.005;
                   const tooltip = mostraDePor
-                    ? `Peso: ${pesoMostrado}\nDe: R$ ${cheioTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nPor: R$ ${pricingTotal.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (com pedras)`
+                    ? `Peso: ${pesoMostrado}\nDe: R$ ${cheioTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nPor: R$ ${displayPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (com pedras)`
                     : `Peso: ${pesoMostrado}`;
+                  const congeladoFmt = savedSnapshot?.congelado_em
+                    ? new Date(savedSnapshot.congelado_em).toLocaleDateString("pt-BR")
+                    : null;
                   return (
                     <div
                       onDoubleClick={toggleRawWeight}
@@ -3138,12 +3236,56 @@ export default function OrcamentoClient({
                         </p>
                       )}
                       <p className="text-2xl font-black tracking-tight" style={{ color: C.esmeralda }}>
-                        R$ {pricingTotal.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        R$ {displayPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
-                      {allianceMode === "par" && (
+                      {allianceMode === "par" && !usaSnapshot && (
                         <p className="text-[9px] text-gray-400">
                           A1: R$ {pricing.discountPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | A2: R$ {pricing2.discountPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </p>
+                      )}
+                      {showLockedBadge && (
+                        <div className="mt-1.5 flex items-center justify-end gap-1.5">
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold"
+                            style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}
+                            title={congeladoFmt ? `Valor congelado em ${congeladoFmt}` : "Valor congelado"}
+                          >
+                            <Lock size={9} />
+                            Valor travado{congeladoFmt ? ` · ${congeladoFmt}` : ""}
+                          </span>
+                          {!readOnly && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setDirty(true); }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border hover:bg-gray-50"
+                              style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+                            >
+                              <RefreshCcw size={9} />
+                              Recalcular
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {showRecalcBadge && (
+                        <div className="mt-1.5 flex items-center justify-end gap-1.5">
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold"
+                            style={{ backgroundColor: "#FEF9C3", color: "#854D0E" }}
+                            title={`Era R$ ${savedSnapshot!.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
+                          >
+                            Recalculado · era R$ {savedSnapshot!.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                          {!readOnly && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setDirty(false); }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border hover:bg-gray-50"
+                              style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+                            >
+                              Restaurar
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   );
