@@ -219,6 +219,7 @@ export async function POST(req: NextRequest) {
       RETURNING id
     `;
 
+
     // 3a. Verificar saldo disponível ANTES do INSERT (trigger ainda não criou reservas)
     //     Usa 'disponivel' (saldo - reservas existentes) para alinhar com o que o frontend exibe.
     //     Produtos com disponivel < quantidade entram na lista de reposição.

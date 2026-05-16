@@ -43,7 +43,7 @@ export async function GET(_req: NextRequest) {
   const itens = await sql`
     SELECT
       ii.id, ii.inventario_id, ii.produto_id,
-      p.sku, p.nome, ii.quantidade_sistema,
+      p.id_api_produto, p.sku, p.nome, ii.quantidade_sistema,
       ii.quantidade_contada, ii.conferido
     FROM alissonerp.itens_inventario_comercial ii
     JOIN public.produtos p ON p.id_produto = ii.produto_id
@@ -57,6 +57,7 @@ export async function GET(_req: NextRequest) {
     list.push({
       id: item.id,
       produto_id: Number(item.produto_id),
+      id_api_produto: item.id_api_produto != null ? Number(item.id_api_produto) : null,
       sku: item.sku ?? "",
       nome: item.nome ?? "",
       quantidade_sistema: Number(item.quantidade_sistema),
