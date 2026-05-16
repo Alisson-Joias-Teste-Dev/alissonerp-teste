@@ -171,7 +171,8 @@ export async function POST(req: NextRequest) {
   let novaVenda;
   try {
   novaVenda = await sql.begin(async (tx: any) => {
-    // 1. Inserir com numero temporário (usa id depois)
+    // 1. Inserir já com numero_venda via sequence (migration 259) — evita
+    // race condition do antigo MAX+1 quando dois INSERTs corriam em paralelo.
     const [venda] = await tx`
       INSERT INTO alissonerp.vendas_erp (
         numero_venda,
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
         situacao,
         created_by
       ) VALUES (
-        'V-TEMP',
+        nextval('alissonerp.venda_numero_seq')::text,
         ${body.cliente_id ?? null},
         ${body.vendedor_id ?? null},
         ${body.data_entrega ?? null},
@@ -211,22 +212,6 @@ export async function POST(req: NextRequest) {
         ${user.id}::uuid
       )
       RETURNING id
-    `;
-
-    // 2. Gerar numero_venda seguindo a sequência do public.vendas (ex: 14791)
-    const [{ proximo }] = await tx`
-      SELECT COALESCE(
-        GREATEST(
-          (SELECT MAX(numero_pedido) + 1 FROM public.vendas),
-          (SELECT MAX(numero_venda::bigint) + 1 FROM alissonerp.vendas_erp WHERE numero_venda ~ '^[0-9]+$')
-        ),
-        1
-      ) AS proximo
-    `;
-    await tx`
-      UPDATE alissonerp.vendas_erp
-      SET numero_venda = ${String(proximo)}
-      WHERE id = ${venda.id}
     `;
 
     // 3a. Verificar saldo disponível ANTES do INSERT (trigger ainda não criou reservas)
