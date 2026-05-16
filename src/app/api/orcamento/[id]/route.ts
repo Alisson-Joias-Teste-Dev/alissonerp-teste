@@ -290,14 +290,19 @@ export async function PUT(
     }
   }
 
-  // Upload foto 3D se enviada. Path determinístico (3d.jpg) com upsert=true
-  // evita acumular arquivos órfãos a cada save. Cache-bust via query string.
+  // Upload foto 3D se enviada. Path determinístico (`${numero_orcamento}/3d.jpg`)
+  // com upsert=true evita acumular arquivos órfãos a cada save. Cache-bust via
+  // query string. Unificado com POST pra um único arquivo por orçamento.
   let foto3dUrl: string | undefined;
   if (foto_3d_base64 && typeof foto_3d_base64 === "string" && foto_3d_base64.startsWith("data:")) {
-    const { uploadFile } = await import("@/lib/storage");
-    const path = `orcamento/ORC-${orcId}/3d.jpg`;
-    const result = await uploadFile("ordem-fotos", path, foto_3d_base64, "image/jpeg");
-    if (!("error" in result)) foto3dUrl = `${result.url}?v=${Date.now()}`;
+    const [numRow] = await sql`SELECT numero_orcamento FROM alissonerp.orcamentos WHERE id = ${orcId}`;
+    const numero = numRow?.numero_orcamento as string | undefined;
+    if (numero) {
+      const { uploadFile } = await import("@/lib/storage");
+      const path = `orcamento/${numero}/3d.jpg`;
+      const result = await uploadFile("ordem-fotos", path, foto_3d_base64, "image/jpeg");
+      if (!("error" in result)) foto3dUrl = `${result.url}?v=${Date.now()}`;
+    }
   }
 
   // Atualizar ficha técnica 1
@@ -396,10 +401,14 @@ export async function PUT(
     }
   }
 
-  // snapshot=null → não atualiza; objeto → sobrescreve + carimba congelado_em.
-  // valor_negociado_locked vira true sempre que houver um save (cliente fechou).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const snapshotJsonOrNull = (snapshot != null && typeof snapshot === "object") ? (sql as any).json(snapshot) : null;
+  // snapshot=null → preserva colunas snapshot+congelado_em.
+  // snapshot=objeto → sobrescreve e carimba congelado_em=NOW().
+  // Fragment dinâmico evita `could not determine data type` que postgres@3
+  // emite ao passar null como parâmetro pra coluna JSONB via COALESCE.
+  const hasSnapshot = snapshot != null && typeof snapshot === "object";
+  const snapshotSql = hasSnapshot
+    ? sql`snapshot = ${sql.json(snapshot)}, congelado_em = NOW(),`
+    : sql``;
 
   await sql`
     UPDATE alissonerp.orcamentos SET
@@ -418,8 +427,7 @@ export async function PUT(
       cliente_id = COALESCE(${cliente_id ?? null}, cliente_id),
       foto_3d = COALESCE(${foto3dUrl ?? null}, foto_3d),
       ficha_tecnica_2_id = COALESCE(${ficha2Id ?? null}, ficha_tecnica_2_id),
-      snapshot = COALESCE(${snapshotJsonOrNull}, snapshot),
-      congelado_em = CASE WHEN ${snapshotJsonOrNull} IS NOT NULL THEN NOW() ELSE congelado_em END,
+      ${snapshotSql}
       valor_negociado_locked = COALESCE(${valor_negociado_locked ?? null}, valor_negociado_locked),
       updated_at = NOW()
     WHERE id = ${orcId}
