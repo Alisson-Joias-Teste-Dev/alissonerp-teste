@@ -1,8 +1,73 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 29/04/2026 — Versão: v2.38.0 <!-- Revisado 29/04/2026 -->
+> 📋 Última atualização automática: 16/05/2026 — Versão: v2.39.0 <!-- Revisado 16/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## feat(orcamento): Comissão de aliança via curva de produto (pelo mkp)
+
+Aliança aprovada pagava 4% fixo de comissão para a vendedora (vinha de
+`faixas_comissao` em desconto 0%), independentemente do peso ou markup
+aplicado. Agora a comissão segue a curva de precificação dos produtos: cada
+mkp da faixa da aliança gera a comissão equivalente que um produto com aquele
+mesmo mkp receberia.
+
+- Nova função `commissionForMarkup(mkp, cfg, categorias)` em
+  `src/lib/curva-precificacao.ts`: faz reverse lookup na curva pelo mkp e
+  interpola linearmente entre os pontos. Igual a `getPricingFactors`, mas com
+  o markup como chave em vez do peso.
+- `POST /api/orcamento/[id]` (fluxo de aprovação) passa a derivar
+  `pct_comissao` do `markup` salvo no orçamento via `commissionForMarkup`.
+  Fallbacks em cascata: 1) mkp do orçamento; 2) peso do orçamento via curva;
+  3) `faixas_comissao` em desconto 0% (compat histórico).
+- Tabela equivalente para as faixas atuais (start_mkp 5, start_comm 5):
+
+  | Faixa | Mkp | Comissão |
+  |---|---|---|
+  | Super Leves | 2.4× | 1,50% |
+  | Leves | 2.3× | 1,40% |
+  | Medias | 2.2× | 1,30% |
+  | Pesadas | 2.1× | 1,20% |
+  | Super Pesadas | 2.0× | 1,10% |
+
+- Impacto financeiro: alianças vendidas hoje (mkp 2.3 médio) pagavam ~4% e
+  passam a pagar ~1,4%. Vendedoras vão receber menos comissão por aliança;
+  para ajustar pra cima, editar `curva_categorias.comm_variation` (sobe a
+  comissão de todas as faixas correspondentes da curva).
+
+## fix(orcamento): Aliança 3D não fica preta (RoomEnvironment local)
+
+Material com `metalness=1` + `roughness=0` precisa de environment map pra
+refletir — sem isso, fica preto. Os Environments de drei dependiam de CDN
+externo (githack offline → tudo preto). Solução: importar `RoomEnvironment`
+do próprio Three.js (vem embutido, gera PMREM em memória) e atribuir em
+`scene.environment` via componente `StudioEnv` dentro do Canvas. Sem rede,
+sem regressão visual.
+
+## fix(orcamento): Config — salvar unificado + curvatura padrão global
+
+A tela de Configurações do Orçamento tinha 3 botões de "Salvar" separados (um por
+seção), cada um persistindo só parte dos campos. Usuárias editavam Markup, Risco
+ou Gravação e clicavam no "Salvar mudanças" da seção de Espessura, achando que
+era global — nada disso era salvo. Além disso, "Curvatura padrão (%)" mexia em
+`params.domePercentage` (state local de uma única aliança aberta) e nunca era
+persistida no banco.
+
+- Migration `255_config_orcamento_dome_percentage.sql`: adiciona coluna
+  `dome_percentage NUMERIC DEFAULT 100` em `alissonerp.config_orcamento`.
+- API `POST /api/orcamento/config` agora aceita e persiste `dome_percentage`
+  com COALESCE (não sobrescreve com null).
+- `OrcamentoClient`: estado novo `defaultDomePercentage` (separado de
+  `params.domePercentage`), inicializado de `config?.dome_percentage`. Toda
+  aliança nova (`params` e `params2` iniciais) usa a curvatura global como
+  default em vez de hardcoded 100.
+- Botões de salvar unificados: removido o "Salvar mudanças" interno da seção
+  Espessura e o "Salvar" do footer. Único botão "Salvar tudo" fica no header
+  sticky da config, persiste todos os campos (markup, desconto, curvatura,
+  faixas, regras de friso, risco, gravação, espessura mínima, nomes dos
+  modelos). "Salvar promoção" segue separado por usar outra tabela.
+- Após sucesso: mensagem "Salvo!" no topo + `router.refresh()` para recarregar
+  o RSC e exibir o estado real do banco.
 
 ## feat: Sistema de Promoções de Produtos (em revisão)
 

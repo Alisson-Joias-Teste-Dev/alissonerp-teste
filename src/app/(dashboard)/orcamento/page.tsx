@@ -40,7 +40,7 @@ export default async function OrcamentoPage() {
              profile, pricing_categories, groove_rules, stone_markup, stone_prices,
              risco_width, risco_depth, preco_gravacao, stone_markups_table,
              calibracao, espessura_minima_por_modelo, nomes_modelos,
-             promocao_inicio, promocao_fim
+             promocao_inicio, promocao_fim, dome_percentage
       FROM alissonerp.config_orcamento
       WHERE name = 'default'
       LIMIT 1
@@ -71,6 +71,7 @@ export default async function OrcamentoPage() {
     nomes_modelos: (typeof configRow.nomes_modelos === "object" && configRow.nomes_modelos) ? configRow.nomes_modelos as Record<string, string> : null,
     promocao_inicio: configRow.promocao_inicio ? String(configRow.promocao_inicio) : null,
     promocao_fim: configRow.promocao_fim ? String(configRow.promocao_fim) : null,
+    dome_percentage: configRow.dome_percentage != null ? Number(configRow.dome_percentage) : 100,
   } : null;
 
   // Pode gerenciar config: admin, desenvolvedor, gerente_loja

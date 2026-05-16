@@ -353,6 +353,7 @@ export default function OrcamentoClient({
   const [params, setParams] = useState<RingParams>({
     ...DEFAULT_PARAMS, goldPrice: cotacaoOuro,
     startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0,
+    domePercentage: Number(config?.dome_percentage ?? DEFAULT_PARAMS.domePercentage),
     width: 0, height: 0,
   });
   const [currentMesh, setCurrentMesh] = useState<THREE.Mesh | null>(null);
@@ -370,6 +371,7 @@ export default function OrcamentoClient({
   const [params2, setParams2] = useState<RingParams>({
     ...DEFAULT_PARAMS, goldPrice: cotacaoOuro,
     startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0,
+    domePercentage: Number(config?.dome_percentage ?? DEFAULT_PARAMS.domePercentage),
     width: 0, height: 0,
   });
   const [currentMesh2, setCurrentMesh2] = useState<THREE.Mesh | null>(null);
@@ -554,6 +556,11 @@ export default function OrcamentoClient({
     const raw = (config as any)?.risco_depth;
     return raw ? Number(raw) : 0.2;
   });
+  // Curvatura padrão (%) — aplicada a alianças novas (migration 255).
+  // Antes era editada via params.domePercentage e nunca persistia.
+  const [defaultDomePercentage, setDefaultDomePercentage] = useState<number>(
+    () => Number(config?.dome_percentage ?? 100)
+  );
   // ── Promoção do orçamento ──
   // Datas no formato YYYY-MM-DD (input type="date"). Quando hoje ∈ [inicio, fim]
   // E a faixa de preço tem `desconto_promocao > 0`, o R$/g é reduzido.
@@ -634,35 +641,6 @@ export default function OrcamentoClient({
     const key = PROFILE_TO_KEY[profileTypeValue] ?? "";
     return nomesModelos[key] ?? PROFILE_OPTIONS.find((p) => p.id === profileTypeValue)?.label ?? profileTypeValue;
   };
-  // Estado de salvamento da seção "Espessura mínima por modelo"
-  const [savingEspessura, setSavingEspessura] = useState(false);
-  const [espessuraMsg, setEspessuraMsg] = useState<string | null>(null);
-
-  async function salvarEspessuraNomes() {
-    setSavingEspessura(true); setEspessuraMsg(null);
-    try {
-      const res = await fetch("/api/orcamento/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          espessura_minima_por_modelo: espessuraMinimaPorModelo,
-          nomes_modelos: nomesModelos,
-        }),
-      });
-      if (!res.ok) {
-        const b = await res.json().catch(() => ({}));
-        setEspessuraMsg((b as { error?: string }).error ?? `Erro ${res.status}`);
-        return;
-      }
-      setEspessuraMsg("Salvo!");
-      setTimeout(() => setEspessuraMsg(null), 2500);
-    } catch (e) {
-      setEspessuraMsg(e instanceof Error ? e.message : "Erro de rede");
-    } finally {
-      setSavingEspessura(false);
-    }
-  }
-
   // ── Histórico de campanhas de promoção ──
   // Lista de campanhas salvas (nome + datas + descontos). Permite reativar
   // promoções antigas sem redigitar tudo.
@@ -1199,7 +1177,7 @@ export default function OrcamentoClient({
     setTextosExtras([]); setTextosExtras2([]);
 
     // Restaura últimos parâmetros do modelo usados (localStorage)
-    const baseParams = { ...DEFAULT_PARAMS, goldPrice: cotacaoOuro, startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0 };
+    const baseParams = { ...DEFAULT_PARAMS, goldPrice: cotacaoOuro, startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0, domePercentage: Number(config?.dome_percentage ?? DEFAULT_PARAMS.domePercentage) };
     let savedProfile = (config?.profile as ProfileType) ?? ProfileType.Anatomica;
     let savedRingSize = RING_SIZES[14];
     let restoredParams = baseParams;
@@ -1355,6 +1333,7 @@ export default function OrcamentoClient({
         body: JSON.stringify({
           start_mkp: params.startMkp,
           discount_percent: params.discountPercent,
+          dome_percentage: defaultDomePercentage,
           profile,
           pricing_categories: pricingCategories,
           groove_rules: grooveRules,
@@ -1364,13 +1343,21 @@ export default function OrcamentoClient({
           risco_depth: riscoDepth,
           preco_gravacao: precoGravacao,
           espessura_minima_por_modelo: espessuraMinimaPorModelo,
+          nomes_modelos: nomesModelos,
           promocao_inicio: promocaoInicio || null,
           promocao_fim: promocaoFim || null,
         }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setConfigMsg((b as { error?: string }).error ?? `Erro ${res.status}`);
+        return;
+      }
       setConfigMsg("Salvo!");
-    } catch { setConfigMsg("Erro"); }
+      setTimeout(() => setConfigMsg(null), 2500);
+      // Recarrega RSC pra todos verem o estado real do banco
+      router.refresh();
+    } catch (e) { setConfigMsg(e instanceof Error ? e.message : "Erro de rede"); }
     finally { setIsSavingConfig(false); }
   };
 
@@ -2046,9 +2033,23 @@ export default function OrcamentoClient({
   if (tab === "config" && canManageConfig) {
     return (
       <div className="p-6 space-y-5 max-w-3xl mx-auto" style={{ backgroundColor: C.cremeBg, minHeight: "100vh" }}>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-20 -mx-6 px-6 py-3" style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
           <h1 className="text-lg font-bold text-gray-800">Configurações do Orçamento</h1>
-          <button onClick={() => setTab("design")} className="text-xs font-semibold px-4 py-2 rounded-lg text-white" style={{ background: C.esmeralda }}>Voltar ao Design</button>
+          <div className="flex items-center gap-2">
+            {configMsg && (
+              <span className={`text-xs font-semibold ${configMsg === "Salvo!" ? "text-emerald-600" : "text-red-500"}`}>{configMsg}</span>
+            )}
+            <button
+              onClick={handleSaveConfig}
+              disabled={isSavingConfig}
+              className="flex items-center gap-1.5 px-5 py-2 text-xs font-bold rounded-lg text-white disabled:opacity-50"
+              style={{ background: C.esmeralda }}
+            >
+              {isSavingConfig ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+              {isSavingConfig ? "Salvando…" : "Salvar tudo"}
+            </button>
+            <button onClick={() => setTab("design")} className="text-xs font-semibold px-4 py-2 rounded-lg border" style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>Voltar ao Design</button>
+          </div>
         </div>
         {/* Markup e Desconto */}
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
@@ -2071,10 +2072,10 @@ export default function OrcamentoClient({
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Curvatura padrão (%)</label>
-              <input type="number" min={0} max={100} step={5} value={params.domePercentage}
-                onChange={e => setParams(p => ({ ...p, domePercentage: parseInt(e.target.value) || 100 }))}
+              <input type="number" min={0} max={100} step={5} value={defaultDomePercentage}
+                onChange={e => setDefaultDomePercentage(parseInt(e.target.value) || 100)}
                 className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none" style={{ borderColor: C.cremeBorder }} />
-              <p className="text-[10px] text-gray-400 mt-1">Curvatura dos perfis Anatomica, Boleada e Boleada Dupla</p>
+              <p className="text-[10px] text-gray-400 mt-1">Curvatura padrão dos perfis Anatomica, Boleada e Boleada Dupla em alianças novas</p>
             </div>
           </div>
         </div>
@@ -2334,20 +2335,6 @@ export default function OrcamentoClient({
               })}
             </tbody>
           </table>
-          <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: C.cremeBorder }}>
-            <span className="text-[11px]" style={{ color: espessuraMsg === "Salvo!" ? "#15803D" : "#DC2626" }}>
-              {espessuraMsg ?? ""}
-            </span>
-            <button
-              type="button"
-              onClick={salvarEspessuraNomes}
-              disabled={savingEspessura}
-              className="text-xs font-semibold px-4 py-2 rounded-lg text-white disabled:opacity-50"
-              style={{ background: C.esmeralda }}
-            >
-              {savingEspessura ? "Salvando…" : "Salvar mudanças"}
-            </button>
-          </div>
         </div>
         {/* Padrão Risco */}
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
@@ -2384,13 +2371,10 @@ export default function OrcamentoClient({
         </div>
 
         <div className="flex items-center gap-3">
-          <button onClick={handleSaveConfig} disabled={isSavingConfig} className="flex items-center gap-1.5 px-5 py-2 text-xs font-bold rounded-lg text-white disabled:opacity-50" style={{ background: C.esmeralda }}>
-            {isSavingConfig ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Salvar
-          </button>
           <button onClick={() => { setPricingCategories(DEFAULT_PRICING_CATEGORIES); setGrooveRules(DEFAULT_GROOVE_RULES); setStonePricesLocal([...DEFAULT_STONE_PRICES]); }} className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border" style={{ borderColor: C.cremeBorder, color: "#6b7280" }}>
-            <RotateCcw size={12} /> Resetar
+            <RotateCcw size={12} /> Resetar faixas e regras
           </button>
-          {configMsg && <span className="text-xs font-semibold text-emerald-600">{configMsg}</span>}
+          <p className="text-[11px] text-gray-400">Use o botão <strong>Salvar tudo</strong> no topo para persistir as alterações.</p>
         </div>
       </div>
     );
