@@ -248,10 +248,19 @@ export default function OrcamentoClient({
 
     // Snapshot salvo: prioriza coluna nova (jsonb). Fallback p/ campos avulsos
     // (orçamentos antigos pré-migration 258 podem vir sem snapshot mesmo
-    // estando travados pelo backfill — mas se o backfill rodou, snapshot
-    // existe). Só popula se `valor_negociado_locked = true`.
-    if (orc.valor_negociado_locked && orc.snapshot && typeof orc.snapshot === "object") {
-      const s = orc.snapshot as OrcamentoSnapshot;
+    // estando travados pelo backfill).
+    //
+    // B4: quando `valor_negociado_locked=true` mas `snapshot=null` (cenário
+    // possível em backfills incompletos da migration 258 — só status
+    // rascunho|enviado|aprovado tiveram snapshot populado), reconstruímos o
+    // snapshot a partir das colunas escalares. Sem esse fallback, savedSnapshot
+    // ficava null, o useEffect auto-dirty saía cedo (`!savedSnapshot return`),
+    // dirty nunca marcava, e o save regravava `valor` recalculado — reabrindo
+    // exatamente a regressão que v2.42.0 fechou.
+    if (orc.valor_negociado_locked) {
+      const s = (orc.snapshot && typeof orc.snapshot === "object")
+        ? (orc.snapshot as OrcamentoSnapshot)
+        : ({} as OrcamentoSnapshot);
       setSavedSnapshot({
         valor: Number(s.valor ?? orc.valor ?? 0),
         peso: Number(s.peso ?? orc.peso ?? 0),
@@ -1244,6 +1253,9 @@ export default function OrcamentoClient({
     }
   }, [pricingTotal.price, savedSnapshot, markDirty]);
 
+  // (auto-dirty da peça foi movido pra depois do `pecaTotal` ser declarado —
+  // veja após `const pecaTotal = ...`)
+
   const handleSizeChange = (s: RingSize) => { setRingSize(s); updateParam("diameter", s.diameter); };
   const handleSizeChange2 = (s: RingSize) => { setRingSize2(s); setParams2(p => ({ ...p, diameter: s.diameter })); };
 
@@ -1603,8 +1615,34 @@ export default function OrcamentoClient({
     URL.revokeObjectURL(url);
   }, [currentMesh]);
 
-  // Pricing peça personalizada (também respeita a promoção quando ativa)
-  const descPromoPeca = descPromoParaPeso(pecaPeso, params.startMkp);
+  // Pricing peça personalizada — HOISTADO pra fora do bloco condicional para
+  // que o auto-dirty da peça (B1) e o early-return NO-OP (#20) possam observar
+  // `pecaTotal` em useEffect/useMemo no nível raiz do componente.
+  const pecaFactors = curvaConfig && curvaCategorias.length > 0
+    ? getPricingFactors(pecaPeso, curvaConfig, curvaCategorias)
+    : null;
+  const pecaValorOuro = pecaFactors && curvaConfig
+    ? calcularPrecoSync(pecaPeso, cotacaoOuro, pecaFactors.mkp, curvaConfig.arredondamento, curvaConfig.goldCostPercentage)
+    : 0;
+  const pecaMaxDesconto = pecaFactors?.maxDiscount ?? 0;
+  const pecaSubtotal = pecaValorOuro + pecaPedrasTotalRS;
+  const pecaDescontoValor = pecaSubtotal * (pecaDescontoPct / 100);
+  const pecaTotal = pecaSubtotal - pecaDescontoValor;
+
+  // B1: mesmo guard auto-dirty pra peça personalizada. Antes, mudar peso/
+  // desconto/pedras numa peça travada não marcava dirty → handleSavePeca
+  // caía em NO-OP perpétuo e o usuário não conseguia salvar alteração nenhuma.
+  useEffect(() => {
+    if (!savedSnapshot || isHydratingRef.current) return;
+    if (orcamentoTipo !== "peca") return;
+    if (Math.abs(pecaTotal - savedSnapshot.valor) > 0.01) {
+      markDirty();
+    }
+  }, [orcamentoTipo, pecaTotal, savedSnapshot, markDirty]);
+
+  // B3: peça tem markup próprio (curva dinâmica) — antes usava params.startMkp
+  // (do anel 1), o que jogava o desconto promo na faixa errada.
+  const descPromoPeca = descPromoParaPeso(pecaPeso, pecaFactors?.mkp ?? params.startMkp);
   const effDiscountPeca = Math.max(params.discountPercent, descPromoPeca);
   const pecaPricing = useMemo(
     () => computePricing(pecaPeso, cotacaoOuro, params.startMkp, effDiscountPeca, pricingCategories, 0),
@@ -1841,17 +1879,8 @@ export default function OrcamentoClient({
   // MODO: PEÇA PERSONALIZADA
   // ═══════════════════════════════════════════════════════════════════════════
   if (orcamentoTipo === "peca") {
-    // Valor do ouro + desconto máximo vêm da Curva Dinâmica de Precificação (/precificacao)
-    const pecaFactors = curvaConfig && curvaCategorias.length > 0
-      ? getPricingFactors(pecaPeso, curvaConfig, curvaCategorias)
-      : null;
-    const pecaValorOuro = pecaFactors && curvaConfig
-      ? calcularPrecoSync(pecaPeso, cotacaoOuro, pecaFactors.mkp, curvaConfig.arredondamento, curvaConfig.goldCostPercentage)
-      : 0;
-    const pecaMaxDesconto = pecaFactors?.maxDiscount ?? 0;
-    const pecaSubtotal = pecaValorOuro + pecaPedrasTotalRS;
-    const pecaDescontoValor = pecaSubtotal * (pecaDescontoPct / 100);
-    const pecaTotal = pecaSubtotal - pecaDescontoValor;
+    // pecaFactors/pecaValorOuro/pecaSubtotal/pecaTotal foram hoistados pro
+    // topo do componente (B1 + B3) — não duplicar aqui.
     return (
       <div className="min-h-screen" style={{ backgroundColor: C.cremeBg }}>
         <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
@@ -2141,6 +2170,13 @@ export default function OrcamentoClient({
             ) : (
               <button onClick={async () => {
                 if (!clientName.trim()) { setSaveMsg({ text: "Preencha o nome do cliente", type: "error" }); return; }
+                // B2: curva ainda não carregou → markup vira 0 e backend
+                // (numCheck min=0.1) rejeita com 400. Bloqueia o save até o
+                // pecaFactors estar disponível.
+                if (!pecaFactors) {
+                  setSaveMsg({ text: "Aguarde — curva de precificação ainda carregando.", type: "error" });
+                  return;
+                }
                 // Bug #20: peça travada e sem alteração = NO-OP (mesma regra
                 // da aliança). Antes, recalcular a peça (ex: mudança de cotação
                 // ouro) sobrescrevia o valor combinado quando o usuário clicava

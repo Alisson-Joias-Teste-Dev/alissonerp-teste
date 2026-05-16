@@ -142,28 +142,34 @@ export async function PATCH(
       return NextResponse.json({ error: "Cliente vinculado não foi encontrado (pode ter sido removido). Selecione outro." }, { status: 422 });
     }
 
-    // Bug #18: defesa em profundidade — revalida a ficha técnica antes da
-    // aprovação. Se algum endpoint legado/manual deixou a ficha inviável, o
-    // PUT já barra, mas o PATCH não tinha proteção própria.
-    if (orc.tipo === "alianca" && orc.ficha_tecnica_id) {
-      const [fichaApro] = await sql`
-        SELECT * FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${orc.ficha_tecnica_id} LIMIT 1
-      `;
-      if (fichaApro) {
+    // Bug #18 + B6: defesa em profundidade — revalida ficha técnica (1 E 2)
+    // antes da aprovação. Se algum endpoint legado/manual deixou a ficha
+    // inviável, o PUT já barra, mas o PATCH não tinha proteção própria. B6
+    // estende pra ficha2: par com bug em anel 2 não pode chegar à venda.
+    if (orc.tipo === "alianca") {
+      const fichaIds = [orc.ficha_tecnica_id, orc.ficha_tecnica_2_id].filter((id): id is number => !!id);
+      if (fichaIds.length > 0) {
         const [configRow] = await sql`SELECT calibracao FROM alissonerp.config_orcamento WHERE name = 'default' LIMIT 1`;
         const calibAp: CalibracaoDefaults = (configRow?.calibracao as CalibracaoDefaults) ?? CALIBRACAO_DEFAULTS;
-        const profileAp = migrateProfile(String(fichaApro.perfil ?? "Simples"));
-        const capacityAp = computeStoneCapacity(
-          Number(fichaApro.diametro ?? 0),
-          Number(fichaApro.espessura ?? 0),
-          Number(fichaApro.canal_borda_altura ?? 1.0),
-          Number(fichaApro.tamanho_pedra ?? 0),
-          Number(fichaApro.pedra_fileiras ?? 1),
-          profileAp,
-        );
-        const errsAp = validateFichaTecnica(fichaApro as unknown as Record<string, unknown>, capacityAp, calibAp);
-        if (errsAp.length > 0) {
-          return NextResponse.json({ error: `Ficha técnica inválida: ${errsAp[0].message}`, errors: errsAp }, { status: 422 });
+        for (const fichaId of fichaIds) {
+          const [fichaApro] = await sql`
+            SELECT * FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${fichaId} LIMIT 1
+          `;
+          if (!fichaApro) continue;
+          const profileAp = migrateProfile(String(fichaApro.perfil ?? "Simples"));
+          const capacityAp = computeStoneCapacity(
+            Number(fichaApro.diametro ?? 0),
+            Number(fichaApro.espessura ?? 0),
+            Number(fichaApro.canal_borda_altura ?? 1.0),
+            Number(fichaApro.tamanho_pedra ?? 0),
+            Number(fichaApro.pedra_fileiras ?? 1),
+            profileAp,
+          );
+          const errsAp = validateFichaTecnica(fichaApro as unknown as Record<string, unknown>, capacityAp, calibAp);
+          if (errsAp.length > 0) {
+            const label = fichaId === orc.ficha_tecnica_id ? "anel 1" : "anel 2";
+            return NextResponse.json({ error: `Ficha técnica inválida (${label}): ${errsAp[0].message}`, errors: errsAp }, { status: 422 });
+          }
         }
       }
     }
@@ -355,12 +361,12 @@ export async function PUT(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  // Permissões: descobre role do caller pra decidir se pode destravar valor
-  // negociado. Só admin/desenvolvedor podem mudar `valor_negociado_locked` pra
-  // false — qualquer outro role tem o false ignorado (preserva o lock).
-  const [callerRow] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid`;
+  // Permissões: descobre role + mx_desconto_permitido do caller pra decidir
+  // se pode destravar valor negociado E se pode passar do limite de desconto.
+  const [callerRow] = await sql`SELECT role, mx_desconto_permitido FROM alissonerp.usuarios WHERE id = ${user.id}::uuid`;
   const callerRole = (callerRow?.role ?? "") as string;
   const canUnlock = isFullAccess(callerRole);
+  const callerMaxDesc = Number(callerRow?.mx_desconto_permitido ?? 0);
 
   const body = await req.json();
   const {
@@ -410,6 +416,18 @@ export async function PUT(
   if (cliente_id != null) {
     const [existe] = await sql`SELECT 1 AS ok FROM public.contatos WHERE id_contato = ${Number(cliente_id)} LIMIT 1`;
     if (!existe) return NextResponse.json({ error: "Cliente informado não foi encontrado" }, { status: 422 });
+  }
+
+  // B7: trava backend de desconto_pct (espelha POST). Não-admin não pode
+  // ultrapassar mx_desconto_permitido via cURL.
+  if (!canUnlock && desconto_pct != null) {
+    const descNum = Number(desconto_pct);
+    if (Number.isFinite(descNum) && descNum > callerMaxDesc) {
+      return NextResponse.json(
+        { error: `Desconto ${descNum}% excede seu limite (${callerMaxDesc}%). Solicite aprovação.` },
+        { status: 403 },
+      );
+    }
   }
 
   // Normaliza quantidade UMA vez. Antes alguns checks faziam `=== 2` estrito,
@@ -538,27 +556,40 @@ export async function PUT(
       `;
       ficha2Id = existing.ficha_tecnica_2_id;
     } else {
-      // Criar ficha 2 se não existe
+      // Criar ficha 2 se não existe (caso: usuário editou orçamento unidade
+      // e converteu pra par). B5: INSERT alinhado com o POST ficha2 — antes
+      // faltavam profundidade_concava, canal_largura, canal_borda_altura,
+      // chanfro_tamanho, pedra_fileiras, e pedras_detalhadas era hardcoded
+      // como '[]'. Resultado: anel 2 nascia incompleto e a tela mostrava "—"
+      // até um segundo save sobrescrever via UPDATE.
       const [newFicha] = await sql`
         INSERT INTO alissonerp.orcamento_fichas_tecnicas (
-          modelo, aro_numeracao, largura, espessura, peso_estimado, perfil, diametro,
-          densidade_ouro, cor_metal, tipo_fonte, texto, qtd_pedras, tamanho_pedra, tipo_pedra,
-          tipo_aplicacao_pedra, has_friso, friso_kind, friso_tipo, friso_lado, friso_largura,
-          friso_profundidade, friso_offset,
-          dome_porcentagem, pedra_drill, pedra_meia_lua, pedra_volta_completa,
+          modelo, aro_numeracao, largura, espessura, peso_estimado,
+          perfil, diametro, densidade_ouro, cor_metal,
+          tipo_fonte, texto, qtd_pedras, tamanho_pedra, tipo_pedra, tipo_aplicacao_pedra,
+          profundidade_concava, has_friso, friso_kind, friso_tipo,
+          friso_lado, friso_largura, friso_profundidade, friso_offset,
+          canal_largura, canal_borda_altura, chanfro_tamanho, dome_porcentagem,
+          pedra_fileiras, pedra_drill, pedra_meia_lua, pedra_volta_completa,
           pedras_detalhadas
         ) VALUES (
-          ${ficha2.modelo ?? null}, ${ficha2.aro_numeracao ?? null}, ${ficha2.largura ?? null},
-          ${ficha2.espessura ?? null}, ${ficha2.peso_estimado ?? null}, ${ficha2.perfil ?? null},
-          ${ficha2.diametro ?? null}, ${ficha2.densidade_ouro ?? null}, ${ficha2.cor_metal ?? null},
-          ${ficha2.tipo_fonte ?? null}, ${ficha2.texto ?? null}, ${ficha2.qtd_pedras ?? null},
-          ${ficha2.tamanho_pedra ?? null}, ${ficha2.tipo_pedra ?? null}, ${ficha2.tipo_aplicacao_pedra ?? null},
+          ${ficha2.modelo ?? null}, ${ficha2.aro_numeracao ?? null},
+          ${ficha2.largura ?? null}, ${ficha2.espessura ?? null}, ${ficha2.peso_estimado ?? null},
+          ${ficha2.perfil ?? null}, ${ficha2.diametro ?? null},
+          ${ficha2.densidade_ouro ?? null}, ${ficha2.cor_metal ?? null},
+          ${ficha2.tipo_fonte ?? null}, ${ficha2.texto ?? null},
+          ${ficha2.qtd_pedras ?? null}, ${ficha2.tamanho_pedra ?? null}, ${ficha2.tipo_pedra ?? null},
+          ${ficha2.tipo_aplicacao_pedra ?? null},
+          ${ficha2.profundidade_concava ?? null},
           ${ficha2.has_friso ?? false}, ${ficha2.friso_kind ?? "friso"}, ${ficha2.friso_tipo ?? null},
-          ${ficha2.friso_lado ?? null}, ${ficha2.friso_largura ?? null},
-          ${ficha2.friso_profundidade ?? null}, ${ficha2.friso_offset ?? null},
-          ${ficha2.dome_porcentagem ?? null}, ${ficha2.pedra_drill ?? false},
+          ${ficha2.friso_lado ?? null},
+          ${ficha2.friso_largura ?? null}, ${ficha2.friso_profundidade ?? null},
+          ${ficha2.friso_offset ?? null},
+          ${ficha2.canal_largura ?? null}, ${ficha2.canal_borda_altura ?? null},
+          ${ficha2.chanfro_tamanho ?? null}, ${ficha2.dome_porcentagem ?? null},
+          ${ficha2.pedra_fileiras ?? null}, ${ficha2.pedra_drill ?? false},
           ${ficha2.pedra_meia_lua ?? false}, ${ficha2.pedra_volta_completa ?? false},
-          '[]'::jsonb
+          ${sql.json(ficha2.pedras_detalhadas ?? [])}
         ) RETURNING id
       `;
       ficha2Id = newFicha.id as number;

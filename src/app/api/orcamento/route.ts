@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
 
   const [caller] = await sql`
-    SELECT u.role, v.id_vendedor
+    SELECT u.role, u.mx_desconto_permitido, v.id_vendedor
     FROM alissonerp.usuarios u
     LEFT JOIN public.vendedores v ON v.email = u.email
     WHERE u.id = ${user.id}::uuid
@@ -116,6 +116,22 @@ export async function POST(req: NextRequest) {
   ] as const) {
     const err = numCheck(val, label, opts);
     if (err) return NextResponse.json({ error: err }, { status: 400 });
+  }
+
+  // B7: trava backend de desconto_pct contra mx_desconto_permitido do
+  // usuário. Antes só o frontend bloqueava — vendedora maliciosa via cURL
+  // conseguia salvar 50% mesmo tendo permissão de 15%. Admin/desenvolvedor
+  // (isFullAccess) podem ultrapassar (decisão consciente — espelha #32).
+  const callerRoleStr = (caller.role ?? "") as string;
+  const maxDescUser = Number(caller.mx_desconto_permitido ?? 0);
+  if (!isFullAccess(callerRoleStr) && desconto_pct != null) {
+    const descNum = Number(desconto_pct);
+    if (Number.isFinite(descNum) && descNum > maxDescUser) {
+      return NextResponse.json(
+        { error: `Desconto ${descNum}% excede seu limite (${maxDescUser}%). Solicite aprovação.` },
+        { status: 403 },
+      );
+    }
   }
 
   // Normaliza quantidade UMA vez. Sem isso, string "2" passava a validação
