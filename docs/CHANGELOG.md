@@ -1,8 +1,185 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 29/04/2026 — Versão: v2.38.0 <!-- Revisado 29/04/2026 -->
+> 📋 Última atualização automática: 16/05/2026 — Versão: v2.42.0 <!-- Revisado 16/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(orcamento): Snapshot + lock previne sobrescrita silenciosa de valor negociado (v2.42.0)
+
+Reabrir um orçamento recalculava o preço da ficha técnica e descartava o
+valor combinado com o cliente — qualquer Salvar regravava o recalculado por
+cima. Agora o orçamento guarda um snapshot do valor travado; a tela exibe o
+travado, o Salvar não mexe nele, e há um botão Recalcular explícito para
+quando o usuário realmente quer atualizar.
+
+- Migration `258_orcamento_snapshot_lock.sql`: novas colunas `snapshot`
+  (jsonb), `congelado_em` (timestamptz), `valor_negociado_locked` (bool).
+  Flag global `config_orcamento.snapshot_lock_enabled` (default true).
+  Backfill: rascunho/enviado/aprovado recebem snapshot dos valores atuais.
+- `src/lib/orcamento-config.ts`: loader único da config (lista + detalhe
+  usam o mesmo SELECT, com nomes_modelos/promocao/dome/snapshot_lock).
+- `src/app/(dashboard)/orcamento/page.tsx`,
+  `src/app/(dashboard)/orcamento/detalhe/[id]/page.tsx`: usam o loader único.
+- `src/app/api/orcamento/[id]/route.ts`:
+  - `GET` volta a expor `ficha`/`ficha2` como objetos via `row_to_json`,
+    sem colidir `o.id` com `ft.id`.
+  - `PUT` aceita `snapshot`, `valor_negociado_locked`, `valor_ouro`,
+    `valor_pedras`, `cotacao_dolar`. Carimba `congelado_em = NOW()` quando
+    um novo snapshot chega.
+  - Foto 3D: path determinístico `orcamento/ORC-{id}/3d.jpg` com upsert
+    (sem acumular arquivos órfãos), cache-bust via query string.
+- `src/app/(dashboard)/orcamento/OrcamentoClient.tsx`:
+  - Hidrata `savedSnapshot` ao abrir; exibe valor travado enquanto `!dirty`.
+  - Badge dourado "Valor travado · dd/mm/yyyy" + botão Recalcular.
+  - Badge amarelo "Recalculado · era R$ X" + botão Restaurar quando há
+    divergência.
+  - `handleSaveOrder`: persiste snapshot atual quando `!dirty`, novo
+    snapshot quando recalculado, sempre com `valor_negociado_locked=true`.
+  - `pricingTotal` agora arredondado a 2 casas (limpa lixo de centavos).
+- `src/app/(dashboard)/orcamento/detalhe/[id]/OrcamentoDetalheClient.tsx`:
+  esconde botão Compartilhar até o orçamento virar venda.
+- `src/app/(dashboard)/orcamento/types.ts`: campos novos do
+  `ConfigOrcamento` (`snapshot_lock_enabled`, promoção, nomes, etc) e
+  type `OrcamentoSnapshot`.
+
+## feat(promocoes): Regra de máximo de parcelas no cartão por campanha
+
+Promoções de produto agora podem definir um teto de parcelas no cartão. Quando
+a venda contém produto em campanha ativa, o dropdown de parcelas fica limitado
+a esse valor. Fora da janela [data_inicio, data_fim], reverte automaticamente
+ao default (12x). Sem cron, sem trigger — a view recompõe pela data.
+
+- Migration `257_promocoes_max_parcelas.sql`: nova coluna
+  `max_parcelas_cartao` em `alissonerp.promocoes_produtos` (CHECK 1..12, NULL
+  = sem restrição). View `vw_produto_preco_vigente` recriada pra expor o
+  campo.
+- API `POST /api/promocoes` aceita `max_parcelas_cartao` no body.
+- API `PATCH /api/promocoes/[id]` aceita `max_parcelas_cartao` (só enquanto
+  campanha está agendada).
+- API `GET /api/vendas/produtos/busca` retorna `max_parcelas_promo` em cada
+  produto vigente.
+- UI `NovaPromocaoModal`: input "Máximo de parcelas no cartão (opcional)".
+- UI `PromocaoDetalheClient`: edição inline da regra (com botão Salvar)
+  enquanto a campanha está agendada.
+- UI `PagamentoForm`: aplica cap em todas as listas (Mercado Pago, demais
+  gateways, modo Múltiplas). Banner "Limitado a Nx pela promoção (nome)" no
+  campo.
+- UI `NovaVendaClientV2`: deriva `maxParcelasPromoVenda = min` dos itens
+  em promo. Reset automático de `pagCondicao` quando cap fica menor.
+
+## fix(orcamento → venda): Comissão de aliança volta a usar faixas_comissao
+
+Decisão de negócio: aliança deve seguir EXATAMENTE a mesma regra de produto
+no checkout — `faixas_comissao` pelo `pct_desconto` do item. Sem distinção
+por mkp, peso ou curva de produto. 30% desc (caso típico de promoção) → 0,5%
+de comissão.
+
+- `POST /api/orcamento/[id]`: cálculo de comissão volta a usar
+  `faixas_comissao[desconto_pct]` (era `commissionForMarkup` pela curva).
+- Frontend `VendaDetalheClient`: revertido — getComissao(pct) sem
+  markup_aplicado. Imports e props de curva removidos.
+- Coluna `markup_aplicado` em `itens_venda_erp` permanece (migration 256)
+  mas fica não-usada. Pode servir pra auditoria futura.
+
+Resultado em orçamentos atuais (30% promo):
+- ORC-000063: R$ 9.600 → comissão 0,50% = **R$ 48,00**
+- ORC-000058: R$ 20.571 → comissão 0,50% = **R$ 102,86**
+
+## fix(orcamento → venda): Replica desconto + comissão por mkp na tela de venda
+
+Quando o orçamento virava venda, o item era criado com `preco_lista = valor já
+descontado` e `pct_desconto = 0`. Resultado: relatório de desconto mostrava 0%,
+e se a consultora aplicasse +30% na venda, o desconto virava 51% real
+(multiplicativo) sem ninguém perceber. Também a regra de aprovação
+(`LIMITE_DESCONTO_APROVACAO=30`) não travava — só conferia o segundo desconto.
+
+- Migration `256_itens_venda_markup_aplicado.sql`: nova coluna
+  `markup_aplicado` em `alissonerp.itens_venda_erp`.
+- `POST /api/orcamento/[id]` (aprovação) agora:
+  * Reconstrói `preco_lista = valor / (1 − desconto/100)` (preço cheio).
+  * Grava `pct_desconto` real do orçamento (30%, não 0%).
+  * `preco_unitario = valor descontado` (mantém o total).
+  * Grava `markup_aplicado = orc.markup` (faixa pricing_categories).
+- `GET /api/vendas/[id]` retorna `markup_aplicado` em cada item.
+- `VendaDetalheClient`:
+  * Recebe `curvaConfig` + `curvaCategorias` via SSR.
+  * `getComissao(pct, markup_aplicado)`: quando `markup_aplicado` presente,
+    usa `commissionForMarkup` (curva); caso contrário, faixas_comissao por
+    desconto (comportamento de produto).
+  * Todos os recálculos client-side passam `item.markup_aplicado` pro
+    getComissao — comissão de aliança fica consistente mesmo após edição.
+
+Efeitos colaterais positivos:
+- Relatório `analise-comissoes` (comissão perdida = `preco_lista × 0.04 −
+  valor_comissao`) volta a calcular corretamente, já que `preco_lista` agora
+  é o cheio.
+- Limite de aprovação trava naturalmente: aliança já entra com 30%, segundo
+  desconto exige aprovação.
+
+## feat(orcamento): Comissão de aliança via curva de produto (pelo mkp)
+
+Aliança aprovada pagava 4% fixo de comissão para a vendedora (vinha de
+`faixas_comissao` em desconto 0%), independentemente do peso ou markup
+aplicado. Agora a comissão segue a curva de precificação dos produtos: cada
+mkp da faixa da aliança gera a comissão equivalente que um produto com aquele
+mesmo mkp receberia.
+
+- Nova função `commissionForMarkup(mkp, cfg, categorias)` em
+  `src/lib/curva-precificacao.ts`: faz reverse lookup na curva pelo mkp e
+  interpola linearmente entre os pontos. Igual a `getPricingFactors`, mas com
+  o markup como chave em vez do peso.
+- `POST /api/orcamento/[id]` (fluxo de aprovação) passa a derivar
+  `pct_comissao` do `markup` salvo no orçamento via `commissionForMarkup`.
+  Fallbacks em cascata: 1) mkp do orçamento; 2) peso do orçamento via curva;
+  3) `faixas_comissao` em desconto 0% (compat histórico).
+- Tabela equivalente para as faixas atuais (start_mkp 5, start_comm 5):
+
+  | Faixa | Mkp | Comissão |
+  |---|---|---|
+  | Super Leves | 2.4× | 1,50% |
+  | Leves | 2.3× | 1,40% |
+  | Medias | 2.2× | 1,30% |
+  | Pesadas | 2.1× | 1,20% |
+  | Super Pesadas | 2.0× | 1,10% |
+
+- Impacto financeiro: alianças vendidas hoje (mkp 2.3 médio) pagavam ~4% e
+  passam a pagar ~1,4%. Vendedoras vão receber menos comissão por aliança;
+  para ajustar pra cima, editar `curva_categorias.comm_variation` (sobe a
+  comissão de todas as faixas correspondentes da curva).
+
+## fix(orcamento): Aliança 3D não fica preta (RoomEnvironment local)
+
+Material com `metalness=1` + `roughness=0` precisa de environment map pra
+refletir — sem isso, fica preto. Os Environments de drei dependiam de CDN
+externo (githack offline → tudo preto). Solução: importar `RoomEnvironment`
+do próprio Three.js (vem embutido, gera PMREM em memória) e atribuir em
+`scene.environment` via componente `StudioEnv` dentro do Canvas. Sem rede,
+sem regressão visual.
+
+## fix(orcamento): Config — salvar unificado + curvatura padrão global
+
+A tela de Configurações do Orçamento tinha 3 botões de "Salvar" separados (um por
+seção), cada um persistindo só parte dos campos. Usuárias editavam Markup, Risco
+ou Gravação e clicavam no "Salvar mudanças" da seção de Espessura, achando que
+era global — nada disso era salvo. Além disso, "Curvatura padrão (%)" mexia em
+`params.domePercentage` (state local de uma única aliança aberta) e nunca era
+persistida no banco.
+
+- Migration `255_config_orcamento_dome_percentage.sql`: adiciona coluna
+  `dome_percentage NUMERIC DEFAULT 100` em `alissonerp.config_orcamento`.
+- API `POST /api/orcamento/config` agora aceita e persiste `dome_percentage`
+  com COALESCE (não sobrescreve com null).
+- `OrcamentoClient`: estado novo `defaultDomePercentage` (separado de
+  `params.domePercentage`), inicializado de `config?.dome_percentage`. Toda
+  aliança nova (`params` e `params2` iniciais) usa a curvatura global como
+  default em vez de hardcoded 100.
+- Botões de salvar unificados: removido o "Salvar mudanças" interno da seção
+  Espessura e o "Salvar" do footer. Único botão "Salvar tudo" fica no header
+  sticky da config, persiste todos os campos (markup, desconto, curvatura,
+  faixas, regras de friso, risco, gravação, espessura mínima, nomes dos
+  modelos). "Salvar promoção" segue separado por usar outra tabela.
+- Após sucesso: mensagem "Salvo!" no topo + `router.refresh()` para recarregar
+  o RSC e exibir o estado real do banco.
 
 ## feat: Sistema de Promoções de Produtos (em revisão)
 

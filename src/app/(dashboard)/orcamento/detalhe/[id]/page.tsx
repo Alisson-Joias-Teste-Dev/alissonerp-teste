@@ -3,6 +3,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import { isFullAccess } from "@/lib/roles";
 import OrcamentoDetalheClient from "./OrcamentoDetalheClient";
+import { loadOrcamentoConfig } from "@/lib/orcamento-config";
 import { normalizeConfigRow, normalizeCategoriaRow, type CurvaConfig, type CurvaCategoriaInput } from "@/lib/curva-precificacao";
 
 export const dynamic = "force-dynamic";
@@ -67,37 +68,7 @@ export default async function OrcamentoDetalhePage({ params }: { params: Promise
   const cotacaoOuro = Number(paramRow?.ouro ?? 0);
   const cotacaoDolar = Number(paramRow?.dollar ?? 5.80);
 
-  // Config orçamento
-  let configRow = null;
-  try {
-    const rows = await sql`
-      SELECT id, name, start_mkp, discount_percent, gold_price, camera_override,
-             profile, pricing_categories, groove_rules, stone_markup, stone_prices,
-             risco_width, risco_depth, preco_gravacao, stone_markups_table
-      FROM alissonerp.config_orcamento
-      WHERE name = 'default'
-      LIMIT 1
-    `;
-    configRow = rows[0] ?? null;
-  } catch { /* tabela não existe */ }
-
-  const config = configRow ? {
-    id: configRow.id as number,
-    name: configRow.name as string,
-    start_mkp: Number(configRow.start_mkp ?? 3.5),
-    discount_percent: Number(configRow.discount_percent ?? 0),
-    gold_price: Number(configRow.gold_price ?? 0),
-    camera_override: configRow.camera_override ? Number(configRow.camera_override) : null,
-    profile: (configRow.profile as string) ?? "Anatomica",
-    pricing_categories: Array.isArray(configRow.pricing_categories) ? configRow.pricing_categories : [],
-    groove_rules: Array.isArray(configRow.groove_rules) ? configRow.groove_rules : [],
-    stone_markup: Number(configRow.stone_markup ?? 2.5),
-    stone_prices: Array.isArray(configRow.stone_prices) ? configRow.stone_prices : [],
-    risco_width: Number(configRow.risco_width ?? 0.1),
-    risco_depth: Number(configRow.risco_depth ?? 0.2),
-    preco_gravacao: Number(configRow.preco_gravacao ?? 100),
-    stone_markups_table: (typeof configRow.stone_markups_table === "object" && configRow.stone_markups_table) ? configRow.stone_markups_table as Record<string, Record<string, number>> : {},
-  } : null;
+  const config = await loadOrcamentoConfig();
 
   const canManageConfig = isFullAccess(role) || role === "gerente_loja";
 
