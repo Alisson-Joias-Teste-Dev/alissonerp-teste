@@ -135,37 +135,24 @@ export async function PATCH(
         if (dow !== 0 && dow !== 6) diasUteis++;
       }
 
-      // 2. Criar venda (rascunho) pré-preenchida
+      // 2. Criar venda (rascunho) pré-preenchida — número via sequence
+      // (migration 259) elimina race condition do MAX+1 entre INSERTs paralelos.
       const vendedorId = orc.vendedor_id ?? (caller.id_vendedor ? Number(caller.id_vendedor) : null);
       const [venda] = await tx`
         INSERT INTO alissonerp.vendas_erp (
           numero_venda, cliente_id, vendedor_id, data_venda, data_entrega,
           situacao, observacoes, orcamento_id, created_by
         ) VALUES (
-          'V-TEMP', ${clienteId}, ${vendedorId},
+          nextval('alissonerp.venda_numero_seq')::text,
+          ${clienteId}, ${vendedorId},
           CURRENT_DATE, ${dataEntrega.toISOString().split("T")[0]},
           'rascunho',
           ${'Orçamento ' + orc.numero_orcamento + (orc.nome_modelo ? ' - ' + orc.nome_modelo : '')},
           ${orcId}, ${user.id}::uuid
         )
-        RETURNING id
+        RETURNING id, numero_venda
       `;
-      // Gerar numero_venda seguindo a sequência do public.vendas
-      const [{ proximo }] = await tx`
-        SELECT COALESCE(
-          GREATEST(
-            (SELECT MAX(numero_pedido) + 1 FROM public.vendas),
-            (SELECT MAX(numero_venda::bigint) + 1 FROM alissonerp.vendas_erp WHERE numero_venda ~ '^[0-9]+$')
-          ),
-          1
-        ) AS proximo
-      `;
-      await tx`
-        UPDATE alissonerp.vendas_erp
-        SET numero_venda = ${String(proximo)}
-        WHERE id = ${venda.id}
-      `;
-      const [vendaFinal] = await tx`SELECT numero_venda FROM alissonerp.vendas_erp WHERE id = ${venda.id}`;
+      const vendaFinal = { numero_venda: venda.numero_venda as string };
 
       // 3. Criar item da venda com comissão calculada via faixas_comissao
       // Usa nome_modelo salvo (preserva friso, par, label customizado).
