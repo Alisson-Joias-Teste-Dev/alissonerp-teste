@@ -5,7 +5,6 @@ import { isFullAccess } from "@/lib/roles";
 import { validateFichaTecnica, migrateProfile, CALIBRACAO_DEFAULTS, type CalibracaoDefaults } from "@/app/(dashboard)/orcamento/validations";
 import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
 import { ProfileType } from "@/app/(dashboard)/orcamento/types";
-import { getPricingFactors, commissionForMarkup, normalizeConfigRow, normalizeCategoriaRow } from "@/lib/curva-precificacao";
 
 const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "consultora"] as const;
 
@@ -194,32 +193,17 @@ export async function PATCH(
         ? Math.round((valorItem / (1 - descontoPctItem / 100)) * 100) / 100
         : valorItem;
 
-      // Comissão derivada do MKP do orçamento, usando a curva de precificação
-      // dos produtos como referência. Aliança com mkp 2.4 (faixa Super Leves)
-      // paga a mesma comissão que um produto com mkp 2.4 pagaria (~1,5%).
-      // Cada 0,1 a menos no mkp ⇒ ~0,1% a menos de comissão.
-      //
-      // Ordem de preferência:
-      //   1) mkp do próprio orçamento (alissonerp.orcamentos.markup) → curva
-      //   2) peso do orçamento → curva (se markup ausente)
-      //   3) faixas_comissao em desconto 0% (último fallback histórico)
-      const mkpItem = Number(orc.markup ?? 0);
+      // Comissão segue faixas_comissao pelo desconto efetivo do orçamento —
+      // mesma regra que produto cadastrado usa no checkout. Aliança com 30%
+      // desconto (típica em promoção) cai na faixa 30 → 0.5% comissão.
+      // Acima de 30% → 0.5% fixo (mesmo teto do frontend).
       let pctComissao = 0;
-      const [cfgRow] = await tx`SELECT * FROM alissonerp.curva_config WHERE id = 1`;
-      const catRows = await tx`SELECT * FROM alissonerp.curva_categorias WHERE ativo = true ORDER BY ordem`;
-      if (cfgRow && catRows.length > 0) {
-        const cfg = normalizeConfigRow(cfgRow as Record<string, unknown>);
-        const cats = (catRows as Record<string, unknown>[]).map(normalizeCategoriaRow);
-        if (mkpItem > 0) {
-          pctComissao = commissionForMarkup(mkpItem, cfg, cats);
-        } else if (pesoItem > 0) {
-          pctComissao = getPricingFactors(pesoItem, cfg, cats).commission;
-        }
-      }
-      if (pctComissao === 0) {
+      if (descontoPctItem > 30) {
+        pctComissao = 0.5;
+      } else {
         const [faixa] = await tx`
           SELECT comissao_pct FROM alissonerp.faixas_comissao
-          WHERE desconto_pct = 0 AND ativo = true
+          WHERE desconto_pct = ${Math.round(descontoPctItem)} AND ativo = true
           LIMIT 1
         `;
         pctComissao = Number(faixa?.comissao_pct ?? 0);
@@ -230,11 +214,11 @@ export async function PATCH(
         INSERT INTO alissonerp.itens_venda_erp (
           venda_id, nome_produto, quantidade, preco_lista,
           pct_desconto, preco_unitario, total_item, peso_estimado,
-          pct_comissao, valor_comissao, markup_aplicado, observacao
+          pct_comissao, valor_comissao, observacao
         ) VALUES (
           ${venda.id}, ${nomeItem}, 1, ${precoListaItem},
           ${descontoPctItem}, ${valorItem}, ${valorItem}, ${pesoItem},
-          ${pctComissao}, ${valorComissao}, ${mkpItem > 0 ? mkpItem : null},
+          ${pctComissao}, ${valorComissao},
           ${'Orçamento ' + orc.numero_orcamento}
         )
       `;

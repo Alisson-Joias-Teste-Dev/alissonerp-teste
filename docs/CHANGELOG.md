@@ -1,8 +1,26 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/05/2026 — Versão: v2.40.0 <!-- Revisado 16/05/2026 -->
+> 📋 Última atualização automática: 16/05/2026 — Versão: v2.40.1 <!-- Revisado 16/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(orcamento → venda): Comissão de aliança volta a usar faixas_comissao
+
+Decisão de negócio: aliança deve seguir EXATAMENTE a mesma regra de produto
+no checkout — `faixas_comissao` pelo `pct_desconto` do item. Sem distinção
+por mkp, peso ou curva de produto. 30% desc (caso típico de promoção) → 0,5%
+de comissão.
+
+- `POST /api/orcamento/[id]`: cálculo de comissão volta a usar
+  `faixas_comissao[desconto_pct]` (era `commissionForMarkup` pela curva).
+- Frontend `VendaDetalheClient`: revertido — getComissao(pct) sem
+  markup_aplicado. Imports e props de curva removidos.
+- Coluna `markup_aplicado` em `itens_venda_erp` permanece (migration 256)
+  mas fica não-usada. Pode servir pra auditoria futura.
+
+Resultado em orçamentos atuais (30% promo):
+- ORC-000063: R$ 9.600 → comissão 0,50% = **R$ 48,00**
+- ORC-000058: R$ 20.571 → comissão 0,50% = **R$ 102,86**
 
 ## fix(orcamento → venda): Replica desconto + comissão por mkp na tela de venda
 

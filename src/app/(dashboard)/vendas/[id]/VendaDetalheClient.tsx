@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { maskCpfCnpj } from "@/lib/formatters";
-import { commissionForMarkup, type CurvaConfig, type CurvaCategoriaInput } from "@/lib/curva-precificacao";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
 import MercadoPagoCobranca from "@/components/vendas/MercadoPagoCobranca";
@@ -391,8 +390,6 @@ interface Props {
   isFullAccess: boolean;
   maxDesconto: number;
   descontoAuthThreshold?: number;
-  curvaConfig: CurvaConfig | null;
-  curvaCategorias: CurvaCategoriaInput[];
 }
 
 interface PendingAuth {
@@ -402,7 +399,7 @@ interface PendingAuth {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAccess, maxDesconto, descontoAuthThreshold, curvaConfig, curvaCategorias }: Props) {
+export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAccess, maxDesconto, descontoAuthThreshold }: Props) {
   const router = useRouter();
 
   // ── Server data ─────────────────────────────────────────────────────────────
@@ -718,13 +715,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   });
 
   // ── Commission lookup ───────────────────────────────────────────────────────
-  // Itens vindos de orçamento (alianças/peças) trazem `markup_aplicado` e usam
-  // commissionForMarkup (curva). Demais itens (produto cadastrado) caem na
-  // faixas_comissao por desconto.
-  function getComissao(pct: number, markupAplicado?: number | null): number {
-    if (markupAplicado != null && markupAplicado > 0 && curvaConfig && curvaCategorias.length > 0) {
-      return commissionForMarkup(markupAplicado, curvaConfig, curvaCategorias);
-    }
+  function getComissao(pct: number): number {
     if (pct > 30) return 0.5;
     const faixa = faixas.find(f => f.desconto_pct === Math.round(pct));
     if (!faixa) return 0;
@@ -804,7 +795,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       const newQtd        = item.quantidade;
       const precoUnit     = novoPreco;                             // preserva precisão digitada
       const totalItem     = precoUnit * newQtd;
-      const pctComissao   = getComissao(pct, item.markup_aplicado);
+      const pctComissao   = getComissao(pct);
       const valorComissao = totalItem * pctComissao / 100;
 
       setUpdating(true);
@@ -856,7 +847,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     const newDesc = field === "pct_desconto" ? val : item.pct_desconto;
     const precoUnit = item.preco_lista * (1 - newDesc / 100);
     const totalItem = precoUnit * newQtd;
-    const pctComissao = getComissao(newDesc, item.markup_aplicado);
+    const pctComissao = getComissao(newDesc);
     const valorComissao = totalItem * pctComissao / 100;
 
     setUpdating(true);
@@ -2234,7 +2225,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           const effTotal    = effPrecoUn * item.quantidade;
                           const effDescVal  = item.preco_lista * effPct / 100;
                           const editandoDesc  = editandoPreco || localPct[item.id!] !== undefined;
-                          const effPctComissao = editandoDesc ? getComissao(effPct, item.markup_aplicado) : item.pct_comissao;
+                          const effPctComissao = editandoDesc ? getComissao(effPct) : item.pct_comissao;
                           const effValComissao = editandoDesc ? effTotal * effPctComissao / 100 : item.valor_comissao;
                           return (<>
                         <td className="px-2 py-2 tabular-nums text-center" style={{ color: effPct > 0 ? "#D97706" : "#9CA3AF" }}>
