@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
     nomes_modelos,
     promocao_inicio,
     promocao_fim,
+    dome_percentage,
   } = body;
 
   // IMPORTANTE: usar sql.json() em vez de JSON.stringify+::jsonb.
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
       nomes_modelos = COALESCE(${nomes_modelos != null ? sql.json(nomes_modelos) : null}, nomes_modelos),
       promocao_inicio = ${promocao_inicio !== undefined ? promocao_inicio : sql`promocao_inicio`},
       promocao_fim = ${promocao_fim !== undefined ? promocao_fim : sql`promocao_fim`},
+      dome_percentage = COALESCE(${dome_percentage ?? null}::numeric, dome_percentage),
       updated_at = now(),
       updated_by = ${user.id}::uuid
     WHERE name = 'default'

@@ -103,6 +103,8 @@ export interface ConfigOrcamento {
   stone_prices: StonePrice[];
   /** Parâmetros de validação configuráveis (migration 132). Opcional pra compat. */
   calibracao?: CalibracaoDefaults;
+  /** Curvatura padrão (%) aplicada a alianças novas (migration 255). */
+  dome_percentage?: number;
 }
 
 export interface Orcamento {

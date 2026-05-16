@@ -139,6 +139,42 @@ export function getPricingFactors(
 }
 
 /**
+ * Reverse lookup: dado um markup, retorna a comissao equivalente da curva.
+ *
+ * Usado para precificar entidades que ja tem markup definido por outra tabela
+ * (ex: alianca, cujo mkp vem de config_orcamento.pricing_categories) mas que
+ * devem pagar comissao consistente com a curva dos produtos.
+ *
+ * Interpola linearmente entre os pontos (startMkp, startComm) e os targets de
+ * cada categoria preparada. Se mkpAlvo cair fora do intervalo [min, max],
+ * usa o ponto extremo correspondente.
+ */
+export function commissionForMarkup(
+  mkpAlvo: number,
+  config: Pick<CurvaConfig, "startMkp" | "startCommission">,
+  categorias: CurvaCategoriaInput[],
+): number {
+  const prepared = prepareCategories(config, categorias);
+  const points: Array<{ mkp: number; comm: number }> = [
+    { mkp: config.startMkp, comm: config.startCommission },
+    ...prepared.map((c) => ({ mkp: c.targetMkp, comm: c.targetComm })),
+  ];
+  points.sort((a, b) => a.mkp - b.mkp);
+
+  if (mkpAlvo <= points[0].mkp) return points[0].comm;
+  if (mkpAlvo >= points[points.length - 1].mkp) return points[points.length - 1].comm;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    if (mkpAlvo >= points[i].mkp && mkpAlvo <= points[i + 1].mkp) {
+      const range = points[i + 1].mkp - points[i].mkp;
+      const progress = range > 0 ? (mkpAlvo - points[i].mkp) / range : 0;
+      return points[i].comm + (points[i + 1].comm - points[i].comm) * progress;
+    }
+  }
+  return points[0].comm;
+}
+
+/**
  * Arredonda um valor conforme a regra configurada (dezena/unidade/centena).
  * Duplicado em PrecificacaoClient.tsx — extraido aqui para reuso server-side.
  */
