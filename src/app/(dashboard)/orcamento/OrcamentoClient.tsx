@@ -2564,15 +2564,29 @@ export default function OrcamentoClient({
               </button>
             )
           ) : (
-            <button
-              onClick={handleSaveOrder}
-              disabled={isSaving || validationErrors.length > 0}
-              title={validationErrors.length > 0 ? validationErrors[0].message : "Salvar orcamento"}
-              className="flex items-center gap-1.5 px-4 py-2 text-[11px] font-bold rounded-lg text-white disabled:opacity-50 transition-colors"
-              style={{ backgroundColor: C.esmeralda }}
-            >
-              {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Salvar
-            </button>
+            (() => {
+              // Quando travado e sem mudanças, não há nada a persistir.
+              // Desabilitar evita PUT desnecessário (e o bug do snapshot=null
+              // no backend) e comunica o estado ao usuário.
+              const lockedNoChanges = !dirty && lockEnabled && !!savedSnapshot && !!editingOrcId;
+              const disabled = isSaving || validationErrors.length > 0 || lockedNoChanges;
+              const title = validationErrors.length > 0
+                ? validationErrors[0].message
+                : lockedNoChanges
+                  ? "Sem alterações — orçamento travado no valor combinado"
+                  : "Salvar orçamento";
+              return (
+                <button
+                  onClick={handleSaveOrder}
+                  disabled={disabled}
+                  title={title}
+                  className="flex items-center gap-1.5 px-4 py-2 text-[11px] font-bold rounded-lg text-white disabled:opacity-50 transition-colors"
+                  style={{ backgroundColor: C.esmeralda }}
+                >
+                  {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Salvar
+                </button>
+              );
+            })()
           )}
           <button
             onClick={() => setShowFichaTecnica(true)}

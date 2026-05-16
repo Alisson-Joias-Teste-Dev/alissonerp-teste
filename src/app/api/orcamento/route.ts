@@ -75,6 +75,7 @@ export async function POST(req: NextRequest) {
     nome_cliente, nome_modelo, peso, valor, markup, desconto_pct,
     cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
     tipo, ficha, ficha2, quantidade, observacoes, cliente_id, foto_3d_base64,
+    snapshot, valor_negociado_locked,
   } = body;
 
   if (!nome_cliente?.trim() && !cliente_id) {
@@ -125,12 +126,14 @@ export async function POST(req: NextRequest) {
   const [seqRow] = await sql`SELECT nextval('alissonerp.orcamento_seq') AS seq`;
   const numero = `ORC-${String(seqRow.seq).padStart(6, "0")}`;
 
-  // Upload foto 3D se enviada
+  // Upload foto 3D se enviada. Path determinístico (`${numero}/3d.jpg`) +
+  // cache-bust via query string. Mesmo path do PUT — sem isso, o PUT criava
+  // arquivo novo em folder distinto e o do POST ficava órfão.
   let foto3dUrl: string | null = null;
   if (foto_3d_base64 && typeof foto_3d_base64 === "string" && foto_3d_base64.startsWith("data:")) {
-    const path = `orcamento/${numero}/3d-${Date.now()}.jpg`;
+    const path = `orcamento/${numero}/3d.jpg`;
     const result = await uploadFile("ordem-fotos", path, foto_3d_base64, "image/jpeg");
-    if (!("error" in result)) foto3dUrl = result.url;
+    if (!("error" in result)) foto3dUrl = `${result.url}?v=${Date.now()}`;
   }
 
   let fichaId: number | null = null;
@@ -206,12 +209,23 @@ export async function POST(req: NextRequest) {
     ficha2Id = fichaRow2.id as number;
   }
 
+  // snapshot+lock entram no INSERT pra orçamentos novos já nascerem travados.
+  // Sem isso, só os 7 já existentes (backfill da migration 258) ficavam
+  // protegidos contra sobrescrita silenciosa do valor negociado — todo novo
+  // orçamento voltaria ao bug original. Fragment dinâmico evita passar null
+  // pra coluna JSONB (postgres@3 falha em inferir o tipo).
+  const hasSnapshot = snapshot != null && typeof snapshot === "object";
+  const snapshotColSql = hasSnapshot ? sql`, snapshot, congelado_em` : sql``;
+  const snapshotValSql = hasSnapshot ? sql`, ${sql.json(snapshot)}, NOW()` : sql``;
+
   const [orcamento] = await sql`
     INSERT INTO alissonerp.orcamentos (
       numero_orcamento, tipo, vendedor_id, usuario_id,
       nome_cliente, nome_modelo, peso, valor, markup,
       desconto_pct, cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
-      ficha_tecnica_id, ficha_tecnica_2_id, quantidade, observacoes, cliente_id, foto_3d
+      ficha_tecnica_id, ficha_tecnica_2_id, quantidade, observacoes, cliente_id, foto_3d,
+      valor_negociado_locked
+      ${snapshotColSql}
     ) VALUES (
       ${numero}, ${tipo ?? "alianca"},
       ${caller.id_vendedor ? Number(caller.id_vendedor) : null},
@@ -220,7 +234,9 @@ export async function POST(req: NextRequest) {
       ${peso ?? null}, ${valor ?? null}, ${markup ?? null},
       ${desconto_pct ?? 0}, ${cotacao_ouro ?? null},
       ${cotacao_dolar ?? null}, ${valor_ouro ?? null}, ${valor_pedras ?? null},
-      ${fichaId}, ${ficha2Id}, ${quantidade ?? 1}, ${observacoes ?? null}, ${cliente_id ?? null}, ${foto3dUrl}
+      ${fichaId}, ${ficha2Id}, ${quantidade ?? 1}, ${observacoes ?? null}, ${cliente_id ?? null}, ${foto3dUrl},
+      ${valor_negociado_locked === true}
+      ${snapshotValSql}
     ) RETURNING *
   `;
 
