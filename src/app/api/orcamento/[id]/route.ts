@@ -236,6 +236,11 @@ export async function PUT(
     snapshot, valor_negociado_locked,
   } = body;
 
+  // Par de alianças exige as DUAS fichas (idem POST).
+  if ((tipo ?? "alianca") === "alianca" && Number(quantidade) === 2 && (!ficha2 || typeof ficha2 !== "object")) {
+    return NextResponse.json({ error: "Par de alianças exige ficha técnica do anel 2" }, { status: 422 });
+  }
+
   // ── Validação de travas (bilateral: frontend + backend) ─────────────────
   // Re-valida ficha técnica no PUT também. O PATCH (aprovação) é intocado.
   if ((tipo ?? "alianca") === "alianca") {
