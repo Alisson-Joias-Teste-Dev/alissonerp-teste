@@ -7,6 +7,10 @@ import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
 import { ProfileType } from "@/app/(dashboard)/orcamento/types";
 
 const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "consultora"] as const;
+// Aprovar/rejeitar só pode quem aprova de fato. Sem isso, o frontend escondia o
+// botão mas a API aceitava o PATCH via cURL — consultora gerava venda em
+// rascunho em nome de outro vendedor. Espelha ROLES_APROVACAO do componente.
+const ROLES_APROVACAO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica"] as const;
 
 // GET /api/orcamento/[id] — detalhe do orçamento
 export async function GET(
@@ -86,6 +90,22 @@ export async function PATCH(
   `;
   if (!orc) return NextResponse.json({ error: "Orçamento não encontrado" }, { status: 404 });
 
+  // Ownership: consultora só toca os próprios orçamentos (a página já filtra
+  // mas a API era cega — qualquer consultora autenticada conseguia PATCH em
+  // orçamento alheio via cURL).
+  const isFull = isFullAccess(role);
+  if (role === "consultora" && !isFull && orc.usuario_id !== user.id) {
+    return NextResponse.json({ error: "Sem permissão para esse orçamento" }, { status: 403 });
+  }
+
+  // Aprovar/rejeitar exige ROLES_APROVACAO (admin/gerentes/desenvolvedor) —
+  // consultora pode só enviar e atualizar cliente_id dos próprios.
+  if ((body.status === "aprovado" || body.status === "rejeitado")
+      && !isFull
+      && !ROLES_APROVACAO.includes(role as typeof ROLES_APROVACAO[number])) {
+    return NextResponse.json({ error: "Sem permissão para aprovar/rejeitar" }, { status: 403 });
+  }
+
   // Atualizar cliente_id se fornecido
   if (body.cliente_id) {
     await sql`UPDATE alissonerp.orcamentos SET cliente_id = ${body.cliente_id} WHERE id = ${orcId}`;
@@ -123,8 +143,27 @@ export async function PATCH(
       FrisoUnico: "Reta + Friso", FrisoLateral: "Reta + Friso Duplo",
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const resultado = await (sql as any).begin(async (tx: typeof sql) => {
+    // Retry defensivo em unique_violation do numero_venda. Migration 259
+    // alinha o sequence com MAX(numero_pedido/numero_venda), mas se ela ainda
+    // não rodou em prod (ou alguém inserir via outro caminho), o nextval pode
+    // colidir. Como sequence é monotônico, a 2ª tentativa pega número novo.
+    const runWithRetry = async <T>(fn: () => Promise<T>, max = 3): Promise<T> => {
+      let lastErr: unknown;
+      for (let i = 0; i < max; i++) {
+        try { return await fn(); }
+        catch (e) {
+          lastErr = e;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const code = (e as any)?.code;
+          if (code !== "23505") throw e; // só retentamos unique_violation
+        }
+      }
+      throw lastErr;
+    };
+    type ResultadoAprovacao = { venda_id: number; numero_venda: string };
+    const resultado = await runWithRetry<ResultadoAprovacao>(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (sql as any).begin(async (tx: typeof sql) => {
       // 1. Data entrega: +10 dias úteis
       const dataEntrega = new Date();
       let diasUteis = 0;
@@ -183,6 +222,12 @@ export async function PATCH(
       // mesma regra que produto cadastrado usa no checkout. Aliança com 30%
       // desconto (típica em promoção) cai na faixa 30 → 0.5% comissão.
       // Acima de 30% → 0.5% fixo (mesmo teto do frontend).
+      //
+      // UNIT NOTE: faixas_comissao.comissao_pct é armazenado em "1 = 1%"
+      // (seed 104: 0% desc → 4.00 = 4%; 30% desc → 0.50 = 0.5%). Por isso
+      // a fórmula é (valor * pct) / 100 — não (valor * pct).
+      // Clamp [0, 100] defende contra dados corrompidos (ex: alguém gravando
+      // fração 0.04 em vez de 4) que gerariam comissão zerada em silêncio.
       let pctComissao = 0;
       if (descontoPctItem > 30) {
         pctComissao = 0.5;
@@ -194,6 +239,8 @@ export async function PATCH(
         `;
         pctComissao = Number(faixa?.comissao_pct ?? 0);
       }
+      if (!Number.isFinite(pctComissao) || pctComissao < 0) pctComissao = 0;
+      if (pctComissao > 100) pctComissao = 100;
       const valorComissao = Math.round(valorItem * pctComissao) / 100;
 
       await tx`
@@ -217,7 +264,8 @@ export async function PATCH(
       `;
 
       return { venda_id: venda.id, numero_venda: vendaFinal.numero_venda as string };
-    });
+    }),
+    );
 
     // Venda criada como rascunho — usuário preenche pagamento/frete e aprova manualmente
 
@@ -245,16 +293,41 @@ export async function PUT(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
+  // Permissões: descobre role do caller pra decidir se pode destravar valor
+  // negociado. Só admin/desenvolvedor podem mudar `valor_negociado_locked` pra
+  // false — qualquer outro role tem o false ignorado (preserva o lock).
+  const [callerRow] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid`;
+  const callerRole = (callerRow?.role ?? "") as string;
+  const canUnlock = isFullAccess(callerRole);
+
   const body = await req.json();
   const {
     nome_cliente, nome_modelo, peso, valor, markup, desconto_pct,
     cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
     tipo, ficha, ficha2, quantidade, cliente_id, foto_3d_base64,
-    snapshot, valor_negociado_locked,
+    snapshot, valor_negociado_locked, client_updated_at,
   } = body;
 
+  // Locking otimista (ADR 0006). Se o cliente envia client_updated_at, comparamos
+  // com o updated_at atual; mismatch = 409 (outro usuário editou desde o GET).
+  // Sem isso, dois usuários editando o mesmo orçamento sobrescrevem em silêncio.
+  if (client_updated_at) {
+    const [row] = await sql`SELECT updated_at FROM alissonerp.orcamentos WHERE id = ${orcId}`;
+    if (row && new Date(row.updated_at).getTime() !== new Date(client_updated_at).getTime()) {
+      return NextResponse.json(
+        { error: "Conflito: orçamento foi modificado por outro usuário. Recarregue a página." },
+        { status: 409 },
+      );
+    }
+  }
+
+  // Normaliza quantidade UMA vez. Antes alguns checks faziam `=== 2` estrito,
+  // outros `Number(...) === 2` — string "2" passava na fase 1 mas pulava o
+  // INSERT da ficha2 (bug v2.42.2 voltava por outro caminho).
+  const qtdNum = Number(quantidade);
+
   // Par de alianças exige as DUAS fichas (idem POST).
-  if ((tipo ?? "alianca") === "alianca" && Number(quantidade) === 2 && (!ficha2 || typeof ficha2 !== "object")) {
+  if ((tipo ?? "alianca") === "alianca" && qtdNum === 2 && (!ficha2 || typeof ficha2 !== "object")) {
     return NextResponse.json({ error: "Par de alianças exige ficha técnica do anel 2" }, { status: 422 });
   }
 
@@ -268,7 +341,7 @@ export async function PUT(
 
     const fichasParaValidar: Array<{ f: Record<string, unknown>; label: string }> = [];
     if (ficha && typeof ficha === "object") fichasParaValidar.push({ f: ficha, label: "alianca" });
-    if (ficha2 && typeof ficha2 === "object" && quantidade === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
+    if (ficha2 && typeof ficha2 === "object" && qtdNum === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
 
     for (const { f, label } of fichasParaValidar) {
       const profile = migrateProfile(String(f.perfil ?? "Simples"));
@@ -344,7 +417,7 @@ export async function PUT(
 
   // Atualizar ficha técnica 2 (par)
   let ficha2Id: number | undefined;
-  if (ficha2 && typeof ficha2 === "object" && quantidade === 2) {
+  if (ficha2 && typeof ficha2 === "object" && qtdNum === 2) {
     const [existing] = await sql`SELECT ficha_tecnica_2_id FROM alissonerp.orcamentos WHERE id = ${orcId}`;
     if (existing?.ficha_tecnica_2_id) {
       await sql`
@@ -410,6 +483,20 @@ export async function PUT(
     ? sql`snapshot = ${sql.json(snapshot)}, congelado_em = NOW(),`
     : sql``;
 
+  // Regra do lock (regressão v2.42.0):
+  //  - true              → trava sempre
+  //  - undefined/null    → preserva o valor atual (COALESCE)
+  //  - false sem permissão → IGNORA (qualquer não-admin não destrava)
+  //  - false com permissão → destrava (admin/desenvolvedor)
+  // Antes, qualquer cliente API podia mandar false e destravar silenciosamente
+  // o valor negociado, reabrindo a janela pro bug original do v2.42.0.
+  const [currentLock] = await sql`SELECT valor_negociado_locked FROM alissonerp.orcamentos WHERE id = ${orcId}`;
+  const currentLockVal = currentLock?.valor_negociado_locked === true;
+  let lockedToPersist: boolean;
+  if (valor_negociado_locked === true) lockedToPersist = true;
+  else if (valor_negociado_locked === false && canUnlock) lockedToPersist = false;
+  else lockedToPersist = currentLockVal;
+
   await sql`
     UPDATE alissonerp.orcamentos SET
       nome_cliente = COALESCE(${nome_cliente ?? null}, nome_cliente),
@@ -428,10 +515,13 @@ export async function PUT(
       foto_3d = COALESCE(${foto3dUrl ?? null}, foto_3d),
       ficha_tecnica_2_id = COALESCE(${ficha2Id ?? null}, ficha_tecnica_2_id),
       ${snapshotSql}
-      valor_negociado_locked = COALESCE(${valor_negociado_locked ?? null}, valor_negociado_locked),
+      valor_negociado_locked = ${lockedToPersist},
       updated_at = NOW()
     WHERE id = ${orcId}
   `;
 
-  return NextResponse.json({ ok: true });
+  // Retorna updated_at pra o cliente sincronizar e poder enviar próximo PUT
+  // com client_updated_at correto.
+  const [updated] = await sql`SELECT updated_at FROM alissonerp.orcamentos WHERE id = ${orcId}`;
+  return NextResponse.json({ ok: true, updated_at: updated?.updated_at });
 }

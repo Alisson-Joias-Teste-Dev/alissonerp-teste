@@ -204,6 +204,9 @@ export default function OrcamentoClient({
   const [rejectId, setRejectId] = useState<number | null>(null);
   const [rejectMotivo, setRejectMotivo] = useState("");
   const [editingOrcId, setEditingOrcId] = useState<number | null>(null);
+  // updated_at do orçamento carregado — usado no PUT como guard otimista
+  // (ADR 0006). Atualizado quando o save retorna o novo carimbo.
+  const [orcUpdatedAt, setOrcUpdatedAt] = useState<string | null>(null);
 
   // ── Snapshot + lock (migration 258) ───────────────────────────────────────
   // savedSnapshot guarda o valor negociado travado no DB. Enquanto dirty=false
@@ -231,6 +234,7 @@ export default function OrcamentoClient({
   function aplicarOrcamento(orc: Record<string, any>, orcId: number) {
     isHydratingRef.current = true;
     setEditingOrcId(orcId);
+    setOrcUpdatedAt(orc.updated_at ? String(orc.updated_at) : null);
     setClientName(orc.cliente_nome_contato || orc.nome_cliente || "");
     setClienteId(orc.cliente_id || null);
 
@@ -1327,6 +1331,16 @@ export default function OrcamentoClient({
       setSaveMsg({ text: "Gravação (Anel 2): preencha o texto principal antes de salvar.", type: "error" }); return;
     }
 
+    // Bug #4: salvar sem alteração em orçamento travado = NO-OP. Antes,
+    // mesmo com botão desabilitado, qualquer chamada alternativa caía no PUT
+    // e regravava `valor`/`peso` do snapshot — reintroduzindo a regressão
+    // que o v2.42.0 fechou em caminhos paralelos (teclado, fluxos externos).
+    if (editingOrcId && !dirty && lockEnabled && savedSnapshot) {
+      setSaveMsg({ text: "Nada para salvar — orçamento sem alterações.", type: "success" });
+      if (onSaved) onSaved();
+      return;
+    }
+
     setIsSaving(true); setSaveMsg(null);
     try {
       const foto3d = capture3DScreenshot();
@@ -1384,6 +1398,11 @@ export default function OrcamentoClient({
         snapshot: novoSnapshot,
         valor_negociado_locked: true,
       };
+      // Guard otimista no PUT — backend retorna 409 se outro usuário gravou
+      // entre o GET e o nosso save.
+      if (editingOrcId && orcUpdatedAt) {
+        body.client_updated_at = orcUpdatedAt;
+      }
       if (isPar) {
         const sc2 = computeStoneCapacity(params2.diameter, params2.height, params2.canalBorderHeight, params2.stoneSize, params2.stoneRows, profile2);
         const derivedCount2 = params2.hasStones ? (params2.stoneFull ? sc2 : params2.stoneHalfMoon ? Math.floor(sc2 / 2) : params2.stoneCount) : 0;
@@ -1393,8 +1412,14 @@ export default function OrcamentoClient({
       const url = editingOrcId ? `/api/orcamento/${editingOrcId}` : "/api/orcamento";
       const method = editingOrcId ? "PUT" : "POST";
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await res.json() as { ok?: boolean; orcamento?: { id: number; numero_orcamento?: string }; error?: string };
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      const data = await res.json() as { ok?: boolean; orcamento?: { id: number; numero_orcamento?: string; updated_at?: string }; updated_at?: string; error?: string };
+      if (!res.ok) {
+        // 409 = conflito de edição (outro usuário alterou).
+        if (res.status === 409) {
+          throw new Error(data.error ?? "Conflito: orçamento foi alterado por outro usuário. Recarregue a página.");
+        }
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
       const savedId = data.orcamento?.id ?? editingOrcId;
 
       // Atualiza snapshot local quando gravou um novo valor (o backend congela
@@ -1402,6 +1427,9 @@ export default function OrcamentoClient({
       if (novoSnapshot) {
         setSavedSnapshot({ ...novoSnapshot, congelado_em: new Date().toISOString() });
       }
+      // Sincroniza updated_at pro próximo PUT (mantém o guard otimista vivo).
+      const newUpdatedAt = data.updated_at ?? data.orcamento?.updated_at;
+      if (newUpdatedAt) setOrcUpdatedAt(String(newUpdatedAt));
       setDirty(false);
 
       if (onSaved) {

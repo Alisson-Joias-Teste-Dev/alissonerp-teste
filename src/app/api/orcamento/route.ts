@@ -82,9 +82,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "nome_cliente ou cliente_id obrigatorio" }, { status: 400 });
   }
 
+  // Normaliza quantidade UMA vez. Sem isso, string "2" passava a validação
+  // de par mas era ignorada nos `=== 2` estritos depois (regressão v2.42.2).
+  const qtdNum = Number(quantidade);
+
   // Par de alianças exige as DUAS fichas — sem isso, ficha2 vinha como null
   // e o orçamento salvava só um anel mesmo com quantidade=2.
-  if ((tipo ?? "alianca") === "alianca" && Number(quantidade) === 2 && (!ficha2 || typeof ficha2 !== "object")) {
+  if ((tipo ?? "alianca") === "alianca" && qtdNum === 2 && (!ficha2 || typeof ficha2 !== "object")) {
     return NextResponse.json({ error: "Par de alianças exige ficha técnica do anel 2" }, { status: 422 });
   }
 
@@ -100,7 +104,7 @@ export async function POST(req: NextRequest) {
 
     const fichasParaValidar: Array<{ f: Record<string, unknown>; label: string }> = [];
     if (ficha && typeof ficha === "object") fichasParaValidar.push({ f: ficha, label: "alianca" });
-    if (ficha2 && typeof ficha2 === "object" && quantidade === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
+    if (ficha2 && typeof ficha2 === "object" && qtdNum === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
 
     for (const { f, label } of fichasParaValidar) {
       const profile = migrateProfile(String(f.perfil ?? "Simples"));
@@ -175,7 +179,7 @@ export async function POST(req: NextRequest) {
 
   // Ficha técnica 2 (par de alianças)
   let ficha2Id: number | null = null;
-  if (ficha2 && typeof ficha2 === "object" && quantidade === 2) {
+  if (ficha2 && typeof ficha2 === "object" && qtdNum === 2) {
     const [fichaRow2] = await sql`
       INSERT INTO alissonerp.orcamento_fichas_tecnicas (
         modelo, aro_numeracao, largura, espessura, peso_estimado,
@@ -234,7 +238,7 @@ export async function POST(req: NextRequest) {
       ${peso ?? null}, ${valor ?? null}, ${markup ?? null},
       ${desconto_pct ?? 0}, ${cotacao_ouro ?? null},
       ${cotacao_dolar ?? null}, ${valor_ouro ?? null}, ${valor_pedras ?? null},
-      ${fichaId}, ${ficha2Id}, ${quantidade ?? 1}, ${observacoes ?? null}, ${cliente_id ?? null}, ${foto3dUrl},
+      ${fichaId}, ${ficha2Id}, ${Number.isFinite(qtdNum) && qtdNum > 0 ? qtdNum : 1}, ${observacoes ?? null}, ${cliente_id ?? null}, ${foto3dUrl},
       ${valor_negociado_locked === true}
       ${snapshotValSql}
     ) RETURNING *

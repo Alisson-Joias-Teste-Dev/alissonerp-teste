@@ -7,7 +7,7 @@ import { Loader2, Download, User, Phone, Mail, MapPin, Package, CreditCard, Cale
 interface ItemVenda {
   nome_produto: string; sku: string | null; quantidade: number;
   preco_lista: number; pct_desconto: number; preco_unitario: number;
-  total_item: number; pct_comissao: number; valor_comissao: number;
+  total_item: number;
   peso_estimado: number | null; observacao: string | null;
 }
 interface Pagamento {
@@ -25,9 +25,9 @@ interface Venda {
   vendedor_nome: string | null;
   data_venda: string; data_entrega: string | null; created_at: string;
   total_produtos: number; total_desconto: number; total_frete: number;
-  total_venda: number; total_comissao: number;
+  total_venda: number;
   forma_envio: string | null; forma_frete: string | null;
-  observacoes: string | null; observacoes_internas: string | null;
+  observacoes: string | null;
   endereco_entrega: string | null; endereco_entrega_numero: string | null;
   endereco_entrega_complemento: string | null; endereco_entrega_bairro: string | null;
   endereco_entrega_cidade: string | null; endereco_entrega_cep: string | null;
