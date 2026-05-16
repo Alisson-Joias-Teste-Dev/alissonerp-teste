@@ -1,8 +1,22 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/05/2026 — Versão: v2.42.0 <!-- Revisado 16/05/2026 -->
+> 📋 Última atualização automática: 16/05/2026 — Versão: v2.42.1 <!-- Revisado 16/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(orcamento): Peça personalizada respeita edição + sequence pra numero_venda (v2.42.1)
+
+- `src/app/(dashboard)/orcamento/OrcamentoClient.tsx` (Salvar de peça):
+  agora usa `PUT /api/orcamento/{id}` quando `editingOrcId` está setado
+  (antes sempre fazia POST e criava duplicata na listagem).
+- Migration `259_venda_numero_sequence.sql`: nova
+  `alissonerp.venda_numero_seq`, alinhada ao maior `numero_pedido` /
+  `numero_venda` já existente.
+- `src/app/api/orcamento/[id]/route.ts` (PATCH aprovar) e
+  `src/app/api/vendas/route.ts` (POST): geram `numero_venda` via
+  `nextval('alissonerp.venda_numero_seq')` direto no INSERT — elimina race
+  condition do antigo `MAX(numero_venda) + 1` quando dois INSERTs paralelos
+  pegavam o mesmo número.
 
 ## fix(orcamento): Snapshot + lock previne sobrescrita silenciosa de valor negociado (v2.42.0)
 

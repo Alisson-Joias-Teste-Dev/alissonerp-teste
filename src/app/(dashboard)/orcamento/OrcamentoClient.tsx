@@ -2072,16 +2072,25 @@ export default function OrcamentoClient({
                 if (!clientName.trim()) { setSaveMsg({ text: "Preencha o nome do cliente", type: "error" }); return; }
                 setIsSaving(true); setSaveMsg(null);
                 try {
-                  const body = {
+                  const body: Record<string, unknown> = {
                     nome_cliente: clientName.trim(), cliente_id: clienteId, tipo: "peca",
                     peso: pecaPeso, valor: pecaTotal, markup: pecaFactors?.mkp ?? 0,
                     desconto_pct: pecaDescontoPct, cotacao_ouro: cotacaoOuro,
                     cotacao_dolar: cotacaoDolar, valor_ouro: pecaValorOuro,
                     valor_pedras: pecaPedrasTotalRS,
+                    valor_negociado_locked: true,
+                    snapshot: {
+                      valor: pecaTotal, peso: pecaPeso,
+                      valor_ouro: pecaValorOuro, valor_pedras: pecaPedrasTotalRS,
+                      desconto_pct: pecaDescontoPct, markup: pecaFactors?.mkp ?? 0,
+                      cotacao_ouro: cotacaoOuro, cotacao_dolar: cotacaoDolar,
+                    },
                     ficha: {
                       peso_estimado: pecaPeso,
                       cor_metal: pecaMetalColor,
                       densidade_ouro: pecaGoldDensity,
+                      // foto_referencia descartada no backend (sem coluna dedicada)
+                      // — ver pendência BUG-010 no relatório do Dev.
                       foto_referencia: pecaFotoRef,
                       pedras_detalhadas: pecaPedras.map((p) => ({
                         produto_id: p.produto.id,
@@ -2094,11 +2103,18 @@ export default function OrcamentoClient({
                       })),
                     },
                   };
-                  const res = await fetch("/api/orcamento", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                  // PUT quando estamos editando um orçamento existente; POST quando é novo.
+                  // Sem isso, "Salvar" sempre criava duplicata — bug visível na listagem.
+                  const url = editingOrcId ? `/api/orcamento/${editingOrcId}` : "/api/orcamento";
+                  const method = editingOrcId ? "PUT" : "POST";
+                  const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
                   if (!res.ok) throw new Error();
                   setSaveMsg({ text: "Orçamento salvo!", type: "success" });
-                  setClientName(""); setClienteId(null);
-                  setPecaPedras([]); setPecaDescontoPct(0); setPecaFotoRef(null);
+                  if (!editingOrcId) {
+                    setClientName(""); setClienteId(null);
+                    setPecaPedras([]); setPecaDescontoPct(0); setPecaFotoRef(null);
+                  }
+                  if (onSaved) onSaved();
                 } catch { setSaveMsg({ text: "Erro ao salvar", type: "error" }); }
                 finally { setIsSaving(false); }
               }}
