@@ -30,6 +30,8 @@ object SupabaseAuth {
             try {
                 val url = URL("${BuildConfig.SUPABASE_URL}/auth/v1/token?grant_type=password")
                 val conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 15_000
+                conn.readTimeout = 15_000
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)

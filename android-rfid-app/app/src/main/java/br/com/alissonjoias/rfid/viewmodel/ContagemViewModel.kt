@@ -4,18 +4,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import br.com.alissonjoias.rfid.AlissonErpApp
+import br.com.alissonjoias.rfid.data.local.entity.EpcCacheEntity
 import br.com.alissonjoias.rfid.data.local.entity.InventarioCacheEntity
 import br.com.alissonjoias.rfid.data.local.entity.ItemInventarioCacheEntity
 import br.com.alissonjoias.rfid.data.repository.InventarioRepository
 import br.com.alissonjoias.rfid.data.repository.StatusItem
 import br.com.alissonjoias.rfid.data.repository.calcularResultados
-import br.com.alissonjoias.rfid.data.tsl.TslManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -33,10 +32,7 @@ data class ContagemUiState(
     val totalEpcsUnicos: Int = 0,
     val scanning: Boolean = false,
     val tempoLeitura: Long = 0L,
-    val sincronizando: Boolean = false,
-    val enviando: Boolean = false,
     val erro: String? = null,
-    val enviado: Boolean = false,
     val modoResultado: Boolean = false,
 )
 
@@ -67,11 +63,22 @@ class ContagemViewModel(
     val resumo: StateFlow<ResumoDivergencias> = _resumo.asStateFlow()
 
     private var timerJob: Job? = null
+    private var flushJob: Job? = null
     private var scanStartTime: Long = 0L
-    private val epcSet = mutableSetOf<String>()
 
-    private val lastEpcTimestamps = mutableMapOf<String, Long>()
-    private val DEDUP_WINDOW_MS = 3000L
+    private val epcSet = hashSetOf<String>()
+    private val pendingEpcs = mutableListOf<EpcCacheEntity>()
+    private val displayEpcs = mutableListOf<String>()
+    private val lastEpcTimestamps = hashMapOf<String, Long>()
+    private var lastRecalcTime = 0L
+
+    companion object {
+        private const val DEDUP_WINDOW_MS = 3000L
+        private const val BATCH_SIZE = 20
+        private const val FLUSH_INTERVAL_MS = 3000L
+        private const val RECALC_INTERVAL_MS = 1000L
+        private const val MAX_DISPLAY_EPCS = 30
+    }
 
     init {
         carregarDados()
@@ -82,31 +89,26 @@ class ContagemViewModel(
     private fun carregarDados() {
         viewModelScope.launch {
             val inv = app.database.inventarioCacheDao().getInventarioById(inventarioId)
-            _uiState.value = _uiState.value.copy(inventario = inv)
+            val itens = repo.getItensSync(inventarioId)
+            val epcs = repo.getEpcsSync(inventarioId)
 
-            repo.getItens(inventarioId).collect { itens ->
-                _uiState.value = _uiState.value.copy(itens = itens)
-                recalcularResultado()
-            }
-        }
+            epcSet.addAll(epcs)
+            displayEpcs.addAll(epcs.takeLast(MAX_DISPLAY_EPCS))
 
-        viewModelScope.launch {
-            repo.getEpcs(inventarioId).collect { epcs ->
-                val epcsStr = epcs.map { it.epc }.distinct()
-                _uiState.value = _uiState.value.copy(
-                    epcsLidos = epcsStr,
-                    totalEpcsUnicos = epcsStr.size,
-                )
-            }
+            _uiState.value = _uiState.value.copy(
+                inventario = inv,
+                itens = itens,
+                epcsLidos = displayEpcs.toList(),
+                totalEpcsUnicos = epcSet.size,
+            )
+            recalcularResultado()
         }
     }
 
     private fun observarTslEstado() {
         viewModelScope.launch {
             tslManager.state.collect { tslState ->
-                _uiState.value = _uiState.value.copy(
-                    scanning = tslState.scanning,
-                )
+                _uiState.value = _uiState.value.copy(scanning = tslState.scanning)
             }
         }
     }
@@ -115,202 +117,152 @@ class ContagemViewModel(
         tslManager.onEpcReceived { epc, rssi ->
             val now = System.currentTimeMillis()
             val lastTime = lastEpcTimestamps[epc]
-
             if (lastTime != null && (now - lastTime) < DEDUP_WINDOW_MS) return@onEpcReceived
 
             lastEpcTimestamps[epc] = now
             epcSet.add(epc)
 
-            _uiState.value = _uiState.value.copy(totalEpcsUnicos = epcSet.size)
+            displayEpcs.add(epc)
+            if (displayEpcs.size > MAX_DISPLAY_EPCS) displayEpcs.removeAt(0)
 
-            viewModelScope.launch {
-                repo.registrarLeitura(inventarioId, epc, rssi)
-                incrementarContagem(epc)
+            addPendingEpc(EpcCacheEntity(inventarioId = inventarioId, epc = epc, rssi = rssi))
+            incrementarContagemMemoria()
+
+            _uiState.value = _uiState.value.copy(
+                totalEpcsUnicos = epcSet.size,
+                epcsLidos = displayEpcs.toList(),
+            )
+
+            if (now - lastRecalcTime > RECALC_INTERVAL_MS) {
                 recalcularResultado()
+                lastRecalcTime = now
             }
         }
     }
 
-    private suspend fun incrementarContagem(epc: String) {
+    private fun incrementarContagemMemoria() {
         val itens = _uiState.value.itens
         if (itens.isEmpty()) return
-
         val itemToUpdate = itens
             .filter { (it.quantidadeContada ?: 0) < it.quantidadeSistema }
-            .minByOrNull { it.quantidadeContada ?: 0 }
-
-        if (itemToUpdate != null) {
-            val newCount = (itemToUpdate.quantidadeContada ?: 0) + 1
-            app.database.inventarioCacheDao().updateQuantidadeContada(
-                inventarioId, itemToUpdate.produtoId, newCount
-            )
-        }
-
-        repo.syncStatus(inventarioId, "contando")
+            .minByOrNull { it.quantidadeContada ?: 0 } ?: return
+        itemToUpdate.quantidadeContada = (itemToUpdate.quantidadeContada ?: 0) + 1
     }
 
     private fun recalcularResultado() {
         val itens = _uiState.value.itens
         if (itens.isEmpty()) return
-
-        val resultado = itens.map { item ->
-            val lido = countEpcsForProduto(item.produtoId)
-            val status = StatusItem.from(lido, item.quantidadeSistema)
-            ItemResultado(item = item, lido = lido, status = status)
-        }
-
-        _uiState.value = _uiState.value.copy(itensResultado = resultado)
-
+        _uiState.value = _uiState.value.copy(
+            itensResultado = itens.map { item ->
+                val lido = item.quantidadeContada ?: 0
+                ItemResultado(item = item, lido = lido, status = StatusItem.from(lido, item.quantidadeSistema))
+            }
+        )
         val calc = calcularResultados(itens)
         _resumo.value = ResumoDivergencias(
-            ok = calc.ok,
-            faltando = calc.faltando,
-            excesso = calc.excesso,
+            ok = calc.ok, faltando = calc.faltando, excesso = calc.excesso,
             totalEsperado = itens.sumOf { it.quantidadeSistema },
             totalLido = epcSet.size,
         )
     }
 
-    private fun countEpcsForProduto(produtoId: Long): Int {
-        val item = _uiState.value.itens.find { it.produtoId == produtoId }
-        return item?.quantidadeContada ?: 0
+    private fun addPendingEpc(epc: EpcCacheEntity) {
+        synchronized(pendingEpcs) { pendingEpcs.add(epc) }
+    }
+
+    private suspend fun flushEpcs() {
+        val batch: List<EpcCacheEntity>
+        synchronized(pendingEpcs) {
+            batch = pendingEpcs.toList()
+            pendingEpcs.clear()
+        }
+        if (batch.isEmpty()) return
+        app.database.epcCacheDao().insertEpcs(batch)
+        val dao = app.database.inventarioCacheDao()
+        for (item in _uiState.value.itens) {
+            dao.updateQuantidadeContada(inventarioId, item.produtoId, item.quantidadeContada ?: 0)
+        }
+        repo.syncStatus(inventarioId, "contando")
     }
 
     fun iniciarContagem() {
         viewModelScope.launch {
-            val result = tslManager.startInventory()
-            result.fold(
+            tslManager.startInventory().fold(
                 onSuccess = {
                     scanStartTime = System.currentTimeMillis()
                     startTimer()
+                    startPeriodicFlush()
                     _uiState.value = _uiState.value.copy(erro = null)
                 },
-                onFailure = { e ->
-                    _uiState.value = _uiState.value.copy(
-                        erro = "Erro ao iniciar: ${e.message}"
-                    )
-                }
+                onFailure = { e -> _uiState.value = _uiState.value.copy(erro = "Erro ao iniciar: ${e.message}") }
             )
         }
     }
 
     fun pararContagem() {
         viewModelScope.launch {
+            flushEpcs()
+            flushJob?.cancel()
             tslManager.stop()
             timerJob?.cancel()
-            repo.syncStatus(inventarioId, "concluido_local")
             _uiState.value = _uiState.value.copy(modoResultado = true)
         }
-    }
-
-    fun limparLeituras() {
-        viewModelScope.launch {
-            tslManager.stop()
-            timerJob?.cancel()
-            epcSet.clear()
-            lastEpcTimestamps.clear()
-            repo.limparLeituras(inventarioId)
-            repo.syncStatus(inventarioId, "pendente")
-            _uiState.value = _uiState.value.copy(
-                totalEpcsUnicos = 0,
-                tempoLeitura = 0L,
-                modoResultado = false,
-                epcsLidos = emptyList(),
-            )
-        }
-    }
-
-    fun recontar() {
-        viewModelScope.launch {
-            tslManager.stop()
-            timerJob?.cancel()
-            epcSet.clear()
-            lastEpcTimestamps.clear()
-            repo.limparLeituras(inventarioId)
-            repo.syncStatus(inventarioId, "pendente")
-            _uiState.value = _uiState.value.copy(
-                totalEpcsUnicos = 0,
-                tempoLeitura = 0L,
-                modoResultado = false,
-                epcsLidos = emptyList(),
-            )
-            tslManager.startInventory().fold(
-                onSuccess = {
-                    scanStartTime = System.currentTimeMillis()
-                    startTimer()
-                    _uiState.value = _uiState.value.copy(erro = null)
-                },
-                onFailure = { e ->
-                    _uiState.value = _uiState.value.copy(erro = "Erro ao recontar: ${e.message}")
-                }
-            )
-        }
-    }
-
-    fun limparErro() {
-        _uiState.value = _uiState.value.copy(erro = null)
     }
 
     fun irParaResultado() {
         viewModelScope.launch {
+            flushEpcs()
+            flushJob?.cancel()
             tslManager.stop()
             timerJob?.cancel()
-            repo.syncStatus(inventarioId, "concluido_local")
             _uiState.value = _uiState.value.copy(modoResultado = true)
         }
     }
 
-    fun voltarParaContagem() {
-        _uiState.value = _uiState.value.copy(modoResultado = false)
-        startTimer()
-    }
-
-    fun enviarParaSistema() {
+    fun recontar() {
+        flushJob?.cancel()
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(enviando = true, erro = null)
-
-            val itens = repo.getItensSync(inventarioId)
-            val epcs = repo.getEpcsSync(inventarioId)
-
-            val result = repo.enviarParaSistema(inventarioId, itens, epcs)
-
-            result.fold(
+            tslManager.stop()
+            timerJob?.cancel()
+            epcSet.clear(); lastEpcTimestamps.clear(); pendingEpcs.clear(); displayEpcs.clear()
+            repo.limparLeituras(inventarioId)
+            _uiState.value = _uiState.value.copy(totalEpcsUnicos = 0, tempoLeitura = 0L, modoResultado = false, epcsLidos = emptyList())
+            tslManager.startInventory().fold(
                 onSuccess = {
-                    _uiState.value = _uiState.value.copy(
-                        enviando = false,
-                        enviado = true,
-                    )
+                    scanStartTime = System.currentTimeMillis()
+                    startTimer()
+                    startPeriodicFlush()
+                    _uiState.value = _uiState.value.copy(erro = null)
                 },
-                onFailure = { e ->
-                    _uiState.value = _uiState.value.copy(
-                        enviando = false,
-                        erro = e.message ?: "Erro ao enviar",
-                    )
-                }
+                onFailure = { e -> _uiState.value = _uiState.value.copy(erro = "Erro ao recontar: ${e.message}") }
             )
         }
     }
 
+    fun limparErro() { _uiState.value = _uiState.value.copy(erro = null) }
+
     private fun startTimer() {
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
-            while (isActive) {
-                delay(1000)
-                val elapsed = (System.currentTimeMillis() - scanStartTime) / 1000
-                _uiState.value = _uiState.value.copy(tempoLeitura = elapsed)
-            }
+            while (isActive) { delay(1000); _uiState.value = _uiState.value.copy(tempoLeitura = (System.currentTimeMillis() - scanStartTime) / 1000) }
+        }
+    }
+
+    private fun startPeriodicFlush() {
+        flushJob?.cancel()
+        flushJob = viewModelScope.launch {
+            while (isActive) { delay(FLUSH_INTERVAL_MS.toLong()); flushEpcs() }
         }
     }
 
     override fun onCleared() {
+        viewModelScope.launch { flushEpcs() }
+        timerJob?.cancel(); flushJob?.cancel()
         super.onCleared()
-        timerJob?.cancel()
     }
 
     class Factory(private val inventarioId: Int) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return ContagemViewModel(inventarioId) as T
-        }
+        override fun <T : ViewModel> create(modelClass: Class<T>): T = ContagemViewModel(inventarioId) as T
     }
 }
