@@ -96,15 +96,12 @@ export default function OrcamentoDetalheClient({
     }
   };
 
-  // Compartilhar só faz sentido depois que o orçamento vira venda
-  // (o link público hoje é o da venda, não do orçamento em si).
-  // Enquanto status != 'convertido', escondemos o botão.
-  const podeCompartilhar = status === "convertido" && !!orcamento.venda_gerada_id;
-  const handleShare = podeCompartilhar ? () => {
-    // TODO Onda 3: buscar token público da venda gerada e abrir /vendas/compartilhada/{token}.
-    // Por ora apenas avisa o usuário pra ele saber que o caminho existe.
-    alert("Compartilhar via venda gerada ainda em construção.");
-  } : undefined;
+  // Compartilhar: feature ainda não implementada. Antes mostrava o botão e
+  // abria `alert("em construção")` — frustrava o usuário. Escondido até que
+  // o fluxo real (gerar link público + abrir /vendas/compartilhada/{token})
+  // esteja pronto. `onShare` undefined faz o componente filho não renderizar
+  // o botão.
+  const handleShare: (() => void) | undefined = undefined;
 
   const extraActions = (
     <>

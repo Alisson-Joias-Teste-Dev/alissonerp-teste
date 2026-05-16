@@ -54,14 +54,24 @@ export default async function OrcamentoDetalhePage({ params }: { params: Promise
     ficha = ft ?? null;
   }
 
-  // Fetch ficha técnica 2
+  // Fetch ficha técnica 2 — só se quantidade=2 ASSEGURADA. Bug #15: orçamentos
+  // antigos podiam ter ficha_tecnica_2_id setado com quantidade=1 (ou vice-versa)
+  // devido a regressões pré-v2.42.2. Carregar a ficha2 nesses casos confundia
+  // a UI (exibia par mesmo sendo unidade).
   let ficha2 = null;
-  if (orc.ficha_tecnica_2_id) {
+  const qtdOrc = Number(orc.quantidade ?? 1);
+  if (orc.ficha_tecnica_2_id && qtdOrc === 2) {
     const [ft2] = await sql`SELECT * FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${orc.ficha_tecnica_2_id}`;
     ficha2 = ft2 ?? null;
   }
-
-  const orcamento = { ...orc, ficha, ficha2 };
+  // Normaliza no objeto que vai pro client — evita pares órfãos.
+  const orcamento = {
+    ...orc,
+    quantidade: qtdOrc === 2 && ficha2 ? 2 : 1,
+    ficha_tecnica_2_id: qtdOrc === 2 && ficha2 ? orc.ficha_tecnica_2_id : null,
+    ficha,
+    ficha2,
+  };
 
   // Cotações
   const [paramRow] = await sql`SELECT ouro, dollar FROM public.parametros LIMIT 1`;

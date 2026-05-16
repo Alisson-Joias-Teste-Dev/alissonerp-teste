@@ -656,12 +656,12 @@ function EngravingText({
 function AliancaViewportInner({
   params,
   profile,
-  cameraDistance,
   onMeshReady,
 }: {
   params: RingParams;
   profile: ProfileType;
-  cameraDistance: number;
+  // Bug #35: `cameraDistance` removida — era prop morta (a câmera usa posição
+  // fixa [0,-35,35] e OrbitControls clampa entre 10..60). Mantinha math inútil.
   onMeshReady?: (mesh: THREE.Mesh | null) => void;
 }) {
   const handleMesh = useCallback((m: THREE.Mesh | null) => {

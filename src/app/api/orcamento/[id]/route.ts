@@ -135,6 +135,39 @@ export async function PATCH(
       return NextResponse.json({ error: "Vincule um cliente antes de aprovar" }, { status: 422 });
     }
 
+    // Bug #13: valida que o cliente_id realmente existe em public.contatos
+    // antes de criar a venda. Sem isso, FK quebrava com mensagem genérica.
+    const [clienteExiste] = await sql`SELECT 1 AS ok FROM public.contatos WHERE id_contato = ${clienteId} LIMIT 1`;
+    if (!clienteExiste) {
+      return NextResponse.json({ error: "Cliente vinculado não foi encontrado (pode ter sido removido). Selecione outro." }, { status: 422 });
+    }
+
+    // Bug #18: defesa em profundidade — revalida a ficha técnica antes da
+    // aprovação. Se algum endpoint legado/manual deixou a ficha inviável, o
+    // PUT já barra, mas o PATCH não tinha proteção própria.
+    if (orc.tipo === "alianca" && orc.ficha_tecnica_id) {
+      const [fichaApro] = await sql`
+        SELECT * FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${orc.ficha_tecnica_id} LIMIT 1
+      `;
+      if (fichaApro) {
+        const [configRow] = await sql`SELECT calibracao FROM alissonerp.config_orcamento WHERE name = 'default' LIMIT 1`;
+        const calibAp: CalibracaoDefaults = (configRow?.calibracao as CalibracaoDefaults) ?? CALIBRACAO_DEFAULTS;
+        const profileAp = migrateProfile(String(fichaApro.perfil ?? "Simples"));
+        const capacityAp = computeStoneCapacity(
+          Number(fichaApro.diametro ?? 0),
+          Number(fichaApro.espessura ?? 0),
+          Number(fichaApro.canal_borda_altura ?? 1.0),
+          Number(fichaApro.tamanho_pedra ?? 0),
+          Number(fichaApro.pedra_fileiras ?? 1),
+          profileAp,
+        );
+        const errsAp = validateFichaTecnica(fichaApro as unknown as Record<string, unknown>, capacityAp, calibAp);
+        if (errsAp.length > 0) {
+          return NextResponse.json({ error: `Ficha técnica inválida: ${errsAp[0].message}`, errors: errsAp }, { status: 422 });
+        }
+      }
+    }
+
     const perfilNomes: Record<string, string> = {
       Anatomica: "Anatômica", Boleada: "Boleada", BoleadaDouble: "Boleada Dupla",
       Chanfrada: "Chanfrada", Concava: "Côncava", QuadradoCanal: "Bordas Elevadas",
@@ -164,12 +197,23 @@ export async function PATCH(
     const resultado = await runWithRetry<ResultadoAprovacao>(() =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (sql as any).begin(async (tx: typeof sql) => {
-      // 1. Data entrega: +10 dias úteis
-      const dataEntrega = new Date();
+      // 1. Data entrega: +10 dias úteis em America/Sao_Paulo.
+      // Bug #19: `new Date()` no servidor em UTC pulava sábado/domingo errado
+      // (sex 23h SP = sáb 02h UTC, então `getDay()` retornava 6 e atrasava 1 dia).
+      // Aqui montamos a data no fuso SP usando Intl, depois caminhamos em UTC
+      // (independente do TZ do host).
+      const partsBR = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Sao_Paulo",
+        year: "numeric", month: "2-digit", day: "2-digit",
+      }).formatToParts(new Date());
+      const y = Number(partsBR.find(p => p.type === "year")?.value);
+      const m = Number(partsBR.find(p => p.type === "month")?.value);
+      const d = Number(partsBR.find(p => p.type === "day")?.value);
+      const dataEntrega = new Date(Date.UTC(y, m - 1, d));
       let diasUteis = 0;
       while (diasUteis < 10) {
-        dataEntrega.setDate(dataEntrega.getDate() + 1);
-        const dow = dataEntrega.getDay();
+        dataEntrega.setUTCDate(dataEntrega.getUTCDate() + 1);
+        const dow = dataEntrega.getUTCDay();
         if (dow !== 0 && dow !== 6) diasUteis++;
       }
 
@@ -204,16 +248,34 @@ export async function PATCH(
                 : `Aliança ${nomeModeloSaved}`)
             : `Aliança ${nomeFallback}`)
         : `Peça Personalizada`;
-      // Buscar valor, peso e desconto diretamente do orçamento
-      const [orcValores] = await tx`SELECT valor, peso, desconto_pct FROM alissonerp.orcamentos WHERE id = ${orcId}`;
-      const valorItem = Number(orcValores?.valor ?? 0);
-      const pesoItem = Number(orcValores?.peso ?? orc.peso_estimado ?? 0);
+      // Buscar valor, peso, desconto, quantidade, snapshot e lock direto do orçamento.
+      // Bug #14: quando snapshot lock está ativo, usar o valor congelado em vez
+      // do `valor` cru — assim qualquer dessincronia entre coluna e snapshot
+      // (cenário raro mas possível) não vaza pra venda gerada.
+      // Bug #12: respeitar quantidade=2 do par — antes a venda nascia sempre
+      // com 1 item, perdendo o "par" e o relatório de produção desalinhava.
+      const [orcValores] = await tx`
+        SELECT valor, peso, desconto_pct, quantidade, snapshot, valor_negociado_locked
+        FROM alissonerp.orcamentos WHERE id = ${orcId}
+      `;
+      const lockedAtivo = orcValores?.valor_negociado_locked === true;
+      const snap = (lockedAtivo && orcValores?.snapshot && typeof orcValores.snapshot === "object")
+        ? (orcValores.snapshot as Record<string, unknown>)
+        : null;
+      const valorTotal = Number(snap?.valor ?? orcValores?.valor ?? 0);
+      const pesoTotal = Number(snap?.peso ?? orcValores?.peso ?? orc.peso_estimado ?? 0);
+      const qtdRaw = Number(orcValores?.quantidade ?? 1);
+      const qtdItem = Number.isFinite(qtdRaw) && qtdRaw >= 1 ? Math.floor(qtdRaw) : 1;
+      // Item da venda é gravado como "par" (1 linha, quantidade=2, valor TOTAL,
+      // peso TOTAL) — o vendedor edita na tela de venda se precisar separar.
+      const valorItem = valorTotal;
+      const pesoItem = pesoTotal;
       // Replica o desconto do orçamento no item da venda. Reconstrói o preço
       // cheio para manter coerência: lista × (1 − pct/100) = unitário.
       // Sem isso, lista ficava como o próprio valor já descontado, e qualquer
       // desconto adicional na venda aplicava em cascata multiplicativa
       // (30% no orçamento + 30% na venda = 51% real, não 60% e não 30%).
-      const descontoPctItem = Number(orcValores?.desconto_pct ?? 0);
+      const descontoPctItem = Number(snap?.desconto_pct ?? orcValores?.desconto_pct ?? 0);
       const precoListaItem = descontoPctItem > 0 && descontoPctItem < 100
         ? Math.round((valorItem / (1 - descontoPctItem / 100)) * 100) / 100
         : valorItem;
@@ -249,7 +311,7 @@ export async function PATCH(
           pct_desconto, preco_unitario, total_item, peso_estimado,
           pct_comissao, valor_comissao, observacao
         ) VALUES (
-          ${venda.id}, ${nomeItem}, 1, ${precoListaItem},
+          ${venda.id}, ${nomeItem}, ${qtdItem}, ${precoListaItem},
           ${descontoPctItem}, ${valorItem}, ${valorItem}, ${pesoItem},
           ${pctComissao}, ${valorComissao},
           ${'Orçamento ' + orc.numero_orcamento}
@@ -319,6 +381,35 @@ export async function PUT(
         { status: 409 },
       );
     }
+  }
+
+  // Bug #10: validação de tipo/range nos campos numéricos do PUT também
+  // (espelha o POST). Defende contra clientes API externos mandando lixo.
+  const numCheck = (v: unknown, label: string, opts: { min?: number; max?: number; allowNull?: boolean } = {}): string | null => {
+    const { min = 0, max = Number.POSITIVE_INFINITY, allowNull = true } = opts;
+    if (v === null || v === undefined) return allowNull ? null : `${label} é obrigatório`;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return `${label} inválido (não é número)`;
+    if (n < min) return `${label} não pode ser menor que ${min}`;
+    if (n > max) return `${label} maior que o limite (${max})`;
+    return null;
+  };
+  for (const [val, label, opts] of [
+    [peso, "peso", { max: 10000 }],
+    [valor, "valor", { max: 1_000_000_000 }],
+    [markup, "markup", { min: 0.1, max: 1000 }],
+    [desconto_pct, "desconto_pct", { max: 100 }],
+    [cotacao_ouro, "cotacao_ouro", { max: 100000 }],
+    [cotacao_dolar, "cotacao_dolar", { max: 1000 }],
+    [valor_ouro, "valor_ouro", { max: 1_000_000_000 }],
+    [valor_pedras, "valor_pedras", { max: 1_000_000_000 }],
+  ] as const) {
+    const err = numCheck(val, label, opts);
+    if (err) return NextResponse.json({ error: err }, { status: 400 });
+  }
+  if (cliente_id != null) {
+    const [existe] = await sql`SELECT 1 AS ok FROM public.contatos WHERE id_contato = ${Number(cliente_id)} LIMIT 1`;
+    if (!existe) return NextResponse.json({ error: "Cliente informado não foi encontrado" }, { status: 422 });
   }
 
   // Normaliza quantidade UMA vez. Antes alguns checks faziam `=== 2` estrito,

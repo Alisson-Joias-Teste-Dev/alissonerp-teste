@@ -177,6 +177,14 @@ export default function OrcamentoClient({
       preco_unitario_rs: 0, preco_total_rs: 0,
     };
     const calc = computeStoneEntryPrice(entry, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
+    // Bug #16: alerta quando zircônia adicionada custa R$ 0 (config sem
+    // preço cadastrado). Antes, peça saía subprecificada em silêncio.
+    if (calc.preco_total_rs === 0) {
+      useErrorStore.getState().push(
+        "Zircônia adicionada sem preço configurado. Cadastre o R$/un na Configuração de Pedras antes de salvar.",
+        { level: "warning" },
+      );
+    }
     const setter = ringIdx === 1 ? setStoneEntries : setStoneEntries2;
     setter((prev) => [...prev, { ...entry, ...calc }]);
   };
@@ -318,11 +326,13 @@ export default function OrcamentoClient({
         setParams2(p => applyRingParams({ ...p, metalColor: metalHex2, goldDensity: metalDensity2 }, ft2));
       }
 
-      // Restaurar detalhamento de pedras
+      // Restaurar detalhamento de pedras.
+      // Bug #22: usa o contador `nextStoneId` em vez de Date.now()+i.
+      // Carregar 2 orçamentos no mesmo ms colidia keys do React.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const toEntries = (pedras: any[]): StoneEntry[] =>
-        (pedras ?? []).map((p: any, i: number) => ({
-          id: Date.now() + i,
+        (pedras ?? []).map((p: any) => ({
+          id: nextStoneId.current++,
           tipo: p.tipo as StoneType,
           corte: p.corte as StoneCut,
           tamanho_mm: Number(p.tamanho_mm ?? 0),
@@ -371,22 +381,39 @@ export default function OrcamentoClient({
   const [pedrasLoading, setPedrasLoading] = useState(false);
   const [pedrasShowDropdown, setPedrasShowDropdown] = useState(false);
   const pedrasTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pedrasAbortRef = useRef<AbortController | null>(null);
   const pecaPedrasTotalRS = useMemo(
     () => pecaPedras.reduce((s, p) => s + p.produto.preco * p.qtd, 0),
     [pecaPedras]
   );
   function searchPedras(v: string) {
     if (pedrasTimer.current) clearTimeout(pedrasTimer.current);
+    // Bug #24: cancela request em voo. Antes, múltiplas digitações rápidas
+    // podiam retornar fora de ordem e o resultado final era de uma busca antiga.
+    if (pedrasAbortRef.current) pedrasAbortRef.current.abort();
     setPedrasBusca(v);
     if (v.length < 2) { setPedrasResults([]); setPedrasShowDropdown(false); return; }
     pedrasTimer.current = setTimeout(async () => {
+      const ctrl = new AbortController();
+      pedrasAbortRef.current = ctrl;
       setPedrasLoading(true);
       try {
-        const r = await fetch(`/api/orcamento/produtos-pedras?q=${encodeURIComponent(v)}`);
+        const r = await fetch(`/api/orcamento/produtos-pedras?q=${encodeURIComponent(v)}`, { signal: ctrl.signal });
         const data = await r.json();
+        if (ctrl.signal.aborted) return;
         setPedrasResults(Array.isArray(data) ? data : []);
         setPedrasShowDropdown(true);
-      } finally { setPedrasLoading(false); }
+      } catch (e) {
+        // AbortError é esperado quando o usuário digita rápido; outros vão pro store.
+        if (e instanceof Error && e.name !== "AbortError") {
+          useErrorStore.getState().push(e.message, { level: "warning" });
+        }
+      } finally {
+        if (pedrasAbortRef.current === ctrl) {
+          setPedrasLoading(false);
+          pedrasAbortRef.current = null;
+        }
+      }
     }, 350);
   }
 
@@ -489,7 +516,11 @@ export default function OrcamentoClient({
 
   const buscarClientes = useCallback(async (termo: string) => {
     if (termo.length < 2) { setClienteResults([]); setClienteSemResultados(false); return; }
-    const res = await fetch(`/api/vendas/clientes/busca?q=${encodeURIComponent(termo)}`).catch(() => null);
+    // Bug #27: erro de rede vai pro useErrorStore em vez de sumir.
+    const res = await fetch(`/api/vendas/clientes/busca?q=${encodeURIComponent(termo)}`).catch((e) => {
+      useErrorStore.getState().push(e instanceof Error ? e.message : "Falha ao buscar clientes", { level: "warning" });
+      return null;
+    });
     const data = res?.ok ? await res.json().catch(() => []) : [];
     const lista = Array.isArray(data) ? data : [];
     setClienteResults(lista);
@@ -499,7 +530,9 @@ export default function OrcamentoClient({
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function selecionarCliente(c: any) {
-    setClienteId(c.id_contato ?? c.id);
+    // Bug #17: contatos.id_contato eh a PK real (CLAUDE.md). O fallback ?? c.id
+    // mascarava bugs futuros se a API mudasse — agora exige id_contato.
+    setClienteId(c.id_contato);
     setClientName(c.nome);
     setShowClienteDropdown(false);
     setClienteResults([]);
@@ -618,24 +651,26 @@ export default function OrcamentoClient({
     const raw = (config as any)?.promocao_fim;
     return raw ? String(raw).slice(0, 10) : "";
   });
-  // Promoção está ATIVA hoje?
-  const promocaoAtiva = useMemo(() => {
-    if (!promocaoInicio || !promocaoFim) return false;
-    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-    const ini = new Date(promocaoInicio + "T00:00:00");
-    const fim = new Date(promocaoFim + "T23:59:59");
-    return hoje >= ini && hoje <= fim;
-  }, [promocaoInicio, promocaoFim]);
-  // Status visual da promo: ativa / programada (futura) / expirada / sem datas
+  // Bug #31: usa "hoje" no fuso America/Sao_Paulo (não no fuso do browser do
+  // cliente). Antes, cliente em Lisboa (UTC+1) via promo expirar 4h antes,
+  // cliente no Acre via expirar 1h depois. Hoje a regra é uniforme: a promo
+  // sai do ar à meia-noite no horário oficial da loja.
+  function hojeEmSP(): string {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Sao_Paulo",
+      year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(new Date());
+    return `${parts.find(p => p.type === "year")?.value}-${parts.find(p => p.type === "month")?.value}-${parts.find(p => p.type === "day")?.value}`;
+  }
   const promocaoStatus: "ativa" | "programada" | "expirada" | "nenhuma" = useMemo(() => {
     if (!promocaoInicio || !promocaoFim) return "nenhuma";
-    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-    const ini = new Date(promocaoInicio + "T00:00:00");
-    const fim = new Date(promocaoFim + "T23:59:59");
-    if (hoje < ini) return "programada";
-    if (hoje > fim) return "expirada";
+    const hoje = hojeEmSP();
+    // Comparação lexicográfica de "YYYY-MM-DD" é ordem cronológica.
+    if (hoje < promocaoInicio) return "programada";
+    if (hoje > promocaoFim) return "expirada";
     return "ativa";
   }, [promocaoInicio, promocaoFim]);
+  const promocaoAtiva = promocaoStatus === "ativa";
   // Espessura (altura) mínima por modelo de aliança — bloqueia inputs abaixo desse valor.
   // Chaves no JSONB são snake_case; profile (ProfileType) é PascalCase. Mapa abaixo
   // converte entre os dois.
@@ -708,7 +743,7 @@ export default function OrcamentoClient({
     fetch("/api/orcamento/promocoes")
       .then((r) => r.ok ? r.json() : { promocoes: [] })
       .then((d) => setPromocoesHistorico(Array.isArray(d?.promocoes) ? d.promocoes : []))
-      .catch(() => { /* silencioso */ });
+      .catch((e) => useErrorStore.getState().push(e instanceof Error ? e.message : "Falha ao carregar histórico de promoções", { level: "warning" }));
   }, [canManageConfig]);
 
   async function salvarPromocao() {
@@ -1133,10 +1168,13 @@ export default function OrcamentoClient({
   }, [params2.hasStones, params2.stoneType, params2.stoneSize]);
 
   const weightEst = useMemo(() => computeWeight(params, profile), [params, profile]);
-  // Helper: pega o desconto da promoção da faixa que cobre esse peso (0 se inativa)
-  function descPromoParaPeso(weight: number): number {
+  // Helper: pega o desconto da promoção da faixa que cobre esse peso (0 se inativa).
+  // Bug #11: recebe `startMkp` como parâmetro em vez de pegar do `params` global.
+  // Antes, anel 2 e peça personalizada (que podem ter markup próprio) sempre
+  // usavam o markup do anel 1 — desconto promo do anel 2 saía da faixa errada.
+  function descPromoParaPeso(weight: number, startMkp: number = params.startMkp): number {
     if (!promocaoAtiva) return 0;
-    const { activeCategory } = computeCalculatedCategories(params.startMkp, pricingCategories, weight);
+    const { activeCategory } = computeCalculatedCategories(startMkp, pricingCategories, weight);
     return Number(activeCategory?.desconto_promocao ?? 0);
   }
   // Desconto efetivo no orçamento = max(manual da vendedora, promoção da faixa).
@@ -1156,15 +1194,11 @@ export default function OrcamentoClient({
     () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, 0, pricingCategories, 0),
     [weightEst.weight, params.goldPrice, params.startMkp, pricingCategories]
   );
-  const cameraDistance = useMemo(() => {
-    const radius = params.diameter / 2 + params.height + params.width * 0.6;
-    return radius * 8;
-  }, [params.diameter, params.height, params.width]);
   const { calc: calcCategories } = computeCalculatedCategories(params.startMkp, pricingCategories, weightEst.weight);
 
   // Pricing aliança 2 (par)
   const weightEst2 = useMemo(() => computeWeight(params2, profile2), [params2, profile2]);
-  const descPromo2 = descPromoParaPeso(weightEst2.weight);
+  const descPromo2 = descPromoParaPeso(weightEst2.weight, params2.startMkp);
   const effDiscount2 = Math.max(params2.discountPercent, descPromo2);
   const lockDiscount2 = !canManageConfig && descPromo2 > 0;
   const pricing2: PricingResult = useMemo(
@@ -1176,10 +1210,6 @@ export default function OrcamentoClient({
     () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, 0, pricingCategories, 0),
     [weightEst2.weight, params2.goldPrice, params2.startMkp, pricingCategories]
   );
-  const cameraDistance2 = useMemo(() => {
-    const radius = params2.diameter / 2 + params2.height + params2.width * 0.6;
-    return radius * 8;
-  }, [params2.diameter, params2.height, params2.width]);
 
   // Gravação: primeiro nome incluso, adicionais cobram R$ precoGravacao cada.
   // EXCEÇÃO: perfil "Bordas Elevadas" (QuadradoCanal) tem nomes ILIMITADOS
@@ -1444,6 +1474,9 @@ export default function OrcamentoClient({
   const handleSaveConfig = async () => {
     setIsSavingConfig(true); setConfigMsg(null);
     try {
+      // Bug #21: pricing_categories já está no payload (correto). O QA acusou
+      // que estava faltando — checando a lista de campos, está aqui. Mantido
+      // explícito + verificação visual nos próximos saves.
       const res = await fetch("/api/orcamento/config", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1477,6 +1510,87 @@ export default function OrcamentoClient({
     finally { setIsSavingConfig(false); }
   };
 
+  // Modal Novo Cliente — helper que centraliza o JSX (bug #39 eliminava
+  // duplicata de ~70 linhas entre listagem e edição). Retorna null quando
+  // o modal não está aberto.
+  function renderModalNovoCliente() {
+    if (!showNovoClienteForm) return null;
+    const fechar = () => { setShowNovoClienteForm(false); setClienteErr(""); setCpfExistente(null); };
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={fechar}>
+        <div className="bg-white rounded-2xl p-6 w-full max-w-lg mx-4 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold" style={{ color: "#374151" }}>Novo Cliente</p>
+            <button onClick={fechar} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Nome <span className="text-red-500">*</span></label>
+              <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" placeholder="Nome completo" value={novoClienteForm.nome} onChange={e => setNovoClienteForm(p => ({ ...p, nome: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>CPF/CNPJ</label>
+              <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono" placeholder="000.000.000-00" value={novoClienteForm.cpf_cnpj} onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cpf_cnpj: v })); checkCpfDuplicado(v); }} style={{ borderColor: cpfExistente ? "#EF4444" : C.cremeBorder }} />
+              {cpfExistente && <p className="text-xs text-red-500 mt-1">Já cadastrado: {cpfExistente} <button className="underline ml-1" onClick={() => setShowNovoClienteForm(false)}>Buscar</button></p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Email</label>
+              <input type="email" className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.email} onChange={e => setNovoClienteForm(p => ({ ...p, email: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Telefone</label>
+              <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.telefone} onChange={e => setNovoClienteForm(p => ({ ...p, telefone: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Celular</label>
+              <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.celular} onChange={e => setNovoClienteForm(p => ({ ...p, celular: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+            </div>
+          </div>
+          <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
+            <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>CEP</label>
+                <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono" placeholder="00000-000" value={novoClienteForm.cep} onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cep: v })); if (v.replace(/\D/g, "").length === 8) buscaCEP(v); }} style={{ borderColor: C.cremeBorder }} />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Logradouro</label>
+                <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.endereco} onChange={e => setNovoClienteForm(p => ({ ...p, endereco: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Número</label>
+                <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.numero} onChange={e => setNovoClienteForm(p => ({ ...p, numero: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Complemento</label>
+                <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.complemento} onChange={e => setNovoClienteForm(p => ({ ...p, complemento: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Bairro</label>
+                <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.bairro} onChange={e => setNovoClienteForm(p => ({ ...p, bairro: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Município</label>
+                <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.municipio} onChange={e => setNovoClienteForm(p => ({ ...p, municipio: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>UF</label>
+                <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" maxLength={2} value={novoClienteForm.uf} onChange={e => setNovoClienteForm(p => ({ ...p, uf: e.target.value.toUpperCase() }))} style={{ borderColor: C.cremeBorder }} />
+              </div>
+            </div>
+          </div>
+          {clienteErr && <p className="text-sm text-red-600">{clienteErr}</p>}
+          <div className="flex gap-2 pt-1">
+            <button onClick={fechar} className="px-4 py-2 rounded-lg text-sm border" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
+            <button onClick={handleCriarCliente} disabled={savingCliente} className="flex items-center gap-1.5 flex-1 justify-center py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ backgroundColor: C.esmeralda }}>
+              {savingCliente ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Salvar Cliente
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const exportSTL = useCallback(async () => {
     if (!currentMesh) return;
     const { STLExporter } = await import("three/examples/jsm/exporters/STLExporter.js");
@@ -1490,7 +1604,7 @@ export default function OrcamentoClient({
   }, [currentMesh]);
 
   // Pricing peça personalizada (também respeita a promoção quando ativa)
-  const descPromoPeca = descPromoParaPeso(pecaPeso);
+  const descPromoPeca = descPromoParaPeso(pecaPeso, params.startMkp);
   const effDiscountPeca = Math.max(params.discountPercent, descPromoPeca);
   const pecaPricing = useMemo(
     () => computePricing(pecaPeso, cotacaoOuro, params.startMkp, effDiscountPeca, pricingCategories, 0),
@@ -1690,81 +1804,10 @@ export default function OrcamentoClient({
           </div>
         )}
 
-        {/* Modal: Busca CPF */}
-        {/* Modal: Novo Cliente — igual à venda */}
-        {showNovoClienteForm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setShowNovoClienteForm(false); setClienteErr(""); setCpfExistente(null); }}>
-            <div className="bg-white rounded-2xl p-6 w-full max-w-lg mx-4 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold" style={{ color: "#374151" }}>Novo Cliente</p>
-                <button onClick={() => { setShowNovoClienteForm(false); setClienteErr(""); setCpfExistente(null); }} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Nome <span className="text-red-500">*</span></label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" placeholder="Nome completo" value={novoClienteForm.nome} onChange={e => setNovoClienteForm(p => ({ ...p, nome: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>CPF/CNPJ</label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono" placeholder="000.000.000-00" value={novoClienteForm.cpf_cnpj} onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cpf_cnpj: v })); checkCpfDuplicado(v); }} style={{ borderColor: cpfExistente ? "#EF4444" : C.cremeBorder }} />
-                  {cpfExistente && <p className="text-xs text-red-500 mt-1">Já cadastrado: {cpfExistente} <button className="underline ml-1" onClick={() => setShowNovoClienteForm(false)}>Buscar</button></p>}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Email</label>
-                  <input type="email" className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.email} onChange={e => setNovoClienteForm(p => ({ ...p, email: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Telefone</label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.telefone} onChange={e => setNovoClienteForm(p => ({ ...p, telefone: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Celular</label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.celular} onChange={e => setNovoClienteForm(p => ({ ...p, celular: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                </div>
-              </div>
-              <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
-                <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>CEP</label>
-                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono" placeholder="00000-000" value={novoClienteForm.cep} onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cep: v })); if (v.replace(/\D/g, "").length === 8) buscaCEP(v); }} style={{ borderColor: C.cremeBorder }} />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Logradouro</label>
-                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.endereco} onChange={e => setNovoClienteForm(p => ({ ...p, endereco: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Número</label>
-                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.numero} onChange={e => setNovoClienteForm(p => ({ ...p, numero: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Complemento</label>
-                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.complemento} onChange={e => setNovoClienteForm(p => ({ ...p, complemento: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Bairro</label>
-                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.bairro} onChange={e => setNovoClienteForm(p => ({ ...p, bairro: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Município</label>
-                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.municipio} onChange={e => setNovoClienteForm(p => ({ ...p, municipio: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>UF</label>
-                    <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" maxLength={2} value={novoClienteForm.uf} onChange={e => setNovoClienteForm(p => ({ ...p, uf: e.target.value.toUpperCase() }))} style={{ borderColor: C.cremeBorder }} />
-                  </div>
-                </div>
-              </div>
-              {clienteErr && <p className="text-sm text-red-600">{clienteErr}</p>}
-              <div className="flex gap-2 pt-1">
-                <button onClick={() => { setShowNovoClienteForm(false); setClienteErr(""); setCpfExistente(null); }} className="px-4 py-2 rounded-lg text-sm border" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
-                <button onClick={handleCriarCliente} disabled={savingCliente} className="flex items-center gap-1.5 flex-1 justify-center py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ backgroundColor: C.esmeralda }}>
-                  {savingCliente ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Salvar Cliente
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Modal: Novo Cliente — renderizado uma vez no fim da tela. Bug #39
+            removeu a duplicata; o renderModalNovoCliente abaixo cobre os 2
+            contextos (listagem + aliança/peça). */}
+        {renderModalNovoCliente()}
 
         {/* Modal rejeição */}
         {rejectId && (
@@ -2098,6 +2141,16 @@ export default function OrcamentoClient({
             ) : (
               <button onClick={async () => {
                 if (!clientName.trim()) { setSaveMsg({ text: "Preencha o nome do cliente", type: "error" }); return; }
+                // Bug #20: peça travada e sem alteração = NO-OP (mesma regra
+                // da aliança). Antes, recalcular a peça (ex: mudança de cotação
+                // ouro) sobrescrevia o valor combinado quando o usuário clicava
+                // Salvar sem mexer em nada.
+                const pecaUsaSnapshot = editingOrcId && !dirty && lockEnabled && savedSnapshot;
+                if (pecaUsaSnapshot) {
+                  setSaveMsg({ text: "Nada para salvar — orçamento sem alterações.", type: "success" });
+                  if (onSaved) onSaved();
+                  return;
+                }
                 setIsSaving(true); setSaveMsg(null);
                 try {
                   const body: Record<string, unknown> = {
@@ -2113,6 +2166,7 @@ export default function OrcamentoClient({
                       desconto_pct: pecaDescontoPct, markup: pecaFactors?.mkp ?? 0,
                       cotacao_ouro: cotacaoOuro, cotacao_dolar: cotacaoDolar,
                     },
+                    ...(editingOrcId && orcUpdatedAt ? { client_updated_at: orcUpdatedAt } : {}),
                     ficha: {
                       peso_estimado: pecaPeso,
                       cor_metal: pecaMetalColor,
@@ -2136,14 +2190,24 @@ export default function OrcamentoClient({
                   const url = editingOrcId ? `/api/orcamento/${editingOrcId}` : "/api/orcamento";
                   const method = editingOrcId ? "PUT" : "POST";
                   const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-                  if (!res.ok) throw new Error();
+                  if (!res.ok) {
+                    const data = await res.json().catch(() => ({} as { error?: string; updated_at?: string }));
+                    if (res.status === 409) throw new Error(data.error ?? "Conflito: orçamento alterado por outro usuário. Recarregue a página.");
+                    throw new Error(data.error ?? `Erro ${res.status}`);
+                  }
+                  const data = await res.json().catch(() => ({} as { updated_at?: string }));
+                  if (data.updated_at) setOrcUpdatedAt(String(data.updated_at));
+                  setDirty(false);
                   setSaveMsg({ text: "Orçamento salvo!", type: "success" });
                   if (!editingOrcId) {
                     setClientName(""); setClienteId(null);
                     setPecaPedras([]); setPecaDescontoPct(0); setPecaFotoRef(null);
                   }
                   if (onSaved) onSaved();
-                } catch { setSaveMsg({ text: "Erro ao salvar", type: "error" }); }
+                } catch (e) {
+                  useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao salvar peça", { level: "critical" });
+                  setSaveMsg({ text: e instanceof Error ? e.message : "Erro ao salvar", type: "error" });
+                }
                 finally { setIsSaving(false); }
               }}
                 disabled={isSaving}
@@ -3159,12 +3223,12 @@ export default function OrcamentoClient({
               {allianceMode === "par" && (
                 <div className="absolute top-2 left-2 z-10 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: C.esmeralda, color: "#fff" }}>Aliança 1</div>
               )}
-              <AliancaViewport params={params} profile={profile} cameraDistance={cameraDistance} onMeshReady={setCurrentMesh} />
+              <AliancaViewport params={params} profile={profile} onMeshReady={setCurrentMesh} />
             </div>
             {allianceMode === "par" && (
               <div className="rounded-2xl overflow-hidden border relative" style={{ borderColor: activeRing === 2 ? C.esmeralda : C.cremeBorder, flex: 1, borderWidth: activeRing === 2 ? 2 : 1 }}>
                 <div className="absolute top-2 left-2 z-10 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: C.esmeralda, color: "#fff" }}>Aliança 2</div>
-                <AliancaViewport params={params2} profile={profile2} cameraDistance={cameraDistance2} onMeshReady={setCurrentMesh2} />
+                <AliancaViewport params={params2} profile={profile2} onMeshReady={setCurrentMesh2} />
               </div>
             )}
           </div>
@@ -3219,8 +3283,10 @@ export default function OrcamentoClient({
                           onClick={() => {
                             if (lockActive) return;
                             const curr = (activeRing === 1 ? params : params2).discountPercent;
-                            // Admin não pode descer abaixo do desconto da promo
-                            const minimo = descPromoActive;
+                            // Bug #32: admin/desenvolvedor (canManageConfig) pode
+                            // furar a regra da promo em casos especiais (negociação
+                            // custom). Vendedora segue presa no piso da promo.
+                            const minimo = canManageConfig ? 0 : descPromoActive;
                             updateParam("discountPercent", Math.max(minimo, curr - 1));
                           }}
                           className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
@@ -3354,80 +3420,8 @@ export default function OrcamentoClient({
         </div>
       </div>
 
-      {/* Modal: Novo Cliente */}
-      {showNovoClienteForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setShowNovoClienteForm(false); setClienteErr(""); setCpfExistente(null); }}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-lg mx-4 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold" style={{ color: "#374151" }}>Novo Cliente</p>
-              <button onClick={() => { setShowNovoClienteForm(false); setClienteErr(""); setCpfExistente(null); }} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Nome <span className="text-red-500">*</span></label>
-                <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" placeholder="Nome completo" value={novoClienteForm.nome} onChange={e => setNovoClienteForm(p => ({ ...p, nome: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>CPF/CNPJ</label>
-                <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono" placeholder="000.000.000-00" value={novoClienteForm.cpf_cnpj} onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cpf_cnpj: v })); checkCpfDuplicado(v); }} style={{ borderColor: cpfExistente ? "#EF4444" : C.cremeBorder }} />
-                {cpfExistente && <p className="text-xs text-red-500 mt-1">Já cadastrado: {cpfExistente} <button className="underline ml-1" onClick={() => setShowNovoClienteForm(false)}>Buscar</button></p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Email</label>
-                <input type="email" className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.email} onChange={e => setNovoClienteForm(p => ({ ...p, email: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Telefone</label>
-                <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.telefone} onChange={e => setNovoClienteForm(p => ({ ...p, telefone: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Celular</label>
-                <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.celular} onChange={e => setNovoClienteForm(p => ({ ...p, celular: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-              </div>
-            </div>
-            <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
-              <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>CEP</label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono" placeholder="00000-000" value={novoClienteForm.cep} onChange={e => { const v = e.target.value; setNovoClienteForm(p => ({ ...p, cep: v })); if (v.replace(/\D/g, "").length === 8) buscaCEP(v); }} style={{ borderColor: C.cremeBorder }} />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Logradouro</label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.endereco} onChange={e => setNovoClienteForm(p => ({ ...p, endereco: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Número</label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.numero} onChange={e => setNovoClienteForm(p => ({ ...p, numero: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Complemento</label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.complemento} onChange={e => setNovoClienteForm(p => ({ ...p, complemento: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Bairro</label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.bairro} onChange={e => setNovoClienteForm(p => ({ ...p, bairro: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>Município</label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" value={novoClienteForm.municipio} onChange={e => setNovoClienteForm(p => ({ ...p, municipio: e.target.value }))} style={{ borderColor: C.cremeBorder }} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: "#374151" }}>UF</label>
-                  <input className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none" maxLength={2} value={novoClienteForm.uf} onChange={e => setNovoClienteForm(p => ({ ...p, uf: e.target.value.toUpperCase() }))} style={{ borderColor: C.cremeBorder }} />
-                </div>
-              </div>
-            </div>
-            {clienteErr && <p className="text-sm text-red-600">{clienteErr}</p>}
-            <div className="flex gap-2 pt-1">
-              <button onClick={() => { setShowNovoClienteForm(false); setClienteErr(""); setCpfExistente(null); }} className="px-4 py-2 rounded-lg text-sm border" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
-              <button onClick={handleCriarCliente} disabled={savingCliente} className="flex items-center gap-1.5 flex-1 justify-center py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ backgroundColor: C.esmeralda }}>
-                {savingCliente ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Salvar Cliente
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Modal Novo Cliente — extraído como helper (renderModalNovoCliente). */}
+      {renderModalNovoCliente()}
 
       {/* ── Modal Ficha Técnica ── */}
       {showFichaTecnica && (
