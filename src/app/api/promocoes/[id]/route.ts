@@ -25,13 +25,14 @@ async function loadCampanha(id: number) {
     situacao_manual: string;
     observacao: string | null;
     criado_por: string;
+    max_parcelas_cartao: number | null;
     criado_em: string;
     atualizado_em: string;
     situacao_efetiva: string;
   }>>`
     SELECT
       pp.id, pp.nome_campanha, pp.data_inicio, pp.data_fim,
-      pp.situacao_manual, pp.observacao, pp.criado_por,
+      pp.situacao_manual, pp.observacao, pp.max_parcelas_cartao, pp.criado_por,
       pp.criado_em, pp.atualizado_em,
       CASE
         WHEN pp.situacao_manual = 'cancelada'        THEN 'cancelada'
@@ -126,10 +127,21 @@ export async function PATCH(
     data_inicio?: string;
     data_fim?: string;
     observacao?: string | null;
+    max_parcelas_cartao?: number | null;
     itens?: { produto_id: number; preco_promo: number }[];
   };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalido" }, { status: 400 }); }
+
+  if (body.max_parcelas_cartao != null) {
+    const n = Number(body.max_parcelas_cartao);
+    if (!Number.isInteger(n) || n < 1 || n > 12) {
+      return NextResponse.json(
+        { error: "max_parcelas_cartao deve ser inteiro entre 1 e 12 (ou null para sem restricao)" },
+        { status: 400 },
+      );
+    }
+  }
 
   const novaInicio = body.data_inicio ?? camp.data_inicio;
   const novaFim    = body.data_fim    ?? camp.data_fim;
@@ -171,11 +183,12 @@ export async function PATCH(
       await tx`
         UPDATE alissonerp.promocoes_produtos
         SET
-          nome_campanha = ${body.nome_campanha ?? camp.nome_campanha},
-          data_inicio   = ${novaInicio}::date,
-          data_fim      = ${novaFim}::date,
-          observacao    = ${body.observacao !== undefined ? body.observacao : camp.observacao},
-          atualizado_em = NOW()
+          nome_campanha       = ${body.nome_campanha ?? camp.nome_campanha},
+          data_inicio         = ${novaInicio}::date,
+          data_fim            = ${novaFim}::date,
+          observacao          = ${body.observacao !== undefined ? body.observacao : camp.observacao},
+          max_parcelas_cartao = ${body.max_parcelas_cartao !== undefined ? body.max_parcelas_cartao : camp.max_parcelas_cartao},
+          atualizado_em       = NOW()
         WHERE id = ${idNum}
       `;
 

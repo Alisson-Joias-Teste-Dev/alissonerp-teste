@@ -1,8 +1,33 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/05/2026 — Versão: v2.40.1 <!-- Revisado 16/05/2026 -->
+> 📋 Última atualização automática: 16/05/2026 — Versão: v2.41.0 <!-- Revisado 16/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## feat(promocoes): Regra de máximo de parcelas no cartão por campanha
+
+Promoções de produto agora podem definir um teto de parcelas no cartão. Quando
+a venda contém produto em campanha ativa, o dropdown de parcelas fica limitado
+a esse valor. Fora da janela [data_inicio, data_fim], reverte automaticamente
+ao default (12x). Sem cron, sem trigger — a view recompõe pela data.
+
+- Migration `257_promocoes_max_parcelas.sql`: nova coluna
+  `max_parcelas_cartao` em `alissonerp.promocoes_produtos` (CHECK 1..12, NULL
+  = sem restrição). View `vw_produto_preco_vigente` recriada pra expor o
+  campo.
+- API `POST /api/promocoes` aceita `max_parcelas_cartao` no body.
+- API `PATCH /api/promocoes/[id]` aceita `max_parcelas_cartao` (só enquanto
+  campanha está agendada).
+- API `GET /api/vendas/produtos/busca` retorna `max_parcelas_promo` em cada
+  produto vigente.
+- UI `NovaPromocaoModal`: input "Máximo de parcelas no cartão (opcional)".
+- UI `PromocaoDetalheClient`: edição inline da regra (com botão Salvar)
+  enquanto a campanha está agendada.
+- UI `PagamentoForm`: aplica cap em todas as listas (Mercado Pago, demais
+  gateways, modo Múltiplas). Banner "Limitado a Nx pela promoção (nome)" no
+  campo.
+- UI `NovaVendaClientV2`: deriva `maxParcelasPromoVenda = min` dos itens
+  em promo. Reset automático de `pagCondicao` quando cap fica menor.
 
 ## fix(orcamento → venda): Comissão de aliança volta a usar faixas_comissao
 

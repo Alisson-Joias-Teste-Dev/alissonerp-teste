@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, Fragment } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, ArrowRight, Search, X, XCircle, Plus, Loader2, CheckCircle, CheckCircle2,
@@ -52,6 +52,11 @@ interface Produto {
   numeracao: string | null;
   saldo_disponivel: number;
   tem_ficha_tecnica: boolean;
+  // Promoção vigente (migration 248) + regra de pagamento (migration 257)
+  em_promocao?: boolean;
+  promocao_nome?: string | null;
+  preco_promo?: number | null;
+  max_parcelas_promo?: number | null;
 }
 
 interface FaixaComissao {
@@ -87,6 +92,10 @@ interface ItemVenda {
   valor_comissao: number;
   peso_estimado: number | null;
   saldo_disponivel: number;
+  /** Limite de parcelas no cartão imposto por promoção (migration 257). */
+  max_parcelas_promo?: number | null;
+  /** Nome da campanha — para exibir no banner de parcelas restritas. */
+  promocao_nome?: string | null;
   personalizacao?: PersonalizacaoItem;
 }
 
@@ -673,15 +682,37 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [descontoCartaoAprovadoNome, setDescontoCartaoAprovadoNome] = useState<string | null>(null);
   const cartaoBloqueado = temDescontoCartao && !descontoCartaoAprovado;
 
-  // Reset parcelas se valor muda
+  // Limite de parcelas no cartão imposto por promoção (migration 257).
+  // Se a venda tem N itens em promoção com max_parcelas diferentes, vale o
+  // mais restritivo. Se nenhum item em promo definiu cap, fica null (12x).
+  const maxParcelasPromoVenda = useMemo<number | null>(() => {
+    const caps = itens
+      .map(i => i.max_parcelas_promo)
+      .filter((v): v is number => v != null && v > 0);
+    if (caps.length === 0) return null;
+    return Math.min(...caps);
+  }, [itens]);
+  const nomesPromosNaVenda = useMemo<string[]>(() => {
+    const nomes = new Set<string>();
+    for (const i of itens) {
+      if (i.max_parcelas_promo != null && i.promocao_nome) nomes.add(i.promocao_nome);
+    }
+    return Array.from(nomes);
+  }, [itens]);
+
+  // Reset parcelas se valor ou cap mudam
   useEffect(() => {
     if (pagForma === "Múltiplas") return;
-    if (pagGateway === "Mercado Pago" && pagForma === "Cartão de Crédito") {
-      const opcoes = condicoesMp(totalVenda);
-      if (!opcoes.includes(pagCondicao)) setPagCondicao("À vista");
+    if (pagForma === "Cartão de Crédito") {
+      const base = pagGateway === "Mercado Pago" ? condicoesMp(totalVenda) : null;
+      // Cap por promoção (string como "Nx") — vira no máximo Nx no select
+      const cap = maxParcelasPromoVenda;
+      const atualN = pagCondicao === "À vista" ? 1 : parseInt(pagCondicao) || 1;
+      if (cap != null && atualN > cap) setPagCondicao(cap === 1 ? "À vista" : `${cap}x`);
+      else if (base && !base.includes(pagCondicao)) setPagCondicao("À vista");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalVenda, pagGateway, pagForma]);
+  }, [totalVenda, pagGateway, pagForma, maxParcelasPromoVenda]);
 
   useEffect(() => {
     if (pagForma === "Múltiplas") return;
@@ -909,6 +940,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       preco_unitario: precoUnit, total_item: totalItem,
       pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100,
       peso_estimado: produto.peso_precificado,
+      max_parcelas_promo: produto.em_promocao ? produto.max_parcelas_promo ?? null : null,
+      promocao_nome:      produto.em_promocao ? produto.promocao_nome ?? null : null,
       saldo_disponivel: produto.saldo_disponivel ?? 0,
     };
   }
@@ -2774,6 +2807,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                 } finally { setSaving(false); }
               }}
               solicitandoAprovacaoCartao={saving}
+              maxParcelasPromo={maxParcelasPromoVenda}
+              nomesPromosNaVenda={nomesPromosNaVenda}
             />
 
             {/* Resumo totais */}

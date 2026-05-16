@@ -31,6 +31,7 @@ const CreatePromoSchema = z.object({
   data_inicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD"),
   data_fim:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD"),
   observacao:  z.string().nullable().optional(),
+  max_parcelas_cartao: z.number().int().min(1).max(12).nullable().optional(),
   itens:       z.array(ItemSchema).min(1),
 });
 
@@ -98,10 +99,11 @@ export async function POST(req: NextRequest) {
       // 3. INSERT campanha
       const [campanha] = await tx<{ id: number }[]>`
         INSERT INTO alissonerp.promocoes_produtos
-          (nome_campanha, data_inicio, data_fim, observacao, criado_por)
+          (nome_campanha, data_inicio, data_fim, observacao, max_parcelas_cartao, criado_por)
         VALUES
           (${body.nome_campanha}, ${body.data_inicio}::date,
-           ${body.data_fim}::date, ${body.observacao ?? null}, ${user.id}::uuid)
+           ${body.data_fim}::date, ${body.observacao ?? null},
+           ${body.max_parcelas_cartao ?? null}, ${user.id}::uuid)
         RETURNING id
       `;
 
@@ -217,6 +219,7 @@ export async function GET(req: NextRequest) {
         pp.data_fim,
         pp.situacao_manual,
         pp.observacao,
+        pp.max_parcelas_cartao,
         pp.criado_por,
         pp.criado_em,
         pp.atualizado_em,

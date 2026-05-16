@@ -157,6 +157,12 @@ export interface PagamentoFormProps {
   cartaoBloqueado?: boolean;
   onSolicitarAprovacaoCartao?: () => void;
   solicitandoAprovacaoCartao?: boolean;
+
+  // Regra de promocao: limite de parcelas no cartao para vendas que contem
+  // produtos em campanha (migration 257). NULL = sem limite (default 12x).
+  maxParcelasPromo?: number | null;
+  /** Nome(s) das campanhas que impuseram o limite — exibido no aviso. */
+  nomesPromosNaVenda?: string[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -172,6 +178,12 @@ const COM_CARTAO = ["Cartão de Crédito", "Pix"];
 function condicoesMp(valor: number) {
   const max = Math.min(12, Math.floor(valor / 100));
   return CONDICOES.filter(c => c === "À vista" || parseInt(c) <= max);
+}
+/** Aplica um teto adicional na lista de parcelas (mantém "À vista"). */
+function aplicarCap(lista: string[], cap: number | null | undefined): string[] {
+  if (cap == null || cap >= 12) return lista;
+  const teto = Math.max(1, Math.floor(cap));
+  return lista.filter(c => c === "À vista" || parseInt(c) <= teto);
 }
 export function fmt(v: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
@@ -255,6 +267,8 @@ export default function PagamentoForm({
   cartaoBloqueado,
   onSolicitarAprovacaoCartao,
   solicitandoAprovacaoCartao,
+  maxParcelasPromo,
+  nomesPromosNaVenda,
 }: PagamentoFormProps) {
   const formasPagamento = FORMAS_PAGAMENTO_BASE;
   const totalMult = payments.reduce((s, p) => s + p.valor, 0);
@@ -374,8 +388,19 @@ export default function PagamentoForm({
               <div>
                 <Label>Condição de Pagamento</Label>
                 <Sel value={pagCondicao} onChange={e => setPagCondicao(e.target.value)}>
-                  {(pagGateway === "Mercado Pago" ? condicoesMp(totalVenda) : CONDICOES).map(c => <option key={c} value={c}>{c}</option>)}
+                  {aplicarCap(
+                    pagGateway === "Mercado Pago" ? condicoesMp(totalVenda) : CONDICOES,
+                    maxParcelasPromo,
+                  ).map(c => <option key={c} value={c}>{c}</option>)}
                 </Sel>
+                {maxParcelasPromo != null && maxParcelasPromo < 12 && (
+                  <p className="mt-1 text-[11px] text-amber-700">
+                    Limitado a {maxParcelasPromo}x pela promoção
+                    {nomesPromosNaVenda && nomesPromosNaVenda.length > 0
+                      ? ` (${nomesPromosNaVenda.join(", ")})`
+                      : ""}.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -580,7 +605,7 @@ export default function PagamentoForm({
                   </div>
                   {multForma === "Cartão de Crédito" && (() => {
                     const valCC = parseFloat(multValor.replace(",", ".")) || restante;
-                    const opcoesCC = condicoesMp(valCC);
+                    const opcoesCC = aplicarCap(condicoesMp(valCC), maxParcelasPromo);
                     const maxCC = opcoesCC.length > 1 ? parseInt(opcoesCC[opcoesCC.length - 1]) : 1;
                     const parcelasOk = multParcelas <= maxCC ? multParcelas : 1;
                     if (parcelasOk !== multParcelas) setMultParcelas(parcelasOk);
