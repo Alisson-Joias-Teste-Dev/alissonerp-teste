@@ -68,7 +68,7 @@ export default function OrcamentoDetalheClient({
       if (!res.ok) throw new Error(data.error ?? "Erro ao aprovar");
       setStatus("convertido");
       setMsg({ text: `Aprovado! Venda ${data.numero_venda} criada.`, type: "success" });
-      setTimeout(() => router.push(`/vendas/erp/${data.venda_id}`), 1800);
+      setTimeout(() => router.push(`/vendas/${data.venda_id}`), 1800);
     } catch (e) {
       setMsg({ text: e instanceof Error ? e.message : "Erro", type: "error" });
     } finally {
