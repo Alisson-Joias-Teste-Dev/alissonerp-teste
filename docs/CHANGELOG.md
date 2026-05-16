@@ -1,8 +1,14 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/05/2026 — Versão: v2.42.1 <!-- Revisado 16/05/2026 -->
+> 📋 Última atualização automática: 16/05/2026 — Versão: v2.42.2 <!-- Revisado 16/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(orcamento): Valida par exige ficha2 (v2.42.2)
+
+- `POST /api/orcamento` e `PUT /api/orcamento/[id]`: quando `tipo=alianca`
+  e `quantidade=2`, exige `ficha2` válida. Sem isso, retorna 422 com
+  mensagem clara em vez de salvar par incompleto.
 
 ## fix(orcamento): Peça personalizada respeita edição + sequence pra numero_venda (v2.42.1)
 

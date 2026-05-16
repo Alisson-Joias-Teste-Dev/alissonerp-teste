@@ -81,6 +81,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "nome_cliente ou cliente_id obrigatorio" }, { status: 400 });
   }
 
+  // Par de alianças exige as DUAS fichas — sem isso, ficha2 vinha como null
+  // e o orçamento salvava só um anel mesmo com quantidade=2.
+  if ((tipo ?? "alianca") === "alianca" && Number(quantidade) === 2 && (!ficha2 || typeof ficha2 !== "object")) {
+    return NextResponse.json({ error: "Par de alianças exige ficha técnica do anel 2" }, { status: 422 });
+  }
+
   // ── Validação de travas (bilateral: frontend + backend) ─────────────────
   // Para alianças, re-valida a ficha técnica contra as travas de espessura,
   // largura e capacidade de pedras usando calibracao persistida no config.
