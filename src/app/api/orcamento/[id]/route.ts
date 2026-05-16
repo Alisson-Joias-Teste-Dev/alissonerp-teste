@@ -5,12 +5,7 @@ import { isFullAccess } from "@/lib/roles";
 import { validateFichaTecnica, migrateProfile, CALIBRACAO_DEFAULTS, type CalibracaoDefaults } from "@/app/(dashboard)/orcamento/validations";
 import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
 import { ProfileType } from "@/app/(dashboard)/orcamento/types";
-
-const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "consultora"] as const;
-// Aprovar/rejeitar só pode quem aprova de fato. Sem isso, o frontend escondia o
-// botão mas a API aceitava o PATCH via cURL — consultora gerava venda em
-// rascunho em nome de outro vendedor. Espelha ROLES_APROVACAO do componente.
-const ROLES_APROVACAO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica"] as const;
+import { ROLES_ORCAMENTO, ROLES_APROVACAO, orcamentoNumericChecks } from "@/lib/orcamento-shared";
 
 // GET /api/orcamento/[id] — detalhe do orçamento
 export async function GET(
@@ -389,30 +384,11 @@ export async function PUT(
     }
   }
 
-  // Bug #10: validação de tipo/range nos campos numéricos do PUT também
-  // (espelha o POST). Defende contra clientes API externos mandando lixo.
-  const numCheck = (v: unknown, label: string, opts: { min?: number; max?: number; allowNull?: boolean } = {}): string | null => {
-    const { min = 0, max = Number.POSITIVE_INFINITY, allowNull = true } = opts;
-    if (v === null || v === undefined) return allowNull ? null : `${label} é obrigatório`;
-    const n = Number(v);
-    if (!Number.isFinite(n)) return `${label} inválido (não é número)`;
-    if (n < min) return `${label} não pode ser menor que ${min}`;
-    if (n > max) return `${label} maior que o limite (${max})`;
-    return null;
-  };
-  for (const [val, label, opts] of [
-    [peso, "peso", { max: 10000 }],
-    [valor, "valor", { max: 1_000_000_000 }],
-    [markup, "markup", { min: 0.1, max: 1000 }],
-    [desconto_pct, "desconto_pct", { max: 100 }],
-    [cotacao_ouro, "cotacao_ouro", { max: 100000 }],
-    [cotacao_dolar, "cotacao_dolar", { max: 1000 }],
-    [valor_ouro, "valor_ouro", { max: 1_000_000_000 }],
-    [valor_pedras, "valor_pedras", { max: 1_000_000_000 }],
-  ] as const) {
-    const err = numCheck(val, label, opts);
-    if (err) return NextResponse.json({ error: err }, { status: 400 });
-  }
+  // Validacao numerica (helper compartilhado — antes era copy-paste do POST).
+  const numErr = orcamentoNumericChecks({
+    peso, valor, markup, desconto_pct, cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
+  });
+  if (numErr) return NextResponse.json({ error: numErr }, { status: 400 });
   if (cliente_id != null) {
     const [existe] = await sql`SELECT 1 AS ok FROM public.contatos WHERE id_contato = ${Number(cliente_id)} LIMIT 1`;
     if (!existe) return NextResponse.json({ error: "Cliente informado não foi encontrado" }, { status: 422 });

@@ -6,8 +6,7 @@ import { Check, X, Loader2 } from "lucide-react";
 import OrcamentoClient from "../../OrcamentoClient";
 import type { CurvaConfig, CurvaCategoriaInput } from "@/lib/curva-precificacao";
 import type { ConfigOrcamento } from "@/app/(dashboard)/orcamento/types";
-
-const ROLES_APROVACAO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica"];
+import { ROLES_APROVACAO } from "@/lib/orcamento-shared";
 
 interface Props {
   orcamento: Record<string, any>;
@@ -53,7 +52,7 @@ export default function OrcamentoDetalheClient({
   const [showRejeitar, setShowRejeitar] = useState(false);
   const [msg, setMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
-  const canAprovar = ROLES_APROVACAO.includes(role) && ["rascunho", "enviado"].includes(status);
+  const canAprovar = (ROLES_APROVACAO as readonly string[]).includes(role) && ["rascunho", "enviado"].includes(status);
 
   const handleAprovar = async () => {
     setLoading("aprovar");

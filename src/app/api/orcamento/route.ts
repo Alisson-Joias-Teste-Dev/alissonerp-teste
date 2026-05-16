@@ -6,8 +6,7 @@ import { isFullAccess } from "@/lib/roles";
 import { validateFichaTecnica, migrateProfile, CALIBRACAO_DEFAULTS, type CalibracaoDefaults } from "@/app/(dashboard)/orcamento/validations";
 import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
 import { ProfileType } from "@/app/(dashboard)/orcamento/types";
-
-const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "consultora"] as const;
+import { ROLES_ORCAMENTO, orcamentoNumericChecks } from "@/lib/orcamento-shared";
 
 // GET /api/orcamento — lista orçamentos
 export async function GET(req: NextRequest) {
@@ -92,31 +91,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Bug #10: bate-pronto de tipo/range em campos numéricos. Antes, qualquer
-  // string ("abc"), negativo (-100) ou NaN ia direto pro INSERT — Postgres
-  // errava com mensagem genérica e em alguns casos gravava silenciosamente.
-  const numCheck = (v: unknown, label: string, opts: { min?: number; max?: number; allowNull?: boolean } = {}): string | null => {
-    const { min = 0, max = Number.POSITIVE_INFINITY, allowNull = true } = opts;
-    if (v === null || v === undefined) return allowNull ? null : `${label} é obrigatório`;
-    const n = Number(v);
-    if (!Number.isFinite(n)) return `${label} inválido (não é número)`;
-    if (n < min) return `${label} não pode ser menor que ${min}`;
-    if (n > max) return `${label} maior que o limite (${max})`;
-    return null;
-  };
-  for (const [val, label, opts] of [
-    [peso, "peso", { max: 10000 }],
-    [valor, "valor", { max: 1_000_000_000 }],
-    [markup, "markup", { min: 0.1, max: 1000 }],
-    [desconto_pct, "desconto_pct", { max: 100 }],
-    [cotacao_ouro, "cotacao_ouro", { max: 100000 }],
-    [cotacao_dolar, "cotacao_dolar", { max: 1000 }],
-    [valor_ouro, "valor_ouro", { max: 1_000_000_000 }],
-    [valor_pedras, "valor_pedras", { max: 1_000_000_000 }],
-  ] as const) {
-    const err = numCheck(val, label, opts);
-    if (err) return NextResponse.json({ error: err }, { status: 400 });
-  }
+  // Bate-pronto de tipo/range em campos numericos (helper compartilhado).
+  const numErr = orcamentoNumericChecks({
+    peso, valor, markup, desconto_pct, cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
+  });
+  if (numErr) return NextResponse.json({ error: numErr }, { status: 400 });
 
   // B7: trava backend de desconto_pct contra mx_desconto_permitido do
   // usuário. Antes só o frontend bloqueava — vendedora maliciosa via cURL

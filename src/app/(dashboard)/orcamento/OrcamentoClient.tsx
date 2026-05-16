@@ -229,14 +229,30 @@ export default function OrcamentoClient({
     setDirty(true);
   }, []);
 
-  const fetchOrcamentos = useCallback(async () => {
+  // Paginacao simples por "Carregar mais". API ja aceita limit/offset; antes
+  // a UI hardcodava limit=100 e ignorava offset, escondendo o resto. Para
+  // contagens grandes (loja com milhares), 50 por pagina + acumulo eh
+  // suficiente sem precisar de endpoint de count.
+  const ORC_PAGE_SIZE = 50;
+  const [orcOffset, setOrcOffset] = useState(0);
+  const [orcHasMore, setOrcHasMore] = useState(false);
+  const fetchOrcamentos = useCallback(async (mode: "replace" | "append" = "replace") => {
     setLoadingOrc(true);
-    const res = await fetch("/api/orcamento?limit=100").catch((e) => { useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao carregar orçamentos", { level: "warning" }); return null; });
+    const offset = mode === "append" ? orcOffset : 0;
+    const res = await fetch(`/api/orcamento?limit=${ORC_PAGE_SIZE}&offset=${offset}`).catch((e) => {
+      useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao carregar orçamentos", { level: "warning" });
+      return null;
+    });
     const data = res?.ok ? await res.json().catch(() => ({})) : {};
-    setOrcamentos(data.orcamentos ?? []);
+    const nova = (data.orcamentos ?? []) as Record<string, unknown>[];
+    setOrcamentos(prev => mode === "append" ? [...prev, ...nova] : nova);
+    setOrcOffset(offset + nova.length);
+    setOrcHasMore(nova.length === ORC_PAGE_SIZE);
     setLoadingOrc(false);
-  }, []);
-  useEffect(() => { fetchOrcamentos(); }, [fetchOrcamentos]);
+  }, [orcOffset]);
+  // Reseta offset ao remontar (e roda a primeira pagina).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchOrcamentos("replace"); }, []);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function aplicarOrcamento(orc: Record<string, any>, orcId: number) {
@@ -1838,7 +1854,19 @@ export default function OrcamentoClient({
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-3 border-t text-[11px] text-gray-400" style={{ borderColor: C.creme }}>{searched.length} registros</div>
+            <div className="px-4 py-3 border-t flex items-center justify-between text-[11px]" style={{ borderColor: C.creme }}>
+              <span className="text-gray-400">{searched.length} registros{orcHasMore ? " (parcial)" : ""}</span>
+              {orcHasMore && (
+                <button
+                  onClick={() => fetchOrcamentos("append")}
+                  disabled={loadingOrc}
+                  className="px-3 py-1 rounded-lg text-[11px] font-semibold border disabled:opacity-50"
+                  style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+                >
+                  {loadingOrc ? "Carregando..." : "Carregar mais"}
+                </button>
+              )}
+            </div>
           </div>
         )}
 

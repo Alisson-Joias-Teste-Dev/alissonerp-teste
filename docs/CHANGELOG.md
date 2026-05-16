@@ -1,8 +1,54 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/05/2026 — Versão: v2.42.2 <!-- Revisado 16/05/2026 -->
+> 📋 Última atualização automática: 16/05/2026 — Versão: v2.43.0 <!-- Revisado 16/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## feat(orcamento): Integridade do schema + paginação + helpers compartilhados (v2.43.0)
+
+Onda 4 de hardening do módulo orcamento, após 3 auditorias paralelas (DB,
+código, re-verificação dos fixes). Cobre lacunas estruturais que ficaram
+expostas e que não dava pra fechar só com código de aplicação.
+
+**Migration 260 (`260_orcamento_integridade.sql`)** — DDL idempotente,
+aplicada com sucesso em staging (`72.60.55.140:5543`) após backup:
+- Formaliza coluna `tipo_pedra` em `orcamento_fichas_tecnicas` (drift:
+  existia em prod sem nenhuma migration declarando).
+- Cria FK ausente em `orcamentos.vendedor_id → public.vendedores`
+  (`ON DELETE SET NULL, NOT VALID`).
+- Cria índice parcial em `vendedor_id` pra acelerar JOINs.
+- Cria UNIQUE em `numero_orcamento` (sequence protegia até hoje, mas era
+  defesa pela sorte).
+- Cria CHECK constraints em `status`, `tipo`, `quantidade` (NOT VALID — só
+  defende inserts/updates futuros, não revalida histórico).
+- Alinha `venda_numero_seq` com MAX real (estava desalinhada em 1 →
+  próxima aprovação geraria `unique_violation`, capturada pelo retry mas
+  desperdiçando uma tentativa).
+- Alinha `orcamento_seq` também (defesa).
+- GRANT USAGE,SELECT pras duas sequences pra `authenticated` (consistência
+  com migration 104).
+
+**Backup pré-migration:**
+`backups/pre-260-{timestamp}.json` (snapshot de constraints/índices/
+colunas/sequences/contagem de linhas via script Node).
+
+**Helpers compartilhados (`src/lib/orcamento-shared.ts`)** — elimina
+duplicação que ficou após as ondas 1-3:
+- `ROLES_ORCAMENTO`, `ROLES_APROVACAO`, `ORCAMENTO_STATUS` (antes em 4-6
+  arquivos diferentes — bug #1 da onda 1 nasceu de uma divergência dessa).
+- `numCheck`, `validateNumericFields`, `orcamentoNumericChecks` (antes
+  copy-paste byte-a-byte entre POST e PUT).
+- Migrados: `api/orcamento/route.ts`, `api/orcamento/[id]/route.ts`,
+  `(dashboard)/orcamento/page.tsx`, `detalhe/[id]/page.tsx`,
+  `detalhe/[id]/OrcamentoDetalheClient.tsx`.
+
+**Paginação real na listagem** — antes hardcodado `limit=100`. Agora paginação
+"Carregar mais" com `ORC_PAGE_SIZE=50`, accumulate em estado, contador
+`(parcial)` quando há mais páginas.
+
+**Migrations com numeração duplicada** (130, 202, 203, 246, 247, 248):
+**não renomeadas** propositalmente — já aplicadas em prod. Renomear quebra
+o tracker. Documentado aqui pra deploys futuros se atentarem.
 
 ## fix(orcamento): Valida par exige ficha2 (v2.42.2)
 

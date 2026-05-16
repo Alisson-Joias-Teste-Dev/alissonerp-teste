@@ -5,10 +5,9 @@ import { isFullAccess } from "@/lib/roles";
 import OrcamentoClient from "./OrcamentoClient";
 import { loadOrcamentoConfig } from "@/lib/orcamento-config";
 import { normalizeConfigRow, normalizeCategoriaRow, type CurvaConfig, type CurvaCategoriaInput } from "@/lib/curva-precificacao";
+import { ROLES_ORCAMENTO } from "@/lib/orcamento-shared";
 
 export const dynamic = "force-dynamic";
-
-const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "consultora"] as const;
 
 export default async function OrcamentoPage() {
   const supabase = await createServerSupabase();
