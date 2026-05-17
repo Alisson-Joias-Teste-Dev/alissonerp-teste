@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
       JOIN public.produtos p ON p.id_produto = v.produto_id
       WHERE v.local_estoque_id = ${local_estoque_id}
         AND p.categoria = ${cat}
-        AND v.saldo_fisico IS NOT NULL
+        AND v.saldo_fisico > 0
     `;
 
     // Também incluir produtos com config ativa da categoria escolhida
@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
         COALESCE(v.saldo_fisico, 0)::INTEGER
       FROM alissonerp.vw_saldo_estoque_comercial_v2 v
       WHERE v.local_estoque_id = ${local_estoque_id}
-        AND v.saldo_fisico IS NOT NULL
+        AND v.saldo_fisico > 0
     `;
 
     await sql`
