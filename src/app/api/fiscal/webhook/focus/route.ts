@@ -23,7 +23,42 @@ interface FocusWebhookPayload {
   numero?: number | string;
 }
 
+/**
+ * Valida secret do webhook Focus NFe.
+ *
+ * Focus NFe não oferece HMAC nativo, mas permite secret compartilhado
+ * via header `Authorization: Bearer <token>` ou query string `?token=...`.
+ *
+ * Comportamento:
+ *   - Se FOCUS_WEBHOOK_SECRET está setado em env → exige match exato
+ *   - Se não está setado → loga warn e aceita (modo legado, INSEGURO)
+ *
+ * Para fechar o webhook em prod: defina `FOCUS_WEBHOOK_SECRET` em .env.local
+ * e configure o mesmo valor no painel Focus (Dashboard > Webhooks > Secret).
+ */
+function validarFocusSecret(req: NextRequest): { ok: boolean; modo: "validated" | "insecure" } {
+  const expected = process.env.FOCUS_WEBHOOK_SECRET?.trim();
+  if (!expected) {
+    console.warn("[webhook/focus] FOCUS_WEBHOOK_SECRET nao configurado — webhook ACEITANDO sem validacao. Configure em .env.local para fechar.");
+    return { ok: true, modo: "insecure" };
+  }
+  const url = new URL(req.url);
+  const tokenQuery = url.searchParams.get("token")?.trim() ?? "";
+  const authHeader = req.headers.get("authorization") ?? "";
+  const tokenHeader = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const provided = tokenHeader || tokenQuery;
+  if (!provided || provided !== expected) {
+    return { ok: false, modo: "validated" };
+  }
+  return { ok: true, modo: "validated" };
+}
+
 export async function POST(req: NextRequest) {
+  const valid = validarFocusSecret(req);
+  if (!valid.ok) {
+    return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  }
+
   let body: FocusWebhookPayload;
   try {
     body = await req.json();

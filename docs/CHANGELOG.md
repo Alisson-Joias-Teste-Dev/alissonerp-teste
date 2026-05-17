@@ -1,8 +1,47 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.45.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.46.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): Onda 1A-3 — webhooks Focus NFe + MP HMAC + audit trail (v2.46.0)
+
+Terceira onda do hardening. Fecha 3 problemas críticos em webhooks fiscais e
+de pagamento que permitiam fraude do audit trail e bypass de assinatura.
+
+**1. Focus NFe webhook — validação de secret opt-in via env**
+`src/app/api/fiscal/webhook/focus/route.ts`: antes não validava nada (qualquer
+um podia POST `{ref, status: "autorizado"}` e marcar NFe como autorizada).
+Agora valida `process.env.FOCUS_WEBHOOK_SECRET` via header `Authorization:
+Bearer <token>` ou query `?token=...`.
+- **Sem env**: aceita mas loga warn (modo legado, não quebra prod)
+- **Com env**: exige match — 401 se token inválido
+- **Próximo passo**: configurar `FOCUS_WEBHOOK_SECRET` em `.env.local` + setar
+  no painel Focus (Dashboard > Webhooks > Secret)
+
+**2. Mercado Pago webhook — HMAC obrigatório (sem mais bypass via `live_mode=false`)**
+`src/app/api/webhooks/mercado-pago/route.ts`: antes, se HMAC falhasse, o
+fluxo continuava ("best-effort"). Pior: shortcut `live_mode === false`
+retornava 200 sem nem validar HMAC, permitindo simulação forjada por atacante.
+Agora HMAC é obrigatório quando `mp_webhook_secret` está configurado.
+- Sem secret configurado: warn + aceita (modo legado, transição)
+- Com secret + HMAC inválido: **401** mesmo em `live_mode=false`
+- Validado em prod: POST com `live_mode:false` sem HMAC → **401 "Assinatura invalida"** (antes: 200)
+
+**3. Mercado Pago `getSystemUserId` — sem mais fallback "admin mais antigo"**
+`src/app/api/webhooks/mercado-pago/route.ts`: antes, quando
+`mp_system_user_id` não estava configurado, o webhook usava `SELECT id FROM
+usuarios WHERE role IN ('desenvolvedor','admin') ORDER BY created_at ASC LIMIT
+1` — atribuindo autoria de transições financeiras a um admin aleatório que
+nunca viu a venda. Audit trail mentia.
+
+Agora a cadeia é honesta:
+1. `mp_system_user_id` (preferido)
+2. `created_by` da venda (autor original — quem iniciou)
+3. **NULL + log ERROR** → venda NÃO é concluída automaticamente
+
+Operador vê na fila e conclui manualmente quando `mp_system_user_id` for
+configurado. Melhor do que mentir.
 
 ## fix(security): Onda 1A-2 — fechar `user_metadata?.role` em 56 rotas (v2.45.0)
 
