@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
+import { authOr401 } from "@/lib/auth-server";
 
 interface ValidacaoBody {
   imagem_base64: string;
@@ -9,6 +10,10 @@ interface ValidacaoBody {
 }
 
 export async function POST(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const body = await req.json() as ValidacaoBody;
   const { imagem_base64, peso_referencia, media_type } = body;
   const tolerancia = body.tolerancia ?? 0.1;

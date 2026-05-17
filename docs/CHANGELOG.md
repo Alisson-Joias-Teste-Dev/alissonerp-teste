@@ -1,8 +1,49 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.46.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.47.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): Onda 1A-4 — fechar 17 rotas sem auth nenhuma (v2.47.0)
+
+Quarta e última onda do bloco de segurança crítica (1A). Adiciona
+`requireAuth()` em 17 endpoints que estavam totalmente abertos — qualquer
+pessoa na internet podia chamar.
+
+**Rotas fechadas:**
+
+| Rota | O que fazia (sem auth) |
+|---|---|
+| `POST /api/ia/validar-peso` | Chamava LLM (queimava quota Claude/OpenAI/Gemini) |
+| `GET/POST /api/depositos` | Listava + criava depósitos do sistema |
+| `GET/POST /api/insumos` | Listava + criava insumos (ouro, pedras) |
+| `PATCH/DELETE /api/insumos/[id]` | Editava/desativava insumo |
+| `GET/POST /api/compras` | Listava + criava compras (NF) |
+| `PATCH /api/compras/[id]/concluir` | Concluía compra → CE de estoque |
+| `GET/POST /api/compras/[id]/itens` | CRUD itens de compra |
+| `PATCH /api/compras/[id]/receber` | Marcava como recebida (`recebido_por` vinha do body!) |
+| `PATCH /api/compras/[id]/reverter-rascunho` | Revertia compra |
+| `PATCH /api/entrega/[entregaId]` | Concluía entrega de ordem |
+| `PATCH /api/auditoria/[auditoriaId]` | Aprovava/reprovava auditoria |
+| `PATCH /api/aprovacao/[aprovacaoId]` | Aprovava consultora |
+| `GET /api/dashboard/fabrica` | Saldo do pote, ouro em produção, quebra por operador |
+| `GET /api/dashboard/fabrica/movimentacoes` | Histórico de movimentações de ouro |
+| `GET /api/gestao-estoque/imagem-proxy` | Proxy de imagem (whitelist já existia, mas anônimo) |
+| `POST /api/agentes/playground` | LLM via DeepSeek (defesa em camadas: env token + auth + full access) |
+
+**Rastreabilidade:**
+- `POST /api/compras`: `created_by` agora vem da sessão (era do body).
+- `PATCH /api/compras/[id]/receber`: `recebido_por` agora vem da sessão.
+
+**Rotas com role check adicional (full access):** depósitos POST, insumos
+POST/PATCH/DELETE — operações estruturais.
+
+**Validado em prod (localhost dev → api.alisson.api.br):**
+- 10/10 endpoints sem cookie: **401** (antes: 200)
+- 4/4 endpoints autenticados como admin: **200 OK** (sem regressão)
+
+**Bloco 1A completo:** ondas 1A-1 a 1A-4 fecharam **97 endpoints** (12 críticos
++ 56 com user_metadata + 3 webhooks + 17 sem auth + 9 frontend callers).
 
 ## fix(security): Onda 1A-3 — webhooks Focus NFe + MP HMAC + audit trail (v2.46.0)
 

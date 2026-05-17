@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 type Params = Promise<{ id: string }>;
 
@@ -7,7 +8,11 @@ type Params = Promise<{ id: string }>;
 // Seta situacao='concluido' → trigger trg_concluir_compra gera CE de estoque
 //                           → trigger trg_aa_bloquear_compra seta bloqueado=true
 // Aceita situacao 'recebida' OU 'rascunho'/'pendente' (backward compat)
-export async function PATCH(_req: NextRequest, { params }: { params: Params }) {
+export async function PATCH(req: NextRequest, { params }: { params: Params }) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const { id } = await params;
   const compraId = parseInt(id);
 

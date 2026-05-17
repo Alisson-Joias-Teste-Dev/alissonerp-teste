@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createDeepSeekProvider } from '@/agentes/core/llm/deepseek';
+import { authOr401 } from '@/lib/auth-server';
+import { isFullAccess } from '@/lib/roles';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  // Defesa em camadas: token de env + sessao autenticada full-access
   const token = req.headers.get('X-Playground-Token');
   if (token !== process.env.DEV_PLAYGROUND_TOKEN) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role)) {
+    return NextResponse.json({ error: 'Sem permissão' }, { status: 403 });
   }
 
   let body: { messages?: Array<{ role: string; content: string }>; message?: string };

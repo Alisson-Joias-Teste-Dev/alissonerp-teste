@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/dashboard/fabrica?inicio=YYYY-MM-DD&fim=YYYY-MM-DD
 //
@@ -11,6 +12,10 @@ import { getParametroNumber, PARAM } from "@/lib/parametros";
 //   quebra_operadores → quebra por operador no período
 //   financeiro     → entradas/saídas ouro no almoxarifado no período + saldo atual
 export async function GET(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const params = req.nextUrl.searchParams;
 
   // Default: últimos 30 dias

@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { normalizeRow } from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/compras — lista todas as compras com JOIN locais_estoque + fornecedor
 // Query params: ?situacao=rascunho&local_id=1
 export async function GET(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const situacaoFilter = req.nextUrl.searchParams.get("situacao");
   const localIdFilter  = req.nextUrl.searchParams.get("local_id");
 
@@ -82,18 +87,20 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(normalized);
 }
 
-// POST /api/compras
-// Body: { fornecedor_id?, obs?, local_destino_id?, numero_nf?, data_compra?, created_by? }
+// POST /api/compras — created_by vem da sessao (nunca do body).
+// Body: { fornecedor_id?, obs?, local_destino_id?, numero_nf?, data_compra? }
 export async function POST(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const localEstoqueDefault = await getParametroNumber(PARAM.LOCAL_ESTOQUE_DEFAULT_ID);
-  const { fornecedor_id, obs, local_destino_id, numero_nf, data_compra, created_by } =
+  const { fornecedor_id, obs, local_destino_id, numero_nf, data_compra } =
     await req.json() as {
       fornecedor_id?: number | null;
       obs?: string | null;
       local_destino_id?: number | null;
       numero_nf?: string | null;
       data_compra?: string | null;
-      created_by?: string | null;
     };
 
   const [row] = await sql`
@@ -106,7 +113,7 @@ export async function POST(req: NextRequest) {
       ${local_destino_id ?? localEstoqueDefault},
       ${numero_nf ?? null},
       ${data_compra ?? null},
-      ${created_by ?? null}::uuid
+      ${user.id}::uuid
     )
     RETURNING *
   `;
