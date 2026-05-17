@@ -3,12 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
-import {
-  requireVendaOwnership,
-  isVendasFullAccess,
-  getUserVendedorId,
-  NotFoundError,
-} from "@/lib/auth-vendas";
+import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 
 // ─── GET /api/vendas/[id] ──────────────────────────────────────────────────────
 export async function GET(
@@ -182,16 +177,16 @@ export async function PATCH(
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
 
-  // Onda 1D: consultora so edita venda propria
-  if (!isVendasFullAccess(usuario.role)) {
-    try {
-      const userVid = await getUserVendedorId(user.id);
-      if (venda.vendedor_id == null || Number(venda.vendedor_id) !== userVid) {
-        return NextResponse.json({ error: "Sem permissão para esta venda" }, { status: 403 });
-      }
-    } catch {
-      return NextResponse.json({ error: "Usuario sem vendedor_id vinculado" }, { status: 403 });
-    }
+  // Onda 1D: consultora so edita venda propria — Onda 1G: helper unificado
+  try {
+    await requireVendaOwnership(
+      { id: user.id, role: usuario.role, email: user.email ?? "" },
+      vendaId,
+    );
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
   }
 
   const body = await req.json() as {

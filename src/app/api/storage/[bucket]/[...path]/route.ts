@@ -41,7 +41,8 @@ const BUCKETS_PRIVADOS = new Set([
 
 // Buckets que exigem full access (admin/dev/diretor) — fotos com dados financeiros sensíveis
 const BUCKETS_FULL_ACCESS = new Set<string>([
-  // por enquanto nenhum exige; pagamento-fotos é admin via UI mas qualquer logado pode ver
+  // PII financeiro: comprovante de pagamento em ouro — restrito a admin/desenvolvedor/diretor
+  "pagamento-fotos",
 ]);
 
 export async function GET(

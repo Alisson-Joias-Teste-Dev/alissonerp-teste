@@ -1,8 +1,43 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.52.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.53.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## refactor(security): onda 1G — refactors de seguranca (v2.53.0)
+
+Sétima onda do bloco de segurança. Sweep de polimento pós-QA fechando 3 pontos
+menores identificados nas revisões das ondas 1D/1E. Sem mudança funcional de
+fluxo de auth — apenas consistência interna e robustez de PII.
+
+**Refactor 1 — Ownership manual virou helper unificado:**
+- `vendas/[id]/route.ts:185-195` (PATCH): bloco manual com
+  `isVendasFullAccess` + `getUserVendedorId` + comparação de `vendedor_id`
+  foi substituído pela chamada única a `requireVendaOwnership` (mesmo padrão
+  já usado no GET do próprio arquivo e em `vendas/[id]/itens/route.ts`).
+  Quando o helper evoluir (log de tentativas, métricas, etc), o PATCH
+  acompanha automaticamente. Imports `isVendasFullAccess` e
+  `getUserVendedorId` removidos do arquivo — não eram mais usados.
+
+**Refactor 2 — `pagamento-fotos` agora exige full access:**
+- `storage/[bucket]/[...path]/route.ts:43-46`: `BUCKETS_FULL_ACCESS` ganhou
+  `pagamento-fotos`. Era um bucket privado (só usuário autenticado podia
+  ler), mas qualquer role logada conseguia baixar comprovante de pagamento
+  em ouro — dado financeiro/PII. Agora restrito a `admin`, `desenvolvedor`
+  e `diretor` (via `isFullAccess`). UI já era admin-only; o gate de
+  storage agora confirma a restrição na camada de transporte.
+
+**Refactor 3 — Catch silencioso (verificação):**
+- `vendas/[id]/itens/route.ts:248`: confirmado que o `.catch(() => {})`
+  original já havia sido convertido para `console.error` na onda 1E
+  (commit e929091). Nada a fazer aqui; mantido conforme o briefing.
+
+**Decisão sobre `useErrorStore`:**
+- Padrão recomendado pelo CLAUDE.md §3 para catches loud é
+  `useErrorStore.getState().push()`, porém é um store Zustand client-side
+  e não funciona em API routes (server-side). Para o contexto server,
+  `console.error` continua sendo o caminho correto. Documentado aqui pra
+  evitar re-discussão futura.
 
 ## fix(security): onda 1F — info disclosure em ~30 rotas restantes (v2.52.0)
 
