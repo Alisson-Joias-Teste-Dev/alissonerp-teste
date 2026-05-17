@@ -243,7 +243,7 @@ export default function InventarioDetalhePage() {
   const lidos         = leituras.length;
   const okCount       = itens.filter(i => getStatus(i) === "ok").length;
   const faltandoCount = itens.filter(i => getStatus(i) === "faltando" || getStatus(i) === "pendente").length;
-  const excessoCount  = itens.filter(i => getStatus(i) === "excesso").length;
+  const excessoCount  = itens.filter(i => getStatus(i) === "excesso").length + excedentesForaInventario.reduce((s, e) => s + e.quantidade, 0);
 
   const filtro = busca.trim().toLowerCase();
   const itensFiltrados = filtro
