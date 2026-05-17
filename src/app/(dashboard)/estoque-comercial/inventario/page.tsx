@@ -24,7 +24,7 @@ interface Inventario {
 }
 
 interface LocalEstoque { id: number; nome: string; }
-interface Categoria { categoria: string; total_produtos: number; total_estoque?: number; }
+interface Categoria { categoria: string; total_produtos: number; total_estoque?: number; tem_subcategorias?: boolean; }
 
 
 function fmtDate(d: string) {
@@ -244,7 +244,7 @@ export default function InventarioPage() {
                 <option value="">Todas as categorias</option>
                 {categorias.map(c => (
                   <option key={c.categoria} value={c.categoria}>
-                    {c.categoria} ({c.total_produtos} prod.)
+                    {c.categoria} ({c.total_produtos} prod.{c.tem_subcategorias ? " + subcategorias" : ""})
                   </option>
                 ))}
               </select>

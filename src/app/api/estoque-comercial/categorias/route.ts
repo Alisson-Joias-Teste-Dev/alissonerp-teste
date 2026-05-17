@@ -24,36 +24,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(rows);
   }
 
-  // Categorias com estoque no local OU com config ativa (mesma lógica dos snapshots)
+  // Categorias com estoque no local — inclui subcategorias na contagem do pai
   const rows = await sql`
-    WITH categorias_com_estoque AS (
+    WITH base AS (
       SELECT p.categoria,
-             COUNT(*)::int AS total_produtos,
-             COALESCE(SUM(v.saldo_fisico),0)::int AS total_estoque
+             COUNT(*)::int AS total_produtos
       FROM alissonerp.vw_saldo_estoque_comercial_v2 v
       JOIN public.produtos p ON p.id_produto = v.produto_id
       WHERE v.local_estoque_id = ${localEstoqueId}
         AND p.categoria IS NOT NULL AND p.categoria != ''
-      GROUP BY p.categoria
-    ),
-    categorias_config AS (
-      SELECT p.categoria,
-             COUNT(*)::int AS total_produtos,
-             0::int AS total_estoque
-      FROM alissonerp.estoque_comercial_config cfg
-      JOIN public.produtos p ON p.id_produto = cfg.produto_id
-      WHERE cfg.ativo = true
-        AND p.categoria IS NOT NULL AND p.categoria != ''
-        AND NOT EXISTS (
-          SELECT 1 FROM categorias_com_estoque c WHERE c.categoria = p.categoria
-        )
+        AND v.saldo_fisico > 0
       GROUP BY p.categoria
     )
-    SELECT categoria, total_produtos, total_estoque
-    FROM categorias_com_estoque
-    UNION ALL
-    SELECT categoria, total_produtos, total_estoque
-    FROM categorias_config
+    SELECT
+      categoria,
+      total_produtos,
+      -- indica se é categoria pai (tem subcategorias)
+      EXISTS (
+        SELECT 1 FROM base b2
+        WHERE b2.categoria LIKE base.categoria || ' -> %'
+      ) AS tem_subcategorias
+    FROM base
     ORDER BY categoria
   `;
 

@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
       FROM alissonerp.vw_saldo_estoque_comercial_v2 v
       JOIN public.produtos p ON p.id_produto = v.produto_id
       WHERE v.local_estoque_id = ${local_estoque_id}
-        AND p.categoria = ${cat}
+        AND (p.categoria = ${cat} OR p.categoria LIKE ${cat + ' -> %'})
         AND v.saldo_fisico > 0
     `;
 
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
       JOIN alissonerp.vw_saldo_estoque_comercial_v2 v
         ON v.produto_id = cfg.produto_id AND v.local_estoque_id = ${local_estoque_id}
       WHERE cfg.ativo = true
-        AND p.categoria = ${cat}
+        AND (p.categoria = ${cat} OR p.categoria LIKE ${cat + ' -> %'})
         AND v.saldo_fisico > 0
         AND NOT EXISTS (
           SELECT 1 FROM alissonerp.itens_inventario_comercial ii
