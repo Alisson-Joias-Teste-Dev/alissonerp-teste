@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
     UNION ALL
     SELECT categoria, total_produtos, total_estoque
     FROM categorias_config
-    ORDER BY total_estoque DESC, categoria
+    ORDER BY categoria
   `;
 
   return NextResponse.json(rows);
