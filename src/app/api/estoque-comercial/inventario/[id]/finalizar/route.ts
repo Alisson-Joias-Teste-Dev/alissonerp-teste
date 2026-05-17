@@ -62,29 +62,30 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   try {
     await sql.begin(async (tx: any) => {
-      // 1. Atualizar contagens dos itens
-      for (const c of body.contagens) {
-        await tx`
-          UPDATE alissonerp.itens_inventario_comercial
-          SET quantidade_contada = ${c.quantidade_contada},
-              diferenca = ${c.quantidade_contada} - quantidade_sistema,
-              contado_por = ${user.id}::uuid,
-              contado_em = now()
-          WHERE id = ${c.item_id} AND inventario_id = ${invId}
-        `;
-      }
+      // 1. Atualizar contagens em batch (1 query em vez de N)
+      const itemIds   = body.contagens.map(c => c.item_id);
+      const quantidades = body.contagens.map(c => c.quantidade_contada);
+      await tx`
+        UPDATE alissonerp.itens_inventario_comercial AS t
+        SET quantidade_contada = v.qtd::int,
+            diferenca          = v.qtd::int - t.quantidade_sistema,
+            contado_por        = ${user.id}::uuid,
+            contado_em         = now()
+        FROM UNNEST(${itemIds}::int[], ${quantidades}::int[]) AS v(item_id, qtd)
+        WHERE t.id = v.item_id AND t.inventario_id = ${invId}
+      `;
 
-      // 2. Registrar leituras EPC no histórico
+      // 2. Registrar leituras EPC em batch
       if (body.leituras?.length) {
         const unicos = [...new Set(body.leituras)];
-        for (const epc of unicos) {
-          await tx`
-            INSERT INTO alissonerp.joias_leituras
-              (epc, evento, localizacao, inventario_id, leitor_id, operador, lido_em)
-            VALUES
-              (${epc}, 'inventario', ${inv.local_nome}, ${invId}, ${leitorId}, ${user.id}::uuid, now())
-          `;
-        }
+        const localNome = inv.local_nome;
+        await tx`
+          INSERT INTO alissonerp.joias_leituras
+            (epc, evento, localizacao, inventario_id, leitor_id, operador, lido_em)
+          SELECT
+            v.epc, 'inventario', ${localNome}, ${invId}, ${leitorId}, ${user.id}::uuid, now()
+          FROM UNNEST(${unicos}::text[]) AS v(epc)
+        `;
       }
 
       // 3. Concluir inventário
