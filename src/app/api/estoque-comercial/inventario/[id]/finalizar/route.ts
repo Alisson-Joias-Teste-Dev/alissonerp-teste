@@ -80,9 +80,9 @@ export async function POST(req: NextRequest, { params }: Params) {
         for (const epc of unicos) {
           await tx`
             INSERT INTO alissonerp.joias_leituras
-              (epc, evento, localizacao, leitor_id, operador, lido_em)
+              (epc, evento, localizacao, inventario_id, leitor_id, operador, lido_em)
             VALUES
-              (${epc}, 'inventario', ${inv.local_nome}, ${leitorId}, ${user.id}::uuid, now())
+              (${epc}, 'inventario', ${inv.local_nome}, ${invId}, ${leitorId}, ${user.id}::uuid, now())
           `;
         }
       }

@@ -50,14 +50,11 @@ export async function GET(
       p.nome
   `;
 
-  // Filtra leituras apenas a partir da abertura deste inventário
-  // (evita mostrar leituras de inventários anteriores do mesmo local)
+  // Filtra leituras diretamente pelo inventario_id (vínculo direto, sem ambiguidade)
   const leituras = await sql`
     SELECT epc, evento, lido_em, operador::text AS operador
     FROM alissonerp.joias_leituras
-    WHERE evento = 'inventario'
-      AND localizacao = ${inventario.local_nome}
-      AND lido_em >= ${inventario.data_abertura}::timestamptz
+    WHERE inventario_id = ${invId}
     ORDER BY lido_em DESC
     LIMIT 200
   `;
