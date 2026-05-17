@@ -89,14 +89,17 @@ export async function POST(req: NextRequest) {
         AND v.saldo_fisico > 0
     `;
 
-    // Também incluir produtos com config ativa da categoria escolhida
+    // Incluir produtos com config ativa que tenham saldo > 0 (e ainda não inseridos)
     await sql`
       INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
-      SELECT ${inv.id}, cfg.produto_id, 0
+      SELECT ${inv.id}, cfg.produto_id, COALESCE(v.saldo_fisico, 0)::INTEGER
       FROM alissonerp.estoque_comercial_config cfg
       JOIN public.produtos p ON p.id_produto = cfg.produto_id
+      JOIN alissonerp.vw_saldo_estoque_comercial_v2 v
+        ON v.produto_id = cfg.produto_id AND v.local_estoque_id = ${local_estoque_id}
       WHERE cfg.ativo = true
         AND p.categoria = ${cat}
+        AND v.saldo_fisico > 0
         AND NOT EXISTS (
           SELECT 1 FROM alissonerp.itens_inventario_comercial ii
           WHERE ii.inventario_id = ${inv.id} AND ii.produto_id = cfg.produto_id
@@ -117,9 +120,12 @@ export async function POST(req: NextRequest) {
 
     await sql`
       INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
-      SELECT ${inv.id}, cfg.produto_id, 0
+      SELECT ${inv.id}, cfg.produto_id, COALESCE(v.saldo_fisico, 0)::INTEGER
       FROM alissonerp.estoque_comercial_config cfg
+      JOIN alissonerp.vw_saldo_estoque_comercial_v2 v
+        ON v.produto_id = cfg.produto_id AND v.local_estoque_id = ${local_estoque_id}
       WHERE cfg.ativo = true
+        AND v.saldo_fisico > 0
         AND NOT EXISTS (
           SELECT 1 FROM alissonerp.itens_inventario_comercial ii
           WHERE ii.inventario_id = ${inv.id} AND ii.produto_id = cfg.produto_id
