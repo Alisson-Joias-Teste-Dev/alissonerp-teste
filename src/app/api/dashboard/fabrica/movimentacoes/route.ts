@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/dashboard/fabrica/movimentacoes?inicio=YYYY-MM-DD&fim=YYYY-MM-DD&page=1&pageSize=20
 //
 // Retorna movimentações de estoque (ouro cat=1) no período, paginadas
 // JOIN: insumos (nome), depositos (nome)
 export async function GET(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const params = req.nextUrl.searchParams;
 
   const hoje = new Date();

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { internalError } from "@/lib/api-error";
 
 // GET /api/configuracoes/ia
 // Retorna configurações de IA + status de quais providers têm key configurada
@@ -95,10 +96,6 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[PATCH /api/configuracoes/ia] erro:", err);
-    return NextResponse.json(
-      { error: (err as Error).message ?? "Erro ao salvar configuração" },
-      { status: 500 }
-    );
+    return internalError("[PATCH /api/configuracoes/ia]", err, "Erro ao salvar configuração");
   }
 }

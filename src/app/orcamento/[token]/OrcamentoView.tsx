@@ -7,7 +7,7 @@ import { Loader2, Download, User, Phone, Mail, MapPin, Package, CreditCard, Cale
 interface ItemVenda {
   nome_produto: string; sku: string | null; quantidade: number;
   preco_lista: number; pct_desconto: number; preco_unitario: number;
-  total_item: number; pct_comissao: number; valor_comissao: number;
+  total_item: number;
   peso_estimado: number | null; observacao: string | null;
 }
 interface Pagamento {
@@ -25,9 +25,10 @@ interface Venda {
   vendedor_nome: string | null;
   data_venda: string; data_entrega: string | null; created_at: string;
   total_produtos: number; total_desconto: number; total_frete: number;
-  total_venda: number; total_comissao: number;
+  total_venda: number;
   forma_envio: string | null; forma_frete: string | null;
-  observacoes: string | null; observacoes_internas: string | null;
+  observacoes: string | null;
+  foto_3d: string | null;
   endereco_entrega: string | null; endereco_entrega_numero: string | null;
   endereco_entrega_complemento: string | null; endereco_entrega_bairro: string | null;
   endereco_entrega_cidade: string | null; endereco_entrega_cep: string | null;
@@ -59,14 +60,23 @@ export default function OrcamentoView({ token }: { token: string }) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch(`/api/orcamento/compartilhado?token=${token}`)
+    // Bug #25: aborta fetch + ignora setState quando o componente desmontou
+    // (token muda ou usuário sai da página antes da resposta). Sem isso o
+    // React reclamava de setState em componente desmontado.
+    const ctrl = new AbortController();
+    let alive = true;
+    fetch(`/api/orcamento/compartilhado?token=${token}`, { signal: ctrl.signal })
       .then(async r => {
         if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? `HTTP ${r.status}`);
         return r.json() as Promise<Venda>;
       })
-      .then(setVenda)
-      .catch(e => setError(e instanceof Error ? e.message : "Erro ao carregar"))
-      .finally(() => setLoading(false));
+      .then(v => { if (alive) setVenda(v); })
+      .catch(e => {
+        if (!alive || (e instanceof Error && e.name === "AbortError")) return;
+        setError(e instanceof Error ? e.message : "Erro ao carregar");
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; ctrl.abort(); };
   }, [token]);
 
   if (loading) return (
@@ -170,9 +180,15 @@ export default function OrcamentoView({ token }: { token: string }) {
             <div className="space-y-3">
               {venda.itens.map((item, idx) => (
                 <div key={idx} className="flex items-center gap-4 rounded-lg border bg-white p-3 shadow-sm">
-                  {/* Foto placeholder */}
-                  <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100">
-                    <span className="text-xs text-gray-400">Sem foto</span>
+                  {/* Foto: usa foto_3d do orçamento de origem quando existir.
+                      Bug #40: antes era hardcoded "Sem foto". */}
+                  <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100 overflow-hidden">
+                    {idx === 0 && venda.foto_3d ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={venda.foto_3d} alt={item.nome_produto} className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="text-xs text-gray-400">Sem foto</span>
+                    )}
                   </div>
                   {/* Info */}
                   <div className="flex-1 min-w-0">

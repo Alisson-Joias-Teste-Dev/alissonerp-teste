@@ -209,6 +209,7 @@ h1{font-family:Georgia,serif;color:#184036;font-size:22px;margin-bottom:4px}
 .btn-danger{background:#DC2626}
 .btn-success{background:#059669}
 .btn-gray{background:#374151}
+.btn-sm{padding:6px 12px;font-size:12px}
 select{padding:6px 12px;border-radius:8px;border:1px solid #E8DCC8;font-size:14px;background:#fff}
 table{width:100%;border-collapse:collapse;font-size:14px}
 th{text-align:left;padding:8px 6px;font-size:12px;color:#6B7280;text-transform:uppercase;border-bottom:1px solid #E8DCC8;font-weight:600}
@@ -218,6 +219,7 @@ td{padding:10px 6px;border-bottom:1px solid #F3F4F6}
 .badge-warn{background:#FEE2E2;color:#991B1B}
 .badge-exc{background:#FEF3C7;color:#92400E}
 .badge-info{background:#DBEAFE;color:#1E40AF}
+.badge-fora-cat{background:#F3E8FF;color:#6B21A8}
 .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .stat-card{background:#fff;border:1px solid #E8DCC8;border-radius:10px;padding:12px;text-align:center}
 .stat-card .num{font-size:26px;font-weight:700;color:#184036}
@@ -228,6 +230,7 @@ td{padding:10px 6px;border-bottom:1px solid #F3F4F6}
 .log-item .dot{width:8px;height:8px;border-radius:50%;background:#059669;flex-shrink:0}
 .log-item .epc{font-family:monospace;font-size:12px;color:#6B7280}
 .log-item .info{color:#9CA3AF;font-size:12px;font-style:italic}
+.checkbox-conf{width:20px;height:20px;cursor:pointer;accent-color:#059669}
 </style>
 </head>
 <body>
@@ -269,6 +272,7 @@ td{padding:10px 6px;border-bottom:1px solid #F3F4F6}
 <script>
 const API = "";
 let epcs = [], known = new Set(), scanning = false, timer = 0, timerInt = null;
+let conferidoState = {}; // { sku: true/false }
 
 async function api(path) { const r = await fetch(API + path, {cache:"no-store"}); return r.json(); }
 async function apiPost(path, body) {
@@ -287,14 +291,89 @@ apiPost("/proxy", {url:"/api/locais-estoque"}).then(d => {
   }
 }).catch(() => {});
 
-// Carrega categorias via proxy
+// Carrega categorias via proxy (com agrupamento hierarquico usando ->)
 function loadCategorias() {
   const localId = parseInt($("localSelect").value) || 2;
   apiPost("/proxy", {url:"/api/categorias", body:{local_estoque_id: localId}}).then(d => {
     if (Array.isArray(d)) {
       const sel = $("catSelect");
       const currentVal = sel.value;
-      sel.innerHTML = '<option value="">Todas</option>' + d.map(c => '<option value="'+c.categoria+'">'+c.categoria+' ('+c.total+')</option>').join("");
+
+      // Funcao auxiliar para escape de HTML (atributos entre aspas)
+      function esc(s) { return String(s).replace(/"/g,'"').replace(/'/g,'&#39;'); }
+
+      // Separa raizes (sem ->) e filhos (com ->)
+      const roots = [];
+      const children = [];
+      for (const c of d) {
+        const sep = c.categoria.indexOf(' -> ');
+        if (sep >= 0) {
+          children.push({
+            categoria: c.categoria,
+            total: c.total,
+            total_produtos: c.total_produtos,
+            parent: c.categoria.substring(0, sep),
+            childName: c.categoria.substring(sep + 4)
+          });
+        } else {
+          roots.push(c);
+        }
+      }
+
+      // Monta grupos: cada grupo tem label, root (ou null), e filhos
+      const groups = [];
+      const seenParents = new Set();
+
+      // 1. Grupos a partir de categorias raiz existentes
+      for (const r of roots) {
+        groups.push({
+          label: r.categoria,
+          root: r,
+          children: children.filter(ch => ch.parent === r.categoria)
+        });
+        seenParents.add(r.categoria);
+      }
+
+      // 2. Grupos de filhos cujo pai nao existe como raiz
+      for (const ch of children) {
+        if (!seenParents.has(ch.parent)) {
+          groups.push({
+            label: ch.parent,
+            root: null,
+            children: children.filter(c => c.parent === ch.parent)
+          });
+          seenParents.add(ch.parent);
+        }
+      }
+
+      // Ordena grupos pelo total da raiz (ou maior total dos filhos se sem raiz)
+      groups.sort((a, b) => {
+        const aTotal = a.root ? a.root.total : Math.max(0, ...a.children.map(c => c.total));
+        const bTotal = b.root ? b.root.total : Math.max(0, ...b.children.map(c => c.total));
+        return bTotal - aTotal;
+      });
+
+      // Recalcula total do pai = ele mesmo + soma de todos os filhos
+      for (const g of groups) {
+        if (g.root) {
+          const somaFilhos = g.children.reduce((s, ch) => s + ch.total, 0);
+          g.root.total = g.root.total + somaFilhos;
+        }
+      }
+
+      // Renderiza options: raiz em negrito, filhos indentados com ↳
+      let html = '<option value="">Todas</option>';
+      for (const g of groups) {
+        const childrenSorted = [...g.children].sort((a, b) => b.total - a.total);
+        if (g.root) {
+          html += '<option value="' + esc(g.root.categoria) + '" style="font-weight:700">' + esc(g.root.categoria) + ' (' + g.root.total + ')</option>';
+        }
+        for (const ch of childrenSorted) {
+          html += '<option value="' + esc(ch.categoria) + '">&nbsp;&nbsp;↳ ' + esc(ch.childName) + ' (' + ch.total + ')</option>';
+        }
+      }
+
+      sel.innerHTML = html;
       sel.value = currentVal;
     }
   }).catch(() => {});
@@ -368,9 +447,19 @@ async function sendInventory() {
     });
     if (data.error) { alert("Erro: " + data.error); return; }
     if (!data.resumo) { alert("Erro: resposta invalida do servidor"); console.error(data); return; }
+    conferidoState = {};
     showResult(data);
   } catch(e) {
     alert("Erro ao enviar: " + e.message);
+  }
+}
+
+async function toggleConferido(produtoId, sku, checked) {
+  conferidoState[sku] = checked;
+  try {
+    await apiPost("/conferir", { produto_id: produtoId, conferido: checked });
+  } catch(e) {
+    console.error("Erro ao marcar conferido:", e);
   }
 }
 
@@ -382,7 +471,11 @@ function showResult(d) {
   for (const p of d.produtos || []) {
     const cl = p.status==="ok"?"badge-ok":p.status==="faltando"?"badge-warn":p.status==="excedente"?"badge-exc":"badge-info";
     const lb = p.status==="ok"?"OK":p.status==="faltando"?"Faltando":p.status==="excedente"?"Excedente":p.status==="sem_estoque"?"Sem estoque":"Nao cadastrado";
-    rows += '<tr><td>' + (p.nome||"API #"+p.id_api_produto) + '</td><td>' + (p.sku||"-") + '</td><td>' +
+    const checked = conferidoState[p.sku] ? "checked" : "";
+    const safeSku = String(p.sku||'').replace(/"/g,'"').replace(/'/g,'&#39;');
+    rows += '<tr data-pid="' + (p.produto_id||'') + '" data-sku="' + safeSku + '">' +
+      '<td><input type="checkbox" class="checkbox-conf" ' + checked + '></td>' +
+      '<td>' + (p.nome||"API #"+p.id_api_produto) + '</td><td>' + (p.sku||"-") + '</td><td>' +
       (p.categoria||"-") + '</td><td>' +
       p.esperado + '</td><td>' + p.encontrado + '</td><td style="color:' +
       (p.divergencia===0?"#6B7280":p.divergencia<0?"#DC2626":"#F59E0B") + '">' +
@@ -406,6 +499,19 @@ function showResult(d) {
     catRows += '<tr><td>' + cat + '</td><td>' + c.produtos + '</td><td>' + c.esperado + '</td><td>' + c.encontrado + '</td><td style="color:' + (cd===0?"#6B7280":cd<0?"#DC2626":"#059669") + '">' + (cd>0?"+":"") + cd + '</td></tr>';
   }
 
+  // Seção "Fora da categoria"
+  let foraCatHtml = "";
+  const fora = d.produtos_fora_categoria || [];
+  if (fora.length > 0) {
+    let foraRows = "";
+    for (const p of fora) {
+      foraRows += '<tr><td>' + (p.nome||"API #"+p.id_api_produto) + '</td><td>' + (p.sku||"-") + '</td><td>' + (p.categoria||"-") + '</td><td>' + p.encontrado + '</td></tr>';
+    }
+    foraCatHtml = '<div class="card" style="border-color:#D8B4FE;background:#FDF4FF">' +
+      '<h2 style="margin-bottom:8px;color:#6B21A8;font-size:16px">⚠️ ' + fora.length + ' leitura(s) fora da categoria selecionada "' + (d.categoria_filtro || "") + '"</h2>' +
+      '<table><thead><tr><th>Produto</th><th>SKU</th><th>Categoria</th><th>Lido</th></tr></thead><tbody>' + foraRows + '</tbody></table></div>';
+  }
+
   $("resultArea").innerHTML =
     '<div class="card"><h2 style="margin-bottom:12px">Resultado — ' + d.local_nome + '</h2>' +
     '<div class="grid-4">' +
@@ -416,14 +522,27 @@ function showResult(d) {
     '</div>' +
     (d.nao_identificados?.length ? '<p style="margin:10px 0;font-size:12px;color:#9CA3AF">' + d.nao_identificados.length + ' EPCs nao identificados</p>' : "") +
     (catRows ? '<details style="margin:10px 0"><summary style="font-weight:600;font-size:13px;color:#184036;cursor:pointer">Resumo por Categoria (' + catMap.size + ')</summary><table style="margin-top:6px"><thead><tr><th>Categoria</th><th>Produtos</th><th>Esperado</th><th>Lido</th><th>Div.</th></tr></thead><tbody>' + catRows + '</tbody></table></details>' : "") +
-    '<table>' + (rows ? '<thead><tr><th>Produto</th><th>SKU</th><th>Categoria</th><th>Esperado</th><th>Lido</th><th>Div.</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody>' : "") + '</table>' +
+    '<table>' + (rows ? '<thead><tr><th style="width:40px">Conf.</th><th>Produto</th><th>SKU</th><th>Categoria</th><th>Esperado</th><th>Lido</th><th>Div.</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody>' : "") + '</table>' +
+    foraCatHtml +
     '<div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">' +
       '<button class="btn btn-gray" onclick="resetResult()">Refazer contagem</button>' +
       '<button id="btnSave" class="btn btn-success" onclick="saveInventory()">Salvar no Sistema</button>' +
     '</div></div>';
 }
 
-function resetResult() { $("resultArea").style.display = "none"; $("logArea").style.display = ""; $("controls").style.display = ""; epcs = []; known.clear(); renderLog(); }
+function resetResult() { $("resultArea").style.display = "none"; $("logArea").style.display = ""; $("controls").style.display = ""; epcs = []; known.clear(); conferidoState = {}; renderLog(); }
+
+// Event delegation para checkbox de conferido (evita SyntaxError com SKUs com caracteres especiais)
+document.addEventListener("change", (e) => {
+  if (e.target.classList.contains("checkbox-conf")) {
+    const tr = e.target.closest("tr");
+    if (!tr) return;
+    const pid = parseInt(tr.dataset.pid, 10);
+    const sku = tr.dataset.sku || "";
+    if (!pid) return;
+    toggleConferido(pid, sku, e.target.checked);
+  }
+});
 
 async function saveInventory() {
   const btn = $("btnSave");
@@ -650,32 +769,21 @@ function startHttpServer() {
               console.log(`[inventario] buscando SKUs no local ${localId}` + (categoriaFiltro ? ` categoria ${categoriaFiltro}` : "") + `: ${skuArr.join(",")}`);
               let query = db`SELECT v.sku, v.saldo_fisico::int FROM alissonerp.vw_saldo_estoque_comercial_v2 v WHERE v.local_estoque_id = ${localId} AND v.sku = ANY(${skuArr}::text[])`;
               if (categoriaFiltro) {
-                query = db`SELECT v.sku, v.saldo_fisico::int FROM alissonerp.vw_saldo_estoque_comercial_v2 v JOIN public.produtos p ON p.id_produto = v.produto_id WHERE v.local_estoque_id = ${localId} AND v.sku = ANY(${skuArr}::text[]) AND p.categoria = ${categoriaFiltro}`;
+                query = db`SELECT v.sku, v.saldo_fisico::int FROM alissonerp.vw_saldo_estoque_comercial_v2 v JOIN public.produtos p ON p.id_produto = v.produto_id WHERE v.local_estoque_id = ${localId} AND v.sku = ANY(${skuArr}::text[]) AND p.categoria LIKE ${categoriaFiltro + '%'}`;
               }
               const alertRows = await query;
               console.log(`[inventario] estoque encontrado no local ${localId}: ${alertRows.length}`);
               for (const r of alertRows) estoquePorSku.set(String(r.sku), Number(r.saldo_fisico ?? 0));
             }
 
-            // 5b. Fallback: busca saldo consolidado (movimentacoes_estoque_comercial) para SKUs nao encontrados no local
-            const skusSemLocal = [...skusLidos].filter(s => !estoquePorSku.has(s));
-            if (skusSemLocal.length > 0) {
-              const movRows = await db`
-                SELECT p.sku, COALESCE(SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END), 0)::int AS saldo
-                FROM public.produtos p
-                LEFT JOIN alissonerp.movimentacoes_estoque_comercial m ON m.produto_id = p.id_produto AND m.status = 'efetivado'
-                WHERE p.sku = ANY(${skusSemLocal}::text[])
-                GROUP BY p.sku
-              `;
-              for (const r of movRows) {
-                if (!estoquePorSku.has(String(r.sku))) estoquePorSku.set(String(r.sku), Number(r.saldo ?? 0));
-              }
-            }
+            // 5b. (REMOVED) Nao faz mais fallback de saldo consolidado.
+            //     Se o SKU nao tem estoque no local selecionado, fica como 0.
+            //     Isso evita que produtos de outros locais aparecam como "esperado" aqui.
 
             // 6. Busca TODOS os SKUs com estoque nesse local (para mostrar faltantes), filtrando por categoria se definido
             let todosQuery = db`SELECT v.sku, v.saldo_fisico::int FROM alissonerp.vw_saldo_estoque_comercial_v2 v WHERE v.local_estoque_id = ${localId}`;
             if (categoriaFiltro) {
-              todosQuery = db`SELECT v.sku, v.saldo_fisico::int FROM alissonerp.vw_saldo_estoque_comercial_v2 v JOIN public.produtos p ON p.id_produto = v.produto_id WHERE v.local_estoque_id = ${localId} AND p.categoria = ${categoriaFiltro}`;
+              todosQuery = db`SELECT v.sku, v.saldo_fisico::int FROM alissonerp.vw_saldo_estoque_comercial_v2 v JOIN public.produtos p ON p.id_produto = v.produto_id WHERE v.local_estoque_id = ${localId} AND p.categoria LIKE ${categoriaFiltro + '%'}`;
             }
             const todosLocal = await todosQuery;
             console.log(`[inventario] total produtos no local ${localId}` + (categoriaFiltro ? ` categoria ${categoriaFiltro}` : "") + `: ${todosLocal.length}`);
@@ -696,6 +804,7 @@ function startHttpServer() {
 
             // 7. Monta relatorio
             const produtos = [];
+            const produtosForaCategoria = []; // produtos lidos cuja categoria NAO corresponde ao filtro
             let totalEsperado = 0, totalEncontrado = 0;
             const todosSkus = new Set([...skusLidos, ...estoquePorSku.keys()]);
 
@@ -714,7 +823,16 @@ function startHttpServer() {
               totalEsperado += esperadoQty;
               totalEncontrado += encontradoQty;
 
-              produtos.push({
+              // Verifica se esta fora da categoria filtrada
+              // Regra: se categoria_filtro = "Anel", entao "Anel -> *" faz parte do grupo
+              let foraDaCategoria = false;
+              if (categoriaFiltro && g?.categoria) {
+                if (g.categoria !== categoriaFiltro && !g.categoria.startsWith(categoriaFiltro + ' -> ')) {
+                  foraDaCategoria = true;
+                }
+              }
+
+              const prodItem = {
                 produto_id: g?.id_produto ?? null,
                 id_api_produto: g?.idApi ?? null,
                 sku,
@@ -725,7 +843,13 @@ function startHttpServer() {
                 divergencia,
                 epcs: g?.epcs ?? [],
                 status,
-              });
+              };
+
+              if (foraDaCategoria) {
+                produtosForaCategoria.push(prodItem);
+              } else {
+                produtos.push(prodItem);
+              }
             }
 
             // Busca nome do local
@@ -737,6 +861,8 @@ function startHttpServer() {
               local_nome: localNome, total_epcs_unicos: leituras.length,
               nao_identificados: naoIdentificados,
               produtos,
+              produtos_fora_categoria: produtosForaCategoria,
+              categoria_filtro: categoriaFiltro,
               resumo: {
                 total_produtos: produtos.length, total_esperado: totalEsperado,
                 total_encontrado: totalEncontrado,
@@ -745,6 +871,7 @@ function startHttpServer() {
                 excedente: produtos.filter(p => p.status === "excedente").length,
                 sem_estoque: produtos.filter(p => p.status === "sem_estoque").length,
                 nao_cadastrado: 0,
+                fora_categoria: produtosForaCategoria.length,
               },
             };
 
@@ -787,13 +914,13 @@ function startHttpServer() {
               SELECT ${inv.id}, v.produto_id, COALESCE(v.saldo_fisico,0)::INTEGER
               FROM alissonerp.vw_saldo_estoque_comercial_v2 v
               JOIN public.produtos p ON p.id_produto = v.produto_id
-              WHERE v.local_estoque_id = ${localId} AND v.saldo_fisico IS NOT NULL AND p.categoria = ${cat}`;
+              WHERE v.local_estoque_id = ${localId} AND v.saldo_fisico IS NOT NULL AND p.categoria LIKE ${cat + '%'}`;
 
             await db`INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
               SELECT ${inv.id}, cfg.produto_id, 0
               FROM alissonerp.estoque_comercial_config cfg
               JOIN public.produtos p ON p.id_produto = cfg.produto_id
-              WHERE cfg.ativo = true AND p.categoria = ${cat}
+              WHERE cfg.ativo = true AND p.categoria LIKE ${cat + '%'}
                 AND NOT EXISTS (SELECT 1 FROM alissonerp.itens_inventario_comercial ii WHERE ii.inventario_id = ${inv.id} AND ii.produto_id = cfg.produto_id)`;
           } else {
             // Sem filtro de categoria
@@ -837,6 +964,37 @@ function startHttpServer() {
       return;
     }
 
+    if (path === "/conferir" && req.method === "POST" && db) {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", async () => {
+        try {
+          const msg = JSON.parse(body);
+          const { produto_id, conferido } = msg;
+          if (!lastResult) throw new Error("Nenhum inventario em andamento");
+          if (!produto_id) throw new Error("produto_id obrigatorio");
+
+          await db`
+            UPDATE alissonerp.itens_inventario_comercial ii
+            SET conferido = ${!!conferido},
+                conferido_em = CASE WHEN ${!!conferido} THEN now() ELSE NULL END
+            FROM alissonerp.inventarios_comercial inv
+            WHERE ii.inventario_id = inv.id
+              AND inv.status IN ('aberto', 'em_contagem')
+              AND ii.produto_id = ${produto_id}
+          `;
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, produto_id, conferido: !!conferido }));
+        } catch (e) {
+          console.error("[conferir] Erro:", e.message);
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
     res.writeHead(404);
     res.end();
   });
@@ -844,8 +1002,6 @@ function startHttpServer() {
   server.listen(HTTP_PORT, () => {
     console.log(`[tsl-bridge] Servidor HTTP em http://localhost:${HTTP_PORT}`);
     console.log(`[tsl-bridge] Endpoints: /health /status /command /salvar`);
-    console.log(`[tsl-bridge] Tentando conectar em ${PORT} @ ${BAUD} baud`);
-    console.log(`[tsl-bridge] TSL_PORT=COM3 npm run tsl-bridge`);
   });
 }
 

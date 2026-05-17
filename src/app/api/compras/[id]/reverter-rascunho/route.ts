@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 type Params = Promise<{ id: string }>;
 
 // PATCH /api/compras/[id]/reverter-rascunho
 // Reverte uma compra 'recebida' de volta para 'rascunho', apagando data_recebimento e recebido_por.
 // NÃO permite reverter compras concluídas/bloqueadas.
-export async function PATCH(_req: NextRequest, { params }: { params: Params }) {
+export async function PATCH(req: NextRequest, { params }: { params: Params }) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const { id } = await params;
   const compraId = parseInt(id);
   if (isNaN(compraId)) {

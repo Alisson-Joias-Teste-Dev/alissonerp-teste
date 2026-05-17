@@ -12,6 +12,7 @@ import ApontamentoPCPModal from "@/components/forms/ApontamentoPCPModal";
 import TransferenciaPCPModal from "@/components/forms/TransferenciaPCPModal";
 import SaidaOrdemModal from "@/components/forms/SaidaOrdemModal";
 import type { EventoHistorico } from "@/app/api/pcp/[id]/historico/route";
+import { getPublicUrl } from "@/lib/storage-url";
 
 const C = {
   esmeralda: "#184036",
@@ -128,14 +129,13 @@ export default function PCPDetalheModal({ pcp, onClose, onSuccess }: Props) {
         setTotais(resumoData.totais);
       }
 
-      // URLs públicas para eventos com foto_balanca (bucket apontamento-fotos público)
-      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+      // URLs via proxy autenticado (bucket apontamento-fotos é privado)
       const comFoto = lista.filter((e) => e.foto_balanca);
       if (comFoto.length > 0) {
         const urls: Record<string, string> = {};
         comFoto.forEach((e) => {
           const path = e.foto_balanca!;
-          urls[path] = `${SUPABASE_URL}/storage/v1/object/public/apontamento-fotos/${path}`;
+          urls[path] = getPublicUrl("apontamento-fotos", path);
         });
         setFotoUrls(urls);
       }

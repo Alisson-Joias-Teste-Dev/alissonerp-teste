@@ -62,4 +62,5 @@ Interprete os atalhos abaixo carregando o arquivo correspondente em `.aiox-core/
 - `@ux-design-expert`, `/ux-design-expert`, `/ux-design-expert.md` -> `.aiox-core/development/agents/ux-design-expert.md`
 - `@squad-creator`, `/squad-creator`, `/squad-creator.md` -> `.aiox-core/development/agents/squad-creator.md`
 - `@aiox-master`, `/aiox-master`, `/aiox-master.md` -> `.aiox-core/development/agents/aiox-master.md`
+- `@lia`, `/lia`, `/lia.md` -> `.aiox-core/development/agents/lia.md`
 <!-- AIOX-MANAGED-END: shortcuts -->

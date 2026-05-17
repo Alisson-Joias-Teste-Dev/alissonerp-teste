@@ -49,10 +49,11 @@ export async function GET(req: NextRequest) {
       COALESCE(est.saldo, 0) AS saldo_disponivel,
       (ftp.id IS NOT NULL) AS tem_ficha_tecnica,
       COALESCE(rfid.qtd, 0) AS rfid_disponivel,
-      -- Promocao vigente (migration 248)
+      -- Promocao vigente (migration 248) + regra de pagamento (migration 257)
       CASE WHEN vpv.em_promocao THEN vpv.preco_vigente ELSE NULL END AS preco_promo,
       COALESCE(vpv.em_promocao, false) AS em_promocao,
-      vpv.nome_campanha AS promocao_nome
+      vpv.nome_campanha AS promocao_nome,
+      CASE WHEN vpv.em_promocao THEN vpv.max_parcelas_cartao ELSE NULL END AS max_parcelas_promo
     FROM public.produtos p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
     LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
@@ -90,9 +91,10 @@ export async function GET(req: NextRequest) {
       saldo_disponivel:  Number(p.saldo_disponivel ?? 0),
       tem_ficha_tecnica: Boolean(p.tem_ficha_tecnica),
       rfid_disponivel:   Number(p.rfid_disponivel ?? 0),
-      preco_promo:       p.preco_promo       != null ? Number(p.preco_promo)       : null,
-      em_promocao:       Boolean(p.em_promocao),
-      promocao_nome:     p.promocao_nome ?? null,
+      preco_promo:        p.preco_promo        != null ? Number(p.preco_promo)        : null,
+      em_promocao:        Boolean(p.em_promocao),
+      promocao_nome:      p.promocao_nome ?? null,
+      max_parcelas_promo: p.max_parcelas_promo != null ? Number(p.max_parcelas_promo) : null,
     }))
   );
 }

@@ -107,7 +107,7 @@ export async function POST(
     const [deposito] = await sql`
       SELECT local_estoque_id FROM alissonerp.depositos WHERE id = ${operadorId}
     `;
-    const localEstoqueId = (deposito?.local_estoque_id ?? 3) as number;
+    const localEstoqueId = (deposito?.local_estoque_id ?? 1) as number;
 
     // ── 4. Upload da foto ─────────────────────────────────────────────────────
     const mediaType = extrairMediaType(fotoBase64);

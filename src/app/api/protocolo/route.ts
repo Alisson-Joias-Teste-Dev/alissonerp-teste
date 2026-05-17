@@ -98,6 +98,58 @@ export async function POST(req: NextRequest) {
   const rows = ordem_ids.map((ordem_id) => ({ protocolo_id: prot.id, ordem_id }));
   await sql`INSERT INTO alissonerp.protocolo_ordens ${sql(rows)}`;
 
+  // Criar movimentações para ordens conversao_sku
+  const ordensSku = await sql`
+    SELECT cs.id, cs.sku_origem_id, cs.sku_origem_quantidade,
+           cs.local_origem_id, cs.sku_destino_id, cs.quantidade_produzida,
+           cs.sku_destino_quantidade_desejada, cs.status_conversao, cs.ordem_id,
+           cs.reserva_id, cs.local_destino_id,
+           o.numero_ordem
+    FROM alissonerp.conversoes_sku cs
+    JOIN alissonerp.ordens o ON o.id = cs.ordem_id
+    WHERE cs.ordem_id = ANY(${ordem_ids}::int[])
+  `;
+
+  for (const cs of ordensSku) {
+    if (direcao === "ida" && cs.status_conversao === "aprovado") {
+      // Protocolo ida: SKU origem sai do local de origem
+      await sql`
+        INSERT INTO alissonerp.movimentacoes_estoque_comercial
+          (produto_id, tipo, quantidade, motivo, local_estoque_id, status,
+           ordem_id, protocolo_id, referencia_id, observacao, created_by)
+        VALUES
+          (${cs.sku_origem_id}, 'saida', ${cs.sku_origem_quantidade},
+           'conversao_sku_ida', ${cs.local_origem_id}, 'efetivado',
+           ${cs.ordem_id}, ${prot.id}, ${cs.ordem_id},
+           'Saida ' || COALESCE(${cs.numero_ordem}, '#' || ${cs.ordem_id}) || ' (prot ' || ${prot.id} || ')',
+           ${user.id}::uuid)
+      `;
+      // Efetivar a reserva (libera o saldo virtual, já que a saída real foi criada)
+      if (cs.reserva_id) {
+        await sql`
+          UPDATE alissonerp.reservas_estoque_comercial
+          SET status = 'efetivado', efetivado_em = NOW()
+          WHERE id = ${cs.reserva_id} AND status = 'ativo'
+        `;
+      }
+    } else if (direcao === "volta" && cs.status_conversao === "aguardando_volta") {
+      // Protocolo volta: SKU destino sai da fábrica/service
+      const localFabrica = tipoFinal === "service" ? 3 : 1;
+      const qtdVolta = cs.quantidade_produzida ?? cs.sku_destino_quantidade_desejada;
+      await sql`
+        INSERT INTO alissonerp.movimentacoes_estoque_comercial
+          (produto_id, tipo, quantidade, motivo, local_estoque_id, status,
+           ordem_id, protocolo_id, referencia_id, observacao, created_by)
+        VALUES
+          (${cs.sku_destino_id}, 'saida', ${qtdVolta},
+           'conversao_sku_volta', ${localFabrica}, 'efetivado',
+           ${cs.ordem_id}, ${prot.id}, ${cs.ordem_id},
+           'Retorno ' || ${cs.numero_ordem ?? '#' + cs.ordem_id} || ' (prot ' || ${prot.id} || ')',
+           ${user.id}::uuid)
+      `;
+    }
+  }
+
   await logAudit(sql, {
     tabela: "protocolos",
     operacao: "INSERT",

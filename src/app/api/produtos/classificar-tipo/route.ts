@@ -7,16 +7,15 @@
  *      Cria a tabela (se não existir) e aplica a classificação automática.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
+import { internalError } from "@/lib/api-error";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 
-async function auth(acao: "ler" | "escrever" = "ler") {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: NextResponse.json({ error: "Não autenticado" }, { status: 401 }) };
-  const role = user.user_metadata?.role as string | undefined;
-  if (!(await temAcessoModulo(role ?? "", "produtos", acao))) {
+async function auth(req: NextRequest | undefined, acao: "ler" | "escrever" = "ler") {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return { error: errRes };
+  if (!(await temAcessoModulo(user.role, "produtos", acao))) {
     return { error: NextResponse.json({ error: "Sem permissão" }, { status: 403 }) };
   }
   return { user };
@@ -52,8 +51,8 @@ function regraJoia() {
   )`;
 }
 
-export async function GET() {
-  const a = await auth("ler");
+export async function GET(req: NextRequest) {
+  const a = await auth(req, "ler");
   if ("error" in a) return a.error;
 
   const [contagem] = await sql<{ insumo: string; joia: string; semclass: string; total: string }[]>`
@@ -88,7 +87,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const a = await auth("escrever");
+  const a = await auth(req, "escrever");
   if ("error" in a) return a.error;
 
   const body = await req.json().catch(() => ({}));
@@ -144,7 +143,6 @@ export async function POST(req: NextRequest) {
       distribAtivos: distrib,
     });
   } catch (err) {
-    console.error("[POST /api/produtos/classificar-tipo]", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return internalError("[POST /api/produtos/classificar-tipo]", err);
   }
 }

@@ -3,6 +3,8 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { fetchPayment } from "@/lib/mercado-pago";
 import { concluirVenda } from "@/lib/vendas-aprovar";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /api/vendas/[id]/mercado-pago/verificar-manual
@@ -54,6 +56,15 @@ export async function POST(
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
+
+  // Onda 1D: consultora so confirma MP manual de venda propria
+  try {
+    await requireVendaOwnership({ id: user.id, role: usuario.role, email: user.email ?? "" }, vendaId);
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
   if (!["rascunho", "aprovado"].includes(venda.situacao)) {
     return NextResponse.json({ error: `Venda em situação '${venda.situacao}'` }, { status: 409 });
   }

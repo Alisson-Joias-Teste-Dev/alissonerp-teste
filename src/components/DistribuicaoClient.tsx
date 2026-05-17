@@ -9,6 +9,7 @@ import ApontamentoDistModal from "@/components/forms/ApontamentoDistModal";
 import FecharOrdemDistModal from "@/components/forms/FecharOrdemDistModal";
 import ConcluirDistModal from "@/components/forms/ConcluirDistModal";
 import { gramasToCt } from "@/lib/formatters";
+import { normalizeImageUrl } from "@/lib/storage-url";
 
 // Labels para o enum legado (distribuições antigas sem deposito_id)
 const SETOR_LABEL: Record<string, string> = {
@@ -961,7 +962,7 @@ export default function DistribuicaoClient({
                     </p>
                   </div>
                   {a.foto_balanca && (
-                    <a href={a.foto_balanca} target="_blank" rel="noreferrer"
+                    <a href={normalizeImageUrl(a.foto_balanca)} target="_blank" rel="noreferrer"
                       className="shrink-0 text-[10px] underline" style={{ color: "#9CA3AF" }}>
                       foto
                     </a>

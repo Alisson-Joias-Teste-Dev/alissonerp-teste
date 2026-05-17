@@ -613,6 +613,18 @@ export async function approveVenda(
     return { ok: true, ja_aprovada: true };
   }
 
+  // ── Bloquear aprovação se cartão foi liberado mas sem pagamento ainda ────
+  const [cartaoBlock] = await sql`
+    SELECT
+      (SELECT desconto_cartao_aprovado_por FROM alissonerp.vendas_erp WHERE id = ${vendaId}) IS NOT NULL AS cartao_ja_liberado,
+      EXISTS(SELECT 1 FROM alissonerp.itens_venda_erp WHERE venda_id = ${vendaId} AND pct_desconto > 20) AS tem_desconto_cartao,
+      EXISTS(SELECT 1 FROM alissonerp.pagamentos_venda WHERE venda_id = ${vendaId} AND status = 'confirmado') AS tem_pagamento_confirmado
+  `;
+  if (cartaoBlock?.cartao_ja_liberado && cartaoBlock?.tem_desconto_cartao && !cartaoBlock?.tem_pagamento_confirmado) {
+    console.log(`[approveVenda] SKIP venda=${vendaId}: cartão liberado pela trigger, sem pagamentos confirmados ainda`);
+    return { ok: true, ja_aprovada: true };
+  }
+
   // ── Bloquear aprovação se desconto >30% não aprovado ─────────────────────
   if (venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
     console.error(`[approveVenda] BLOQUEADO venda=${vendaId}: desconto >30% sem aprovação (desconto_aprovado_por=NULL)`);

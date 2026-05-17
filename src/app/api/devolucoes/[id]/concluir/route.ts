@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
 import { concluirDevolucao } from "@/lib/devolucoes";
+import { internalError } from "@/lib/api-error";
 
 async function getUserRole(userId: string): Promise<string | null> {
   const [row] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid`;
@@ -30,9 +31,14 @@ export async function POST(
     const res = await concluirDevolucao(devId, user.id);
     return NextResponse.json(res);
   } catch (err) {
+    // Postgres errors (code/severity) viram 500 generico — nao vazam schema.
+    // Errors de dominio (throw new Error com mensagem amigavel) continuam expostos como 400.
+    const isPgError = !!err && typeof err === "object" && ("code" in err || "severity" in err);
+    if (isPgError) {
+      return internalError(`[POST /api/devolucoes/${devId}/concluir]`, err);
+    }
     const msg = err instanceof Error ? err.message : String(err);
-    const stack = err instanceof Error ? err.stack : undefined;
-    console.error(`[concluir devolucao ${devId}]`, msg, stack);
+    console.error(`[POST /api/devolucoes/${devId}/concluir]`, err);
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }

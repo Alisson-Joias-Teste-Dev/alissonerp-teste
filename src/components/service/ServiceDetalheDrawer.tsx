@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { X, User, Scale, Flame, Gem, Clock, Image as ImageIcon } from "lucide-react";
+import { normalizeImageUrl } from "@/lib/storage-url";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -316,9 +317,9 @@ export default function ServiceDetalheDrawer({ servico, onClose }: Props) {
                             </p>
                           )}
                           {t.foto_reprovacao && (
-                            <button onClick={() => setZoomFoto(t.foto_reprovacao!)} className="mt-1">
+                            <button onClick={() => setZoomFoto(normalizeImageUrl(t.foto_reprovacao!))} className="mt-1">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={t.foto_reprovacao} alt="Foto reprovação"
+                              <img src={normalizeImageUrl(t.foto_reprovacao)} alt="Foto reprovação"
                                 className="w-14 h-14 rounded-lg object-cover border border-red-200 hover:opacity-80 transition-opacity" />
                             </button>
                           )}

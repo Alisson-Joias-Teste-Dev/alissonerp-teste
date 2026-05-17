@@ -1,0 +1,5 @@
+-keepattributes Signature
+-keepattributes *Annotation*
+-keep class br.com.alissonjoias.rfid.data.remote.dto.** { *; }
+-keep class br.com.alissonjoias.rfid.data.local.entity.** { *; }
+-dontwarn com.uk.tsl.**

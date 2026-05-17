@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { DM_Sans, JetBrains_Mono, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
+import { QueryClientProvider } from "@/components/QueryClientProvider";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -57,8 +58,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
       </head>
       <body className="antialiased">
-        {children}
-        <ServiceWorkerRegister />
+        <QueryClientProvider>
+          {children}
+          <ServiceWorkerRegister />
+        </QueryClientProvider>
       </body>
     </html>
   );

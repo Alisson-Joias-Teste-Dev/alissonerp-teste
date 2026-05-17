@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 
 const MODULOS = [
@@ -9,19 +9,20 @@ const MODULOS = [
   "auditoria","vendas","financeiro","produtos","precificacao","configuracoes",
 ] as const;
 
-async function authCheck() {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const role = user.user_metadata?.role as string | undefined;
-  if (!isFullAccess(role)) return null;
-  return user;
+async function authCheck(req?: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return { user: null, errRes };
+  if (!isFullAccess(user.role)) {
+    return { user: null, errRes: NextResponse.json({ error: "Sem permissão" }, { status: 403 }) };
+  }
+  return { user, errRes: null };
 }
 
 // GET /api/configuracoes/roles — lista todas as roles
-export async function GET() {
-  const user = await authCheck();
-  if (!user) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+export async function GET(req: NextRequest) {
+  const { user, errRes } = await authCheck(req);
+  if (errRes) return errRes;
+  void user;
 
   const roles = await sql`
     SELECT nome, descricao, ativo, criado_em
@@ -36,8 +37,9 @@ export async function GET() {
 
 // POST /api/configuracoes/roles — criar nova role
 export async function POST(req: NextRequest) {
-  const user = await authCheck();
-  if (!user) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  const { user, errRes } = await authCheck(req);
+  if (errRes) return errRes;
+  void user;
 
   const body = await req.json() as { nome?: string; descricao?: string };
   const nome = body.nome?.trim().toLowerCase();

@@ -168,6 +168,27 @@ function TabParametros({ parametros }: { parametros: Parametros }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [erro, setErro] = useState("");
+  const [comentariosAtivos, setComentariosAtivos] = useState(true);
+  const [salvandoComentarios, setSalvandoComentarios] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/configuracoes/sistema")
+      .then(r => r.json())
+      .then((d: { comentarios_ordens_ativo?: boolean }) => setComentariosAtivos(d.comentarios_ordens_ativo ?? true))
+      .catch(() => {});
+  }, []);
+
+  async function toggleComentarios() {
+    setSalvandoComentarios(true);
+    const novoValor = !comentariosAtivos;
+    await fetch("/api/configuracoes/sistema", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comentarios_ordens_ativo: novoValor }),
+    });
+    setComentariosAtivos(novoValor);
+    setSalvandoComentarios(false);
+  }
 
   async function handleSave() {
     setSaving(true); setErro(""); setSaved(false);
@@ -255,6 +276,30 @@ function TabParametros({ parametros }: { parametros: Parametros }) {
           <><Save size={15} /> Salvar Cotações</>
         )}
       </button>
+
+      {/* ── Comentários de Ordens ── */}
+      <div
+        className="flex items-center justify-between px-5 py-4 rounded-xl"
+        style={{ border: `1px solid ${P.border}`, backgroundColor: P.card }}
+      >
+        <div>
+          <p className="text-sm font-semibold" style={{ color: P.creme }}>Comentários de Ordens</p>
+          <p className="text-xs mt-0.5" style={{ color: P.muted }}>
+            {comentariosAtivos
+              ? "Ativos — colaboradores podem comentar em ordens"
+              : "Desativados — campo de comentário oculto"}
+          </p>
+        </div>
+        <button
+          onClick={toggleComentarios}
+          disabled={salvandoComentarios}
+          className="flex items-center gap-1.5 text-sm transition-opacity disabled:opacity-40"
+          style={{ color: comentariosAtivos ? P.verde : P.muted }}
+        >
+          {comentariosAtivos ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+          {comentariosAtivos ? "Ativo" : "Inativo"}
+        </button>
+      </div>
     </div>
   );
 }

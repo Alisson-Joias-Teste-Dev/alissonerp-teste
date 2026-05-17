@@ -6,23 +6,23 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { normalizeCategoriaRow } from "@/lib/curva-precificacao";
 
-async function authorize() {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: "Não autenticado", status: 401, user: null };
-  const role = user.user_metadata?.role as string | undefined;
-  if (!isFullAccess(role)) return { error: "Sem permissão", status: 403, user: null };
-  return { error: null, status: 200, user };
+async function authorize(req?: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return { error: errRes, user: null };
+  if (!isFullAccess(user.role)) {
+    return { error: NextResponse.json({ error: "Sem permissão" }, { status: 403 }), user: null };
+  }
+  return { error: null, user };
 }
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { error, status } = await authorize();
-  if (error) return NextResponse.json({ error }, { status });
+  const { error } = await authorize(req);
+  if (error) return error;
 
   const { id } = await ctx.params;
   const catId = Number(id);
@@ -63,9 +63,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   }
 }
 
-export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { error, status } = await authorize();
-  if (error) return NextResponse.json({ error }, { status });
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const { error } = await authorize(req);
+  if (error) return error;
 
   const { id } = await ctx.params;
   const catId = Number(id);

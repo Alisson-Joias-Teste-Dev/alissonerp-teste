@@ -4,10 +4,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { deleteFile } from "@/lib/storage";
+import { internalError } from "@/lib/api-error";
 
 export async function PATCH(
   req: NextRequest,
@@ -18,11 +19,9 @@ export async function PATCH(
   const imagemId = Number(imgId);
   if (!produtoId || !imagemId) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-  const role = user.user_metadata?.role as string | undefined;
-  if (!(await temAcessoModulo(role ?? "", "produtos", "escrever"))) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!(await temAcessoModulo(user.role, "produtos", "escrever"))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -52,13 +51,12 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[PATCH /produtos/[id]/imagens/[imgId]]", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return internalError("[PATCH /api/produtos/[id]/imagens/[imgId]]", err);
   }
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string; imgId: string }> }
 ) {
   const { id, imgId } = await params;
@@ -66,11 +64,9 @@ export async function DELETE(
   const imagemId = Number(imgId);
   if (!produtoId || !imagemId) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-  const role = user.user_metadata?.role as string | undefined;
-  if (!(await temAcessoModulo(role ?? "", "produtos", "escrever"))) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!(await temAcessoModulo(user.role, "produtos", "escrever"))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -103,7 +99,6 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[DELETE /produtos/[id]/imagens/[imgId]]", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return internalError("[DELETE /api/produtos/[id]/imagens/[imgId]]", err);
   }
 }

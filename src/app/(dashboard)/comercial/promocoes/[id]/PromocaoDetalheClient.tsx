@@ -24,6 +24,7 @@ interface Campanha {
   situacao_manual: string;
   situacao_efetiva: "ativa" | "agendada" | "encerrada" | "cancelada";
   observacao: string | null;
+  max_parcelas_cartao: number | null;
   itens: ItemDetalhe[];
 }
 
@@ -92,6 +93,43 @@ export default function PromocaoDetalheClient({
     load();
   }
 
+  // Edição da regra "máximo de parcelas" — só funciona enquanto a promo está
+  // 'agendada' (mesma restrição do PATCH no backend).
+  const [editandoMax, setEditandoMax] = useState(false);
+  const [maxInput, setMaxInput] = useState<string>("");
+  const [savingMax, setSavingMax] = useState(false);
+
+  function abrirEdicaoMax() {
+    setMaxInput(camp?.max_parcelas_cartao != null ? String(camp.max_parcelas_cartao) : "");
+    setEditandoMax(true);
+  }
+
+  async function salvarMax() {
+    const raw = maxInput.trim();
+    const valor = raw === "" ? null : parseInt(raw, 10);
+    if (valor != null && (!Number.isInteger(valor) || valor < 1 || valor > 12)) {
+      pushError("Máximo de parcelas deve ser entre 1 e 12 (ou vazio)");
+      return;
+    }
+    setSavingMax(true);
+    try {
+      const res = await fetch(`/api/promocoes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ max_parcelas_cartao: valor }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        pushError(body.error ?? "Erro ao salvar regra de parcelas");
+        return;
+      }
+      setEditandoMax(false);
+      load();
+    } catch (err) {
+      pushError("Falha de rede", { detail: String(err) });
+    } finally { setSavingMax(false); }
+  }
+
   if (loading) {
     return (
       <div className="p-6 min-h-screen bg-creme-50 flex items-center justify-center">
@@ -137,6 +175,55 @@ export default function PromocaoDetalheClient({
               {camp.observacao && (
                 <p className="mt-2 text-xs text-gray-600">{camp.observacao}</p>
               )}
+              {/* Regra de pagamento: máximo de parcelas no cartão */}
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-gray-500">
+                  Máx. parcelas no cartão:
+                </span>
+                {editandoMax ? (
+                  <>
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      step={1}
+                      value={maxInput}
+                      onChange={(e) => setMaxInput(e.target.value)}
+                      placeholder="sem restrição"
+                      className="w-32 px-2 py-1 text-xs border border-creme-200 rounded focus:outline-none focus:border-alisson-gold/50"
+                    />
+                    <button
+                      onClick={salvarMax}
+                      disabled={savingMax}
+                      className="px-2 py-1 text-[11px] font-semibold text-white rounded disabled:opacity-50"
+                      style={{ background: "#184036" }}
+                    >
+                      {savingMax ? "Salvando…" : "Salvar"}
+                    </button>
+                    <button
+                      onClick={() => setEditandoMax(false)}
+                      disabled={savingMax}
+                      className="px-2 py-1 text-[11px] font-semibold text-gray-600 border border-creme-200 rounded"
+                    >
+                      Cancelar
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xs font-semibold text-gray-800">
+                      {camp.max_parcelas_cartao != null ? `${camp.max_parcelas_cartao}x` : "Sem restrição (12x default)"}
+                    </span>
+                    {podeEditar && camp.situacao_efetiva === "agendada" && (
+                      <button
+                        onClick={abrirEdicaoMax}
+                        className="text-[11px] text-alisson-gold hover:underline"
+                      >
+                        editar
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
             {podeEditar && (
               <div className="flex items-center gap-2">

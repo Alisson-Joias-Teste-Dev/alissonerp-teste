@@ -6,8 +6,7 @@ import { isFullAccess } from "@/lib/roles";
 import { validateFichaTecnica, migrateProfile, CALIBRACAO_DEFAULTS, type CalibracaoDefaults } from "@/app/(dashboard)/orcamento/validations";
 import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
 import { ProfileType } from "@/app/(dashboard)/orcamento/types";
-
-const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "consultora"] as const;
+import { ROLES_ORCAMENTO, orcamentoNumericChecks } from "@/lib/orcamento-shared";
 
 // GET /api/orcamento — lista orçamentos
 export async function GET(req: NextRequest) {
@@ -63,7 +62,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
 
   const [caller] = await sql`
-    SELECT u.role, v.id_vendedor
+    SELECT u.role, u.mx_desconto_permitido, v.id_vendedor
     FROM alissonerp.usuarios u
     LEFT JOIN public.vendedores v ON v.email = u.email
     WHERE u.id = ${user.id}::uuid
@@ -82,9 +81,45 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "nome_cliente ou cliente_id obrigatorio" }, { status: 400 });
   }
 
+  // Bug #9: valida que o cliente_id realmente existe. Sem isso, qualquer ID
+  // inteiro (ex: 999999999) era aceito e gerava orçamento órfão — a FK pode
+  // não estar configurada ou estar com ON DELETE SET NULL.
+  if (cliente_id) {
+    const [existe] = await sql`SELECT 1 AS ok FROM public.contatos WHERE id_contato = ${Number(cliente_id)} LIMIT 1`;
+    if (!existe) {
+      return NextResponse.json({ error: "Cliente informado não foi encontrado" }, { status: 422 });
+    }
+  }
+
+  // Bate-pronto de tipo/range em campos numericos (helper compartilhado).
+  const numErr = orcamentoNumericChecks({
+    peso, valor, markup, desconto_pct, cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
+  });
+  if (numErr) return NextResponse.json({ error: numErr }, { status: 400 });
+
+  // B7: trava backend de desconto_pct contra mx_desconto_permitido do
+  // usuário. Antes só o frontend bloqueava — vendedora maliciosa via cURL
+  // conseguia salvar 50% mesmo tendo permissão de 15%. Admin/desenvolvedor
+  // (isFullAccess) podem ultrapassar (decisão consciente — espelha #32).
+  const callerRoleStr = (caller.role ?? "") as string;
+  const maxDescUser = Number(caller.mx_desconto_permitido ?? 0);
+  if (!isFullAccess(callerRoleStr) && desconto_pct != null) {
+    const descNum = Number(desconto_pct);
+    if (Number.isFinite(descNum) && descNum > maxDescUser) {
+      return NextResponse.json(
+        { error: `Desconto ${descNum}% excede seu limite (${maxDescUser}%). Solicite aprovação.` },
+        { status: 403 },
+      );
+    }
+  }
+
+  // Normaliza quantidade UMA vez. Sem isso, string "2" passava a validação
+  // de par mas era ignorada nos `=== 2` estritos depois (regressão v2.42.2).
+  const qtdNum = Number(quantidade);
+
   // Par de alianças exige as DUAS fichas — sem isso, ficha2 vinha como null
   // e o orçamento salvava só um anel mesmo com quantidade=2.
-  if ((tipo ?? "alianca") === "alianca" && Number(quantidade) === 2 && (!ficha2 || typeof ficha2 !== "object")) {
+  if ((tipo ?? "alianca") === "alianca" && qtdNum === 2 && (!ficha2 || typeof ficha2 !== "object")) {
     return NextResponse.json({ error: "Par de alianças exige ficha técnica do anel 2" }, { status: 422 });
   }
 
@@ -100,7 +135,7 @@ export async function POST(req: NextRequest) {
 
     const fichasParaValidar: Array<{ f: Record<string, unknown>; label: string }> = [];
     if (ficha && typeof ficha === "object") fichasParaValidar.push({ f: ficha, label: "alianca" });
-    if (ficha2 && typeof ficha2 === "object" && quantidade === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
+    if (ficha2 && typeof ficha2 === "object" && qtdNum === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
 
     for (const { f, label } of fichasParaValidar) {
       const profile = migrateProfile(String(f.perfil ?? "Simples"));
@@ -122,9 +157,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Gerar número do orçamento
+  // Gerar número do orçamento.
+  // Bug #34: padStart(7) garante ordenação alfabética correta até 9.999.999
+  // orçamentos. O `String(...)` mantém retrocompatibilidade pra orçamentos
+  // antigos (6 dígitos): "ORC-000001" continua sendo lido normalmente; só os
+  // novos nascem com "ORC-0000001".
   const [seqRow] = await sql`SELECT nextval('alissonerp.orcamento_seq') AS seq`;
-  const numero = `ORC-${String(seqRow.seq).padStart(6, "0")}`;
+  const numero = `ORC-${String(seqRow.seq).padStart(7, "0")}`;
 
   // Upload foto 3D se enviada. Path determinístico (`${numero}/3d.jpg`) +
   // cache-bust via query string. Mesmo path do PUT — sem isso, o PUT criava
@@ -175,7 +214,7 @@ export async function POST(req: NextRequest) {
 
   // Ficha técnica 2 (par de alianças)
   let ficha2Id: number | null = null;
-  if (ficha2 && typeof ficha2 === "object" && quantidade === 2) {
+  if (ficha2 && typeof ficha2 === "object" && qtdNum === 2) {
     const [fichaRow2] = await sql`
       INSERT INTO alissonerp.orcamento_fichas_tecnicas (
         modelo, aro_numeracao, largura, espessura, peso_estimado,
@@ -234,7 +273,7 @@ export async function POST(req: NextRequest) {
       ${peso ?? null}, ${valor ?? null}, ${markup ?? null},
       ${desconto_pct ?? 0}, ${cotacao_ouro ?? null},
       ${cotacao_dolar ?? null}, ${valor_ouro ?? null}, ${valor_pedras ?? null},
-      ${fichaId}, ${ficha2Id}, ${quantidade ?? 1}, ${observacoes ?? null}, ${cliente_id ?? null}, ${foto3dUrl},
+      ${fichaId}, ${ficha2Id}, ${Number.isFinite(qtdNum) && qtdNum > 0 ? qtdNum : 1}, ${observacoes ?? null}, ${cliente_id ?? null}, ${foto3dUrl},
       ${valor_negociado_locked === true}
       ${snapshotValSql}
     ) RETURNING *

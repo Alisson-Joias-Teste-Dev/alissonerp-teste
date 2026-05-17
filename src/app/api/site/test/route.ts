@@ -14,17 +14,14 @@
  * Se retornar `ok: true`, as credenciais podem sincronizar produtos.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 
 export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const role = user.user_metadata?.role as string | undefined;
-  if (!(await temAcessoModulo(role ?? "", "produtos", "escrever"))) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!(await temAcessoModulo(user.role, "produtos", "escrever"))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 

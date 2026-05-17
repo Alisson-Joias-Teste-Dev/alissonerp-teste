@@ -1,5 +1,6 @@
 import sql from "@/lib/db";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { authOr401 } from "@/lib/auth-server";
 
 interface UpdateBody {
   situacao: string;
@@ -8,9 +9,13 @@ interface UpdateBody {
 }
 
 export async function PATCH(
-  req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ auditoriaId: string }> }
 ) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const { auditoriaId } = await params;
   const id = parseInt(auditoriaId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });

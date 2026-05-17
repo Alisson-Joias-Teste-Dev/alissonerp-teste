@@ -3,8 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Package, AlertTriangle, CheckCircle, Search,
-  RefreshCw, ArrowUpCircle, ArrowDownCircle, Settings2,
-  Loader2, X, ClipboardList, ScanLine, Printer,
+  RefreshCw, Loader2, X, ClipboardList, ScanLine, Printer,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -25,18 +24,6 @@ interface ItemEstoque {
   alerta:              "ok" | "no_minimo" | "abaixo_minimo" | "zerado" | "negativo";
 }
 
-interface MovModal {
-  produtoId: number;
-  nomeProduto: string;
-  saldoAtual: number;
-  tipo: "entrada" | "saida";
-}
-
-interface LocalEstoque {
-  id: number;
-  nome: string;
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const ALERTA_STYLE: Record<string, { bg: string; text: string; label: string }> = {
   ok:            { bg: "#D1FAE5", text: "#065F46", label: "OK"            },
@@ -46,149 +33,12 @@ const ALERTA_STYLE: Record<string, { bg: string; text: string; label: string }> 
   negativo:      { bg: "#FCA5A5", text: "#7F1D1D", label: "Negativo"     },
 };
 
-const MOTIVOS_ENTRADA = [
-  { value: "producao",        label: "Produção"         },
-  { value: "devolucao",       label: "Devolução"        },
-  { value: "ajuste_entrada",  label: "Ajuste de entrada"},
-  { value: "inventario",      label: "Inventário"       },
-];
-
-const MOTIVOS_SAIDA = [
-  { value: "ajuste_saida",    label: "Ajuste de saída"  },
-  { value: "inventario",      label: "Inventário"       },
-];
-
-// ─── MovimentacaoModal ────────────────────────────────────────────────────────
-function MovimentacaoModal({
-  mov, locais, onClose, onDone,
-}: { mov: MovModal; locais: LocalEstoque[]; onClose: () => void; onDone: () => void }) {
-  const motivos = mov.tipo === "entrada" ? MOTIVOS_ENTRADA : MOTIVOS_SAIDA;
-  const [qtd,        setQtd]        = useState(1);
-  const [motivo,     setMotivo]     = useState(motivos[0].value);
-  const [localId,    setLocalId]    = useState(2); // Default: Loja
-  const [observacao, setObservacao] = useState("");
-  const [saving,     setSaving]     = useState(false);
-  const [err,        setErr]        = useState("");
-
-  async function handleSubmit() {
-    setSaving(true); setErr("");
-    try {
-      const r = await fetch("/api/estoque-comercial/movimentos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          produto_id: mov.produtoId,
-          tipo: mov.tipo,
-          quantidade: qtd,
-          motivo,
-          local_estoque_id: localId,
-          observacao: observacao || undefined,
-        }),
-      });
-      if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? "Erro");
-      onDone();
-      onClose();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Erro");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const isEntrada = mov.tipo === "entrada";
-  const accentColor = isEntrada ? "#059669" : "#DC2626";
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            {isEntrada
-              ? <ArrowUpCircle size={18} style={{ color: accentColor }} />
-              : <ArrowDownCircle size={18} style={{ color: accentColor }} />}
-            <h2 className="font-bold text-lg" style={{ color: "#184036" }}>
-              {isEntrada ? "Entrada" : "Saida"}
-            </h2>
-          </div>
-          <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
-        </div>
-
-        <p className="text-sm font-medium mb-4" style={{ color: "#374151" }}>{mov.nomeProduto}</p>
-
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-semibold mb-1 text-gray-500">Local</label>
-            <select
-              className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
-              style={{ borderColor: "#E8DCC8" }}
-              value={localId}
-              onChange={e => setLocalId(Number(e.target.value))}
-            >
-              {locais.map(l => (
-                <option key={l.id} value={l.id}>{l.nome}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
-            <input
-              type="number"
-              min={1}
-              className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
-              style={{ borderColor: "#E8DCC8" }}
-              value={qtd}
-              onChange={e => setQtd(Math.max(1, Number(e.target.value)))}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1 text-gray-500">Motivo</label>
-            <select
-              className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
-              style={{ borderColor: "#E8DCC8" }}
-              value={motivo}
-              onChange={e => setMotivo(e.target.value)}
-            >
-              {motivos.map(m => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1 text-gray-500">Observacao (opcional)</label>
-            <input
-              className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
-              style={{ borderColor: "#E8DCC8" }}
-              placeholder="..."
-              value={observacao}
-              onChange={e => setObservacao(e.target.value)}
-            />
-          </div>
-        </div>
-
-        {err && <p className="text-xs text-red-500 mt-3">{err}</p>}
-
-        <button
-          className="w-full mt-5 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
-          style={{ background: accentColor, color: "#fff" }}
-          onClick={handleSubmit}
-          disabled={saving}
-        >
-          {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-          Confirmar {isEntrada ? "Entrada" : "Saida"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function EstoqueComercialClient() {
   const router = useRouter();
-  const [items,     setItems]     = useState<ItemEstoque[]>([]);
-  const [loading,   setLoading]   = useState(true);
-  const [search,    setSearch]    = useState("");
-  const [movModal,  setMovModal]  = useState<MovModal | null>(null);
-  const [locais,    setLocais]    = useState<LocalEstoque[]>([]);
+  const [items,     setItems]   = useState<ItemEstoque[]>([]);
+  const [loading,   setLoading] = useState(true);
+  const [search,    setSearch]  = useState("");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -200,14 +50,7 @@ export default function EstoqueComercialClient() {
     }
   }, []);
 
-  const fetchLocais = useCallback(async () => {
-    try {
-      const r = await fetch("/api/locais-estoque");
-      if (r.ok) setLocais(await r.json());
-    } catch { /* ignore */ }
-  }, []);
-
-  useEffect(() => { fetchData(); fetchLocais(); }, [fetchData, fetchLocais]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const filtered = items.filter(i =>
     !search ||
@@ -259,7 +102,7 @@ export default function EstoqueComercialClient() {
           >
             <ClipboardList size={15} />
             <span className="hidden sm:inline">Inventario</span>
-          </button>
+           </button>
           <button
             onClick={fetchData}
             className="p-2 rounded-xl hover:bg-gray-100 transition-colors"
@@ -334,7 +177,6 @@ export default function EstoqueComercialClient() {
                 <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#059669" }}>Disponivel</th>
                 <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Minimo</th>
                 <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Status</th>
-                <th className="text-right px-4 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Acoes</th>
               </tr>
             </thead>
             <tbody>
@@ -388,42 +230,6 @@ export default function EstoqueComercialClient() {
                         {style.label}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          title="Entrada"
-                          className="p-1.5 rounded-lg hover:bg-green-50 transition-colors"
-                          onClick={() => setMovModal({
-                            produtoId: item.produto_id,
-                            nomeProduto: item.nome_produto,
-                            saldoAtual: item.disponivel,
-                            tipo: "entrada",
-                          })}
-                        >
-                          <ArrowUpCircle size={16} style={{ color: "#059669" }} />
-                        </button>
-                        <button
-                          title="Saida"
-                          className="p-1.5 rounded-lg hover:bg-red-50 transition-colors"
-                          onClick={() => setMovModal({
-                            produtoId: item.produto_id,
-                            nomeProduto: item.nome_produto,
-                            saldoAtual: item.disponivel,
-                            tipo: "saida",
-                          })}
-                          disabled={item.disponivel <= 0}
-                        >
-                          <ArrowDownCircle size={16} style={{ color: item.disponivel <= 0 ? "#D1D5DB" : "#DC2626" }} />
-                        </button>
-                        <button
-                          title="Configurar"
-                          className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-                          onClick={() => router.push(`/estoque-comercial/${item.produto_id}`)}
-                        >
-                          <Settings2 size={16} className="text-gray-400" />
-                        </button>
-                      </div>
-                    </td>
                   </tr>
                 );
               })}
@@ -432,15 +238,6 @@ export default function EstoqueComercialClient() {
         </div>
       )}
 
-      {/* Modals */}
-      {movModal && (
-        <MovimentacaoModal
-          mov={movModal}
-          locais={locais}
-          onClose={() => setMovModal(null)}
-          onDone={fetchData}
-        />
-      )}
     </div>
   );
 }

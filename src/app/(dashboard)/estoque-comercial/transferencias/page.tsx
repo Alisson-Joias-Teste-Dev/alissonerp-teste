@@ -12,6 +12,7 @@ interface Transferencia {
   produto_id: number;
   quantidade: number;
   status: string;
+  ordem_solicitacao: string;
   obs: string | null;
   local_origem_id: number;
   local_origem_nome: string;
@@ -52,6 +53,7 @@ function NovaTransferenciaModal({
   const [qtd,      setQtd]      = useState(1);
   const [origem,   setOrigem]   = useState(locais[0]?.id ?? 1);
   const [destino,  setDestino]  = useState(locais[1]?.id ?? 2);
+  const [ordemSol, setOrdemSol] = useState("");
   const [obs,      setObs]      = useState("");
   const [saving,   setSaving]   = useState(false);
   const [err,      setErr]      = useState("");
@@ -71,6 +73,7 @@ function NovaTransferenciaModal({
   async function handleSubmit() {
     if (!selected) return;
     if (origem === destino) { setErr("Origem e destino devem ser diferentes"); return; }
+    if (!ordemSol.trim()) { setErr("Ordem de solicitação é obrigatória"); return; }
     setSaving(true); setErr("");
     try {
       const r = await fetch("/api/estoque-comercial/transferir", {
@@ -81,6 +84,7 @@ function NovaTransferenciaModal({
           quantidade: qtd,
           local_origem_id: origem,
           local_destino_id: destino,
+          ordem_solicitacao: ordemSol.trim(),
           obs: obs || undefined,
         }),
       });
@@ -155,6 +159,15 @@ function NovaTransferenciaModal({
                   {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
                 </select>
               </div>
+            </div>
+            <div className="mb-3">
+              <label className="block text-xs font-semibold mb-1 text-gray-500">Ordem de solicitacao <span className="text-red-400">*</span></label>
+              <input
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                style={{ borderColor: "#E8DCC8" }}
+                placeholder="Ex: SOL-2026-00123"
+                value={ordemSol} onChange={e => setOrdemSol(e.target.value)}
+              />
             </div>
             <div className="mb-3">
               <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
@@ -299,6 +312,9 @@ export default function TransferenciasPage() {
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {t.local_origem_nome} &rarr; {t.local_destino_nome}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Ordem: {t.ordem_solicitacao}
                   </p>
                   {t.obs && <p className="text-xs text-gray-400 mt-0.5">{t.obs}</p>}
                   <p className="text-xs text-gray-300 mt-0.5">

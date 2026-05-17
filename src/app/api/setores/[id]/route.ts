@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { internalError } from "@/lib/api-error";
 
 // PATCH /api/setores/[id] — editar nome, deposito_id, ativo, requer_peso, ordem
 // Body: { nome?: string, deposito_id?: number | null, ativo?: boolean, requer_peso?: boolean, ordem?: number }
@@ -37,7 +38,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return internalError("[PATCH /api/setores/[id]]", err);
   }
 }
 
@@ -48,6 +49,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     await sql`UPDATE alissonerp.setores SET ativo = false, updated_at = NOW() WHERE id = ${parseInt(id)}`;
     return NextResponse.json({ ok: true });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return internalError("[DELETE /api/setores/[id]]", err);
   }
 }

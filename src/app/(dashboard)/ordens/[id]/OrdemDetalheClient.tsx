@@ -9,6 +9,7 @@ import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
 import FichaTecnicaForm, { TIPOS_ITEM, type TipoItem, type FichaTecnicaDados, validarFichaTecnica } from "@/components/ordens/FichaTecnicaForm";
 import { Pencil, X, Save, Loader2, AlertCircle, Ban } from "lucide-react";
 import { formatDateBR } from "@/lib/formatters";
+import { getPublicUrl } from "@/lib/storage-url";
 
 const C = {
   esmeralda: "#184036",
@@ -121,10 +122,9 @@ function PecaClienteCard({ fotoPeca, fotoPeca2, pesoPeca, videoObs }: {
   pesoPeca: number | null;
   videoObs: string | null;
 }) {
-  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-
+  // getPublicUrl roteia bucket privado pelo proxy /api/storage/[bucket]/[...path]
   const toUrl = (path: string | null, bucket: string) =>
-    path ? (path.startsWith("http") ? path : `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`) : null;
+    path ? getPublicUrl(bucket, path) : null;
 
   const fotoUrl  = toUrl(fotoPeca,  "ordem-fotos");
   const fotoUrl2 = toUrl(fotoPeca2, "ordem-fotos");
@@ -203,6 +203,7 @@ interface Props {
   fichaTecnica: any | null;
   timeline: any[];
   userRole: string | null;
+  conversaoSku?: any | null;
 }
 
 // Roles "operacionais" — colaboradores de execução que só precisam ver a

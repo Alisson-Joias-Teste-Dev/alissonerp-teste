@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { internalError } from "@/lib/api-error";
 
 // GET /api/setores?deposito_id=X — lista setores (filtro opcional por depósito)
 export async function GET(req: NextRequest) {
@@ -54,6 +55,6 @@ export async function POST(req: NextRequest) {
     `;
     return NextResponse.json({ id: rows[0].id }, { status: 201 });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return internalError("[POST /api/setores]", err);
   }
 }

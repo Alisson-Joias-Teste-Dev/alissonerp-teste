@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle, XCircle, Loader2, RefreshCw, Clock, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
@@ -37,29 +38,20 @@ function timeAgo(iso: string) {
 
 export default function AutorizacoesClient() {
   const [tab, setTab] = useState<"pendente" | "aprovado" | "rejeitado">("pendente");
-  const [rows, setRows] = useState<Solicitacao[]>([]);
-  const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<number | null>(null);
   const [err, setErr] = useState("");
+  const queryClient = useQueryClient();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
+  const { data: rows = [], isLoading: loading } = useQuery({
+    queryKey: ["solicitacoes-desconto", tab],
+    queryFn: async () => {
       const res = await fetch(`/api/vendas/solicitacoes-desconto?status=${tab}`);
-      if (res.ok) setRows(await res.json());
-    } finally {
-      setLoading(false);
-    }
-  }, [tab]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  // Auto-refresh a cada 10s quando na aba pendente
-  useEffect(() => {
-    if (tab !== "pendente") return;
-    const t = setInterval(() => void load(), 10_000);
-    return () => clearInterval(t);
-  }, [tab, load]);
+      if (!res.ok) return [] as Solicitacao[];
+      return res.json() as Promise<Solicitacao[]>;
+    },
+    refetchInterval: tab === "pendente" ? 10_000 : false,
+    staleTime: 5_000,
+  });
 
   async function handleAction(id: number, status: "aprovado" | "rejeitado") {
     setActing(id);
@@ -74,7 +66,7 @@ export default function AutorizacoesClient() {
         const d = await res.json();
         setErr(d.error ?? "Erro ao processar");
       } else {
-        setRows(prev => prev.filter(r => r.id !== id));
+        queryClient.invalidateQueries({ queryKey: ["solicitacoes-desconto"] });
       }
     } catch {
       setErr("Erro de conexão");
@@ -110,7 +102,7 @@ export default function AutorizacoesClient() {
             Solicitações de desconto acima de 30% enviadas pela equipe de vendas
           </p>
         </div>
-        <button onClick={() => void load()} disabled={loading}
+        <button onClick={() => queryClient.invalidateQueries({ queryKey: ["solicitacoes-desconto"] })} disabled={loading}
           className="ml-auto text-gray-400 hover:text-gray-600 disabled:opacity-40 transition-colors">
           <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
         </button>

@@ -14,6 +14,7 @@
  *  - cache 1 dia (imagens de produto raramente mudam)
  */
 import { NextRequest, NextResponse } from "next/server";
+import { authOr401 } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 15;
@@ -33,6 +34,10 @@ function hostPermitido(url: URL): boolean {
 }
 
 export async function GET(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const { searchParams } = new URL(req.url);
   const targetUrl = searchParams.get("url");
   if (!targetUrl) {

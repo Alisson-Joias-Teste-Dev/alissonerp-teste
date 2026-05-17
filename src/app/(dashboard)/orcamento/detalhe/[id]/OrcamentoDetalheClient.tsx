@@ -6,8 +6,7 @@ import { Check, X, Loader2 } from "lucide-react";
 import OrcamentoClient from "../../OrcamentoClient";
 import type { CurvaConfig, CurvaCategoriaInput } from "@/lib/curva-precificacao";
 import type { ConfigOrcamento } from "@/app/(dashboard)/orcamento/types";
-
-const ROLES_APROVACAO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica"];
+import { ROLES_APROVACAO } from "@/lib/orcamento-shared";
 
 interface Props {
   orcamento: Record<string, any>;
@@ -53,7 +52,7 @@ export default function OrcamentoDetalheClient({
   const [showRejeitar, setShowRejeitar] = useState(false);
   const [msg, setMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
-  const canAprovar = ROLES_APROVACAO.includes(role) && ["rascunho", "enviado"].includes(status);
+  const canAprovar = (ROLES_APROVACAO as readonly string[]).includes(role) && ["rascunho", "enviado"].includes(status);
 
   const handleAprovar = async () => {
     setLoading("aprovar");
@@ -68,7 +67,7 @@ export default function OrcamentoDetalheClient({
       if (!res.ok) throw new Error(data.error ?? "Erro ao aprovar");
       setStatus("convertido");
       setMsg({ text: `Aprovado! Venda ${data.numero_venda} criada.`, type: "success" });
-      setTimeout(() => router.push(`/vendas/erp/${data.venda_id}`), 1800);
+      setTimeout(() => router.push(`/vendas/${data.venda_id}`), 1800);
     } catch (e) {
       setMsg({ text: e instanceof Error ? e.message : "Erro", type: "error" });
     } finally {
@@ -96,15 +95,12 @@ export default function OrcamentoDetalheClient({
     }
   };
 
-  // Compartilhar só faz sentido depois que o orçamento vira venda
-  // (o link público hoje é o da venda, não do orçamento em si).
-  // Enquanto status != 'convertido', escondemos o botão.
-  const podeCompartilhar = status === "convertido" && !!orcamento.venda_gerada_id;
-  const handleShare = podeCompartilhar ? () => {
-    // TODO Onda 3: buscar token público da venda gerada e abrir /vendas/compartilhada/{token}.
-    // Por ora apenas avisa o usuário pra ele saber que o caminho existe.
-    alert("Compartilhar via venda gerada ainda em construção.");
-  } : undefined;
+  // Compartilhar: feature ainda não implementada. Antes mostrava o botão e
+  // abria `alert("em construção")` — frustrava o usuário. Escondido até que
+  // o fluxo real (gerar link público + abrir /vendas/compartilhada/{token})
+  // esteja pronto. `onShare` undefined faz o componente filho não renderizar
+  // o botão.
+  const handleShare: (() => void) | undefined = undefined;
 
   const extraActions = (
     <>

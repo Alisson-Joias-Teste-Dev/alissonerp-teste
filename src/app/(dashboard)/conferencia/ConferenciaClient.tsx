@@ -3,6 +3,7 @@
 import { useState, useCallback, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { normalizeImageUrl } from "@/lib/storage-url";
 import {
   CheckCircle2,
   XCircle,
@@ -149,7 +150,7 @@ function FotoOuPlaceholder({ src, label }: { src: string | null; label: string }
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={src}
+      src={normalizeImageUrl(src)}
       alt={label}
       className="w-full aspect-square rounded-xl object-cover border"
       style={{ borderColor: C.cremeBorder }}

@@ -1,11 +1,31 @@
 "use client";
 
 import React, { useMemo, useRef, useEffect, useCallback } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera, ContactShadows, Text } from "@react-three/drei";
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { ProfileType } from "./types";
 import type { RingParams, GrooveType } from "./types";
+
+// Environment local — gera PMREM a partir do RoomEnvironment do Three.js (sem
+// dependência de CDN). Sem isso, material com metalness=1 + roughness=0 fica
+// preto porque não tem nada para refletir.
+function StudioEnv() {
+  const { gl, scene } = useThree();
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const previous = scene.environment;
+    scene.environment = envTex;
+    return () => {
+      scene.environment = previous;
+      envTex.dispose();
+      pmrem.dispose();
+    };
+  }, [gl, scene]);
+  return null;
+}
 
 // ── Groove helpers ──────────────────────────────────────────────────────────
 
@@ -636,12 +656,12 @@ function EngravingText({
 function AliancaViewportInner({
   params,
   profile,
-  cameraDistance,
   onMeshReady,
 }: {
   params: RingParams;
   profile: ProfileType;
-  cameraDistance: number;
+  // Bug #35: `cameraDistance` removida — era prop morta (a câmera usa posição
+  // fixa [0,-35,35] e OrbitControls clampa entre 10..60). Mantinha math inútil.
   onMeshReady?: (mesh: THREE.Mesh | null) => void;
 }) {
   const handleMesh = useCallback((m: THREE.Mesh | null) => {
@@ -673,10 +693,11 @@ function AliancaViewportInner({
       >
         <PerspectiveCamera makeDefault position={[0, -35, 35]} fov={35} />
         <color attach="background" args={["#f1f5f9"]} />
-        <ambientLight intensity={0.7} />
-        <hemisphereLight intensity={0.5} color="#ffffff" groundColor="#cbd5e1" />
-        <spotLight position={[30, 40, 20]} angle={0.25} penumbra={1} intensity={3} />
-        <spotLight position={[-30, 20, 10]} angle={0.3} penumbra={1} intensity={2} color="#ffffff" />
+        <StudioEnv />
+        <ambientLight intensity={0.4} />
+        <hemisphereLight intensity={0.3} color="#ffffff" groundColor="#cbd5e1" />
+        <spotLight position={[30, 40, 20]} angle={0.25} penumbra={1} intensity={2.5} />
+        <spotLight position={[-30, 20, 10]} angle={0.3} penumbra={1} intensity={1.5} color="#ffffff" />
         <Ring params={params} profileType={profile} onSetMesh={handleMesh} />
         {/* Pedras 3D desabilitadas — renderização simplificada */}
         {params.textEnabled && params.textContent.trim() && (

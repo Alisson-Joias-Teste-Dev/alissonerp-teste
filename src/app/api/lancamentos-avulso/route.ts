@@ -1,12 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 // POST /api/lancamentos-avulso
-// Body: { tipo_lancamento, insumo_id, peso, deposito_id?, deposito_destino_id?, obs?, created_by? }
+// Body: { tipo_lancamento, insumo_id, peso, deposito_id?, deposito_destino_id?, obs?, local_estoque_id? }
 // Trigger trg_lancamento_avulso executa automaticamente ao INSERT.
+// `created_by` vem da sessão autenticada — NUNCA do body (rastreabilidade de ouro).
 export async function POST(req: NextRequest) {
-  const { tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, obs, created_by, local_estoque_id } =
+  let user;
+  try {
+    user = await requireAuth(req);
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
+
+  const { tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, obs, local_estoque_id } =
     await req.json() as {
       tipo_lancamento: string;
       insumo_id: number;
@@ -14,7 +26,6 @@ export async function POST(req: NextRequest) {
       deposito_destino_id?: number | null;
       peso: number;
       obs?: string | null;
-      created_by?: string | null;
       local_estoque_id?: number | null;
     };
 
@@ -42,7 +53,7 @@ export async function POST(req: NextRequest) {
       ${deposito_destino_id ?? null},
       ${peso},
       ${obs ?? null},
-      ${created_by ?? null}::uuid,
+      ${user.id}::uuid,
       ${local_estoque_id ?? localEstoqueDefault}
     )
     RETURNING id

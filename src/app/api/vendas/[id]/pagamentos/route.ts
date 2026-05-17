@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+
+async function checkOwnership(userId: string, vendaId: number) {
+  const [u] = await sql<{ role: string }[]>`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid LIMIT 1
+  `;
+  if (!u) throw new ForbiddenError("Usuario nao encontrado");
+  await requireVendaOwnership({ id: userId, role: u.role, email: "" }, vendaId);
+}
 
 // ─── GET /api/vendas/[id]/pagamentos ───────────────────────────────────────────
 export async function GET(
@@ -14,6 +24,14 @@ export async function GET(
   const { id } = await params;
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
+  // Onda 1D: bloqueia consultora de ler pagamentos de venda alheia
+  try { await checkOwnership(user.id, vendaId); }
+  catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   const pagamentos = await sql`
     SELECT id, venda_id, forma, gateway, valor, parcelas,
@@ -44,15 +62,24 @@ export async function POST(
 
   const [venda] = await sql`
     SELECT v.id, v.bloqueado, v.situacao,
-           v.desconto_aprovado_por,
-           EXISTS(
-             SELECT 1 FROM alissonerp.itens_venda_erp
-             WHERE venda_id = ${vendaId} AND pct_desconto > 30
-           ) AS tem_desconto_alto
+    v.desconto_aprovado_por,
+    v.desconto_cartao_aprovado_por,
+    EXISTS(
+      SELECT 1 FROM alissonerp.itens_venda_erp
+      WHERE venda_id = ${vendaId} AND pct_desconto > 30
+    ) AS tem_desconto_alto
     FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
+
+  // Onda 1D: bloqueia consultora de criar pagamento em venda alheia
+  try { await checkOwnership(user.id, vendaId); }
+  catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   // ── Travar venda: sem pagamento enquanto desconto >30% não aprovado ──────
   if (venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
@@ -83,6 +110,22 @@ export async function POST(
   // Ouro calcula o valor server-side — não valida o campo valor aqui
   if (body.forma !== "Ouro" && (!body.valor || body.valor <= 0))
     return NextResponse.json({ error: "valor inválido" }, { status: 400 });
+
+  // ── Guard: Cartão de Crédito com desconto >20% sem aprovação ────────────
+  if (body.forma === "Cartão de Crédito") {
+    const [temDescontoCartao] = await sql`
+      SELECT EXISTS(
+        SELECT 1 FROM alissonerp.itens_venda_erp
+        WHERE venda_id = ${vendaId} AND pct_desconto > 20
+      ) AS tem
+    `;
+    if (temDescontoCartao?.tem && !venda.desconto_cartao_aprovado_por) {
+      return NextResponse.json(
+        { error: "Esta venda tem itens com desconto acima de 20%. Para pagar no cartão de crédito, solicite aprovação." },
+        { status: 409 }
+      );
+    }
+  }
 
   // ── Hook: Vale-Troca ─────────────────────────────────────────────────────
   if (body.forma === "Vale-Troca") {

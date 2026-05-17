@@ -6,6 +6,7 @@ import { registrarQuebra, buscarOuroRecebido } from "@/lib/registrar-quebra";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { internalError } from "@/lib/api-error";
 
 // POST /api/service/[id]/devolver
 // Operador service devolve a peça para o POTE (Almoxarifado ID=1).
@@ -31,13 +32,8 @@ export async function POST(
 ) {
   try {
     return await _handler(req, params);
-  } catch (err: unknown) {
-    const e = err as Error;
-    console.error("[service/devolver] ERRO:", e?.message, e?.stack);
-    return NextResponse.json(
-      { error: e?.message ?? "Erro desconhecido", hint: e?.stack?.split("\n")[1]?.trim() },
-      { status: 500 }
-    );
+  } catch (err) {
+    return internalError("[POST /api/service/[id]/devolver]", err);
   }
 }
 

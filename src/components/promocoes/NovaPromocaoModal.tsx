@@ -60,6 +60,9 @@ export default function NovaPromocaoModal({
   const [dataInicio, setDataInicio] = useState("");
   const [dataFim, setDataFim] = useState("");
   const [observacao, setObservacao] = useState("");
+  // Regra de pagamento: máximo de parcelas no cartão durante a campanha.
+  // Vazio = sem restrição (default 12x do sistema).
+  const [maxParcelas, setMaxParcelas] = useState<string>("");
   const [busca, setBusca] = useState("");
   const [resultados, setResultados] = useState<ProdutoBusca[]>([]);
   const [loadingBusca, setLoadingBusca] = useState(false);
@@ -79,6 +82,8 @@ export default function NovaPromocaoModal({
       setBusca("");
       setResultados([]);
       setConflitos(null);
+      setMaxParcelas("");
+      setObservacao("");
       // Datas default: hoje -> +7 dias
       const hoje = new Date();
       const fim = new Date(hoje); fim.setDate(fim.getDate() + 7);
@@ -169,6 +174,12 @@ export default function NovaPromocaoModal({
     setSubmitting(true);
     setConflitos(null);
     try {
+      const maxParcelasNum = maxParcelas.trim() ? parseInt(maxParcelas, 10) : null;
+      if (maxParcelasNum != null && (!Number.isInteger(maxParcelasNum) || maxParcelasNum < 1 || maxParcelasNum > 12)) {
+        pushError("Máximo de parcelas deve ser entre 1 e 12 (ou vazio para sem restrição)");
+        setSubmitting(false);
+        return;
+      }
       const res = await fetch("/api/promocoes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -177,6 +188,7 @@ export default function NovaPromocaoModal({
           data_inicio: dataInicio,
           data_fim: dataFim,
           observacao: observacao.trim() || null,
+          max_parcelas_cartao: maxParcelasNum,
           itens: itensValidos.map(i => ({
             produto_id: i.produto_id,
             preco_promo: parseFloat(i.preco_promo.replace(",", ".")),
@@ -281,6 +293,24 @@ export default function NovaPromocaoModal({
                 onChange={(e) => setObservacao(e.target.value)}
                 className="mt-1 w-full px-3 py-2 text-sm border border-creme-200 rounded-lg focus:outline-none focus:border-alisson-gold/50"
               />
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                Máximo de parcelas no cartão (opcional)
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={12}
+                step={1}
+                value={maxParcelas}
+                onChange={(e) => setMaxParcelas(e.target.value)}
+                placeholder="Vazio = sem restrição (até 12x default)"
+                className="mt-1 w-full px-3 py-2 text-sm border border-creme-200 rounded-lg focus:outline-none focus:border-alisson-gold/50"
+              />
+              <p className="mt-1 text-[11px] text-gray-500">
+                Vendas que contenham produtos desta campanha ficam limitadas a esse número de parcelas no cartão durante a janela ativa.
+              </p>
             </div>
           </div>
 

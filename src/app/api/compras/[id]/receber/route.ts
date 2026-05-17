@@ -1,19 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 type Params = Promise<{ id: string }>;
 
 // PATCH /api/compras/[id]/receber
 // Marca a compra como 'recebida' (novo estado intermediário antes de concluir).
-// Body: { data_recebimento?: string (ISO date), recebido_por?: string (uuid) }
+// Body: { data_recebimento?: string (ISO date) }
+// recebido_por vem da sessao autenticada (nunca do body)
 export async function PATCH(req: NextRequest, { params }: { params: Params }) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const { id } = await params;
   const compraId = parseInt(id);
 
-  const { data_recebimento, recebido_por } = await req.json() as {
+  const { data_recebimento } = await req.json() as {
     data_recebimento?: string | null;
-    recebido_por?: string | null;
   };
+  const recebido_por = user.id;
 
   // Verificar existência e estado
   const [compra] = await sql`

@@ -59,6 +59,7 @@ export async function POST(
     const [item] = await sql`
       UPDATE alissonerp.itens_inventario_comercial
       SET quantidade_contada = ${c.quantidade_contada},
+          diferenca = ${c.quantidade_contada} - quantidade_sistema,
           contado_por = ${user.id},
           contado_em = now()
       WHERE inventario_id = ${invId} AND produto_id = ${c.produto_id}

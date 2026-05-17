@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from "rea
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle,
+  ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle, AlertCircle,
   Truck, Video, RefreshCw, Share2, Download,
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
   RotateCcw, ArrowRight, PackageCheck, ScanLine,
@@ -49,6 +49,10 @@ interface ItemVenda {
   preco_unitario: number; total_item: number; pct_comissao: number;
   valor_comissao: number; peso_estimado: number | null; unidade: string | null;
   observacao?: string | null;
+  /** Markup gravado quando o item vem de orçamento (aliança/peça). Quando
+   *  presente, a comissão usa commissionForMarkup (curva). Quando null,
+   *  cai na faixas_comissao por desconto. */
+  markup_aplicado?: number | null;
   personalizacao?: { valor?: string; preco_por_letra?: number; peso_por_letra?: number } | null;
 }
 interface PagamentoServer {
@@ -85,6 +89,8 @@ interface Venda {
   aprovacao_desconto_aprov_id?: number | null;
   desconto_aprovado_por_nome?: string | null;
   desconto_aprovado_em?: string | null;
+  desconto_cartao_aprovado_por_nome?: string | null;
+  desconto_cartao_aprovado_em?: string | null;
   endereco_entrega?: string | null; endereco_entrega_numero?: string | null;
   endereco_entrega_complemento?: string | null; endereco_entrega_bairro?: string | null;
   endereco_entrega_cidade?: string | null; endereco_entrega_cep?: string | null;
@@ -97,6 +103,7 @@ interface Venda {
     quantidade: number; preco_lista: number; pct_desconto: number;
     preco_unitario: number; total_item: number; pct_comissao: number;
     valor_comissao: number; observacao: string | null; peso_estimado?: number | null;
+    markup_aplicado?: number | null;
     personalizacao?: { valor?: string; preco_por_letra?: number; peso_por_letra?: number } | null;
   }>;
   pagamentos: PagamentoServer[];
@@ -649,6 +656,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       preco_unitario: i.preco_unitario, total_item: i.total_item,
       pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao,
       peso_estimado: i.peso_estimado ?? null, unidade: null, observacao: i.observacao,
+      markup_aplicado: i.markup_aplicado ?? null,
       personalizacao: i.personalizacao ?? null,
     })),
   [venda]);
@@ -1134,6 +1142,25 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     finally { setUpdating(false); }
   }
 
+  // ── Solicitar aprovação para cartão de crédito (desconto >20%) ──────────
+  async function solicitarAprovacaoCartao() {
+    if (!venda) return;
+    setUpdating(true); setSaveErr("");
+    try {
+      const res = await fetch(`/api/vendas/${venda.id}/solicitar-aprovacao`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tipo: "cartao_desconto" }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      if (d.aguardando_aprovacao_cartao) {
+        alert("Solicitação de aprovação para cartão de crédito enviada.");
+      }
+      await load();
+    } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao solicitar aprovação"); }
+    finally { setUpdating(false); }
+  }
+
   // ── Solicitar aprovação (com suporte a crédito gerente) ────────────────────
   async function solicitarAprovacao() {
     if (!venda) return;
@@ -1516,6 +1543,16 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const podeAprovarConcluir = venda.situacao === "aprovado" && temPagamentoPendente;
   const temDescontoAlto = venda.itens.some(i => Number(i.pct_desconto) > 30);
   const precisaSolicitarDesconto = temDescontoAlto && !venda.desconto_aprovado_por_nome && !venda.aprovacao_credito_tarefa_id && venda.situacao === "rascunho";
+  const LIMITE_DESCONTO_CARTAO = 20;
+  const temDescontoCartao = venda.itens.some(i => Number(i.pct_desconto) > LIMITE_DESCONTO_CARTAO);
+  const descontoCartaoAprovado = !!venda.desconto_cartao_aprovado_por_nome;
+  const cartaoBloqueado = temDescontoCartao && !descontoCartaoAprovado;
+  const isCartaoApproval = aguardandoAprovacaoCredito && (() => {
+    const t = venda.aprovacao_tarefa_tags;
+    const tags = Array.isArray(t) ? t : (typeof t === "string" ? t.replace(/[{}]/g, "").split(",") : []);
+    return tags.includes("aprov_cartao_desconto");
+  })();
+  const precisaSolicitarDescontoCartao = cartaoBloqueado && !venda.aprovacao_credito_tarefa_id && venda.situacao === "rascunho";
 
   return (
     <>
@@ -1724,6 +1761,46 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
           <Loader2 size={16} className="animate-spin shrink-0" />
           <p className="text-sm font-medium">
             Aguardando aprovação de desconto pelo administrador. Pagamento e conclusão bloqueados até a aprovação.
+          </p>
+        </div>
+      )}
+
+      {/* ── Banner: desconto >20% para cartão sem aprovação ── */}
+      {precisaSolicitarDescontoCartao && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-3"
+          style={{ backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#9A3412" }}>
+          <p className="text-sm font-medium">
+            Esta venda tem itens com desconto acima de 20%. Para pagar no cartão de crédito, solicite aprovação.
+          </p>
+          <button onClick={solicitarAprovacaoCartao} disabled={updating}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 whitespace-nowrap"
+            style={{ backgroundColor: "#C2410C", color: "#fff" }}>
+            {updating ? <Loader2 size={12} className="animate-spin" /> : null}
+            Solicitar Aprovação para Cartão
+          </button>
+        </div>
+      )}
+
+      {/* ── Banner aprovação de cartão pendente ── */}
+      {isCartaoApproval && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center gap-2"
+          style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
+          <Loader2 size={16} className="animate-spin shrink-0" />
+          <p className="text-sm font-medium">
+            Aguardando aprovação para cartão de crédito. Pagamento no cartão bloqueado até a aprovação.
+          </p>
+        </div>
+      )}
+
+      {/* ── Badge cartão aprovado ── */}
+      {venda.desconto_cartao_aprovado_por_nome && venda.desconto_cartao_aprovado_em && (
+        <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
+          style={{ backgroundColor: "#F0FDF4", borderColor: "#86EFAC", color: "#166534" }}>
+          <CheckCircle size={14} className="shrink-0" />
+          <p className="text-xs font-medium">
+            Cartão de crédito liberado por <strong>{venda.desconto_cartao_aprovado_por_nome}</strong>{" "}
+            em {new Date(venda.desconto_cartao_aprovado_em).toLocaleDateString("pt-BR")}{" "}
+            às {new Date(venda.desconto_cartao_aprovado_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
           </p>
         </div>
       )}
@@ -2572,13 +2649,24 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                     {/* Cartão de Crédito inline */}
                     {isCartao && pag.status === "pendente" && (
                       <div className="px-3 pb-3 border-t" style={{ borderColor: C.cremeBorder }}>
-                        <CartaoInline
-                          vendaId={venda.id}
-                          numeroVenda={venda.numero_venda}
-                          valor={pag.valor}
-                          installments={pag.parcelas || 1}
-                          onPagamentoConfirmado={() => load()}
-                        />
+                        {cartaoBloqueado ? (
+                          <div className="flex items-start gap-2 p-3 rounded-lg"
+                            style={{ backgroundColor: "#FFF7ED", border: "1px solid #FED7AA" }}>
+                            <AlertCircle size={14} className="shrink-0 mt-0.5" style={{ color: "#9A3412" }} />
+                            <div className="text-xs" style={{ color: "#9A3412" }}>
+                              <p className="font-medium">Cartão de crédito bloqueado</p>
+                              <p>Este pedido possui itens com desconto acima de 20%. Aguarde aprovação para pagar no cartão.</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <CartaoInline
+                            vendaId={venda.id}
+                            numeroVenda={venda.numero_venda}
+                            valor={pag.valor}
+                            installments={pag.parcelas || 1}
+                            onPagamentoConfirmado={() => load()}
+                          />
+                        )}
                       </div>
                     )}
                   </div>
@@ -2759,6 +2847,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                     finally { setUpdating(false); }
                   }}
                   onPaymentSaved={load}
+                  cartaoBloqueado={cartaoBloqueado}
+                  onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
+                  solicitandoAprovacaoCartao={updating}
                 />
               </div>
             ) : (
@@ -2844,6 +2935,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                         finally { setUpdating(false); }
                       }}
                       onPaymentSaved={() => { load(); setAddingPag(false); }}
+                      cartaoBloqueado={cartaoBloqueado}
+                      onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
+                      solicitandoAprovacaoCartao={updating}
                     />
                   </div>
                 )}

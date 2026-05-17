@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { uploadFile, deleteFile } from "@/lib/storage";
+import { authOr401 } from "@/lib/auth-server";
+import { isFullAccess } from "@/lib/roles";
 
-// PATCH /api/insumos/:id — atualiza campos do insumo
+// PATCH /api/insumos/:id — atualiza campos do insumo (somente full access)
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const { id: rawId } = await params;
   const id = parseInt(rawId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
@@ -100,11 +108,17 @@ export async function PATCH(
   return NextResponse.json(rows[0]);
 }
 
-// DELETE /api/insumos/:id — desativa (soft delete)
+// DELETE /api/insumos/:id — desativa (soft delete, somente full access)
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const { id: rawId } = await params;
   const id = parseInt(rawId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });

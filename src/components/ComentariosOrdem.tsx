@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { getPublicUrl } from "@/lib/storage-url";
 
 const C = {
   esmeralda: "#184036",
@@ -91,9 +92,7 @@ interface Props {
   onCountChange?: (count: number) => void;
 }
 
-// SOMENTE LEITURA: a lista de comentários existentes fica visível para consulta,
-// mas o input de novo comentário e os botões de editar/deletar foram ocultados.
-const SOMENTE_LEITURA = true;
+const SOMENTE_LEITURA = false;
 
 export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   const { user, role } = useAuth();
@@ -129,11 +128,8 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-
-  function getPublicUrl(bucket: string, path: string): string {
-    return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
-  }
+  // Helper de URL agora vem de @/lib/storage-url. Decide entre proxy autenticado
+  // (bucket privado) e URL pública direta, e normaliza URLs antigas salvas no DB.
 
   function carregarSignedUrls(lista: Comentario[]): Comentario[] {
     return lista.map((c) =>

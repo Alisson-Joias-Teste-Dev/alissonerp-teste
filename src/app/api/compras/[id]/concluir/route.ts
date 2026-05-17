@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
+import { internalError } from "@/lib/api-error";
 
 type Params = Promise<{ id: string }>;
 
@@ -7,7 +9,11 @@ type Params = Promise<{ id: string }>;
 // Seta situacao='concluido' → trigger trg_concluir_compra gera CE de estoque
 //                           → trigger trg_aa_bloquear_compra seta bloqueado=true
 // Aceita situacao 'recebida' OU 'rascunho'/'pendente' (backward compat)
-export async function PATCH(_req: NextRequest, { params }: { params: Params }) {
+export async function PATCH(req: NextRequest, { params }: { params: Params }) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const { id } = await params;
   const compraId = parseInt(id);
 
@@ -36,6 +42,6 @@ export async function PATCH(_req: NextRequest, { params }: { params: Params }) {
     if (error.message?.includes("bloqueado") || error.code === "P0001") {
       return NextResponse.json({ error: "Compra bloqueada — não permite alteração" }, { status: 409 });
     }
-    return NextResponse.json({ error: error.message ?? "Erro interno" }, { status: 500 });
+    return internalError("[PATCH /api/compras/[id]/concluir]", err);
   }
 }

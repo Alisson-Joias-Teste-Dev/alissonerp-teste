@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { ForbiddenError } from "@/lib/auth-server";
+import {
+  requireVendaOwnership,
+  isVendasFullAccess,
+  getUserVendedorId,
+  NotFoundError,
+} from "@/lib/auth-vendas";
 
 // ─── GET /api/vendas/[id] ──────────────────────────────────────────────────────
 export async function GET(
@@ -14,6 +21,19 @@ export async function GET(
   const { id } = await params;
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
+  // Onda 1D: bloqueia consultora de ler venda de outro vendedor
+  const [usuarioAuth] = await sql<{ role: string }[]>`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+  `;
+  if (!usuarioAuth) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  try {
+    await requireVendaOwnership({ id: user.id, role: usuarioAuth.role, email: user.email ?? "" }, vendaId);
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   const [venda] = await sql`
     SELECT
@@ -37,6 +57,9 @@ export async function GET(
       ve.desconto_aprovado_por,
       ve.desconto_aprovado_em,
       (SELECT u.nome FROM alissonerp.usuarios u WHERE u.id = ve.desconto_aprovado_por) AS desconto_aprovado_por_nome,
+      ve.desconto_cartao_aprovado_por,
+      ve.desconto_cartao_aprovado_em,
+      (SELECT u.nome FROM alissonerp.usuarios u WHERE u.id = ve.desconto_cartao_aprovado_por) AS desconto_cartao_aprovado_por_nome,
       c.endereco AS cliente_endereco, c.numero AS cliente_numero, c.complemento AS cliente_complemento,
       c.bairro AS cliente_bairro, c.municipio AS cliente_municipio, c.cep AS cliente_cep, c.uf AS cliente_uf,
       c.id_api_contato AS cliente_id_tiny
@@ -52,7 +75,7 @@ export async function GET(
       id, produto_id, nome_produto, sku,
       quantidade,
       preco_lista, pct_desconto, preco_unitario, total_item,
-      pct_comissao, valor_comissao,
+      pct_comissao, valor_comissao, markup_aplicado,
       desconto_autorizado_por, observacao, peso_estimado, personalizacao, created_at
     FROM alissonerp.itens_venda_erp
     WHERE venda_id = ${vendaId}
@@ -108,15 +131,18 @@ export async function GET(
     aprovacao_desconto_aprov_id: venda.aprovacao_desconto_aprov_id ?? null,
     desconto_aprovado_por_nome: venda.desconto_aprovado_por_nome ?? null,
     desconto_aprovado_em: venda.desconto_aprovado_em ?? null,
+    desconto_cartao_aprovado_por_nome: venda.desconto_cartao_aprovado_por_nome ?? null,
+    desconto_cartao_aprovado_em: venda.desconto_cartao_aprovado_em ?? null,
     itens: itens.map((i) => ({
       ...i,
-      quantidade:     Number(i.quantidade),
-      preco_lista:    Number(i.preco_lista),
-      pct_desconto:   Number(i.pct_desconto),
-      preco_unitario: Number(i.preco_unitario),
-      total_item:     Number(i.total_item),
-      pct_comissao:   Number(i.pct_comissao),
-      valor_comissao: Number(i.valor_comissao),
+      quantidade:      Number(i.quantidade),
+      preco_lista:     Number(i.preco_lista),
+      pct_desconto:    Number(i.pct_desconto),
+      preco_unitario:  Number(i.preco_unitario),
+      total_item:      Number(i.total_item),
+      pct_comissao:    Number(i.pct_comissao),
+      valor_comissao:  Number(i.valor_comissao),
+      markup_aplicado: i.markup_aplicado != null ? Number(i.markup_aplicado) : null,
     })),
     pagamentos: pagamentos.map((p) => ({
       ...p,
@@ -150,10 +176,22 @@ export async function PATCH(
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [venda] = await sql`
-    SELECT id, situacao, bloqueado, aprovacao_credito_tarefa_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    SELECT id, situacao, bloqueado, aprovacao_credito_tarefa_id, vendedor_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
+
+  // Onda 1D: consultora so edita venda propria
+  if (!isVendasFullAccess(usuario.role)) {
+    try {
+      const userVid = await getUserVendedorId(user.id);
+      if (venda.vendedor_id == null || Number(venda.vendedor_id) !== userVid) {
+        return NextResponse.json({ error: "Sem permissão para esta venda" }, { status: 403 });
+      }
+    } catch {
+      return NextResponse.json({ error: "Usuario sem vendedor_id vinculado" }, { status: 403 });
+    }
+  }
 
   const body = await req.json() as {
     situacao?:             string;

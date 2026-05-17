@@ -2,11 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { normalizeRow } from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { authOr401 } from "@/lib/auth-server";
 
 type Params = Promise<{ id: string }>;
 
 // GET /api/compras/[id]/itens
-export async function GET(_req: NextRequest, { params }: { params: Params }) {
+export async function GET(req: NextRequest, { params }: { params: Params }) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const { id } = await params;
   const compraId = parseInt(id);
 
@@ -35,6 +40,10 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
 // Body (outros):          { insumo_id, deposito_id?, qtd, valor_unitario? }
 // Trigger fn_calcular_item_compra calcula valor_total automaticamente.
 export async function POST(req: NextRequest, { params }: { params: Params }) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const { id } = await params;
   const compraId = parseInt(id);
 

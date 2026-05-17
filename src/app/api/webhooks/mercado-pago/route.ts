@@ -27,11 +27,14 @@ import { concluirVenda, estornarVenda } from "@/lib/vendas-aprovar";
 const WEBHOOK_NOME = "mercado-pago-payment";
 
 // User ID sistema — usado em created_by quando a transição vem de automação.
-// Cadeia de fallback (cobertura defensiva pra garantir que SEMPRE retorna user válido):
+// Cadeia (sem fallback admin aleatório, que corrompia audit trail):
 //  1. configuracoes_sistema.mp_system_user_id (preferido — admin dedicado pra automação)
-//  2. created_by da venda
-//  3. qualquer usuário ativo desenvolvedor/admin (último recurso pra evitar null)
-//  4. null + log loudly se nem isso existir
+//  2. created_by da venda (autor original; é honesto: foi quem criou que iniciou o fluxo)
+//  3. null + log ERROR se nem isso existir → venda NÃO é concluída automaticamente
+//
+// Removido em v2.46.0 (Onda 1A-3): o fallback "admin mais antigo ativo" mentia
+// no audit trail. Em vez de fingir, falhamos loud — operador vê na fila e
+// conclui manualmente quando configurar mp_system_user_id.
 async function getSystemUserId(vendaId: number): Promise<string | null> {
   const [row] = await sql`
     SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'mp_system_user_id'
@@ -42,24 +45,11 @@ async function getSystemUserId(vendaId: number): Promise<string | null> {
     v = v.replace(/"/g, "").trim();
     if (v) return v;
   }
-  // Fallback 1: created_by da venda
+  // Fallback único e honesto: created_by da venda (foi quem iniciou)
   const [venda] = await sql`SELECT created_by FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
   if (venda?.created_by) return String(venda.created_by);
 
-  // Fallback 2: qualquer admin/desenvolvedor ativo — evita ficar com pagamento confirmado
-  // mas venda nunca concluída quando created_by é null e mp_system_user_id não foi configurado
-  const [adminFallback] = await sql`
-    SELECT id FROM alissonerp.usuarios
-    WHERE role IN ('desenvolvedor', 'admin') AND ativo = true
-    ORDER BY created_at ASC
-    LIMIT 1
-  `;
-  if (adminFallback?.id) {
-    console.warn(`[webhook-mp] getSystemUserId venda=${vendaId} usou fallback admin id=${adminFallback.id}. Configure 'mp_system_user_id' em configuracoes_sistema.`);
-    return String(adminFallback.id);
-  }
-
-  console.error(`[webhook-mp] getSystemUserId venda=${vendaId} retornou NULL — sem mp_system_user_id, sem created_by, sem admin ativo. Pagamento será confirmado MAS venda não será concluída.`);
+  console.error(`[webhook-mp] getSystemUserId venda=${vendaId} retornou NULL — sem mp_system_user_id em configuracoes_sistema e sem created_by na venda. Pagamento sera confirmado MAS venda NAO sera concluida automaticamente. Configure mp_system_user_id ou conclua manualmente.`);
   return null;
 }
 
@@ -286,26 +276,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "data.id ausente" }, { status: 400 });
   }
 
-  // ─── 3. Valida assinatura HMAC (best-effort) ─────────────────────────────
-  // Se falhar, ainda processamos o webhook — confiamos no access_token na
-  // chamada subsequente /v1/payments/{id} como validação real. Só pagamentos
-  // da NOSSA conta MP são acessíveis com nosso token, então um atacante não
-  // consegue forjar webhooks falsos pra confirmar vendas.
+  // ─── 3. Valida assinatura HMAC (OBRIGATÓRIO se secret configurado) ──────
+  // Antes era best-effort com fallback ao access_token — mas o shortcut
+  // live_mode=false permitia bypass total. Agora: se mp_webhook_secret existe
+  // em configuracoes_secrets, HMAC É OBRIGATÓRIO em TODA chamada (incluindo
+  // simulação do painel MP, que envia HMAC válido também).
   const sig = await validarAssinatura(req, dataId);
   if (!sig.ok) {
+    const errorMsg = sig.erro ?? "Assinatura HMAC inválida";
+    // Se o erro é "secret não configurado", mantém comportamento legado (warn)
+    // para não quebrar setups que ainda não rodaram a configuração inicial.
+    const secretMissing = errorMsg.toLowerCase().includes("secret");
     await sql`
       INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-      VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ hmac_fallback: true, data_id: dataId })}::text::jsonb, 200, ${sig.erro ?? "HMAC inválido (usando fallback)"})
+      VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ data_id: dataId, hmac_check: "failed" })}::text::jsonb, ${secretMissing ? 200 : 401}, ${errorMsg})
     `;
-    // Continua o fluxo — fetchPayment valida pela posse do token
+    if (secretMissing) {
+      console.warn("[webhook-mp] mp_webhook_secret nao configurado — aceitando webhook sem validacao HMAC. Configure em Configuracoes > Integracoes.");
+    } else {
+      return NextResponse.json({ error: "Assinatura invalida" }, { status: 401 });
+    }
   }
 
   // ─── 3.5. Detecta simulação do painel MP ─────────────────────────────────
-  // O botão "Simular notificação" do painel de Webhooks envia:
-  //   { live_mode: false, data.id: "123456", ... }
-  // O payment_id "123456" é fake e fetchPayment() retornaria 404/401 real.
-  // Tratamos explicitamente pra retornar 200 OK limpo no painel MP, provando
-  // que o endpoint está recebendo, HMAC validou e parseou o payload.
+  // O botão "Simular notificação" do painel de Webhooks envia live_mode=false
+  // mas COM HMAC válido. Como o HMAC já foi validado acima, podemos retornar
+  // 200 limpo (não chamamos fetchPayment porque o data.id é fake).
+  // Sem HMAC válido + live_mode=false NUNCA chega aqui (bloqueado em 3.).
   if (body.live_mode === false) {
     await sql`
       INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status)

@@ -3,6 +3,8 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 
 // ─── GET /api/vendas/[id]/pdf ─────────────────────────────────────────────────
 export async function GET(
@@ -22,6 +24,15 @@ export async function GET(
   const { id } = await params;
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
+  // Onda 1D: bloqueia consultora de gerar PDF de venda alheia
+  try {
+    await requireVendaOwnership({ id: user.id, role: usuario.role, email: user.email ?? "" }, vendaId);
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   const [venda] = await sql`
     SELECT

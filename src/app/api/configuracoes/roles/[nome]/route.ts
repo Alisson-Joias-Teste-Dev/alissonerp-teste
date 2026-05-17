@@ -1,18 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 
 const ROLES_PROTEGIDAS = ["desenvolvedor", "admin"] as const;
-
-async function authCheck() {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const role = user.user_metadata?.role as string | undefined;
-  if (!isFullAccess(role)) return null;
-  return user;
-}
 
 // PATCH /api/configuracoes/roles/[nome]
 // Body: { descricao?: string, ativo?: boolean }
@@ -20,8 +11,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ nome: string }> }
 ) {
-  const user = await authCheck();
-  if (!user) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
 
   const { nome } = await params;
 

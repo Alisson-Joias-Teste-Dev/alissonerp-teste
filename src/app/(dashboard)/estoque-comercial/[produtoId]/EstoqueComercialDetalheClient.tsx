@@ -3,10 +3,11 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft, ArrowUpCircle, ArrowDownCircle,
-  Settings2, Loader2, Save, AlertTriangle,
-  RotateCcw, ArrowRightLeft, Bookmark, X,
+  Settings2, Loader2, Save, AlertTriangle, CheckCircle,
+  RotateCcw, ArrowRightLeft, Bookmark, X, TrendingDown, RefreshCw,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Consolidado {
@@ -64,6 +65,7 @@ interface Transferencia {
   status:              string;
   local_origem_nome:   string;
   local_destino_nome:  string;
+  ordem_solicitacao:   string;
   obs:                 string | null;
   created_at:          string;
   enviado_por_email:   string | null;
@@ -119,32 +121,86 @@ type TabId = "movimentos" | "reservas" | "transferencias" | "rfid";
 function TransferirModal({
   produtoId, onClose, onDone,
 }: { produtoId: number; onClose: () => void; onDone: () => void }) {
-  const [destino, setDestino] = useState(5); // default: Motoboy
+  const router = useRouter();
+  const [locais, setLocais] = useState<{ id: number; nome: string }[]>([]);
+  const [origem, setOrigem] = useState(0);
+  const [destino, setDestino] = useState(0);
   const [quantidade, setQuantidade] = useState(1);
+  const [ordemSol, setOrdemSol] = useState("");
   const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
   const [err, setErr] = useState("");
 
+  useEffect(() => {
+    fetch("/api/locais-estoque")
+      .then(r => r.json())
+      .then((data: { id: number; nome: string }[]) => {
+        setLocais(data);
+        if (data.length >= 2) {
+          setOrigem(data[0].id);
+          setDestino(data[1].id);
+        }
+      })
+      .catch(() => setErr("Erro ao carregar locais de estoque"));
+  }, []);
+
   async function handleTransferir() {
+    if (origem === destino) { setErr("Origem e destino devem ser diferentes"); return; }
+    if (!ordemSol.trim()) { setErr("Ordem de solicitação é obrigatória"); return; }
     setSaving(true); setErr("");
     try {
-      const r = await fetch("/api/estoque-comercial/transferir-motoboy", {
+      const r = await fetch("/api/estoque-comercial/transferir", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: destino === 2 ? "receber_na_loja" : "enviar_para_motoboy",
           produto_id: produtoId,
           quantidade,
-          motoboy_id: destino === 1 ? "fabrica" : undefined,
+          local_origem_id: origem,
+          local_destino_id: destino,
+          ordem_solicitacao: ordemSol.trim(),
         }),
       });
       if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? "Erro");
+      setDone(true);
       onDone();
-      onClose();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Erro");
     } finally {
       setSaving(false);
     }
+  }
+
+  if (done) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 text-center">
+          <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
+            <CheckCircle size={24} style={{ color: "#059669" }} />
+          </div>
+          <h2 className="font-bold text-lg mb-1" style={{ color: "#184036" }}>Transferencia Criada!</h2>
+          <p className="text-sm text-gray-500 mb-5">
+            O produto esta em transito. Va em Transferencias para concluir o recebimento.
+          </p>
+          <div className="flex gap-2">
+            <button
+              className="flex-1 py-2.5 rounded-xl text-sm font-medium border"
+              style={{ color: "#6B7280", borderColor: "#E5E7EB" }}
+              onClick={onClose}
+            >
+              Fechar
+            </button>
+            <button
+              className="flex-1 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
+              style={{ background: "#184036", color: "#F3EADA" }}
+              onClick={() => router.push("/estoque-comercial/transferencias")}
+            >
+              <ArrowRightLeft size={14} />
+              Ver Transferencias
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -154,37 +210,57 @@ function TransferirModal({
           <h2 className="font-bold text-lg" style={{ color: "#184036" }}>Transferir Produto</h2>
           <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
         </div>
-        <div className="space-y-3 mb-4">
-          <div>
-            <label className="block text-xs font-semibold mb-1 text-gray-500">Destino</label>
-            <select
-              className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
-              style={{ borderColor: "#E8DCC8" }}
-              value={destino}
-              onChange={e => setDestino(Number(e.target.value))}
-            >
-              <option value={5}>Motoboy [Nome] (Fabrica → Motoboy)</option>
-              <option value={2}>Loja (Motoboy → Loja)</option>
-              <option value={1}>Fabrica (devolver)</option>
-            </select>
+          <div className="space-y-3 mb-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-gray-500">Origem</label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                  style={{ borderColor: "#E8DCC8" }}
+                  value={origem}
+                  onChange={e => setOrigem(Number(e.target.value))}
+                >
+                  {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-gray-500">Destino</label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                  style={{ borderColor: "#E8DCC8" }}
+                  value={destino}
+                  onChange={e => setDestino(Number(e.target.value))}
+                >
+                  {locais.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1 text-gray-500">Ordem de solicitacao <span className="text-red-400">*</span></label>
+              <input
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                style={{ borderColor: "#E8DCC8" }}
+                placeholder="Ex: SOL-2026-00123"
+                value={ordemSol} onChange={e => setOrdemSol(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
+              <input
+                type="number" min={1}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                style={{ borderColor: "#E8DCC8" }}
+                value={quantidade}
+                onChange={e => setQuantidade(Math.max(1, Number(e.target.value)))}
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
-            <input
-              type="number" min={1}
-              className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
-              style={{ borderColor: "#E8DCC8" }}
-              value={quantidade}
-              onChange={e => setQuantidade(Math.max(1, Number(e.target.value)))}
-            />
-          </div>
-        </div>
         {err && <p className="text-xs text-red-500 mb-3">{err}</p>}
         <button
           className="w-full py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
           style={{ background: "#D97706", color: "#fff" }}
           onClick={handleTransferir}
-          disabled={saving}
+          disabled={saving || locais.length === 0}
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <ArrowRightLeft size={14} />}
           Transferir
@@ -197,11 +273,21 @@ function TransferirModal({
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId: number }) {
   const router  = useRouter();
+  const { role } = useAuth();
+  const podeAdminDev = role === "admin" || role === "desenvolvedor";
+
   const [data,    setData]    = useState<DetalheData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab,     setTab]     = useState<TabId>("movimentos");
   const [estornando, setEstornando] = useState<number | null>(null);
   const [transferindo, setTransferindo] = useState(false);
+
+  // Ajuste manual (entrada ou saída)
+  const [ajusteTipo,    setAjusteTipo]    = useState<"entrada" | "saida" | null>(null);
+  const [ajusteQtd,     setAjusteQtd]     = useState("1");
+  const [ajusteDesc,    setAjusteDesc]    = useState("");
+  const [ajusteErr,     setAjusteErr]     = useState("");
+  const [ajusteLoading, setAjusteLoading] = useState(false);
 
   // Config edit
   const [editMin,    setEditMin]    = useState(0);
@@ -267,6 +353,42 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
     }
   }
 
+  function abrirAjuste(tipo: "entrada" | "saida") {
+    setAjusteTipo(tipo);
+    setAjusteQtd("1");
+    setAjusteDesc("");
+    setAjusteErr("");
+  }
+
+  async function handleAjusteManual() {
+    if (!ajusteTipo) return;
+    const qtd = parseInt(ajusteQtd, 10);
+    if (!qtd || qtd < 1) { setAjusteErr("Quantidade inválida"); return; }
+    if (!ajusteDesc.trim()) { setAjusteErr("Descrição obrigatória"); return; }
+    setAjusteLoading(true); setAjusteErr("");
+    try {
+      const r = await fetch("/api/estoque-comercial/movimentos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          produto_id: produtoId,
+          tipo: ajusteTipo,
+          motivo: ajusteTipo === "entrada" ? "ajuste_entrada" : "ajuste_saida",
+          quantidade: qtd,
+          observacao: ajusteDesc.trim(),
+          local_estoque_id: 2,
+        }),
+      });
+      if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? "Erro");
+      setAjusteTipo(null);
+      await fetchData();
+    } catch (e) {
+      setAjusteErr(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setAjusteLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -282,15 +404,26 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
 
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto">
-      {/* Back */}
-      <button
-        className="flex items-center gap-1.5 text-sm mb-5 hover:opacity-70 transition-opacity"
-        style={{ color: "#184036" }}
-        onClick={() => router.push("/estoque-comercial")}
-      >
-        <ArrowLeft size={15} />
-        Estoque Comercial
-      </button>
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-sm mb-5">
+        <button
+          className="flex items-center gap-1.5 hover:opacity-70 transition-opacity"
+          style={{ color: "#184036" }}
+          onClick={() => router.push("/estoque-comercial")}
+        >
+          <ArrowLeft size={15} />
+          Estoque Comercial
+        </button>
+        <span className="text-gray-300">|</span>
+        <button
+          className="flex items-center gap-1.5 hover:opacity-70 transition-opacity"
+          style={{ color: "#D97706" }}
+          onClick={() => router.push("/estoque-comercial/transferencias")}
+        >
+          <ArrowRightLeft size={14} />
+          Transferencias
+        </button>
+      </div>
 
       {/* Hero Section */}
       <div className="rounded-2xl p-5 sm:p-6 mb-6" style={{ background: "#FAFAF7", border: "1px solid #E8DCC8" }}>
@@ -317,6 +450,28 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
             )}
           </div>
           <div className="flex items-center gap-3 shrink-0">
+            {podeAdminDev && (
+              <>
+                <button
+                  onClick={() => abrirAjuste("entrada")}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                  style={{ background: "#D1FAE5", color: "#065F46", border: "1px solid #6EE7B7" }}
+                  title="Registrar entrada manual no estoque"
+                >
+                  <ArrowUpCircle size={15} />
+                  Entrada Manual
+                </button>
+                <button
+                  onClick={() => abrirAjuste("saida")}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                  style={{ background: "#FEE2E2", color: "#991B1B", border: "1px solid #FECACA" }}
+                  title="Registrar baixa manual no estoque"
+                >
+                  <TrendingDown size={15} />
+                  Baixa Manual
+                </button>
+              </>
+            )}
             <button
               onClick={() => setTransferindo(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
@@ -571,6 +726,7 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
                   <span className="text-sm text-gray-500 ml-2">
                     {t.local_origem_nome} &rarr; {t.local_destino_nome}
                   </span>
+                  <span className="text-xs text-gray-400 ml-2">Ordem: {t.ordem_solicitacao}</span>
                   <span
                     className="text-xs ml-2 px-1.5 py-0.5 rounded"
                     style={{
@@ -634,6 +790,88 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
           onDone={fetchData}
         />
       )}
+
+      {/* Ajuste Manual Modal (entrada ou saída) */}
+      {ajusteTipo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                {ajusteTipo === "entrada"
+                  ? <ArrowUpCircle size={18} style={{ color: "#059669" }} />
+                  : <TrendingDown size={18} style={{ color: "#DC2626" }} />}
+                <h2 className="font-bold text-lg" style={{ color: "#184036" }}>
+                  {ajusteTipo === "entrada" ? "Entrada Manual" : "Baixa Manual"}
+                </h2>
+              </div>
+              <button onClick={() => setAjusteTipo(null)}><X size={18} className="text-gray-400" /></button>
+            </div>
+
+            <p className="text-sm text-gray-500 mb-4">{c?.nome_produto}</p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-gray-500">Quantidade</label>
+                <input
+                  type="number"
+                  min={1}
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                  style={{ borderColor: "#E8DCC8" }}
+                  value={ajusteQtd}
+                  onChange={e => setAjusteQtd(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-gray-500">
+                  Descrição <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none resize-none"
+                  style={{ borderColor: "#E8DCC8" }}
+                  placeholder={ajusteTipo === "entrada" ? "Motivo da entrada manual..." : "Motivo da baixa manual..."}
+                  value={ajusteDesc}
+                  onChange={e => setAjusteDesc(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {ajusteErr && (
+              <p className="text-xs text-red-500 mt-2 flex items-center gap-1">
+                <AlertTriangle size={12} /> {ajusteErr}
+              </p>
+            )}
+
+            <div className="flex gap-2 mt-5">
+              <button
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium border"
+                style={{ color: "#6B7280", borderColor: "#E5E7EB" }}
+                onClick={() => setAjusteTipo(null)}
+                disabled={ajusteLoading}
+              >
+                Cancelar
+              </button>
+              <button
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
+                style={{
+                  background: ajusteTipo === "entrada" ? "#059669" : "#DC2626",
+                  color: "#fff",
+                }}
+                onClick={handleAjusteManual}
+                disabled={ajusteLoading}
+              >
+                {ajusteLoading
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : ajusteTipo === "entrada"
+                    ? <ArrowUpCircle size={14} />
+                    : <TrendingDown size={14} />}
+                {ajusteTipo === "entrada" ? "Confirmar Entrada" : "Confirmar Baixa"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

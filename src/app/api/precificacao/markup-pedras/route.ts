@@ -5,32 +5,23 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 
-async function authorize() {
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Não autenticado", status: 401, user: null };
-
-  const role = user.user_metadata?.role as string | undefined;
-  if (!isFullAccess(role)) return { error: "Sem permissão", status: 403, user: null };
-
-  return { error: null, status: 200, user };
+async function authorize(req?: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return { error: errRes, user: null };
+  if (!isFullAccess(user.role)) {
+    return { error: NextResponse.json({ error: "Sem permissão" }, { status: 403 }), user: null };
+  }
+  return { error: null, user };
 }
 
-export async function GET() {
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const role = user.user_metadata?.role as string | undefined;
-  if (!isFullAccess(role)) {
+export async function GET(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -48,8 +39,9 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const { error, status, user } = await authorize();
-  if (error) return NextResponse.json({ error }, { status });
+  const { error, user } = await authorize(req);
+  if (error) return error;
+  void user;
 
   const body = await req.json();
   const { id, nome, tamanho_min, tamanho_max, markup, ativo } = body;
@@ -87,8 +79,8 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { error, status, user } = await authorize();
-  if (error) return NextResponse.json({ error }, { status });
+  const { error, user } = await authorize(req);
+  if (error) return error;
 
   const body = await req.json();
   const { nome, tamanho_min, tamanho_max, unidade, markup } = body;

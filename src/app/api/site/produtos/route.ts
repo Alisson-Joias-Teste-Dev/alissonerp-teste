@@ -12,7 +12,7 @@
  * Apenas produtos ativos, não-variação (pais + simples), não insumos/matérias.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { tabelaExiste } from "@/lib/schema-check";
@@ -20,12 +20,9 @@ import { tabelaExiste } from "@/lib/schema-check";
 const MSG_MIGRACAO = "Migration 159 pendente. Execute: node scripts/apply_159.mjs";
 
 export async function GET(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const role = user.user_metadata?.role as string | undefined;
-  if (!(await temAcessoModulo(role ?? "", "produtos", "ler"))) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!(await temAcessoModulo(user.role, "produtos", "ler"))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 

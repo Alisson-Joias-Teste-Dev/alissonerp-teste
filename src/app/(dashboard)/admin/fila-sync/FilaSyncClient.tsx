@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 interface FilaItem {
   id: number;
@@ -53,34 +54,28 @@ function formatarData(iso: string | null): string {
 }
 
 export default function FilaSyncClient() {
-  const [dados, setDados] = useState<ApiResponse | null>(null);
   const [page, setPage] = useState(1);
   const [filtroStatus, setFiltroStatus] = useState("");
   const [filtroSistema, setFiltroSistema] = useState("");
-  const [loading, setLoading] = useState(false);
   const [processando, setProcessando] = useState(false);
   const [limpando, setLimpando] = useState(false);
   const [mensagem, setMensagem] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+  const queryClient = useQueryClient();
 
-  const carregar = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ page: String(page) });
-      if (filtroStatus) params.set("status", filtroStatus);
-      if (filtroSistema) params.set("sistema", filtroSistema);
+  const params = new URLSearchParams({ page: String(page) });
+  if (filtroStatus) params.set("status", filtroStatus);
+  if (filtroSistema) params.set("sistema", filtroSistema);
+
+  const { data: dados, isLoading: loading } = useQuery({
+    queryKey: ["fila-sync", page, filtroStatus, filtroSistema],
+    queryFn: async () => {
       const res = await fetch(`/api/admin/fila-sync?${params.toString()}`);
-      if (res.ok) setDados(await res.json() as ApiResponse);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, filtroStatus, filtroSistema]);
-
-  // Auto-refresh a cada 30s
-  useEffect(() => {
-    void carregar();
-    const timer = setInterval(() => { void carregar(); }, 30_000);
-    return () => clearInterval(timer);
-  }, [carregar]);
+      if (!res.ok) throw new Error("Erro ao carregar");
+      return res.json() as Promise<ApiResponse>;
+    },
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
 
   function exibirMensagem(tipo: "ok" | "erro", texto: string) {
     setMensagem({ tipo, texto });
@@ -94,7 +89,7 @@ export default function FilaSyncClient() {
       const data = await res.json() as { processados?: number; falhas?: number; falhas_definitivas?: number; error?: string };
       if (!res.ok) { exibirMensagem("erro", data.error ?? "Erro ao processar"); return; }
       exibirMensagem("ok", `Processados: ${data.processados ?? 0} | Falhas: ${data.falhas ?? 0} | Falhas definitivas: ${data.falhas_definitivas ?? 0}`);
-      void carregar();
+      queryClient.invalidateQueries({ queryKey: ["fila-sync"] });
     } finally {
       setProcessando(false);
     }
@@ -105,7 +100,7 @@ export default function FilaSyncClient() {
     const data = await res.json() as { ok?: boolean; error?: string };
     if (!res.ok) { exibirMensagem("erro", data.error ?? "Erro ao reprocessar"); return; }
     exibirMensagem("ok", `Item #${id} movido para pendente`);
-    void carregar();
+    queryClient.invalidateQueries({ queryKey: ["fila-sync"] });
   }
 
   async function handleLimpar() {
@@ -116,7 +111,7 @@ export default function FilaSyncClient() {
       const data = await res.json() as { deletados?: number; error?: string };
       if (!res.ok) { exibirMensagem("erro", data.error ?? "Erro ao limpar"); return; }
       exibirMensagem("ok", `${data.deletados ?? 0} registro(s) deletado(s)`);
-      void carregar();
+      queryClient.invalidateQueries({ queryKey: ["fila-sync"] });
     } finally {
       setLimpando(false);
     }
@@ -193,7 +188,7 @@ export default function FilaSyncClient() {
           style={{ borderColor: "#1B4332" }}
         />
         <button
-          onClick={() => { void carregar(); }}
+          onClick={() => { queryClient.invalidateQueries({ queryKey: ["fila-sync"] }); }}
           className="px-3 py-2 rounded text-sm font-medium text-white cursor-pointer"
           style={{ backgroundColor: "#1B4332" }}
         >

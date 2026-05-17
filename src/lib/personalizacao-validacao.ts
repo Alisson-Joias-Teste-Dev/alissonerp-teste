@@ -4,6 +4,10 @@
  *   - POST /api/vendas/*                 (ao criar venda/item, valida antes de INSERT)
  *   - POST /api/ordens                   (ao propagar para itens_ordem)
  *   - POST /api/produtos/[id]/personalizacao (admin cadastra regra)
+ *
+ * === Evolucao para Multi-Campos ===
+ * Agora suporta tanto formato legado (1 campo) quanto novo (N campos).
+ * Veja CamposPersonalizacao / PersonalizacaoAplicadaMulti.
  */
 
 export type CaracteresPermitidos =
@@ -33,9 +37,11 @@ export interface ConfigPersonalizacaoCompleta extends ConfigPersonalizacao {
   peso_por_letra?:  number | null;
 }
 
+// ─── FORMATO LEGADO (1 campo) ──────────────────────────────────────────────
+
 /**
  * Estrutura canonica do JSONB salvo em itens_venda_erp.personalizacao
- * e itens_ordem.personalizacao. Snapshot dos valores no momento da venda.
+ * e itens_ordem.personalizacao. Formato legado (1 campo).
  */
 export interface PersonalizacaoAplicada {
   tipo: string;
@@ -43,6 +49,84 @@ export interface PersonalizacaoAplicada {
   max_caracteres: number;
   label?: string;
 }
+
+// ─── FORMATO NOVO (N campos) ───────────────────────────────────────────────
+
+/**
+ * Um campo dentro do array "campos" do novo formato.
+ * Cada campo representa um input de personalizacao (ex: "Nome 1", "Nome 2").
+ */
+export interface CampoPersonalizacao {
+  label: string;
+  valor: string | null;
+  max_caracteres: number;
+  obrigatorio: boolean;
+}
+
+/**
+ * Estrutura canonica do novo formato JSONB (multi-campos).
+ * Usado quando um produto tem N campos de personalizacao.
+ */
+export interface PersonalizacaoAplicadaMulti {
+  campos: CampoPersonalizacao[];
+}
+
+/**
+ * Union type: personalizacao pode ser legado OU multi-campos.
+ */
+export type PersonalizacaoQualquer = PersonalizacaoAplicada | PersonalizacaoAplicadaMulti;
+
+// ─── HELPERS DE DETECCAO ───────────────────────────────────────────────────
+
+/**
+ * Detecta se a personalizacao esta no formato multi-campos.
+ * Um objeto com a chave "campos" (array) = novo formato.
+ */
+export function isMultiCampo(
+  p: PersonalizacaoQualquer | null | undefined,
+): p is PersonalizacaoAplicadaMulti {
+  if (!p) return false;
+  return "campos" in p && Array.isArray((p as PersonalizacaoAplicadaMulti).campos);
+}
+
+/**
+ * Retorna texto legivel concatenado para observacao.
+ * Para legado: "Nome gravado: JOAO"
+ * Para multi: "Nome 1: Maria | Nome 2: João"
+ */
+export function personalizacaoParaTexto(
+  p: PersonalizacaoQualquer | null | undefined,
+): string {
+  if (!p) return "";
+
+  if (isMultiCampo(p)) {
+    return p.campos
+      .filter((c) => c.valor?.trim())
+      .map((c) => `${c.label}: ${c.valor!.trim()}`)
+      .join(" | ");
+  }
+
+  // Formato legado
+  return personalizacaoParaObservacao(p as PersonalizacaoAplicada);
+}
+
+/**
+ * Versão legada (backward compat).
+ */
+export function personalizacaoParaObservacao(
+  personalizacao: PersonalizacaoAplicada,
+): string {
+  const label =
+    personalizacao.label ??
+    (personalizacao.tipo === "nome" ? "Nome gravado" :
+     personalizacao.tipo === "iniciais" ? "Iniciais" :
+     personalizacao.tipo === "data" ? "Data gravada" :
+     personalizacao.tipo === "numero" ? "Numero gravado" :
+     personalizacao.tipo);
+  return `${label}: ${personalizacao.valor}`;
+}
+
+// ─── VALIDACAO ─────────────────────────────────────────────────────────────
 
 export const REGEX_POR_TIPO: Record<CaracteresPermitidos, RegExp> = {
   alfa:                  /^[A-Za-z]+$/,
@@ -106,7 +190,7 @@ export function validarPersonalizacao(
 }
 
 /**
- * Constroi objeto canonico para salvar no JSONB (snapshot).
+ * Constroi objeto canonico para salvar no JSONB (snapshot) — formato legado.
  * Use apos validar.
  */
 export function normalizarPersonalizacao(
@@ -122,38 +206,39 @@ export function normalizarPersonalizacao(
 }
 
 /**
- * Gera texto legivel para concatenar no campo 'observacao'
- * (compatibilidade com relatorios antigos que leem so observacao).
- *
- * Ex: { tipo: "nome", valor: "JOAO" } → "Nome gravado: JOAO"
+ * Constroi objeto canonico para o novo formato multi-campos.
+ * Cada campo validado individualmente.
  */
-export function personalizacaoParaObservacao(
-  personalizacao: PersonalizacaoAplicada,
-): string {
-  const label =
-    personalizacao.label ??
-    (personalizacao.tipo === "nome" ? "Nome gravado" :
-     personalizacao.tipo === "iniciais" ? "Iniciais" :
-     personalizacao.tipo === "data" ? "Data gravada" :
-     personalizacao.tipo === "numero" ? "Numero gravado" :
-     personalizacao.tipo);
-  return `${label}: ${personalizacao.valor}`;
+export function normalizarPersonalizacaoMulti(
+  campos: Array<{ label: string; valor: string | null; max_caracteres: number; obrigatorio: boolean }>,
+): PersonalizacaoAplicadaMulti {
+  return {
+    campos: campos.map((c) => ({
+      label: c.label,
+      valor: c.valor?.trim() ?? null,
+      max_caracteres: c.max_caracteres,
+      obrigatorio: c.obrigatorio,
+    })),
+  };
 }
 
 /**
- * Concatena uma nova linha de personalizacao na observacao existente.
- * Se obs existente ja contiver a mesma personalizacao, nao duplica.
+ * Concatena texto de personalizacao na observacao existente.
+ * Suporta ambos formatos (legado e multi-campos).
+ * Se obs existente ja contiver o mesmo texto, nao duplica.
  */
 export function appendPersonalizacaoObservacao(
   observacaoExistente: string | null | undefined,
-  personalizacao: PersonalizacaoAplicada,
+  personalizacao: PersonalizacaoQualquer,
 ): string {
-  const linha = personalizacaoParaObservacao(personalizacao);
+  const linha = personalizacaoParaTexto(personalizacao);
   const base  = (observacaoExistente ?? "").trim();
   if (!base) return linha;
   if (base.includes(linha)) return base;
   return `${base}\n${linha}`;
 }
+
+// ─── CALCULOS (preco/peso por letra — apenas formato legado) ───────────────
 
 /**
  * Calcula preco do item baseado em qtd de letras x preco_por_letra.
@@ -228,4 +313,108 @@ export function calcularPesoPorLetra(
   if (qtdLetras === 0) return null;
 
   return Math.round(qtdLetras * pesoPorLetra * 100) / 100;
+}
+
+// ─── FORMATACAO AUTOMATICA BASEADA EM REGRAS ────────────────────────────────
+
+export interface RegrasFormatacao {
+  primeira_letra_maiuscula: boolean;
+  sem_espacos: boolean;
+  sem_numeros: boolean;
+  sem_simbolos: boolean;
+  sem_acentos: boolean;
+}
+
+const MAPA_ACENTOS: Record<string, string> = {
+  'á': 'a', 'à': 'a', 'ã': 'a', 'â': 'a', 'ä': 'a',
+  'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+  'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
+  'ó': 'o', 'ò': 'o', 'õ': 'o', 'ô': 'o', 'ö': 'o',
+  'ú': 'u', 'ù': 'u', 'û': 'u', 'ü': 'u',
+  'ç': 'c', 'ñ': 'n',
+  'Á': 'A', 'À': 'A', 'Ã': 'A', 'Â': 'A', 'Ä': 'A',
+  'É': 'E', 'È': 'E', 'Ê': 'E', 'Ë': 'E',
+  'Í': 'I', 'Ì': 'I', 'Î': 'I', 'Ï': 'I',
+  'Ó': 'O', 'Ò': 'O', 'Õ': 'O', 'Ô': 'O', 'Ö': 'O',
+  'Ú': 'U', 'Ù': 'U', 'Û': 'U', 'Ü': 'U',
+  'Ç': 'C', 'Ñ': 'N',
+};
+
+const REGEX_SIMBOLOS = /[^a-zA-Z0-9áàãâäéèêëíìîïóòõôöúùûüçñÁÀÃÂÄÉÈÊËÍÌÎÏÓÒÕÔÖÚÙÛÜÇÑ ]/g;
+const REGEX_NUMEROS = /[0-9]/g;
+
+/**
+ * Aplica as regras de formatacao definidas na config ao valor digitado.
+ *
+ * Ordem de aplicacao:
+ * 1. Remove acentos (se sem_acentos)
+ * 2. Remove numeros (se sem_numeros)
+ * 3. Remove simbolos (se sem_simbolos)
+ * 4. Remove espacos (se sem_espacos)
+ * 5. Primeira letra maiuscula + resto minusculo (se primeira_letra_maiuscula)
+ *
+ * @example
+ *   formatarComRegras("marIA 123!", { primeira_letra_maiuscula: true, sem_numeros: true, sem_simbolos: true })
+ *   // => "Maria"
+ */
+export function formatarComRegras(
+  valor: string,
+  regras: RegrasFormatacao | null | undefined,
+): string {
+  if (!valor) return "";
+  let v = valor;
+
+  // 1. Remove acentos
+  if (regras?.sem_acentos) {
+    v = v.split('').map((c) => MAPA_ACENTOS[c] ?? c).join('');
+  }
+
+  // 2. Remove numeros
+  if (regras?.sem_numeros) {
+    v = v.replace(REGEX_NUMEROS, '');
+  }
+
+  // 3. Remove simbolos
+  if (regras?.sem_simbolos) {
+    v = v.replace(REGEX_SIMBOLOS, '');
+  }
+
+  // 4. Remove espacos
+  if (regras?.sem_espacos) {
+    v = v.replace(/\s+/g, '');
+  }
+
+  // 5. Primeira letra maiuscula + resto minusculo
+  if (regras?.primeira_letra_maiuscula && v.length > 0) {
+    v = v.charAt(0).toUpperCase() + v.slice(1).toLowerCase();
+  }
+
+  return v;
+}
+
+/**
+ * Normaliza o valor aplicando as regras e limitando ao max_caracteres.
+ * Usado no onChange dos inputs de personalizacao.
+ */
+export function normalizarCampoPersonalizacao(
+  valor: string,
+  regras: RegrasFormatacao | null | undefined,
+  maxCaracteres: number,
+): string {
+  const formatado = formatarComRegras(valor, regras);
+  return formatado.slice(0, maxCaracteres);
+}
+
+/**
+ * Retorna as regras padrao para um tipo de personalizacao.
+ * Usado quando ainda nao ha config salva no banco.
+ */
+export function regrasPadrao(): RegrasFormatacao {
+  return {
+    primeira_letra_maiuscula: true,
+    sem_espacos: false,
+    sem_numeros: true,
+    sem_simbolos: true,
+    sem_acentos: false,
+  };
 }

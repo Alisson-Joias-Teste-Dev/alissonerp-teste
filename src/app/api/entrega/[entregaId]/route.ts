@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 // PATCH /api/entrega/[entregaId] — concluir entrega
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ entregaId: string }> }
 ) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  void user;
+
   const { entregaId } = await params;
   const id = parseInt(entregaId);
   const { etapas } = await req.json() as { etapas: string };

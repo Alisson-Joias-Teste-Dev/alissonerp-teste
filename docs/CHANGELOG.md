@@ -1,8 +1,408 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/05/2026 — Versão: v2.42.2 <!-- Revisado 16/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.50.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): Onda 1D — IDOR em vendas/orçamento/crediário (v2.50.0)
+
+Segunda onda do bloco de segurança não-auth. Fecha o vetor de **fraude
+patrimonial** identificado no audit: qualquer `consultora` autenticada
+conseguia ler/editar vendas, orçamentos e crediários de qualquer colega
+via cURL (ROLES_PERMITIDOS aceitava o role mas não checava ownership).
+
+**Impacto evitado:** consultora podia alterar preço/desconto/endereço de
+entrega/observações internas de venda alheia, adicionar/remover itens,
+criar ou estornar pagamentos (inclusive vale-troca + ouro), vincular
+RFIDs físicos a venda errada, confirmar MP manual, cancelar rascunho
+alheio. Vetor direto de desvio de comissão e fraude de entrega
+(skill `joalheria-seguranca` confirma como cenário crítico).
+
+**Regra (mesma do módulo ordens):**
+- Roles em `ROLES_VENDAS_FULL` veem/editam TUDO:
+  `admin`, `desenvolvedor`, `diretor`, `gerente_loja`, `gerente_fabrica`.
+- Demais roles autorizadas (ex: `consultora`) só operam sobre recursos
+  próprios — `vendas_erp.vendedor_id == alissonerp.usuarios.vendedor_id`
+  do user; `orcamentos.usuario_id == auth.users.id` do user.
+
+**Novo helper** (`src/lib/auth-vendas.ts`):
+- `isVendasFullAccess(role)` — fonte única de verdade.
+- `requireVendaOwnership(user, vendaId)` — para vendas.
+- `requireOrcamentoOwnership(user, orcamentoId)` — UUID (não vendedor_id).
+- `requireCrediarioOwnership(user, contaId)` — via `vw_crediario`.
+- `ownershipWhereVendas(user)` — SQL fragment para filtro em listas.
+- `NotFoundError`, `getUserVendedorId(userId)` — utilidades.
+
+**21 endpoints fixados:**
+
+| Rota | Métodos | Risco antes |
+|---|---|---|
+| `vendas/[id]` | GET, PATCH | ler/editar venda alheia (preço, endereço, obs) |
+| `vendas/[id]/cancelar` | POST | cancelar rascunho alheio, estornar crédito |
+| `vendas/[id]/itens` | GET, POST | ver/adicionar item em venda alheia |
+| `vendas/[id]/itens/[itemId]` | PATCH, DELETE | editar/deletar item alheio |
+| `vendas/[id]/pagamentos` | GET, POST | ver/criar pagamento (vale, ouro) em venda alheia |
+| `vendas/[id]/pagamentos/[pagId]` | PATCH, DELETE | confirmar/cancelar/estornar pagamento alheio |
+| `vendas/[id]/pdf` | GET | gerar PDF de venda alheia |
+| `vendas/[id]/rfid` | GET, POST | vincular joias físicas a venda errada |
+| `vendas/[id]/solicitar-aprovacao` | POST | submeter venda alheia pra aprovação |
+| `vendas/[id]/mercado-pago/checar-point` | GET | pollar MP de venda alheia |
+| `vendas/[id]/mercado-pago/verificar-manual` | POST | confirmar MP manual em venda alheia |
+| `orcamento/[id]` | GET, PUT | ler/editar orçamento alheio |
+| `crediario/[id]/comunicacao` | POST | inserir comunicação em conta alheia |
+| `vendas/por-cliente/[clienteId]` | GET | **estava SEM AUTH NENHUMA** + IDOR |
+
+**Não tocado (OK por design — admin-only):**
+- `aprovar-desconto`, `pagamentos/[pagId]/confirmar`, `tiny-resync`,
+  `crediario/[id]/registrar-pagamento`, `crediario/[id]/verificar-mp`,
+  `mercado-pago/criar-pix`, `criar-pix-instore`, `criar-link`,
+  `criar-intent-point` — já filtravam ownership ou role check excluía
+  consultora explicitamente.
+
+**Smoke test** (`scripts/test-onda-1d.mjs`, node --test, 9/9 verde):
+- isVendasFullAccess cobre roles full e scoped.
+- consultora bloqueada em venda alheia, passa em venda própria.
+- venda com `vendedor_id NULL` é inacessível pra consultora.
+- coerção numero/string não engana check.
+- orçamento usa `usuario_id` UUID (não `vendedor_id`).
+
+**Fora de escopo (próximas ondas):**
+- 1E: rate limiting (auth, IA paga, PDF) — ~15 endpoints.
+- 1F: input validation (zod via `defineRoute`) — ~225 rotas.
+- 1G: payload size guards em `images[]`/`mensagem`/`observacoes`.
+
+## fix(security): Onda 1C — info disclosure em erros 500 (v2.49.0)
+
+Primeira onda do bloco de segurança não-auth. Re-auditoria de 405 rotas
+identificou que muitas devolviam `err.message` cru do Postgres (revela
+nome de tabela, coluna, constraint, hint de schema) — duas chegavam a
+expor uma linha da stack trace no JSON de resposta.
+
+**Estratégia:** novo helper `internalError(tag, err, fallback?)` em
+`src/lib/api-error.ts`. Loga o erro completo no server (`console.error`)
+e devolve `{ error: "Erro interno" }` 500 para o cliente. Substituição
+mecânica nos handlers afetados — comportamento de domínio
+(`AuthError`/`ForbiddenError`/`HttpError`) preservado.
+
+**Rotas saneadas (16):**
+
+| Rota | O que vazava |
+|---|---|
+| `service/[id]/devolver` | `err.message` + `hint: stack.split("\n")[1]` |
+| `service/[id]/concluir` | `err.message` + `hint: stack.split("\n")[1]` |
+| `devolucoes/[id]/concluir` | `err.message` raw (separa Postgres vs domínio) |
+| `depositos/route.ts` (POST) | `(err as Error).message` |
+| `depositos/[id]/route.ts` (PATCH, DELETE) | idem |
+| `setores/route.ts` (POST) | idem |
+| `setores/[id]/route.ts` (PATCH, DELETE) | idem |
+| `configuracoes/ia/route.ts` (PATCH) | idem |
+| `compras/[id]/concluir` (PATCH) | idem (mantém short-circuit `P0001`/bloqueado) |
+| `ordens/upload-arquivo` (POST) | `StorageError.message` |
+| `produtos/preview-reclassificacao` (GET) | `String(err)` |
+| `produtos/[id]/imagens` (GET, POST) | `String(err)` |
+| `produtos/[id]/imagens/[imgId]` (PATCH, DELETE) | `String(err)` |
+| `produtos/classificar-tipo` (POST) | `String(err)` |
+| `produtos/[id]/personalizacao-campos` (PUT) | `(err as Error).message` |
+| `agentes/telegram/webhook/[bot]` (POST) | `String(error)` |
+
+**Não mexido (mensagens já controladas):**
+- `AuthError`/`ForbiddenError` em 401/403 — `e.message` vem do nosso
+  próprio construtor ("Não autenticado", "Sem permissão").
+- `HttpError` em `produtos/[id]/personalizacao*` e `rfid/cadastrar` —
+  classe interna com mensagens explícitas.
+- `console.error(...e?.stack)` em `pcp/transferir-service` — log
+  server-side, não exposto.
+
+**Caso especial — `devolucoes/[id]/concluir`:** mantém status 400 e
+mensagem do erro porque `concluirDevolucao()` faz `throw new Error(msg)`
+com mensagens amigáveis de domínio ("Devolucao nao editavel", etc).
+Filtro: se o erro tem `code`/`severity` (Postgres error), vira 500
+genérico via `internalError`; senão, devolve `msg` como 400.
+
+**Fora de escopo desta onda (audit identificou para próximas):**
+- 1D: IDOR em `vendas/[id]/*` e `orcamento/[id]/*` (~25 rotas) —
+  consultora hoje lê/edita venda de qualquer colega. Maior impacto
+  patrimonial dos achados restantes.
+- 1E: rate limiting (auth, IA paga, PDF) — ~15 endpoints.
+- 1F: input validation (zod via `defineRoute`) — ~225 rotas POST/PUT/PATCH
+  sem validação runtime.
+- 1G: payload size guards em `images[]`/`mensagem`/`observacoes`.
+
+## fix(security): Onda 1B — proxy de storage + buckets sensíveis fechados (v2.48.0)
+
+Fecha o último problema crítico do audit: buckets de fotos sensíveis (ordens,
+apontamentos, protocolos, purificação, service) estavam todos **públicos**.
+Qualquer pessoa que descobrisse o nome do arquivo (timestamp adivinhável)
+podia baixar fotos de peças/ouro/cliente sem autenticação. CLAUDE.md já
+documentava esses 3 como privados — havia drift documentação vs realidade.
+
+**Estratégia:** proxy autenticado em vez de signed URL (não exige refator de
+cada componente para lidar com TTL/rotação). `<img>` continua simples.
+
+**Novo endpoint** (`src/app/api/storage/[bucket]/[...path]/route.ts`):
+- Valida JWT da sessão via `authOr401`
+- Whitelist defensiva de buckets privados
+- Faz fetch interno via service key na rota `authenticated/` do Supabase
+- Stream da resposta com cache `private, max-age=3600`
+
+**Novo helper** (`src/lib/storage-url.ts`) — funções puras (sem `supabase-js`,
+seguras pra client bundle):
+- `isPrivateBucket(bucket)` — fonte única de verdade (sincronizada com proxy)
+- `getPublicUrl(bucket, path)` — roteia bucket privado pro proxy
+- `normalizeImageUrl(url)` — detecta URL Supabase pública antiga salva no DB e
+  reescreve pra proxy. **Crítico**: garante que fotos antigas continuam
+  funcionando após bucket fechar (sem migração retroativa do DB).
+
+**Componentes atualizados** (12 callers que tinham URL hardcoded ou
+recebiam URL pública do DB):
+- `ServiceApp.tsx` (3 lugares: ordem-fotos, ordem-videos, foto_recebimento)
+- `ServiceDetalheDrawer.tsx` (foto_reprovacao)
+- `OrdemDetalheClient.tsx` (fotoUrl/fotoUrl2)
+- `ComentariosOrdem.tsx` (foto_url)
+- `GaleriaFotosOrdem.tsx` (via API que usa getPublicUrl)
+- `PCPDetalheModal.tsx` (apontamento-fotos)
+- `DistribuicaoClient.tsx` (foto_balanca)
+- `ProtocoloClient.tsx` (resolveStorageUrl)
+- `PurificacaoClient.tsx` (foto_envio/foto_retorno)
+- `LigacaoTab.tsx` (foto_envio/foto_resultado)
+- `InsumosClient.tsx` (insumo.foto)
+- `ConferenciaClient.tsx` (FotoOuPlaceholder)
+
+**5 buckets fechados em prod** (UPDATE storage.buckets SET public=false):
+- `ordem-fotos`
+- `apontamento-fotos`
+- `protocolo-fotos`
+- `purificacao-fotos`
+- `service-fotos`
+
+**Validado em prod:**
+- URL pública direta `https://api.alisson.api.br/.../public/purificacao-fotos/X.jpg` → **400** (antes: 200)
+- Proxy sem cookie → **401**
+- Proxy autenticado → **200 image/jpeg** (fotos antigas convertidas pelo normalizeImageUrl carregam OK)
+- 3 fotos antigas testadas em `/purificacao` carregaram via proxy sem regressão
+
+**Outros buckets na whitelist do proxy mas ainda públicos** (preparados pra
+fechar em onda futura): `ordem-videos`, `vendas-videos`, `insumo-fotos`,
+`pagamento-fotos`. Decisão de quando fechar fica pra próxima sessão.
+
+## fix(security): Onda 1A-4 — fechar 17 rotas sem auth nenhuma (v2.47.0)
+
+Quarta e última onda do bloco de segurança crítica (1A). Adiciona
+`requireAuth()` em 17 endpoints que estavam totalmente abertos — qualquer
+pessoa na internet podia chamar.
+
+**Rotas fechadas:**
+
+| Rota | O que fazia (sem auth) |
+|---|---|
+| `POST /api/ia/validar-peso` | Chamava LLM (queimava quota Claude/OpenAI/Gemini) |
+| `GET/POST /api/depositos` | Listava + criava depósitos do sistema |
+| `GET/POST /api/insumos` | Listava + criava insumos (ouro, pedras) |
+| `PATCH/DELETE /api/insumos/[id]` | Editava/desativava insumo |
+| `GET/POST /api/compras` | Listava + criava compras (NF) |
+| `PATCH /api/compras/[id]/concluir` | Concluía compra → CE de estoque |
+| `GET/POST /api/compras/[id]/itens` | CRUD itens de compra |
+| `PATCH /api/compras/[id]/receber` | Marcava como recebida (`recebido_por` vinha do body!) |
+| `PATCH /api/compras/[id]/reverter-rascunho` | Revertia compra |
+| `PATCH /api/entrega/[entregaId]` | Concluía entrega de ordem |
+| `PATCH /api/auditoria/[auditoriaId]` | Aprovava/reprovava auditoria |
+| `PATCH /api/aprovacao/[aprovacaoId]` | Aprovava consultora |
+| `GET /api/dashboard/fabrica` | Saldo do pote, ouro em produção, quebra por operador |
+| `GET /api/dashboard/fabrica/movimentacoes` | Histórico de movimentações de ouro |
+| `GET /api/gestao-estoque/imagem-proxy` | Proxy de imagem (whitelist já existia, mas anônimo) |
+| `POST /api/agentes/playground` | LLM via DeepSeek (defesa em camadas: env token + auth + full access) |
+
+**Rastreabilidade:**
+- `POST /api/compras`: `created_by` agora vem da sessão (era do body).
+- `PATCH /api/compras/[id]/receber`: `recebido_por` agora vem da sessão.
+
+**Rotas com role check adicional (full access):** depósitos POST, insumos
+POST/PATCH/DELETE — operações estruturais.
+
+**Validado em prod (localhost dev → api.alisson.api.br):**
+- 10/10 endpoints sem cookie: **401** (antes: 200)
+- 4/4 endpoints autenticados como admin: **200 OK** (sem regressão)
+
+**Bloco 1A completo:** ondas 1A-1 a 1A-4 fecharam **97 endpoints** (12 críticos
++ 56 com user_metadata + 3 webhooks + 17 sem auth + 9 frontend callers).
+
+## fix(security): Onda 1A-3 — webhooks Focus NFe + MP HMAC + audit trail (v2.46.0)
+
+Terceira onda do hardening. Fecha 3 problemas críticos em webhooks fiscais e
+de pagamento que permitiam fraude do audit trail e bypass de assinatura.
+
+**1. Focus NFe webhook — validação de secret opt-in via env**
+`src/app/api/fiscal/webhook/focus/route.ts`: antes não validava nada (qualquer
+um podia POST `{ref, status: "autorizado"}` e marcar NFe como autorizada).
+Agora valida `process.env.FOCUS_WEBHOOK_SECRET` via header `Authorization:
+Bearer <token>` ou query `?token=...`.
+- **Sem env**: aceita mas loga warn (modo legado, não quebra prod)
+- **Com env**: exige match — 401 se token inválido
+- **Próximo passo**: configurar `FOCUS_WEBHOOK_SECRET` em `.env.local` + setar
+  no painel Focus (Dashboard > Webhooks > Secret)
+
+**2. Mercado Pago webhook — HMAC obrigatório (sem mais bypass via `live_mode=false`)**
+`src/app/api/webhooks/mercado-pago/route.ts`: antes, se HMAC falhasse, o
+fluxo continuava ("best-effort"). Pior: shortcut `live_mode === false`
+retornava 200 sem nem validar HMAC, permitindo simulação forjada por atacante.
+Agora HMAC é obrigatório quando `mp_webhook_secret` está configurado.
+- Sem secret configurado: warn + aceita (modo legado, transição)
+- Com secret + HMAC inválido: **401** mesmo em `live_mode=false`
+- Validado em prod: POST com `live_mode:false` sem HMAC → **401 "Assinatura invalida"** (antes: 200)
+
+**3. Mercado Pago `getSystemUserId` — sem mais fallback "admin mais antigo"**
+`src/app/api/webhooks/mercado-pago/route.ts`: antes, quando
+`mp_system_user_id` não estava configurado, o webhook usava `SELECT id FROM
+usuarios WHERE role IN ('desenvolvedor','admin') ORDER BY created_at ASC LIMIT
+1` — atribuindo autoria de transições financeiras a um admin aleatório que
+nunca viu a venda. Audit trail mentia.
+
+Agora a cadeia é honesta:
+1. `mp_system_user_id` (preferido)
+2. `created_by` da venda (autor original — quem iniciou)
+3. **NULL + log ERROR** → venda NÃO é concluída automaticamente
+
+Operador vê na fila e conclui manualmente quando `mp_system_user_id` for
+configurado. Melhor do que mentir.
+
+## fix(security): Onda 1A-2 — fechar `user_metadata?.role` em 56 rotas (v2.45.0)
+
+Segunda onda do hardening de segurança. Fecha o mesmo padrão A da onda 1A-1
+(`user_metadata?.role` permite escalada via `auth.updateUser`) em mais 56 rotas
+do sistema.
+
+**Novo helper** (`src/lib/auth-server.ts`): `authOr401(req)` retorna
+`[user, null]` em sucesso ou `[null, NextResponse]` de 401/403 em falha. Padrão
+reduzido de 8 linhas para 3 em cada handler.
+
+**Lotes corrigidos:**
+
+- **2.1 Configurações** (4): `roles`, `roles/[nome]`, `permissoes`, `parametros`
+- **2.2 Site** (7): `test`, `sync`, `sync/[id]`, `produtos`, `produtos/[id]`,
+  `invalidar-cache`, `config`
+- **2.3 Produtos core** (20): `route` (GET/POST), `[id]/route` (GET/PATCH),
+  `[id]/tiny-sync`, `[id]/propagar`, `[id]/imagens/route` (GET/POST),
+  `[id]/imagens/[imgId]` (PATCH/DELETE), `[id]/composicao/route` (GET/POST),
+  `[id]/composicao/[itemId]`, `sync-public-to-erp`, `sync-erp-to-public`,
+  `setup`, `bulk-edit`, `pedras-bulk/route` (4 handlers), `pedras-bulk/reprice`,
+  `peca-avulsa`, `categorias`, `metais`, `pendencias-contagem`,
+  `preview-reclassificacao`, `classificar-tipo`, `normalizar-metal`,
+  `rename-metal`, `insumos`
+- **2.4 Precificação** (14): `aprovar`, `rejeitar`, `simular`,
+  `solicitar-aprovacao`, `cotacoes`, `pendentes`, `regras`, `markup-ouro`,
+  `markup-pedras`, `curva/aplicar`, `curva/categorias`, `curva/categorias/[id]`,
+  `curva/config`, `curva/preview-aplicar`, `curva/simular-produto`
+- **2.5 Outros** (8): `pcp/ordem-teste`, `gestao-estoque/produtos`,
+  `gestao-estoque/vendas-semanais`, `gestao-estoque/oportunidades-fabricacao`,
+  `fornecedores`, `estoque-produtos`, `dashboard-comercial/premiacao`
+
+**Validação em prod (localhost dev → api.alisson.api.br):**
+- 16/16 endpoints autenticados como admin: **200 OK** (sem regressão)
+- 13/13 endpoints sem cookie: **401 Unauthorized** (antes: 200 via metadata)
+
+**Pendência conhecida (não-crítica):** 13 arquivos frontend ainda usam
+`user.user_metadata?.role` (Sidebar, page.tsx de produtos/precificacao/site/etc).
+Isso é apenas para controle de UI (mostrar/esconder); backend já bloqueia. O
+`useAuth` prioriza role da API (`perm?.role ?? roleFromToken`). Refator pode
+vir em onda futura.
+
+## fix(security): Onda 1A-1 — auth bypass em 12 rotas críticas (v2.44.0)
+
+Primeira onda do hardening de segurança após auditoria completa do sistema
+(`docs/audits/sistema-2026-05-16.md`). Fecha 3 padrões de bypass de
+autenticação em rotas que mexem com dinheiro/ouro/credenciais.
+
+**Padrão A — `user_metadata?.role` (escalada trivial):**
+Supabase permite ao usuário escrever em `user_metadata` via
+`auth.updateUser({ data: { role: "admin" } })`. Rotas que liam dali
+deixavam qualquer pessoa virar admin. Trocadas por `requireAuth()` (lê de
+`alissonerp.usuarios.role`, fonte de verdade do CLAUDE.md):
+- `src/app/api/admin/api-chaves/route.ts` (GET, POST)
+- `src/app/api/admin/api-chaves/[id]/route.ts` (PATCH, DELETE)
+
+**Padrão B — rotas SEM auth nenhuma:**
+- `src/app/api/configuracoes/ia/key/route.ts` (POST) — sobrescrevia API
+  keys de Claude/OpenAI/Gemini sem checagem. Agora requer
+  `isFullAccess(user.role)`.
+- `src/app/api/lancamentos-avulso/route.ts` (POST) — lançava movimentação
+  de ouro/pedras com `created_by` vindo do body (atacante setava UUID de
+  qualquer um). Agora usa `user.id` da sessão. Rastreabilidade restaurada.
+
+**Padrão C — autentica e ignora, confia em `user_id`/`user_role` do body:**
+Purificação/refino de ouro (10 endpoints). Cliente enviava
+`user_role: "admin"` no body e bypass total. Migrados para `requireAuth()`:
+- `src/app/api/purificacao/route.ts` (GET, POST)
+- `src/app/api/purificacao/[id]/route.ts` (GET, PATCH, DELETE)
+- `src/app/api/purificacao/ligacao/route.ts` (GET, POST)
+- `src/app/api/purificacao/ligacao/[id]/route.ts` (PATCH, DELETE)
+- `src/app/api/purificacao/teores/route.ts` (GET)
+- `src/app/api/purificacao/teores/[id]/route.ts` (PATCH)
+- `src/app/api/purificacao/liga-tipos/route.ts` (GET)
+- `src/app/api/purificacao/liga-tipos/[id]/route.ts` (PATCH)
+
+**Callers no frontend ajustados** (não enviam mais `user_id`/`user_role`):
+- `src/app/(dashboard)/purificacao/PurificacaoClient.tsx` (3 fetches)
+- `src/app/(dashboard)/purificacao/LigacaoTab.tsx` (3 fetches)
+
+**Validação em prod (localhost dev contra api.alisson.api.br):**
+- POST `/api/lancamentos-avulso` sem auth → **401** (antes: 200)
+- POST `/api/configuracoes/ia/key` sem auth → **401** (antes: 200)
+- POST `/api/purificacao` sem auth → **401** (antes: aceitava `user_id` forjado)
+- GET `/api/admin/api-chaves` sem auth → **403** (antes: 200 via metadata)
+- GET `/api/purificacao` autenticado como admin → **200** (não regrediu)
+
+**Próximas ondas (planejadas):**
+- 1A-2: `user_metadata?.role` em ~45 rotas restantes (produtos, precificacao, site, configuracoes)
+- 1A-3: webhook Focus NFe (sem assinatura) + MP HMAC bypass
+- 1A-4: ~25 rotas sem auth (dashboard-comercial, pcp, protocolo, distribuicao)
+
+Relatório completo em `docs/audits/sistema-2026-05-16.md`.
+
+## feat(orcamento): Integridade do schema + paginação + helpers compartilhados (v2.43.0)
+
+Onda 4 de hardening do módulo orcamento, após 3 auditorias paralelas (DB,
+código, re-verificação dos fixes). Cobre lacunas estruturais que ficaram
+expostas e que não dava pra fechar só com código de aplicação.
+
+**Migration 260 (`260_orcamento_integridade.sql`)** — DDL idempotente,
+aplicada com sucesso em staging (`72.60.55.140:5543`) após backup:
+- Formaliza coluna `tipo_pedra` em `orcamento_fichas_tecnicas` (drift:
+  existia em prod sem nenhuma migration declarando).
+- Cria FK ausente em `orcamentos.vendedor_id → public.vendedores`
+  (`ON DELETE SET NULL, NOT VALID`).
+- Cria índice parcial em `vendedor_id` pra acelerar JOINs.
+- Cria UNIQUE em `numero_orcamento` (sequence protegia até hoje, mas era
+  defesa pela sorte).
+- Cria CHECK constraints em `status`, `tipo`, `quantidade` (NOT VALID — só
+  defende inserts/updates futuros, não revalida histórico).
+- Alinha `venda_numero_seq` com MAX real (estava desalinhada em 1 →
+  próxima aprovação geraria `unique_violation`, capturada pelo retry mas
+  desperdiçando uma tentativa).
+- Alinha `orcamento_seq` também (defesa).
+- GRANT USAGE,SELECT pras duas sequences pra `authenticated` (consistência
+  com migration 104).
+
+**Backup pré-migration:**
+`backups/pre-260-{timestamp}.json` (snapshot de constraints/índices/
+colunas/sequences/contagem de linhas via script Node).
+
+**Helpers compartilhados (`src/lib/orcamento-shared.ts`)** — elimina
+duplicação que ficou após as ondas 1-3:
+- `ROLES_ORCAMENTO`, `ROLES_APROVACAO`, `ORCAMENTO_STATUS` (antes em 4-6
+  arquivos diferentes — bug #1 da onda 1 nasceu de uma divergência dessa).
+- `numCheck`, `validateNumericFields`, `orcamentoNumericChecks` (antes
+  copy-paste byte-a-byte entre POST e PUT).
+- Migrados: `api/orcamento/route.ts`, `api/orcamento/[id]/route.ts`,
+  `(dashboard)/orcamento/page.tsx`, `detalhe/[id]/page.tsx`,
+  `detalhe/[id]/OrcamentoDetalheClient.tsx`.
+
+**Paginação real na listagem** — antes hardcodado `limit=100`. Agora paginação
+"Carregar mais" com `ORC_PAGE_SIZE=50`, accumulate em estado, contador
+`(parcial)` quando há mais páginas.
+
+**Migrations com numeração duplicada** (130, 202, 203, 246, 247, 248):
+**não renomeadas** propositalmente — já aplicadas em prod. Renomear quebra
+o tracker. Documentado aqui pra deploys futuros se atentarem.
 
 ## fix(orcamento): Valida par exige ficha2 (v2.42.2)
 

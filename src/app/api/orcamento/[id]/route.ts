@@ -5,8 +5,9 @@ import { isFullAccess } from "@/lib/roles";
 import { validateFichaTecnica, migrateProfile, CALIBRACAO_DEFAULTS, type CalibracaoDefaults } from "@/app/(dashboard)/orcamento/validations";
 import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
 import { ProfileType } from "@/app/(dashboard)/orcamento/types";
-
-const ROLES_ORCAMENTO = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "consultora"] as const;
+import { ROLES_ORCAMENTO, ROLES_APROVACAO, orcamentoNumericChecks } from "@/lib/orcamento-shared";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireOrcamentoOwnership, NotFoundError } from "@/lib/auth-vendas";
 
 // GET /api/orcamento/[id] — detalhe do orçamento
 export async function GET(
@@ -20,6 +21,19 @@ export async function GET(
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // Onda 1D: bloqueia consultora de ler orcamento alheio
+  const [usuarioGet] = await sql<{ role: string }[]>`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+  `;
+  if (!usuarioGet) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  try {
+    await requireOrcamentoOwnership({ id: user.id, role: usuarioGet.role, email: user.email ?? "" }, orcId);
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   // o.* + ft.* causava colisão de `id` (orçamento vs ficha) — o `id` da ficha
   // sobrescrevia o do orçamento no resultado. Voltamos a ficha como objeto
@@ -86,6 +100,22 @@ export async function PATCH(
   `;
   if (!orc) return NextResponse.json({ error: "Orçamento não encontrado" }, { status: 404 });
 
+  // Ownership: consultora só toca os próprios orçamentos (a página já filtra
+  // mas a API era cega — qualquer consultora autenticada conseguia PATCH em
+  // orçamento alheio via cURL).
+  const isFull = isFullAccess(role);
+  if (role === "consultora" && !isFull && orc.usuario_id !== user.id) {
+    return NextResponse.json({ error: "Sem permissão para esse orçamento" }, { status: 403 });
+  }
+
+  // Aprovar/rejeitar exige ROLES_APROVACAO (admin/gerentes/desenvolvedor) —
+  // consultora pode só enviar e atualizar cliente_id dos próprios.
+  if ((body.status === "aprovado" || body.status === "rejeitado")
+      && !isFull
+      && !ROLES_APROVACAO.includes(role as typeof ROLES_APROVACAO[number])) {
+    return NextResponse.json({ error: "Sem permissão para aprovar/rejeitar" }, { status: 403 });
+  }
+
   // Atualizar cliente_id se fornecido
   if (body.cliente_id) {
     await sql`UPDATE alissonerp.orcamentos SET cliente_id = ${body.cliente_id} WHERE id = ${orcId}`;
@@ -115,6 +145,45 @@ export async function PATCH(
       return NextResponse.json({ error: "Vincule um cliente antes de aprovar" }, { status: 422 });
     }
 
+    // Bug #13: valida que o cliente_id realmente existe em public.contatos
+    // antes de criar a venda. Sem isso, FK quebrava com mensagem genérica.
+    const [clienteExiste] = await sql`SELECT 1 AS ok FROM public.contatos WHERE id_contato = ${clienteId} LIMIT 1`;
+    if (!clienteExiste) {
+      return NextResponse.json({ error: "Cliente vinculado não foi encontrado (pode ter sido removido). Selecione outro." }, { status: 422 });
+    }
+
+    // Bug #18 + B6: defesa em profundidade — revalida ficha técnica (1 E 2)
+    // antes da aprovação. Se algum endpoint legado/manual deixou a ficha
+    // inviável, o PUT já barra, mas o PATCH não tinha proteção própria. B6
+    // estende pra ficha2: par com bug em anel 2 não pode chegar à venda.
+    if (orc.tipo === "alianca") {
+      const fichaIds = [orc.ficha_tecnica_id, orc.ficha_tecnica_2_id].filter((id): id is number => !!id);
+      if (fichaIds.length > 0) {
+        const [configRow] = await sql`SELECT calibracao FROM alissonerp.config_orcamento WHERE name = 'default' LIMIT 1`;
+        const calibAp: CalibracaoDefaults = (configRow?.calibracao as CalibracaoDefaults) ?? CALIBRACAO_DEFAULTS;
+        for (const fichaId of fichaIds) {
+          const [fichaApro] = await sql`
+            SELECT * FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${fichaId} LIMIT 1
+          `;
+          if (!fichaApro) continue;
+          const profileAp = migrateProfile(String(fichaApro.perfil ?? "Simples"));
+          const capacityAp = computeStoneCapacity(
+            Number(fichaApro.diametro ?? 0),
+            Number(fichaApro.espessura ?? 0),
+            Number(fichaApro.canal_borda_altura ?? 1.0),
+            Number(fichaApro.tamanho_pedra ?? 0),
+            Number(fichaApro.pedra_fileiras ?? 1),
+            profileAp,
+          );
+          const errsAp = validateFichaTecnica(fichaApro as unknown as Record<string, unknown>, capacityAp, calibAp);
+          if (errsAp.length > 0) {
+            const label = fichaId === orc.ficha_tecnica_id ? "anel 1" : "anel 2";
+            return NextResponse.json({ error: `Ficha técnica inválida (${label}): ${errsAp[0].message}`, errors: errsAp }, { status: 422 });
+          }
+        }
+      }
+    }
+
     const perfilNomes: Record<string, string> = {
       Anatomica: "Anatômica", Boleada: "Boleada", BoleadaDouble: "Boleada Dupla",
       Chanfrada: "Chanfrada", Concava: "Côncava", QuadradoCanal: "Bordas Elevadas",
@@ -123,14 +192,44 @@ export async function PATCH(
       FrisoUnico: "Reta + Friso", FrisoLateral: "Reta + Friso Duplo",
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const resultado = await (sql as any).begin(async (tx: typeof sql) => {
-      // 1. Data entrega: +10 dias úteis
-      const dataEntrega = new Date();
+    // Retry defensivo em unique_violation do numero_venda. Migration 259
+    // alinha o sequence com MAX(numero_pedido/numero_venda), mas se ela ainda
+    // não rodou em prod (ou alguém inserir via outro caminho), o nextval pode
+    // colidir. Como sequence é monotônico, a 2ª tentativa pega número novo.
+    const runWithRetry = async <T>(fn: () => Promise<T>, max = 3): Promise<T> => {
+      let lastErr: unknown;
+      for (let i = 0; i < max; i++) {
+        try { return await fn(); }
+        catch (e) {
+          lastErr = e;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const code = (e as any)?.code;
+          if (code !== "23505") throw e; // só retentamos unique_violation
+        }
+      }
+      throw lastErr;
+    };
+    type ResultadoAprovacao = { venda_id: number; numero_venda: string };
+    const resultado = await runWithRetry<ResultadoAprovacao>(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (sql as any).begin(async (tx: typeof sql) => {
+      // 1. Data entrega: +10 dias úteis em America/Sao_Paulo.
+      // Bug #19: `new Date()` no servidor em UTC pulava sábado/domingo errado
+      // (sex 23h SP = sáb 02h UTC, então `getDay()` retornava 6 e atrasava 1 dia).
+      // Aqui montamos a data no fuso SP usando Intl, depois caminhamos em UTC
+      // (independente do TZ do host).
+      const partsBR = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Sao_Paulo",
+        year: "numeric", month: "2-digit", day: "2-digit",
+      }).formatToParts(new Date());
+      const y = Number(partsBR.find(p => p.type === "year")?.value);
+      const m = Number(partsBR.find(p => p.type === "month")?.value);
+      const d = Number(partsBR.find(p => p.type === "day")?.value);
+      const dataEntrega = new Date(Date.UTC(y, m - 1, d));
       let diasUteis = 0;
       while (diasUteis < 10) {
-        dataEntrega.setDate(dataEntrega.getDate() + 1);
-        const dow = dataEntrega.getDay();
+        dataEntrega.setUTCDate(dataEntrega.getUTCDate() + 1);
+        const dow = dataEntrega.getUTCDay();
         if (dow !== 0 && dow !== 6) diasUteis++;
       }
 
@@ -165,18 +264,61 @@ export async function PATCH(
                 : `Aliança ${nomeModeloSaved}`)
             : `Aliança ${nomeFallback}`)
         : `Peça Personalizada`;
-      // Buscar valor e peso diretamente do orçamento (evitar conflito de colunas com ft.*)
-      const [orcValores] = await tx`SELECT valor, peso FROM alissonerp.orcamentos WHERE id = ${orcId}`;
-      const valorItem = Number(orcValores?.valor ?? 0);
-      const pesoItem = Number(orcValores?.peso ?? orc.peso_estimado ?? 0);
-
-      // Calcular comissão baseada na faixa (desconto 0% → mesma lógica do frontend)
-      const [faixa] = await tx`
-        SELECT comissao_pct FROM alissonerp.faixas_comissao
-        WHERE desconto_pct = 0 AND ativo = true
-        LIMIT 1
+      // Buscar valor, peso, desconto, quantidade, snapshot e lock direto do orçamento.
+      // Bug #14: quando snapshot lock está ativo, usar o valor congelado em vez
+      // do `valor` cru — assim qualquer dessincronia entre coluna e snapshot
+      // (cenário raro mas possível) não vaza pra venda gerada.
+      // Bug #12: respeitar quantidade=2 do par — antes a venda nascia sempre
+      // com 1 item, perdendo o "par" e o relatório de produção desalinhava.
+      const [orcValores] = await tx`
+        SELECT valor, peso, desconto_pct, quantidade, snapshot, valor_negociado_locked
+        FROM alissonerp.orcamentos WHERE id = ${orcId}
       `;
-      const pctComissao = Number(faixa?.comissao_pct ?? 0);
+      const lockedAtivo = orcValores?.valor_negociado_locked === true;
+      const snap = (lockedAtivo && orcValores?.snapshot && typeof orcValores.snapshot === "object")
+        ? (orcValores.snapshot as Record<string, unknown>)
+        : null;
+      const valorTotal = Number(snap?.valor ?? orcValores?.valor ?? 0);
+      const pesoTotal = Number(snap?.peso ?? orcValores?.peso ?? orc.peso_estimado ?? 0);
+      const qtdRaw = Number(orcValores?.quantidade ?? 1);
+      const qtdItem = Number.isFinite(qtdRaw) && qtdRaw >= 1 ? Math.floor(qtdRaw) : 1;
+      // Item da venda é gravado como "par" (1 linha, quantidade=2, valor TOTAL,
+      // peso TOTAL) — o vendedor edita na tela de venda se precisar separar.
+      const valorItem = valorTotal;
+      const pesoItem = pesoTotal;
+      // Replica o desconto do orçamento no item da venda. Reconstrói o preço
+      // cheio para manter coerência: lista × (1 − pct/100) = unitário.
+      // Sem isso, lista ficava como o próprio valor já descontado, e qualquer
+      // desconto adicional na venda aplicava em cascata multiplicativa
+      // (30% no orçamento + 30% na venda = 51% real, não 60% e não 30%).
+      const descontoPctItem = Number(snap?.desconto_pct ?? orcValores?.desconto_pct ?? 0);
+      const precoListaItem = descontoPctItem > 0 && descontoPctItem < 100
+        ? Math.round((valorItem / (1 - descontoPctItem / 100)) * 100) / 100
+        : valorItem;
+
+      // Comissão segue faixas_comissao pelo desconto efetivo do orçamento —
+      // mesma regra que produto cadastrado usa no checkout. Aliança com 30%
+      // desconto (típica em promoção) cai na faixa 30 → 0.5% comissão.
+      // Acima de 30% → 0.5% fixo (mesmo teto do frontend).
+      //
+      // UNIT NOTE: faixas_comissao.comissao_pct é armazenado em "1 = 1%"
+      // (seed 104: 0% desc → 4.00 = 4%; 30% desc → 0.50 = 0.5%). Por isso
+      // a fórmula é (valor * pct) / 100 — não (valor * pct).
+      // Clamp [0, 100] defende contra dados corrompidos (ex: alguém gravando
+      // fração 0.04 em vez de 4) que gerariam comissão zerada em silêncio.
+      let pctComissao = 0;
+      if (descontoPctItem > 30) {
+        pctComissao = 0.5;
+      } else {
+        const [faixa] = await tx`
+          SELECT comissao_pct FROM alissonerp.faixas_comissao
+          WHERE desconto_pct = ${Math.round(descontoPctItem)} AND ativo = true
+          LIMIT 1
+        `;
+        pctComissao = Number(faixa?.comissao_pct ?? 0);
+      }
+      if (!Number.isFinite(pctComissao) || pctComissao < 0) pctComissao = 0;
+      if (pctComissao > 100) pctComissao = 100;
       const valorComissao = Math.round(valorItem * pctComissao) / 100;
 
       await tx`
@@ -185,8 +327,8 @@ export async function PATCH(
           pct_desconto, preco_unitario, total_item, peso_estimado,
           pct_comissao, valor_comissao, observacao
         ) VALUES (
-          ${venda.id}, ${nomeItem}, 1, ${valorItem},
-          0, ${valorItem}, ${valorItem}, ${pesoItem},
+          ${venda.id}, ${nomeItem}, ${qtdItem}, ${precoListaItem},
+          ${descontoPctItem}, ${valorItem}, ${valorItem}, ${pesoItem},
           ${pctComissao}, ${valorComissao},
           ${'Orçamento ' + orc.numero_orcamento}
         )
@@ -200,7 +342,8 @@ export async function PATCH(
       `;
 
       return { venda_id: venda.id, numero_venda: vendaFinal.numero_venda as string };
-    });
+    }),
+    );
 
     // Venda criada como rascunho — usuário preenche pagamento/frete e aprova manualmente
 
@@ -228,16 +371,72 @@ export async function PUT(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
+  // Permissões: descobre role + mx_desconto_permitido do caller pra decidir
+  // se pode destravar valor negociado E se pode passar do limite de desconto.
+  const [callerRow] = await sql`SELECT role, mx_desconto_permitido FROM alissonerp.usuarios WHERE id = ${user.id}::uuid`;
+  const callerRole = (callerRow?.role ?? "") as string;
+  const canUnlock = isFullAccess(callerRole);
+  const callerMaxDesc = Number(callerRow?.mx_desconto_permitido ?? 0);
+
+  // Onda 1D: consultora so atualiza orcamento proprio (usuario_id == user.id)
+  try {
+    await requireOrcamentoOwnership({ id: user.id, role: callerRole, email: user.email ?? "" }, orcId);
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
+
   const body = await req.json();
   const {
     nome_cliente, nome_modelo, peso, valor, markup, desconto_pct,
     cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
     tipo, ficha, ficha2, quantidade, cliente_id, foto_3d_base64,
-    snapshot, valor_negociado_locked,
+    snapshot, valor_negociado_locked, client_updated_at,
   } = body;
 
+  // Locking otimista (ADR 0006). Se o cliente envia client_updated_at, comparamos
+  // com o updated_at atual; mismatch = 409 (outro usuário editou desde o GET).
+  // Sem isso, dois usuários editando o mesmo orçamento sobrescrevem em silêncio.
+  if (client_updated_at) {
+    const [row] = await sql`SELECT updated_at FROM alissonerp.orcamentos WHERE id = ${orcId}`;
+    if (row && new Date(row.updated_at).getTime() !== new Date(client_updated_at).getTime()) {
+      return NextResponse.json(
+        { error: "Conflito: orçamento foi modificado por outro usuário. Recarregue a página." },
+        { status: 409 },
+      );
+    }
+  }
+
+  // Validacao numerica (helper compartilhado — antes era copy-paste do POST).
+  const numErr = orcamentoNumericChecks({
+    peso, valor, markup, desconto_pct, cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,
+  });
+  if (numErr) return NextResponse.json({ error: numErr }, { status: 400 });
+  if (cliente_id != null) {
+    const [existe] = await sql`SELECT 1 AS ok FROM public.contatos WHERE id_contato = ${Number(cliente_id)} LIMIT 1`;
+    if (!existe) return NextResponse.json({ error: "Cliente informado não foi encontrado" }, { status: 422 });
+  }
+
+  // B7: trava backend de desconto_pct (espelha POST). Não-admin não pode
+  // ultrapassar mx_desconto_permitido via cURL.
+  if (!canUnlock && desconto_pct != null) {
+    const descNum = Number(desconto_pct);
+    if (Number.isFinite(descNum) && descNum > callerMaxDesc) {
+      return NextResponse.json(
+        { error: `Desconto ${descNum}% excede seu limite (${callerMaxDesc}%). Solicite aprovação.` },
+        { status: 403 },
+      );
+    }
+  }
+
+  // Normaliza quantidade UMA vez. Antes alguns checks faziam `=== 2` estrito,
+  // outros `Number(...) === 2` — string "2" passava na fase 1 mas pulava o
+  // INSERT da ficha2 (bug v2.42.2 voltava por outro caminho).
+  const qtdNum = Number(quantidade);
+
   // Par de alianças exige as DUAS fichas (idem POST).
-  if ((tipo ?? "alianca") === "alianca" && Number(quantidade) === 2 && (!ficha2 || typeof ficha2 !== "object")) {
+  if ((tipo ?? "alianca") === "alianca" && qtdNum === 2 && (!ficha2 || typeof ficha2 !== "object")) {
     return NextResponse.json({ error: "Par de alianças exige ficha técnica do anel 2" }, { status: 422 });
   }
 
@@ -251,7 +450,7 @@ export async function PUT(
 
     const fichasParaValidar: Array<{ f: Record<string, unknown>; label: string }> = [];
     if (ficha && typeof ficha === "object") fichasParaValidar.push({ f: ficha, label: "alianca" });
-    if (ficha2 && typeof ficha2 === "object" && quantidade === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
+    if (ficha2 && typeof ficha2 === "object" && qtdNum === 2) fichasParaValidar.push({ f: ficha2, label: "alianca 2" });
 
     for (const { f, label } of fichasParaValidar) {
       const profile = migrateProfile(String(f.perfil ?? "Simples"));
@@ -327,7 +526,7 @@ export async function PUT(
 
   // Atualizar ficha técnica 2 (par)
   let ficha2Id: number | undefined;
-  if (ficha2 && typeof ficha2 === "object" && quantidade === 2) {
+  if (ficha2 && typeof ficha2 === "object" && qtdNum === 2) {
     const [existing] = await sql`SELECT ficha_tecnica_2_id FROM alissonerp.orcamentos WHERE id = ${orcId}`;
     if (existing?.ficha_tecnica_2_id) {
       await sql`
@@ -357,27 +556,40 @@ export async function PUT(
       `;
       ficha2Id = existing.ficha_tecnica_2_id;
     } else {
-      // Criar ficha 2 se não existe
+      // Criar ficha 2 se não existe (caso: usuário editou orçamento unidade
+      // e converteu pra par). B5: INSERT alinhado com o POST ficha2 — antes
+      // faltavam profundidade_concava, canal_largura, canal_borda_altura,
+      // chanfro_tamanho, pedra_fileiras, e pedras_detalhadas era hardcoded
+      // como '[]'. Resultado: anel 2 nascia incompleto e a tela mostrava "—"
+      // até um segundo save sobrescrever via UPDATE.
       const [newFicha] = await sql`
         INSERT INTO alissonerp.orcamento_fichas_tecnicas (
-          modelo, aro_numeracao, largura, espessura, peso_estimado, perfil, diametro,
-          densidade_ouro, cor_metal, tipo_fonte, texto, qtd_pedras, tamanho_pedra, tipo_pedra,
-          tipo_aplicacao_pedra, has_friso, friso_kind, friso_tipo, friso_lado, friso_largura,
-          friso_profundidade, friso_offset,
-          dome_porcentagem, pedra_drill, pedra_meia_lua, pedra_volta_completa,
+          modelo, aro_numeracao, largura, espessura, peso_estimado,
+          perfil, diametro, densidade_ouro, cor_metal,
+          tipo_fonte, texto, qtd_pedras, tamanho_pedra, tipo_pedra, tipo_aplicacao_pedra,
+          profundidade_concava, has_friso, friso_kind, friso_tipo,
+          friso_lado, friso_largura, friso_profundidade, friso_offset,
+          canal_largura, canal_borda_altura, chanfro_tamanho, dome_porcentagem,
+          pedra_fileiras, pedra_drill, pedra_meia_lua, pedra_volta_completa,
           pedras_detalhadas
         ) VALUES (
-          ${ficha2.modelo ?? null}, ${ficha2.aro_numeracao ?? null}, ${ficha2.largura ?? null},
-          ${ficha2.espessura ?? null}, ${ficha2.peso_estimado ?? null}, ${ficha2.perfil ?? null},
-          ${ficha2.diametro ?? null}, ${ficha2.densidade_ouro ?? null}, ${ficha2.cor_metal ?? null},
-          ${ficha2.tipo_fonte ?? null}, ${ficha2.texto ?? null}, ${ficha2.qtd_pedras ?? null},
-          ${ficha2.tamanho_pedra ?? null}, ${ficha2.tipo_pedra ?? null}, ${ficha2.tipo_aplicacao_pedra ?? null},
+          ${ficha2.modelo ?? null}, ${ficha2.aro_numeracao ?? null},
+          ${ficha2.largura ?? null}, ${ficha2.espessura ?? null}, ${ficha2.peso_estimado ?? null},
+          ${ficha2.perfil ?? null}, ${ficha2.diametro ?? null},
+          ${ficha2.densidade_ouro ?? null}, ${ficha2.cor_metal ?? null},
+          ${ficha2.tipo_fonte ?? null}, ${ficha2.texto ?? null},
+          ${ficha2.qtd_pedras ?? null}, ${ficha2.tamanho_pedra ?? null}, ${ficha2.tipo_pedra ?? null},
+          ${ficha2.tipo_aplicacao_pedra ?? null},
+          ${ficha2.profundidade_concava ?? null},
           ${ficha2.has_friso ?? false}, ${ficha2.friso_kind ?? "friso"}, ${ficha2.friso_tipo ?? null},
-          ${ficha2.friso_lado ?? null}, ${ficha2.friso_largura ?? null},
-          ${ficha2.friso_profundidade ?? null}, ${ficha2.friso_offset ?? null},
-          ${ficha2.dome_porcentagem ?? null}, ${ficha2.pedra_drill ?? false},
+          ${ficha2.friso_lado ?? null},
+          ${ficha2.friso_largura ?? null}, ${ficha2.friso_profundidade ?? null},
+          ${ficha2.friso_offset ?? null},
+          ${ficha2.canal_largura ?? null}, ${ficha2.canal_borda_altura ?? null},
+          ${ficha2.chanfro_tamanho ?? null}, ${ficha2.dome_porcentagem ?? null},
+          ${ficha2.pedra_fileiras ?? null}, ${ficha2.pedra_drill ?? false},
           ${ficha2.pedra_meia_lua ?? false}, ${ficha2.pedra_volta_completa ?? false},
-          '[]'::jsonb
+          ${sql.json(ficha2.pedras_detalhadas ?? [])}
         ) RETURNING id
       `;
       ficha2Id = newFicha.id as number;
@@ -392,6 +604,20 @@ export async function PUT(
   const snapshotSql = hasSnapshot
     ? sql`snapshot = ${sql.json(snapshot)}, congelado_em = NOW(),`
     : sql``;
+
+  // Regra do lock (regressão v2.42.0):
+  //  - true              → trava sempre
+  //  - undefined/null    → preserva o valor atual (COALESCE)
+  //  - false sem permissão → IGNORA (qualquer não-admin não destrava)
+  //  - false com permissão → destrava (admin/desenvolvedor)
+  // Antes, qualquer cliente API podia mandar false e destravar silenciosamente
+  // o valor negociado, reabrindo a janela pro bug original do v2.42.0.
+  const [currentLock] = await sql`SELECT valor_negociado_locked FROM alissonerp.orcamentos WHERE id = ${orcId}`;
+  const currentLockVal = currentLock?.valor_negociado_locked === true;
+  let lockedToPersist: boolean;
+  if (valor_negociado_locked === true) lockedToPersist = true;
+  else if (valor_negociado_locked === false && canUnlock) lockedToPersist = false;
+  else lockedToPersist = currentLockVal;
 
   await sql`
     UPDATE alissonerp.orcamentos SET
@@ -411,10 +637,13 @@ export async function PUT(
       foto_3d = COALESCE(${foto3dUrl ?? null}, foto_3d),
       ficha_tecnica_2_id = COALESCE(${ficha2Id ?? null}, ficha_tecnica_2_id),
       ${snapshotSql}
-      valor_negociado_locked = COALESCE(${valor_negociado_locked ?? null}, valor_negociado_locked),
+      valor_negociado_locked = ${lockedToPersist},
       updated_at = NOW()
     WHERE id = ${orcId}
   `;
 
-  return NextResponse.json({ ok: true });
+  // Retorna updated_at pra o cliente sincronizar e poder enviar próximo PUT
+  // com client_updated_at correto.
+  const [updated] = await sql`SELECT updated_at FROM alissonerp.orcamentos WHERE id = ${orcId}`;
+  return NextResponse.json({ ok: true, updated_at: updated?.updated_at });
 }
