@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createClient } from "@supabase/supabase-js";
 import { uploadFile, deleteFile } from "@/lib/storage";
+import { internalError } from "@/lib/api-error";
 
 const BUCKETS_PERMITIDOS = ["ordem-fotos", "ordem-videos"];
 
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
       .upload(filePath, buffer, { contentType, upsert: true });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return internalError("[POST /api/ordens/upload-arquivo] storage", error, "Falha ao salvar arquivo");
     }
 
     const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${bucket}/${data.path}`;

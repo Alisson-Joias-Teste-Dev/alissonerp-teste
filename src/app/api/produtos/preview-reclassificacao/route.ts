@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
+import { internalError } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -98,7 +99,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ faixas, porLadoECategoria, insumosAlto, joiasBaixo });
   } catch (err) {
-    console.error("[preview-reclassificacao]", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return internalError("[GET /api/produtos/preview-reclassificacao]", err);
   }
 }

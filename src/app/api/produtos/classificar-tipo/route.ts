@@ -8,6 +8,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
+import { internalError } from "@/lib/api-error";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 
@@ -142,7 +143,6 @@ export async function POST(req: NextRequest) {
       distribAtivos: distrib,
     });
   } catch (err) {
-    console.error("[POST /api/produtos/classificar-tipo]", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return internalError("[POST /api/produtos/classificar-tipo]", err);
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
+import { internalError } from "@/lib/api-error";
 
 type Params = Promise<{ id: string }>;
 
@@ -41,6 +42,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
     if (error.message?.includes("bloqueado") || error.code === "P0001") {
       return NextResponse.json({ error: "Compra bloqueada — não permite alteração" }, { status: 409 });
     }
-    return NextResponse.json({ error: error.message ?? "Erro interno" }, { status: 500 });
+    return internalError("[PATCH /api/compras/[id]/concluir]", err);
   }
 }

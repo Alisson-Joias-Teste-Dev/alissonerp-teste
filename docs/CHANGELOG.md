@@ -1,8 +1,65 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.48.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.49.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): Onda 1C — info disclosure em erros 500 (v2.49.0)
+
+Primeira onda do bloco de segurança não-auth. Re-auditoria de 405 rotas
+identificou que muitas devolviam `err.message` cru do Postgres (revela
+nome de tabela, coluna, constraint, hint de schema) — duas chegavam a
+expor uma linha da stack trace no JSON de resposta.
+
+**Estratégia:** novo helper `internalError(tag, err, fallback?)` em
+`src/lib/api-error.ts`. Loga o erro completo no server (`console.error`)
+e devolve `{ error: "Erro interno" }` 500 para o cliente. Substituição
+mecânica nos handlers afetados — comportamento de domínio
+(`AuthError`/`ForbiddenError`/`HttpError`) preservado.
+
+**Rotas saneadas (16):**
+
+| Rota | O que vazava |
+|---|---|
+| `service/[id]/devolver` | `err.message` + `hint: stack.split("\n")[1]` |
+| `service/[id]/concluir` | `err.message` + `hint: stack.split("\n")[1]` |
+| `devolucoes/[id]/concluir` | `err.message` raw (separa Postgres vs domínio) |
+| `depositos/route.ts` (POST) | `(err as Error).message` |
+| `depositos/[id]/route.ts` (PATCH, DELETE) | idem |
+| `setores/route.ts` (POST) | idem |
+| `setores/[id]/route.ts` (PATCH, DELETE) | idem |
+| `configuracoes/ia/route.ts` (PATCH) | idem |
+| `compras/[id]/concluir` (PATCH) | idem (mantém short-circuit `P0001`/bloqueado) |
+| `ordens/upload-arquivo` (POST) | `StorageError.message` |
+| `produtos/preview-reclassificacao` (GET) | `String(err)` |
+| `produtos/[id]/imagens` (GET, POST) | `String(err)` |
+| `produtos/[id]/imagens/[imgId]` (PATCH, DELETE) | `String(err)` |
+| `produtos/classificar-tipo` (POST) | `String(err)` |
+| `produtos/[id]/personalizacao-campos` (PUT) | `(err as Error).message` |
+| `agentes/telegram/webhook/[bot]` (POST) | `String(error)` |
+
+**Não mexido (mensagens já controladas):**
+- `AuthError`/`ForbiddenError` em 401/403 — `e.message` vem do nosso
+  próprio construtor ("Não autenticado", "Sem permissão").
+- `HttpError` em `produtos/[id]/personalizacao*` e `rfid/cadastrar` —
+  classe interna com mensagens explícitas.
+- `console.error(...e?.stack)` em `pcp/transferir-service` — log
+  server-side, não exposto.
+
+**Caso especial — `devolucoes/[id]/concluir`:** mantém status 400 e
+mensagem do erro porque `concluirDevolucao()` faz `throw new Error(msg)`
+com mensagens amigáveis de domínio ("Devolucao nao editavel", etc).
+Filtro: se o erro tem `code`/`severity` (Postgres error), vira 500
+genérico via `internalError`; senão, devolve `msg` como 400.
+
+**Fora de escopo desta onda (audit identificou para próximas):**
+- 1D: IDOR em `vendas/[id]/*` e `orcamento/[id]/*` (~25 rotas) —
+  consultora hoje lê/edita venda de qualquer colega. Maior impacto
+  patrimonial dos achados restantes.
+- 1E: rate limiting (auth, IA paga, PDF) — ~15 endpoints.
+- 1F: input validation (zod via `defineRoute`) — ~225 rotas POST/PUT/PATCH
+  sem validação runtime.
+- 1G: payload size guards em `images[]`/`mensagem`/`observacoes`.
 
 ## fix(security): Onda 1B — proxy de storage + buckets sensíveis fechados (v2.48.0)
 

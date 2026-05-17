@@ -8,6 +8,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { deleteFile } from "@/lib/storage";
+import { internalError } from "@/lib/api-error";
 
 export async function PATCH(
   req: NextRequest,
@@ -50,8 +51,7 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[PATCH /produtos/[id]/imagens/[imgId]]", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return internalError("[PATCH /api/produtos/[id]/imagens/[imgId]]", err);
   }
 }
 
@@ -99,7 +99,6 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[DELETE /produtos/[id]/imagens/[imgId]]", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return internalError("[DELETE /api/produtos/[id]/imagens/[imgId]]", err);
   }
 }

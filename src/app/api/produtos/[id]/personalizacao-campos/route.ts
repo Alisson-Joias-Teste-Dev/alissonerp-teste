@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, hasRole } from "@/lib/roles";
+import { internalError } from "@/lib/api-error";
 
 const ROLES_CONFIG = ["admin", "desenvolvedor", "diretor", "gerente_loja", "gerente_fabrica"] as const;
 
@@ -269,7 +270,6 @@ export async function PUT(
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[PUT /api/produtos/[id]/personalizacao-campos]", err);
-    return NextResponse.json({ error: (err as Error).message ?? "Erro interno" }, { status: 500 });
+    return internalError("[PUT /api/produtos/[id]/personalizacao-campos]", err);
   }
 }

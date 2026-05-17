@@ -5,6 +5,7 @@ import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { internalError } from "@/lib/api-error";
 
 // POST /api/service/[id]/concluir
 // Operador conclui o serviço: registra pesos, solda, pedras, fotos.
@@ -35,13 +36,8 @@ export async function POST(
 ) {
   try {
     return await _handler(req, params);
-  } catch (err: unknown) {
-    const e = err as Error;
-    console.error("[service/concluir] ERRO NÃO CAPTURADO:", e?.message, e?.stack);
-    return NextResponse.json(
-      { error: e?.message ?? "Erro desconhecido", hint: e?.stack?.split("\n")[1]?.trim() },
-      { status: 500 }
-    );
+  } catch (err) {
+    return internalError("[POST /api/service/[id]/concluir]", err);
   }
 }
 

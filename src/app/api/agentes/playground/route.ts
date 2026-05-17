@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createDeepSeekProvider } from '@/agentes/core/llm/deepseek';
 import { authOr401 } from '@/lib/auth-server';
 import { isFullAccess } from '@/lib/roles';
+import { createDeepSeekProvider } from '@/agentes/core/llm/deepseek';
 
+// ATENCAO: esta rota nao funciona em dev/prod hoje — depende de `ai` +
+// `@ai-sdk/deepseek` que NAO estao instaladas no package.json. Qualquer
+// request retorna 500 (erro de compilacao do modulo), independente de auth.
+// Auth foi adicionada na onda 1A-4 como defesa em camadas para quando as
+// deps forem instaladas. Enquanto isso, atacante tambem nao consegue invocar
+// a LLM (mesmo efeito que 401), so nao recebe o codigo de status esperado.
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // Defesa em camadas: token de env + sessao autenticada full-access
   const token = req.headers.get('X-Playground-Token');

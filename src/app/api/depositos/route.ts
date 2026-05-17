@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
+import { internalError } from "@/lib/api-error";
 
 // GET /api/depositos — lista todos (ativos + inativos)
 export async function GET(req: NextRequest) {
@@ -44,6 +45,6 @@ export async function POST(req: NextRequest) {
     `;
     return NextResponse.json({ id: rows[0].id }, { status: 201 });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return internalError("[POST /api/depositos]", err);
   }
 }

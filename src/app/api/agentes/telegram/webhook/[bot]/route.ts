@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateWebhookSecret } from '@/agentes/core/telegram/webhook-secret';
 import { processUpdate } from '@/agentes/core/orchestrator';
+import { internalError } from '@/lib/api-error';
 
 export async function POST(
   req: NextRequest,
@@ -24,8 +25,7 @@ export async function POST(
   try {
     await processUpdate(body as Parameters<typeof processUpdate>[0], bot);
   } catch (error) {
-    console.error(`[telegram/${bot}] erro:`, error);
-    return NextResponse.json({ ok: false, error: String(error) }, { status: 500 });
+    return internalError(`[telegram/${bot}]`, error, "Erro interno no processamento");
   }
 
   return NextResponse.json({ ok: true });

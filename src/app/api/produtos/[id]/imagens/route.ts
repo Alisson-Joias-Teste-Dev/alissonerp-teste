@@ -9,6 +9,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
+import { internalError } from "@/lib/api-error";
 
 const BUCKET = "imagens";
 
@@ -78,8 +79,7 @@ export async function GET(
 
     return NextResponse.json({ imagens: [], herdada_de: null });
   } catch (err) {
-    console.error("[GET /produtos/[id]/imagens]", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return internalError("[GET /api/produtos/[id]/imagens]", err);
   }
 }
 
@@ -150,7 +150,6 @@ export async function POST(
 
     return NextResponse.json({ imagem: inserted });
   } catch (err) {
-    console.error("[POST /produtos/[id]/imagens]", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return internalError("[POST /api/produtos/[id]/imagens]", err);
   }
 }
