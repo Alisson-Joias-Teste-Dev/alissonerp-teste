@@ -94,8 +94,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         WHERE id = ${invId}
       `;
 
-      // 4. Gerar ajustes de estoque para divergências
-      await gerarAjustesDivergencias(tx, invId, inv.local_estoque_id, user.id);
+      // Ajustes de estoque NAO sao gerados automaticamente — inventario e apenas auditoria
     });
 
     return NextResponse.json({
