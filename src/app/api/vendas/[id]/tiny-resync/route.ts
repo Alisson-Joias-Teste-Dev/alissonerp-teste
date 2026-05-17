@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
 import { sendToTiny } from "@/lib/vendas-aprovar";
+import { internalError } from "@/lib/api-error";
 
 const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 
@@ -35,7 +36,6 @@ export async function POST(
     await sendToTiny(vendaId);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro ao reenviar para o Tiny";
-    return NextResponse.json({ error: msg }, { status: 422 });
+    return internalError(`[POST /api/vendas/${vendaId}/tiny-resync]`, err, "Erro ao reenviar para o Tiny", 422);
   }
 }

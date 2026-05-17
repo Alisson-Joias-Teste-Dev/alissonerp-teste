@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createPixPayment, getWebhookBaseUrl } from "@/lib/mercado-pago";
+import { internalError } from "@/lib/api-error";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /api/vendas/[id]/mercado-pago/criar-pix
@@ -172,13 +173,13 @@ export async function POST(
       expiraEmMinutos: 30,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Erro ao criar Pix MP";
+    const internalMsg = err instanceof Error ? err.message : "Erro ao criar Pix MP";
     await sql`
       UPDATE alissonerp.pagamentos_venda
-      SET gateway_payload = ${JSON.stringify({ erro: msg, quando: new Date().toISOString() })}::text::jsonb
+      SET gateway_payload = ${JSON.stringify({ erro: internalMsg, quando: new Date().toISOString() })}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
-    return NextResponse.json({ error: msg }, { status: 502 });
+    return internalError("[POST /api/vendas/[id]/mercado-pago/criar-pix] createPixPayment", err, "Erro ao criar Pix MP", 502);
   }
 
   // ─── Persiste payment_id no pagamento ─────────────────────────────────────

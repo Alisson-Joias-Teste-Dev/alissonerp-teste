@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { processarDecisao } from "@/lib/aprovacao-regras";
+import { internalError } from "@/lib/api-error";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabase();
@@ -146,7 +147,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[cartao_desconto] ERRO`, { ...logCtx, erro: msg });
-      return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] cartao_desconto`, err);
     }
   }
 
@@ -203,7 +204,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
         VALUES ('aprovacao_desconto', ${JSON.stringify({ ...logCtx, resultado: "erro" })}::text::jsonb, 500, ${msg})
       `.catch(() => {});
-      return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] desconto`, err);
     }
   }
 
@@ -215,9 +216,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       );
       return NextResponse.json({ ok: true, credito: resultado });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[aprovacao] Erro ao processar crédito:`, msg);
-      return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] credito`, err);
     }
   }
 
@@ -232,9 +231,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       );
       return NextResponse.json({ ok: true, devolucao: resultado });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[aprovacao] Erro ao processar devolucao:`, msg);
-      return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] devolucao`, err);
     }
   }
 

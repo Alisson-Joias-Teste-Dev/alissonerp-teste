@@ -10,6 +10,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { normalizeCategoriaRow } from "@/lib/curva-precificacao";
+import { internalError } from "@/lib/api-error";
 
 async function authorize(req?: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -57,9 +58,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const categoria = normalizeCategoriaRow(row as unknown as Record<string, unknown>);
     return NextResponse.json({ categoria });
   } catch (err) {
-    console.error("[PATCH /api/precificacao/curva/categorias/[id]]", err);
-    const msg = err instanceof Error ? err.message : "Erro ao atualizar categoria";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError("[PATCH /api/precificacao/curva/categorias/[id]]", err, "Erro ao atualizar categoria");
   }
 }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createPointIntent, cancelPointIntent } from "@/lib/mercado-pago";
+import { internalError } from "@/lib/api-error";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST   /api/vendas/[id]/mercado-pago/criar-intent-point
@@ -157,13 +158,13 @@ export async function POST(
       printOnTerminal: true,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Erro ao criar intent MP";
+    const internalMsg = err instanceof Error ? err.message : "Erro ao criar intent MP";
     await sql`
       UPDATE alissonerp.pagamentos_venda
-      SET gateway_payload = ${JSON.stringify({ erro: msg, device_id: body.device_id, quando: new Date().toISOString() })}::text::jsonb
+      SET gateway_payload = ${JSON.stringify({ erro: internalMsg, device_id: body.device_id, quando: new Date().toISOString() })}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
-    return NextResponse.json({ error: msg }, { status: 502 });
+    return internalError("[POST /api/vendas/[id]/mercado-pago/criar-intent-point]", err, "Erro ao criar intent MP", 502);
   }
 
   await sql`
@@ -231,20 +232,20 @@ export async function DELETE(
   try {
     await cancelPointIntent(deviceId, intentId);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Erro ao cancelar";
+    const internalMsg = err instanceof Error ? err.message : "Erro ao cancelar";
     // 404 = intent já processada ou expirada no MP — trata como cancelamento bem-sucedido
-    const isGone = msg.includes("404") || msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("doesn't exist");
+    const isGone = internalMsg.includes("404") || internalMsg.toLowerCase().includes("not found") || internalMsg.toLowerCase().includes("doesn't exist");
     if (!isGone) {
       await sql`
         UPDATE alissonerp.pagamentos_venda
         SET gateway_payload = ${JSON.stringify({
           ...(payload ?? {}),
-          cancel_error: msg,
+          cancel_error: internalMsg,
           cancelado_em: new Date().toISOString(),
         })}::text::jsonb
         WHERE id = ${pagamentoId}
       `;
-      return NextResponse.json({ error: msg, pagamento_id: pagamentoId }, { status: 502 });
+      return internalError("[DELETE /api/vendas/[id]/mercado-pago/criar-intent-point]", err, "Erro ao cancelar intent MP", 502);
     }
     // isGone: continua para marcar como cancelado no banco
   }

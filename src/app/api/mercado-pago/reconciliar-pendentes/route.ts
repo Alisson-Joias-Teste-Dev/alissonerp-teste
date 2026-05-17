@@ -103,15 +103,15 @@ export async function POST() {
           await concluirVenda(pag.venda_id, user.id, { tinyBestEffort: true });
           acao = "venda_concluida";
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "erro_concluir";
-          acao = `confirmado_mas_conclusao_falhou: ${msg}`;
+          console.error(`[reconciliar-pendentes] concluirVenda falhou venda=${pag.venda_id}`, err);
+          acao = "confirmado_mas_conclusao_falhou";
         }
       }
 
       resultados.push({ pagamento_id: pag.id, venda_id: pag.venda_id, acao, payment_id: paymentId });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "erro";
-      resultados.push({ pagamento_id: pag.id, venda_id: pag.venda_id, acao: "excecao", erro: msg });
+      console.error(`[reconciliar-pendentes] excecao pag=${pag.id} venda=${pag.venda_id}`, err);
+      resultados.push({ pagamento_id: pag.id, venda_id: pag.venda_id, acao: "excecao" });
     }
   }
 

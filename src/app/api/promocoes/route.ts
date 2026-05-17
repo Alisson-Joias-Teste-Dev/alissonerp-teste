@@ -18,6 +18,7 @@ import {
   expandirItensComPais,
   checarConflitoPromocoes,
 } from "@/lib/promocoes-helpers";
+import { internalError } from "@/lib/api-error";
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -160,9 +161,7 @@ export async function POST(req: NextRequest) {
       { status: 201 },
     );
   } catch (err) {
-    console.error("[POST /api/promocoes]", err);
-    const msg = err instanceof Error ? err.message : "Erro ao criar promocao";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError("[POST /api/promocoes]", err, "Erro ao criar promocao");
   }
 }
 

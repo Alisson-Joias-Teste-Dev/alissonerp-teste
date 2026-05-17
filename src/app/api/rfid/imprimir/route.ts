@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { gerarZplEtiquetaJoia, imprimirZplDireto } from "@/lib/rfid-zpl";
+import { internalError } from "@/lib/api-error";
 
 // POST /api/rfid/imprimir
 // Body: { produto_id: number, tipo?: string }
@@ -75,6 +76,6 @@ export async function POST(req: NextRequest) {
       produto: { id: produtoId, sku: prod.sku, nome: prod.nome },
     });
   } catch (err) {
-    return NextResponse.json({ error: `Erro ao gerar RFID: ${(err as Error).message}` }, { status: 500 });
+    return internalError("[POST /api/rfid/imprimir]", err, "Erro ao gerar RFID");
   }
 }

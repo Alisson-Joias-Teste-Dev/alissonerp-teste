@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
 import { solicitarAprovacaoDevolucao } from "@/lib/devolucoes";
+import { internalError } from "@/lib/api-error";
 
 async function getUserRole(userId: string): Promise<string | null> {
   const [row] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid`;
@@ -30,7 +31,6 @@ export async function POST(
     const res = await solicitarAprovacaoDevolucao(devId, user.id);
     return NextResponse.json(res);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return internalError(`[POST /api/devolucoes/${devId}/solicitar-aprovacao]`, err, "Erro ao solicitar aprovacao", 400);
   }
 }

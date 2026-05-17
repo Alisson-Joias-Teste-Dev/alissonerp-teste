@@ -6,6 +6,7 @@ import { approveVenda } from "@/lib/vendas-aprovar";
 import { avaliarRegras, criarTarefaAprovacao } from "@/lib/aprovacao-regras";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { internalError } from "@/lib/api-error";
 
 // ─── POST /api/vendas/[id]/solicitar-aprovacao ───────────────────────────────
 // Consultora/gerente solicita aprovação de venda.
@@ -234,8 +235,7 @@ export async function POST(
         message: result.message,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return NextResponse.json({ error: msg }, { status: 500 });
+      return internalError("[POST /api/vendas/[id]/solicitar-aprovacao]", err);
     }
   }
 
@@ -252,7 +252,6 @@ export async function POST(
       tiny_erro: result.tiny_erro,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 502 });
+    return internalError("[POST /api/vendas/[id]/solicitar-aprovacao] approveVenda", err, "Erro ao aprovar venda", 502);
   }
 }

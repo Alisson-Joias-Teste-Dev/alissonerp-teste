@@ -15,6 +15,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
+import { internalError } from "@/lib/api-error";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 15;
@@ -82,8 +83,6 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'erro desconhecido';
-    console.error("[GET /api/gestao-estoque/imagem-proxy]", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError("[GET /api/gestao-estoque/imagem-proxy]", err);
   }
 }

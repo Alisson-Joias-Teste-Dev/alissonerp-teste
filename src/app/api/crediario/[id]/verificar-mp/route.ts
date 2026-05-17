@@ -4,6 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { fetchPayment } from "@/lib/mercado-pago";
 import { creditarSaldo } from "@/lib/saldo-credito";
 import { concluirVenda } from "@/lib/vendas-aprovar";
+import { internalError } from "@/lib/api-error";
 
 const PODE_VERIFICAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
 
@@ -65,11 +66,7 @@ export async function POST(
   try {
     mpData = await fetchPayment(mpPaymentId);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { error: `Erro ao consultar Mercado Pago: ${msg}` },
-      { status: 502 },
-    );
+    return internalError("[POST /api/crediario/[id]/verificar-mp] fetchPayment", err, "Erro ao consultar Mercado Pago", 502);
   }
 
   if (!mpData || mpData.status !== "approved") {

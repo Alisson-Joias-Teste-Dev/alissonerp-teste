@@ -23,6 +23,7 @@ import {
   normalizeCategoriaRow,
 } from "@/lib/curva-precificacao";
 import { buildFiltrosProdutos } from "@/lib/produtos-filtros";
+import { internalError } from "@/lib/api-error";
 
 interface ApplyBody {
   filtros?: {
@@ -154,8 +155,6 @@ export async function POST(req: NextRequest) {
       elapsed_s: elapsed,
     });
   } catch (err) {
-    console.error("[POST /api/precificacao/curva/aplicar]", err);
-    const msg = err instanceof Error ? err.message : "Erro ao aplicar curva";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError("[POST /api/precificacao/curva/aplicar]", err, "Erro ao aplicar curva");
   }
 }

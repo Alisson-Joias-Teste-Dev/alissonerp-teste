@@ -4,6 +4,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import type { RankingConsultora, TipoMeta } from "@/lib/types/dashboard-comercial";
 import { safeDiv } from "@/lib/dashboard-comercial/utils";
+import { internalError } from "@/lib/api-error";
 
 // GET /api/dashboard-comercial/ranking?from=YYYY-MM-DD&to=YYYY-MM-DD
 //
@@ -115,9 +116,7 @@ export async function GET(req: NextRequest) {
       .map((r, i) => ({ ...r, posicao: i + 1 }));
 
     return NextResponse.json({ ranking });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[dashboard-comercial/ranking]", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch (err) {
+    return internalError("[GET /api/dashboard-comercial/ranking]", err);
   }
 }

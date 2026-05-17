@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
 import { atualizarDevolucao, cancelarDevolucao, type PatchDevolucao } from "@/lib/devolucoes";
+import { internalError } from "@/lib/api-error";
 
 async function getUserRole(userId: string): Promise<string | null> {
   const [row] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid`;
@@ -120,8 +121,7 @@ export async function PATCH(
     await atualizarDevolucao(devId, patch, user.id);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return internalError("[PATCH /api/devolucoes/[id]]", err, "Erro ao atualizar devolucao", 400);
   }
 }
 
@@ -147,7 +147,6 @@ export async function DELETE(
     await cancelarDevolucao(devId, user.id);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return internalError("[DELETE /api/devolucoes/[id]]", err, "Erro ao cancelar devolucao", 400);
   }
 }

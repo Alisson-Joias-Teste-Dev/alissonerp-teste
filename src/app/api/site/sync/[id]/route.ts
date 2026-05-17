@@ -15,6 +15,7 @@ import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { tabelaExiste } from "@/lib/schema-check";
 import { upsertProduto, sincronizarVariacoes, type WCProductPayload } from "@/lib/woocommerce";
+import { internalError } from "@/lib/api-error";
 
 const MSG_MIGRACAO = "Migration 159 pendente. Execute: node scripts/apply_159.mjs";
 
@@ -272,10 +273,6 @@ export async function POST(
       }, { status: 502 });
     }
   } catch (err) {
-    console.error("[POST /api/site/sync/[id]]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao sincronizar" },
-      { status: 500 }
-    );
+    return internalError("[POST /api/site/sync/[id]]", err, "Erro ao sincronizar");
   }
 }

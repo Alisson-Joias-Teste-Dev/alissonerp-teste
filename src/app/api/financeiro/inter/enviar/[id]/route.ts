@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import * as inter from "@/lib/inter";
+import { internalError } from "@/lib/api-error";
 
 const ROLES_ENVIAR = ["desenvolvedor", "admin", "diretor", "gerente_loja", "gerente_fabrica"];
 
@@ -128,6 +129,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       SET inter_erro = ${msg}, inter_atualizado_em = now()
       WHERE id = ${contaId}
     `;
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError(`[POST /api/financeiro/inter/enviar/${contaId}]`, e, "Falha ao enviar para o Inter");
   }
 }

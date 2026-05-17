@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { buscarOuroRecebido } from "@/lib/registrar-quebra";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { internalError } from "@/lib/api-error";
 
 // POST /api/pcp/transferir-service
 // Move uma ordem do PCP de um depósito de ourives para um operador service.
@@ -16,13 +17,8 @@ const ROLES_PERMITIDOS = ["admin", "desenvolvedor", "gerente_fabrica", "pcp"];
 export async function POST(req: NextRequest) {
   try {
     return await _handler(req);
-  } catch (err: unknown) {
-    const e = err as Error;
-    console.error("[pcp/transferir-service] ERRO:", e?.message, e?.stack);
-    return NextResponse.json(
-      { error: e?.message ?? "Erro desconhecido" },
-      { status: 500 }
-    );
+  } catch (err) {
+    return internalError("[POST /api/pcp/transferir-service]", err);
   }
 }
 

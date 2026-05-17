@@ -2,6 +2,7 @@
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, isFullAccess } from "@/lib/roles";
+import { internalError } from "@/lib/api-error";
 
 /**
  * POST /api/lia/personalizar/configurar
@@ -241,9 +242,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, ...resultado });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Erro desconhecido";
-    console.error("[LIA Configurar]", err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError("[POST /api/lia/personalizar/configurar]", err);
   }
 }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { internalError } from "@/lib/api-error";
 
 export async function GET() {
   try {
@@ -11,7 +12,7 @@ export async function GET() {
     if (authHeader?.startsWith("Bearer ")) {
       const token = authHeader.substring(7);
       const { data, error } = await supabase.auth.getUser(token);
-      if (error) return NextResponse.json({ error: error.message }, { status: 401 });
+      if (error) return NextResponse.json({ error: "Token inválido" }, { status: 401 });
       user = data.user;
     } else {
       const { data } = await supabase.auth.getUser();
@@ -34,8 +35,7 @@ export async function GET() {
         nome: p.nome ?? "",
       })),
     });
-  } catch (e: any) {
-    console.error("[produtos/export]", e);
-    return NextResponse.json({ error: e?.message ?? "Erro interno" }, { status: 500 });
+  } catch (err) {
+    return internalError("[GET /api/produtos/export]", err);
   }
 }

@@ -10,6 +10,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { tabelaExiste } from "@/lib/schema-check";
+import { internalError } from "@/lib/api-error";
 
 const MSG_MIGRACAO = "Migration 159 pendente. Execute: node scripts/apply_159.mjs";
 
@@ -57,11 +58,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("[GET /api/site/config]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao carregar config" },
-      { status: 500 }
-    );
+    return internalError("[GET /api/site/config]", err, "Erro ao carregar config");
   }
 }
 
@@ -105,10 +102,6 @@ export async function POST(req: NextRequest) {
     `;
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[POST /api/site/config]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao salvar config" },
-      { status: 500 }
-    );
+    return internalError("[POST /api/site/config]", err, "Erro ao salvar config");
   }
 }

@@ -12,6 +12,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { normalizeCategoriaRow } from "@/lib/curva-precificacao";
+import { internalError } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -84,8 +85,6 @@ export async function POST(req: NextRequest) {
     const categoria = normalizeCategoriaRow(row as unknown as Record<string, unknown>);
     return NextResponse.json({ categoria }, { status: 201 });
   } catch (err) {
-    console.error("[POST /api/precificacao/curva/categorias]", err);
-    const msg = err instanceof Error ? err.message : "Erro ao criar categoria";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError("[POST /api/precificacao/curva/categorias]", err, "Erro ao criar categoria");
   }
 }

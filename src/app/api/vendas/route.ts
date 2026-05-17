@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { validarDescontos } from "@/lib/validar-desconto";
 import { logAudit } from "@/lib/audit";
+import { internalError } from "@/lib/api-error";
 import {
   validarPersonalizacao,
   normalizarPersonalizacao,
@@ -540,8 +541,7 @@ export async function POST(req: NextRequest) {
     return { ...completa, ordensReposicao };
   });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Erro ao criar venda";
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return internalError("[POST /api/vendas]", err, "Erro ao criar venda", 400);
   }
 
   const ordensReposicao = novaVenda.ordensReposicao ?? [];

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { internalError } from "@/lib/api-error";
 
 const ROLES_ADMIN_FRETE = ["desenvolvedor", "admin", "gerente_loja"];
 
@@ -52,11 +53,13 @@ export async function PATCH(
     `;
     return NextResponse.json({ ...updated, valor: Number(updated.valor) });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro ao atualizar";
-    const notFound = msg.includes("does not exist") || msg.includes("relation");
-    return NextResponse.json(
-      { error: notFound ? "Tabela não encontrada — execute a migration 153 no banco" : msg },
-      { status: 500 }
-    );
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("does not exist") || msg.includes("relation")) {
+      return NextResponse.json(
+        { error: "Tabela não encontrada — execute a migration 153 no banco" },
+        { status: 500 },
+      );
+    }
+    return internalError(`[PATCH /api/configuracoes/fretes-bairro/${freteId}]`, err, "Erro ao atualizar");
   }
 }

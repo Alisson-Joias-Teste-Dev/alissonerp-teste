@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { parseOFX } from "@/lib/ofx-parser";
+import { internalError } from "@/lib/api-error";
 
 // ─── POST /api/financeiro/upload-ofx ──────────────────────────────────────────
 // Recebe arquivo OFX, parseia e insere transações com deduplicação por fitid
@@ -33,8 +34,7 @@ export async function POST(req: NextRequest) {
   try {
     result = parseOFX(text);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Falha ao processar arquivo OFX";
-    return NextResponse.json({ error: msg }, { status: 422 });
+    return internalError("[POST /api/financeiro/upload-ofx] parseOFX", e, "Falha ao processar arquivo OFX", 422);
   }
 
   if (result.transacoes.length === 0) {

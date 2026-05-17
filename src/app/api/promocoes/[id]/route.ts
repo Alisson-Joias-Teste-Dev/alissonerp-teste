@@ -15,6 +15,7 @@ import {
   expandirItensComPais,
   checarConflitoPromocoes,
 } from "@/lib/promocoes-helpers";
+import { internalError } from "@/lib/api-error";
 
 async function loadCampanha(id: number) {
   const [camp] = await sql<Array<{
@@ -240,8 +241,6 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[PATCH /api/promocoes/:id]", err);
-    const msg = err instanceof Error ? err.message : "Erro ao editar promocao";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError("[PATCH /api/promocoes/:id]", err, "Erro ao editar promocao");
   }
 }

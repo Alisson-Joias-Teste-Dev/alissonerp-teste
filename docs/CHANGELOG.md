@@ -1,8 +1,90 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.51.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.52.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): onda 1F — info disclosure em ~30 rotas restantes (v2.52.0)
+
+Sexta onda do bloco de segurança. Auditoria pós-1C/1E identificou rotas que
+continuavam devolvendo `err.message` / `String(err)` em respostas 4xx/5xx,
+vazando nomes de tabelas/colunas/constraints do Postgres, mensagens de fetch
+externo (Tiny, Mercado Pago, Inter) e stack traces para o cliente. Atacante
+podia usar isso pra mapear o schema do banco e descobrir integrações ativas.
+
+**Padrão aplicado:** trocar respostas que continham `err.message` por
+`internalError("[METHOD /api/path]", err, "Mensagem genérica", status)` de
+`src/lib/api-error.ts`. Logs do servidor seguem com erro completo (stack +
+mensagem original) via `console.error`. Cliente recebe apenas mensagem
+genérica + status code.
+
+**Exceções mantidas (mensagens controladas internamente):**
+- `AuthError.message`, `ForbiddenError.message`, `NotFoundError.message` —
+  mensagens fixas em classes de domínio (`auth-server.ts`, `auth-vendas.ts`).
+- `HttpError.message` — classes internas em `produtos/[id]/personalizacao/*`
+  e `rfid/cadastrar` — mensagens curadas dentro do `sql.begin`.
+- Strings sentinelas (`PRODUTO_NAO_ENCONTRADO`, `SETOR_INVALIDO`,
+  `RACE_CONDITION`, `PROMO_NOT_FOUND`, etc) — usadas em comparações
+  internas pra classificar 4xx custom.
+
+**Vendas/Financeiro (alto risco):**
+- `vendas/route.ts:543` — POST devolvia err.message do Postgres em 400.
+- `vendas/legado/route.ts:245` — idem para cadastro de venda antiga.
+- `vendas/[id]/pagamentos/route.ts:156,203` — vale-troca e pagamento ouro.
+- `vendas/[id]/solicitar-aprovacao/route.ts:255` — fallback do `approveVenda`.
+- `vendas/[id]/tiny-resync/route.ts:38` — reenvio para o Tiny.
+- `saldo-credito/route.ts:58` — ajuste manual de saldo (admin).
+- `devolucoes/route.ts:123` — criação.
+- `devolucoes/[id]/route.ts:123,150` — PATCH/DELETE.
+- `devolucoes/[id]/solicitar-aprovacao/route.ts:33`.
+- `devolucoes/[id]/inspecionar/route.ts:52`.
+- `crediario/[id]/verificar-mp/route.ts:68` — consulta MP manual.
+
+**Mercado Pago (gateway externo):**
+- `vendas/[id]/mercado-pago/checar-point/route.ts:68` — getAccessToken.
+- `vendas/[id]/mercado-pago/criar-pix/route.ts:175` — createPixPayment.
+- `vendas/[id]/mercado-pago/criar-link/route.ts:204` — createPreference.
+- `vendas/[id]/mercado-pago/criar-intent-point/route.ts:160,234` — intent e cancel.
+- `vendas/[id]/mercado-pago/criar-pix-instore/route.ts:138` — QR in-store.
+- `vendas/[id]/mercado-pago/verificar-manual/route.ts:77` — fetchPayment.
+- `mercado-pago/devices/route.ts:102` — listPointDevices.
+- `mercado-pago/reconciliar-pendentes/route.ts:106,113` — concluirVenda em loop.
+- `webhooks/mercado-pago/route.ts:89,129,330,539,656` — handler do webhook
+  passou a logar internamente e responder mensagem genérica (MP recebe 200
+  mesmo assim, sem reentregar).
+
+**Integrações externas:**
+- `editor-ia/generate/route.ts:121` — generateImage Gemini/etc.
+- `integracoes/tiny/callback/route.ts:98` — OAuth callback do Tiny.
+- `tiny/resync-erros/route.ts:52` — agora classifica token-expirado vs
+  outros erros sem vazar mensagem bruta do Tiny.
+- `financeiro/upload-ofx/route.ts:36` — parseOFX.
+- `financeiro/inter/sync/route.ts:87` — agora loga e responde "Falha ao
+  sincronizar (ver log)" por conta.
+- `estoque-comercial/sync-tiny/route.ts:126` — agora resposta genérica
+  "Falha de comunicação com Tiny" por produto.
+- `gestao-estoque/ai-chat/route.ts:66,76` — proxy Gemini.
+- `agentes/playground/route.ts:48` — playground DeepSeek.
+
+**Auth Bearer (Supabase Auth):**
+- `produtos/export/route.ts:15` — `error.message` virou "Token inválido".
+- `produtos/lookup/route.ts:16` — idem.
+- `estoque-comercial/inventario/app/route.ts:16` — idem.
+
+**Total: 30 arquivos modificados** (vs ~76 estimados — o restante já tinha
+sido coberto nas ondas 1C/1E ou usa AuthError/ForbiddenError/HttpError, que
+são exceções legítimas).
+
+**Pendências conhecidas (admin-only, ferramentas de diagnóstico):**
+- `site/test/route.ts:116,226` — diagnóstico WooCommerce: mensagens de
+  erro de rede (DNS, SSL, etc) são parte da feature pro admin entender o
+  problema. Endpoint é admin-only.
+- `vendas/[id]/route.ts:641` — `tinyErroWarning` exposto em response como
+  campo opcional. Mensagem vem do Tiny (não Postgres) e é deliberadamente
+  montada pelo código (não dump bruto). Mantido como info pra admin.
+- `devolucoes/[id]/concluir/route.ts:40` — já tem tratamento defensivo
+  parcial: erros de Postgres viram genérico, erros de domínio (throw new
+  Error) ainda expõem mensagem. Design consciente do autor anterior.
 
 ## fix(security): Onda 1E — fechar 18 rotas sem auth + ajustes QA (v2.51.0)
 

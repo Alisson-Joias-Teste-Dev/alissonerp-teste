@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import { safeDiv } from "@/lib/dashboard-comercial/utils";
+import { internalError } from "@/lib/api-error";
 
 // GET /api/dashboard-comercial/comparativo-anual?from=YYYY-MM-DD&to=YYYY-MM-DD
 //
@@ -82,9 +83,7 @@ export async function GET(req: NextRequest) {
     };
 
     return NextResponse.json(resp);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[dashboard-comercial/comparativo-anual]", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch (err) {
+    return internalError("[GET /api/dashboard-comercial/comparativo-anual]", err);
   }
 }

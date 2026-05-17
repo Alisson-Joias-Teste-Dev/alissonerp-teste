@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { internalError } from "@/lib/api-error";
 
 // PATCH /api/ordens/[id]
 // Edição completa de uma ordem — apenas role 'desenvolvedor'.
@@ -63,10 +64,6 @@ export async function PATCH(
     if (!updated) return NextResponse.json({ error: "Ordem não encontrada" }, { status: 404 });
     return NextResponse.json(updated);
   } catch (err) {
-    console.error("[PATCH /api/ordens/[id]]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro interno ao salvar" },
-      { status: 500 }
-    );
+    return internalError(`[PATCH /api/ordens/${ordemId}]`, err, "Erro interno ao salvar");
   }
 }

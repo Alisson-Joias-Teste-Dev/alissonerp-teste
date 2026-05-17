@@ -62,8 +62,9 @@ DIRETRIZES:
     });
     const j = await r.json();
     if (!r.ok) {
+      console.error("[ai-chat] Gemini falhou:", r.status, j?.error);
       return NextResponse.json(
-        { text: `Falha na conexão neural: ${j?.error?.message ?? r.statusText}` },
+        { text: "Falha na conexão neural com o modelo de IA." },
         { status: 200 }
       );
     }
@@ -72,8 +73,9 @@ DIRETRIZES:
       "Não foi possível gerar uma resposta.";
     return NextResponse.json({ text });
   } catch (err) {
+    console.error("[ai-chat] erro:", err);
     return NextResponse.json(
-      { text: `Erro: ${err instanceof Error ? err.message : "desconhecido"}` },
+      { text: "Erro interno ao consultar a IA." },
       { status: 200 }
     );
   }

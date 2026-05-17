@@ -23,6 +23,7 @@ import sql from "@/lib/db";
 import { ensureBucket, uploadFile } from "@/lib/storage";
 import { buildFinalPrompt } from "@/lib/editor-ia/prompts";
 import { generateImage, AVAILABLE_MODELS, type ModelId, type AspectRatio } from "@/lib/editor-ia/engine";
+import { internalError } from "@/lib/api-error";
 import { getApiKeys } from "@/lib/editor-ia/api-keys";
 
 const BUCKET = "editor-ia-geradas";
@@ -117,8 +118,7 @@ export async function POST(req: NextRequest) {
       apiKeys,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro desconhecido";
-    return NextResponse.json({ error: `Falha na geração: ${msg}` }, { status: 502 });
+    return internalError("[POST /api/editor-ia/generate] generateImage", err, "Falha na geração de imagem", 502);
   }
 
   // ----- Upload para bucket -----
@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
   const path = `${user.id}/${Date.now()}_${inputHash.slice(0, 8)}_${paramsHash.slice(0, 8)}.${ext}`;
   const up = await uploadFile(BUCKET, path, result.base64, result.mimeType);
   if ("error" in up) {
-    return NextResponse.json({ error: `Falha no upload: ${up.error}` }, { status: 500 });
+    return internalError("[POST /api/editor-ia/generate] upload", new Error(up.error), "Falha no upload");
   }
 
   // Nome do usuário (best effort)

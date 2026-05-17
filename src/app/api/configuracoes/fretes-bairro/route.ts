@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { internalError } from "@/lib/api-error";
 
 // ─── GET /api/configuracoes/fretes-bairro ─────────────────────────────────────
 // Lista todos os bairros com seus valores de frete, ordenados por municipio e bairro.
@@ -46,11 +47,13 @@ export async function POST(req: NextRequest) {
     `;
     return NextResponse.json({ ...frete, valor: Number(frete.valor) }, { status: 201 });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro ao salvar";
-    const notFound = msg.includes("does not exist") || msg.includes("relation");
-    return NextResponse.json(
-      { error: notFound ? "Tabela não encontrada — execute a migration 153 no banco" : msg },
-      { status: 500 }
-    );
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("does not exist") || msg.includes("relation")) {
+      return NextResponse.json(
+        { error: "Tabela não encontrada — execute a migration 153 no banco" },
+        { status: 500 },
+      );
+    }
+    return internalError("[POST /api/configuracoes/fretes-bairro]", err, "Erro ao salvar");
   }
 }

@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { internalError } from "@/lib/api-error";
 
 // POST /api/service/[id]/apontar
 // Operador registra consumo de insumo (fecho, corrente, etc.) em um serviço em andamento,
@@ -175,12 +176,7 @@ export async function POST(
       foto_url:       fotoResult.url,
       novo_saldo:     novoSaldo,
     });
-  } catch (err: unknown) {
-    const e = err as Error;
-    console.error("[service/apontar] ERRO:", e?.message);
-    return NextResponse.json(
-      { error: e?.message ?? "Erro desconhecido" },
-      { status: 500 }
-    );
+  } catch (err) {
+    return internalError("[POST /api/service/[id]/apontar]", err);
   }
 }

@@ -11,6 +11,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
+import { internalError } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -117,10 +118,6 @@ export async function POST(req: NextRequest) {
     `;
     return NextResponse.json({ ok: true, fornecedor: row }, { status: 201 });
   } catch (err) {
-    console.error("[POST /api/fornecedores]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao salvar fornecedor" },
-      { status: 500 }
-    );
+    return internalError("[POST /api/fornecedores]", err, "Erro ao salvar fornecedor");
   }
 }

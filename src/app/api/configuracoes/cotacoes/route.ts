@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { internalError } from "@/lib/api-error";
 
 const ONCA_TROY_GRAMAS = 31.1034768;
 
@@ -127,10 +128,7 @@ export async function POST(req: NextRequest) {
       atualizado_em: agora,
     });
   } catch (err) {
-    return NextResponse.json(
-      { error: `Falha ao buscar cotações: ${err instanceof Error ? err.message : String(err)}` },
-      { status: 500 }
-    );
+    return internalError("[POST /api/configuracoes/cotacoes]", err, "Falha ao buscar cotações");
   }
 }
 

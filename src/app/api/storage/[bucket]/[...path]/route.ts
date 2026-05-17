@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
+import { internalError } from "@/lib/api-error";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -110,8 +111,6 @@ export async function GET(
       },
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro ao buscar arquivo";
-    console.error(`[storage proxy] ${bucket}/${filePath}:`, msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError(`[GET /api/storage/${bucket}/${filePath}]`, err, "Erro ao buscar arquivo");
   }
 }

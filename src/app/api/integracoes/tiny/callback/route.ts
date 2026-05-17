@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
     return redirect("/configuracoes?tab=integracoes&tiny_ok=1");
 
   } catch (e) {
-    const errMsg = e instanceof Error ? e.message : "Erro na comunicação com o Tiny";
-    return redirect(`/configuracoes?tab=integracoes&tiny_error=${encodeURIComponent(errMsg)}`);
+    console.error("[tiny/callback] erro:", e);
+    return redirect(`/configuracoes?tab=integracoes&tiny_error=${encodeURIComponent("Erro na comunicação com o Tiny")}`);
   }
 }

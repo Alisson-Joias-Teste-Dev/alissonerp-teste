@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
+import { internalError } from "@/lib/api-error";
 
 interface PedraItem {
   tipo: string;
@@ -107,10 +108,6 @@ export async function POST(req: NextRequest) {
       mudancas,
     });
   } catch (err) {
-    console.error("[POST /api/produtos/pedras-bulk/reprice]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao atualizar preços" },
-      { status: 500 }
-    );
+    return internalError("[POST /api/produtos/pedras-bulk/reprice]", err, "Erro ao atualizar preços");
   }
 }

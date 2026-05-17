@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { internalError } from "@/lib/api-error";
 
 export async function GET(
   _req: NextRequest,
@@ -49,9 +50,7 @@ export async function GET(
 
     return NextResponse.json({ ...tarefa, comentarios });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[GET /api/tarefas/${tarefaId}]`, msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError(`[GET /api/tarefas/${tarefaId}]`, err);
   }
 }
 

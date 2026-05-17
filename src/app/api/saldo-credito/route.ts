@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, hasRole } from "@/lib/roles";
 import { getSaldoAtual, getSaldoLimite, ajustarSaldo } from "@/lib/saldo-credito";
+import { internalError } from "@/lib/api-error";
 
 const ROLES_VER_SALDO = ["desenvolvedor", "admin", "diretor", "gerente_loja"];
 
@@ -55,8 +56,7 @@ export async function POST(req: NextRequest) {
     const result = await ajustarSaldo(body.valor, body.descricao.trim(), user.id);
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return internalError("[POST /api/saldo-credito]", err, "Erro ao ajustar saldo", 400);
   }
 }
 

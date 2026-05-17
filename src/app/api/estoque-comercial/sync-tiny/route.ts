@@ -117,13 +117,14 @@ export async function POST() {
       });
 
     } catch (e) {
+      console.error(`[estoque-comercial/sync-tiny] produto=${prod.produto_id} sku=${sku} falhou:`, e);
       resultados.push({
         produto_id: prod.produto_id as number,
         sku,
         nome: prod.nome_produto as string,
         saldo,
         status: "erro",
-        erro: e instanceof Error ? e.message : "Falha de comunicação",
+        erro: "Falha de comunicação com Tiny",
       });
     }
   }

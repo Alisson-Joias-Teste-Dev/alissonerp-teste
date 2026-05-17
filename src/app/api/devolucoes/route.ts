@@ -8,6 +8,7 @@ import {
   type ItemDevolucaoInput,
   type TipoCompensacao,
 } from "@/lib/devolucoes";
+import { internalError } from "@/lib/api-error";
 
 async function getUserRole(userId: string): Promise<string | null> {
   const [row] = await sql`
@@ -120,7 +121,6 @@ export async function POST(req: NextRequest) {
     const dev = await criarDevolucao(body.venda_id, body.itens, opts, user.id);
     return NextResponse.json(dev, { status: 201 });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return internalError("[POST /api/devolucoes]", err, "Erro ao criar devolucao", 400);
   }
 }

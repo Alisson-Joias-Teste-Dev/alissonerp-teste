@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { internalError } from "@/lib/api-error";
 
 const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 
@@ -98,8 +99,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ id: transf.id, created_at: transf.created_at }, { status: 201 });
   } catch (err) {
-    console.error("ERRO ao criar transferência:", err);
-    const message = err instanceof Error ? err.message : "Erro interno";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError("[POST /api/estoque-comercial/transferir]", err);
   }
 }

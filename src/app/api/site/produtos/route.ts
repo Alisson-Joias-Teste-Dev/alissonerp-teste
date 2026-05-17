@@ -16,6 +16,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { tabelaExiste } from "@/lib/schema-check";
+import { internalError } from "@/lib/api-error";
 
 const MSG_MIGRACAO = "Migration 159 pendente. Execute: node scripts/apply_159.mjs";
 
@@ -156,10 +157,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ produtos: rows });
   } catch (err) {
-    console.error("[GET /api/site/produtos]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao listar produtos" },
-      { status: 500 }
-    );
+    return internalError("[GET /api/site/produtos]", err, "Erro ao listar produtos");
   }
 }

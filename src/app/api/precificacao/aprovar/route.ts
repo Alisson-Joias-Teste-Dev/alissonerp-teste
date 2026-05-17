@@ -15,6 +15,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
+import { internalError } from "@/lib/api-error";
 
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -131,8 +132,6 @@ export async function POST(req: NextRequest) {
       elapsed_s: elapsed,
     });
   } catch (err) {
-    console.error("[POST /api/precificacao/aprovar]", err);
-    const msg = err instanceof Error ? err.message : "Erro ao aprovar";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError("[POST /api/precificacao/aprovar]", err, "Erro ao aprovar");
   }
 }

@@ -5,6 +5,7 @@ import { fetchPayment } from "@/lib/mercado-pago";
 import { concluirVenda } from "@/lib/vendas-aprovar";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { internalError } from "@/lib/api-error";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /api/vendas/[id]/mercado-pago/verificar-manual
@@ -74,8 +75,7 @@ export async function POST(
   try {
     mpData = await fetchPayment(mpPaymentId);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: `Erro ao consultar MP: ${msg}` }, { status: 502 });
+    return internalError("[POST /api/vendas/[id]/mercado-pago/verificar-manual] fetchPayment", e, "Erro ao consultar MP", 502);
   }
 
   if (!mpData || mpData.status !== "approved") {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ensureTinyToken } from "@/lib/vendas-aprovar";
+import { internalError } from "@/lib/api-error";
 
 // GET /api/admin/tiny-keepalive
 // Mantém o token OAuth2 do Tiny renovado proativamente.
@@ -23,10 +24,7 @@ export async function GET(_req: NextRequest) {
     const token = await ensureTinyToken();
     const masked = token.slice(0, 10) + "...";
     return NextResponse.json({ ok: true, token_preview: masked });
-  } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : "Falha ao renovar token" },
-      { status: 500 }
-    );
+  } catch (err) {
+    return internalError("[GET /api/admin/tiny-keepalive]", err, "Falha ao renovar token");
   }
 }

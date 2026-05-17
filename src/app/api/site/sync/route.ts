@@ -17,6 +17,7 @@ import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { tabelaExiste } from "@/lib/schema-check";
 import { upsertProduto, sincronizarVariacoes, type WCProductPayload } from "@/lib/woocommerce";
+import { internalError } from "@/lib/api-error";
 
 const MSG_MIGRACAO = "Migration 159 pendente. Execute: node scripts/apply_159.mjs";
 
@@ -71,11 +72,7 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json({ resumo: await resumo() });
   } catch (err) {
-    console.error("[GET /api/site/sync]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro" },
-      { status: 500 }
-    );
+    return internalError("[GET /api/site/sync]", err);
   }
 }
 
@@ -276,10 +273,6 @@ export async function POST(req: NextRequest) {
       resumo: await resumo(),
     });
   } catch (err) {
-    console.error("[POST /api/site/sync]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao sincronizar" },
-      { status: 500 }
-    );
+    return internalError("[POST /api/site/sync]", err, "Erro ao sincronizar");
   }
 }

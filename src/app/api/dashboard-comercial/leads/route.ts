@@ -4,6 +4,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import type { LeadsDashboardResponse, LeadsConsultoraStats } from "@/lib/types/dashboard-comercial";
 import { safeDiv } from "@/lib/dashboard-comercial/utils";
+import { internalError } from "@/lib/api-error";
 
 // GET /api/dashboard-comercial/leads?from=...&to=...
 //
@@ -136,9 +137,7 @@ export async function GET(req: NextRequest) {
     };
 
     return NextResponse.json(response);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[dashboard-comercial/leads]", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch (err) {
+    return internalError("[GET /api/dashboard-comercial/leads]", err);
   }
 }

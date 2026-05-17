@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { gerarAjustesDivergencias } from "@/lib/inventario-helpers";
+import { internalError } from "@/lib/api-error";
 
 interface Params { params: Promise<{ id: string }> }
 
@@ -104,8 +105,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       mensagem: "Inventário concluído com sucesso",
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Erro interno";
-    console.error("[finalizar]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError(`[POST /api/estoque-comercial/inventario/${invId}/finalizar]`, err);
   }
 }

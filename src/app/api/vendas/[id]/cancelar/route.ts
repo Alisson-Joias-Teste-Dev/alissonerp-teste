@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { ensureTinyToken } from "@/lib/vendas-aprovar";
+import { internalError } from "@/lib/api-error";
 
 // ─── POST /api/vendas/[id]/cancelar ───────────────────────────────────────────
 // Cancela venda (apenas gerente+ ou admin/dev).
@@ -96,9 +97,7 @@ export async function POST(
       }
     });
   } catch (err) {
-    console.error("[cancelar] Falha ao cancelar venda:", err);
-    const msg = err instanceof Error ? err.message : "Falha ao cancelar. Tente novamente.";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError(`[POST /api/vendas/${vendaId}/cancelar]`, err, "Falha ao cancelar. Tente novamente.");
   }
 
   // Cancelar pedido no Tiny (best-effort: não bloqueia o cancelamento local)

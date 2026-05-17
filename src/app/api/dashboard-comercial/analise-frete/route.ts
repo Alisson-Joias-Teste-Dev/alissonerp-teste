@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import type { AnaliseFreteResponse } from "@/lib/types/dashboard-comercial";
+import { internalError } from "@/lib/api-error";
 
 // GET /api/dashboard-comercial/analise-frete?from=...&to=...
 //
@@ -113,9 +114,7 @@ export async function GET(req: NextRequest) {
     };
 
     return NextResponse.json(response);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[dashboard-comercial/analise-frete]", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch (err) {
+    return internalError("[GET /api/dashboard-comercial/analise-frete]", err);
   }
 }

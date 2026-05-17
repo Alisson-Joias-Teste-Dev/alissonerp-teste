@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, isFullAccess } from "@/lib/roles";
+import { internalError } from "@/lib/api-error";
 
 /**
  * POST /api/produtos/personalizados
@@ -209,8 +210,6 @@ export async function POST(req: NextRequest) {
       { status: 201 },
     );
   } catch (err) {
-    console.error("[POST /api/produtos/personalizados]", err);
-    const msg = err instanceof Error ? err.message : "Erro ao criar produto personalizado";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError("[POST /api/produtos/personalizados]", err, "Erro ao criar produto personalizado");
   }
 }

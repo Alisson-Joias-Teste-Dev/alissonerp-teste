@@ -84,7 +84,8 @@ export async function POST(req: NextRequest) {
       }
       atualizados++;
     } catch (e) {
-      erros.push({ id: c.id, erro: e instanceof Error ? e.message : String(e) });
+      console.error(`[inter/sync] conta=${c.id} falhou:`, e);
+      erros.push({ id: c.id, erro: "Falha ao sincronizar (ver log do servidor)" });
     }
   }
 

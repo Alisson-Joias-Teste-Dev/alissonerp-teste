@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { internalError } from "@/lib/api-error";
 
 async function checkOwnership(userId: string, vendaId: number) {
   const [u] = await sql<{ role: string }[]>`
@@ -153,8 +154,7 @@ export async function POST(
         novo_vale: aplic.novo_vale,
       }, { status: 201 });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return NextResponse.json({ error: msg }, { status: 400 });
+      return internalError("[POST /api/vendas/[id]/pagamentos] vale-troca", err, "Erro ao aplicar vale-troca", 400);
     }
   }
 
@@ -200,8 +200,7 @@ export async function POST(
         novoOuroId = novoOuro.id;
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Erro ao registrar pagamento em ouro";
-      return NextResponse.json({ error: msg }, { status: 409 });
+      return internalError("[POST /api/vendas/[id]/pagamentos] ouro", err, "Erro ao registrar pagamento em ouro", 409);
     }
     return NextResponse.json({ id: novoOuroId, valor: valorOuro }, { status: 201 });
   }

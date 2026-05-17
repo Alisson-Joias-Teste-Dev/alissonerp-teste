@@ -9,6 +9,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { tabelaExiste } from "@/lib/schema-check";
+import { internalError } from "@/lib/api-error";
 
 export async function PATCH(
   req: NextRequest,
@@ -59,10 +60,6 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true, produto_id: produtoId, publicado_no_site: publicado });
   } catch (err) {
-    console.error("[PATCH /api/site/produtos/[id]]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao atualizar" },
-      { status: 500 }
-    );
+    return internalError("[PATCH /api/site/produtos/[id]]", err, "Erro ao atualizar");
   }
 }

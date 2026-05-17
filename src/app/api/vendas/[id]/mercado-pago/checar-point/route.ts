@@ -5,6 +5,7 @@ import { getAccessToken } from "@/lib/mercado-pago";
 import { concluirVenda } from "@/lib/vendas-aprovar";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { internalError } from "@/lib/api-error";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GET /api/vendas/[id]/mercado-pago/checar-point?pagamento_id=Y
@@ -65,7 +66,7 @@ export async function GET(
   try {
     accessToken = await getAccessToken();
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "MP não configurado" }, { status: 502 });
+    return internalError("[GET /api/vendas/[id]/mercado-pago/checar-point] getAccessToken", err, "MP não configurado", 502);
   }
 
   const searchUrl = `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(externalReference)}&sort=date_created&criteria=desc&limit=5`;

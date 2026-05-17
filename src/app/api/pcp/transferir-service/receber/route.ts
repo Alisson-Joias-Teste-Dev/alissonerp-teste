@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { internalError } from "@/lib/api-error";
 
 // POST /api/pcp/transferir-service/receber
 // Operador service recebe a peça via protocolo de transferência.
@@ -16,13 +17,8 @@ import { isFullAccess } from "@/lib/roles";
 export async function POST(req: NextRequest) {
   try {
     return await _handler(req);
-  } catch (err: unknown) {
-    const e = err as Error;
-    console.error("[transferir-service/receber] ERRO:", e?.message, e?.stack);
-    return NextResponse.json(
-      { error: e?.message ?? "Erro desconhecido" },
-      { status: 500 }
-    );
+  } catch (err) {
+    return internalError("[POST /api/pcp/transferir-service/receber]", err);
   }
 }
 

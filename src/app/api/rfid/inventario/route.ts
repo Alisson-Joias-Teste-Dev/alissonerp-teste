@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { internalError } from "@/lib/api-error";
 
 function extrairIdApi(epc: string): number | null {
   if (!epc || epc.length < 13) return null;
@@ -182,9 +183,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Erro interno";
-    console.error("[rfid/inventario]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError("[POST /api/rfid/inventario]", err);
   }
 }
 
@@ -206,8 +205,6 @@ export async function GET() {
 
     return NextResponse.json(leituras);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Erro interno";
-    console.error("[rfid/inventario GET]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError("[GET /api/rfid/inventario]", err);
   }
 }

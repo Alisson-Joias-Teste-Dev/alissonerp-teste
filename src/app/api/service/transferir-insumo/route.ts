@@ -4,6 +4,7 @@ import { uploadFile } from "@/lib/storage";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { internalError } from "@/lib/api-error";
 
 // POST /api/service/transferir-insumo
 // Transfere insumo do estoque do operador logado para outro operador.
@@ -145,9 +146,7 @@ export async function POST(req: NextRequest) {
       novo_saldo_origem: novoSaldoOrigem,
       novo_saldo_dest:   novoSaldoDest,
     });
-  } catch (err: unknown) {
-    const e = err as Error;
-    console.error("[service/transferir-insumo] ERRO:", e?.message);
-    return NextResponse.json({ error: e?.message ?? "Erro desconhecido" }, { status: 500 });
+  } catch (err) {
+    return internalError("[POST /api/service/transferir-insumo]", err);
   }
 }

@@ -86,7 +86,8 @@ async function validarAssinatura(
   try {
     secret = await getWebhookSecret();
   } catch (err) {
-    return { ok: false, erro: err instanceof Error ? err.message : "Secret não configurado" };
+    console.error("[webhook-mp] getWebhookSecret falhou", err);
+    return { ok: false, erro: "Secret não configurado" };
   }
 
   // Manifesto: "id:{data_id};request-id:{x-request-id};ts:{ts};"
@@ -126,8 +127,8 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
   try {
     order = await fetchMerchantOrder(orderId);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro ao buscar merchant_order";
-    return NextResponse.json({ ok: false, error: msg });
+    console.error("[webhook-mp] fetchMerchantOrder falhou", err);
+    return NextResponse.json({ ok: false, error: "Erro ao buscar merchant_order" });
   }
 
   const externalReference = order.external_reference as string | undefined;
@@ -327,13 +328,14 @@ export async function POST(req: NextRequest) {
   try {
     payment = await fetchPayment(dataId) as unknown as Record<string, unknown>;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro ao buscar payment";
+    const internalMsg = err instanceof Error ? err.message : "Erro ao buscar payment";
+    console.error("[webhook-mp] fetchPayment falhou", err);
     await sql`
       INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-      VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ data_id: dataId })}::text::jsonb, 502, ${msg})
+      VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ data_id: dataId })}::text::jsonb, 502, ${internalMsg})
     `;
     // Retorna 200 pra não fazer MP reentregar (já está logado)
-    return NextResponse.json({ ok: false, error: msg });
+    return NextResponse.json({ ok: false, error: "Erro ao buscar payment" });
   }
 
   const status = String(payment.status ?? "");
@@ -536,17 +538,18 @@ export async function POST(req: NextRequest) {
           tinyBestEffort: true,
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Erro ao concluir venda";
+        const internalMsg = err instanceof Error ? err.message : "Erro ao concluir venda";
+        console.error(`[webhook-mp] concluirVenda falhou venda=${vendaId}`, err);
         await sql`
           INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-          VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ venda_id: vendaId, payment_id: paymentId })}::text::jsonb, 500, ${msg})
+          VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ venda_id: vendaId, payment_id: paymentId })}::text::jsonb, 500, ${internalMsg})
         `;
         // Retorna 200 mesmo assim — pagamento já está registrado como confirmado
         return NextResponse.json({
           ok: false,
           pagamento_confirmado: true,
           venda_concluida: false,
-          error: msg,
+          error: "Erro ao concluir venda",
         });
       }
 
@@ -653,7 +656,8 @@ export async function POST(req: NextRequest) {
         status_mp: status,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Erro ao estornar venda";
+      const internalMsg = err instanceof Error ? err.message : "Erro ao estornar venda";
+      console.error(`[webhook-mp] estornarVenda falhou venda=${vendaId}`, err);
       await sql`
         INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
         VALUES (${WEBHOOK_NOME}, ${JSON.stringify({
@@ -661,10 +665,10 @@ export async function POST(req: NextRequest) {
           pagamento_id: pagamentoId,
           payment_id: paymentId,
           status,
-        })}::text::jsonb, 500, ${msg})
+        })}::text::jsonb, 500, ${internalMsg})
       `;
       // Retorna 200 pra não fazer MP reentregar infinitamente
-      return NextResponse.json({ ok: false, estorno_failed: true, error: msg });
+      return NextResponse.json({ ok: false, estorno_failed: true, error: "Erro ao estornar venda" });
     }
 
     await sql`

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { logAudit } from "@/lib/audit";
+import { internalError } from "@/lib/api-error";
 
 const MAX_LEGACY_DATE = "2023-12-31";
 const ROLES_PERMITIDOS = ["desenvolvedor", "admin"];
@@ -242,8 +243,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(resultado, { status: 201 });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Erro ao cadastrar venda antiga";
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return internalError("[POST /api/vendas/legado]", err, "Erro ao cadastrar venda antiga", 400);
   }
 }
 

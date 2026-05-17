@@ -44,6 +44,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
+import { internalError } from "@/lib/api-error";
 
 interface PedraItem {
   tipo: string;
@@ -237,11 +238,7 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    console.error("[POST /api/produtos/pedras-bulk]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao cadastrar pedras" },
-      { status: 500 }
-    );
+    return internalError("[POST /api/produtos/pedras-bulk]", err, "Erro ao cadastrar pedras");
   }
 }
 
@@ -298,11 +295,7 @@ export async function GET(req: NextRequest) {
       ultimos,
     });
   } catch (err) {
-    console.error("[GET /api/produtos/pedras-bulk]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao consultar pedras" },
-      { status: 500 }
-    );
+    return internalError("[GET /api/produtos/pedras-bulk]", err, "Erro ao consultar pedras");
   }
 }
 
@@ -374,11 +367,7 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
-    console.error("[PATCH /api/produtos/pedras-bulk]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao ajustar saldo" },
-      { status: 500 }
-    );
+    return internalError("[PATCH /api/produtos/pedras-bulk]", err, "Erro ao ajustar saldo");
   }
 }
 
@@ -529,10 +518,6 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
-    console.error("[DELETE /api/produtos/pedras-bulk]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao excluir pedras" },
-      { status: 500 }
-    );
+    return internalError("[DELETE /api/produtos/pedras-bulk]", err, "Erro ao excluir pedras");
   }
 }

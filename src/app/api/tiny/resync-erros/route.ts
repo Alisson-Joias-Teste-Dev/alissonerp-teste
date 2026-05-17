@@ -49,10 +49,17 @@ export async function POST() {
       detalhes.push({ numero_venda: String(venda.numero_venda), ok: true });
     } catch (err) {
       erros++;
-      const msg = err instanceof Error ? err.message : "Erro desconhecido";
-      detalhes.push({ numero_venda: String(venda.numero_venda), ok: false, erro: msg });
+      const internalMsg = err instanceof Error ? err.message : "Erro desconhecido";
+      console.error(`[tiny/resync-erros] venda=${venda.numero_venda} falhou:`, err);
+      // Reporta classificacao do erro sem vazar mensagem bruta do Tiny/Postgres
+      const tokenInvalidado = internalMsg.includes("expirado") || internalMsg.includes("Token");
+      detalhes.push({
+        numero_venda: String(venda.numero_venda),
+        ok: false,
+        erro: tokenInvalidado ? "Token Tiny expirado/inválido" : "Falha ao enviar (ver log do servidor)",
+      });
       // Se o primeiro já falhou por token, para — os demais vão falhar igual
-      if (msg.includes("expirado") || msg.includes("Token")) break;
+      if (tokenInvalidado) break;
     }
   }
 

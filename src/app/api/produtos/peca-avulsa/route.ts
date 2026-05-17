@@ -39,6 +39,7 @@ import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
+import { internalError } from "@/lib/api-error";
 
 const InputSchema = z.object({
   tipo_pedra: z.string().trim().min(2),
@@ -206,11 +207,7 @@ export async function POST(req: NextRequest) {
       { status: 201 },
     );
   } catch (err) {
-    console.error("[POST /api/produtos/peca-avulsa]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erro ao cadastrar peça avulsa" },
-      { status: 500 },
-    );
+    return internalError("[POST /api/produtos/peca-avulsa]", err, "Erro ao cadastrar peça avulsa");
   }
 }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createInStorePixQr, getWebhookBaseUrl } from "@/lib/mercado-pago";
+import { internalError } from "@/lib/api-error";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /api/vendas/[id]/mercado-pago/criar-pix-instore
@@ -135,14 +136,13 @@ export async function POST(
       expiraEmMinutos: 30,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Erro ao gerar PIX In-Store";
-    console.error("[criar-pix-instore] Erro:", msg);
+    const internalMsg = err instanceof Error ? err.message : "Erro ao gerar PIX In-Store";
     await sql`
       UPDATE alissonerp.pagamentos_venda
-      SET gateway_payload = ${JSON.stringify({ erro: msg, quando: new Date().toISOString() })}::text::jsonb
+      SET gateway_payload = ${JSON.stringify({ erro: internalMsg, quando: new Date().toISOString() })}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
-    return NextResponse.json({ error: msg, detalhe: "Verifique o log do servidor para mais informações" }, { status: 502 });
+    return internalError("[POST /api/vendas/[id]/mercado-pago/criar-pix-instore]", err, "Erro ao gerar PIX In-Store", 502);
   }
 
   await sql`

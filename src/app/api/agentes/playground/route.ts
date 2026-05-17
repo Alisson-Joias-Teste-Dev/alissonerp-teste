@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOr401 } from '@/lib/auth-server';
 import { isFullAccess } from '@/lib/roles';
 import { createDeepSeekProvider } from '@/agentes/core/llm/deepseek';
+import { internalError } from '@/lib/api-error';
 
 // ATENCAO: esta rota nao funciona em dev/prod hoje — depende de `ai` +
 // `@ai-sdk/deepseek` que NAO estao instaladas no package.json. Qualquer
@@ -43,9 +44,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       model: result.model,
     });
   } catch (error) {
-    return NextResponse.json({
-      error: 'LLM request failed',
-      detail: String(error),
-    }, { status: 502 });
+    return internalError("[POST /api/agentes/playground]", error, "LLM request failed", 502);
   }
 }

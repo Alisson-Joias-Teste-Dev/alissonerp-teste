@@ -24,6 +24,7 @@ import {
   type Arredondamento,
 } from "@/lib/curva-precificacao";
 import { buildFiltrosProdutos } from "@/lib/produtos-filtros";
+import { internalError } from "@/lib/api-error";
 
 interface RequestBody {
   config?: CurvaConfig;
@@ -198,8 +199,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ stats, amostra, cotacao });
   } catch (err) {
-    console.error("[POST /api/precificacao/curva/preview-aplicar]", err);
-    const msg = err instanceof Error ? err.message : "Erro ao calcular preview";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError("[POST /api/precificacao/curva/preview-aplicar]", err, "Erro ao calcular preview");
   }
 }

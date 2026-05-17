@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
+import { internalError } from "@/lib/api-error";
 
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -42,8 +43,6 @@ export async function POST(req: NextRequest) {
       produtos: result.map(r => ({ id_produto: r.id_produto, sku: r.sku, nome: r.nome })),
     });
   } catch (err) {
-    console.error("[sync-erp-to-public]", err);
-    const msg = err instanceof Error ? err.message : "Erro desconhecido";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError("[POST /api/produtos/sync-erp-to-public]", err);
   }
 }

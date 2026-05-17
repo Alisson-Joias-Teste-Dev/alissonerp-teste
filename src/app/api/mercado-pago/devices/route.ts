@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { listPointDevices } from "@/lib/mercado-pago";
 import { isFullAccess } from "@/lib/roles";
+import { internalError } from "@/lib/api-error";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GET  /api/mercado-pago/devices            → lista maquininhas cadastradas
@@ -72,7 +73,7 @@ export async function GET(req: NextRequest) {
       ORDER BY d.nome_legivel
     `;
     return NextResponse.json(devices);
-  } catch (err: unknown) {
+  } catch (err) {
     // Tabela pode não existir se migration 135 ainda não foi rodada
     const msg = err instanceof Error ? err.message : String(err);
     if (/mp_point_devices/.test(msg) && /does not exist|não existe/i.test(msg)) {
@@ -80,7 +81,7 @@ export async function GET(req: NextRequest) {
         ? NextResponse.json({ minha: null, reservas: [] })
         : NextResponse.json([]);
     }
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError("[GET /api/mercado-pago/devices]", err);
   }
 }
 
@@ -98,8 +99,7 @@ export async function POST() {
   try {
     mpDevices = await listPointDevices();
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Erro ao consultar Mercado Pago";
-    return NextResponse.json({ error: msg }, { status: 502 });
+    return internalError("[POST /api/mercado-pago/devices] listPointDevices", err, "Erro ao consultar Mercado Pago", 502);
   }
 
   let inserted = 0;
