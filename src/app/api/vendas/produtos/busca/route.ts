@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 // ─── GET /api/vendas/produtos/busca?q=&limit= ─────────────────────────────────
 // Busca produtos em public.produtos (READONLY)
@@ -9,6 +10,9 @@ import sql from "@/lib/db";
 // preenchido + em_promocao=true. O preco_venda continua sendo o de lista
 // (curva atual ou preco_tiny) - o POS aplica o desconto no calcItem.
 export async function GET(req: NextRequest) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const { searchParams } = new URL(req.url);
   const q       = (searchParams.get("q")?.trim() ?? "").replace(",", ".");
   // Divide termos por espaço para busca multi-palavra (ex: "diamante 3.4" → AND de cada termo)

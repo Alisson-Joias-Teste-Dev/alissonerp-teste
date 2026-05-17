@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { internalError } from "@/lib/api-error";
+import { authOr401 } from "@/lib/auth-server";
+
+const ROLES_SETORES_WRITE = ["admin", "desenvolvedor"];
 
 // PATCH /api/setores/[id] — editar nome, deposito_id, ativo, requer_peso, ordem
 // Body: { nome?: string, deposito_id?: number | null, ativo?: boolean, requer_peso?: boolean, ordem?: number }
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!ROLES_SETORES_WRITE.includes(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   try {
     const { id } = await params;
     const setorId = parseInt(id);
@@ -43,7 +52,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 // DELETE /api/setores/[id] — soft delete
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!ROLES_SETORES_WRITE.includes(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   try {
     const { id } = await params;
     await sql`UPDATE alissonerp.setores SET ativo = false, updated_at = NOW() WHERE id = ${parseInt(id)}`;

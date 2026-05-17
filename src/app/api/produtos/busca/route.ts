@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/produtos/busca?q=TEXTO&limit=10&com_estoque=true&local_id=2
 // Busca rápida de produtos por nome ou SKU (para selects/modais)
 // com_estoque=true: retorna apenas produtos com saldo disponivel > 0 no local informado
 // local_id: id do local_estoque (default 2 = Loja) — usado junto com com_estoque=true
 export async function GET(req: NextRequest) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const url   = new URL(req.url);
   const q     = url.searchParams.get("q")?.trim() ?? "";
   const limit = Math.min(Number(url.searchParams.get("limit") ?? "10"), 50);

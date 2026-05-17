@@ -132,6 +132,20 @@ export async function PATCH(
     throw e;
   }
 
+  // Onda 1K: consolida ownership no mesmo helper do GET/PUT (antes era check
+  // manual `orc.usuario_id !== user.id` que so disparava DEPOIS do SELECT
+  // gigante abaixo e nao tinha a regra de full-access centralizada).
+  try {
+    await requireOrcamentoOwnership(
+      { id: user.id, role, email: user.email ?? "" },
+      orcId,
+    );
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
+
   // Buscar orçamento atual
   const [orc] = await sql`
     SELECT o.*, ft.modelo, ft.aro_numeracao, ft.largura, ft.espessura, ft.peso_estimado,
@@ -148,16 +162,9 @@ export async function PATCH(
   `;
   if (!orc) return NextResponse.json({ error: "Orçamento não encontrado" }, { status: 404 });
 
-  // Ownership: consultora só toca os próprios orçamentos (a página já filtra
-  // mas a API era cega — qualquer consultora autenticada conseguia PATCH em
-  // orçamento alheio via cURL).
-  const isFull = isFullAccess(role);
-  if (role === "consultora" && !isFull && orc.usuario_id !== user.id) {
-    return NextResponse.json({ error: "Sem permissão para esse orçamento" }, { status: 403 });
-  }
-
   // Aprovar/rejeitar exige ROLES_APROVACAO (admin/gerentes/desenvolvedor) —
   // consultora pode só enviar e atualizar cliente_id dos próprios.
+  const isFull = isFullAccess(role);
   if ((body.status === "aprovado" || body.status === "rejeitado")
       && !isFull
       && !ROLES_APROVACAO.includes(role as typeof ROLES_APROVACAO[number])) {

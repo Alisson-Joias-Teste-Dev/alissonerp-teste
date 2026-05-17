@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { normalizeRow } from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/insumos/pote
 // Sem parâmetros: saldo total por categoria (vw_saldo_pote)
 // Com ?local_id=N: saldo por local (vw_saldo_por_local), filtrando por local_estoque_id
 // Sprint 3: inclui saldo_ct para pedras
 export async function GET(req: NextRequest) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const localIdParam = req.nextUrl.searchParams.get("local_id");
 
   if (localIdParam) {

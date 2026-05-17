@@ -1,8 +1,87 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.56.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.57.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): onda 1K — fechar ressalvas QA final (v2.57.0)
+
+Decima primeira onda do bloco de segurança — fecha os 4 itens flagados pelo QA
+no review do EPIC ondas 1A-1J. Sem novas funcionalidades, apenas
+endurecimento.
+
+**Item 1 — IDOR em GET /api/vendas (lista):**
+
+A onda 1D fechou `vendas/[id]/*` (acesso individual) mas o GET da lista ficou
+aberto: qualquer `consultora` autenticada listava TODAS as vendas (CPFs,
+valores, vendedores, comissoes alheias). Aplicamos `ownershipWhereVendas(user, "v")`
+no WHERE da query — roles full continuam vendo tudo, demais sao filtradas por
+`v.vendedor_id = mapping(user.id)`.
+
+- `src/lib/auth-vendas.ts` — `ownershipWhereVendas` agora aceita `alias`
+  opcional (via `sql.unsafe` controlado pelo backend, nunca pelo usuario).
+- `src/app/api/vendas/route.ts` — GET importa helper e injeta no WHERE.
+
+**Item 2 — fecha 32 rotas internas restantes sem auth:**
+
+Aplicado `authOr401` em todas. Mutativas tambem ganharam role check:
+
+*Mutativas:*
+- `pcp/[id]/atribuir-operador/route.ts` PATCH — admin/desenvolvedor/gerente_fabrica/pcp
+- `protocolo/[protocoloId]/route.ts` PATCH — admin/desenvolvedor/gerente_fabrica/motoboy
+- `setores/route.ts` POST — admin/desenvolvedor
+- `setores/[id]/route.ts` PATCH + DELETE — admin/desenvolvedor
+
+*GETs sensiveis (financeiro/PCP/ouro):*
+- `insumos/pote/route.ts` (saldo de ouro), `insumos/[id]/foto-url/route.ts`
+- `pcp/[id]/{apontamentos,historico,insumos-transferencia,outros-disponiveis,pedras-disponiveis,resumo}/route.ts`
+- `protocolo/{ordens,concluidos}/route.ts` + `protocolo/[protocoloId]/route.ts` GET
+
+*GETs com dados internos (cadastros):*
+- `vendas/{clientes,produtos}/busca/route.ts`
+- `vendedores/route.ts`, `usuarios/transportadores/route.ts`
+- `setores/route.ts` GET, `insumos/{categorias,fornecedores}/route.ts`
+- `ordens/proximo-numero/route.ts`
+- `pcp/{depositos,insumos,insumos-disponiveis,setores,tipos-apontamento}/route.ts`
+- `produtos/busca/route.ts`
+
+**Item 3 — consolida PATCH `orcamento/[id]` no helper:**
+
+PATCH ainda tinha check manual `orc.usuario_id !== user.id` que so disparava
+DEPOIS do SELECT gigante de ficha tecnica. Migrado para `requireOrcamentoOwnership`
+(mesmo helper que GET/PUT ja usavam) — ownership confere antes do SELECT, com
+a regra de full-access centralizada.
+
+**Item 4 — vazamento de err.message em site/test:**
+
+3 retornos do POST `/api/site/test` ainda incluiam `err.message` cru
+(linhas ~141, ~147, ~226). Em catches de erro de rede/TLS isso pode vazar:
+- host interno, header de auth Basic, fingerprint do certificado.
+
+Classificacao por `err.code` foi mantida (DNS, conexao recusada, TLS) mas o
+texto passou a ser generico. Log com stack continua server-side via `console.error`.
+
+**Item 5 — atualiza vitest tests da Onda 1J:**
+
+3 arquivos de teste (`contas-pagar`, `contas-receber`, `pagamento-ouro`)
+quebraram apos a Onda 1J trocar `{ error: "descricao obrigatoria" }` por
+`{ error: "Dados invalidos", issues: [...] }`. Asserts atualizados para a
+nova forma. `pagamento-ouro.test.ts` tambem ganhou mock de
+`requireVendaOwnership` (Onda 1D adicionou o helper sem atualizar os tests).
+
+Pendencia conhecida (Onda 1L):
+- ~80 outros testes ainda falham por causa de Ondas 1D/1F (info disclosure e
+  IDOR adicionaram queries extras nao mockadas). Nao bloqueiam producao —
+  testes sao isolados, codigo passa em runtime.
+- `descricao = "   "` (so espacos) passa pelo schema zod `min(1)` — sera
+  bloqueado adicionando `.refine(s => s.trim().length > 0)` na proxima onda.
+
+**Verificacao:**
+- `npx tsc --noEmit` — zero erros.
+- `npx eslint .` — zero erros (567 warnings pre-existentes, nenhum novo).
+- `npx vitest run src/__tests__/{contas-pagar,contas-receber,pagamento-ouro}.test.ts` — 94/94 passam.
+- Suite completa: 92 falhas (vs 112 antes) / 818 pass (vs 798) — 20 testes
+  recuperados, nenhuma regressao introduzida.
 
 ## fix(security): onda 1J — validacao zod em 40 rotas criticas (v2.56.0)
 

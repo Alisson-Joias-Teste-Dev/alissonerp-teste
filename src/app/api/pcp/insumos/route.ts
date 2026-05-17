@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/pcp/insumos?categoria_id=1
 export async function GET(req: NextRequest) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const categoria_id = req.nextUrl.searchParams.get("categoria_id");
 
   const rows = categoria_id

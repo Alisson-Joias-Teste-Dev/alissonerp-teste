@@ -135,14 +135,32 @@ export async function requireCrediarioOwnership(
 }
 
 /**
- * Atalho: devolve sql fragment para `WHERE vendedor_id = X` (ou `1=1` p/ full).
+ * Atalho: devolve sql fragment para `WHERE <alias>.vendedor_id = X`
+ * (ou `1=1` para roles full).
  *
- * Use em GET de lista de vendas (`SELECT ... FROM vendas_erp WHERE ${fragment}`).
+ * Use em GET de lista de vendas:
+ *   const ownership = await ownershipWhereVendas(user, "v");
+ *   sql`SELECT ... FROM ... v WHERE ... AND ${ownership}`
+ *
+ * Tipo de retorno via `any` porque postgres@3 tagged template retorna
+ * `PendingQuery<Row[]>` mas TS nao casa esse tipo automaticamente com
+ * `ParameterOrFragment<never>` quando passado a outro template. Os helpers
+ * inline (sql`AND x = ${y}` : sql``) funcionam por causa do union literal —
+ * helpers que retornam o fragmento perdem essa inferencia.
+ *
+ * @param alias prefixo da coluna no SQL (default: sem prefixo). Passe o alias
+ *              da tabela quando o GET fizer JOIN para evitar ambiguidade.
+ *              Apenas identificadores controlados pelo backend — nunca aceitar
+ *              valor vindo do usuario aqui.
  */
-export async function ownershipWhereVendas(user: AuthUser) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function ownershipWhereVendas(user: AuthUser, alias?: string): Promise<any> {
   if (isVendasFullAccess(user.role)) {
     return sql`1=1`;
   }
   const vid = await getUserVendedorId(user.id);
+  if (alias) {
+    return sql`${sql.unsafe(`${alias}.vendedor_id`)} = ${vid}`;
+  }
   return sql`vendedor_id = ${vid}`;
 }

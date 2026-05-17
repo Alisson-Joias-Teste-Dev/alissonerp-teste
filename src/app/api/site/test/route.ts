@@ -136,15 +136,18 @@ export async function POST(req: NextRequest) {
       });
     }
     if (msg.includes("certificate") || msg.includes("SSL") || msg.includes("TLS")) {
+      // Onda 1K: nao vaza err.message — apenas classifica. O msg do TLS pode
+      // expor detalhes de cadeia/subject que viram fingerprint da infra.
       return NextResponse.json({
         ok: false,
-        error: `Erro SSL/TLS: ${msg}`,
+        error: "Erro SSL/TLS no site de destino",
         dica: "O certificado HTTPS do site expirou ou é inválido.",
       });
     }
+    console.error("[POST /api/site/test] fetch /wp-json/ falhou:", err);
     return NextResponse.json({
       ok: false,
-      error: `Falha de rede: ${msg}`,
+      error: "Falha de rede ao alcancar o site",
       dica: "O servidor ERP não conseguiu alcançar o site.",
     });
   }
@@ -221,9 +224,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, status: 200, store_info: info });
   } catch (err) {
+    // Onda 1K: nao vaza err.message do fetch ao cliente — antes podia expor
+    // host interno, header de auth, etc. Log fica server-side.
+    console.error("[POST /api/site/test] autenticacao WooCommerce falhou:", err);
     return NextResponse.json({
       ok: false,
-      error: err instanceof Error ? err.message : "Erro desconhecido na autenticação",
+      error: "Erro desconhecido na autenticação",
       dica: "Tente de novo. Se persistir, regenere as chaves.",
     });
   }

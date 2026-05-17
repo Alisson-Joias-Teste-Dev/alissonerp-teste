@@ -12,6 +12,8 @@ import {
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
 import { zodError, IdSchema } from "@/lib/schemas/common";
+import { ownershipWhereVendas } from "@/lib/auth-vendas";
+import { AuthError } from "@/lib/auth-server";
 
 // Schemas para POST /api/vendas — itens e pagamentos sao validados em loop
 // dentro da transacao (regras de negocio: produto_id > 0, preco_lista >= 0,
@@ -87,6 +89,25 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
+  // Onda 1K: fecha IDOR no GET lista — consultora autenticada listava TODAS as
+  // vendas (CPFs, valores, comissoes alheias). Filtramos por vendedor_id
+  // mapeado em alissonerp.usuarios para roles nao-full.
+  const [usuarioRow] = await sql<{ role: string }[]>`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+  `;
+  if (!usuarioRow) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
+  const userCtx = { id: user.id, role: usuarioRow.role, email: user.email ?? "" };
+
+  let ownership;
+  try {
+    ownership = await ownershipWhereVendas(userCtx, "v");
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
+
   const { searchParams } = new URL(req.url);
   const inicio     = searchParams.get("inicio");
   const fim        = searchParams.get("fim");
@@ -135,6 +156,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.vendas_erp ve ON ve.id = v.id
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <  (${fim}::date + INTERVAL '1 day')
+      AND ${ownership}
       ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}
       ${vendedorId ? sql`AND v.vendedor_id = ${Number(vendedorId)}`    : sql``}
       ${isDocSearch

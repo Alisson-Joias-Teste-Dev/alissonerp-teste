@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/pcp/[id]/outros-disponiveis
 // Retorna insumos "outros" apontados neste PCP (tipo 8 = Entrada Outros Insumos)
 // excluindo metal (cat 1) e pedras (cat 2).
 // Usado na saída PCP para descontar peso de silicone, solda, etc. do peso bruto.
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const { id } = await params;
   const pcpId = parseInt(id);
   if (isNaN(pcpId)) {

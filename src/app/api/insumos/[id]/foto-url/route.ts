@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { getPublicUrl } from "@/lib/storage";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/insumos/[id]/foto-url
 // Retorna URL pública para a foto do insumo (bucket público insumo-fotos)
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const { id: rawId } = await params;
   const id = parseInt(rawId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });

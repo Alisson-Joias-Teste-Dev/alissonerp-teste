@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { internalError } from "@/lib/api-error";
+import { authOr401 } from "@/lib/auth-server";
+
+const ROLES_SETORES_WRITE = ["admin", "desenvolvedor"];
 
 // GET /api/setores?deposito_id=X — lista setores (filtro opcional por depósito)
 export async function GET(req: NextRequest) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const depositoId = req.nextUrl.searchParams.get("deposito_id");
 
   const rows = depositoId
@@ -25,6 +31,12 @@ export async function GET(req: NextRequest) {
 // POST /api/setores — criar setor (impede duplicatas via uniq_setores_nome_ativo)
 // Body: { nome: string, deposito_id?: number }
 export async function POST(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!ROLES_SETORES_WRITE.includes(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   try {
     const body = await req.json() as { nome?: string; deposito_id?: number };
     const nome = body.nome?.trim();

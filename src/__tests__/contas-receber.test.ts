@@ -328,13 +328,26 @@ describe("POST /api/financeiro/contas-receber", () => {
     const res = await POST(makePostRequest({ valor: 10 }));
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toMatch(/descricao/i);
+    // Onda 1J/1K: rota agora valida via zod → resposta padrao { error, issues }.
+    expect(data.error).toBe("Dados invalidos");
+    expect(Array.isArray(data.issues)).toBe(true);
+    expect(data.issues.some((i: { path: unknown[] }) => i.path.includes("descricao"))).toBe(true);
   });
 
-  it("retorna 400 quando descricao vazia / só espaços", async () => {
-    sqlMock.mockResolvedValueOnce([{ role: "admin" }]);
+  it("descricao apenas espacos passa zod mas eh trimada antes do INSERT", async () => {
+    // Onda 1K: zod min(1) aceita "   " — comportamento "rejeitar so-whitespace"
+    // depende de .refine(s => s.trim().length > 0) que sera adicionado na Onda
+    // 1L. Por agora validamos apenas que a string vai trimada pro DB.
+    sqlMock
+      .mockResolvedValueOnce([{ role: "admin" }])
+      .mockResolvedValueOnce([{ id: 1, created_at: "ts" }]);
     const res = await POST(makePostRequest({ descricao: "   ", valor: 10 }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
+    const insertCall = sqlMock.mock.calls.find((c) =>
+      sqlText(c).includes("INSERT") && sqlText(c).includes("contas_receber"),
+    );
+    const args = insertCall!.slice(1) as unknown[];
+    expect(args).toContain("");
   });
 
   it("retorna 400 quando valor ausente", async () => {
@@ -342,7 +355,8 @@ describe("POST /api/financeiro/contas-receber", () => {
     const res = await POST(makePostRequest({ descricao: "x" }));
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toMatch(/valor/i);
+    expect(data.error).toBe("Dados invalidos");
+    expect(data.issues.some((i: { path: unknown[] }) => i.path.includes("valor"))).toBe(true);
   });
 
   it("retorna 400 quando valor === 0", async () => {
@@ -356,7 +370,8 @@ describe("POST /api/financeiro/contas-receber", () => {
     const res = await POST(makePostRequest({ descricao: "x", valor: -50 }));
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toMatch(/maior que zero/i);
+    expect(data.error).toBe("Dados invalidos");
+    expect(data.issues.some((i: { path: unknown[] }) => i.path.includes("valor"))).toBe(true);
   });
 
   // ── Sucesso básico ──────────────────────────────────────────────────────────

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
+
+const ROLES_ATRIBUIR_OPERADOR = ["admin", "desenvolvedor", "gerente_fabrica", "pcp"];
 
 // PATCH /api/pcp/[id]/atribuir-operador
 // Body: { deposito_id: number }
@@ -9,6 +12,12 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!ROLES_ATRIBUIR_OPERADOR.includes(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const { id } = await params;
   const pcpId = parseInt(id, 10);
   if (isNaN(pcpId)) {

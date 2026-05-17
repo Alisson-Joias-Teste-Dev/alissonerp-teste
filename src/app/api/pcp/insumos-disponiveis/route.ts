@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/pcp/insumos-disponiveis
 // Params:
@@ -8,6 +9,9 @@ import sql from "@/lib/db";
 //   excluir_categorias   CSV de IDs de categoria a EXCLUIR, ex: "1,2"
 //                        Quando presente, ignora categoria_id e usa NOT IN
 export async function GET(req: NextRequest) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const depositoId = parseInt(req.nextUrl.searchParams.get("deposito_id") ?? "1");
   const excluirParam = req.nextUrl.searchParams.get("excluir_categorias");
 

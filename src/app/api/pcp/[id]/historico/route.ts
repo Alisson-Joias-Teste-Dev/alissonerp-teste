@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/pcp/[id]/historico
 //
@@ -44,9 +45,12 @@ export interface EventoHistorico {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const { id } = await params;
   const pcpId = parseInt(id);
   if (isNaN(pcpId)) {

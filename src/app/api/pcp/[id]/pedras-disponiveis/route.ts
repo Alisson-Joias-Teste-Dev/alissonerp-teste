@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/pcp/[id]/pedras-disponiveis
 // Retorna pedras com saldo disponível no PCP: entrada (tipo 3) − retorno (tipo 6)
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const { id } = await params;
   const pcpId = parseInt(id);
   if (isNaN(pcpId)) {

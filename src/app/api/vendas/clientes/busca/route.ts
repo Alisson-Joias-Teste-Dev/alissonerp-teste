@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
 
 // ─── GET /api/vendas/clientes/busca?q=&limit= ─────────────────────────────────
 // Busca clientes em public.contatos (READONLY)
 export async function GET(req: NextRequest) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const { searchParams } = new URL(req.url);
   const q     = searchParams.get("q")?.trim() ?? "";
   const limit = Math.min(Number(searchParams.get("limit") ?? "20"), 50);

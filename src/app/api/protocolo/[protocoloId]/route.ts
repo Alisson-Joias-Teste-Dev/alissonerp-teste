@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { ROLES_CONCLUIR_PROTOCOLO } from "@/lib/roles";
 import { uploadFile, ensureBucket } from "@/lib/storage";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/protocolo/[protocoloId] — ordens do protocolo
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ protocoloId: string }> }
 ) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const { protocoloId } = await params;
   const id = parseInt(protocoloId);
 
@@ -29,10 +33,21 @@ export async function GET(
 
 // PATCH /api/protocolo/[protocoloId] — atualiza etapas + recebedor + foto_conclusao
 //   + ordens_detalhes para conversao: [{ ordem_id, foto_base64 }]
+//
+// Auth: admin/desenvolvedor/gerente_fabrica/motoboy. Conclusao em si exige role
+// em ROLES_CONCLUIR_PROTOCOLO (validado no recebedor abaixo).
+const ROLES_PROTOCOLO_PATCH = ["admin", "desenvolvedor", "gerente_fabrica", "motoboy"];
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ protocoloId: string }> }
 ) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!ROLES_PROTOCOLO_PATCH.includes(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const { protocoloId } = await params;
   const id = parseInt(protocoloId);
   const body = await req.json() as {
