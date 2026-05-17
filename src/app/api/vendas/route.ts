@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { validarDescontos } from "@/lib/validar-desconto";
@@ -10,6 +11,59 @@ import {
   checkStringLength,
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
+import { zodError, IdSchema } from "@/lib/schemas/common";
+
+// Schemas para POST /api/vendas — itens e pagamentos sao validados em loop
+// dentro da transacao (regras de negocio: produto_id > 0, preco_lista >= 0,
+// nome_produto trim != "", etc). Aqui validamos so a forma geral do body.
+const VendaItemSchema = z.object({
+  produto_id: z.number().int().nullable().optional(),
+  nome_produto: z.string().min(1).max(LIMITS.NOME_MAX),
+  sku: z.string().max(100).nullable().optional(),
+  quantidade: z.number().int().min(1),
+  preco_lista: z.number().nonnegative(),
+  pct_desconto: z.number().min(0).max(100),
+  preco_unitario: z.number().nonnegative(),
+  total_item: z.number().nonnegative(),
+  pct_comissao: z.number().min(0).max(100),
+  valor_comissao: z.number().nonnegative(),
+  peso_estimado: z.number().nullable().optional(),
+  observacao: z.string().max(LIMITS.OBSERVACOES_MAX).nullable().optional(),
+  personalizacao: z.record(z.string(), z.unknown()).nullable().optional(),
+}).passthrough();
+
+const VendaPagamentoSchema = z.object({
+  forma: z.string().min(1).max(100),
+  gateway: z.string().max(100).nullable().optional(),
+  valor: z.number().nonnegative(),
+  parcelas: z.number().int().min(1).max(99).optional(),
+  status: z.string().max(50).optional(),
+}).passthrough();
+
+const VendaPostSchema = z.object({
+  cliente_id: IdSchema.nullable().optional(),
+  vendedor_id: IdSchema.nullable().optional(),
+  data_entrega: z.string().max(50).nullable().optional(),
+  total_frete: z.number().nonnegative().optional(),
+  forma_envio: z.string().max(100).nullable().optional(),
+  forma_frete: z.string().max(100).nullable().optional(),
+  observacoes: z.string().max(LIMITS.OBSERVACOES_MAX).nullable().optional(),
+  observacoes_internas: z.string().max(LIMITS.OBSERVACOES_MAX).nullable().optional(),
+  video_obs_interna: z.string().max(1000).nullable().optional(),
+  endereco_entrega: z.string().max(500).nullable().optional(),
+  endereco_entrega_numero: z.string().max(50).nullable().optional(),
+  endereco_entrega_complemento: z.string().max(200).nullable().optional(),
+  endereco_entrega_bairro: z.string().max(200).nullable().optional(),
+  endereco_entrega_cidade: z.string().max(200).nullable().optional(),
+  endereco_entrega_cep: z.string().max(20).nullable().optional(),
+  endereco_entrega_uf: z.string().max(5).nullable().optional(),
+  tipo_venda: z.string().max(50).nullable().optional(),
+  numero_rastreio: z.string().max(100).nullable().optional(),
+  venda_garantia_id: IdSchema.nullable().optional(),
+  situacao: z.string().max(50).nullable().optional(),
+  itens: z.array(VendaItemSchema).max(LIMITS.ITENS_VENDA_MAX).optional(),
+  pagamentos: z.array(VendaPagamentoSchema).max(LIMITS.ITENS_VENDA_MAX).optional(),
+}).passthrough();
 import {
   validarPersonalizacao,
   normalizarPersonalizacao,
@@ -135,7 +189,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
+  const raw = await req.json().catch(() => ({}));
+  const parsedBody = VendaPostSchema.safeParse(raw);
+  if (!parsedBody.success) return zodError(parsedBody.error);
+  // Cast para o tipo legado com itens/pagamentos tipados — schema valida com
+  // passthrough(), entao mantemos os tipos existentes para nao mexer no resto.
+  const body = parsedBody.data as unknown as {
     cliente_id?:          number | null;
     vendedor_id?:         number | null;
     data_entrega?:        string | null;

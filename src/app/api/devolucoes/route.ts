@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
@@ -9,6 +10,22 @@ import {
   type TipoCompensacao,
 } from "@/lib/devolucoes";
 import { internalError } from "@/lib/api-error";
+import { zodError, IdSchema, PercentSchema } from "@/lib/schemas/common";
+
+const ItemDevolucaoSchema = z.object({
+  item_venda_id: IdSchema,
+  quantidade: z.number().positive(),
+});
+
+const DevolucaoPostSchema = z.object({
+  venda_id: IdSchema,
+  tipo: z.enum(["parcial", "total"]),
+  motivo: z.string().max(5000).nullable().optional(),
+  tipo_compensacao: z.string().min(1, "tipo_compensacao obrigatorio").max(50),
+  foi_entregue: z.boolean().optional(),
+  percentual_retencao: PercentSchema.optional(),
+  itens: z.array(ItemDevolucaoSchema).min(1, "itens obrigatorio").max(100),
+});
 
 async function getUserRole(userId: string): Promise<string | null> {
   const [row] = await sql`
@@ -93,32 +110,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    venda_id: number;
-    tipo: "parcial" | "total";
-    motivo?: string | null;
-    tipo_compensacao: TipoCompensacao;
-    foi_entregue?: boolean;
-    percentual_retencao?: number;
-    itens: ItemDevolucaoInput[];
-  };
-
-  if (!body.venda_id) return NextResponse.json({ error: "venda_id obrigatorio" }, { status: 400 });
-  if (!body.tipo) return NextResponse.json({ error: "tipo obrigatorio" }, { status: 400 });
-  if (!body.tipo_compensacao) return NextResponse.json({ error: "tipo_compensacao obrigatorio" }, { status: 400 });
-  if (!Array.isArray(body.itens) || body.itens.length === 0) {
-    return NextResponse.json({ error: "itens obrigatorio" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = DevolucaoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   try {
     const opts: CriarDevolucaoOpts = {
       tipo: body.tipo,
-      tipoCompensacao: body.tipo_compensacao,
+      tipoCompensacao: body.tipo_compensacao as TipoCompensacao,
       motivo: body.motivo ?? null,
       foiEntregue: body.foi_entregue ?? false,
       percentualRetencao: body.percentual_retencao ?? (body.foi_entregue ? 0 : 70),
     };
-    const dev = await criarDevolucao(body.venda_id, body.itens, opts, user.id);
+    const dev = await criarDevolucao(body.venda_id, body.itens as ItemDevolucaoInput[], opts, user.id);
     return NextResponse.json(dev, { status: 201 });
   } catch (err) {
     return internalError("[POST /api/devolucoes]", err, "Erro ao criar devolucao", 400);

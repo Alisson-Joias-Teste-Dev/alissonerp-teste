@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
+import { zodError, IdSchema, MoneySchema, DateSchema } from "@/lib/schemas/common";
 
 const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+
+const ContasReceberSchema = z.object({
+  descricao: z.string().min(1, "descricao obrigatoria").max(LIMITS.TITULO_MAX),
+  cliente_id: IdSchema.optional(),
+  valor: MoneySchema.refine((v) => v > 0, { message: "Valor deve ser maior que zero" }),
+  data_vencimento: DateSchema.optional(),
+  categoria: z.string().max(LIMITS.NOME_MAX).optional(),
+  obs: z.string().max(LIMITS.OBSERVACOES_MAX).optional(),
+  venda_erp_id: IdSchema.optional(),
+});
 
 // ─── GET /api/financeiro/contas-receber ───────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -78,16 +90,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    descricao: string;
-    cliente_id?: number;
-    valor: number;
-    data_vencimento?: string;
-    categoria?: string;
-    obs?: string;
-    venda_erp_id?: number;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ContasReceberSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
+  // Defesa em profundidade — zod ja limita, helper retorna 413 explicito.
   try {
     checkStringLength("descricao", body.descricao, LIMITS.TITULO_MAX);
     checkStringLength("obs", body.obs, LIMITS.OBSERVACOES_MAX);
@@ -96,13 +104,6 @@ export async function POST(req: NextRequest) {
     const r = payloadTooLargeResponse(e);
     if (r) return r;
     throw e;
-  }
-
-  if (!body.descricao?.trim() || !body.valor) {
-    return NextResponse.json({ error: "descricao e valor obrigatórios" }, { status: 400 });
-  }
-  if (body.valor <= 0) {
-    return NextResponse.json({ error: "Valor deve ser maior que zero" }, { status: 400 });
   }
 
   let cliente_nome: string | null = null;

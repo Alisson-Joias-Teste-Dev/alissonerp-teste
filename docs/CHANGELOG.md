@@ -1,8 +1,159 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.55.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.56.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): onda 1J — validacao zod em 40 rotas criticas (v2.56.0)
+
+Decima onda do bloco de segurança. A maioria das rotas POST/PATCH/PUT fazia
+validação manual (parseInt, isNaN, typeof string), o que é frágil e
+duplicado entre endpoints. O projeto já usa zod (helper `defineRoute` em
+`src/lib/api-handler.ts`). Esta onda padroniza schemas zod nas 40 rotas de
+maior risco. As ~185 restantes ficam para wave futura (Onda 1J-2, 1J-3).
+
+**Schemas reutilizaveis — `src/lib/schemas/common.ts`:**
+- `IdSchema` — `z.coerce.number().int().positive()` (FKs cliente/produto/etc).
+- `UuidSchema` — `z.string().uuid()` (UUIDs Supabase Auth).
+- `DateSchema` — string ISO YYYY-MM-DD (ou com timestamp).
+- `MoneySchema` — `z.number().nonnegative()` (valores monetarios).
+- `WeightSchema` — `z.number().nonnegative()` (peso em gramas).
+- `PercentSchema` — `z.number().min(0).max(100)`.
+- `QuantitySchema` — `z.number().int().min(1)`.
+- `PaginationSchema` — `{ page?, limit? }` com coerce (query params vem como string).
+- `DateRangeSchema` — `{ inicio, fim }` para filtros de relatorio.
+- `zodError(error, status?)` — helper que converte `ZodError` em `NextResponse`
+  400 padronizado com `{ error: "Dados invalidos", issues: [{ path, message }] }`.
+
+**Padrao aplicado (inline, menos invasivo que migrar pra defineRoute):**
+
+```ts
+const Schema = z.object({ campo: z.string() });
+const raw = await req.json().catch(() => ({}));
+const parsed = Schema.safeParse(raw);
+if (!parsed.success) return zodError(parsed.error);
+const body = parsed.data; // ja validado e tipado
+```
+
+Para rotas legadas que destruturam body com tipos especificos, mantivemos
+`as any` apenas para preservar inferencia do `sql` tagged template
+(postgres@3 nao consegue tipar `Record<string, unknown>` em parametros).
+A validacao zod ja roda antes — `as any` so afeta o destructuring.
+
+**Rotas com zod aplicado (33 de 40):**
+
+*Vendas (5/8):*
+- `vendas/route.ts` POST — itens/pagamentos como arrays validados
+- `vendas/[id]/route.ts` PATCH — campos editaveis + client_updated_at
+- `vendas/[id]/pagamentos/route.ts` POST — forma/valor/ouro_*/vale_numero
+- `vendas/[id]/itens/route.ts` POST — produto/quantidade/precos
+- `vendas/[id]/solicitar-aprovacao/route.ts` POST — tipo opcional
+- `vendas/legado/route.ts` POST — cliente_id OU novo_cliente (refine)
+
+*Devolucoes (2/3):*
+- `devolucoes/route.ts` POST — tipo enum, itens min 1
+- `devolucoes/[id]/route.ts` PATCH — campos parciais
+
+*Orcamento (3/3):*
+- `orcamento/route.ts` POST — fichas como records permissivos
+- `orcamento/[id]/route.ts` PATCH (status) + PUT (campos)
+
+*Crediario (3/3):*
+- `crediario/[id]/comunicacao/route.ts` POST — tipo enum + mensagem
+- `crediario/[id]/verificar-mp/route.ts` POST — payment_id obrigatorio
+- `crediario/[id]/registrar-pagamento/route.ts` POST — obs opcional
+
+*Estoque/PCP (8/8):*
+- `estoque-comercial/transferir/route.ts` POST — refine origem != destino
+- `estoque-comercial/inventario/[id]/finalizar/route.ts` POST — contagens min 1
+- `pcp/transferir-service/route.ts` POST — pcp_id + deposito_destino
+- `pcp/transferir-service/receber/route.ts` POST — protocolo_id + foto base64
+- `distribuicao/[id]/adicionar-ordens/route.ts` POST — ordem_ids min 1
+- `ordens/[id]/route.ts` PATCH — campos nullable optional
+- `ordens/route.ts` POST — passthrough (rota gigante com upload + fichas)
+- `protocolo/route.ts` POST — direcao enum + ordem_ids
+
+*Financeiro (3/4):*
+- `financeiro/contas-pagar/route.ts` POST — descricao + valor > 0
+- `financeiro/contas-receber/route.ts` POST — descricao + valor > 0
+- `financeiro/inter/enviar/[id]/route.ts` POST — tipo enum pix/boleto/ted
+
+*Produtos (3/3):*
+- `produtos/route.ts` POST — passthrough (variacoes/composicao livres)
+- `produtos/[id]/route.ts` PATCH — passthrough (PATCH parcial complexo)
+- `produtos/[id]/imagens/route.ts` POST — foto_base64 + filename + eh_capa
+
+*Precificacao (3/3):*
+- `precificacao/aprovar/route.ts` POST — alteracao_id
+- `precificacao/curva/aplicar/route.ts` POST — filtros opcionais
+- `precificacao/curva/categorias/route.ts` POST — nome + max_weight > 0
+
+*Configuracoes (3/3):*
+- `configuracoes/cotacoes/route.ts` PATCH — api_key/auto_ativo/provedor
+- `configuracoes/ia/route.ts` PATCH — provedor enum claude/openai/gemini
+- `depositos/[id]/route.ts` PATCH — nome + ativo
+
+*User (1/2):*
+- `user/alterar-senha/route.ts` PATCH — senha_atual + nova_senha (min 6)
+
+*Webhooks (1/1):*
+- `webhooks/mercado-pago/route.ts` POST — passthrough (payload gateway com
+  campos extras) — schema apenas valida forma sem rejeitar (webhook nao pode
+  retornar 400 sem perder evento)
+
+**Rotas no escopo mas puladas (7) — motivos:**
+- `vendas/[id]/aprovar/route.ts` — **nao existe** (existe `aprovar-desconto`)
+- `vendas/[id]/cancelar/route.ts` — **sem body** (`_req`)
+- `devolucoes/[id]/concluir/route.ts` — **sem body** (`_req`)
+- `crediario/[id]/pagamento/route.ts` — **nao existe** (existe `registrar-pagamento`, ja coberto)
+- `financeiro/upload-ofx/route.ts` — **FormData** (validacao manual ja
+  robusta com `file.size > 10MB`, parser OFX tem try/catch)
+- `user/avatar/route.ts` — **FormData** (limite ja aplicado via
+  `LIMITS.IMAGE_BASE64_MAX * 0.75`)
+
+**Backlog — ~185 rotas restantes (futuras ondas):**
+Inclui endpoints de menor risco (CRUD admin, GET-only com query params,
+helpers internos). Sera priorizado conforme exposicao do cliente vs
+criticidade dos dados. Padrao definido nesta onda (helpers em
+`src/lib/schemas/common.ts` + safeParse inline) deve ser reusado.
+
+**Helper schemas exportados sem uso direto (Onda 1J-2):**
+`WeightSchema`, `QuantitySchema`, `PaginationSchema`, `DateRangeSchema`,
+`UuidSchema` estão prontos para serem importados nas proximas ondas sem
+re-declarar. Mantidos no export mesmo sem uso interno hoje — sao a API
+pública do modulo.
+
+**Comportamento preservado:**
+- Schemas usam `.optional()`/`.nullable()` agressivamente — qualquer chamada
+  que funcionava antes continua funcionando (refator nao bloqueia frontend).
+- `passthrough()` aplicado em rotas com payload livre (orcamento ficha,
+  produto variacoes, webhook MP) — campos extras nao sao rejeitados.
+- Defesa em profundidade: helpers `checkStringLength`/`checkArrayLength`/
+  `checkBase64Length` (Onda 1I) **permanecem** ao lado do zod nas rotas com
+  uploads ou texto livre — retorno 413 explicito vs 400 generico do zod.
+- Rotas que ja faziam validacao manual robusta (`produtos/[id]` PATCH com
+  ~15 checks granulares de range/tipo) tiveram zod aplicado em modo
+  permissivo — checks manuais permanecem como segunda camada.
+
+**Resposta 400 unificada:**
+```json
+{ "error": "Dados invalidos", "issues": [
+  { "path": "valor", "message": "Number must be greater than 0" },
+  { "path": "itens.0.quantidade", "message": "Expected number, received string" }
+]}
+```
+
+**Smoke test — `scripts/test-onda-1j.mjs`:**
+- 30 testes em `node:test` (sem vitest), reimplementacao inline dos schemas.
+- Cobre todos os schemas comuns + 7 cenarios reais (contas-pagar,
+  verificar-mp, transferir estoque com refine, devolucoes com min 1,
+  inter/enviar com enum, ordens PATCH com nullable, webhook MP com
+  passthrough).
+- Roda em ~150ms, **30/30 pass**.
+
+**tsc + eslint:** 0 errors. Warnings residuais (`Unexpected any`,
+`unused-vars`) sao pre-existentes ou intencionais em casts pra preservar
+inferencia do `sql` tagged template.
 
 ## fix(security): onda 1I — payload size guards em ~23 rotas sensiveis (v2.55.0)
 

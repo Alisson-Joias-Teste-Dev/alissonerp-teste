@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, deleteFile } from "@/lib/storage";
@@ -7,6 +8,8 @@ import {
   personalizacaoParaTexto,
   type PersonalizacaoQualquer,
 } from "@/lib/personalizacao-validacao";
+import { zodError, IdSchema, DateSchema } from "@/lib/schemas/common";
+import { LIMITS } from "@/lib/payload-limits";
 
 const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
 const ALL_TIPOS = [
@@ -14,6 +17,31 @@ const ALL_TIPOS = [
   "reposicao_loja", "compra_fornecedor", "garantia", "servico_interno",
   "conversao",
 ];
+
+// Schema de entrada. Permissivo — campos opcionais cobrem variacoes por tipo_ordem
+// (validacoes de obrigatoriedade por tipo continuam no handler).
+const OrdensPostSchema = z.object({
+  tipo_ordem: z.string().min(1, "tipo_ordem é obrigatório").max(50),
+  cliente_id: IdSchema.nullable().optional(),
+  vendedor_id: IdSchema.nullable().optional(),
+  data_entrega: DateSchema.nullable().optional(),
+  peso_metal_negociado: z.number().nullable().optional(),
+  foto_peca_servico: z.string().max(500).nullable().optional(),
+  foto_peca_servico_base64: z.string().max(LIMITS.IMAGE_BASE64_MAX).nullable().optional(),
+  peso_peca_servico: z.number().nullable().optional(),
+  peso_metal_externo: z.number().nullable().optional(),
+  video_observacao: z.string().max(500).nullable().optional(),
+  video_observacao_base64: z.string().max(LIMITS.VIDEO_BASE64_MAX).nullable().optional(),
+  detalhes_ordem: z.string().max(LIMITS.DESCRICAO_LONGA_MAX).nullable().optional(),
+  fotos_base64: z.array(z.string().max(LIMITS.IMAGE_BASE64_MAX)).max(LIMITS.IMAGES_ARRAY_MAX).optional(),
+  tipos_servico_ids: z.array(z.number().int()).max(50).optional(),
+  venda_id: IdSchema.nullable().optional(),
+  venda_item_ids: z.array(z.number().int()).max(LIMITS.ITENS_VENDA_MAX).optional(),
+  rota_override: z.enum(["pcp", "protocolo"]).nullable().optional(),
+  ficha_tecnica_dados: z.record(z.string(), z.unknown()).nullable().optional(),
+  numero_pedido_manual: z.string().max(100).nullable().optional(),
+  itens: z.array(z.record(z.string(), z.unknown())).max(LIMITS.ITENS_VENDA_MAX).optional(),
+}).passthrough();
 const SERVICO_TIPOS = ["servico_venda", "servico_loja", "garantia", "servico_interno"];
 const CONVERSAO_TIPOS = ["conversao"];
 
@@ -28,7 +56,10 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const body = await req.json();
+  const raw = await req.json().catch(() => ({}));
+  const parsedBody = OrdensPostSchema.safeParse(raw);
+  if (!parsedBody.success) return zodError(parsedBody.error);
+  const body = parsedBody.data;
   const {
     tipo_ordem,
     cliente_id,
@@ -51,10 +82,6 @@ export async function POST(req: NextRequest) {
     numero_pedido_manual,   // string — pedido PDV sem venda no ERP (fallback manual)
     itens = [],
   } = body;
-
-  if (!tipo_ordem) {
-    return NextResponse.json({ error: "tipo_ordem é obrigatório" }, { status: 400 });
-  }
 
   // ── Validações específicas por tipo ─────────────────────────────────────
   if (tipo_ordem === "servico_interno") {
@@ -233,9 +260,12 @@ export async function POST(req: NextRequest) {
       numeroVendaLigada = vRow?.numero_venda ?? null;
     }
 
-    // Determinar ficha_pendente para fabricação
+    // Determinar ficha_pendente para fabricação. Cast via unknown para alinhar
+    // com a tipagem do validador (zod retorna Record<string, unknown> opaco).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fichaTecnicaDados = ficha_tecnica_dados as any;
     const fichaPendente = tipo_ordem === "fabricacao"
-      ? (validarFichaTecnicaServer(ficha_tecnica_dados) !== null)
+      ? (validarFichaTecnicaServer(fichaTecnicaDados) !== null)
       : false;
 
     const [ordem] = await tx`
@@ -347,13 +377,13 @@ export async function POST(req: NextRequest) {
     //    — não inserir manualmente para evitar unique constraint violation
 
     // 4. Criar ficha técnica (se houver dados)
-    if (ficha_tecnica_dados && ficha_tecnica_dados.tipo_item) {
+    if (fichaTecnicaDados && fichaTecnicaDados.tipo_item) {
       await tx`
         INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
         VALUES (
           ${ordem.id},
-          ${ficha_tecnica_dados.tipo_item},
-          ${JSON.stringify(ficha_tecnica_dados)}::jsonb,
+          ${fichaTecnicaDados.tipo_item},
+          ${JSON.stringify(fichaTecnicaDados)}::jsonb,
           ${user.id}::uuid
         )
       `;

@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { fetchPayment } from "@/lib/mercado-pago";
 import { creditarSaldo } from "@/lib/saldo-credito";
 import { concluirVenda } from "@/lib/vendas-aprovar";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
 
 const PODE_VERIFICAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
+
+const VerificarMpSchema = z.object({
+  payment_id: z.string().min(1, "Informe o ID do pagamento do Mercado Pago").max(100),
+  obs: z.string().max(5000).optional(),
+});
 
 // POST /api/crediario/[id]/verificar-mp
 // [id] = conta_receber_id
@@ -32,11 +39,11 @@ export async function POST(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({})) as { payment_id?: string; obs?: string };
-  const mpPaymentId = String(body.payment_id ?? "").trim();
-  if (!mpPaymentId) {
-    return NextResponse.json({ error: "Informe o ID do pagamento do Mercado Pago" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = VerificarMpSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const mpPaymentId = body.payment_id.trim();
 
   // Guard duplicata: já existe este payment_id em pagamentos_venda?
   const [duplicata] = await sql`

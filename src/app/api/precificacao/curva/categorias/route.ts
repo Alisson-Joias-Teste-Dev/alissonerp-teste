@@ -8,11 +8,23 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { normalizeCategoriaRow } from "@/lib/curva-precificacao";
 import { internalError } from "@/lib/api-error";
+import { zodError, PercentSchema } from "@/lib/schemas/common";
+
+const CategoriaSchema = z.object({
+  nome: z.string().min(1, "nome obrigatorio").max(200),
+  max_weight: z.number().positive("max_weight deve ser positivo"),
+  variation: z.number().optional(),
+  comm_variation: z.number().optional(),
+  max_discount: PercentSchema.optional(),
+  ativo: z.boolean().optional(),
+  ordem: z.number().int().optional(),
+});
 
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -42,18 +54,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json();
-  const { nome, max_weight, variation, comm_variation, max_discount, ativo, ordem } = body as Record<string, unknown>;
-
-  if (!nome || max_weight == null) {
-    return NextResponse.json({ error: "nome e max_weight são obrigatórios" }, { status: 400 });
-  }
-  if (Number(max_weight) <= 0) {
-    return NextResponse.json({ error: "max_weight deve ser positivo" }, { status: 400 });
-  }
-  if (max_discount != null && (Number(max_discount) < 0 || Number(max_discount) > 100)) {
-    return NextResponse.json({ error: "max_discount deve estar entre 0 e 100" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = CategoriaSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { nome, max_weight, variation, comm_variation, max_discount, ativo, ordem } = parsed.data;
 
   try {
     // Se ordem nao foi informada, pega o max+1

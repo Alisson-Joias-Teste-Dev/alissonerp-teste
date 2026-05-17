@@ -1,8 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { fetchPayment, fetchMerchantOrder, getWebhookSecret } from "@/lib/mercado-pago";
 import { concluirVenda, estornarVenda } from "@/lib/vendas-aprovar";
+
+// Webhook MP — payload do gateway pode vir com campos adicionais (passthrough).
+// Validamos apenas a forma; tipo "merchant_order" usa o mesmo schema.
+const WebhookSchema = z.object({
+  type: z.string().max(50).optional(),
+  action: z.string().max(100).optional(),
+  data: z.object({
+    id: z.union([z.string(), z.number()]).optional(),
+  }).optional(),
+  live_mode: z.boolean().optional(),
+  user_id: z.union([z.string(), z.number()]).optional(),
+}).passthrough();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /api/webhooks/mercado-pago
@@ -233,14 +246,17 @@ export async function POST(req: NextRequest) {
   const url = new URL(req.url);
 
   // ─── 1. Log bruto imediato (antes de qualquer validação) ─────────────────
-  let body: {
+  let bodyRaw: unknown;
+  try { bodyRaw = JSON.parse(rawBody); } catch { bodyRaw = {}; }
+  // Zod valida forma, mas nunca rejeita — webhook MP nao pode 400 silencioso.
+  const parsedWebhook = WebhookSchema.safeParse(bodyRaw);
+  const body: {
     type?: string;
     action?: string;
     data?: { id?: string | number };
     live_mode?: boolean;
     user_id?: number | string;
-  } = {};
-  try { body = JSON.parse(rawBody); } catch { /* keep empty */ }
+  } = parsedWebhook.success ? parsedWebhook.data : {};
 
   await sql`
     INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status)

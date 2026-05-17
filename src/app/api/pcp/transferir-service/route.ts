@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { buscarOuroRecebido } from "@/lib/registrar-quebra";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
+import { zodError, IdSchema, UuidSchema } from "@/lib/schemas/common";
+
+const TransferirServiceSchema = z.object({
+  pcp_id: IdSchema,
+  deposito_destino_id: IdSchema,
+  observacao: z.string().max(5000).nullable().optional(),
+  user_id: UuidSchema.nullable().optional(),
+  motoboy_id: UuidSchema.nullable().optional(),
+});
 
 // POST /api/pcp/transferir-service
 // Move uma ordem do PCP de um depósito de ourives para um operador service.
@@ -34,22 +44,10 @@ async function _handler(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    pcp_id: number;
-    deposito_destino_id: number;
-    observacao?: string | null;
-    user_id?: string | null;
-    motoboy_id?: string | null;
-  };
-
-  const { pcp_id, deposito_destino_id, observacao, user_id, motoboy_id } = body;
-
-  if (!pcp_id || !deposito_destino_id) {
-    return NextResponse.json(
-      { error: "pcp_id e deposito_destino_id são obrigatórios" },
-      { status: 400 }
-    );
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TransferirServiceSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { pcp_id, deposito_destino_id, observacao, user_id, motoboy_id } = parsed.data;
 
   // 1. Buscar PCP + ordem
   const [pcp] = await sql`

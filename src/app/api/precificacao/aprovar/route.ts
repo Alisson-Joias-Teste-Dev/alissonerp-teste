@@ -11,11 +11,17 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
 import { internalError } from "@/lib/api-error";
+import { zodError, IdSchema } from "@/lib/schemas/common";
+
+const AprovarSchema = z.object({
+  alteracao_id: IdSchema,
+});
 
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -27,12 +33,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = (await req.json()) as { alteracao_id: number };
-  const { alteracao_id } = body;
-
-  if (!alteracao_id) {
-    return NextResponse.json({ error: "alteracao_id é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = AprovarSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { alteracao_id } = parsed.data;
 
   const startTime = Date.now();
 

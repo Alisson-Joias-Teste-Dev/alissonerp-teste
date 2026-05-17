@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { internalError } from "@/lib/api-error";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const PatchSchema = z.object({
+  nome: z.string().max(200).optional(),
+  ativo: z.boolean().optional(),
+});
 
 // PATCH /api/depositos/[id] — editar nome ou ativar/desativar
 // Body: { nome?: string, ativo?: boolean }
@@ -16,7 +23,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     const depositoId = parseInt(id);
-    const body = await req.json() as { nome?: string; ativo?: boolean };
+    const raw = await req.json().catch(() => ({}));
+    const parsed = PatchSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const body = parsed.data;
 
     if (body.nome !== undefined) {
       const nome = body.nome.trim();

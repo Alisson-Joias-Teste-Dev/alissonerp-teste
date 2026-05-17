@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
@@ -17,6 +18,13 @@ import {
   checkStringLength,
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
+import { zodError } from "@/lib/schemas/common";
+
+const ImagensPostSchema = z.object({
+  foto_base64: z.string().min(1, "foto_base64 inválido (esperado data URL)").max(LIMITS.IMAGE_BASE64_MAX),
+  filename: z.string().max(LIMITS.NOME_MAX).optional(),
+  eh_capa: z.boolean().optional(),
+});
 
 const BUCKET = "imagens";
 
@@ -114,11 +122,13 @@ export async function POST(
   }
 
   try {
-    const body = await req.json();
-    const fotoBase64: string | undefined = body.foto_base64;
-    const filenameOriginal: string | undefined = body.filename;
-    const definirComoCapa: boolean = body.eh_capa === true;
+    const raw = await req.json().catch(() => ({}));
+    const parsed = ImagensPostSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const { foto_base64: fotoBase64, filename: filenameOriginal, eh_capa } = parsed.data;
+    const definirComoCapa = eh_capa === true;
 
+    // Defesa em profundidade — zod ja limita, helper retorna 413 explicito.
     try {
       checkBase64Length("foto_base64", fotoBase64, LIMITS.IMAGE_BASE64_MAX);
       checkStringLength("filename", filenameOriginal, LIMITS.NOME_MAX);
@@ -128,7 +138,7 @@ export async function POST(
       throw e;
     }
 
-    if (!fotoBase64 || !fotoBase64.startsWith("data:")) {
+    if (!fotoBase64.startsWith("data:")) {
       return NextResponse.json({ error: "foto_base64 inválido (esperado data URL)" }, { status: 400 });
     }
     const matches = fotoBase64.match(/^data:([^;]+);base64,/);

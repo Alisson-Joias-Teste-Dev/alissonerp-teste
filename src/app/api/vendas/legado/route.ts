@@ -1,11 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { logAudit } from "@/lib/audit";
 import { internalError } from "@/lib/api-error";
+import { zodError, IdSchema } from "@/lib/schemas/common";
 
 const MAX_LEGACY_DATE = "2023-12-31";
 const ROLES_PERMITIDOS = ["desenvolvedor", "admin"];
+
+const LegacyItemSchema = z.object({
+  produto_id: IdSchema.nullable().optional(),
+  nome_produto: z.string().min(1).max(200),
+  sku: z.string().max(100).nullable().optional(),
+  quantidade: z.number().int().min(1).optional(),
+  peso_estimado: z.number().positive("peso medio e obrigatorio"),
+  observacao: z.string().max(5000).nullable().optional(),
+});
+
+const NovoClienteSchema = z.object({
+  nome: z.string().min(1, "Nome do cliente e obrigatorio").max(200),
+  telefone: z.string().min(1, "Telefone do cliente e obrigatorio").max(50),
+  cpf_cnpj: z.string().max(50).optional(),
+  email: z.string().max(200).optional(),
+  celular: z.string().max(50).optional(),
+  endereco: z.string().max(500).optional(),
+  numero: z.string().max(50).optional(),
+  complemento: z.string().max(200).optional(),
+  bairro: z.string().max(200).optional(),
+  municipio: z.string().max(200).optional(),
+  cep: z.string().max(20).optional(),
+  uf: z.string().max(5).optional(),
+});
+
+const VendaLegadoSchema = z.object({
+  cliente_id: IdSchema.optional(),
+  novo_cliente: NovoClienteSchema.optional(),
+  data_venda: z.string().max(50).optional(),
+  observacoes: z.string().max(5000).optional(),
+  vendedor_id: IdSchema.nullable().optional(),
+  itens: z.array(LegacyItemSchema).min(1, "Informe ao menos uma peca").max(100).optional(),
+}).refine((d) => d.cliente_id != null || d.novo_cliente != null, {
+  message: "Informe um cliente existente ou os dados do novo cliente",
+});
 
 // ─── POST /api/vendas/legado ─────────────────────────────────────────────────
 // Cria venda antiga (legacy) — registro historico para garantia vitalicia.
@@ -42,44 +79,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
   }
 
-  const body = await req.json() as {
+  const raw = await req.json().catch(() => ({}));
+  const parsed = VendaLegadoSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as unknown as {
     cliente_id?: number;
-    novo_cliente?: {
-      nome: string;
-      telefone: string;
-      cpf_cnpj?: string;
-      email?: string;
-      celular?: string;
-      endereco?: string;
-      numero?: string;
-      complemento?: string;
-      bairro?: string;
-      municipio?: string;
-      cep?: string;
-      uf?: string;
-    };
+    novo_cliente?: z.infer<typeof NovoClienteSchema>;
     data_venda?: string;
     observacoes?: string;
     vendedor_id?: number | null;
     itens?: LegacyItemInput[];
   };
-
-  // ── Validacao de cliente ─────────────────────────────────────────────────
-  if (!body.cliente_id && !body.novo_cliente) {
-    return NextResponse.json(
-      { error: "Informe um cliente existente ou os dados do novo cliente" },
-      { status: 400 },
-    );
-  }
-
-  if (body.novo_cliente) {
-    if (!body.novo_cliente.nome?.trim()) {
-      return NextResponse.json({ error: "Nome do cliente e obrigatorio" }, { status: 400 });
-    }
-    if (!body.novo_cliente.telefone?.trim()) {
-      return NextResponse.json({ error: "Telefone do cliente e obrigatorio" }, { status: 400 });
-    }
-  }
 
   // ── Validacao de data ────────────────────────────────────────────────────
   const dataVenda = body.data_venda || "2023-01-01";
@@ -90,34 +100,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── Validacao de itens ───────────────────────────────────────────────────
+  // Itens obrigatorios — refine acima nao cobre lista vazia se itens=undefined.
   if (!Array.isArray(body.itens) || body.itens.length === 0) {
     return NextResponse.json(
       { error: "Informe ao menos uma peca" },
       { status: 400 },
     );
-  }
-
-  for (let i = 0; i < body.itens.length; i++) {
-    const item = body.itens[i];
-    if (!item.nome_produto?.trim()) {
-      return NextResponse.json(
-        { error: `Item ${i + 1}: nome da peca e obrigatorio` },
-        { status: 400 },
-      );
-    }
-    if (item.peso_estimado == null || Number(item.peso_estimado) <= 0) {
-      return NextResponse.json(
-        { error: `Item ${i + 1}: peso medio e obrigatorio` },
-        { status: 400 },
-      );
-    }
-    if (item.quantidade != null && item.quantidade < 1) {
-      return NextResponse.json(
-        { error: `Item ${i + 1}: quantidade deve ser >= 1` },
-        { status: 400 },
-      );
-    }
   }
 
   try {

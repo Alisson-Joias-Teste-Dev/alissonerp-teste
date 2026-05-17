@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { zodError } from "@/lib/schemas/common";
+
+const PatchCotacoesSchema = z.object({
+  api_key: z.string().max(500).optional(),
+  auto_ativo: z.boolean().optional(),
+  provedor: z.string().max(100).optional(),
+});
 
 const ONCA_TROY_GRAMAS = 31.1034768;
 
@@ -156,11 +164,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    api_key?: string;
-    auto_ativo?: boolean;
-    provedor?: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PatchCotacoesSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   if (body.api_key !== undefined) {
     await sql`

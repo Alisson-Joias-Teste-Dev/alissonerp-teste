@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import * as inter from "@/lib/inter";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_ENVIAR = ["desenvolvedor", "admin", "diretor", "gerente_loja", "gerente_fabrica"];
 
@@ -18,6 +20,12 @@ type Body = {
   tipo: "pix" | "boleto" | "ted";
   dados: DadosPix | DadosBoleto | DadosTed;
 };
+
+// Schema generico — `dados` valida por tipo no handler (campos divergem por tipo)
+const InterEnviarSchema = z.object({
+  tipo: z.enum(["pix", "boleto", "ted"]),
+  dados: z.record(z.string(), z.unknown()),
+});
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabase();
@@ -35,13 +43,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "id inválido" }, { status: 400 });
   }
 
-  const body = (await req.json()) as Body;
-  if (!body?.tipo || !["pix", "boleto", "ted"].includes(body.tipo)) {
-    return NextResponse.json({ error: "tipo deve ser pix|boleto|ted" }, { status: 400 });
-  }
-  if (!body.dados) {
-    return NextResponse.json({ error: "dados obrigatórios" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = InterEnviarSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Body;
 
   const [conta] = await sql`
     SELECT id, descricao, valor, situacao, data_vencimento, inter_pagamento_id

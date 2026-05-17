@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
+import { zodError, IdSchema, DateSchema } from "@/lib/schemas/common";
+
+const OrdensPatchSchema = z.object({
+  data_entrega: DateSchema.nullable().optional(),
+  detalhes_ordem: z.string().max(LIMITS.DESCRICAO_LONGA_MAX).nullable().optional(),
+  situacao: z.string().max(50).nullable().optional(),
+  cliente_id: IdSchema.nullable().optional(),
+  vendedor_id: IdSchema.nullable().optional(),
+  tipo_ordem: z.string().max(50).nullable().optional(),
+  peso_metal_negociado: z.number().nonnegative().nullable().optional(),
+}).partial();
 
 // PATCH /api/ordens/[id]
 // Edição completa de uma ordem — apenas role 'desenvolvedor'.
@@ -27,16 +39,13 @@ export async function PATCH(
     return NextResponse.json({ error: "Sem permissão — apenas desenvolvedor" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({})) as {
-    data_entrega?:         string | null;
-    detalhes_ordem?:       string | null;
-    situacao?:             string | null;
-    cliente_id?:           number | null;
-    vendedor_id?:          number | null;
-    tipo_ordem?:           string | null;
-    peso_metal_negociado?: number | null;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsedBody = OrdensPatchSchema.safeParse(raw);
+  if (!parsedBody.success) return zodError(parsedBody.error);
+  // Cópia mutável para permitir normalizacao de enums abaixo.
+  const body: z.infer<typeof OrdensPatchSchema> = { ...parsedBody.data };
 
+  // Defesa em profundidade — zod ja limita, helper retorna 413 explicito.
   try {
     checkStringLength("detalhes_ordem", body.detalhes_ordem, LIMITS.DESCRICAO_LONGA_MAX);
   } catch (e) {

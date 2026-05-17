@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { logAudit } from "@/lib/audit";
 import sql from "@/lib/db";
 import { requireAuth, AuthError } from "@/lib/auth-server";
@@ -8,6 +9,16 @@ import {
   checkBase64Length,
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
+import { zodError, IdSchema, UuidSchema } from "@/lib/schemas/common";
+
+const ProtocoloPostSchema = z.object({
+  direcao: z.enum(["ida", "volta"]),
+  ordem_ids: z.array(IdSchema).min(1, "Parâmetros inválidos").max(LIMITS.ORDENS_LOTE_MAX),
+  motoboy_id: UuidSchema.optional(),
+  foto_criacao: z.string().max(LIMITS.IMAGE_BASE64_MAX).optional(),
+  user_id: UuidSchema.optional(),
+  tipo_protocolo: z.string().max(50).optional(),
+});
 
 // GET /api/protocolo?user_id=UUID — lista protocolos do motoboy (ou todos se todos=true)
 export async function GET(req: NextRequest) {
@@ -42,15 +53,6 @@ export async function GET(req: NextRequest) {
 
 // POST /api/protocolo — cria protocolo + vincula ordens
 export async function POST(req: NextRequest) {
-  const { direcao, ordem_ids, motoboy_id, foto_criacao, user_id, tipo_protocolo } = await req.json() as {
-    direcao: "ida" | "volta";
-    ordem_ids: number[];
-    motoboy_id?: string;
-    foto_criacao?: string;
-    user_id?: string;
-    tipo_protocolo?: string;
-  };
-
   // Auth obrigatória — user.id substitui body.user_id para created_by e permissões
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try {
@@ -60,6 +62,13 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ProtocoloPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { direcao, ordem_ids, motoboy_id, foto_criacao, user_id, tipo_protocolo } = parsed.data;
+  void user_id; // body.user_id é ignorado intencionalmente (usa user.id da sessão)
+
+  // Defesa em profundidade — zod ja limita, helper retorna 413 explicito.
   try {
     checkArrayLength("ordem_ids", ordem_ids, LIMITS.ORDENS_LOTE_MAX);
     checkBase64Length("foto_criacao", foto_criacao, LIMITS.IMAGE_BASE64_MAX);
@@ -67,10 +76,6 @@ export async function POST(req: NextRequest) {
     const r = payloadTooLargeResponse(e);
     if (r) return r;
     throw e;
-  }
-
-  if (!direcao || !Array.isArray(ordem_ids) || ordem_ids.length === 0) {
-    return NextResponse.json({ error: "Parâmetros inválidos" }, { status: 400 });
   }
 
   const tipoFinal = tipo_protocolo ?? "fabrica";

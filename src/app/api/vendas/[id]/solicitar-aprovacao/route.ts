@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { submeterVendaParaAprovacaoCredito } from "@/lib/vendas-credito-aprovar";
@@ -7,6 +8,11 @@ import { avaliarRegras, criarTarefaAprovacao } from "@/lib/aprovacao-regras";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const SolicitarAprovacaoSchema = z.object({
+  tipo: z.string().max(50).optional(),
+}).partial();
 
 // ─── POST /api/vendas/[id]/solicitar-aprovacao ───────────────────────────────
 // Consultora/gerente solicita aprovação de venda.
@@ -24,8 +30,10 @@ export async function POST(
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  let tipo = "";
-  try { const b = await req.json(); tipo = b?.tipo ?? ""; } catch { /* body opcional */ }
+  const raw = await req.json().catch(() => ({}));
+  const parsedBody = SolicitarAprovacaoSchema.safeParse(raw);
+  if (!parsedBody.success) return zodError(parsedBody.error);
+  const tipo = parsedBody.data.tipo ?? "";
 
   const [usuario] = await sql`
     SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1

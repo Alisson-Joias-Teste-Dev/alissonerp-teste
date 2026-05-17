@@ -26,6 +26,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
@@ -35,6 +36,32 @@ import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { dispararWebhookBackground } from "@/lib/webhooks-server";
 import { syncProdutoToTiny } from "@/lib/produto-tiny-sync";
+import { zodError } from "@/lib/schemas/common";
+import { LIMITS } from "@/lib/payload-limits";
+
+// Schema permissivo (passthrough) — produto novo tem dezenas de campos
+// calculados/opcionais e listas complexas (composicao, variacoes, quantidades).
+// Validamos a forma + obrigatorios criticos; o handler ja cobre regras de
+// negocio (peso > 0, markup > 0, SKU unico, etc).
+const ProdutosPostSchema = z.object({
+  nome: z.string().min(1, "nome é obrigatório").max(LIMITS.NOME_MAX),
+  sku: z.string().max(100).optional(),
+  tipo_metal: z.string().max(100).optional(),
+  cor_metal: z.string().max(100).optional(),
+  peso_precificado: z.number().positive("peso_precificado inválido"),
+  markup: z.number().positive("Categoria não encontrada para o peso informado"),
+  fator: z.number().nonnegative().optional(),
+  categoria_precificacao: z.string().max(200).optional(),
+  categoria_geral: z.string().max(200).nullable().optional(),
+  tem_pedra_preciosa: z.boolean().optional(),
+  fornecedor: z.string().max(200).nullable().optional(),
+  medidas: z.record(z.string(), z.unknown()).optional(),
+  ficha_tecnica_ia: z.record(z.string(), z.unknown()).nullable().optional(),
+  composicao: z.array(z.record(z.string(), z.unknown())).max(200).optional(),
+  variacoes: z.record(z.string(), z.unknown()).optional(),
+  quantidades: z.record(z.string(), z.number()).optional(),
+  foto_base64: z.string().max(LIMITS.IMAGE_BASE64_MAX).optional(),
+}).passthrough();
 
 // ── Helpers para geração de variações ─────────────────────────────────────────
 
@@ -481,49 +508,17 @@ export async function POST(req: NextRequest) {
     if (!perm?.pode_escrever) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    nome?: string;
-    sku?: string;
-    tipo_metal?: string;
-    cor_metal?: string;
-    peso_precificado?: number;
-    markup?: number;
-    fator?: number;
-    categoria_precificacao?: string;
-    categoria_geral?: string | null;
-    tem_pedra_preciosa?: boolean;
-    fornecedor?: string | null;
-    medidas?: { largura_aro?: number; altura_aro?: number; base?: number };
-    ficha_tecnica_ia?: {
-      tipo_peca?: string | null;
-      largura?: number | null;
-      altura?: number | null;
-      profundidade?: number | null;
-      diametro_interno?: number | null;
-      peso_estimado_metal?: number | null;
-      qtd_pedras?: number | null;
-      tamanho_pedras_mm?: number | null;
-      tamanho_pedras_ct?: number | null;
-      tipo_cravacao?: string | null;
-      qtd_garras?: number | null;
-      largura_garras_mm?: number | null;
-      altura_garras_mm?: number | null;
-      confianca_pct?: number | null;
-      observacoes?: string | null;
-    } | null;
-    composicao?: ComposicaoItem[];
-    variacoes?: VariacoesConfig;
-    quantidades?: Record<string, number>;
-    foto_base64?: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsedBody = ProdutosPostSchema.safeParse(raw);
+  if (!parsedBody.success) return zodError(parsedBody.error);
+  // body legado tem variacoes/composicao/medidas com shape interno proprio.
+  // Cast pra `any` evita perda de inferencia ao destruturar.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = parsedBody.data as any;
 
   const { nome, tipo_metal, cor_metal, peso_precificado, markup, fator,
           categoria_precificacao, categoria_geral, tem_pedra_preciosa, fornecedor,
           medidas, ficha_tecnica_ia, composicao, variacoes, quantidades, foto_base64 } = body;
-
-  if (!nome?.trim()) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
-  if (!peso_precificado || peso_precificado <= 0) return NextResponse.json({ error: "peso_precificado inválido" }, { status: 400 });
-  if (!markup || markup <= 0) return NextResponse.json({ error: "Categoria não encontrada para o peso informado" }, { status: 400 });
 
   try {
     // ── Determinar SKU ───────────────────────────────────────────────────────

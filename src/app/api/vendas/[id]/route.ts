@@ -1,10 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
+import { zodError, IdSchema } from "@/lib/schemas/common";
+
+const VendaPatchSchema = z.object({
+  situacao: z.string().max(50).optional(),
+  cliente_id: IdSchema.nullable().optional(),
+  vendedor_id: IdSchema.nullable().optional(),
+  data_venda: z.string().max(50).optional(),
+  data_entrega: z.string().max(50).nullable().optional(),
+  total_frete: z.number().nonnegative().optional(),
+  forma_envio: z.string().max(100).nullable().optional(),
+  forma_frete: z.string().max(100).nullable().optional(),
+  observacoes: z.string().max(LIMITS.OBSERVACOES_MAX).nullable().optional(),
+  observacoes_internas: z.string().max(LIMITS.OBSERVACOES_MAX).nullable().optional(),
+  video_obs_interna: z.string().max(1000).nullable().optional(),
+  endereco_entrega: z.string().max(500).nullable().optional(),
+  endereco_entrega_numero: z.string().max(50).nullable().optional(),
+  endereco_entrega_complemento: z.string().max(200).nullable().optional(),
+  endereco_entrega_bairro: z.string().max(200).nullable().optional(),
+  endereco_entrega_cidade: z.string().max(200).nullable().optional(),
+  endereco_entrega_cep: z.string().max(20).nullable().optional(),
+  endereco_entrega_uf: z.string().max(5).nullable().optional(),
+  tipo_venda: z.string().max(50).nullable().optional(),
+  numero_rastreio: z.string().max(100).nullable().optional(),
+  venda_garantia_id: IdSchema.nullable().optional(),
+  client_updated_at: z.string().max(50).optional(),
+}).passthrough();
 
 // ─── GET /api/vendas/[id] ──────────────────────────────────────────────────────
 export async function GET(
@@ -190,7 +217,11 @@ export async function PATCH(
     throw e;
   }
 
-  const body = await req.json() as {
+  const rawBody = await req.json().catch(() => ({}));
+  const parsedBody = VendaPatchSchema.safeParse(rawBody);
+  if (!parsedBody.success) return zodError(parsedBody.error);
+  // Cast pra preservar tipos legados (situacao mutavel etc).
+  const body = parsedBody.data as {
     situacao?:             string;
     cliente_id?:           number | null;
     vendedor_id?:          number | null;

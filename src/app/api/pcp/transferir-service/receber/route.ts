@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { zodError, IdSchema } from "@/lib/schemas/common";
+import { LIMITS } from "@/lib/payload-limits";
+
+const ReceberSchema = z.object({
+  protocolo_id: IdSchema,
+  foto_base64: z.string().min(1, "foto_base64 é obrigatória").max(LIMITS.IMAGE_BASE64_MAX),
+});
 
 // POST /api/pcp/transferir-service/receber
 // Operador service recebe a peça via protocolo de transferência.
@@ -43,13 +51,10 @@ async function _handler(req: NextRequest) {
     );
   }
 
-  const { protocolo_id, foto_base64 } = await req.json() as {
-    protocolo_id: number;
-    foto_base64: string;
-  };
-
-  if (!protocolo_id) return NextResponse.json({ error: "protocolo_id é obrigatório" }, { status: 400 });
-  if (!foto_base64)  return NextResponse.json({ error: "foto_base64 é obrigatória" }, { status: 400 });
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ReceberSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { protocolo_id, foto_base64 } = parsed.data;
 
   // 1. Validar protocolo: deve ser ida, pendente, tipo_protocolo='fabrica'
   const [protocolo] = await sql`

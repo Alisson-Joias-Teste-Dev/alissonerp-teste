@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { gerarAjustesDivergencias } from "@/lib/inventario-helpers";
 import { internalError } from "@/lib/api-error";
+import { zodError, IdSchema } from "@/lib/schemas/common";
 
 interface Params { params: Promise<{ id: string }> }
 
@@ -11,6 +13,16 @@ const ROLES_CONTAR = [
   "desenvolvedor", "admin", "gerente_fabrica", "gerente_loja",
   "estoquista_fabrica", "estoquista_loja",
 ];
+
+const FinalizarSchema = z.object({
+  leituras: z.array(z.string().max(200)).max(10000).optional(),
+  contagens: z.array(z.object({
+    item_id: IdSchema,
+    produto_id: IdSchema,
+    quantidade_contada: z.number().nonnegative(),
+  })).min(1, "contagens é obrigatório").max(10000),
+  leitor_id: z.string().max(100).optional(),
+});
 
 export async function POST(req: NextRequest, { params }: Params) {
   const supabase = await createServerSupabase();
@@ -49,15 +61,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Inventário já concluído" }, { status: 409 });
   }
 
-  const body = await req.json() as {
-    leituras?: string[];
-    contagens: Array<{ item_id: number; produto_id: number; quantidade_contada: number }>;
-    leitor_id?: string;
-  };
-
-  if (!body.contagens?.length) {
-    return NextResponse.json({ error: "contagens é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = FinalizarSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const leitorId = body.leitor_id ?? "TSL-1128-ANDROID";
 

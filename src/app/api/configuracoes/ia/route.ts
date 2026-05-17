@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { internalError } from "@/lib/api-error";
 import { authOr401 } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
+
+const PROVEDORES_VALIDOS = ["claude", "openai", "gemini"] as const;
+
+const PatchSchema = z.object({
+  provedor: z.enum(PROVEDORES_VALIDOS).optional(),
+  ativa: z.boolean().optional(),
+  margem_pedra_pct: z.number().min(0).max(100).optional(),
+});
 
 // GET /api/configuracoes/ia
 // Retorna configurações de IA + status de quais providers têm key configurada
@@ -75,14 +85,12 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    const body = await req.json() as { provedor?: string; ativa?: boolean; margem_pedra_pct?: number };
-
-    const PROVEDORES_VALIDOS = ["claude", "openai", "gemini"];
+    const raw = await req.json().catch(() => ({}));
+    const parsed = PatchSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const body = parsed.data;
 
     if (body.provedor !== undefined) {
-      if (!PROVEDORES_VALIDOS.includes(body.provedor)) {
-        return NextResponse.json({ error: "Provedor inválido" }, { status: 400 });
-      }
       await sql`
         UPDATE alissonerp.configuracoes_sistema
         SET valor = ${body.provedor}, updated_at = NOW()

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
@@ -14,6 +15,35 @@ import {
   checkStringLength,
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
+import { zodError, IdSchema } from "@/lib/schemas/common";
+
+const OrcamentoPatchSchema = z.object({
+  status: z.enum(["enviado", "aprovado", "rejeitado"]),
+  motivo_rejeicao: z.string().max(LIMITS.OBSERVACOES_MAX).optional(),
+  cliente_id: IdSchema.optional(),
+}).passthrough();
+
+const OrcamentoPutSchema = z.object({
+  nome_cliente: z.string().max(LIMITS.NOME_MAX).optional(),
+  nome_modelo: z.string().max(LIMITS.NOME_MAX).optional(),
+  peso: z.number().nullable().optional(),
+  valor: z.number().nullable().optional(),
+  markup: z.number().nullable().optional(),
+  desconto_pct: z.number().nullable().optional(),
+  cotacao_ouro: z.number().nullable().optional(),
+  cotacao_dolar: z.number().nullable().optional(),
+  valor_ouro: z.number().nullable().optional(),
+  valor_pedras: z.number().nullable().optional(),
+  tipo: z.string().max(50).optional(),
+  ficha: z.record(z.string(), z.unknown()).nullable().optional(),
+  ficha2: z.record(z.string(), z.unknown()).nullable().optional(),
+  quantidade: z.union([z.number(), z.string()]).optional(),
+  cliente_id: IdSchema.nullable().optional(),
+  foto_3d_base64: z.string().max(LIMITS.IMAGE_BASE64_MAX).optional(),
+  snapshot: z.record(z.string(), z.unknown()).nullable().optional(),
+  valor_negociado_locked: z.boolean().optional(),
+  client_updated_at: z.string().max(50).optional(),
+}).passthrough();
 
 // GET /api/orcamento/[id] — detalhe do orçamento
 export async function GET(
@@ -84,12 +114,16 @@ export async function PATCH(
   const hasAccess = isFullAccess(role) || ROLES_ORCAMENTO.includes(role as typeof ROLES_ORCAMENTO[number]);
   if (!hasAccess) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const body = await req.json() as {
+  const raw = await req.json().catch(() => ({}));
+  const parsedPatch = OrcamentoPatchSchema.safeParse(raw);
+  if (!parsedPatch.success) return zodError(parsedPatch.error);
+  const body = parsedPatch.data as {
     status: "enviado" | "aprovado" | "rejeitado";
     motivo_rejeicao?: string;
     cliente_id?: number;
   };
 
+  // Defesa em profundidade — zod ja limita, helper retorna 413 explicito.
   try {
     checkStringLength("motivo_rejeicao", body.motivo_rejeicao, LIMITS.OBSERVACOES_MAX);
   } catch (e) {
@@ -401,7 +435,13 @@ export async function PUT(
     throw e;
   }
 
-  const body = await req.json();
+  const raw = await req.json().catch(() => ({}));
+  const parsedPut = OrcamentoPutSchema.safeParse(raw);
+  if (!parsedPut.success) return zodError(parsedPut.error);
+  // body legado eh usado em UPDATEs com ficha/ficha2/snapshot livres — manter
+  // tipo `any` evita perda de inferencia do sql tagged template.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = parsedPut.data as any;
   const {
     nome_cliente, nome_modelo, peso, valor, markup, desconto_pct,
     cotacao_ouro, cotacao_dolar, valor_ouro, valor_pedras,

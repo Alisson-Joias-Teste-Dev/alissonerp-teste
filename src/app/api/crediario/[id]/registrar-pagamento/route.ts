@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { creditarSaldo } from "@/lib/saldo-credito";
 import { concluirVenda } from "@/lib/vendas-aprovar";
 import { logAudit } from "@/lib/audit";
+import { zodError } from "@/lib/schemas/common";
 
 // Rota de emergência — use verificar-mp para baixas com comprovante MP
 const PODE_BAIXAR = ["desenvolvedor"];
+
+const RegistrarPagamentoSchema = z.object({
+  obs: z.string().max(5000).optional(),
+}).partial();
 
 // POST /api/crediario/[id]/registrar-pagamento
 // [id] = conta_receber_id
@@ -60,8 +66,10 @@ export async function POST(
       `
     : [null];
 
-  const body = await req.json().catch(() => ({})) as { obs?: string };
-  const obs = (body?.obs ?? "").trim() || null;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = RegistrarPagamentoSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const obs = (parsed.data.obs ?? "").trim() || null;
 
   let saldoDevolvido = false;
   let vendaConcluida = false;

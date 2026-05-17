@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import { LIMITS, checkArrayLength, payloadTooLargeResponse } from "@/lib/payload-limits";
+import { zodError, IdSchema } from "@/lib/schemas/common";
+
+const AdicionarOrdensSchema = z.object({
+  ordem_ids: z.array(IdSchema).min(1, "Selecione ao menos uma ordem.").max(LIMITS.ORDENS_LOTE_MAX),
+});
 
 // POST /api/distribuicao/[id]/adicionar-ordens
 // Body: { ordem_ids: number[] }
@@ -23,22 +29,18 @@ export async function POST(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const body = await req.json();
-  const { ordem_ids } = body as { ordem_ids: number[] };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = AdicionarOrdensSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { ordem_ids } = parsed.data;
 
+  // Defesa em profundidade — zod ja limita, helper retorna 413 explicito.
   try {
     checkArrayLength("ordem_ids", ordem_ids, LIMITS.ORDENS_LOTE_MAX);
   } catch (e) {
     const r = payloadTooLargeResponse(e);
     if (r) return r;
     throw e;
-  }
-
-  if (!ordem_ids?.length) {
-    return NextResponse.json(
-      { error: "Selecione ao menos uma ordem." },
-      { status: 400 },
-    );
   }
 
   // 1. Verificar que a distribuição existe e está em andamento

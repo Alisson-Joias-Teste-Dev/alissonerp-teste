@@ -5,6 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
@@ -14,6 +15,35 @@ import { aplicarCurvaProduto } from "@/lib/aplicar-curva-produto";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { dispararWebhookBackground } from "@/lib/webhooks-server";
 import { syncProdutoToTiny } from "@/lib/produto-tiny-sync";
+import { zodError } from "@/lib/schemas/common";
+import { LIMITS } from "@/lib/payload-limits";
+
+// Schema permissivo (passthrough) — PATCH aceita qualquer subconjunto dos
+// campos editaveis. Validacoes de tipo numerico/range continuam no handler
+// (que ja faz checks granulares por campo, ex: peso_precificado >= 0).
+const ProdutosPatchSchema = z.object({
+  nome: z.string().max(LIMITS.NOME_MAX).optional(),
+  sku: z.string().max(100).optional(),
+  tipo_metal: z.string().max(100).nullable().optional(),
+  categoria_geral: z.string().max(200).nullable().optional(),
+  situacao: z.enum(["A", "I"]).optional(),
+  tem_pedra_preciosa: z.boolean().optional(),
+  peso_precificado: z.number().nullable().optional(),
+  markup: z.number().nullable().optional(),
+  fator: z.number().nullable().optional(),
+  categoria_precificacao: z.string().max(200).nullable().optional(),
+  preco_tiny: z.number().nullable().optional(),
+  preco_compra_usd: z.number().nullable().optional(),
+  quantidade_pedra: z.number().int().nullable().optional(),
+  tipo_item: z.string().max(50).nullable().optional(),
+  observacao_erp: z.string().max(LIMITS.OBSERVACOES_MAX).optional(),
+  largura_aro: z.number().nullable().optional(),
+  altura_aro: z.number().nullable().optional(),
+  base: z.number().nullable().optional(),
+  fornecedor: z.string().max(200).nullable().optional(),
+  foto_base64: z.string().max(LIMITS.IMAGE_BASE64_MAX).optional(),
+  aplicar_rota_padrao: z.boolean().optional(),
+}).passthrough();
 
 export async function GET(
   req: NextRequest,
@@ -282,7 +312,11 @@ export async function PATCH(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json();
+  const raw = await req.json().catch(() => ({}));
+  const parsedBody = ProdutosPatchSchema.safeParse(raw);
+  if (!parsedBody.success) return zodError(parsedBody.error);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = parsedBody.data as any;
 
   const fotoBase64 = typeof body.foto_base64 === "string" && body.foto_base64.startsWith("data:")
     ? body.foto_base64

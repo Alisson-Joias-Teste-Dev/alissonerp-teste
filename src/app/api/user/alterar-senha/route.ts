@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { rateLimit, rateLimitResponse, getClientIp } from "@/lib/rate-limit";
+import { zodError } from "@/lib/schemas/common";
+
+const AlterarSenhaSchema = z.object({
+  senha_atual: z.string().min(1, "Senha atual obrigatoria").max(200),
+  nova_senha: z.string().min(6, "Nova senha deve ter ao menos 6 caracteres").max(200),
+});
 
 export async function PATCH(req: NextRequest) {
   const supabase = await createServerSupabase();
@@ -18,14 +25,10 @@ export async function PATCH(req: NextRequest) {
     throw e;
   }
 
-  const { senha_atual, nova_senha } = await req.json();
-
-  if (!senha_atual || !nova_senha) {
-    return NextResponse.json({ error: "Campos obrigatórios" }, { status: 400 });
-  }
-  if (nova_senha.length < 6) {
-    return NextResponse.json({ error: "Nova senha deve ter ao menos 6 caracteres" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = AlterarSenhaSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { senha_atual, nova_senha } = parsed.data;
 
   if (!user.email) return NextResponse.json({ error: "Email do usuário não encontrado" }, { status: 400 });
 

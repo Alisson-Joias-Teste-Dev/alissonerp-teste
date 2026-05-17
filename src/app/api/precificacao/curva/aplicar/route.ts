@@ -14,6 +14,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
@@ -24,20 +25,27 @@ import {
 } from "@/lib/curva-precificacao";
 import { buildFiltrosProdutos } from "@/lib/produtos-filtros";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const FiltrosSchema = z.object({
+  situacao: z.string().max(10).optional(),
+  esconder_insumos: z.boolean().optional(),
+  apenas_com_estoque: z.boolean().optional(),
+  categoria: z.string().max(200).optional(),
+  subcategoria: z.string().max(200).optional(),
+  tipo_metal: z.string().max(100).optional(),
+  tem_pedra: z.string().max(10).optional(),
+  busca: z.string().max(200).optional(),
+  sku_prefix: z.string().max(100).optional(),
+  pendencia: z.string().max(50).optional(),
+}).partial();
+
+const ApplyBodySchema = z.object({
+  filtros: FiltrosSchema.optional(),
+}).partial();
 
 interface ApplyBody {
-  filtros?: {
-    situacao?: string;
-    esconder_insumos?: boolean;
-    apenas_com_estoque?: boolean;
-    categoria?: string;
-    subcategoria?: string;
-    tipo_metal?: string;
-    tem_pedra?: string;
-    busca?: string;
-    sku_prefix?: string;
-    pendencia?: string;
-  };
+  filtros?: z.infer<typeof FiltrosSchema>;
 }
 
 export async function POST(req: NextRequest) {
@@ -72,7 +80,10 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Montar filtros opcionais (body JSON) ──
-    const body = (await req.json().catch(() => ({}))) as ApplyBody;
+    const raw = await req.json().catch(() => ({}));
+    const parsedBody = ApplyBodySchema.safeParse(raw);
+    if (!parsedBody.success) return zodError(parsedBody.error);
+    const body = parsedBody.data as ApplyBody;
     const sp = new URLSearchParams();
     const f = body.filtros ?? {};
     sp.set("situacao", f.situacao ?? "A");

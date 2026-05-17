@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
@@ -12,6 +13,24 @@ import {
   type ConfigPersonalizacao,
   type CaracteresPermitidos,
 } from "@/lib/personalizacao-validacao";
+import { zodError, IdSchema } from "@/lib/schemas/common";
+import { LIMITS } from "@/lib/payload-limits";
+
+const VendaItemPostSchema = z.object({
+  produto_id: IdSchema.nullable().optional(),
+  nome_produto: z.string().min(1, "nome_produto obrigatório").max(LIMITS.NOME_MAX),
+  sku: z.string().max(100).nullable().optional(),
+  quantidade: z.number().int().min(1, "Quantidade inválida"),
+  preco_lista: z.number().nonnegative(),
+  pct_desconto: z.number().min(0).max(100),
+  preco_unitario: z.number().nonnegative(),
+  total_item: z.number().nonnegative(),
+  pct_comissao: z.number().min(0).max(100),
+  valor_comissao: z.number().nonnegative(),
+  peso_estimado: z.number().nullable().optional(),
+  observacao: z.string().max(LIMITS.OBSERVACOES_MAX).nullable().optional(),
+  personalizacao: z.record(z.string(), z.unknown()).nullable().optional(),
+}).passthrough();
 
 async function checkOwnership(userId: string, vendaId: number) {
   const [u] = await sql<{ role: string }[]>`
@@ -101,7 +120,10 @@ export async function POST(
     throw e;
   }
 
-  const body = await req.json() as {
+  const raw = await req.json().catch(() => ({}));
+  const parsed = VendaItemPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as {
     produto_id?:   number | null;
     nome_produto:  string;
     sku?:          string | null;
@@ -116,16 +138,6 @@ export async function POST(
     observacao?:   string | null;
     personalizacao?: { valor?: string } | null;
   };
-
-  if (!body.nome_produto) {
-    return NextResponse.json({ error: "nome_produto obrigatório" }, { status: 400 });
-  }
-  if (!body.quantidade || body.quantidade < 1) {
-    return NextResponse.json({ error: "Quantidade inválida" }, { status: 400 });
-  }
-  if (body.preco_lista == null || body.preco_unitario == null || body.total_item == null) {
-    return NextResponse.json({ error: "Preços obrigatórios" }, { status: 400 });
-  }
 
   // ── Personalizacao: valida contra config do produto (se existir) ────────────
   // Alem disso, se config tem preco_por_letra > 0, RECALCULA preco_unitario/

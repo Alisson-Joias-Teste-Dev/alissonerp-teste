@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
+import { zodError, IdSchema } from "@/lib/schemas/common";
 
 const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+
+const TransferirSchema = z.object({
+  produto_id: IdSchema,
+  quantidade: z.number().positive("quantidade deve ser > 0"),
+  local_origem_id: IdSchema,
+  local_destino_id: IdSchema,
+  ordem_solicitacao: z.string().min(1, "Ordem de solicitação é obrigatória").max(200),
+  obs: z.string().max(5000).optional(),
+}).refine((d) => d.local_origem_id !== d.local_destino_id, {
+  message: "Origem e destino devem ser diferentes",
+  path: ["local_destino_id"],
+});
 
 // GET /api/estoque-comercial/transferir — lista transferências
 export async function GET(req: NextRequest) {
@@ -51,29 +65,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
     }
 
-    const body = await req.json() as {
-      produto_id: number;
-      quantidade: number;
-      local_origem_id: number;
-      local_destino_id: number;
-      ordem_solicitacao: string;
-      obs?: string;
-    };
-
-    const { produto_id, quantidade, local_origem_id, local_destino_id, ordem_solicitacao, obs } = body;
-
-    if (!produto_id || !quantidade || !local_origem_id || !local_destino_id) {
-      return NextResponse.json({ error: "Campos obrigatórios: produto_id, quantidade, local_origem_id, local_destino_id" }, { status: 400 });
-    }
-    if (!ordem_solicitacao || ordem_solicitacao.trim() === "") {
-      return NextResponse.json({ error: "Ordem de solicitação é obrigatória" }, { status: 400 });
-    }
-    if (quantidade <= 0) {
-      return NextResponse.json({ error: "quantidade deve ser > 0" }, { status: 400 });
-    }
-    if (local_origem_id === local_destino_id) {
-      return NextResponse.json({ error: "Origem e destino devem ser diferentes" }, { status: 400 });
-    }
+    const raw = await req.json().catch(() => ({}));
+    const parsed = TransferirSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const { produto_id, quantidade, local_origem_id, local_destino_id, ordem_solicitacao, obs } = parsed.data;
 
     // Verificar saldo disponível no local de origem
     const [saldo] = await sql`

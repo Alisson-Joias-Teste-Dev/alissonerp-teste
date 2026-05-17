@@ -1,9 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const PagamentoPostSchema = z.object({
+  forma: z.string().min(1, "forma obrigatória").max(100),
+  gateway: z.string().max(100).nullable().optional(),
+  // 'Ouro' calcula valor server-side; outros validam > 0 no handler.
+  valor: z.number().nonnegative().optional(),
+  parcelas: z.number().int().min(1).max(99).optional(),
+  status: z.string().max(50).optional(),
+  vale_numero: z.string().max(100).optional(),
+  ouro_peso: z.number().positive().optional(),
+  ouro_valor_grama: z.number().positive().optional(),
+  ouro_foto_path: z.string().max(500).optional(),
+}).passthrough();
 
 async function checkOwnership(userId: string, vendaId: number) {
   const [u] = await sql<{ role: string }[]>`
@@ -90,7 +105,10 @@ export async function POST(
     );
   }
 
-  const body = await req.json() as {
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PagamentoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as {
     forma:            string;
     gateway?:         string | null;
     valor:            number;
@@ -102,7 +120,6 @@ export async function POST(
     ouro_foto_path?:  string;
   };
 
-  if (!body.forma) return NextResponse.json({ error: "forma obrigatória" }, { status: 400 });
   // Bloqueia "Múltiplas" como forma única — deve ser decomposto em pagamentos individuais
   if (body.forma === "Múltiplas") return NextResponse.json(
     { error: "Use pagamentos individuais (Dinheiro, Cartão, Pix, etc.) em vez de 'Múltiplas'. A opção Múltiplas existe para o formulário de checkout, mas cada pagamento deve ser registrado separadamente." },
