@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 // POST /api/pcp/validar-peso
 // Body (FormData):
@@ -13,6 +14,16 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // Mesma janela do /api/ia/validar-peso (10/min, 100/hora por user).
+  try {
+    rateLimit(`pcp-validar-peso:min:${user.id}`, 10, 60_000);
+    rateLimit(`pcp-validar-peso:hour:${user.id}`, 100, 60 * 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   const formData = await req.formData();
   const file = formData.get("file") as File | null;

@@ -10,6 +10,7 @@ import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { internalError } from "@/lib/api-error";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 const BUCKET = "imagens";
 
@@ -95,6 +96,15 @@ export async function POST(
   if (errRes) return errRes;
   if (!(await temAcessoModulo(user.role, "produtos", "escrever"))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
+  // Upload de imagem (base64) — 10/min por user.
+  try {
+    rateLimit(`produto-imagem-upload:${user.id}`, 10, 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
   }
 
   try {

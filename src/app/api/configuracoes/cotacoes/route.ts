@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 const ONCA_TROY_GRAMAS = 31.1034768;
 
@@ -49,10 +50,21 @@ export async function GET() {
 
 // ─── POST /api/configuracoes/cotacoes ─────────────────────────────────────────
 // Busca cotações de API externa e atualiza parametros
-export async function POST(req: NextRequest) {
+export async function POST(_req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // Bate na OpenExchangeRates (cota free limitada). Limita por user (5/min) E
+  // global (10/min) pra evitar atualizar varias vezes em sequencia.
+  try {
+    rateLimit(`cotacoes-fetch:user:${user.id}`, 5, 60_000);
+    rateLimit(`cotacoes-fetch:global`, 10, 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
   if (!usuario || !isFullAccess(usuario.role)) {

@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { uploadFile } from "@/lib/storage";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 // POST /api/user/avatar
 // Body: FormData { file: File, user_id?: string }
@@ -14,6 +15,15 @@ export async function POST(req: NextRequest) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) {
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  }
+
+  // Upload avatar — 5/min eh mais que o suficiente (eh raro).
+  try {
+    rateLimit(`avatar-upload:${user.id}`, 5, 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
   }
 
   // Verificar permissões — join por UUID (emails podem diferir entre tabelas)

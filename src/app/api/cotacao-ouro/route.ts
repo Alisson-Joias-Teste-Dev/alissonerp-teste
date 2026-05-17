@@ -10,7 +10,8 @@
  * Cache em memoria 1h (reset automatico a cada cold-start do lambda/container).
  * Se falhar, retorna fallback estatico com flag `estale: true`.
  */
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { rateLimit, rateLimitResponse, getClientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 15;
@@ -55,7 +56,20 @@ async function fetchAwesomeAPI(): Promise<Cotacao> {
   };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Sem auth: limita por IP (10/min) E global (60/min) pra proteger cota da
+  // AwesomeAPI (provedor free, sem renovacao em caso de abuso). O cache de 1h
+  // ja absorve grande parte do trafego — limite atinge so quando o cache esta
+  // expirado E varias requests entram em paralelo.
+  try {
+    rateLimit(`cotacao-ouro:ip:${getClientIp(req)}`, 10, 60_000);
+    rateLimit(`cotacao-ouro:global`, 60, 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
+
   const now = Date.now();
 
   // Cache hit

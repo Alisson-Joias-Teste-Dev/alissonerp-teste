@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { authOr401 } from "@/lib/auth-server";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 interface ValidacaoBody {
   imagem_base64: string;
@@ -12,7 +13,17 @@ interface ValidacaoBody {
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  void user;
+
+  // IA visao (Gemini/Claude) custa por imagem + tokens. 10/min e 100/hora.
+  // Janela mais permissiva que chat porque PCP/ourives validam pesos em sequencia.
+  try {
+    rateLimit(`ia-validar-peso:min:${user.id}`, 10, 60_000);
+    rateLimit(`ia-validar-peso:hour:${user.id}`, 100, 60 * 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   const body = await req.json() as ValidacaoBody;
   const { imagem_base64, peso_referencia, media_type } = body;

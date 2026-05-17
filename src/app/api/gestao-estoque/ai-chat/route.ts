@@ -5,6 +5,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GESTAO_ESTOQUE_AI_MODEL || "gemini-2.5-flash";
@@ -13,6 +14,16 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // Cada chat consome tokens Gemini. 3/min e 30/hora por user.
+  try {
+    rateLimit(`gestao-estoque-ai:min:${user.id}`, 3, 60_000);
+    rateLimit(`gestao-estoque-ai:hour:${user.id}`, 30, 60 * 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   if (!GEMINI_API_KEY) {
     return NextResponse.json(

@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { internalError } from "@/lib/api-error";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 15;
@@ -37,7 +38,15 @@ function hostPermitido(url: URL): boolean {
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  void user;
+
+  // Proxy externo (S3 Tiny). 60/min por user — catalogo PDF carrega varias imgs.
+  try {
+    rateLimit(`imagem-proxy:${user.id}`, 60, 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   const { searchParams } = new URL(req.url);
   const targetUrl = searchParams.get("url");

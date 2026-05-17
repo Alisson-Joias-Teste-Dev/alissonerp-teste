@@ -25,6 +25,7 @@ import { buildFinalPrompt } from "@/lib/editor-ia/prompts";
 import { generateImage, AVAILABLE_MODELS, type ModelId, type AspectRatio } from "@/lib/editor-ia/engine";
 import { internalError } from "@/lib/api-error";
 import { getApiKeys } from "@/lib/editor-ia/api-keys";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 const BUCKET = "editor-ia-geradas";
 
@@ -45,6 +46,17 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // IA paga (Gemini/OpenAI): limita 3/min e 30/hora por user. Dedup global por
+  // hash entra antes da chamada, mas o rate limit protege mesmo input variado.
+  try {
+    rateLimit(`editor-ia-generate:min:${user.id}`, 3, 60_000);
+    rateLimit(`editor-ia-generate:hour:${user.id}`, 30, 60 * 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   const body = await req.json().catch(() => ({}));
   const images: string[] = Array.isArray(body?.images) ? body.images : [];

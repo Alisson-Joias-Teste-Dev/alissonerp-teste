@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { rateLimit, rateLimitResponse, getClientIp } from "@/lib/rate-limit";
 
 export async function PATCH(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // Bruteforce na senha atual: limita por user.id (autenticado, ja temos)
+  // + IP (defesa em camadas caso atacante use varias sessoes).
+  try {
+    rateLimit(`alterar-senha:user:${user.id}`, 5, 60_000);
+    rateLimit(`alterar-senha:ip:${getClientIp(req)}`, 10, 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   const { senha_atual, nova_senha } = await req.json();
 

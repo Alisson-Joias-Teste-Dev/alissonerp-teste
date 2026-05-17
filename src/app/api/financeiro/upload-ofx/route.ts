@@ -4,6 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { parseOFX } from "@/lib/ofx-parser";
 import { internalError } from "@/lib/api-error";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 // ─── POST /api/financeiro/upload-ofx ──────────────────────────────────────────
 // Recebe arquivo OFX, parseia e insere transações com deduplicação por fitid
@@ -11,6 +12,15 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // OFX parse + insert N lancamentos = CPU + DB pesado. 5/min por user.
+  try {
+    rateLimit(`upload-ofx:${user.id}`, 5, 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
   const PODE_UPLOAD = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];

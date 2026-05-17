@@ -3,6 +3,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createClient } from "@supabase/supabase-js";
 import { uploadFile, deleteFile } from "@/lib/storage";
 import { internalError } from "@/lib/api-error";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 const BUCKETS_PERMITIDOS = ["ordem-fotos", "ordem-videos"];
 
@@ -15,6 +16,15 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // Aceita video — upload pesado. 10/min por user evita abuso.
+  try {
+    rateLimit(`ordens-upload:${user.id}`, 10, 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   const ct = req.headers.get("content-type") ?? "";
   const isFormData = ct.includes("multipart/form-data");

@@ -5,6 +5,7 @@ import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 // ─── GET /api/vendas/[id]/pdf ─────────────────────────────────────────────────
 export async function GET(
@@ -14,6 +15,16 @@ export async function GET(
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // Geracao de PDF eh I/O + CPU pesado (jsPDF carrega fontes/imagens em memoria).
+  // 5/min por user eh generoso pro caso real (vendedor imprime pedido apos fechar).
+  try {
+    rateLimit(`vendas-pdf:${user.id}`, 5, 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
   const ROLES_PDF = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];

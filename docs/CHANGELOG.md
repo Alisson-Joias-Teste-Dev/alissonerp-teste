@@ -1,8 +1,109 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.53.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.54.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): onda 1H — rate limiting em ~15 endpoints sensiveis (v2.54.0)
+
+Oitava onda do bloco de segurança. Endpoints públicos ou caros (login, IA,
+geração de PDF, cotação externa, upload pesado) podiam ser invocados em loop
+sem freio: força bruta de senha, gasto descontrolado de créditos Gemini/OpenAI/
+DeepSeek, bloqueio de cota da API de cotações, abuso de upload de vídeo. Esta
+onda adiciona um rate limiter token-bucket em memória (`src/lib/rate-limit.ts`)
+e aplica em 15 endpoints classificados por risco.
+
+**Helper criado — `src/lib/rate-limit.ts`:**
+- `rateLimit(key, max, windowMs)` — joga `RateLimitError` se excedeu. Use
+  chaves prefixadas por rota + identificador (user.id ou IP) pra granularidade
+  fina. Pode chamar 2x na mesma rota com keys diferentes (ex: `:min:` + `:hour:`)
+  pra ter limite duplo por minuto E por hora.
+- `rateLimitResponse(e)` — converte `RateLimitError` em `NextResponse` 429 com
+  header `Retry-After` (segundos). Devolve null se não for; handler re-lança.
+- `getClientIp(req)` — extrai IP real do `x-forwarded-for` (primeiro hop) ou
+  `x-real-ip`. Fallback "unknown" em dev local.
+- Cleanup periódico (a cada 60s) remove buckets expirados pra não vazar memória.
+  Timer `.unref()` pra não segurar event loop em scripts/testes.
+
+**Login / força bruta (5/min por user + 10/min por IP):**
+- `user/alterar-senha/route.ts` — chama `signInWithPassword` pra validar senha
+  atual antes de trocar. Sem limite, atacante autenticado podia testar senhas
+  em loop. Limita por user.id (defesa primária) E por IP (defesa em camadas).
+
+**IA paga (3/min + 30/hora por user — ou 10/min + 100/hora para visão):**
+- `editor-ia/generate/route.ts` — geração de imagem Gemini (Banana/Nano).
+  Cada chamada custa tokens + dedup hash já existe, mas hash variado fura.
+- `agentes/playground/route.ts` — playground DeepSeek (admin/dev only). Mesmo
+  com token + auth, vale limitar pra evitar abuso interno.
+- `gestao-estoque/ai-chat/route.ts` — chat Gemini 2.5-flash (ALISSON AI).
+- `ia/validar-peso/route.ts` — IA visão pra ler peso da balança. Limite
+  permissivo (10/min, 100/hora) porque PCP/ourives validam em sequência.
+- `pcp/validar-peso/route.ts` — variante FormData da mesma operação.
+
+**PDF (5/min por user):**
+- `vendas/[id]/pdf/route.ts` — gera PDF de pedido via jsPDF. I/O + CPU pesado
+  (carrega fontes, calcula layout, embute imagens). Limite generoso porque
+  vendedor normalmente imprime 1 vez por venda.
+
+**Cotação externa (limite duplo: por user/IP + global):**
+- `cotacao-ouro/route.ts` — bate na AwesomeAPI XAU-BRL (free, sem auth!).
+  10/min por IP + 60/min global. Cache 1h absorve maior parte; rate limit
+  protege quando cache expira e várias requests entram em paralelo.
+- `configuracoes/cotacoes/route.ts` POST — chama OpenExchangeRates (free,
+  com cota mensal). 5/min por user + 10/min global. Evita esgotar cota se
+  admin clicar no botão "atualizar" várias vezes em sequência.
+
+**Upload pesado (10/min por user — 5/min pra avatar/OFX):**
+- `vendas/upload-video/route.ts` — vídeo base64, sem limite vira loop de upload.
+- `ordens/upload-arquivo/route.ts` — vídeo + imagem (FormData ou base64).
+- `produtos/[id]/imagens/route.ts` POST — base64 com upsert no bucket.
+- `user/avatar/route.ts` — upload do avatar do user (raro, 5/min).
+- `financeiro/upload-ofx/route.ts` — parser OFX + insert de N lançamentos numa
+  transação só. CPU + DB pesado (5/min).
+- `gestao-estoque/imagem-proxy/route.ts` — proxy de S3 externo (Tiny). Limite
+  60/min porque catálogo PDF carrega múltiplas imagens em sequência.
+
+**Padrão de aplicação (consistente em todas as rotas):**
+```ts
+try {
+  rateLimit(`<rota>:<dimensao>:${user.id|ip}`, max, windowMs);
+} catch (e) {
+  const r = rateLimitResponse(e);
+  if (r) return r;
+  throw e;
+}
+```
+A chave segue convenção `<rota>:<dimensao>:<id>` (ex: `editor-ia-generate:min:U1`,
+`cotacao-ouro:ip:1.2.3.4`). Quando o limite duplo é usado, dimensões `:min:` e
+`:hour:` separam os buckets.
+
+**Smoke test — `scripts/test-onda-1h.mjs`:**
+13 testes cobrem:
+- Passa nas N primeiras chamadas, lança 429 na N+1.
+- `retryAfter` é segundos inteiros >= 1 (nunca 0).
+- Bucket reseta após janela expirar (libera próximo ciclo).
+- Chaves diferentes não compartilham contador.
+- Limites duplos (min + hora) na mesma rota.
+- `getClientIp` prioriza `x-forwarded-for`, lida com multi-hop e trim.
+- `RateLimitError` sempre tem `status=429` + `name=RateLimitError`.
+
+Tudo passou: `13 pass, 0 fail`.
+
+**Limitações conhecidas (anotadas no helper):**
+- In-memory por design — o estado vive na heap do processo Node. Multi-instance
+  (várias réplicas Next, edge functions, lambdas) NÃO compartilha contador,
+  então atacante distribuído fura. Para o setup atual (single-replica + dev
+  server) é suficiente. **TODO futuro:** migrar para Redis ou tabela
+  `alissonerp.rate_limit_buckets` quando subirmos múltiplas réplicas.
+- Estado zera no restart (não persiste). Aceitável — restart é raro em prod e
+  o impacto é apenas "um burst extra na próxima janela", não bypass real.
+
+**Resultado:**
+- `npx tsc --noEmit` — zero erros.
+- `npx eslint` nos 15 arquivos modificados — zero erros (2 warnings pré-existentes
+  não introduzidos pela onda: `_req` unused em `cotacoes/route.ts:53` e `any`
+  em `produtos/[id]/imagens/route.ts:143`).
+- Smoke test 13/13 passou em 60ms.
 
 ## refactor(security): onda 1G — refactors de seguranca (v2.53.0)
 

@@ -3,6 +3,7 @@ import { authOr401 } from '@/lib/auth-server';
 import { isFullAccess } from '@/lib/roles';
 import { createDeepSeekProvider } from '@/agentes/core/llm/deepseek';
 import { internalError } from '@/lib/api-error';
+import { rateLimit, rateLimitResponse } from '@/lib/rate-limit';
 
 // ATENCAO: esta rota nao funciona em dev/prod hoje — depende de `ai` +
 // `@ai-sdk/deepseek` que NAO estao instaladas no package.json. Qualquer
@@ -20,6 +21,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (errRes) return errRes;
   if (!isFullAccess(user.role)) {
     return NextResponse.json({ error: 'Sem permissão' }, { status: 403 });
+  }
+
+  // LLM playground custa tokens DeepSeek. Limita 3/min e 30/hora por user.
+  try {
+    rateLimit(`agentes-playground:min:${user.id}`, 3, 60_000);
+    rateLimit(`agentes-playground:hour:${user.id}`, 30, 60 * 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
   }
 
   let body: { messages?: Array<{ role: string; content: string }>; message?: string };

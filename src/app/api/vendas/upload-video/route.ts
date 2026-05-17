@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile } from "@/lib/storage";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 // POST /api/vendas/upload-video
 // Body: { base64: string, mime: string, filename?: string }
@@ -9,6 +10,15 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // Video base64 = upload pesado. 10/min por user evita abuso/upload em loop.
+  try {
+    rateLimit(`vendas-upload-video:${user.id}`, 10, 60_000);
+  } catch (e) {
+    const r = rateLimitResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   const body = await req.json() as {
     base64:    string;
