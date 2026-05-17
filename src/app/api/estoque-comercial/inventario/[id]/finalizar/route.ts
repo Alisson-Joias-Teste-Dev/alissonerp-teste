@@ -68,7 +68,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       await tx`
         UPDATE alissonerp.itens_inventario_comercial AS t
         SET quantidade_contada = v.qtd::int,
-            diferenca          = v.qtd::int - t.quantidade_sistema,
             contado_por        = ${user.id}::uuid,
             contado_em         = now()
         FROM UNNEST(${itemIds}::int[], ${quantidades}::int[]) AS v(item_id, qtd)
