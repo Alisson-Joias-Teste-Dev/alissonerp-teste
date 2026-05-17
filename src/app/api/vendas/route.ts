@@ -12,7 +12,7 @@ import {
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
 import { zodError, IdSchema } from "@/lib/schemas/common";
-import { ownershipWhereVendas } from "@/lib/auth-vendas";
+import { getUserVendedorId } from "@/lib/auth-vendas";
 import { AuthError } from "@/lib/auth-server";
 
 // Schemas para POST /api/vendas — itens e pagamentos sao validados em loop
@@ -98,14 +98,22 @@ export async function GET(req: NextRequest) {
   if (!usuarioRow) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
   const userCtx = { id: user.id, role: usuarioRow.role, email: user.email ?? "" };
 
-  let ownership;
-  try {
-    ownership = await ownershipWhereVendas(userCtx, "v");
-  } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ error: e.message }, { status: 401 });
+  // Onda 1K: calcula vendedor_id do user pra filtrar a query (so se nao-full).
+  // Inline (em vez do helper ownershipWhereVendas) porque postgres@3 perde a
+  // inferencia de fragmento quando o `sql` vem de outro modulo async — o
+  // padrao `${cond ? sql`AND ...` : sql``}` so funciona com fragmentos definidos
+  // no mesmo escopo do sql tag.
+  const isFullAccess = ["admin","desenvolvedor","diretor","gerente_loja","gerente_fabrica"].includes(userCtx.role);
+  let meuVendedorId: number | null = null;
+  if (!isFullAccess) {
+    try {
+      meuVendedorId = await getUserVendedorId(user.id);
+    } catch (e) {
+      if (e instanceof AuthError) {
+        return NextResponse.json({ error: e.message }, { status: 401 });
+      }
+      throw e;
     }
-    throw e;
   }
 
   const { searchParams } = new URL(req.url);
@@ -156,7 +164,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.vendas_erp ve ON ve.id = v.id
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <  (${fim}::date + INTERVAL '1 day')
-      AND ${ownership}
+      ${isFullAccess ? sql`` : sql`AND v.vendedor_id = ${meuVendedorId!}`}
       ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}
       ${vendedorId ? sql`AND v.vendedor_id = ${Number(vendedorId)}`    : sql``}
       ${isDocSearch

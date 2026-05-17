@@ -155,12 +155,16 @@ export async function requireCrediarioOwnership(
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function ownershipWhereVendas(user: AuthUser, alias?: string): Promise<any> {
+  // Retorna fragmento ja com AND embutido (ou vazio pra full-access).
+  // Motivo: postgres@3 trata sql`1=1` como query top-level (erro de sintaxe).
+  // Padrão correto pra fragmento condicional: sql`` (vazio) ou sql`AND x = y`.
+  // Caller usa direto: WHERE ... <outras conds> ${ownership}
   if (isVendasFullAccess(user.role)) {
-    return sql`1=1`;
+    return sql``;
   }
   const vid = await getUserVendedorId(user.id);
   if (alias) {
-    return sql`${sql.unsafe(`${alias}.vendedor_id`)} = ${vid}`;
+    return sql`AND ${sql.unsafe(`${alias}.vendedor_id`)} = ${vid}`;
   }
-  return sql`vendedor_id = ${vid}`;
+  return sql`AND vendedor_id = ${vid}`;
 }
