@@ -245,7 +245,7 @@ export async function POST(
       WHERE venda_id = ${vendaId}
         AND status = 'aguardando_aprovacao'
         AND tags @> ARRAY['aprovacao_desconto']::text[]
-    `.catch(() => {});
+    `.catch((err) => console.error("[vendas/itens] tarefa cancel falhou", err));
   }
 
   return NextResponse.json({ id: novoItem.id }, { status: 201 });

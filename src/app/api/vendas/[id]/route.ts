@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
+import { isFullAccess } from "@/lib/roles";
 import {
   requireVendaOwnership,
   isVendasFullAccess,
@@ -300,7 +301,7 @@ export async function PATCH(
     }
   }
   // ── Bloquear aprovação se desconto >30% sem aprovação (não-admin/dev) ────
-  if (body.situacao === "aprovado" && !["desenvolvedor", "admin"].includes(usuario.role)) {
+  if (body.situacao === "aprovado" && !isFullAccess(usuario.role)) {
     const [dcCheck] = await sql`
       SELECT
         EXISTS(

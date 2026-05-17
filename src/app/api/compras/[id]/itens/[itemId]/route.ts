@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
+import { isFullAccess } from "@/lib/roles";
 
 type Params = Promise<{ id: string; itemId: string }>;
 
 // DELETE /api/compras/[id]/itens/[itemId]
-export async function DELETE(_req: NextRequest, { params }: { params: Params }) {
+export async function DELETE(req: NextRequest, { params }: { params: Params }) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const { id, itemId } = await params;
   const compraId  = parseInt(id);
   const itemIdNum = parseInt(itemId);

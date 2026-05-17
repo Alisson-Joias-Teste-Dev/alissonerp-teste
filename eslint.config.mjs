@@ -30,9 +30,17 @@ const eslintConfig = defineConfig([
     ".antigravity/**",
     ".github/**",
     "node_modules/**",
-    // Scripts de manutenção e utilitários raiz (não são código da aplicação)
+    // Scripts de manutenção, prototipos e utilitarios raiz (nao sao codigo da aplicacao)
     "scripts/**",
     "gerar_relatorio.js",
+    "admin-page-tabs.jsx",
+    "admin-showcase-tab.jsx",
+    "catalog-overrides.js",
+    "catalog.jsx",
+    "category-gallery.jsx",
+    "erp-api.js",
+    "page-settings.js",
+    "tweaks-panel.jsx",
   ]),
 ]);
 

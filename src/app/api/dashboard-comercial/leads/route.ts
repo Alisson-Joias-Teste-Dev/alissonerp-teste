@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
+import { isFullAccess } from "@/lib/roles";
 import type { LeadsDashboardResponse, LeadsConsultoraStats } from "@/lib/types/dashboard-comercial";
 import { safeDiv } from "@/lib/dashboard-comercial/utils";
 
@@ -17,6 +19,12 @@ import { safeDiv } from "@/lib/dashboard-comercial/utils";
 //   - Exclui "Incoming leads"
 
 export async function GET(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const params = req.nextUrl.searchParams;
   const hoje = new Date();
   const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);

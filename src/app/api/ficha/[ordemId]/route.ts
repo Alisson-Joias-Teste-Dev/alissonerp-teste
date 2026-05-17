@@ -1,10 +1,14 @@
 import sql from "@/lib/db";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { authOr401 } from "@/lib/auth-server";
 
 export async function GET(
-  _req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ ordemId: string }> }
 ) {
+  const [, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+
   const { ordemId } = await params;
   const id = parseInt(ordemId);
   if (isNaN(id)) return NextResponse.json(null);

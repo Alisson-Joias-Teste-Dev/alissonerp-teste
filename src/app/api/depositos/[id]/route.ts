@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { internalError } from "@/lib/api-error";
+import { authOr401 } from "@/lib/auth-server";
+import { isFullAccess } from "@/lib/roles";
 
 // PATCH /api/depositos/[id] — editar nome ou ativar/desativar
 // Body: { nome?: string, ativo?: boolean }
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   try {
     const { id } = await params;
     const depositoId = parseInt(id);
@@ -34,7 +42,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 // DELETE /api/depositos/[id] — soft delete (ativo = false)
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   try {
     const { id } = await params;
     const depositoId = parseInt(id);

@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
+import { isFullAccess } from "@/lib/roles";
 
 // GET /api/distribuicao/[id]/apontamentos — histórico de apontamentos da distribuição
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role) && !["pcp", "ourives"].includes(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const { id } = await params;
   const rows = await sql`
     SELECT

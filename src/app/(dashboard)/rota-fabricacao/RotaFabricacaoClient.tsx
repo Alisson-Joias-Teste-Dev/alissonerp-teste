@@ -494,7 +494,7 @@ export default function RotaFabricacaoClient() {
       >
         <GripVertical size={13} />
         <span>
-          Ordens caem em <strong>"Novas Ordens"</strong>. Clique em <strong>"Definir Rota"</strong> no card pra
+          Ordens caem em <strong>&ldquo;Novas Ordens&rdquo;</strong>. Clique em <strong>&ldquo;Definir Rota&rdquo;</strong> no card pra
           mapear os setores do produto — depois disso o card é distribuído automaticamente.
           Cards já em setores podem ser arrastados pra mover entre etapas.
         </span>

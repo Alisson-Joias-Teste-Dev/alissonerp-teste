@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { internalError } from "@/lib/api-error";
+import { authOr401 } from "@/lib/auth-server";
 
 // GET /api/configuracoes/ia
 // Retorna configurações de IA + status de quais providers têm key configurada
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!["admin", "desenvolvedor"].includes(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   // Nunca cachear — a config muda quando o usuário salva
   const headers = { "Cache-Control": "no-store" };
 
@@ -61,6 +68,12 @@ export async function GET() {
 // PATCH /api/configuracoes/ia
 // Body: { provedor?: string, ativa?: boolean, margem_pedra_pct?: number }
 export async function PATCH(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!["admin", "desenvolvedor"].includes(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   try {
     const body = await req.json() as { provedor?: string; ativa?: boolean; margem_pedra_pct?: number };
 

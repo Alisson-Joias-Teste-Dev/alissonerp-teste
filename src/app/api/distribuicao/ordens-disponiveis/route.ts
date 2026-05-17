@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { authOr401 } from "@/lib/auth-server";
+import { isFullAccess } from "@/lib/roles";
 
 // GET /api/distribuicao/ordens-disponiveis
 // Ordens elegíveis para distribuição:
@@ -9,6 +11,12 @@ import sql from "@/lib/db";
 // Query param opcional: ?excluir_dist_id=N
 //   → exclui também as ordens JÁ presentes no lote N (para modal "Adicionar Ordens")
 export async function GET(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role) && !["pcp", "ourives"].includes(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const { searchParams } = new URL(req.url);
   const excluirDistId = searchParams.get("excluir_dist_id");
   const distIdNum = excluirDistId ? parseInt(excluirDistId) : null;

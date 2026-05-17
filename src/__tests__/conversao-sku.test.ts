@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
-let sqlSequence: any[] = [];
+const sqlSequence: any[] = [];
 function makeQueryFn() {
   return vi.fn(() => {
     const result = sqlSequence.shift() ?? [];

@@ -17,6 +17,8 @@ function StudioEnv() {
     const pmrem = new THREE.PMREMGenerator(gl);
     const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     const previous = scene.environment;
+    // react-hooks/immutability: scene vem de useThree e é mutável intencionalmente em hooks r3f
+    // eslint-disable-next-line react-hooks/immutability
     scene.environment = envTex;
     return () => {
       scene.environment = previous;
