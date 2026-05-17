@@ -3,17 +3,15 @@
  * Endpoint TEMPORÁRIO — preview da reclassificação joia vs insumo por preço.
  * Remover após decisão do usuário.
  */
-import { NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { NextRequest, NextResponse } from "next/server";
+import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 
-export async function GET() {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-  const role = user.user_metadata?.role as string | undefined;
-  if (!(await temAcessoModulo(role ?? "", "produtos", "ler"))) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+export async function GET(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!(await temAcessoModulo(user.role, "produtos", "ler"))) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   try {
     // Distribuição por faixa de preço (ativos, pais+simples)

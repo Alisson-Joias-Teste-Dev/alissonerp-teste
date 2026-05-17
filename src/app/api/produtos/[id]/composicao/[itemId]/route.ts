@@ -4,22 +4,18 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
 
-async function authorize() {
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Não autenticado", status: 401, user: null };
-
-  const role = user.user_metadata?.role as string | undefined;
-  if (!(await temAcessoModulo(role ?? "", "produtos", "escrever"))) return { error: "Sem permissão", status: 403, user: null };
-
-  return { error: null, status: 200, user };
+async function authorize(req?: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return { error: errRes, user: null };
+  if (!(await temAcessoModulo(user.role, "produtos", "escrever"))) {
+    return { error: NextResponse.json({ error: "Sem permissão" }, { status: 403 }), user: null };
+  }
+  return { error: null, user };
 }
 
 export async function PATCH(
@@ -31,8 +27,8 @@ export async function PATCH(
   const bomItemId = Number(itemId);
   if (!produtoId || !bomItemId) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const { error, status } = await authorize();
-  if (error) return NextResponse.json({ error }, { status });
+  const { error } = await authorize(req);
+  if (error) return error;
 
   const body = await req.json();
   const { quantidade, tamanho, unidade_tamanho, preco_compra_usd, obrigatorio, observacao } = body;
@@ -67,7 +63,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string; itemId: string }> }
 ) {
   const { id, itemId } = await params;
@@ -75,8 +71,8 @@ export async function DELETE(
   const bomItemId = Number(itemId);
   if (!produtoId || !bomItemId) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const { error, status } = await authorize();
-  if (error) return NextResponse.json({ error }, { status });
+  const { error } = await authorize(req);
+  if (error) return error;
 
   try {
     const [deleted] = await sql`

@@ -10,7 +10,7 @@
  * com a listagem (agrupar=true).
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { buildFiltrosProdutos } from "@/lib/produtos-filtros";
@@ -19,11 +19,9 @@ interface Filho { nome: string; total: number }
 interface Pai   { pai: string; total: number; filhos: Filho[] }
 
 export async function GET(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-  const role = user.user_metadata?.role as string | undefined;
-  if (!(await temAcessoModulo(role ?? "", "produtos", "ler"))) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!(await temAcessoModulo(user.role, "produtos", "ler"))) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   try {
     const f = buildFiltrosProdutos(req.nextUrl.searchParams, {

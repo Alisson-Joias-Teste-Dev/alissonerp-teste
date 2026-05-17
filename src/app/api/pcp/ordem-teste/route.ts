@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 
 // POST /api/pcp/ordem-teste
 // Cria uma ordem de teste direto no PCP, sem passar pelo fluxo normal.
@@ -10,14 +10,9 @@ import { createServerSupabase } from "@/lib/supabase/server";
 //   ALTER TABLE alissonerp.ordens ADD COLUMN IF NOT EXISTS eh_teste BOOLEAN NOT NULL DEFAULT false;
 
 export async function POST(req: NextRequest) {
-  // 1. Auth — só desenvolvedor
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-  }
-  const role = user.user_metadata?.role as string | undefined;
-  if (role !== "desenvolvedor") {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (user.role !== "desenvolvedor") {
     return NextResponse.json({ error: "Sem permissão — só desenvolvedor" }, { status: 403 });
   }
 

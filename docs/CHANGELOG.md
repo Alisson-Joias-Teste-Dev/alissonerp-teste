@@ -1,8 +1,49 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/05/2026 — Versão: v2.44.0 <!-- Revisado 16/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.45.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): Onda 1A-2 — fechar `user_metadata?.role` em 56 rotas (v2.45.0)
+
+Segunda onda do hardening de segurança. Fecha o mesmo padrão A da onda 1A-1
+(`user_metadata?.role` permite escalada via `auth.updateUser`) em mais 56 rotas
+do sistema.
+
+**Novo helper** (`src/lib/auth-server.ts`): `authOr401(req)` retorna
+`[user, null]` em sucesso ou `[null, NextResponse]` de 401/403 em falha. Padrão
+reduzido de 8 linhas para 3 em cada handler.
+
+**Lotes corrigidos:**
+
+- **2.1 Configurações** (4): `roles`, `roles/[nome]`, `permissoes`, `parametros`
+- **2.2 Site** (7): `test`, `sync`, `sync/[id]`, `produtos`, `produtos/[id]`,
+  `invalidar-cache`, `config`
+- **2.3 Produtos core** (20): `route` (GET/POST), `[id]/route` (GET/PATCH),
+  `[id]/tiny-sync`, `[id]/propagar`, `[id]/imagens/route` (GET/POST),
+  `[id]/imagens/[imgId]` (PATCH/DELETE), `[id]/composicao/route` (GET/POST),
+  `[id]/composicao/[itemId]`, `sync-public-to-erp`, `sync-erp-to-public`,
+  `setup`, `bulk-edit`, `pedras-bulk/route` (4 handlers), `pedras-bulk/reprice`,
+  `peca-avulsa`, `categorias`, `metais`, `pendencias-contagem`,
+  `preview-reclassificacao`, `classificar-tipo`, `normalizar-metal`,
+  `rename-metal`, `insumos`
+- **2.4 Precificação** (14): `aprovar`, `rejeitar`, `simular`,
+  `solicitar-aprovacao`, `cotacoes`, `pendentes`, `regras`, `markup-ouro`,
+  `markup-pedras`, `curva/aplicar`, `curva/categorias`, `curva/categorias/[id]`,
+  `curva/config`, `curva/preview-aplicar`, `curva/simular-produto`
+- **2.5 Outros** (8): `pcp/ordem-teste`, `gestao-estoque/produtos`,
+  `gestao-estoque/vendas-semanais`, `gestao-estoque/oportunidades-fabricacao`,
+  `fornecedores`, `estoque-produtos`, `dashboard-comercial/premiacao`
+
+**Validação em prod (localhost dev → api.alisson.api.br):**
+- 16/16 endpoints autenticados como admin: **200 OK** (sem regressão)
+- 13/13 endpoints sem cookie: **401 Unauthorized** (antes: 200 via metadata)
+
+**Pendência conhecida (não-crítica):** 13 arquivos frontend ainda usam
+`user.user_metadata?.role` (Sidebar, page.tsx de produtos/precificacao/site/etc).
+Isso é apenas para controle de UI (mostrar/esconder); backend já bloqueia. O
+`useAuth` prioriza role da API (`perm?.role ?? roleFromToken`). Refator pode
+vir em onda futura.
 
 ## fix(security): Onda 1A-1 — auth bypass em 12 rotas críticas (v2.44.0)
 

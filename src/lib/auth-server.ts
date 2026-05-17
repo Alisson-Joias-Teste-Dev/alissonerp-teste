@@ -1,7 +1,7 @@
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { temPermissao } from "@/lib/permissoes";
-import type { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
 export class AuthError extends Error {
   status = 401;
@@ -48,4 +48,28 @@ export async function requireAuth(req?: NextRequest): Promise<AuthUser> {
 export async function requirePermissao(user: AuthUser, permissao: string): Promise<void> {
   const ok = await temPermissao(user.id, permissao, user.role);
   if (!ok) throw new ForbiddenError(`Requer permissão: ${permissao}`);
+}
+
+/**
+ * Wrapper "tudo em uma chamada": autentica e retorna [user, null] em sucesso,
+ * ou [null, NextResponse de erro] em falha. Use em handlers para evitar try/catch
+ * repetido. Exemplo:
+ *
+ *   const [user, errRes] = await authOr401(req);
+ *   if (errRes) return errRes;
+ *   // ...usar user.id, user.role
+ */
+export async function authOr401(req?: NextRequest): Promise<[AuthUser, null] | [null, NextResponse]> {
+  try {
+    const user = await requireAuth(req);
+    return [user, null];
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return [null, NextResponse.json({ error: e.message }, { status: 401 })];
+    }
+    if (e instanceof ForbiddenError) {
+      return [null, NextResponse.json({ error: e.message }, { status: 403 })];
+    }
+    throw e;
+  }
 }

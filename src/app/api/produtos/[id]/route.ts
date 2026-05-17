@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
@@ -16,21 +16,16 @@ import { dispararWebhookBackground } from "@/lib/webhooks-server";
 import { syncProdutoToTiny } from "@/lib/produto-tiny-sync";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   const produtoId = Number(id);
   if (!produtoId) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const role = user.user_metadata?.role as string | undefined;
-  if (!(await temAcessoModulo(role ?? "", "produtos", "ler"))) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!(await temAcessoModulo(user.role, "produtos", "ler"))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -281,14 +276,9 @@ export async function PATCH(
   const produtoId = Number(id);
   if (!produtoId) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const role = user.user_metadata?.role as string | undefined;
-  if (!(await temAcessoModulo(role ?? "", "produtos", "escrever"))) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!(await temAcessoModulo(user.role, "produtos", "escrever"))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 

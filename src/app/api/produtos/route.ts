@@ -26,7 +26,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
@@ -71,17 +71,12 @@ const ORDER_WHITELIST = [
 ];
 
 export async function GET(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const role = user.user_metadata?.role as string | undefined;
-  if (!isFullAccess(role ?? "")) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role)) {
     const [perm] = await sql`
       SELECT pode_ler FROM alissonerp.role_permissoes
-      WHERE role = ${role ?? ""} AND modulo = 'produtos'
+      WHERE role = ${user.role} AND modulo = 'produtos'
     `;
     if (!perm?.pode_ler) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
@@ -476,15 +471,12 @@ interface VariacoesConfig {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const role = user.user_metadata?.role as string | undefined;
-  if (!isFullAccess(role ?? "")) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isFullAccess(user.role)) {
     const [perm] = await sql`
       SELECT pode_escrever FROM alissonerp.role_permissoes
-      WHERE role = ${role ?? ""} AND modulo = 'produtos'
+      WHERE role = ${user.role} AND modulo = 'produtos'
     `;
     if (!perm?.pode_escrever) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }

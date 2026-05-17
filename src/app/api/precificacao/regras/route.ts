@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
 import { isPrecificacaoAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 
@@ -17,21 +17,11 @@ const DEFAULTS: Record<Chave, string> = {
   preco_arredondamento: "dezena",
 };
 
-async function getUser() {
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { user: null, role: null };
-
-  const role = (user.user_metadata?.role as string | undefined) ?? null;
-  return { user, role };
-}
-
-export async function GET() {
-  const { user, role } = await getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-  if (!isPrecificacaoAccess(role)) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+export async function GET(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isPrecificacaoAccess(user.role)) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  void user;
 
   try {
     const rows = await sql<{ chave: string; valor: string }[]>`
@@ -55,9 +45,9 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const { user, role } = await getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-  if (!isPrecificacaoAccess(role)) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!isPrecificacaoAccess(user.role)) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   const body = await req.json() as {
     preco_limiar_subir?: number;
