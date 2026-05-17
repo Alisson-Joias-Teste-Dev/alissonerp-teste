@@ -2,14 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 const ROLES_CANCELAR = ["admin", "desenvolvedor"];
+
+function authErrorResponse(e: unknown) {
+  if (e instanceof AuthError) {
+    return NextResponse.json({ error: e.message }, { status: 401 });
+  }
+  throw e;
+}
 
 // PATCH /api/purificacao/ligacao/[id] — Concluir (18k produzido)
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  let user;
+  try { user = await requireAuth(req); } catch (e) { return authErrorResponse(e); }
+
   const { id } = await params;
   const ligacao_id = parseInt(id);
   if (isNaN(ligacao_id)) {
@@ -20,21 +31,15 @@ export async function PATCH(
     peso_18k_real: number;
     foto_resultado?: string | null;
     observacao?: string | null;
-    user_id?: string | null;
-    user_role?: string | null;
   };
 
-  const { peso_18k_real, foto_resultado, observacao, user_id, user_role } = body;
+  const { peso_18k_real, foto_resultado, observacao } = body;
 
-  if (!user_id || !user_role) {
-    return NextResponse.json({ error: "user_id e user_role obrigatórios" }, { status: 400 });
-  }
-
-  // Verificar permissão granular (admin/dev passam sempre)
-  if (!isFullAccess(user_role)) {
+  // Verificar permissão granular (admin/dev/diretor passam sempre)
+  if (!isFullAccess(user.role)) {
     const [perm] = await sql`
       SELECT permitido FROM alissonerp.permissoes_usuario
-      WHERE usuario_id = ${user_id}::uuid AND acao = 'concluir_ligacao'
+      WHERE usuario_id = ${user.id}::uuid AND acao = 'concluir_ligacao'
     `;
     if (!perm?.permitido) {
       return NextResponse.json(
@@ -107,7 +112,7 @@ export async function PATCH(
       foto_resultado       = ${foto_url},
       observacao_resultado = ${observacao ?? null},
       data_conclusao       = NOW(),
-      concluido_por        = ${user_id}::uuid,
+      concluido_por        = ${user.id}::uuid,
       updated_at           = NOW()
     WHERE id = ${ligacao_id}
   `;
@@ -122,7 +127,7 @@ export async function PATCH(
       ${peso_18k_real}::real,
       'LIGA_ENTRADA_18K'::alissonerp.enum_marcador_estoque,
       ${'Ligação #' + ligacao_id + ' — entrada ' + (ligacao as any).tipo_18k_nome},
-      ${user_id}::uuid,
+      ${user.id}::uuid,
       NOW(), 1
     )
   `;
@@ -140,28 +145,21 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  let user;
+  try { user = await requireAuth(req); } catch (e) { return authErrorResponse(e); }
+
   const { id } = await params;
   const ligacao_id = parseInt(id);
   if (isNaN(ligacao_id)) {
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const body = await req.json() as {
-    user_id?: string | null;
-    user_role?: string | null;
-  };
-  const { user_id, user_role } = body;
-
   // Validar role
-  if (!user_role || !ROLES_CANCELAR.includes(user_role)) {
+  if (!ROLES_CANCELAR.includes(user.role)) {
     return NextResponse.json(
       { error: "Acesso negado. Somente admin e desenvolvedor podem cancelar ligações" },
       { status: 403 },
     );
-  }
-
-  if (!user_id) {
-    return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 });
   }
 
   // Carregar ligação
@@ -193,7 +191,7 @@ export async function DELETE(
       ${Number(peso_24k)}::real,
       'LIGA_CANCEL'::alissonerp.enum_marcador_estoque,
       ${'Cancelamento Ligação #' + ligacao_id + ' — estorno Ouro 24k'},
-      ${user_id}::uuid,
+      ${user.id}::uuid,
       NOW(), 1
     )
   `;
@@ -207,7 +205,7 @@ export async function DELETE(
       ${Number(peso_liga_calculado)}::real,
       'LIGA_CANCEL'::alissonerp.enum_marcador_estoque,
       ${'Cancelamento Ligação #' + ligacao_id + ' — estorno ' + liga_nome},
-      ${user_id}::uuid,
+      ${user.id}::uuid,
       NOW(), 1
     )
   `;

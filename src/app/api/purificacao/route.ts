@@ -3,9 +3,19 @@ import sql, { normalizeRow } from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { requireAuth, AuthError } from "@/lib/auth-server";
+
+function authErrorResponse(e: unknown) {
+  if (e instanceof AuthError) {
+    return NextResponse.json({ error: e.message }, { status: 401 });
+  }
+  throw e;
+}
 
 // GET /api/purificacao?status=em_processo&page=1
 export async function GET(req: NextRequest) {
+  try { await requireAuth(req); } catch (e) { return authErrorResponse(e); }
+
   const status = req.nextUrl.searchParams.get("status");
   const page   = Math.max(1, parseInt(req.nextUrl.searchParams.get("page") ?? "1"));
   const limit  = 20;
@@ -98,25 +108,22 @@ export async function GET(req: NextRequest) {
 
 // POST /api/purificacao — criar nova purificação
 export async function POST(req: NextRequest) {
+  let user;
+  try { user = await requireAuth(req); } catch (e) { return authErrorResponse(e); }
+
   const body = await req.json() as {
     itens: { insumo_id: number; peso: number; teor: number }[];
     foto_envio?: string | null;
     observacao_envio?: string | null;
-    user_id?: string | null;
-    user_role?: string | null;
   };
 
-  const { itens, foto_envio, observacao_envio, user_id, user_role } = body;
+  const { itens, foto_envio, observacao_envio } = body;
 
-  if (!user_id || !user_role) {
-    return NextResponse.json({ error: "user_id e user_role obrigatórios" }, { status: 400 });
-  }
-
-  // Verificar permissão granular (admin/dev passam sempre)
-  if (!isFullAccess(user_role)) {
+  // Verificar permissão granular (admin/dev/diretor passam sempre)
+  if (!isFullAccess(user.role)) {
     const [perm] = await sql`
       SELECT permitido FROM alissonerp.permissoes_usuario
-      WHERE usuario_id = ${user_id}::uuid AND acao = 'abrir_purificacao'
+      WHERE usuario_id = ${user.id}::uuid AND acao = 'abrir_purificacao'
     `;
     if (!perm?.permitido) {
       return NextResponse.json(
@@ -217,7 +224,7 @@ export async function POST(req: NextRequest) {
       ${foto_url},
       ${observacao_envio ?? null},
       NOW(),
-      ${user_id}::uuid
+      ${user.id}::uuid
     )
     RETURNING id
   `;
@@ -236,7 +243,7 @@ export async function POST(req: NextRequest) {
           ${item.peso}::real,
           'PURIF_SAIDA'::alissonerp.enum_marcador_estoque,
           ${'Purificação #' + purif_id + ' — envio para refino'},
-          ${user_id}::uuid,
+          ${user.id}::uuid,
           NOW(),
           ${localEstoqueDefault}
         )

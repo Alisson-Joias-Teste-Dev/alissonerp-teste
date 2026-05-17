@@ -3,14 +3,24 @@ import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 const ROLES_CANCELAR = ["admin", "desenvolvedor"];
 
+function authErrorResponse(e: unknown) {
+  if (e instanceof AuthError) {
+    return NextResponse.json({ error: e.message }, { status: 401 });
+  }
+  throw e;
+}
+
 // GET /api/purificacao/[id]
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  try { await requireAuth(req); } catch (e) { return authErrorResponse(e); }
+
   const { id } = await params;
   const purif_id = parseInt(id);
   if (isNaN(purif_id)) {
@@ -59,6 +69,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  let user;
+  try { user = await requireAuth(req); } catch (e) { return authErrorResponse(e); }
+
   const { id } = await params;
   const purif_id = parseInt(id);
   if (isNaN(purif_id)) {
@@ -69,21 +82,15 @@ export async function PATCH(
     peso_retornado_24k: number;
     foto_retorno?: string | null;
     observacao_retorno?: string | null;
-    user_id?: string | null;
-    user_role?: string | null;
   };
 
-  const { peso_retornado_24k, foto_retorno, observacao_retorno, user_id, user_role } = body;
+  const { peso_retornado_24k, foto_retorno, observacao_retorno } = body;
 
-  if (!user_id || !user_role) {
-    return NextResponse.json({ error: "user_id e user_role obrigatórios" }, { status: 400 });
-  }
-
-  // Verificar permissão granular (admin/dev passam sempre)
-  if (!isFullAccess(user_role)) {
+  // Verificar permissão granular (admin/dev/diretor passam sempre)
+  if (!isFullAccess(user.role)) {
     const [perm] = await sql`
       SELECT permitido FROM alissonerp.permissoes_usuario
-      WHERE usuario_id = ${user_id}::uuid AND acao = 'concluir_purificacao'
+      WHERE usuario_id = ${user.id}::uuid AND acao = 'concluir_purificacao'
     `;
     if (!perm?.permitido) {
       return NextResponse.json(
@@ -164,7 +171,7 @@ export async function PATCH(
       foto_retorno        = ${foto_url},
       observacao_retorno  = ${observacao_retorno ?? null},
       data_retorno        = NOW(),
-      concluido_por       = ${user_id}::uuid,
+      concluido_por       = ${user.id}::uuid,
       updated_at          = NOW()
     WHERE id = ${purif_id}
   `;
@@ -183,7 +190,7 @@ export async function PATCH(
         ${peso_retornado_24k}::real,
         'PURIF_ENTRADA'::alissonerp.enum_marcador_estoque,
         ${'Purificação #' + purif_id + ' — retorno 24k fino'},
-        ${user_id}::uuid,
+        ${user.id}::uuid,
         NOW(),
         ${localEstoqueDefault}
       )
@@ -202,28 +209,21 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  let user;
+  try { user = await requireAuth(req); } catch (e) { return authErrorResponse(e); }
+
   const { id } = await params;
   const purif_id = parseInt(id);
   if (isNaN(purif_id)) {
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const body = await req.json() as {
-    user_id?: string | null;
-    user_role?: string | null;
-  };
-  const { user_id, user_role } = body;
-
   // Validar role (só admin/desenvolvedor)
-  if (!user_role || !ROLES_CANCELAR.includes(user_role)) {
+  if (!ROLES_CANCELAR.includes(user.role)) {
     return NextResponse.json(
       { error: "Acesso negado. Somente admin e desenvolvedor podem cancelar purificações" },
       { status: 403 },
     );
-  }
-
-  if (!user_id) {
-    return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 });
   }
 
   // Carregar purificação
@@ -258,7 +258,7 @@ export async function DELETE(
           ${item.peso}::real,
           'PURIF_CANCEL'::alissonerp.enum_marcador_estoque,
           ${'Cancelamento purificação #' + purif_id + ' — estorno de saída'},
-          ${user_id}::uuid,
+          ${user.id}::uuid,
           NOW(),
           1
         )

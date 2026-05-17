@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 const ROLES_EDITAR = ["admin", "desenvolvedor"];
 
@@ -8,6 +9,16 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  let user;
+  try {
+    user = await requireAuth(req);
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
+
   const { id } = await params;
   const liga_id = parseInt(id);
   if (isNaN(liga_id)) {
@@ -16,12 +27,11 @@ export async function PATCH(
 
   const body = await req.json() as {
     teor_default?: number;
-    user_role?: string | null;
   };
 
-  const { teor_default, user_role } = body;
+  const { teor_default } = body;
 
-  if (!user_role || !ROLES_EDITAR.includes(user_role)) {
+  if (!ROLES_EDITAR.includes(user.role)) {
     return NextResponse.json(
       { error: "Acesso negado. Somente admin e desenvolvedor podem editar mapeamento liga" },
       { status: 403 },

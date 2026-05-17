@@ -1,10 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 // GET /api/purificacao/liga-tipos
 // Retorna mapeamentos liga↔tipo com saldo atual no pote
-export async function GET() {
+export async function GET(req: NextRequest) {
+  try {
+    await requireAuth(req);
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
+
   const ouro24kLigaId = await getParametroNumber(PARAM.OURO_24K_LIGA_INSUMO_ID);
 
   const rows = await sql`

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 const ROLES_EDITAR_TEOR = ["admin", "desenvolvedor"];
 
@@ -8,6 +9,16 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  let user;
+  try {
+    user = await requireAuth(req);
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
+
   const { id } = await params;
   const teor_id = parseInt(id);
   if (isNaN(teor_id)) {
@@ -17,13 +28,12 @@ export async function PATCH(
   const body = await req.json() as {
     teor?: number;
     ativo?: boolean;
-    user_role?: string | null;
   };
 
-  const { teor, ativo, user_role } = body;
+  const { teor, ativo } = body;
 
-  // Validar role
-  if (!user_role || !ROLES_EDITAR_TEOR.includes(user_role)) {
+  // Validar role (vem da sessão autenticada, nunca do body)
+  if (!ROLES_EDITAR_TEOR.includes(user.role)) {
     return NextResponse.json(
       { error: "Acesso negado. Somente admin e desenvolvedor podem editar teores" },
       { status: 403 },

@@ -605,8 +605,6 @@ function ModalNovaLigacao({
           teor: teorNum,
           foto_envio: fotoBase64,
           observacao: observacao || null,
-          user_id: userId,
-          user_role: userRole,
         }),
       });
       const data = await res.json();
@@ -938,8 +936,6 @@ function ModalConcluirLigacao({
           peso_18k_real: pesoRealNum,
           foto_resultado: fotoBase64,
           observacao: observacao || null,
-          user_id: userId,
-          user_role: userRole,
         }),
       });
       const data = await res.json();
@@ -1117,8 +1113,6 @@ function ModalConfirmCancel({
     try {
       const res = await fetch(`/api/purificacao/ligacao/${ligacao.id}`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, user_role: userRole }),
       });
       const data = await res.json();
       if (!res.ok) {

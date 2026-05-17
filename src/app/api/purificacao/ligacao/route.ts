@@ -3,9 +3,19 @@ import sql, { normalizeRow } from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { requireAuth, AuthError } from "@/lib/auth-server";
+
+function authErrorResponse(e: unknown) {
+  if (e instanceof AuthError) {
+    return NextResponse.json({ error: e.message }, { status: 401 });
+  }
+  throw e;
+}
 
 // GET /api/purificacao/ligacao?status=em_processo&page=1
 export async function GET(req: NextRequest) {
+  try { await requireAuth(req); } catch (e) { return authErrorResponse(e); }
+
   const status = req.nextUrl.searchParams.get("status");
   const page   = Math.max(1, parseInt(req.nextUrl.searchParams.get("page") ?? "1"));
   const limit  = 20;
@@ -106,6 +116,9 @@ export async function GET(req: NextRequest) {
 
 // POST /api/purificacao/ligacao — Criar nova ligação
 export async function POST(req: NextRequest) {
+  let user;
+  try { user = await requireAuth(req); } catch (e) { return authErrorResponse(e); }
+
   const body = await req.json() as {
     tipo_18k_insumo_id: number;
     peso_24k: number;
@@ -113,21 +126,15 @@ export async function POST(req: NextRequest) {
     teor: number;
     foto_envio?: string | null;
     observacao?: string | null;
-    user_id?: string | null;
-    user_role?: string | null;
   };
 
-  const { tipo_18k_insumo_id, peso_24k, pureza = 100, teor, foto_envio, observacao, user_id, user_role } = body;
+  const { tipo_18k_insumo_id, peso_24k, pureza = 100, teor, foto_envio, observacao } = body;
 
-  if (!user_id || !user_role) {
-    return NextResponse.json({ error: "user_id e user_role obrigatórios" }, { status: 400 });
-  }
-
-  // Verificar permissão granular (admin/dev passam sempre)
-  if (!isFullAccess(user_role)) {
+  // Verificar permissão granular (admin/dev/diretor passam sempre)
+  if (!isFullAccess(user.role)) {
     const [perm] = await sql`
       SELECT permitido FROM alissonerp.permissoes_usuario
-      WHERE usuario_id = ${user_id}::uuid AND acao = 'abrir_ligacao'
+      WHERE usuario_id = ${user.id}::uuid AND acao = 'abrir_ligacao'
     `;
     if (!perm?.permitido) {
       return NextResponse.json(
@@ -246,7 +253,7 @@ export async function POST(req: NextRequest) {
       ${foto_url},
       ${observacao ?? null},
       NOW(),
-      ${user_id}::uuid
+      ${user.id}::uuid
     )
     RETURNING id
   `;
@@ -262,7 +269,7 @@ export async function POST(req: NextRequest) {
       ${peso_24k}::real,
       'LIGA_SAIDA_24K'::alissonerp.enum_marcador_estoque,
       ${'Ligação #' + ligacao_id + ' — saída Ouro 24k'},
-      ${user_id}::uuid,
+      ${user.id}::uuid,
       NOW(), 1
     )
   `;
@@ -276,7 +283,7 @@ export async function POST(req: NextRequest) {
       ${peso_liga_calculado}::real,
       'LIGA_SAIDA_LIGA'::alissonerp.enum_marcador_estoque,
       ${'Ligação #' + ligacao_id + ' — saída ' + liga_nome},
-      ${user_id}::uuid,
+      ${user.id}::uuid,
       NOW(), 1
     )
   `;

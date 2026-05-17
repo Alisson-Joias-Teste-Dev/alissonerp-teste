@@ -1,8 +1,18 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 // GET /api/purificacao/teores — listar todos os teores de ouro configurados
-export async function GET() {
+export async function GET(req: NextRequest) {
+  try {
+    await requireAuth(req);
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
+
   const rows = await sql`
     SELECT
       t.id,

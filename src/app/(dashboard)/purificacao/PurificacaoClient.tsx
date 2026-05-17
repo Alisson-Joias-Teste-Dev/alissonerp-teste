@@ -623,8 +623,6 @@ function ModalNovaPurificacao({
           })),
           foto_envio: fotoBase64,
           observacao_envio: observacao || null,
-          user_id: userId,
-          user_role: userRole,
         }),
       });
       const data = await res.json();
@@ -897,8 +895,6 @@ function ModalConcluir({
           peso_retornado_24k: retornadoNum,
           foto_retorno: fotoBase64,
           observacao_retorno: observacao || null,
-          user_id: userId,
-          user_role: userRole,
         }),
       });
       const data = await res.json();
@@ -1077,8 +1073,6 @@ function ModalConfirmCancel({
     try {
       const res = await fetch(`/api/purificacao/${purif.id}`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, user_role: userRole }),
       });
       const data = await res.json();
       if (!res.ok) {

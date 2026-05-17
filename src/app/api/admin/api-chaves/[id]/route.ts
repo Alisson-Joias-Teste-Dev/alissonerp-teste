@@ -4,17 +4,19 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 
 async function autorizarAdmin(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const role = user.user_metadata?.role as string | undefined;
-  if (!isFullAccess(role ?? "")) return null;
-  return user;
+  try {
+    const user = await requireAuth(req);
+    if (!isFullAccess(user.role)) return null;
+    return user;
+  } catch (e) {
+    if (e instanceof AuthError) return null;
+    throw e;
+  }
 }
 
 export async function PATCH(

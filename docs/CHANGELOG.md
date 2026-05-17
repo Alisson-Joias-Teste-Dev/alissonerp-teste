@@ -1,8 +1,60 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/05/2026 — Versão: v2.43.0 <!-- Revisado 16/05/2026 -->
+> 📋 Última atualização automática: 16/05/2026 — Versão: v2.44.0 <!-- Revisado 16/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): Onda 1A-1 — auth bypass em 12 rotas críticas (v2.44.0)
+
+Primeira onda do hardening de segurança após auditoria completa do sistema
+(`docs/audits/sistema-2026-05-16.md`). Fecha 3 padrões de bypass de
+autenticação em rotas que mexem com dinheiro/ouro/credenciais.
+
+**Padrão A — `user_metadata?.role` (escalada trivial):**
+Supabase permite ao usuário escrever em `user_metadata` via
+`auth.updateUser({ data: { role: "admin" } })`. Rotas que liam dali
+deixavam qualquer pessoa virar admin. Trocadas por `requireAuth()` (lê de
+`alissonerp.usuarios.role`, fonte de verdade do CLAUDE.md):
+- `src/app/api/admin/api-chaves/route.ts` (GET, POST)
+- `src/app/api/admin/api-chaves/[id]/route.ts` (PATCH, DELETE)
+
+**Padrão B — rotas SEM auth nenhuma:**
+- `src/app/api/configuracoes/ia/key/route.ts` (POST) — sobrescrevia API
+  keys de Claude/OpenAI/Gemini sem checagem. Agora requer
+  `isFullAccess(user.role)`.
+- `src/app/api/lancamentos-avulso/route.ts` (POST) — lançava movimentação
+  de ouro/pedras com `created_by` vindo do body (atacante setava UUID de
+  qualquer um). Agora usa `user.id` da sessão. Rastreabilidade restaurada.
+
+**Padrão C — autentica e ignora, confia em `user_id`/`user_role` do body:**
+Purificação/refino de ouro (10 endpoints). Cliente enviava
+`user_role: "admin"` no body e bypass total. Migrados para `requireAuth()`:
+- `src/app/api/purificacao/route.ts` (GET, POST)
+- `src/app/api/purificacao/[id]/route.ts` (GET, PATCH, DELETE)
+- `src/app/api/purificacao/ligacao/route.ts` (GET, POST)
+- `src/app/api/purificacao/ligacao/[id]/route.ts` (PATCH, DELETE)
+- `src/app/api/purificacao/teores/route.ts` (GET)
+- `src/app/api/purificacao/teores/[id]/route.ts` (PATCH)
+- `src/app/api/purificacao/liga-tipos/route.ts` (GET)
+- `src/app/api/purificacao/liga-tipos/[id]/route.ts` (PATCH)
+
+**Callers no frontend ajustados** (não enviam mais `user_id`/`user_role`):
+- `src/app/(dashboard)/purificacao/PurificacaoClient.tsx` (3 fetches)
+- `src/app/(dashboard)/purificacao/LigacaoTab.tsx` (3 fetches)
+
+**Validação em prod (localhost dev contra api.alisson.api.br):**
+- POST `/api/lancamentos-avulso` sem auth → **401** (antes: 200)
+- POST `/api/configuracoes/ia/key` sem auth → **401** (antes: 200)
+- POST `/api/purificacao` sem auth → **401** (antes: aceitava `user_id` forjado)
+- GET `/api/admin/api-chaves` sem auth → **403** (antes: 200 via metadata)
+- GET `/api/purificacao` autenticado como admin → **200** (não regrediu)
+
+**Próximas ondas (planejadas):**
+- 1A-2: `user_metadata?.role` em ~45 rotas restantes (produtos, precificacao, site, configuracoes)
+- 1A-3: webhook Focus NFe (sem assinatura) + MP HMAC bypass
+- 1A-4: ~25 rotas sem auth (dashboard-comercial, pcp, protocolo, distribuicao)
+
+Relatório completo em `docs/audits/sistema-2026-05-16.md`.
 
 ## feat(orcamento): Integridade do schema + paginação + helpers compartilhados (v2.43.0)
 
