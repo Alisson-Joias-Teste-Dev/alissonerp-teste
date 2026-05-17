@@ -11,6 +11,7 @@ import ServiceCamera from "@/components/service/ServiceCamera";
 import { useGlobalError } from "@/stores/errorStore";
 import { S } from "@/components/layout/ServiceLayout";
 import { formatDateBR } from "@/lib/formatters";
+import { getPublicUrl, normalizeImageUrl } from "@/lib/storage-url";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 interface ProtocoloPendente {
@@ -1367,7 +1368,7 @@ export default function ServiceApp() {
                 </div>
                 {o.foto_peca_servico && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={o.foto_peca_servico} alt="peça" className="w-16 h-16 rounded-xl object-cover shrink-0" />
+                  <img src={normalizeImageUrl(o.foto_peca_servico)} alt="peça" className="w-16 h-16 rounded-xl object-cover shrink-0" />
                 )}
               </div>
             </Card>
@@ -2253,7 +2254,7 @@ export default function ServiceApp() {
               <div className="flex items-start gap-3">
                 {svc.foto_recebimento ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={svc.foto_recebimento} alt="peça" className="w-14 h-14 rounded-xl object-cover shrink-0" />
+                  <img src={normalizeImageUrl(svc.foto_recebimento)} alt="peça" className="w-14 h-14 rounded-xl object-cover shrink-0" />
                 ) : (
                   <div className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0"
                     style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
@@ -2591,10 +2592,8 @@ export default function ServiceApp() {
 
               {/* Fotos e vídeo */}
               {ordemDetalhe.foto_peca_servico && typeof ordemDetalhe.foto_peca_servico === "string" && (() => {
-                const STORAGE_BASE = process.env.NEXT_PUBLIC_SUPABASE_URL + "/storage/v1/object/public/ordem-fotos/";
-                const fotoUrl = ordemDetalhe.foto_peca_servico.startsWith("http")
-                  ? ordemDetalhe.foto_peca_servico
-                  : STORAGE_BASE + ordemDetalhe.foto_peca_servico;
+                // getPublicUrl roteia bucket privado (ordem-fotos) pelo proxy /api/storage/...
+                const fotoUrl = getPublicUrl("ordem-fotos", ordemDetalhe.foto_peca_servico);
                 return (
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Foto da peça (loja)</p>
@@ -2610,10 +2609,8 @@ export default function ServiceApp() {
               })()}
 
               {ordemDetalhe.video_observacao && typeof ordemDetalhe.video_observacao === "string" && (() => {
-                const VIDEO_BASE = process.env.NEXT_PUBLIC_SUPABASE_URL + "/storage/v1/object/public/ordem-videos/";
-                const videoUrl = ordemDetalhe.video_observacao.startsWith("http")
-                  ? ordemDetalhe.video_observacao
-                  : VIDEO_BASE + ordemDetalhe.video_observacao;
+                // getPublicUrl roteia bucket privado (ordem-videos) pelo proxy /api/storage/...
+                const videoUrl = getPublicUrl("ordem-videos", ordemDetalhe.video_observacao);
                 return (
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: S.textMuted }}>Vídeo de observação</p>

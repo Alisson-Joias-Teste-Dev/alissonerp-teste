@@ -1,5 +1,10 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+// Re-exporta helpers puros de URL para retrocompatibilidade
+// (existem callers que importam getPublicUrl/normalizeImageUrl/isPrivateBucket de @/lib/storage)
+export { isPrivateBucket, getPublicUrl, normalizeImageUrl } from '@/lib/storage-url';
+import { isPrivateBucket } from '@/lib/storage-url';
+
 // Lazy init — criado apenas na primeira chamada para evitar crash no hot reload
 // quando env vars ainda não estão disponíveis na avaliação do módulo.
 // NOTA: A SERVICE_ROLE_KEY pode falhar com "signature verification failed" se o
@@ -19,7 +24,7 @@ function getAdmin(): SupabaseClient {
 /**
  * Upload de arquivo para Supabase Storage (server-side)
  * Recebe base64, converte pra Buffer, faz upload
- * Retorna a URL pública do arquivo
+ * Retorna a URL acessível (proxy se bucket privado, pública caso contrário)
  */
 export async function uploadFile(
   bucket: string,
@@ -44,8 +49,10 @@ export async function uploadFile(
       return { error: error.message };
     }
 
-    // URL pública direta (bucket é público)
-    const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${bucket}/${data.path}`;
+    // Bucket privado → proxy autenticado. Público → URL Supabase direta.
+    const url = isPrivateBucket(bucket)
+      ? `/api/storage/${bucket}/${data.path}`
+      : `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${bucket}/${data.path}`;
 
     return { url, path: data.path };
   } catch (err) {
@@ -80,19 +87,12 @@ export async function deleteFile(
 /**
  * Cria o bucket se não existir (ignora erro de "already exists").
  * Chamar antes do primeiro uploadFile em buckets dinâmicos.
+ * Buckets privados são criados com public=false.
  */
 export async function ensureBucket(bucket: string): Promise<void> {
-  const { error } = await getAdmin().storage.createBucket(bucket, { public: true });
+  const { error } = await getAdmin().storage.createBucket(bucket, { public: !isPrivateBucket(bucket) });
   if (error && !error.message?.toLowerCase().includes('already exists')) {
     console.warn(`[storage] ensureBucket(${bucket}):`, error.message);
   }
 }
 
-/**
- * Gerar URL pública de um arquivo
- * (não precisa de signed URL — bucket é público)
- */
-export function getPublicUrl(bucket: string, path: string): string {
-  if (path.startsWith('http')) return path;
-  return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
-}

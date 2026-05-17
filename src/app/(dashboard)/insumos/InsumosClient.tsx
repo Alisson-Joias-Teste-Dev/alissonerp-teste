@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Plus, FlaskConical, Search, X, Loader2, AlertCircle, ChevronDown, Package } from "lucide-react";
 import { formatPeso, formatPesoCt, gramasToCt } from "@/lib/formatters";
 import InsumoEditDrawer from "@/components/insumos/InsumoEditDrawer";
+import { normalizeImageUrl } from "@/lib/storage-url";
 
 const C = {
   esmeralda: "#184036",
@@ -512,7 +513,7 @@ export default function InsumosClient() {
                     >
                       {insumo.foto ? (
                         <img
-                          src={insumo.foto}
+                          src={normalizeImageUrl(insumo.foto)}
                           alt={insumo.insumo_nome}
                           className="w-full h-full object-cover"
                         />

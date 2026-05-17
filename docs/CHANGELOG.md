@@ -1,8 +1,65 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.47.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.48.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): Onda 1B — proxy de storage + buckets sensíveis fechados (v2.48.0)
+
+Fecha o último problema crítico do audit: buckets de fotos sensíveis (ordens,
+apontamentos, protocolos, purificação, service) estavam todos **públicos**.
+Qualquer pessoa que descobrisse o nome do arquivo (timestamp adivinhável)
+podia baixar fotos de peças/ouro/cliente sem autenticação. CLAUDE.md já
+documentava esses 3 como privados — havia drift documentação vs realidade.
+
+**Estratégia:** proxy autenticado em vez de signed URL (não exige refator de
+cada componente para lidar com TTL/rotação). `<img>` continua simples.
+
+**Novo endpoint** (`src/app/api/storage/[bucket]/[...path]/route.ts`):
+- Valida JWT da sessão via `authOr401`
+- Whitelist defensiva de buckets privados
+- Faz fetch interno via service key na rota `authenticated/` do Supabase
+- Stream da resposta com cache `private, max-age=3600`
+
+**Novo helper** (`src/lib/storage-url.ts`) — funções puras (sem `supabase-js`,
+seguras pra client bundle):
+- `isPrivateBucket(bucket)` — fonte única de verdade (sincronizada com proxy)
+- `getPublicUrl(bucket, path)` — roteia bucket privado pro proxy
+- `normalizeImageUrl(url)` — detecta URL Supabase pública antiga salva no DB e
+  reescreve pra proxy. **Crítico**: garante que fotos antigas continuam
+  funcionando após bucket fechar (sem migração retroativa do DB).
+
+**Componentes atualizados** (12 callers que tinham URL hardcoded ou
+recebiam URL pública do DB):
+- `ServiceApp.tsx` (3 lugares: ordem-fotos, ordem-videos, foto_recebimento)
+- `ServiceDetalheDrawer.tsx` (foto_reprovacao)
+- `OrdemDetalheClient.tsx` (fotoUrl/fotoUrl2)
+- `ComentariosOrdem.tsx` (foto_url)
+- `GaleriaFotosOrdem.tsx` (via API que usa getPublicUrl)
+- `PCPDetalheModal.tsx` (apontamento-fotos)
+- `DistribuicaoClient.tsx` (foto_balanca)
+- `ProtocoloClient.tsx` (resolveStorageUrl)
+- `PurificacaoClient.tsx` (foto_envio/foto_retorno)
+- `LigacaoTab.tsx` (foto_envio/foto_resultado)
+- `InsumosClient.tsx` (insumo.foto)
+- `ConferenciaClient.tsx` (FotoOuPlaceholder)
+
+**5 buckets fechados em prod** (UPDATE storage.buckets SET public=false):
+- `ordem-fotos`
+- `apontamento-fotos`
+- `protocolo-fotos`
+- `purificacao-fotos`
+- `service-fotos`
+
+**Validado em prod:**
+- URL pública direta `https://api.alisson.api.br/.../public/purificacao-fotos/X.jpg` → **400** (antes: 200)
+- Proxy sem cookie → **401**
+- Proxy autenticado → **200 image/jpeg** (fotos antigas convertidas pelo normalizeImageUrl carregam OK)
+- 3 fotos antigas testadas em `/purificacao` carregaram via proxy sem regressão
+
+**Outros buckets na whitelist do proxy mas ainda públicos** (preparados pra
+fechar em onda futura): `ordem-videos`, `vendas-videos`, `insumo-fotos`,
+`pagamento-fotos`. Decisão de quando fechar fica pra próxima sessão.
 
 ## fix(security): Onda 1A-4 — fechar 17 rotas sem auth nenhuma (v2.47.0)
 

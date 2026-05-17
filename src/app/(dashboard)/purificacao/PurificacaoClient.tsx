@@ -18,6 +18,7 @@ import {
   FlaskConical,
 } from "lucide-react";
 import LigacaoTab, { type LigaTipo, type Ligacao, type LigacaoStats } from "./LigacaoTab";
+import { normalizeImageUrl } from "@/lib/storage-url";
 
 // ─── Paleta ───────────────────────────────────────────────────────────────────
 const P = {
@@ -465,12 +466,12 @@ function PurificacaoCard({
         <div style={{ fontSize: 11, color: P.muted, fontStyle: "italic" }}>{purif.observacao_envio}</div>
       )}
 
-      {/* Foto envio */}
+      {/* Foto envio — normalizeImageUrl converte URL antiga do bucket privado pro proxy autenticado */}
       {purif.foto_envio && (
-        <a href={purif.foto_envio} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: P.azul }}>Ver foto envio</a>
+        <a href={normalizeImageUrl(purif.foto_envio)} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: P.azul }}>Ver foto envio</a>
       )}
       {purif.foto_retorno && (
-        <a href={purif.foto_retorno} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: P.verde }}>Ver foto retorno</a>
+        <a href={normalizeImageUrl(purif.foto_retorno)} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: P.verde }}>Ver foto retorno</a>
       )}
 
       {/* Ações */}

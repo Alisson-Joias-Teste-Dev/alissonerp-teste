@@ -7,18 +7,17 @@ import { Plus, CheckCircle2, Clock, Package, ChevronDown } from "lucide-react";
 import NovaProtocoloModal from "@/components/forms/NovaProtocoloModal";
 import ConcluirProtocoloModal from "@/components/forms/ConcluirProtocoloModal";
 import { MobileCard } from "@/components/ui/MobileCard";
+import { getPublicUrl } from "@/lib/storage-url";
 
 const TIPOS_PROTOCOLO_DROPDOWN = [
   { tipo: "fabrica", label: "Fábrica", emoji: "🏭" },
   { tipo: "service", label: "Service", emoji: "🔧" },
 ];
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-
 function resolveStorageUrl(path: string | null | undefined): string | null {
   if (!path) return null;
-  if (path.startsWith("http")) return path;
-  return `${SUPABASE_URL}/storage/v1/object/public/protocolo-fotos/${path}`;
+  // getPublicUrl roteia bucket privado (protocolo-fotos) pelo proxy /api/storage/...
+  return getPublicUrl("protocolo-fotos", path);
 }
 
 const C = {
