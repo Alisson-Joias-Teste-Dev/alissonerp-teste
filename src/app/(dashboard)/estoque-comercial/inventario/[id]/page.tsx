@@ -36,6 +36,13 @@ interface LeiturasEPC {
   operador: string;
 }
 
+interface ExcedenteForaInventario {
+  id_api_produto: number;
+  sku: string;
+  nome_produto: string;
+  quantidade: number;
+}
+
 type StatusItem = "ok" | "faltando" | "excesso" | "pendente";
 
 function getStatus(item: ItemInventario): StatusItem {
@@ -143,6 +150,7 @@ export default function InventarioDetalhePage() {
   const [busca, setBusca] = useState("");
   const [buscaAtiva, setBuscaAtiva] = useState(false);
   const [leiturasAbertas, setLeiturasAbertas] = useState(false);
+  const [excedentesForaInventario, setExcedentesForaInventario] = useState<ExcedenteForaInventario[]>([]);
   const [conferidoIds, setConferidoIds] = useState<Set<number>>(new Set());
   const [salvandoConferido, setSalvandoConferido] = useState<Set<number>>(new Set());
 
@@ -159,6 +167,7 @@ export default function InventarioDetalhePage() {
         setInventario(d.inventario);
         setItens(d.itens);
         setLeituras(d.leituras ?? []);
+        setExcedentesForaInventario((d as any).excedentesForaInventario ?? []);
         setConferidoIds(new Set(d.itens.filter(i => i.conferido).map(i => i.produto_id)));
       }
     } finally { setLoading(false); }
@@ -339,7 +348,37 @@ export default function InventarioDetalhePage() {
         )}
       </div>
 
-      {excessos.length > 0 && (
+      {/* Chips lidos pelo app que nao estao no escopo do inventario */}
+      {excedentesForaInventario.length > 0 && (
+        <div className="mb-4">
+          <p className="text-sm font-bold mb-2" style={{ color: "#2563EB" }}>
+            Chips fora do inventario ({excedentesForaInventario.length})
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {excedentesForaInventario.map(e => (
+              <div key={e.id_api_produto}
+                className="flex items-center gap-3 px-4 py-3 rounded-xl"
+                style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate" style={{ fontFamily: "monospace", color: "#184036" }}>
+                    {e.sku}
+                  </p>
+                  <p className="text-xs text-gray-400 truncate">{e.nome_produto}</p>
+                </div>
+                <span className="text-sm font-bold shrink-0" style={{ color: "#374151" }}>
+                  {e.quantidade}/0
+                </span>
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                  style={{ background: "#DBEAFE", color: "#1E40AF", border: "1px solid #93C5FD" }}>
+                  Excedente
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+            {excessos.length > 0 && (
         <div className="mb-4">
           <p className="text-sm font-bold mb-2" style={{ color: "#2563EB" }}>Excedentes ({excessos.length})</p>
           <div className="flex flex-col gap-1.5">
