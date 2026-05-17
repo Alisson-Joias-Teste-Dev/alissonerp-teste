@@ -24,6 +24,7 @@ interface ItemInventario {
   diferenca: number;
   nome_produto: string;
   sku: string | null;
+  conferido: boolean;
   contado_por_email: string | null;
   contado_em: string | null;
 }
@@ -82,11 +83,37 @@ function SummaryCard({ label, value, color }: { label: string; value: number; co
   );
 }
 
-function ItemRow({ item, status }: { item: ItemInventario; status: StatusItem }) {
+function ItemRow({
+  item, status, conferido, salvando, onToggle, isAberto,
+}: {
+  item: ItemInventario;
+  status: StatusItem;
+  conferido: boolean;
+  salvando: boolean;
+  onToggle: () => void;
+  isAberto: boolean;
+}) {
   const lido = item.quantidade_contada ?? 0;
   return (
     <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-      style={{ background: "#FAFAF7", border: "1px solid #F3F0E8" }}>
+      style={{ background: conferido ? "#F0FDF4" : "#FAFAF7", border: `1px solid ${conferido ? "#BBF7D0" : "#F3F0E8"}` }}>
+      {isAberto && (
+        <button
+          onClick={onToggle}
+          disabled={salvando}
+          className="shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors"
+          style={{
+            borderColor: conferido ? "#059669" : "#D1D5DB",
+            background: conferido ? "#059669" : "transparent",
+          }}
+          title={conferido ? "Desmarcar conferido" : "Marcar como conferido"}
+        >
+          {salvando
+            ? <span className="w-2.5 h-2.5 border border-gray-400 border-t-transparent rounded-full animate-spin" />
+            : conferido && <svg viewBox="0 0 12 12" width="10" height="10" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          }
+        </button>
+      )}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate" style={{ fontFamily: "monospace", color: "#184036" }}>
           {item.sku ?? "—"}
@@ -116,6 +143,8 @@ export default function InventarioDetalhePage() {
   const [busca, setBusca] = useState("");
   const [buscaAtiva, setBuscaAtiva] = useState(false);
   const [leiturasAbertas, setLeiturasAbertas] = useState(false);
+  const [conferidoIds, setConferidoIds] = useState<Set<number>>(new Set());
+  const [salvandoConferido, setSalvandoConferido] = useState<Set<number>>(new Set());
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -130,6 +159,7 @@ export default function InventarioDetalhePage() {
         setInventario(d.inventario);
         setItens(d.itens);
         setLeituras(d.leituras ?? []);
+        setConferidoIds(new Set(d.itens.filter(i => i.conferido).map(i => i.produto_id)));
       }
     } finally { setLoading(false); }
   }, [invId]);
@@ -160,6 +190,33 @@ export default function InventarioDetalhePage() {
     } catch (e) {
       alert(e instanceof Error ? e.message : "Erro");
     } finally { setCancelando(false); }
+  }
+
+  async function toggleConferido(item: ItemInventario) {
+    if (!isAberto) return;
+    const novoConferido = !conferidoIds.has(item.produto_id);
+    setConferidoIds(prev => {
+      const next = new Set(prev);
+      if (novoConferido) next.add(item.produto_id);
+      else next.delete(item.produto_id);
+      return next;
+    });
+    setSalvandoConferido(prev => new Set(prev).add(item.produto_id));
+    try {
+      await fetch(`/api/estoque-comercial/inventario/${invId}/contar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contagens: [{
+            produto_id: item.produto_id,
+            quantidade_contada: item.quantidade_contada ?? item.quantidade_sistema,
+            conferido: novoConferido,
+          }],
+        }),
+      });
+    } finally {
+      setSalvandoConferido(prev => { const s = new Set(prev); s.delete(item.produto_id); return s; });
+    }
   }
 
   if (loading) return (
@@ -286,7 +343,11 @@ export default function InventarioDetalhePage() {
         <div className="mb-4">
           <p className="text-sm font-bold mb-2" style={{ color: "#2563EB" }}>Excedentes ({excessos.length})</p>
           <div className="flex flex-col gap-1.5">
-            {excessos.map(item => <ItemRow key={item.id} item={item} status="excesso" />)}
+            {excessos.map(item => <ItemRow key={item.id} item={item} status="excesso"
+              conferido={conferidoIds.has(item.produto_id)}
+              salvando={salvandoConferido.has(item.produto_id)}
+              onToggle={() => toggleConferido(item)}
+              isAberto={isAberto} />)}
           </div>
         </div>
       )}
@@ -297,8 +358,16 @@ export default function InventarioDetalhePage() {
             Faltando ({faltandoL.length + pendentesL.length})
           </p>
           <div className="flex flex-col gap-1.5">
-            {faltandoL.map(item => <ItemRow key={item.id} item={item} status="faltando" />)}
-            {pendentesL.map(item => <ItemRow key={item.id} item={item} status="pendente" />)}
+            {faltandoL.map(item => <ItemRow key={item.id} item={item} status="faltando"
+              conferido={conferidoIds.has(item.produto_id)}
+              salvando={salvandoConferido.has(item.produto_id)}
+              onToggle={() => toggleConferido(item)}
+              isAberto={isAberto} />)}
+            {pendentesL.map(item => <ItemRow key={item.id} item={item} status="pendente"
+              conferido={conferidoIds.has(item.produto_id)}
+              salvando={salvandoConferido.has(item.produto_id)}
+              onToggle={() => toggleConferido(item)}
+              isAberto={isAberto} />)}
           </div>
         </div>
       )}
@@ -307,7 +376,11 @@ export default function InventarioDetalhePage() {
         <div className="mb-4">
           <p className="text-sm font-bold mb-2" style={{ color: "#059669" }}>Conferidos OK ({okL.length})</p>
           <div className="flex flex-col gap-1.5">
-            {okL.map(item => <ItemRow key={item.id} item={item} status="ok" />)}
+            {okL.map(item => <ItemRow key={item.id} item={item} status="ok"
+              conferido={conferidoIds.has(item.produto_id)}
+              salvando={salvandoConferido.has(item.produto_id)}
+              onToggle={() => toggleConferido(item)}
+              isAberto={isAberto} />)}
           </div>
         </div>
       )}

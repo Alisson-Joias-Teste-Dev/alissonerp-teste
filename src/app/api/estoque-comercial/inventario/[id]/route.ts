@@ -37,7 +37,7 @@ export async function GET(
   const itens = await sql`
     SELECT
       ii.id, ii.produto_id, ii.quantidade_sistema, ii.quantidade_contada, ii.diferenca,
-      ii.contado_em, ii.movimento_ajuste_id,
+      ii.conferido, ii.contado_em, ii.movimento_ajuste_id,
       p.nome AS nome_produto, p.sku,
       uc.email AS contado_por_email
     FROM alissonerp.itens_inventario_comercial ii

@@ -37,7 +37,7 @@ export async function POST(
   }
 
   const body = await req.json() as {
-    contagens: Array<{ produto_id: number; quantidade_contada: number }>;
+    contagens: Array<{ produto_id: number; quantidade_contada: number; conferido?: boolean }>;
   };
 
   if (!body.contagens || !Array.isArray(body.contagens) || body.contagens.length === 0) {
