@@ -22,32 +22,39 @@ export async function gerarAjustesDivergencias(
   `;
 
   let ajustes = 0;
+  let erros = 0;
   for (const item of divergentes) {
     const diff = Number(item.diferenca);
     const tipo = diff > 0 ? "entrada" : "saida";
     const quantidade = Math.abs(diff);
 
-    const [mov] = await exec`
-      INSERT INTO alissonerp.movimentacoes_estoque_comercial
-        (produto_id, tipo, quantidade, motivo, local_estoque_id, status,
-         referencia_id, referencia_tipo, observacao, created_by)
-      VALUES
-        (${item.produto_id}, ${tipo}, ${quantidade}, 'inventario',
-         ${localEstoqueId}, 'efetivado',
-         ${invId}, 'inventarios_comercial',
-         ${`Ajuste inventario #${invId} — diferenca: ${diff > 0 ? "+" : ""}${diff}`},
-         ${userId})
-      RETURNING id
-    `;
+    try {
+      const [mov] = await exec`
+        INSERT INTO alissonerp.movimentacoes_estoque_comercial
+          (produto_id, tipo, quantidade, motivo, local_estoque_id, status,
+           referencia_id, referencia_tipo, observacao, created_by)
+        VALUES
+          (${item.produto_id}, ${tipo}, ${quantidade}, 'inventario',
+           ${localEstoqueId}, 'efetivado',
+           ${invId}, 'inventarios_comercial',
+           ${`Ajuste inventario #${invId} — diferenca: ${diff > 0 ? "+" : ""}${diff}`},
+           ${userId})
+        RETURNING id
+      `;
 
-    await exec`
-      UPDATE alissonerp.itens_inventario_comercial
-      SET movimento_ajuste_id = ${mov.id}
-      WHERE id = ${item.id}
-    `;
+      await exec`
+        UPDATE alissonerp.itens_inventario_comercial
+        SET movimento_ajuste_id = ${mov.id}
+        WHERE id = ${item.id}
+      `;
 
-    ajustes++;
+      ajustes++;
+    } catch (e: any) {
+      // Nao bloquear todo o inventario por saldo insuficiente em um item
+      console.warn(`[gerarAjustes] item ${item.id} ignorado: ${e?.message}`);
+      erros++;
+    }
   }
 
-  return { ajustes, total: divergentes.length };
+  return { ajustes, erros, total: divergentes.length };
 }
