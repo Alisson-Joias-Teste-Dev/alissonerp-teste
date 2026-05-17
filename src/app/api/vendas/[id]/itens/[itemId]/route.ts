@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+
+async function checkOwnership(userId: string, vendaId: number) {
+  const [u] = await sql<{ role: string }[]>`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid LIMIT 1
+  `;
+  if (!u) throw new ForbiddenError("Usuario nao encontrado");
+  await requireVendaOwnership({ id: userId, role: u.role, email: "" }, vendaId);
+}
 
 // ─── PATCH /api/vendas/[id]/itens/[itemId] ─────────────────────────────────────
 // Atualiza item (trigger recalcula totais da venda automaticamente)
@@ -22,6 +32,14 @@ export async function PATCH(
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
+
+  // Onda 1D: consultora so edita item de venda propria
+  try { await checkOwnership(user.id, vendaId); }
+  catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   const [item] = await sql`
     SELECT id FROM alissonerp.itens_venda_erp WHERE id = ${iId} AND venda_id = ${vendaId}
@@ -104,6 +122,14 @@ export async function DELETE(
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
   if (venda.situacao === "cancelado") return NextResponse.json({ error: "Venda cancelada" }, { status: 409 });
+
+  // Onda 1D: consultora so deleta item de venda propria
+  try { await checkOwnership(user.id, vendaId); }
+  catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   await sql`
     DELETE FROM alissonerp.itens_venda_erp

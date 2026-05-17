@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireCrediarioOwnership, NotFoundError } from "@/lib/auth-vendas";
 
 const ROLES_CREDIARIO = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
 const TIPOS_VALIDOS = ["aviso_recebimento", "cobranca", "observacao"] as const;
@@ -36,9 +38,16 @@ export async function POST(
     return NextResponse.json({ error: "mensagem obrigatória" }, { status: 400 });
   }
 
-  // Verificar que conta existe
+  // Verificar que conta existe + Onda 1D: consultora so opera em conta propria
   const [conta] = await sql`SELECT id FROM alissonerp.contas_receber WHERE id = ${contaId}`;
   if (!conta) return NextResponse.json({ error: "Conta não encontrada" }, { status: 404 });
+  try {
+    await requireCrediarioOwnership({ id: user.id, role: usuario.role as string, email: user.email ?? "" }, contaId);
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   const [nova] = await sql`
     INSERT INTO alissonerp.comunicacoes_crediario (conta_receber_id, tipo, mensagem, usuario_id)

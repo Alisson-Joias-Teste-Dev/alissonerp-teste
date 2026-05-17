@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+
+async function checkOwnership(userId: string, vendaId: number) {
+  const [u] = await sql<{ role: string }[]>`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid LIMIT 1
+  `;
+  if (!u) throw new ForbiddenError("Usuario nao encontrado");
+  await requireVendaOwnership({ id: userId, role: u.role, email: "" }, vendaId);
+}
 
 // ─── GET /api/vendas/[id]/pagamentos ───────────────────────────────────────────
 export async function GET(
@@ -14,6 +24,14 @@ export async function GET(
   const { id } = await params;
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
+  // Onda 1D: bloqueia consultora de ler pagamentos de venda alheia
+  try { await checkOwnership(user.id, vendaId); }
+  catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   const pagamentos = await sql`
     SELECT id, venda_id, forma, gateway, valor, parcelas,
@@ -54,6 +72,14 @@ export async function POST(
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
+
+  // Onda 1D: bloqueia consultora de criar pagamento em venda alheia
+  try { await checkOwnership(user.id, vendaId); }
+  catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   // ── Travar venda: sem pagamento enquanto desconto >30% não aprovado ──────
   if (venda.tem_desconto_alto && !venda.desconto_aprovado_por) {

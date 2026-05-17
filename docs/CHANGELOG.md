@@ -1,8 +1,75 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.49.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.50.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): Onda 1D — IDOR em vendas/orçamento/crediário (v2.50.0)
+
+Segunda onda do bloco de segurança não-auth. Fecha o vetor de **fraude
+patrimonial** identificado no audit: qualquer `consultora` autenticada
+conseguia ler/editar vendas, orçamentos e crediários de qualquer colega
+via cURL (ROLES_PERMITIDOS aceitava o role mas não checava ownership).
+
+**Impacto evitado:** consultora podia alterar preço/desconto/endereço de
+entrega/observações internas de venda alheia, adicionar/remover itens,
+criar ou estornar pagamentos (inclusive vale-troca + ouro), vincular
+RFIDs físicos a venda errada, confirmar MP manual, cancelar rascunho
+alheio. Vetor direto de desvio de comissão e fraude de entrega
+(skill `joalheria-seguranca` confirma como cenário crítico).
+
+**Regra (mesma do módulo ordens):**
+- Roles em `ROLES_VENDAS_FULL` veem/editam TUDO:
+  `admin`, `desenvolvedor`, `diretor`, `gerente_loja`, `gerente_fabrica`.
+- Demais roles autorizadas (ex: `consultora`) só operam sobre recursos
+  próprios — `vendas_erp.vendedor_id == alissonerp.usuarios.vendedor_id`
+  do user; `orcamentos.usuario_id == auth.users.id` do user.
+
+**Novo helper** (`src/lib/auth-vendas.ts`):
+- `isVendasFullAccess(role)` — fonte única de verdade.
+- `requireVendaOwnership(user, vendaId)` — para vendas.
+- `requireOrcamentoOwnership(user, orcamentoId)` — UUID (não vendedor_id).
+- `requireCrediarioOwnership(user, contaId)` — via `vw_crediario`.
+- `ownershipWhereVendas(user)` — SQL fragment para filtro em listas.
+- `NotFoundError`, `getUserVendedorId(userId)` — utilidades.
+
+**21 endpoints fixados:**
+
+| Rota | Métodos | Risco antes |
+|---|---|---|
+| `vendas/[id]` | GET, PATCH | ler/editar venda alheia (preço, endereço, obs) |
+| `vendas/[id]/cancelar` | POST | cancelar rascunho alheio, estornar crédito |
+| `vendas/[id]/itens` | GET, POST | ver/adicionar item em venda alheia |
+| `vendas/[id]/itens/[itemId]` | PATCH, DELETE | editar/deletar item alheio |
+| `vendas/[id]/pagamentos` | GET, POST | ver/criar pagamento (vale, ouro) em venda alheia |
+| `vendas/[id]/pagamentos/[pagId]` | PATCH, DELETE | confirmar/cancelar/estornar pagamento alheio |
+| `vendas/[id]/pdf` | GET | gerar PDF de venda alheia |
+| `vendas/[id]/rfid` | GET, POST | vincular joias físicas a venda errada |
+| `vendas/[id]/solicitar-aprovacao` | POST | submeter venda alheia pra aprovação |
+| `vendas/[id]/mercado-pago/checar-point` | GET | pollar MP de venda alheia |
+| `vendas/[id]/mercado-pago/verificar-manual` | POST | confirmar MP manual em venda alheia |
+| `orcamento/[id]` | GET, PUT | ler/editar orçamento alheio |
+| `crediario/[id]/comunicacao` | POST | inserir comunicação em conta alheia |
+| `vendas/por-cliente/[clienteId]` | GET | **estava SEM AUTH NENHUMA** + IDOR |
+
+**Não tocado (OK por design — admin-only):**
+- `aprovar-desconto`, `pagamentos/[pagId]/confirmar`, `tiny-resync`,
+  `crediario/[id]/registrar-pagamento`, `crediario/[id]/verificar-mp`,
+  `mercado-pago/criar-pix`, `criar-pix-instore`, `criar-link`,
+  `criar-intent-point` — já filtravam ownership ou role check excluía
+  consultora explicitamente.
+
+**Smoke test** (`scripts/test-onda-1d.mjs`, node --test, 9/9 verde):
+- isVendasFullAccess cobre roles full e scoped.
+- consultora bloqueada em venda alheia, passa em venda própria.
+- venda com `vendedor_id NULL` é inacessível pra consultora.
+- coerção numero/string não engana check.
+- orçamento usa `usuario_id` UUID (não `vendedor_id`).
+
+**Fora de escopo (próximas ondas):**
+- 1E: rate limiting (auth, IA paga, PDF) — ~15 endpoints.
+- 1F: input validation (zod via `defineRoute`) — ~225 rotas.
+- 1G: payload size guards em `images[]`/`mensagem`/`observacoes`.
 
 ## fix(security): Onda 1C — info disclosure em erros 500 (v2.49.0)
 

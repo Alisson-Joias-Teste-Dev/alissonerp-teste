@@ -6,6 +6,8 @@ import { validateFichaTecnica, migrateProfile, CALIBRACAO_DEFAULTS, type Calibra
 import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
 import { ProfileType } from "@/app/(dashboard)/orcamento/types";
 import { ROLES_ORCAMENTO, ROLES_APROVACAO, orcamentoNumericChecks } from "@/lib/orcamento-shared";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireOrcamentoOwnership, NotFoundError } from "@/lib/auth-vendas";
 
 // GET /api/orcamento/[id] — detalhe do orçamento
 export async function GET(
@@ -19,6 +21,19 @@ export async function GET(
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // Onda 1D: bloqueia consultora de ler orcamento alheio
+  const [usuarioGet] = await sql<{ role: string }[]>`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+  `;
+  if (!usuarioGet) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  try {
+    await requireOrcamentoOwnership({ id: user.id, role: usuarioGet.role, email: user.email ?? "" }, orcId);
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   // o.* + ft.* causava colisão de `id` (orçamento vs ficha) — o `id` da ficha
   // sobrescrevia o do orçamento no resultado. Voltamos a ficha como objeto
@@ -362,6 +377,15 @@ export async function PUT(
   const callerRole = (callerRow?.role ?? "") as string;
   const canUnlock = isFullAccess(callerRole);
   const callerMaxDesc = Number(callerRow?.mx_desconto_permitido ?? 0);
+
+  // Onda 1D: consultora so atualiza orcamento proprio (usuario_id == user.id)
+  try {
+    await requireOrcamentoOwnership({ id: user.id, role: callerRole, email: user.email ?? "" }, orcId);
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   const body = await req.json();
   const {

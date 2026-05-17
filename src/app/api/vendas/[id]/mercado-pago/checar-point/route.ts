@@ -3,6 +3,8 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getAccessToken } from "@/lib/mercado-pago";
 import { concluirVenda } from "@/lib/vendas-aprovar";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GET /api/vendas/[id]/mercado-pago/checar-point?pagamento_id=Y
@@ -26,6 +28,19 @@ export async function GET(
 
   const pagamentoId = Number(new URL(req.url).searchParams.get("pagamento_id"));
   if (!pagamentoId) return NextResponse.json({ error: "pagamento_id obrigatório" }, { status: 400 });
+
+  // Onda 1D: bloqueia consultora de pollar pagamento de venda alheia
+  const [usuarioAuth] = await sql<{ role: string }[]>`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+  `;
+  if (!usuarioAuth) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  try {
+    await requireVendaOwnership({ id: user.id, role: usuarioAuth.role, email: user.email ?? "" }, vendaId);
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   // Carrega pagamento
   const [pag] = await sql`

@@ -4,6 +4,8 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { submeterVendaParaAprovacaoCredito } from "@/lib/vendas-credito-aprovar";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { avaliarRegras, criarTarefaAprovacao } from "@/lib/aprovacao-regras";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 
 // ─── POST /api/vendas/[id]/solicitar-aprovacao ───────────────────────────────
 // Consultora/gerente solicita aprovação de venda.
@@ -46,6 +48,15 @@ export async function POST(
   }
   if (venda.bloqueado) {
     return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
+  }
+
+  // Onda 1D: consultora so solicita aprovacao para venda propria
+  try {
+    await requireVendaOwnership({ id: user.id, role: usuario.role, email: user.email ?? "" }, vendaId);
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
   }
   // ── Bloquear solicitação de crédito/gerente se desconto >30% não aprovado ─
   if (tipo !== "desconto" && venda.tem_desconto_alto && !venda.desconto_aprovado_por) {

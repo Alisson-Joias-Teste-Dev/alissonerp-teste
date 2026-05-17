@@ -32,9 +32,17 @@ export async function POST(
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [venda] = await sql`
-    SELECT id, situacao, bloqueado FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    SELECT id, situacao, bloqueado, vendedor_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
+
+  // Onda 1D: consultora so cancela venda propria
+  if (ehConsultora && !temAcessoPleno) {
+    if (usuario.vendedor_id == null || Number(venda.vendedor_id) !== Number(usuario.vendedor_id)) {
+      return NextResponse.json({ error: "Sem permissão para esta venda" }, { status: 403 });
+    }
+  }
+
   if (ehConsultora && !temAcessoPleno && venda.situacao !== "rascunho") {
     return NextResponse.json(
       { error: "Consultoras só podem cancelar vendas em rascunho" },

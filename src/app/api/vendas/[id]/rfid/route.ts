@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+
+async function checkOwnership(userId: string, vendaId: number) {
+  const [u] = await sql<{ role: string }[]>`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid LIMIT 1
+  `;
+  if (!u) throw new ForbiddenError("Usuario nao encontrado");
+  await requireVendaOwnership({ id: userId, role: u.role, email: "" }, vendaId);
+}
 
 // GET /api/vendas/[id]/rfid
 // Retorna: RFIDs vinculados à venda + RFIDs disponíveis por produto da venda
@@ -15,6 +25,14 @@ export async function GET(
   const { id } = await params;
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
+  // Onda 1D: bloqueia consultora de ver RFIDs de venda alheia
+  try { await checkOwnership(user.id, vendaId); }
+  catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   // RFIDs já vinculados a esta venda
   const vinculados = await sql`
@@ -75,9 +93,15 @@ export async function POST(
     return NextResponse.json({ error: "rfid_ids obrigatório (array de UUIDs)" }, { status: 400 });
   }
 
-  // Verifica se venda existe
+  // Verifica se venda existe + onda 1D ownership
   const [venda] = await sql`SELECT id FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
+  try { await checkOwnership(user.id, vendaId); }
+  catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   // Vincula RFIDs à venda e marca como reservados
   const rfids = await sql`

@@ -3,6 +3,16 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { estornarVenda, concluirVenda } from "@/lib/vendas-aprovar";
 import { approveVenda } from "@/lib/vendas-aprovar";
+import { ForbiddenError } from "@/lib/auth-server";
+import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+
+async function checkOwnership(userId: string, vendaId: number) {
+  const [u] = await sql<{ role: string }[]>`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid LIMIT 1
+  `;
+  if (!u) throw new ForbiddenError("Usuario nao encontrado");
+  await requireVendaOwnership({ id: userId, role: u.role, email: "" }, vendaId);
+}
 
 // ─── PATCH /api/vendas/[id]/pagamentos/[pagId] ─────────────────────────────────
 // Atualiza status do pagamento (confirmar, cancelar, estornar)
@@ -30,6 +40,14 @@ export async function PATCH(
   if (pag.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
   if (pag.venda_situacao === "cancelado") return NextResponse.json({ error: "Venda cancelada" }, { status: 409 });
   if (pag.venda_situacao === "concluido") return NextResponse.json({ error: "Venda concluída não permite alteração de pagamento" }, { status: 409 });
+
+  // Onda 1D: consultora so altera pagamento de venda propria
+  try { await checkOwnership(user.id, vendaId); }
+  catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   const body = await req.json() as {
     status:             string;
@@ -128,6 +146,14 @@ export async function DELETE(
   if (pag.venda_situacao === "cancelado") return NextResponse.json({ error: "Venda cancelada" }, { status: 409 });
   if (pag.venda_situacao === "concluido") return NextResponse.json({ error: "Venda concluída não permite exclusão de pagamento" }, { status: 409 });
   if (pag.status === "confirmado") return NextResponse.json({ error: "Pagamento confirmado não pode ser excluído — estorne primeiro" }, { status: 409 });
+
+  // Onda 1D: consultora so deleta pagamento de venda propria
+  try { await checkOwnership(user.id, vendaId); }
+  catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   await sql`DELETE FROM alissonerp.pagamentos_venda WHERE id = ${pId}`;
 
