@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile } from "@/lib/storage";
+import {
+  LIMITS,
+  checkBase64Length,
+  checkStringLength,
+  payloadTooLargeResponse,
+} from "@/lib/payload-limits";
 
 // GET /api/ordens/[id]/comentarios
 export async function GET(
@@ -50,6 +56,15 @@ export async function POST(
 
   const body = await req.json();
   const { texto, mencoes = [], foto_path: fotaPathBody = null, foto_base64 = null } = body;
+
+  try {
+    checkStringLength("texto", texto, LIMITS.OBSERVACOES_MAX);
+    checkBase64Length("foto_base64", foto_base64, LIMITS.IMAGE_BASE64_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   // Upload server-side se vier foto em base64
   let foto_path: string | null = fotaPathBody;

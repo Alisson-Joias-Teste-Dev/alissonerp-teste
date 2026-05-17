@@ -5,6 +5,12 @@ import { validarDescontos } from "@/lib/validar-desconto";
 import { logAudit } from "@/lib/audit";
 import { internalError } from "@/lib/api-error";
 import {
+  LIMITS,
+  checkArrayLength,
+  checkStringLength,
+  payloadTooLargeResponse,
+} from "@/lib/payload-limits";
+import {
   validarPersonalizacao,
   normalizarPersonalizacao,
   normalizarPersonalizacaoMulti,
@@ -153,6 +159,24 @@ export async function POST(req: NextRequest) {
     itens?:               ItemInput[];
     pagamentos?:          PagamentoInput[];
   };
+
+  // ── Guards de tamanho de payload (onda 1I) ────────────────────────────────
+  try {
+    checkStringLength("observacoes", body.observacoes, LIMITS.OBSERVACOES_MAX);
+    checkStringLength("observacoes_internas", body.observacoes_internas, LIMITS.OBSERVACOES_MAX);
+    checkArrayLength("itens", body.itens, LIMITS.ITENS_VENDA_MAX);
+    checkArrayLength("pagamentos", body.pagamentos, LIMITS.ITENS_VENDA_MAX);
+    if (Array.isArray(body.itens)) {
+      for (const item of body.itens) {
+        checkStringLength("itens[].nome_produto", item.nome_produto, LIMITS.NOME_MAX);
+        checkStringLength("itens[].observacao", item.observacao, LIMITS.OBSERVACOES_MAX);
+      }
+    }
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   // ── Validação de desconto por produto (bloqueia vendedor comum) ───────────
   // Rascunhos com desconto alto vão pelo fluxo de aprovação — skip validação

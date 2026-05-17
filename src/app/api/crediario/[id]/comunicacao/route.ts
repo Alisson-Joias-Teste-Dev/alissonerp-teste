@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireCrediarioOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 
 const ROLES_CREDIARIO = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
 const TIPOS_VALIDOS = ["aviso_recebimento", "cobranca", "observacao"] as const;
@@ -30,6 +31,14 @@ export async function POST(
   const body = await req.json() as { tipo?: string; mensagem?: string };
   const tipo = body?.tipo ?? "observacao";
   const mensagem = (body?.mensagem ?? "").trim();
+
+  try {
+    checkStringLength("mensagem", mensagem, LIMITS.MENSAGEM_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   if (!TIPOS_VALIDOS.includes(tipo as typeof TIPOS_VALIDOS[number])) {
     return NextResponse.json({ error: `tipo inválido. Use: ${TIPOS_VALIDOS.join(", ")}` }, { status: 400 });

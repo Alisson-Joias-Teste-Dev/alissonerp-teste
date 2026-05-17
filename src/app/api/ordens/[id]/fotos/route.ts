@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getPublicUrl, deleteFile } from "@/lib/storage";
+import { checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 
 const STORAGE_PUBLIC_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public`;
 
@@ -80,6 +81,15 @@ export async function POST(
 
   const { id: ordemId } = await params;
   const { path } = await req.json();
+
+  try {
+    // Storage path eh string curta (~200 chars max em buckets); 1KB ja eh abuso obvio
+    checkStringLength("path", path, 1_024);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   if (!path?.trim()) {
     return NextResponse.json({ error: "Path obrigatório" }, { status: 400 });

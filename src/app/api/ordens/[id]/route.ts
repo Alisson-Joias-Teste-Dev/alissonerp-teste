@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
+import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 
 // PATCH /api/ordens/[id]
 // Edição completa de uma ordem — apenas role 'desenvolvedor'.
@@ -35,6 +36,14 @@ export async function PATCH(
     tipo_ordem?:           string | null;
     peso_metal_negociado?: number | null;
   };
+
+  try {
+    checkStringLength("detalhes_ordem", body.detalhes_ordem, LIMITS.DESCRICAO_LONGA_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   // Normaliza enums: view retorna display (Criado) mas enum espera lowercase (criado)
   if (body.situacao)   body.situacao   = body.situacao.toLowerCase();

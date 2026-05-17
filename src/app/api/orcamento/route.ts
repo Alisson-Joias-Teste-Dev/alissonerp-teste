@@ -7,6 +7,12 @@ import { validateFichaTecnica, migrateProfile, CALIBRACAO_DEFAULTS, type Calibra
 import { computeStoneCapacity } from "@/app/(dashboard)/orcamento/constants";
 import { ProfileType } from "@/app/(dashboard)/orcamento/types";
 import { ROLES_ORCAMENTO, orcamentoNumericChecks } from "@/lib/orcamento-shared";
+import {
+  LIMITS,
+  checkBase64Length,
+  checkStringLength,
+  payloadTooLargeResponse,
+} from "@/lib/payload-limits";
 
 // GET /api/orcamento — lista orçamentos
 export async function GET(req: NextRequest) {
@@ -76,6 +82,17 @@ export async function POST(req: NextRequest) {
     tipo, ficha, ficha2, quantidade, observacoes, cliente_id, foto_3d_base64,
     snapshot, valor_negociado_locked,
   } = body;
+
+  try {
+    checkStringLength("nome_cliente", nome_cliente, LIMITS.NOME_MAX);
+    checkStringLength("nome_modelo", nome_modelo, LIMITS.NOME_MAX);
+    checkStringLength("observacoes", observacoes, LIMITS.OBSERVACOES_MAX);
+    checkBase64Length("foto_3d_base64", foto_3d_base64, LIMITS.IMAGE_BASE64_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   if (!nome_cliente?.trim() && !cliente_id) {
     return NextResponse.json({ error: "nome_cliente ou cliente_id obrigatorio" }, { status: 400 });

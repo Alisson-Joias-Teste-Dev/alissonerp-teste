@@ -12,6 +12,7 @@ import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
 import { internalError } from "@/lib/api-error";
+import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -97,6 +98,17 @@ export async function POST(req: NextRequest) {
   const cnpj       = body?.cnpj       ? String(body.cnpj).trim()       : null;
   const contato    = body?.contato    ? String(body.contato).trim()    : null;
   const observacao = body?.observacao ? String(body.observacao).trim() : null;
+
+  try {
+    checkStringLength("nome", nome, LIMITS.NOME_MAX);
+    checkStringLength("cnpj", cnpj, 32);
+    checkStringLength("contato", contato, LIMITS.NOME_MAX);
+    checkStringLength("observacao", observacao, LIMITS.OBSERVACOES_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   try {
     if (!(await tabelaExiste("alissonerp", "fornecedores"))) {

@@ -8,6 +8,12 @@ import { ProfileType } from "@/app/(dashboard)/orcamento/types";
 import { ROLES_ORCAMENTO, ROLES_APROVACAO, orcamentoNumericChecks } from "@/lib/orcamento-shared";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireOrcamentoOwnership, NotFoundError } from "@/lib/auth-vendas";
+import {
+  LIMITS,
+  checkBase64Length,
+  checkStringLength,
+  payloadTooLargeResponse,
+} from "@/lib/payload-limits";
 
 // GET /api/orcamento/[id] — detalhe do orçamento
 export async function GET(
@@ -83,6 +89,14 @@ export async function PATCH(
     motivo_rejeicao?: string;
     cliente_id?: number;
   };
+
+  try {
+    checkStringLength("motivo_rejeicao", body.motivo_rejeicao, LIMITS.OBSERVACOES_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   // Buscar orçamento atual
   const [orc] = await sql`
@@ -394,6 +408,16 @@ export async function PUT(
     tipo, ficha, ficha2, quantidade, cliente_id, foto_3d_base64,
     snapshot, valor_negociado_locked, client_updated_at,
   } = body;
+
+  try {
+    checkStringLength("nome_cliente", nome_cliente, LIMITS.NOME_MAX);
+    checkStringLength("nome_modelo", nome_modelo, LIMITS.NOME_MAX);
+    checkBase64Length("foto_3d_base64", foto_3d_base64, LIMITS.IMAGE_BASE64_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   // Locking otimista (ADR 0006). Se o cliente envia client_updated_at, comparamos
   // com o updated_at atual; mismatch = 409 (outro usuário editou desde o GET).

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
+import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 
 // GET /api/insumos?categoria_id=1
 export async function GET(req: NextRequest) {
@@ -39,6 +40,16 @@ export async function POST(req: NextRequest) {
       peso_pedra?: number | null;
       peso_pedra_ct?: number | null;
     };
+
+  try {
+    checkStringLength("nome", nome, LIMITS.NOME_MAX);
+    checkStringLength("sku", sku, LIMITS.NOME_MAX);
+    checkStringLength("descricao", descricao, LIMITS.DESCRICAO_LONGA_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   if (!nome || !categoria_id) {
     return NextResponse.json({ error: "Nome e categoria são obrigatórios" }, { status: 400 });

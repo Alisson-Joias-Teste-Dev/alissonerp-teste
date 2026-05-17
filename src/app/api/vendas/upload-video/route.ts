@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile } from "@/lib/storage";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import {
+  LIMITS,
+  checkBase64Length,
+  checkStringLength,
+  payloadTooLargeResponse,
+} from "@/lib/payload-limits";
 
 // POST /api/vendas/upload-video
 // Body: { base64: string, mime: string, filename?: string }
@@ -25,6 +31,15 @@ export async function POST(req: NextRequest) {
     mime:      string;
     filename?: string;
   };
+
+  try {
+    checkBase64Length("base64", body.base64, LIMITS.VIDEO_BASE64_MAX);
+    checkStringLength("filename", body.filename, LIMITS.NOME_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   if (!body.base64) return NextResponse.json({ error: "base64 obrigatório" }, { status: 400 });
 

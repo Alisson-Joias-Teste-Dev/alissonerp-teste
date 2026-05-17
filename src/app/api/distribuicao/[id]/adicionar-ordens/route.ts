@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
+import { LIMITS, checkArrayLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 
 // POST /api/distribuicao/[id]/adicionar-ordens
 // Body: { ordem_ids: number[] }
@@ -24,6 +25,14 @@ export async function POST(
 
   const body = await req.json();
   const { ordem_ids } = body as { ordem_ids: number[] };
+
+  try {
+    checkArrayLength("ordem_ids", ordem_ids, LIMITS.ORDENS_LOTE_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   if (!ordem_ids?.length) {
     return NextResponse.json(

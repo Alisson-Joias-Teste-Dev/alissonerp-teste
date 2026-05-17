@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import {
+  LIMITS,
+  checkArrayLength,
+  checkStringLength,
+  payloadTooLargeResponse,
+} from "@/lib/payload-limits";
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase();
@@ -92,6 +98,17 @@ export async function POST(req: NextRequest) {
     tags?: string[];
     tipo?: string;
   };
+
+  try {
+    checkStringLength("titulo", body.titulo, LIMITS.TITULO_MAX);
+    checkStringLength("descricao", body.descricao, LIMITS.DESCRICAO_LONGA_MAX);
+    checkArrayLength("ordem_ids", body.ordem_ids, LIMITS.ORDENS_LOTE_MAX);
+    checkArrayLength("tags", body.tags, 20);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   if (!body.titulo?.trim()) {
     return NextResponse.json({ error: "Título obrigatório" }, { status: 400 });

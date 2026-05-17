@@ -26,6 +26,13 @@ import { generateImage, AVAILABLE_MODELS, type ModelId, type AspectRatio } from 
 import { internalError } from "@/lib/api-error";
 import { getApiKeys } from "@/lib/editor-ia/api-keys";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import {
+  LIMITS,
+  checkArrayLength,
+  checkBase64Length,
+  checkStringLength,
+  payloadTooLargeResponse,
+} from "@/lib/payload-limits";
 
 const BUCKET = "editor-ia-geradas";
 
@@ -66,6 +73,18 @@ export async function POST(req: NextRequest) {
   const modelId: string = String(body?.model || "");
   const aspectRatio: AspectRatio = (body?.aspectRatio as AspectRatio) || "1:1";
   const details: string | undefined = body?.details ? String(body.details).trim() : undefined;
+
+  try {
+    checkArrayLength("images", images, LIMITS.IMAGES_ARRAY_MAX);
+    for (const img of images) {
+      checkBase64Length("images[]", img, LIMITS.IMAGE_BASE64_MAX);
+    }
+    checkStringLength("details", details, LIMITS.OBSERVACOES_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   if (!images.length) return NextResponse.json({ error: "Nenhuma imagem enviada." }, { status: 400 });
   if (!sceneId)       return NextResponse.json({ error: "Cenário obrigatório." }, { status: 400 });

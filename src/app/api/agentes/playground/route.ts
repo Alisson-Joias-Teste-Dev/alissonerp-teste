@@ -4,6 +4,12 @@ import { isFullAccess } from '@/lib/roles';
 import { createDeepSeekProvider } from '@/agentes/core/llm/deepseek';
 import { internalError } from '@/lib/api-error';
 import { rateLimit, rateLimitResponse } from '@/lib/rate-limit';
+import {
+  LIMITS,
+  checkArrayLength,
+  checkStringLength,
+  payloadTooLargeResponse,
+} from '@/lib/payload-limits';
 
 // ATENCAO: esta rota nao funciona em dev/prod hoje — depende de `ai` +
 // `@ai-sdk/deepseek` que NAO estao instaladas no package.json. Qualquer
@@ -38,6 +44,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  try {
+    checkArrayLength('messages', body.messages, LIMITS.MENSAGENS_CHAT_MAX);
+    checkStringLength('message', body.message, LIMITS.CHAT_MESSAGE_MAX);
+    if (Array.isArray(body.messages)) {
+      for (const m of body.messages) {
+        checkStringLength('messages[].content', m?.content, LIMITS.CHAT_MESSAGE_MAX);
+      }
+    }
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
   }
 
   const messages = body.messages ?? [

@@ -4,6 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { uploadFile } from "@/lib/storage";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { LIMITS } from "@/lib/payload-limits";
 
 // POST /api/user/avatar
 // Body: FormData { file: File, user_id?: string }
@@ -40,6 +41,15 @@ export async function POST(req: NextRequest) {
   const targetUserId = (formData.get("user_id") as string) || String(meuPerfil.id_user);
 
   if (!file) return NextResponse.json({ error: "Arquivo obrigatório" }, { status: 400 });
+
+  // Avatar normalmente eh JPG/PNG pequeno — limite de imagem (~3.75MB binario)
+  const avatarMaxBytes = Math.floor(LIMITS.IMAGE_BASE64_MAX * 0.75);
+  if (file.size > avatarMaxBytes) {
+    return NextResponse.json(
+      { error: `Avatar excede limite (${file.size} > ${avatarMaxBytes} bytes)` },
+      { status: 413 },
+    );
+  }
 
   // Apenas admin/desenvolvedor pode alterar foto de outros
   if (targetUserId !== String(meuPerfil.id_user) && !isFullAccess(meuPerfil.role)) {

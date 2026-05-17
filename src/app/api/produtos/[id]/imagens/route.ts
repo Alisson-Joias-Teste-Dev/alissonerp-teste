@@ -11,6 +11,12 @@ import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { internalError } from "@/lib/api-error";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import {
+  LIMITS,
+  checkBase64Length,
+  checkStringLength,
+  payloadTooLargeResponse,
+} from "@/lib/payload-limits";
 
 const BUCKET = "imagens";
 
@@ -112,6 +118,15 @@ export async function POST(
     const fotoBase64: string | undefined = body.foto_base64;
     const filenameOriginal: string | undefined = body.filename;
     const definirComoCapa: boolean = body.eh_capa === true;
+
+    try {
+      checkBase64Length("foto_base64", fotoBase64, LIMITS.IMAGE_BASE64_MAX);
+      checkStringLength("filename", filenameOriginal, LIMITS.NOME_MAX);
+    } catch (e) {
+      const r = payloadTooLargeResponse(e);
+      if (r) return r;
+      throw e;
+    }
 
     if (!fotoBase64 || !fotoBase64.startsWith("data:")) {
       return NextResponse.json({ error: "foto_base64 inválido (esperado data URL)" }, { status: 400 });

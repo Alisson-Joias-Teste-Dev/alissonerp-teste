@@ -4,6 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 
 // ─── GET /api/vendas/[id] ──────────────────────────────────────────────────────
 export async function GET(
@@ -214,6 +215,15 @@ export async function PATCH(
     /** Guard de versão — opcional, retrocompatível */
     client_updated_at?:    string;
   };
+
+  try {
+    checkStringLength("observacoes", body.observacoes, LIMITS.OBSERVACOES_MAX);
+    checkStringLength("observacoes_internas", body.observacoes_internas, LIMITS.OBSERVACOES_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "entregue", "cancelado", "concluido"];
   if (body.situacao && !SITUACOES_VALIDAS.includes(body.situacao)) {

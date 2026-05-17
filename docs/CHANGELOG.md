@@ -1,8 +1,127 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.54.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.55.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): onda 1I — payload size guards em ~23 rotas sensiveis (v2.55.0)
+
+Nona onda do bloco de segurança. Endpoints que aceitavam strings/arrays/uploads
+sem limite podiam ser explorados pra explodir DB ou memória do server:
+observações de 100MB no `observacoes`, array `images[]` com 1000 fotos base64,
+mensagens de WhatsApp/notas sem teto, video base64 ilimitado, etc. Esta onda
+adiciona o helper `src/lib/payload-limits.ts` e aplica em ~23 rotas (entrada
+de texto livre, arrays de itens/ordens e uploads base64).
+
+**Helper criado — `src/lib/payload-limits.ts`:**
+- `LIMITS` — tabela de constantes canônicas para todos os limites. Texto em
+  chars (postgres armazena UTF-8 — 1 char ASCII = 1 byte). Arquivos base64
+  em chars; tamanho real do binário ≈ length × 0.75. Arrays em número de itens.
+- `checkStringLength(field, value, max)` — joga `PayloadTooLargeError` se
+  `value` é string com `length > max`. **Ignora** non-string (null/undefined/
+  number/object) — validação de tipo é trabalho do Zod ou da própria rota.
+- `checkArrayLength(field, value, max)` — joga 413 se array com mais que `max`
+  itens. Ignora não-array.
+- `checkBase64Length(field, value, max)` — alias semântico de
+  `checkStringLength` deixando claro na call site que o campo é base64.
+- `payloadTooLargeResponse(e)` — converte `PayloadTooLargeError` em
+  `NextResponse` 413. Devolve null se não for; handler re-lança.
+
+**Limites canônicos definidos:**
+```
+Texto:        OBSERVACOES=5KB | MENSAGEM=2KB | NOME=200ch | TITULO=500ch
+              DESCRICAO_LONGA=10KB | CHAT_MESSAGE=4KB
+Base64:       IMAGE=~3.75MB | VIDEO=~37.5MB | PDF=~7.5MB | OFX=1MB
+Arrays:       IMAGES=10 | ITENS_VENDA=100 | ORDENS_LOTE=200 | MENSAGENS_CHAT=50
+```
+
+**Padrão de aplicação (consistente em todas as rotas):**
+```ts
+try {
+  checkStringLength("observacoes", body.observacoes, LIMITS.OBSERVACOES_MAX);
+  checkArrayLength("itens", body.itens, LIMITS.ITENS_VENDA_MAX);
+  if (Array.isArray(body.itens)) {
+    for (const item of body.itens) {
+      checkStringLength("itens[].nome_produto", item.nome_produto, LIMITS.NOME_MAX);
+    }
+  }
+} catch (e) {
+  const r = payloadTooLargeResponse(e);
+  if (r) return r;
+  throw e;
+}
+```
+Os checks devem rodar **antes** do INSERT/UPDATE/upload — o objetivo é cortar
+o request cedo, sem chegar ao DB nem gastar I/O com Storage.
+
+**Rotas guardadas (23) — agrupadas por categoria:**
+
+*Texto longo (observações/mensagens):*
+- `vendas/route.ts` POST — `observacoes`, `observacoes_internas`, `itens[].observacao`
+- `vendas/[id]/route.ts` PATCH — `observacoes`, `observacoes_internas`
+- `crediario/[id]/comunicacao/route.ts` POST — `mensagem` (max 2KB)
+- `ordens/[id]/comentarios/route.ts` POST — `texto`
+- `ordens/[id]/route.ts` PATCH — `detalhes_ordem`
+- `tarefas/route.ts` POST — `titulo` (500ch), `descricao` (10KB)
+- `financeiro/contas-pagar/route.ts` POST — `descricao`, `obs`, `categoria`
+- `financeiro/contas-receber/route.ts` POST — `descricao`, `obs`, `categoria`
+- `orcamento/route.ts` POST — `nome_cliente`, `nome_modelo`, `observacoes`
+- `orcamento/[id]/route.ts` PATCH/PUT — `motivo_rejeicao`, `nome_cliente`, `nome_modelo`
+- `fornecedores/route.ts` POST — `nome`, `cnpj`, `contato`, `observacao`
+- `insumos/route.ts` POST — `nome`, `sku`, `descricao`
+
+*Arrays grandes:*
+- `vendas/route.ts` POST — `itens[]` (max 100), `pagamentos[]` (max 100)
+- `distribuicao/[id]/adicionar-ordens/route.ts` POST — `ordem_ids[]` (max 200)
+- `protocolo/route.ts` POST — `ordem_ids[]` (max 200)
+- `tarefas/route.ts` POST — `ordem_ids[]` (max 200), `tags[]` (max 20)
+- `editor-ia/generate/route.ts` POST — `images[]` (max 10) + cada imagem checada
+- `gestao-estoque/ai-chat/route.ts` POST — `contextData[]` (max 200)
+- `lia/personalizar/chat/route.ts` POST — `mensagens[]` (max 50) + cada `.content`
+- `agentes/playground/route.ts` POST — `messages[]` (max 50) + cada `.content`
+
+*Uploads base64:*
+- `produtos/[id]/imagens/route.ts` POST — `foto_base64` (~3.75MB)
+- `vendas/upload-video/route.ts` POST — `base64` (~37.5MB) + `filename`
+- `ordens/upload-arquivo/route.ts` POST — `base64` (~37.5MB) + FormData `file.size`
+- `user/avatar/route.ts` POST — FormData `file.size` (~3.75MB)
+- `ordens/[id]/comentarios/route.ts` POST — `foto_base64`
+- `orcamento/route.ts` POST — `foto_3d_base64`
+- `orcamento/[id]/route.ts` PUT — `foto_3d_base64`
+- `protocolo/route.ts` POST — `foto_criacao`
+
+*Strings de chat LLM:*
+- `gestao-estoque/ai-chat/route.ts` POST — `message` (4KB)
+- `lia/personalizar/chat/route.ts` POST — `mensagemAtual` (4KB)
+- `agentes/playground/route.ts` POST — `message` (4KB)
+- `editor-ia/generate/route.ts` POST — `details` (5KB)
+
+**Rotas com validação manual mantida (não duplicar):**
+- `financeiro/upload-ofx/route.ts` — já checa `file.size > 10MB` com mensagem
+  customizada. Mantido como estava.
+
+**Smoke test — `scripts/test-onda-1i.mjs`:**
+15 testes cobrem:
+- Cada check (string/array/base64) passa dentro do limite e lança 413 acima.
+- Valores não-string/não-array são ignorados (não bloqueiam o request).
+- String vazia e array vazio passam (0 ≤ qualquer max).
+- `PayloadTooLargeError` sempre tem `status=413`, expõe `field`/`max`/`actual`.
+- Uso combinado: primeiro check que estourar interrompe os demais (short-circuit).
+- Array de objetos: loop com `checkStringLength` no campo de cada item.
+
+Tudo passou: `15 pass, 0 fail`.
+
+**Limitações conhecidas:**
+- Os limites são em **chars** (string.length), não em bytes. Para UTF-8 puro
+  ASCII coincide (1 char = 1 byte). Texto com acentos consome mais bytes que
+  chars — não é problema porque o limite tem folga (5KB de chars normalmente
+  cabe em ≤ 8KB de UTF-8 mesmo no pior caso).
+- Não há check **global** do body (next.js já corta requests > 4MB por padrão
+  no `bodySizeLimit` — vide `next.config`). Os guards aqui são por campo,
+  pra evitar 1 campo único dominando o body legítimo.
+- Helper não normaliza nem trunca; é decisão consciente — silenciosamente
+  cortar dados levaria a bugs invisíveis ("por que minha observação ficou
+  cortada?"). 413 deixa o cliente saber.
 
 ## fix(security): onda 1H — rate limiting em ~15 endpoints sensiveis (v2.54.0)
 

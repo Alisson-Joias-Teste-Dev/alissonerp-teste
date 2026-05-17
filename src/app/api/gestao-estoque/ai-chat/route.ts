@@ -6,6 +6,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import {
+  LIMITS,
+  checkArrayLength,
+  checkStringLength,
+  payloadTooLargeResponse,
+} from "@/lib/payload-limits";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GESTAO_ESTOQUE_AI_MODEL || "gemini-2.5-flash";
@@ -37,6 +43,16 @@ export async function POST(req: NextRequest) {
   const tableName: string = String(body?.tableName ?? "produtos");
   const schema: string = String(body?.schema ?? "public");
   const contextDataRaw = Array.isArray(body?.contextData) ? body.contextData : [];
+
+  try {
+    checkStringLength("message", message, LIMITS.CHAT_MESSAGE_MAX);
+    checkArrayLength("contextData", contextDataRaw, 200);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
+
   if (!message) return NextResponse.json({ error: "mensagem vazia" }, { status: 400 });
 
   const dataSnapshot = contextDataRaw.slice(0, 50);

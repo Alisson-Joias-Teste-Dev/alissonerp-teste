@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { uploadFile, deleteFile } from "@/lib/storage";
 import { internalError } from "@/lib/api-error";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { LIMITS, checkBase64Length, payloadTooLargeResponse } from "@/lib/payload-limits";
 
 const BUCKETS_PERMITIDOS = ["ordem-fotos", "ordem-videos"];
 
@@ -46,6 +47,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Bucket inválido" }, { status: 400 });
     }
 
+    // Limite de tamanho binario (video pode chegar a ~37.5MB; imagem normalmente < 4MB)
+    if (file.size > LIMITS.VIDEO_BASE64_MAX) {
+      return NextResponse.json(
+        { error: `Arquivo excede limite (${file.size} > ${LIMITS.VIDEO_BASE64_MAX} bytes)` },
+        { status: 413 },
+      );
+    }
+
     const buffer      = Buffer.from(await file.arrayBuffer());
     const contentType = file.type || "application/octet-stream";
 
@@ -72,6 +81,14 @@ export async function POST(req: NextRequest) {
     filePath = body.path   ?? null;
     const base64      = body.base64 ?? null;
     const contentType = body.contentType ?? "application/octet-stream";
+
+    try {
+      checkBase64Length("base64", base64, LIMITS.VIDEO_BASE64_MAX);
+    } catch (e) {
+      const r = payloadTooLargeResponse(e);
+      if (r) return r;
+      throw e;
+    }
 
     if (!bucket || !filePath || !base64) {
       return NextResponse.json({ error: "bucket, path e base64 são obrigatórios" }, { status: 400 });

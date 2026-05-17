@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createDeepSeekProvider } from "@/agentes/core/llm/deepseek";
+import {
+  LIMITS,
+  checkArrayLength,
+  checkStringLength,
+  payloadTooLargeResponse,
+} from "@/lib/payload-limits";
 
 /**
  * POST /api/lia/personalizar/chat
@@ -175,6 +181,21 @@ export async function POST(req: NextRequest) {
 
   const mensagens = Array.isArray(body.mensagens) ? body.mensagens : [];
   const mensagemAtual = typeof body.mensagemAtual === "string" ? body.mensagemAtual.trim() : "";
+
+  try {
+    checkArrayLength("mensagens", mensagens, LIMITS.MENSAGENS_CHAT_MAX);
+    checkStringLength("mensagemAtual", mensagemAtual, LIMITS.CHAT_MESSAGE_MAX);
+    for (const msg of mensagens) {
+      if (msg && typeof msg === "object" && "content" in msg) {
+        checkStringLength("mensagens[].content", (msg as { content: unknown }).content, LIMITS.CHAT_MESSAGE_MAX);
+      }
+    }
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
+
   if (!mensagemAtual) {
     return NextResponse.json({ error: "mensagemAtual é obrigatória" }, { status: 400 });
   }

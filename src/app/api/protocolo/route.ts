@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { logAudit } from "@/lib/audit";
 import sql from "@/lib/db";
 import { requireAuth, AuthError } from "@/lib/auth-server";
+import {
+  LIMITS,
+  checkArrayLength,
+  checkBase64Length,
+  payloadTooLargeResponse,
+} from "@/lib/payload-limits";
 
 // GET /api/protocolo?user_id=UUID — lista protocolos do motoboy (ou todos se todos=true)
 export async function GET(req: NextRequest) {
@@ -51,6 +57,15 @@ export async function POST(req: NextRequest) {
     user = await requireAuth(req);
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: 401 });
+    throw e;
+  }
+
+  try {
+    checkArrayLength("ordem_ids", ordem_ids, LIMITS.ORDENS_LOTE_MAX);
+    checkBase64Length("foto_criacao", foto_criacao, LIMITS.IMAGE_BASE64_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
     throw e;
   }
 

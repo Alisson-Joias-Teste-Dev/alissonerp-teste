@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 
 const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 
@@ -86,6 +87,16 @@ export async function POST(req: NextRequest) {
     obs?: string;
     venda_erp_id?: number;
   };
+
+  try {
+    checkStringLength("descricao", body.descricao, LIMITS.TITULO_MAX);
+    checkStringLength("obs", body.obs, LIMITS.OBSERVACOES_MAX);
+    checkStringLength("categoria", body.categoria, LIMITS.NOME_MAX);
+  } catch (e) {
+    const r = payloadTooLargeResponse(e);
+    if (r) return r;
+    throw e;
+  }
 
   if (!body.descricao?.trim() || !body.valor) {
     return NextResponse.json({ error: "descricao e valor obrigatórios" }, { status: 400 });
