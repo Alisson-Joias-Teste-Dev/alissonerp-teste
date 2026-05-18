@@ -51,6 +51,13 @@ export default function OrcamentoDetalheClient({
   const [motivoRejeicao, setMotivoRejeicao] = useState("");
   const [showRejeitar, setShowRejeitar] = useState(false);
   const [msg, setMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
+  // Bug fix v2.58.2: rastreia o cliente atual do OrcamentoClient para enviar
+  // no body do PATCH de aprovacao. Sem isso, se o usuario selecionou um cliente
+  // mas nao salvou, o backend lia null do banco e devolvia 422.
+  const [clienteState, setClienteState] = useState<{ clienteId: number | null; dirty: boolean }>({
+    clienteId: (orcamento.cliente_id as number | null) ?? null,
+    dirty: false,
+  });
 
   const canAprovar = (ROLES_APROVACAO as readonly string[]).includes(role) && ["rascunho", "enviado"].includes(status);
 
@@ -61,7 +68,12 @@ export default function OrcamentoDetalheClient({
       const res = await fetch(`/api/orcamento/${orcamento.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "aprovado" }),
+        body: JSON.stringify({
+          status: "aprovado",
+          // Bug fix v2.58.2: envia cliente_id atual do state — funciona mesmo
+          // se o usuario nao clicou em Salvar antes de Aprovar.
+          ...(clienteState.clienteId != null ? { cliente_id: clienteState.clienteId } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro ao aprovar");
@@ -189,6 +201,7 @@ export default function OrcamentoDetalheClient({
         setMsg({ text: "Orçamento salvo com sucesso!", type: "success" });
         setTimeout(() => setMsg(null), 4000);
       }}
+      onStateChange={setClienteState}
       extraActions={extraActions}
     />
   );

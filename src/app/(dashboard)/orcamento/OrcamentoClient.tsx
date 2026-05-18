@@ -64,6 +64,10 @@ interface Props {
   onShare?: () => void;
   onSaved?: () => void;
   extraActions?: React.ReactNode;
+  // Bug fix v2.58.2: callback pra parent saber o cliente atual antes de aprovar.
+  // Sem isso, OrcamentoDetalheClient enviava status=aprovado sem cliente_id,
+  // a API lia do banco (null) e devolvia 422 ate o usuario salvar antes.
+  onStateChange?: (state: { clienteId: number | null; dirty: boolean }) => void;
 }
 
 type OrcamentoTipo = "alianca" | "peca" | null;
@@ -113,7 +117,7 @@ function Slider({ label, value, min, max, step, unit, onChange }: {
 export default function OrcamentoClient({
   cotacaoOuro, cotacaoDolar, config, canManageConfig, userName, userId, vendedorId, maxDesconto,
   curvaConfig, curvaCategorias,
-  initialOrcamento, readOnly, onShare, onSaved, extraActions,
+  initialOrcamento, readOnly, onShare, onSaved, extraActions, onStateChange,
 }: Props) {
   const router = useRouter();
   const [orcamentoTipo, setOrcamentoTipo] = useState<OrcamentoTipo>(null);
@@ -527,6 +531,13 @@ export default function OrcamentoClient({
 
   const [clientName, setClientName] = useState("");
   const [clienteId, setClienteId] = useState<number | null>(null);
+  // Bug fix v2.58.2: notifica o parent (OrcamentoDetalheClient) sobre o cliente
+  // selecionado e o estado dirty, para que a aprovacao possa enviar cliente_id
+  // direto no body — evita deadlock de "Vincule um cliente" quando o usuario
+  // selecionou no input mas nao clicou em Salvar antes de Aprovar.
+  useEffect(() => {
+    if (onStateChange) onStateChange({ clienteId, dirty });
+  }, [clienteId, dirty, onStateChange]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [clienteResults, setClienteResults] = useState<any[]>([]);
   const [showClienteDropdown, setShowClienteDropdown] = useState(false);
