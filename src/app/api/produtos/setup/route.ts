@@ -28,11 +28,17 @@ export async function GET() {
       WHERE sku ~ '^[0-9]{1,5}$'
     `;
 
-    const [skuAJRow] = await sql<{ next: string }[]>`
-      SELECT 'AJ' || LPAD((COALESCE(MAX(CAST(REPLACE(sku, 'AJ', '') AS INTEGER)), 1000) + 1)::text, 4, '0') AS next
+    const [skuAJRow] = await sql<{ next: string; esgotado: boolean }[]>`
+      SELECT
+        'AJ' || LPAD((COALESCE(MAX(CAST(SUBSTRING(sku FROM 3) AS INTEGER)), 1000) + 1)::text, 4, '0') AS next,
+        COALESCE(MAX(CAST(SUBSTRING(sku FROM 3) AS INTEGER)), 1000) >= 9999 AS esgotado
       FROM public.produtos
       WHERE sku ~ '^AJ[0-9]{4}$'
     `;
+
+    if (skuAJRow?.esgotado) {
+      return NextResponse.json({ error: "Série AJ esgotada (AJ9999 atingido). Contate o administrador." }, { status: 409 });
+    }
 
     const categorias = await sql`
       SELECT id::integer AS id,

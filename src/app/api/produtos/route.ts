@@ -544,6 +544,12 @@ export async function POST(req: NextRequest) {
       sku = skuRow?.next ?? "1604";
     }
 
+    // ── Validar formato do SKU ───────────────────────────────────────────────
+    const SKU_REGEX = /^([0-9]{1,5}|AJ[0-9]{4})$/;
+    if (!SKU_REGEX.test(sku)) {
+      return NextResponse.json({ error: `SKU "${sku}" fora do padrão (numérico até 5 dígitos ou AJ + 4 dígitos)` }, { status: 400 });
+    }
+
     // ── Verificar SKU único ──────────────────────────────────────────────────
     const [dupSku] = await sql`SELECT 1 FROM public.produtos WHERE sku = ${sku} LIMIT 1`;
     if (dupSku) return NextResponse.json({ error: `SKU "${sku}" já existe` }, { status: 409 });
