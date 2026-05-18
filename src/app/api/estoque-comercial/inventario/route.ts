@@ -80,58 +80,19 @@ export async function POST(req: NextRequest) {
     RETURNING id, created_at
   `;
 
-  if (cat) {
-    // Preencher itens filtrados pela categoria (snapshot)
-    await sql`
-      INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
-      SELECT
-        ${inv.id},
-        v.produto_id,
-        COALESCE(v.saldo_fisico, 0)::INTEGER
-      FROM alissonerp.vw_saldo_estoque_comercial_v2 v
-      JOIN public.produtos p ON p.id_produto = v.produto_id
-      WHERE v.local_estoque_id = ${local_estoque_id}
-        AND p.categoria = ${cat}
-        AND v.saldo_fisico IS NOT NULL
-    `;
-
-    // Também incluir produtos com config ativa da categoria escolhida
-    await sql`
-      INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
-      SELECT ${inv.id}, cfg.produto_id, 0
-      FROM alissonerp.estoque_comercial_config cfg
-      JOIN public.produtos p ON p.id_produto = cfg.produto_id
-      WHERE cfg.ativo = true
-        AND p.categoria = ${cat}
-        AND NOT EXISTS (
-          SELECT 1 FROM alissonerp.itens_inventario_comercial ii
-          WHERE ii.inventario_id = ${inv.id} AND ii.produto_id = cfg.produto_id
-        )
-    `;
-  } else {
-    // Sem filtro de categoria — comportamento original
-    await sql`
-      INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
-      SELECT
-        ${inv.id},
-        v.produto_id,
-        COALESCE(v.saldo_fisico, 0)::INTEGER
-      FROM alissonerp.vw_saldo_estoque_comercial_v2 v
-      WHERE v.local_estoque_id = ${local_estoque_id}
-        AND v.saldo_fisico IS NOT NULL
-    `;
-
-    await sql`
-      INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
-      SELECT ${inv.id}, cfg.produto_id, 0
-      FROM alissonerp.estoque_comercial_config cfg
-      WHERE cfg.ativo = true
-        AND NOT EXISTS (
-          SELECT 1 FROM alissonerp.itens_inventario_comercial ii
-          WHERE ii.inventario_id = ${inv.id} AND ii.produto_id = cfg.produto_id
-        )
-    `;
-  }
+  // Snapshot: todos os produtos com saldo > 0 no local, filtrados pela categoria se informada
+  await sql`
+    INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
+    SELECT
+      ${inv.id},
+      v.produto_id,
+      v.saldo_fisico::INTEGER
+    FROM alissonerp.vw_saldo_estoque_comercial_v2 v
+    JOIN public.produtos p ON p.id_produto = v.produto_id
+    WHERE v.local_estoque_id = ${local_estoque_id}
+      AND v.saldo_fisico > 0
+      ${cat ? sql`AND (p.categoria = ${cat} OR p.categoria LIKE ${cat + ' -> %'})` : sql``}
+  `;
 
   return NextResponse.json({ id: inv.id, created_at: inv.created_at }, { status: 201 });
 

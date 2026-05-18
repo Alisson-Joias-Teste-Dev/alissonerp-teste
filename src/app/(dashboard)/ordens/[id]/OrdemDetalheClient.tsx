@@ -9,7 +9,6 @@ import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
 import FichaTecnicaForm, { TIPOS_ITEM, type TipoItem, type FichaTecnicaDados, validarFichaTecnica } from "@/components/ordens/FichaTecnicaForm";
 import { Pencil, X, Save, Loader2, AlertCircle, Ban } from "lucide-react";
 import { formatDateBR } from "@/lib/formatters";
-import { getPublicUrl } from "@/lib/storage-url";
 
 const C = {
   esmeralda: "#184036",
@@ -116,19 +115,23 @@ function MarcadorBadge({ marcador }: { marcador: string }) {
   );
 }
 
-function PecaClienteCard({ fotoPeca, fotoPeca2, pesoPeca, videoObs }: {
+function PecaClienteCard({ fotoPeca, fotoPeca2, fotoPecaSignedUrl, fotoPeca2SignedUrl, pesoPeca, videoObs }: {
   fotoPeca: string | null;
   fotoPeca2: string | null;
+  fotoPecaSignedUrl: string | null;
+  fotoPeca2SignedUrl: string | null;
   pesoPeca: number | null;
   videoObs: string | null;
 }) {
-  // getPublicUrl roteia bucket privado pelo proxy /api/storage/[bucket]/[...path]
-  const toUrl = (path: string | null, bucket: string) =>
-    path ? getPublicUrl(bucket, path) : null;
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
-  const fotoUrl  = toUrl(fotoPeca,  "ordem-fotos");
-  const fotoUrl2 = toUrl(fotoPeca2, "ordem-fotos");
-  const videoUrl = toUrl(videoObs,  "ordem-videos");
+  // ordem-fotos é PRIVADO — usa signed URL gerada server-side (TTL 1h).
+  // ordem-videos não está na lista de privados — URL pública direta.
+  const fotoUrl  = fotoPecaSignedUrl ?? null;
+  const fotoUrl2 = fotoPeca2SignedUrl ?? null;
+  const videoUrl = videoObs
+    ? (videoObs.startsWith("http") ? videoObs : `${SUPABASE_URL}/storage/v1/object/public/ordem-videos/${videoObs}`)
+    : null;
 
   return (
     <div className="bg-white rounded-xl border p-5" style={{ borderColor: "#E8DCC8" }}>
@@ -204,6 +207,8 @@ interface Props {
   timeline: any[];
   userRole: string | null;
   conversaoSku?: any | null;
+  fotoPecaSignedUrl?: string | null;
+  fotoPeca2SignedUrl?: string | null;
 }
 
 // Roles "operacionais" — colaboradores de execução que só precisam ver a
@@ -211,7 +216,7 @@ interface Props {
 // Transferências). Gestão (admin, gerente, pcp, consultora) vê tudo.
 const ROLES_SO_FICHA = ["ourives", "motoboy", "estoquista_fabrica", "estoquista_loja"];
 
-export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline, userRole }: Props) {
+export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline, userRole, conversaoSku = null, fotoPecaSignedUrl = null, fotoPeca2SignedUrl = null }: Props) {
   const router = useRouter();
   const soFicha = userRole != null && ROLES_SO_FICHA.includes(userRole);
   const [tab, setTab] = useState<Tab>(soFicha ? "ficha" : "producao");
@@ -533,6 +538,8 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
             <PecaClienteCard
               fotoPeca={ordem.foto_peca_servico}
               fotoPeca2={ordem.foto_peca_servico_2 ?? null}
+              fotoPecaSignedUrl={fotoPecaSignedUrl}
+              fotoPeca2SignedUrl={fotoPeca2SignedUrl}
               pesoPeca={ordem.peso_peca_servico}
               videoObs={ordem.video_observacao}
             />

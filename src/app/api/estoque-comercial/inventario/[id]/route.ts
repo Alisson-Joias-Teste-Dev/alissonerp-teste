@@ -4,14 +4,10 @@ import { createServerSupabase } from "@/lib/supabase/server";
 
 interface Params { params: Promise<{ id: string }> }
 
-// GET /api/estoque-comercial/inventario/[id] — detalhe do inventário + itens
-export async function GET(
-  req: NextRequest,
-  { params }: Params
-) {
+export async function GET(req: NextRequest, { params }: Params) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  if (!user) return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
 
   const { id } = await params;
   const invId = Number(id);
@@ -23,13 +19,12 @@ export async function GET(
       uc.email AS criado_por_email,
       uf.email AS concluido_por_email
     FROM alissonerp.inventarios_comercial i
-
     LEFT JOIN alissonerp.locais_estoque le ON le.id = i.local_estoque_id
     LEFT JOIN auth.users uc ON uc.id = i.created_by
     LEFT JOIN auth.users uf ON uf.id = i.concluido_por
     WHERE i.id = ${invId}
   `;
-  if (!inventario) return NextResponse.json({ error: "Inventário não encontrado" }, { status: 404 });
+  if (!inventario) return NextResponse.json({ error: "Inventario nao encontrado" }, { status: 404 });
 
   const url = new URL(req.url);
   const soDivergentes = url.searchParams.get("divergentes") === "true";
@@ -37,7 +32,7 @@ export async function GET(
   const itens = await sql`
     SELECT
       ii.id, ii.produto_id, ii.quantidade_sistema, ii.quantidade_contada, ii.diferenca,
-      ii.contado_em, ii.movimento_ajuste_id,
+      ii.conferido, ii.contado_em, ii.movimento_ajuste_id,
       p.nome AS nome_produto, p.sku,
       uc.email AS contado_por_email
     FROM alissonerp.itens_inventario_comercial ii
@@ -53,10 +48,42 @@ export async function GET(
   const leituras = await sql`
     SELECT epc, evento, lido_em, operador::text AS operador
     FROM alissonerp.joias_leituras
-    WHERE evento = 'inventario' AND localizacao = ${inventario.local_nome}
+    WHERE inventario_id = ${invId}
     ORDER BY lido_em DESC
     LIMIT 200
   `;
 
-  return NextResponse.json({ inventario, itens, leituras });
+  // Chips lidos pelo app que nao estao no escopo do inventario
+  const excedentesForaInventario = await sql`
+    WITH epcs_lidos AS (
+      SELECT DISTINCT epc,
+        CASE
+          WHEN epc ~ '^[0-9]{24}$'
+          THEN CAST(SUBSTRING(epc FROM 5 FOR 9) AS BIGINT)
+          ELSE NULL
+        END AS id_api_produto
+      FROM alissonerp.joias_leituras
+      WHERE inventario_id = ${invId}
+    ),
+    ids_do_inventario AS (
+      SELECT p.id_api_produto
+      FROM alissonerp.itens_inventario_comercial ii
+      JOIN public.produtos p ON p.id_produto = ii.produto_id
+      WHERE ii.inventario_id = ${invId}
+        AND p.id_api_produto IS NOT NULL
+    )
+    SELECT
+      el.id_api_produto,
+      p.sku,
+      p.nome AS nome_produto,
+      COUNT(*)::int AS quantidade
+    FROM epcs_lidos el
+    JOIN public.produtos p ON p.id_api_produto = el.id_api_produto
+    WHERE el.id_api_produto IS NOT NULL
+      AND el.id_api_produto NOT IN (SELECT id_api_produto FROM ids_do_inventario)
+    GROUP BY el.id_api_produto, p.sku, p.nome
+    ORDER BY p.sku
+  `;
+
+  return NextResponse.json({ inventario, itens, leituras, excedentesForaInventario });
 }

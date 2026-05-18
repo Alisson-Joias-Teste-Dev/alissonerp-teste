@@ -22,10 +22,26 @@ export async function gerarAjustesDivergencias(
   `;
 
   let ajustes = 0;
+  let erros = 0;
   for (const item of divergentes) {
     const diff = Number(item.diferenca);
     const tipo = diff > 0 ? "entrada" : "saida";
     const quantidade = Math.abs(diff);
+
+    // Para saidas, verificar saldo antes para evitar STOCK_NEGATIVE
+    if (tipo === "saida") {
+      const [saldo] = await exec`
+        SELECT COALESCE(saldo_fisico, 0) AS saldo
+        FROM alissonerp.vw_saldo_estoque_comercial_v2
+        WHERE produto_id = ${item.produto_id}
+          AND local_estoque_id = ${localEstoqueId}
+      `;
+      if (!saldo || Number(saldo.saldo) < quantidade) {
+        console.warn(`[gerarAjustes] item ${item.produto_id} saldo insuficiente (${saldo?.saldo ?? 0} < ${quantidade}), pulando`);
+        erros++;
+        continue;
+      }
+    }
 
     const [mov] = await exec`
       INSERT INTO alissonerp.movimentacoes_estoque_comercial
@@ -49,5 +65,5 @@ export async function gerarAjustesDivergencias(
     ajustes++;
   }
 
-  return { ajustes, total: divergentes.length };
+  return { ajustes, erros, total: divergentes.length };
 }

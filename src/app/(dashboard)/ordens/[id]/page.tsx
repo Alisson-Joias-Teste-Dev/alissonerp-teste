@@ -91,6 +91,18 @@ export default async function OrdemDetalhePage({
     }
   }
 
+  // Signed URLs para fotos da peça (bucket ordem-fotos é PRIVADO)
+  const fotoPecaPath  = (ordens[0] as any).foto_peca_servico  as string | null;
+  const fotoPeca2Path = (ordens[0] as any).foto_peca_servico_2 as string | null;
+  const [fotoPecaSignedUrl, fotoPeca2SignedUrl] = await Promise.all([
+    fotoPecaPath
+      ? supabase.storage.from("ordem-fotos").createSignedUrl(fotoPecaPath, 3600).then(r => r.data?.signedUrl ?? null)
+      : Promise.resolve(null),
+    fotoPeca2Path
+      ? supabase.storage.from("ordem-fotos").createSignedUrl(fotoPeca2Path, 3600).then(r => r.data?.signedUrl ?? null)
+      : Promise.resolve(null),
+  ]);
+
   // Ficha técnica: tentar view legada (Directus) primeiro, senão tabela ERP nova
   let fichaTecnica = (fichas[0] as any) ?? null;
   if (!fichaTecnica) {
@@ -118,6 +130,8 @@ export default async function OrdemDetalhePage({
       timeline={timeline as any[]}
       userRole={userRole}
       conversaoSku={conversaoSku[0] ?? null}
+      fotoPecaSignedUrl={fotoPecaSignedUrl}
+      fotoPeca2SignedUrl={fotoPeca2SignedUrl}
     />
   );
 }

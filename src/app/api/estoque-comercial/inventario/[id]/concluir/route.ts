@@ -7,7 +7,7 @@ interface Params { params: Promise<{ id: string }> }
 const ROLES_GERENTES = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 
 // POST /api/estoque-comercial/inventario/[id]/concluir
-// Finaliza inventário e gera ajustes automáticos para divergências
+// Conclui o inventario — registra divergencias mas NAO ajusta estoque automaticamente
 export async function POST(
   _req: NextRequest,
   { params }: Params
@@ -29,63 +29,23 @@ export async function POST(
     FROM alissonerp.inventarios_comercial WHERE id = ${invId}
   `;
   if (!inv) return NextResponse.json({ error: "Inventário não encontrado" }, { status: 404 });
-  if (inv.status === 'concluido') {
+  if (inv.status === "concluido") {
     return NextResponse.json({ error: "Inventário já concluído" }, { status: 409 });
   }
-  if (inv.status === 'cancelado') {
+  if (inv.status === "cancelado") {
     return NextResponse.json({ error: "Inventário cancelado" }, { status: 409 });
   }
 
-  // Verificar se todos os itens foram contados
-  const [naoContados] = await sql`
-    SELECT COUNT(*) AS total
+  // Contar divergencias para o relatorio (sem gerar ajustes de estoque)
+  const [stats] = await sql`
+    SELECT
+      COUNT(*) FILTER (WHERE diferenca != 0 AND diferenca IS NOT NULL) AS divergentes,
+      COUNT(*) FILTER (WHERE quantidade_contada IS NULL)               AS nao_contados
     FROM alissonerp.itens_inventario_comercial
-    WHERE inventario_id = ${invId} AND quantidade_contada IS NULL
-  `;
-  if (Number(naoContados.total) > 0) {
-    return NextResponse.json(
-      { error: `Ainda existem ${naoContados.total} itens não contados` },
-      { status: 409 }
-    );
-  }
-
-  // Gerar ajustes para divergências
-  const divergentes = await sql`
-    SELECT id, produto_id, diferenca
-    FROM alissonerp.itens_inventario_comercial
-    WHERE inventario_id = ${invId} AND diferenca != 0
+    WHERE inventario_id = ${invId}
   `;
 
-  let ajustes = 0;
-  for (const item of divergentes) {
-    const diff = Number(item.diferenca);
-    const tipo = diff > 0 ? 'entrada' : 'saida';
-    const quantidade = Math.abs(diff);
-
-    const [mov] = await sql`
-      INSERT INTO alissonerp.movimentacoes_estoque_comercial
-        (produto_id, tipo, quantidade, motivo, local_estoque_id, status,
-         referencia_id, referencia_tipo, observacao, created_by)
-      VALUES
-        (${item.produto_id}, ${tipo}, ${quantidade}, 'inventario',
-         ${inv.local_estoque_id}, 'efetivado',
-         ${invId}, 'inventarios_comercial',
-         ${'Ajuste inventário #' + invId + ' — diferença: ' + (diff > 0 ? '+' : '') + diff},
-         ${user.id})
-      RETURNING id
-    `;
-
-    // Vincular ajuste ao item
-    await sql`
-      UPDATE alissonerp.itens_inventario_comercial
-      SET movimento_ajuste_id = ${mov.id}
-      WHERE id = ${item.id}
-    `;
-
-    ajustes++;
-  }
-
-  // Concluir inventário
+  // Concluir inventario
   await sql`
     UPDATE alissonerp.inventarios_comercial
     SET status = 'concluido', data_conclusao = now(), concluido_por = ${user.id}
@@ -94,7 +54,8 @@ export async function POST(
 
   return NextResponse.json({
     id: invId,
-    ajustes_gerados: ajustes,
-    total_divergentes: divergentes.length,
+    divergentes: Number(stats.divergentes),
+    nao_contados: Number(stats.nao_contados),
+    ajustes_gerados: 0,  // inventario nao ajusta estoque automaticamente
   });
 }
