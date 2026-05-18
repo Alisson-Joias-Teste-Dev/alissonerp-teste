@@ -562,6 +562,10 @@ export default function OrcamentoClient({
     setShowClienteDropdown(false);
     setClienteResults([]);
     setClienteSemResultados(false);
+    // Bug fix: sem markDirty, o orcamento travado nao detectava a mudanca de
+    // cliente e o botao Salvar ficava desabilitado — usuario via cliente no
+    // input mas nao conseguia persistir e nem aprovar (422 "Vincule cliente").
+    markDirty();
   }
 
   async function buscaCEP(cep: string) {
@@ -1926,7 +1930,7 @@ export default function OrcamentoClient({
                 <User size={14} className="text-green-600" />
                 <p className="text-sm font-medium" style={{ color: "#1A1A1A" }}>{clientName}</p>
               </div>
-              <button onClick={() => { setClienteId(null); setClientName(""); setClienteResults([]); setClienteSemResultados(false); }}
+              <button onClick={() => { setClienteId(null); setClientName(""); setClienteResults([]); setClienteSemResultados(false); markDirty(); }}
                 className="text-gray-400 hover:text-gray-600 ml-2">
                 <X size={14} />
               </button>
@@ -1937,7 +1941,7 @@ export default function OrcamentoClient({
                 <div className="flex items-center gap-2">
                   <User size={14} className="text-gray-400" />
                   <input type="text" value={clientName}
-                    onChange={(e) => { setClientName(e.target.value); setClienteId(null); buscarClientes(e.target.value); }}
+                    onChange={(e) => { setClientName(e.target.value); setClienteId(null); buscarClientes(e.target.value); markDirty(); }}
                     onFocus={() => { if (clienteResults.length > 0) setShowClienteDropdown(true); }}
                     onBlur={() => setTimeout(() => setShowClienteDropdown(false), 150)}
                     placeholder="Buscar cliente pelo nome ou CPF..." className="flex-1 text-sm outline-none" />
@@ -2665,7 +2669,7 @@ export default function OrcamentoClient({
           <div className="flex items-center gap-2 bg-white rounded-xl border px-3 py-2" style={{ borderColor: clienteId ? "#059669" : C.cremeBorder }}>
             <User size={14} className={clienteId ? "text-green-600" : "text-gray-400"} />
             <input type="text" value={clientName}
-              onChange={(e) => { setClientName(e.target.value); setClienteId(null); buscarClientes(e.target.value); }}
+              onChange={(e) => { setClientName(e.target.value); setClienteId(null); buscarClientes(e.target.value); markDirty(); }}
               onFocus={() => { if (clienteResults.length > 0) setShowClienteDropdown(true); }}
               placeholder="Buscar cliente..."
               className="flex-1 text-sm outline-none bg-transparent text-gray-700 placeholder:text-gray-300" />
