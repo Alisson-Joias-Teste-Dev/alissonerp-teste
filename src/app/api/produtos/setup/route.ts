@@ -29,9 +29,9 @@ export async function GET() {
     `;
 
     const [skuAJRow] = await sql<{ next: string }[]>`
-      SELECT 'AJ' || (COALESCE(MAX(CAST(REPLACE(sku, 'AJ', '') AS INTEGER)), 1000) + 1)::text AS next
+      SELECT 'AJ' || LPAD((COALESCE(MAX(CAST(REPLACE(sku, 'AJ', '') AS INTEGER)), 1000) + 1)::text, 4, '0') AS next
       FROM public.produtos
-      WHERE sku ~ '^AJ[0-9]{1,5}$'
+      WHERE sku ~ '^AJ[0-9]{4}$'
     `;
 
     const categorias = await sql`
