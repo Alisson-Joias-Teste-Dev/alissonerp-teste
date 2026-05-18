@@ -25,7 +25,7 @@ export async function GET() {
     const [skuRow] = await sql<{ next: string }[]>`
       SELECT (COALESCE(MAX(sku::integer), 1603) + 1)::text AS next
       FROM public.produtos
-      WHERE sku ~ '^[0-9]+$'
+      WHERE sku ~ '^[0-9]{1,5}$'
     `;
 
     const [skuAJRow] = await sql<{ next: string }[]>`

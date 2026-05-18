@@ -539,7 +539,7 @@ export async function POST(req: NextRequest) {
     if (!sku) {
       const [skuRow] = await sql<{ next: string }[]>`
         SELECT (COALESCE(MAX(sku::integer), 1603) + 1)::text AS next
-        FROM public.produtos WHERE sku ~ '^[0-9]+$'
+        FROM public.produtos WHERE sku ~ '^[0-9]{1,5}$'
       `;
       sku = skuRow?.next ?? "1604";
     }
