@@ -31,7 +31,7 @@ export async function GET() {
     const [skuAJRow] = await sql<{ next: string }[]>`
       SELECT 'AJ' || (COALESCE(MAX(CAST(REPLACE(sku, 'AJ', '') AS INTEGER)), 1000) + 1)::text AS next
       FROM public.produtos
-      WHERE sku ~ '^AJ[0-9]+$'
+      WHERE sku ~ '^AJ[0-9]{1,5}$'
     `;
 
     const categorias = await sql`
