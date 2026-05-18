@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { getPublicUrl, deleteFile } from "@/lib/storage";
+import { deleteFile } from "@/lib/storage";
 import { checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 import { zodError } from "@/lib/schemas/common";
 
@@ -60,10 +60,15 @@ export async function GET(
     fotos.push({ path, url: `${STORAGE_PUBLIC_URL}/${path}`, origem: "pdv" });
   }
 
-  // 2. Fotos do ERP — URL pública direta (bucket público após migração)
+  // 2. Fotos do ERP — bucket ordem-fotos é PRIVADO, usar signed URL (TTL 1h)
   const erpPaths: string[] = ordemErp.fotos_paths ?? [];
   for (const path of erpPaths) {
-    fotos.push({ path, url: getPublicUrl("ordem-fotos", path), origem: "erp" });
+    const { data: signedData } = await supabase.storage
+      .from("ordem-fotos")
+      .createSignedUrl(path, 3600);
+    if (signedData?.signedUrl) {
+      fotos.push({ path, url: signedData.signedUrl, origem: "erp" });
+    }
   }
 
   return NextResponse.json({ fotos });
