@@ -544,6 +544,19 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [abrirNfce, setAbrirNfce] = useState(false);
   const [verNotaId, setVerNotaId] = useState<number | null>(null);
 
+  // Modal de solicitação de alteração (quando o backend devolve 403 com solicitar:true)
+  const [solicitarPayload, setSolicitarPayload] = useState<{
+    tipo: "pagamento_status" | "venda_campo";
+    campo?: string;
+    pagamento_id?: number;
+    valor_solicitado: unknown;
+    mensagemBloqueio: string;
+  } | null>(null);
+  const [solicitarMotivo, setSolicitarMotivo] = useState("");
+  const [solicitarEnviando, setSolicitarEnviando] = useState(false);
+  const [solicitarErro, setSolicitarErro] = useState("");
+  const [solicitarSucesso, setSolicitarSucesso] = useState(false);
+
   // ── Load venda ──────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoadingVenda(true); setLoadError("");
@@ -1135,11 +1148,66 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
           method: "PATCH", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: "confirmado" }),
         });
-        if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+        if (!res.ok) {
+          const d = await res.json();
+          if (res.status === 403 && d.solicitar === true) {
+            setSolicitarPayload({
+              tipo: "pagamento_status",
+              pagamento_id: pagId,
+              valor_solicitado: "confirmado",
+              mensagemBloqueio: d.error ?? "Confirmação precisa de aprovação.",
+            });
+            setSolicitarMotivo("");
+            setSolicitarErro("");
+            setSolicitarSucesso(false);
+            return;
+          }
+          throw new Error(d.error ?? `HTTP ${res.status}`);
+        }
       }
       await load();
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao confirmar pagamento"); }
     finally { setUpdating(false); }
+  }
+
+  // ── Enviar solicitação de alteração (modal aberto via 403 + solicitar:true) ──
+  async function enviarSolicitacaoAlteracao() {
+    if (!venda || !solicitarPayload) return;
+    if (!solicitarMotivo.trim()) {
+      setSolicitarErro("Informe o motivo da solicitação.");
+      return;
+    }
+    setSolicitarEnviando(true);
+    setSolicitarErro("");
+    try {
+      const body: Record<string, unknown> = {
+        tipo: solicitarPayload.tipo,
+        valor_solicitado: solicitarPayload.valor_solicitado,
+        motivo: solicitarMotivo.trim(),
+      };
+      if (solicitarPayload.campo) body.campo = solicitarPayload.campo;
+      if (solicitarPayload.pagamento_id) body.pagamento_id = solicitarPayload.pagamento_id;
+
+      const res = await fetch(`/api/vendas/${venda.id}/solicitar-alteracao`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      setSolicitarSucesso(true);
+    } catch (e) {
+      setSolicitarErro(e instanceof Error ? e.message : "Erro ao enviar solicitação");
+    } finally {
+      setSolicitarEnviando(false);
+    }
+  }
+
+  function fecharSolicitarModal() {
+    setSolicitarPayload(null);
+    setSolicitarMotivo("");
+    setSolicitarErro("");
+    setSolicitarSucesso(false);
   }
 
   // ── Solicitar aprovação para cartão de crédito (desconto >20%) ──────────
@@ -1303,6 +1371,22 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
           if (res.status === 409 && d.error?.includes("Conflito")) {
             throw new Error("Esta venda foi modificada por outro usuário. Recarregue a página.");
           }
+          // Backend bloqueou por ser campo restrito a admin — abre modal de solicitação.
+          if (res.status === 403 && d.solicitar === true) {
+            const campoBloqueado = detectarCampoBloqueado(patch, d.error);
+            if (campoBloqueado) {
+              setSolicitarPayload({
+                tipo: "venda_campo",
+                campo: campoBloqueado,
+                valor_solicitado: patch[campoBloqueado],
+                mensagemBloqueio: d.error ?? "Esta alteração precisa de aprovação.",
+              });
+              setSolicitarMotivo("");
+              setSolicitarErro("");
+              setSolicitarSucesso(false);
+              return;
+            }
+          }
           throw new Error(d.error ?? `HTTP ${res.status}`);
         }
         // Atualiza referência local sem recarregar a página inteira
@@ -1311,6 +1395,21 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       setIsDirty(false);
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao salvar"); }
     finally { setSaving(false); }
+  }
+
+  // Extrai o nome do campo que o backend bloqueou a partir da mensagem de erro.
+  // Backend retorna algo como: `O campo "situacao" só pode ser alterado...`
+  function detectarCampoBloqueado(patch: Record<string, unknown>, errorMsg: string | undefined): string | null {
+    const ADMIN_ONLY = ["situacao", "total_frete", "cliente_id", "vendedor_id", "data_venda"];
+    if (errorMsg) {
+      const match = /"([a-z_]+)"/.exec(errorMsg);
+      if (match && ADMIN_ONLY.includes(match[1])) return match[1];
+    }
+    // Fallback: primeiro campo admin-only do patch.
+    for (const k of ADMIN_ONLY) {
+      if (k in patch) return k;
+    }
+    return null;
   }
 
   // ── Status change ───────────────────────────────────────────────────────────
@@ -1325,6 +1424,19 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       const d = await res.json();
       if (res.status === 409 && d.error?.includes("Conflito")) {
         setSaveErr("Esta venda foi modificada por outro usuário. Recarregue a página.");
+        return;
+      }
+      // Backend bloqueou troca de situacao por exigir admin — abre modal
+      if (res.status === 403 && d.solicitar === true) {
+        setSolicitarPayload({
+          tipo: "venda_campo",
+          campo: "situacao",
+          valor_solicitado: s,
+          mensagemBloqueio: d.error ?? "Esta alteração precisa de aprovação.",
+        });
+        setSolicitarMotivo("");
+        setSolicitarErro("");
+        setSolicitarSucesso(false);
         return;
       }
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
@@ -3176,6 +3288,80 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     )}
     {verNotaId && (
       <NotaFiscalDetalheModal notaId={verNotaId} onClose={() => setVerNotaId(null)} />
+    )}
+    {solicitarPayload && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="w-full max-w-md rounded-xl bg-white shadow-xl border" style={{ borderColor: C.cremeBorder }}>
+          <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: C.cremeBorder }}>
+            <h3 className="text-sm font-semibold" style={{ color: C.esmeralda }}>
+              {solicitarSucesso ? "Solicitação enviada" : "Solicitar alteração ao administrador"}
+            </h3>
+            <button onClick={fecharSolicitarModal} className="p-1 rounded hover:bg-gray-100" aria-label="Fechar">
+              <X size={16} />
+            </button>
+          </div>
+          {solicitarSucesso ? (
+            <div className="p-5 text-sm space-y-3">
+              <p className="text-green-700 font-medium">Solicitação enviada com sucesso!</p>
+              <p className="text-gray-600">Aguarde aprovação do administrador. Você será notificado quando ela for processada.</p>
+              <div className="flex justify-end pt-2">
+                <button onClick={fecharSolicitarModal}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                  Fechar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="p-5 space-y-3">
+              <div className="rounded-lg p-3 text-xs" style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                {solicitarPayload.mensagemBloqueio}
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: C.esmeralda }}>
+                  Campo: <span className="font-mono">{solicitarPayload.campo ?? `pagamento ${solicitarPayload.pagamento_id}`}</span>
+                </label>
+                <div className="text-xs text-gray-600">
+                  Novo valor solicitado: <span className="font-mono">{String(solicitarPayload.valor_solicitado)}</span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: C.esmeralda }}>
+                  Motivo da solicitação *
+                </label>
+                <textarea
+                  value={solicitarMotivo}
+                  onChange={(e) => setSolicitarMotivo(e.target.value)}
+                  rows={4}
+                  maxLength={1000}
+                  placeholder="Explique por que esta alteração é necessária..."
+                  className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2"
+                  style={{ borderColor: C.cremeBorder }}
+                  disabled={solicitarEnviando}
+                />
+              </div>
+              {solicitarErro && (
+                <p className="text-xs text-red-600">{solicitarErro}</p>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={fecharSolicitarModal}
+                  disabled={solicitarEnviando}
+                  className="px-4 py-2 rounded-lg text-sm border disabled:opacity-50"
+                  style={{ borderColor: C.cremeBorder }}>
+                  Cancelar
+                </button>
+                <button onClick={enviarSolicitacaoAlteracao}
+                  disabled={solicitarEnviando || !solicitarMotivo.trim()}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+                  style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                  {solicitarEnviando && <Loader2 size={14} className="animate-spin" />}
+                  Enviar solicitação
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     )}
     </>
   );

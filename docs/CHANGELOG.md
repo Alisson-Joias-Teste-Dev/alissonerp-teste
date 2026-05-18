@@ -1,8 +1,83 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.58.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 18/05/2026 — Versão: v2.60.1 <!-- Revisado 18/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(vendas): correções QA em solicitação de alteração (v2.60.1)
+
+Endurecimento dos guards e UI ao redor do feature de solicitação de alteração
+introduzido na v2.60.0, conforme apontado no QA.
+
+**Backend:**
+
+- `aplicarCampoVenda` em `PATCH /api/vendas/solicitacoes-alteracao/[id]`:
+  - mudanças de `situacao` agora roteiam por `approveVenda` / `concluirVenda`
+    quando aplicável — antes faziam UPDATE direto e ignoravam guards de Tiny,
+    contas a receber e criação de ordem.
+  - `cliente_id`, `vendedor_id`, `data_venda`: se a venda saiu de `rascunho`,
+    a solicitação é auto-rejeitada (HTTP 400 + `status='rejeitado'` com
+    `motivo_decisao` explicando).
+  - `total_frete`: continua recalculando `total_venda` como antes.
+- `aplicarStatusPagamento`: UPDATE em `pagamentos_venda` agora roda dentro de
+  `sql.begin(tx => …)` para atomicidade.
+- `POST /api/vendas/[id]/solicitar-alteracao`: bloqueia (HTTP 409) solicitação
+  em venda cancelada, bloqueada ou concluída.
+- `logAudit` registra a decisão (aprovado / rejeitado) na tabela
+  `alissonerp.audit_log` após cada PATCH.
+- Notificação ao solicitante agora inclui `link = /vendas/{venda_id}`.
+- Migration `262_solicitacoes_alteracao.sql`: removido `UPDATE` do GRANT a
+  `authenticated` — atualizações só via service_role/server. Evita bypass via
+  PostgREST.
+
+**Frontend (`VendaDetalheClient.tsx`):**
+
+- Quando `PATCH /api/vendas/[id]` ou `PATCH /api/vendas/[id]/pagamentos/[pagId]`
+  retorna 403 com `solicitar: true`, abre modal pedindo `motivo` e dispara
+  `POST /api/vendas/{id}/solicitar-alteracao` em vez de só exibir o erro.
+- Wired em `handleSave`, `changeSituacao` e `confirmarPagamento`.
+
+**Menu:**
+
+- `src/lib/auth/permissions.ts`: novo item "Solic. Alteração"
+  (`/vendas/solicitacoes-alteracao`) no grupo Comercial, visível para
+  admin/desenvolvedor (e diretor via módulos).
+
+## feat(vendas): bloqueio edição financeira + solicitação de alteração (v2.60.0)
+
+Vendedora/gerente passam a abrir uma solicitação de alteração quando precisam
+mexer em campos financeiros ou pagamentos confirmados — mesmo padrão da
+solicitação de desconto (>30%).
+
+**Bloqueios de API (403 + `solicitar: true`):**
+
+- `PATCH /api/vendas/[id]/pagamentos/[pagId]` — não-admin (≠ admin/desenvolvedor/diretor)
+  não pode mais alterar pagamento já `confirmado` nem mover qualquer pagamento
+  para `confirmado` ou `estornado`.
+- `PATCH /api/vendas/[id]` — não-admin não pode alterar `situacao`, `total_frete`,
+  `cliente_id`, `vendedor_id` nem `data_venda`. Demais campos seguem livres.
+- Gerente segue a mesma regra de consultora por ora (decisão de produto).
+
+**Novas rotas:**
+
+- `POST /api/vendas/[id]/solicitar-alteracao` — vendedora cria solicitação
+  (`tipo: "pagamento_status" | "venda_campo"`, com snapshot do `valor_atual`).
+  Bloqueia duplicata pendente para o mesmo (venda, campo, pagamento).
+- `GET  /api/vendas/solicitacoes-alteracao?status=pendente|aprovado|rejeitado` — listagem admin.
+- `PATCH /api/vendas/solicitacoes-alteracao/[id]` — admin decide. Se aprovado,
+  aplica a mudança usando os helpers existentes de `vendas-aprovar.ts`
+  (`approveVenda`, `concluirVenda`, `estornarVenda`) — mesma cadeia de
+  auto-aprovar/concluir do PATCH original.
+
+**UI admin:**
+
+- `/vendas/solicitacoes-alteracao` — espelha `/vendas/autorizacoes`, com tabs
+  Pendentes / Aprovadas / Rejeitadas. Aprovação é direta; rejeição abre input
+  inline para motivo. Notifica solicitante em ambos os casos.
+
+**Migration:** `262_solicitacoes_alteracao.sql` cria a tabela
+`alissonerp.solicitacoes_alteracao` com `tipo`, `valor_atual`/`valor_solicitado`
+em JSONB e índices por `(status, created_at DESC)` e `venda_id`.
 
 ## fix(security): onda 1J-2 — zod em ~153 rotas restantes (v2.58.0)
 

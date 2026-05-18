@@ -220,6 +220,21 @@ export async function PATCH(
   const rawBody = await req.json().catch(() => ({}));
   const parsedBody = VendaPatchSchema.safeParse(rawBody);
   if (!parsedBody.success) return zodError(parsedBody.error);
+
+  // Gate financeiro por campo — vendedora/gerente abre solicitação ao tentar
+  // alterar campos protegidos. Frontend usa flag `solicitar` pra abrir modal.
+  const CAMPOS_ADMIN_ONLY = ["situacao", "total_frete", "cliente_id", "vendedor_id", "data_venda"];
+  const ROLES_FINANCEIRO = ["admin", "desenvolvedor", "diretor"];
+  if (!ROLES_FINANCEIRO.includes(usuario.role)) {
+    for (const campo of CAMPOS_ADMIN_ONLY) {
+      if ((rawBody as Record<string, unknown>)[campo] !== undefined) {
+        return NextResponse.json(
+          { error: `O campo "${campo}" só pode ser alterado pelo admin. Envie uma solicitação.`, solicitar: true },
+          { status: 403 },
+        );
+      }
+    }
+  }
   // Cast pra preservar tipos legados (situacao mutavel etc).
   const body = parsedBody.data as {
     situacao?:             string;

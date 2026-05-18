@@ -14,12 +14,17 @@ const PagamentoPatchSchema = z.object({
   gateway_id: z.string().nullable().optional(),
 }).passthrough();
 
-async function checkOwnership(userId: string, vendaId: number) {
+// Roles autorizadas a alterar pagamentos confirmados / confirmar / estornar.
+// Vendedora/gerente devem abrir solicitação via /solicitar-alteracao.
+const ROLES_FINANCEIRO = ["admin", "desenvolvedor", "diretor"];
+
+async function checkOwnership(userId: string, vendaId: number): Promise<string> {
   const [u] = await sql<{ role: string }[]>`
     SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid LIMIT 1
   `;
   if (!u) throw new ForbiddenError("Usuario nao encontrado");
   await requireVendaOwnership({ id: userId, role: u.role, email: "" }, vendaId);
+  return u.role;
 }
 
 // ─── PATCH /api/vendas/[id]/pagamentos/[pagId] ─────────────────────────────────
@@ -39,7 +44,7 @@ export async function PATCH(
   if (isNaN(vendaId) || isNaN(pId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [pag] = await sql`
-    SELECT p.id, v.bloqueado, v.situacao AS venda_situacao
+    SELECT p.id, p.status, v.bloqueado, v.situacao AS venda_situacao
     FROM alissonerp.pagamentos_venda p
     JOIN alissonerp.vendas_erp v ON v.id = p.venda_id
     WHERE p.id = ${pId} AND p.venda_id = ${vendaId}
@@ -50,7 +55,8 @@ export async function PATCH(
   if (pag.venda_situacao === "concluido") return NextResponse.json({ error: "Venda concluída não permite alteração de pagamento" }, { status: 409 });
 
   // Onda 1D: consultora so altera pagamento de venda propria
-  try { await checkOwnership(user.id, vendaId); }
+  let userRole: string;
+  try { userRole = await checkOwnership(user.id, vendaId); }
   catch (e) {
     if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
     if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
@@ -61,6 +67,22 @@ export async function PATCH(
   const parsed = PagamentoPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
+
+  // Gate financeiro — vendedora/gerente abre solicitação ao tentar mexer no financeiro.
+  // Frontend usa o flag `solicitar` pra abrir o modal de "Solicitar alteração".
+  const isFinanceiro = ROLES_FINANCEIRO.includes(userRole);
+  if (pag.status === "confirmado" && !isFinanceiro) {
+    return NextResponse.json(
+      { error: "Pagamento confirmado só pode ser alterado pelo admin.", solicitar: true },
+      { status: 403 },
+    );
+  }
+  if ((body.status === "confirmado" || body.status === "estornado") && !isFinanceiro) {
+    return NextResponse.json(
+      { error: "Somente admin pode confirmar ou estornar pagamentos.", solicitar: true },
+      { status: 403 },
+    );
+  }
 
   // Força data_confirmacao ao confirmar (evita pagamento fantasma sem timestamp)
   if (body.status === "confirmado") {
