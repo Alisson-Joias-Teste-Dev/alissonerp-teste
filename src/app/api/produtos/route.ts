@@ -526,9 +526,15 @@ export async function POST(req: NextRequest) {
     if (!sku) {
       const [skuRow] = await sql<{ next: string }[]>`
         SELECT (COALESCE(MAX(sku::integer), 1603) + 1)::text AS next
-        FROM public.produtos WHERE sku ~ '^[0-9]+$'
+        FROM public.produtos WHERE sku ~ '^[0-9]{1,5}$'
       `;
       sku = skuRow?.next ?? "1604";
+    }
+
+    // ── Validar formato do SKU ───────────────────────────────────────────────
+    const SKU_REGEX = /^([0-9]{1,5}|AJ[0-9]{4})$/;
+    if (!SKU_REGEX.test(sku)) {
+      return NextResponse.json({ error: `SKU "${sku}" fora do padrão (numérico até 5 dígitos ou AJ + 4 dígitos)` }, { status: 400 });
     }
 
     // ── Verificar SKU único ──────────────────────────────────────────────────
