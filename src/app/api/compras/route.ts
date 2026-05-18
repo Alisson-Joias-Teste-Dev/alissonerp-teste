@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { normalizeRow } from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { authOr401 } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
+
+const CompraPostSchema = z.object({
+  fornecedor_id: z.coerce.number().int().nullable().optional(),
+  obs: z.string().nullable().optional(),
+  local_destino_id: z.coerce.number().int().nullable().optional(),
+  numero_nf: z.string().nullable().optional(),
+  data_compra: z.string().nullable().optional(),
+}).passthrough();
 
 // GET /api/compras — lista todas as compras com JOIN locais_estoque + fornecedor
 // Query params: ?situacao=rascunho&local_id=1
@@ -94,14 +104,10 @@ export async function POST(req: NextRequest) {
   if (errRes) return errRes;
 
   const localEstoqueDefault = await getParametroNumber(PARAM.LOCAL_ESTOQUE_DEFAULT_ID);
-  const { fornecedor_id, obs, local_destino_id, numero_nf, data_compra } =
-    await req.json() as {
-      fornecedor_id?: number | null;
-      obs?: string | null;
-      local_destino_id?: number | null;
-      numero_nf?: string | null;
-      data_compra?: string | null;
-    };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = CompraPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { fornecedor_id, obs, local_destino_id, numero_nf, data_compra } = parsed.data;
 
   const [row] = await sql`
     INSERT INTO alissonerp.compras

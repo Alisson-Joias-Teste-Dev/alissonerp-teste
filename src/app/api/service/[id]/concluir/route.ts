@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
@@ -6,6 +7,17 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const ConcluirServicoSchema = z.object({
+  peso_saida: z.coerce.number().positive(),
+  foto_peca_base64: z.string().min(1, "obrigatório"),
+  usou_solda: z.boolean(),
+  peso_fio_depois: z.coerce.number().nullable().optional(),
+  foto_fio_base64: z.string().nullable().optional(),
+  colocou_pedra: z.boolean().optional(),
+  pedras_colocadas: z.array(z.object({}).passthrough()).optional(),
+}).passthrough();
 
 // POST /api/service/[id]/concluir
 // Operador conclui o serviço: registra pesos, solda, pedras, fotos.
@@ -67,25 +79,17 @@ async function _handler(
   if (!hasAccess) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   // ── Body ──────────────────────────────────────────────────────────────────
-  const body = await req.json() as {
-    peso_saida: number;
-    foto_peca_base64: string;
-    usou_solda: boolean | null;
-    peso_fio_depois?: number | null;
-    foto_fio_base64?: string | null;
-    colocou_pedra?: boolean;
-    pedras_colocadas?: PedraMaterial[];
-  };
-
-  const {
-    peso_saida,
-    foto_peca_base64,
-    usou_solda,
-    peso_fio_depois,
-    foto_fio_base64,
-    colocou_pedra = false,
-    pedras_colocadas = [],
-  } = body;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConcluirServicoSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const peso_saida = body.peso_saida;
+  const foto_peca_base64 = body.foto_peca_base64;
+  const usou_solda = body.usou_solda;
+  const peso_fio_depois = body.peso_fio_depois;
+  const foto_fio_base64 = body.foto_fio_base64;
+  const colocou_pedra = body.colocou_pedra ?? false;
+  const pedras_colocadas = (body.pedras_colocadas ?? []) as unknown as PedraMaterial[];
 
   if (peso_saida == null || peso_saida <= 0) {
     return NextResponse.json({ error: "peso_saida é obrigatório e deve ser > 0" }, { status: 400 });

@@ -19,28 +19,32 @@
  * }
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
+import { zodError } from "@/lib/schemas/common";
 
 const MAX_BATCH = 500;
+
+const BulkEditPostSchema = z.object({
+  ids: z.array(z.union([z.coerce.number(), z.string()])).min(1, "ids obrigatório").max(MAX_BATCH),
+  updates: z.record(z.string(), z.unknown()).optional(),
+}).passthrough();
 
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
   if (!(await temAcessoModulo(user.role, "produtos", "escrever"))) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const body = await req.json().catch(() => ({}));
-  const idsRaw: unknown = body?.ids;
-  const updates: Record<string, unknown> = body?.updates ?? {};
+  const raw = await req.json().catch(() => ({}));
+  const parsed = BulkEditPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const idsRaw = body.ids;
+  const updates: Record<string, unknown> = body.updates ?? {};
 
-  if (!Array.isArray(idsRaw) || idsRaw.length === 0) {
-    return NextResponse.json({ error: "ids é obrigatório" }, { status: 400 });
-  }
-  if (idsRaw.length > MAX_BATCH) {
-    return NextResponse.json({ error: `Máximo de ${MAX_BATCH} por requisição` }, { status: 400 });
-  }
   const ids = idsRaw.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0);
   if (ids.length === 0) return NextResponse.json({ error: "ids inválidos" }, { status: 400 });
 

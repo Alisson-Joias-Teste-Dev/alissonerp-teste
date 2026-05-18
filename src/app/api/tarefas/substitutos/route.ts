@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const SubstitutoPostSchema = z.object({
+  usuario_id: z.string().min(1, "obrigatório"),
+  substituto_id: z.string().min(1, "obrigatório"),
+  inicio: z.string().optional(),
+  fim: z.string().optional(),
+}).passthrough();
 
 export async function GET() {
   const supabase = await createServerSupabase();
@@ -45,16 +54,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    usuario_id: string;
-    substituto_id: string;
-    inicio?: string;
-    fim?: string;
-  };
-
-  if (!body.usuario_id || !body.substituto_id) {
-    return NextResponse.json({ error: "usuario_id e substituto_id são obrigatórios" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = SubstitutoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const [substituto] = await sql`
     INSERT INTO alissonerp.tarefas_substitutos

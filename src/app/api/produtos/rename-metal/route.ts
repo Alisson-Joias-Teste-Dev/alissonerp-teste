@@ -7,9 +7,16 @@
  *      Atualiza em massa tipo_metal = to onde tipo_metal ∈ from.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const RenameMetalSchema = z.object({
+  from: z.array(z.string()).min(1, "from obrigatório"),
+  to: z.string().nullable().optional(),
+}).passthrough();
 
 async function auth(req: NextRequest | undefined, acao: "ler" | "escrever" = "ler") {
   const [user, errRes] = await authOr401(req);
@@ -41,22 +48,17 @@ export async function POST(req: NextRequest) {
   const a = await auth(req, "escrever");
   if ("error" in a) return a.error;
 
-  const body = await req.json().catch(() => ({}));
-  const from: unknown = body?.from;
-  const to: unknown = body?.to;
-  if (!Array.isArray(from) || from.length === 0 || !from.every((x) => typeof x === "string")) {
-    return NextResponse.json({ error: "from deve ser array de strings não vazias" }, { status: 400 });
-  }
-  if (to !== null && typeof to !== "string") {
-    return NextResponse.json({ error: "to deve ser string ou null" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = RenameMetalSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { from, to } = parsed.data;
 
   const toValue = typeof to === "string" ? (to.trim() || null) : null;
 
   const rows = await sql<{ id_produto: number }[]>`
     UPDATE public.produtos
     SET tipo_metal = ${toValue}
-    WHERE tipo_metal = ANY(${from as string[]})
+    WHERE tipo_metal = ANY(${from})
     RETURNING id_produto
   `;
 

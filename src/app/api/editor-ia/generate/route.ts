@@ -17,6 +17,7 @@
  *   { cached: boolean, item: HistoricoItem }
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import crypto from "crypto";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
@@ -33,6 +34,17 @@ import {
   checkStringLength,
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
+import { zodError } from "@/lib/schemas/common";
+
+const GeneratePostSchema = z.object({
+  images: z.array(z.string()).min(1, "ao menos uma imagem"),
+  category: z.string().optional(),
+  sceneId: z.string().min(1, "obrigatório"),
+  sceneName: z.string().optional(),
+  model: z.string().min(1, "obrigatório"),
+  aspectRatio: z.enum(["1:1", "9:16", "16:9", "4:3", "3:4"]).optional(),
+  details: z.string().optional(),
+}).passthrough();
 
 const BUCKET = "editor-ia-geradas";
 
@@ -65,14 +77,17 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 
-  const body = await req.json().catch(() => ({}));
-  const images: string[] = Array.isArray(body?.images) ? body.images : [];
-  const category: string | undefined = body?.category ? String(body.category) : undefined;
-  const sceneId: string = String(body?.sceneId || "");
-  const sceneName: string | undefined = body?.sceneName ? String(body.sceneName) : undefined;
-  const modelId: string = String(body?.model || "");
-  const aspectRatio: AspectRatio = (body?.aspectRatio as AspectRatio) || "1:1";
-  const details: string | undefined = body?.details ? String(body.details).trim() : undefined;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = GeneratePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const images: string[] = body.images;
+  const category: string | undefined = body.category;
+  const sceneId: string = body.sceneId;
+  const sceneName: string | undefined = body.sceneName;
+  const modelId: string = body.model;
+  const aspectRatio: AspectRatio = (body.aspectRatio as AspectRatio) || "1:1";
+  const details: string | undefined = body.details ? body.details.trim() : undefined;
 
   try {
     checkArrayLength("images", images, LIMITS.IMAGES_ARRAY_MAX);

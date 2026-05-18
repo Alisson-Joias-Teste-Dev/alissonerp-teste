@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const FaixaPatchSchema = z.object({
+  id: z.coerce.number().int().positive().optional(),
+  desconto_pct: z.coerce.number().optional(),
+  comissao_pct: z.coerce.number().min(0),
+  ativo: z.boolean().optional(),
+}).passthrough();
+
+const FaixaPostSchema = z.object({
+  desconto_pct: z.coerce.number(),
+  comissao_pct: z.coerce.number(),
+}).passthrough();
 
 // ─── GET /api/vendas/faixas-comissao ──────────────────────────────────────────
 // Retorna todas as faixas de comissão (ativas ou todas via ?todas=1)
@@ -42,16 +56,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Apenas gerentes podem editar faixas de comissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    id?:           number;
-    desconto_pct?: number;
-    comissao_pct:  number;
-    ativo?:        boolean;
-  };
-
-  if (body.comissao_pct == null || body.comissao_pct < 0) {
-    return NextResponse.json({ error: "comissao_pct inválida" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = FaixaPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   if (body.id) {
     await sql`
@@ -90,9 +98,10 @@ export async function POST(req: NextRequest) {
   if (!usuario || !PODE.includes(usuario.role))
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const body = await req.json() as { desconto_pct: number; comissao_pct: number };
-  if (body.desconto_pct == null || body.comissao_pct == null)
-    return NextResponse.json({ error: "desconto_pct e comissao_pct são obrigatórios" }, { status: 400 });
+  const rawPost = await req.json().catch(() => ({}));
+  const parsedPost = FaixaPostSchema.safeParse(rawPost);
+  if (!parsedPost.success) return zodError(parsedPost.error);
+  const body = parsedPost.data;
 
   const [row] = await sql`
     INSERT INTO alissonerp.faixas_comissao (desconto_pct, comissao_pct, updated_by)

@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const ConciliarPostSchema = z.object({
+  lancamento_id: z.coerce.number().int().positive(),
+  conta_pagar_id: z.coerce.number().int().positive().optional(),
+  conta_receber_id: z.coerce.number().int().positive().optional(),
+}).passthrough();
 
 // ─── GET /api/financeiro/conciliar ────────────────────────────────────────────
 // Retorna sugestões de conciliação: match automático lancamento ↔ conta
@@ -113,14 +121,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    lancamento_id: number;
-    conta_pagar_id?: number;
-    conta_receber_id?: number;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConciliarPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
-  if (!body.lancamento_id || (!body.conta_pagar_id && !body.conta_receber_id)) {
-    return NextResponse.json({ error: "lancamento_id e conta_pagar_id ou conta_receber_id obrigatórios" }, { status: 400 });
+  if (!body.conta_pagar_id && !body.conta_receber_id) {
+    return NextResponse.json({ error: "conta_pagar_id ou conta_receber_id obrigatórios" }, { status: 400 });
   }
 
   // Guard: verificar se lançamento existe e não está já conciliado

@@ -1,7 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_FISCAL } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const EmitentePostSchema = z.object({
+  nome_fantasia: z.string().nullable().optional(),
+  razao_social: z.string().min(1, "obrigatório"),
+  cnpj: z.string().min(1, "obrigatório"),
+  ie: z.string().nullable().optional(),
+  im: z.string().nullable().optional(),
+  regime_tributario: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+  logradouro: z.string().nullable().optional(),
+  numero: z.string().nullable().optional(),
+  complemento: z.string().nullable().optional(),
+  bairro: z.string().nullable().optional(),
+  codigo_ibge_municipio: z.string().nullable().optional(),
+  municipio: z.string().nullable().optional(),
+  uf: z.string().nullable().optional(),
+  cep: z.string().nullable().optional(),
+  focus_token: z.string().nullable().optional(),
+  ambiente: z.enum(["homologacao", "producao"]).optional(),
+  serie_nfe: z.coerce.number().int().optional(),
+  serie_nfce: z.coerce.number().int().optional(),
+  proxima_nfe: z.coerce.number().int().optional(),
+  proxima_nfce: z.coerce.number().int().optional(),
+  local_estoque_id: z.coerce.number().int().nullable().optional(),
+}).passthrough();
 
 async function getUserRole(userId: string): Promise<string | null> {
   const [row] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid`;
@@ -74,17 +100,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
   }
 
-  let body: EmitenteBody;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = EmitentePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
-  // Validacoes
-  if (!body.razao_social?.trim()) {
-    return NextResponse.json({ error: "razao_social obrigatoria" }, { status: 400 });
-  }
   const cnpj = (body.cnpj ?? "").replace(/\D/g, "");
   if (cnpj.length !== 14) {
     return NextResponse.json({ error: "CNPJ deve ter 14 digitos" }, { status: 400 });

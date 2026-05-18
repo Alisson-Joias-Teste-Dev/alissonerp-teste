@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { registrarQuebra, buscarOuroRecebido } from "@/lib/registrar-quebra";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { zodError } from "@/lib/schemas/common";
+
+const PcpTransferirPostSchema = z.object({
+  pcp_id: z.coerce.number().int().positive(),
+  destino_deposito_id: z.coerce.number().int().positive(),
+  setor_id: z.coerce.number().int().nullable().optional(),
+  insumos: z.array(z.object({
+    insumo_id: z.coerce.number().int().positive(),
+    quantidade: z.coerce.number(),
+  })).optional(),
+  obs: z.string().nullable().optional(),
+  user_id: z.string().nullable().optional(),
+  foto_balanca: z.string().nullable().optional(),
+}).passthrough();
 
 // POST /api/pcp/transferir
 // Move uma ordem do PCP de um depósito/operador para outro.
@@ -17,30 +32,18 @@ import { getParametroNumber, PARAM } from "@/lib/parametros";
 //   5. Atualiza pcp.deposito_id e ordens.local_atual para o destino
 
 export async function POST(req: NextRequest) {
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PcpTransferirPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
   const {
     pcp_id,
     destino_deposito_id,
     setor_id,
     insumos,
     obs,
-    user_id,
     foto_balanca,
-  } = await req.json() as {
-    pcp_id: number;
-    destino_deposito_id: number;
-    setor_id?: number | null;
-    insumos?: Array<{ insumo_id: number; quantidade: number }>;
-    obs?: string | null;
-    user_id?: string | null;
-    foto_balanca?: string | null;
-  };
+  } = parsed.data;
 
-  if (!pcp_id || !destino_deposito_id) {
-    return NextResponse.json(
-      { error: "pcp_id e destino_deposito_id são obrigatórios" },
-      { status: 400 },
-    );
-  }
   if (destino_deposito_id === 1) {
     return NextResponse.json(
       { error: "Não é possível transferir para o Almoxarifado Central" },

@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { zodError } from "@/lib/schemas/common";
+
+const TransferirLocalPostSchema = z.object({
+  insumo_id: z.coerce.number().int().positive(),
+  quantidade: z.coerce.number().positive(),
+  local_origem_id: z.coerce.number().int().positive(),
+  local_destino_id: z.coerce.number().int().positive(),
+  obs: z.string().nullable().optional(),
+}).passthrough();
 
 // POST /api/estoque/transferir-local
 // Transferência de insumo entre locais de estoque (Fábrica ↔ Loja).
@@ -20,25 +30,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão — requer admin, desenvolvedor ou gerente_fabrica" }, { status: 403 });
   }
 
-  const { insumo_id, quantidade, local_origem_id, local_destino_id, obs } =
-    await req.json() as {
-      insumo_id: number;
-      quantidade: number;
-      local_origem_id: number;
-      local_destino_id: number;
-      obs?: string | null;
-    };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TransferirLocalPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { insumo_id, quantidade, local_origem_id, local_destino_id, obs } = parsed.data;
 
-  // Validação básica
-  if (!insumo_id || !quantidade || !local_origem_id || !local_destino_id) {
-    return NextResponse.json(
-      { error: "insumo_id, quantidade, local_origem_id e local_destino_id são obrigatórios" },
-      { status: 400 },
-    );
-  }
-  if (quantidade <= 0) {
-    return NextResponse.json({ error: "quantidade deve ser maior que zero" }, { status: 400 });
-  }
   if (local_origem_id === local_destino_id) {
     return NextResponse.json({ error: "local_origem_id e local_destino_id devem ser diferentes" }, { status: 400 });
   }

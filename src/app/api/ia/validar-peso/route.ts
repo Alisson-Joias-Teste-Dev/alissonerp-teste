@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { authOr401 } from "@/lib/auth-server";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { zodError } from "@/lib/schemas/common";
 
-interface ValidacaoBody {
-  imagem_base64: string;
-  peso_referencia: number;
-  tolerancia?: number;  // em gramas, default 0.1
-  media_type?: string;
-}
+const ValidarPesoPostSchema = z.object({
+  imagem_base64: z.string().min(1, "obrigatório"),
+  peso_referencia: z.coerce.number().positive(),
+  tolerancia: z.coerce.number().optional(),
+  media_type: z.string().optional(),
+}).passthrough();
 
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -25,16 +27,12 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 
-  const body = await req.json() as ValidacaoBody;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ValidarPesoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
   const { imagem_base64, peso_referencia, media_type } = body;
   const tolerancia = body.tolerancia ?? 0.1;
-
-  if (!imagem_base64) {
-    return NextResponse.json({ error: "imagem_base64 é obrigatório" }, { status: 400 });
-  }
-  if (!peso_referencia || peso_referencia <= 0) {
-    return NextResponse.json({ error: "peso_referencia inválido" }, { status: 400 });
-  }
 
   const resultado = await validarPesoBalanca(
     imagem_base64,

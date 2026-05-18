@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { internalError } from "@/lib/api-error";
 import { authOr401 } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_SETORES_WRITE = ["admin", "desenvolvedor"];
+
+const SetorPatchSchema = z.object({
+  nome: z.string().min(1).max(120).optional(),
+  deposito_id: z.number().int().positive().nullable().optional(),
+  ativo: z.boolean().optional(),
+  requer_peso: z.boolean().optional(),
+  ordem: z.number().int().min(0).optional(),
+}).passthrough();
 
 // PATCH /api/setores/[id] — editar nome, deposito_id, ativo, requer_peso, ordem
 // Body: { nome?: string, deposito_id?: number | null, ativo?: boolean, requer_peso?: boolean, ordem?: number }
@@ -17,7 +27,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     const setorId = parseInt(id);
-    const body = await req.json() as { nome?: string; deposito_id?: number | null; ativo?: boolean; requer_peso?: boolean; ordem?: number };
+    const raw = await req.json().catch(() => ({}));
+    const parsed = SetorPatchSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const body = parsed.data;
 
     if (body.nome !== undefined) {
       const nome = body.nome.trim();

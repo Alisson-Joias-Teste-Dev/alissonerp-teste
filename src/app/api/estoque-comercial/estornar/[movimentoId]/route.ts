@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
 
 interface Params { params: Promise<{ movimentoId: string }> }
 
 const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+
+const EstornarPostSchema = z.object({
+  observacao: z.string().optional(),
+}).passthrough();
 
 // POST /api/estoque-comercial/estornar/[movimentoId]
 // Estorna um movimento manual (cria movimento reverso rastreável)
@@ -23,7 +29,10 @@ export async function POST(
 
   const { movimentoId } = await params;
   const movId = Number(movimentoId);
-  const body = await req.json().catch(() => ({})) as { observacao?: string };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = EstornarPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Buscar movimento original
   const [original] = await sql`

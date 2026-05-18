@@ -8,9 +8,16 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const RejeitarPostSchema = z.object({
+  alteracao_id: z.coerce.number().int().positive(),
+  motivo: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -19,15 +26,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão — apenas admin e desenvolvedor podem rejeitar" }, { status: 403 });
   }
 
-  const body = await req.json() as { alteracao_id: number; motivo: string };
-  const { alteracao_id, motivo } = body;
-
-  if (!alteracao_id) {
-    return NextResponse.json({ error: "alteracao_id é obrigatório" }, { status: 400 });
-  }
-  if (!motivo?.trim()) {
-    return NextResponse.json({ error: "Motivo é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = RejeitarPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { alteracao_id, motivo } = parsed.data;
 
   try {
     const [alt] = await sql<{ id: number; faixa_nome: string; status: string }[]>`

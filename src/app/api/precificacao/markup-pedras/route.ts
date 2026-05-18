@@ -5,9 +5,28 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const MarkupPatchSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  nome: z.string().optional(),
+  tamanho_min: z.coerce.number().optional(),
+  tamanho_max: z.coerce.number().optional(),
+  markup: z.coerce.number().optional(),
+  ativo: z.boolean().optional(),
+}).passthrough();
+
+const MarkupPostSchema = z.object({
+  nome: z.string().min(1, "obrigatório"),
+  tamanho_min: z.coerce.number(),
+  tamanho_max: z.coerce.number(),
+  unidade: z.string().optional(),
+  markup: z.coerce.number().positive(),
+}).passthrough();
 
 async function authorize(req?: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -43,10 +62,10 @@ export async function PATCH(req: NextRequest) {
   if (error) return error;
   void user;
 
-  const body = await req.json();
-  const { id, nome, tamanho_min, tamanho_max, markup, ativo } = body;
-
-  if (!id) return NextResponse.json({ error: "id é obrigatório" }, { status: 400 });
+  const rawPatch = await req.json().catch(() => ({}));
+  const parsedPatch = MarkupPatchSchema.safeParse(rawPatch);
+  if (!parsedPatch.success) return zodError(parsedPatch.error);
+  const { id, nome, tamanho_min, tamanho_max, markup, ativo } = parsedPatch.data;
 
   if (markup !== undefined && Number(markup) <= 0) {
     return NextResponse.json({ error: "markup deve ser positivo" }, { status: 400 });
@@ -82,20 +101,13 @@ export async function POST(req: NextRequest) {
   const { error, user } = await authorize(req);
   if (error) return error;
 
-  const body = await req.json();
-  const { nome, tamanho_min, tamanho_max, unidade, markup } = body;
+  const rawPost = await req.json().catch(() => ({}));
+  const parsedPost = MarkupPostSchema.safeParse(rawPost);
+  if (!parsedPost.success) return zodError(parsedPost.error);
+  const { nome, tamanho_min, tamanho_max, unidade, markup } = parsedPost.data;
 
-  if (!nome || tamanho_min == null || tamanho_max == null || markup == null) {
-    return NextResponse.json(
-      { error: "nome, tamanho_min, tamanho_max e markup são obrigatórios" },
-      { status: 400 }
-    );
-  }
   if (Number(tamanho_max) <= Number(tamanho_min)) {
     return NextResponse.json({ error: "tamanho_max deve ser maior que tamanho_min" }, { status: 400 });
-  }
-  if (Number(markup) <= 0) {
-    return NextResponse.json({ error: "markup deve ser positivo" }, { status: 400 });
   }
 
   try {

@@ -4,6 +4,7 @@
  * Não expõe a API key pro client.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import {
@@ -12,6 +13,14 @@ import {
   checkStringLength,
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
+import { zodError } from "@/lib/schemas/common";
+
+const AiChatPostSchema = z.object({
+  message: z.string().optional(),
+  tableName: z.string().optional(),
+  schema: z.string().optional(),
+  contextData: z.array(z.unknown()).optional(),
+}).passthrough();
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GESTAO_ESTOQUE_AI_MODEL || "gemini-2.5-flash";
@@ -38,11 +47,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = await req.json().catch(() => ({}));
-  const message: string = String(body?.message ?? "").trim();
-  const tableName: string = String(body?.tableName ?? "produtos");
-  const schema: string = String(body?.schema ?? "public");
-  const contextDataRaw = Array.isArray(body?.contextData) ? body.contextData : [];
+  const raw = await req.json().catch(() => ({}));
+  const parsed = AiChatPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const message: string = String(body.message ?? "").trim();
+  const tableName: string = String(body.tableName ?? "produtos");
+  const schema: string = String(body.schema ?? "public");
+  const contextDataRaw = Array.isArray(body.contextData) ? body.contextData : [];
 
   try {
     checkStringLength("message", message, LIMITS.CHAT_MESSAGE_MAX);

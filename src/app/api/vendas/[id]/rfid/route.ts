@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { zodError } from "@/lib/schemas/common";
+
+const VendaRfidPostSchema = z.object({
+  rfid_ids: z.array(z.string()).min(1, "rfid_ids obrigatório"),
+}).passthrough();
 
 async function checkOwnership(userId: string, vendaId: number) {
   const [u] = await sql<{ role: string }[]>`
@@ -88,10 +94,10 @@ export async function POST(
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json() as { rfid_ids: string[] };
-  if (!Array.isArray(body.rfid_ids) || body.rfid_ids.length === 0) {
-    return NextResponse.json({ error: "rfid_ids obrigatório (array de UUIDs)" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = VendaRfidPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Verifica se venda existe + onda 1D ownership
   const [venda] = await sql`SELECT id FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;

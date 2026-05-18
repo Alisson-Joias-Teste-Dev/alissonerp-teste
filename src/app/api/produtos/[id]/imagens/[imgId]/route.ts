@@ -4,11 +4,18 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { deleteFile } from "@/lib/storage";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const ImagemPatchSchema = z.object({
+  eh_capa: z.boolean().optional(),
+  ordem: z.coerce.number().int().optional(),
+}).passthrough();
 
 export async function PATCH(
   req: NextRequest,
@@ -26,8 +33,10 @@ export async function PATCH(
   }
 
   try {
-    const body = await req.json();
-    const { eh_capa, ordem } = body;
+    const raw = await req.json().catch(() => ({}));
+    const parsed = ImagemPatchSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const { eh_capa, ordem } = parsed.data;
 
     await sql.begin(async (tx: any) => {
       // confirma que a imagem é desse produto

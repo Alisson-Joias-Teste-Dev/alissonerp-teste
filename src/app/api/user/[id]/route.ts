@@ -1,7 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const UserPatchSchema = z.object({
+  nome: z.string().optional(),
+  role: z.string().optional(),
+  ativo: z.boolean().optional(),
+  deposito_id: z.coerce.number().int().nullable().optional(),
+  vendedor_id: z.coerce.number().int().nullable().optional(),
+  email: z.string().optional(),
+  nova_senha: z.string().optional(),
+  tipos_ordem_permitidos: z.array(z.string()).optional(),
+  tipos_protocolo_permitidos: z.array(z.string()).optional(),
+  is_operador_service: z.boolean().optional(),
+  is_transportador: z.boolean().optional(),
+  mx_desconto_permitido: z.coerce.number().nullable().optional(),
+}).passthrough();
 
 // Validação de role: verificar contra alissonerp.roles (dinâmico)
 async function isRoleValida(role: string): Promise<boolean> {
@@ -42,20 +59,10 @@ export async function PATCH(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    nome?: string;
-    role?: string;
-    ativo?: boolean;
-    deposito_id?: number | null;
-    vendedor_id?: number | null;
-    email?: string;
-    nova_senha?: string;
-    tipos_ordem_permitidos?: string[];
-    tipos_protocolo_permitidos?: string[];
-    is_operador_service?: boolean;
-    is_transportador?: boolean;
-    mx_desconto_permitido?: number | null;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsedBody = UserPatchSchema.safeParse(raw);
+  if (!parsedBody.success) return zodError(parsedBody.error);
+  const body = parsedBody.data;
 
   // Não-admin: só pode alterar nome (proteção backend)
   const { nome, nova_senha } = body;

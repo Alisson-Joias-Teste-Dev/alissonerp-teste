@@ -7,10 +7,16 @@
  *      Cria a tabela (se não existir) e aplica a classificação automática.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { internalError } from "@/lib/api-error";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const ClassificarTipoSchema = z.object({
+  apply: z.literal(true),
+}).passthrough();
 
 async function auth(req: NextRequest | undefined, acao: "ler" | "escrever" = "ler") {
   const [user, errRes] = await authOr401(req);
@@ -90,8 +96,9 @@ export async function POST(req: NextRequest) {
   const a = await auth(req, "escrever");
   if ("error" in a) return a.error;
 
-  const body = await req.json().catch(() => ({}));
-  if (body?.apply !== true) {
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ClassificarTipoSchema.safeParse(raw);
+  if (!parsed.success) {
     return NextResponse.json({ error: "Envie { apply: true } para confirmar" }, { status: 400 });
   }
 

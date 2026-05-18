@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isProdutosAccess, isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const ReposicaoPutSchema = z.object({
+  estoque_minimo: z.coerce.number().int().min(0),
+  ativo: z.boolean().optional(),
+  tempo_fabricacao_dias: z.union([z.coerce.number().int(), z.string(), z.null()]).optional(),
+}).passthrough();
 
 /**
  * Configuração de produção (reposição automática + tempo de fabricação) por produto.
@@ -68,14 +76,13 @@ export async function PUT(
   const produtoId = parseProdutoId(id);
   if (!produtoId) return NextResponse.json({ error: "id inválido" }, { status: 400 });
 
-  let body: { estoque_minimo?: unknown; ativo?: unknown; tempo_fabricacao_dias?: unknown };
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = ReposicaoPutSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
 
   const minimo = Number(body.estoque_minimo);
-  if (!Number.isInteger(minimo) || minimo < 0) {
-    return NextResponse.json({ error: "estoque_minimo inválido (inteiro >= 0)" }, { status: 400 });
-  }
   const ativo = typeof body.ativo === "boolean" ? body.ativo : true;
 
   // tempo_fabricacao_dias: integer >= 0 ou null (null = sem prazo definido)

@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { buscarOuroRecebido } from "@/lib/registrar-quebra";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const TransferirFabricaSchema = z.object({
+  deposito_destino_id: z.coerce.number().int().positive(),
+  motoboy_id: z.string().nullable().optional(),
+  observacao: z.string().nullable().optional(),
+}).passthrough();
 
 // POST /api/service/[id]/transferir-fabrica
 // Transfere um serviço de volta para a fábrica (depósito de ourives).
@@ -33,16 +41,10 @@ export async function POST(
   const hasAccess = isFullAccess(caller.role as string) || caller.is_operador_service === true;
   if (!hasAccess) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const body = await req.json() as {
-    deposito_destino_id: number;
-    motoboy_id?: string | null;
-    observacao?: string | null;
-  };
-  const { deposito_destino_id, motoboy_id, observacao } = body;
-
-  if (!deposito_destino_id) {
-    return NextResponse.json({ error: "deposito_destino_id é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TransferirFabricaSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { deposito_destino_id, motoboy_id, observacao } = parsed.data;
 
   // 1. Buscar serviço
   const [servico] = await sql`

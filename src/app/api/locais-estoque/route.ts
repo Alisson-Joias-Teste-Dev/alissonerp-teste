@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
 
 export const dynamic = "force-dynamic";
+
+const LocalEstoquePostSchema = z.object({
+  nome: z.string().min(1, "obrigatório").max(120),
+}).passthrough();
 
 // GET /api/locais-estoque — lista todos os locais ativos
 export async function GET() {
@@ -28,7 +34,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão — requer admin ou desenvolvedor" }, { status: 403 });
   }
 
-  const { nome } = await req.json() as { nome: string };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = LocalEstoquePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { nome } = parsed.data;
   if (!nome || nome.trim() === "") {
     return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
   }

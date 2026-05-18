@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { normalizeRow } from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { authOr401 } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
 
 type Params = Promise<{ id: string }>;
+
+const ItemCompraPostSchema = z.object({
+  insumo_id: z.coerce.number().int().positive(),
+  deposito_id: z.coerce.number().int().nullable().optional(),
+  qtd: z.coerce.number().nullable().optional(),
+  valor_unitario: z.coerce.number().nullable().optional(),
+  peso_ct: z.coerce.number().nullable().optional(),
+  qtd_pecas: z.coerce.number().int().nullable().optional(),
+  custo_por_ct: z.coerce.number().nullable().optional(),
+  lote_referencia: z.string().nullable().optional(),
+  observacao: z.string().nullable().optional(),
+}).passthrough();
 
 // GET /api/compras/[id]/itens
 export async function GET(req: NextRequest, { params }: { params: Params }) {
@@ -47,28 +61,20 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
   const { id } = await params;
   const compraId = parseInt(id);
 
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ItemCompraPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
   const {
     insumo_id,
     deposito_id,
     qtd,
     valor_unitario,
-    // Campos pedras
     peso_ct,
     qtd_pecas,
     custo_por_ct,
     lote_referencia,
     observacao,
-  } = await req.json() as {
-    insumo_id: number;
-    deposito_id?: number | null;
-    qtd?: number | null;
-    valor_unitario?: number | null;
-    peso_ct?: number | null;
-    qtd_pecas?: number | null;
-    custo_por_ct?: number | null;
-    lote_referencia?: string | null;
-    observacao?: string | null;
-  };
+  } = parsed.data;
 
   if (!insumo_id) {
     return NextResponse.json({ error: "insumo_id é obrigatório" }, { status: 400 });

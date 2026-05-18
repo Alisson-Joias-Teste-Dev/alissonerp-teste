@@ -6,9 +6,26 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isPrecificacaoAccess } from "@/lib/roles";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const SolicitarAprovPostSchema = z.object({
+  tipo: z.enum(["ouro", "pedra"]),
+  faixa_id: z.coerce.number().int().positive(),
+  faixa_nome: z.string().min(1, "obrigatório"),
+  markup_anterior: z.coerce.number(),
+  markup_novo: z.coerce.number().positive(),
+  stats: z.object({
+    produtos_afetados: z.coerce.number().optional(),
+    variacao_media: z.coerce.number().optional(),
+    variacao_min: z.coerce.number().optional(),
+    variacao_max: z.coerce.number().optional(),
+  }).optional(),
+  simulacao: z.array(z.unknown()).optional(),
+}).passthrough();
 
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -17,32 +34,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    tipo: "ouro" | "pedra";
-    faixa_id: number;
-    faixa_nome: string;
-    markup_anterior: number;
-    markup_novo: number;
-    stats: {
-      produtos_afetados: number;
-      variacao_media: number;
-      variacao_min: number;
-      variacao_max: number;
-    };
-    simulacao: unknown[];
-  };
-
-  const { tipo, faixa_id, faixa_nome, markup_anterior, markup_novo, stats, simulacao } = body;
-
-  if (!tipo || !faixa_id || !faixa_nome || !markup_anterior || !markup_novo) {
-    return NextResponse.json({ error: "Campos obrigatórios ausentes" }, { status: 400 });
-  }
-  if (!["ouro", "pedra"].includes(tipo)) {
-    return NextResponse.json({ error: "tipo inválido" }, { status: 400 });
-  }
-  if (markup_novo <= 0) {
-    return NextResponse.json({ error: "markup_novo deve ser positivo" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = SolicitarAprovPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { tipo, faixa_id, faixa_nome, markup_anterior, markup_novo, stats, simulacao } = parsed.data;
 
   try {
     const [alteracao] = await sql`

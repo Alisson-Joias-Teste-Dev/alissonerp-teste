@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const PermissoesPatchSchema = z.object({
+  changes: z.array(z.object({
+    role: z.string().min(1),
+    modulo: z.string().min(1),
+    pode_ler: z.boolean(),
+    pode_escrever: z.boolean(),
+  })).min(1),
+}).passthrough();
 
 // ─── Auto-create table + seed on first use ─────────────────────────────────────
 async function ensureTable() {
@@ -172,13 +183,10 @@ export async function PATCH(req: NextRequest) {
   if (errRes) return errRes;
   void user;
 
-  const body = await req.json() as {
-    changes: { role: string; modulo: string; pode_ler: boolean; pode_escrever: boolean }[];
-  };
-
-  if (!Array.isArray(body.changes) || body.changes.length === 0) {
-    return NextResponse.json({ error: "Nenhuma alteração enviada" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PermissoesPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const ROLES_SUPER = ["desenvolvedor", "admin"];
   const updates: { role: string; modulo: string; pode_ler: boolean; pode_escrever: boolean }[] = [];

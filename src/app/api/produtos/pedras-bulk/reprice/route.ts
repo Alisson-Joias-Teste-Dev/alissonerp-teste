@@ -17,10 +17,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
 
 interface PedraItem {
   tipo: string;
@@ -32,6 +34,10 @@ interface PedraItem {
 
 const MAX_BATCH = 500;
 
+const RepricePostSchema = z.object({
+  itens: z.array(z.object({}).passthrough()).min(1, "itens obrigatório").max(MAX_BATCH),
+}).passthrough();
+
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
@@ -39,14 +45,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  const itensRaw: unknown = body?.itens;
-  if (!Array.isArray(itensRaw) || itensRaw.length === 0) {
-    return NextResponse.json({ error: "itens é obrigatório" }, { status: 400 });
-  }
-  if (itensRaw.length > MAX_BATCH) {
-    return NextResponse.json({ error: `Máximo ${MAX_BATCH} itens` }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = RepricePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const itensRaw: unknown = body.itens;
 
   const itens: PedraItem[] = [];
   for (const raw of itensRaw as Record<string, unknown>[]) {

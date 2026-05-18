@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
 
 const FULL_ROLES = ["desenvolvedor", "admin"];
+
+const SolicitacaoDescontoPatchSchema = z.object({
+  status: z.enum(["aprovado", "rejeitado"]),
+  observacao: z.string().optional(),
+}).passthrough();
 
 // GET — qualquer usuário autenticado pode checar o status (para polling)
 export async function GET(
@@ -39,11 +46,10 @@ export async function PATCH(
   }
 
   const { id } = await params;
-  const body = await req.json() as { status: "aprovado" | "rejeitado"; observacao?: string };
-
-  if (!["aprovado", "rejeitado"].includes(body.status)) {
-    return NextResponse.json({ error: "Status inválido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = SolicitacaoDescontoPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const [solicitacao] = await sql`
     SELECT id, item_id, venda_id, pct_desconto_solicitado, preco_solicitado,

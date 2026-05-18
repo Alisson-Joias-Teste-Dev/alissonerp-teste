@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { internalError } from "@/lib/api-error";
 import { authOr401 } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_SETORES_WRITE = ["admin", "desenvolvedor"];
+
+const SetorPostSchema = z.object({
+  nome: z.string().min(1, "obrigatório").max(120),
+  deposito_id: z.number().int().positive().nullable().optional(),
+}).passthrough();
 
 // GET /api/setores?deposito_id=X — lista setores (filtro opcional por depósito)
 export async function GET(req: NextRequest) {
@@ -38,8 +45,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json() as { nome?: string; deposito_id?: number };
-    const nome = body.nome?.trim();
+    const raw = await req.json().catch(() => ({}));
+    const parsed = SetorPostSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const body = parsed.data;
+    const nome = body.nome.trim();
     if (!nome) return NextResponse.json({ error: "Nome obrigatório" }, { status: 400 });
 
     // Pré-check pra mensagem clara antes do erro de constraint do DB

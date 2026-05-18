@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createDeepSeekProvider } from "@/agentes/core/llm/deepseek";
@@ -8,6 +9,13 @@ import {
   checkStringLength,
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
+import { zodError } from "@/lib/schemas/common";
+
+const LiaChatPostSchema = z.object({
+  produtoId: z.coerce.number().int().positive(),
+  mensagens: z.array(z.unknown()).optional(),
+  mensagemAtual: z.string().optional(),
+}).passthrough();
 
 /**
  * POST /api/lia/personalizar/chat
@@ -167,18 +175,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
 
-  let body: { produtoId?: unknown; mensagens?: unknown; mensagemAtual?: unknown };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
-  }
-
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = LiaChatPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
   const produtoId = Number(body.produtoId);
-  if (!Number.isFinite(produtoId) || produtoId <= 0) {
-    return NextResponse.json({ error: "produtoId inválido" }, { status: 400 });
-  }
-
   const mensagens = Array.isArray(body.mensagens) ? body.mensagens : [];
   const mensagemAtual = typeof body.mensagemAtual === "string" ? body.mensagemAtual.trim() : "";
 
@@ -256,7 +258,8 @@ export async function POST(req: NextRequest) {
     // Adiciona histórico de mensagens (máximo 20 para caber no contexto)
     const MAX_HISTORY = 20;
     const recentMessages = mensagens.slice(-MAX_HISTORY);
-    for (const msg of recentMessages) {
+    for (const msgRaw of recentMessages) {
+      const msg = msgRaw as { role?: string; content?: unknown };
       const role = msg.role === "assistant" ? "assistant" : "user";
       messages.push({ role, content: String(msg.content) });
     }

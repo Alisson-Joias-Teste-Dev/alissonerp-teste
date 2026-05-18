@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, ensureBucket } from "@/lib/storage";
+import { zodError } from "@/lib/schemas/common";
+
+const ConversaoRecusarSchema = z.object({
+  tarefa_id: z.coerce.number().int().positive(),
+  conversao_id: z.coerce.number().int().positive().optional(),
+  motivo: z.string().optional(),
+  foto_base64: z.string().optional(),
+}).passthrough();
 
 // POST /api/conversao/recusar
 // Body: { tarefa_id: number, conversao_id: number, motivo?: string, foto_base64: string }
@@ -19,18 +28,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Apenas administradores podem recusar conversões" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    tarefa_id: number;
-    conversao_id?: number;
-    motivo?: string;
-    foto_base64?: string;
-  };
-
-  const { tarefa_id, conversao_id, motivo, foto_base64 } = body;
-
-  if (!tarefa_id) {
-    return NextResponse.json({ error: "tarefa_id é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConversaoRecusarSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { tarefa_id, conversao_id, motivo, foto_base64 } = parsed.data;
 
   // Verificar se tarefa existe e está 'aguardando_aprovacao'
   const [tarefa] = await sql`

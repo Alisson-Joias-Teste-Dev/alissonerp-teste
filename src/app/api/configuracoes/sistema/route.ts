@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const SistemaPatchSchema = z.object({
+  comentarios_ordens_ativo: z.boolean().optional(),
+}).passthrough();
 
 // GET /api/configuracoes/sistema
 export async function GET() {
@@ -27,7 +33,10 @@ export async function PATCH(req: NextRequest) {
   const [u] = await sql`SELECT role::text AS role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid`;
   if (!isFullAccess(u?.role)) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const body = await req.json() as { comentarios_ordens_ativo?: boolean };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = SistemaPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   if (typeof body.comentarios_ordens_ativo === "boolean") {
     await sql`

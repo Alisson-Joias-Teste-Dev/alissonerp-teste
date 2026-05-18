@@ -11,9 +11,17 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isPrecificacaoAccess } from "@/lib/roles";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const SimularPostSchema = z.object({
+  tipo: z.enum(["ouro", "pedra"]),
+  faixa_id: z.coerce.number().int().positive(),
+  markup_novo: z.union([z.coerce.number(), z.string()]),
+}).passthrough();
 
 function arredondarPorTipo(valor: number, tipo: string): number {
   if (tipo === "centena") return Math.round(valor / 100) * 100;
@@ -28,14 +36,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json();
-  const rawMarkupNovo = (body as { tipo: "ouro" | "pedra"; faixa_id: number; markup_novo: number | string }).markup_novo;
-  const { tipo, faixa_id } = body as { tipo: "ouro" | "pedra"; faixa_id: number };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = SimularPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { tipo, faixa_id, markup_novo: rawMarkupNovo } = parsed.data;
   // Normaliza vírgula → ponto para aceitar "2,5" e "2.5"
   const markup_novo = parseFloat(String(rawMarkupNovo ?? "").replace(",", "."));
 
-  if (!tipo || !faixa_id || !markup_novo || markup_novo <= 0) {
-    return NextResponse.json({ error: "tipo, faixa_id e markup_novo (> 0) são obrigatórios" }, { status: 400 });
+  if (!markup_novo || markup_novo <= 0) {
+    return NextResponse.json({ error: "markup_novo > 0 é obrigatório" }, { status: 400 });
   }
 
   // Buscar arredondamento configurado

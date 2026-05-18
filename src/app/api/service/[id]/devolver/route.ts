@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
@@ -7,6 +8,15 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const DevolverServicoSchema = z.object({
+  peso_saida: z.coerce.number().positive(),
+  foto_peca_base64: z.string().min(1, "obrigatório"),
+  usou_solda: z.boolean(),
+  peso_fio_depois: z.coerce.number().nullable().optional(),
+  foto_fio_base64: z.string().nullable().optional(),
+}).passthrough();
 
 // POST /api/service/[id]/devolver
 // Operador service devolve a peça para o POTE (Almoxarifado ID=1).
@@ -58,25 +68,10 @@ async function _handler(
   const hasAccess = isFullAccess(caller.role as string) || caller.is_operador_service === true;
   if (!hasAccess) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const body = await req.json() as {
-    peso_saida: number;
-    foto_peca_base64: string;
-    usou_solda: boolean | null;
-    peso_fio_depois?: number | null;
-    foto_fio_base64?: string | null;
-  };
-
-  const { peso_saida, foto_peca_base64, usou_solda, peso_fio_depois, foto_fio_base64 } = body;
-
-  if (peso_saida == null || peso_saida <= 0) {
-    return NextResponse.json({ error: "peso_saida é obrigatório e deve ser > 0" }, { status: 400 });
-  }
-  if (!foto_peca_base64) {
-    return NextResponse.json({ error: "foto_peca_base64 é obrigatória" }, { status: 400 });
-  }
-  if (usou_solda === null || usou_solda === undefined) {
-    return NextResponse.json({ error: "usou_solda é obrigatório (true ou false)" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = DevolverServicoSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { peso_saida, foto_peca_base64, usou_solda, peso_fio_depois, foto_fio_base64 } = parsed.data;
   if (usou_solda && (peso_fio_depois == null || peso_fio_depois < 0)) {
     return NextResponse.json({ error: "peso_fio_depois é obrigatório quando usou_solda=true" }, { status: 400 });
   }

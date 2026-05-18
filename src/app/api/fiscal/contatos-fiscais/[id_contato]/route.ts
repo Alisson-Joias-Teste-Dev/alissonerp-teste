@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_FISCAL } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const ContatoFiscalPutSchema = z.object({
+  ie: z.string().nullable().optional(),
+  indicador_ie: z.coerce.number().int().nullable().optional(),
+  codigo_ibge_municipio: z.string().nullable().optional(),
+  regime_tributario: z.coerce.number().int().nullable().optional(),
+}).passthrough();
 
 async function getUserRole(userId: string): Promise<string | null> {
   const [row] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid`;
@@ -57,12 +66,11 @@ export async function PUT(
     return NextResponse.json({ error: "id_contato invalido" }, { status: 400 });
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = ContatoFiscalPutSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
 
   const indicadorIe = body.indicador_ie != null ? Number(body.indicador_ie) : null;
   if (indicadorIe !== null && ![1, 2, 9].includes(indicadorIe)) {

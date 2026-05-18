@@ -6,9 +6,15 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, hasRole } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const EtapasPutSchema = z.object({
+  setor_ids: z.array(z.coerce.number().int().positive()),
+}).passthrough();
 
 const ROLES_PERMITIDOS = [
   "admin", "desenvolvedor", "diretor", "gerente_fabrica", "gerente_loja", "pcp",
@@ -60,21 +66,11 @@ export async function PUT(
   const tplId = parseId(id);
   if (!tplId) return NextResponse.json({ error: "id inválido" }, { status: 400 });
 
-  let body: { setor_ids?: unknown };
-  try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }
-
-  const setorIdsRaw = body.setor_ids;
-  if (!Array.isArray(setorIdsRaw)) {
-    return NextResponse.json({ error: "setor_ids deve ser array" }, { status: 400 });
-  }
-  const setorIds: number[] = [];
-  for (const v of setorIdsRaw) {
-    const n = Number(v);
-    if (!Number.isInteger(n) || n <= 0) {
-      return NextResponse.json({ error: `setor_id inválido: ${v}` }, { status: 400 });
-    }
-    setorIds.push(n);
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = EtapasPutSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const setorIds = parsed.data.setor_ids;
 
   try {
     const [tpl] = await sql`SELECT id FROM alissonerp.rotas_template WHERE id = ${tplId}`;

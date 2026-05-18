@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_FISCAL } from "@/lib/roles";
@@ -7,6 +8,11 @@ import {
   buildNfeDevolucaoPayload,
 } from "@/lib/fiscal/payload-nfe-devolucao";
 import type { EmitenteDados } from "@/lib/fiscal/payload-nfce";
+import { zodError } from "@/lib/schemas/common";
+
+const NfeDevolucaoPostSchema = z.object({
+  devolucao_id: z.coerce.number().int().positive(),
+}).passthrough();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,21 +54,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
 
   // ── 2. Parse body ─────────────────────────────────────────────────────────
-  let body: EmitirNfeDevolucaoBody;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Body invalido" }, { status: 400 });
-  }
-
-  const { devolucao_id } = body;
-
-  if (!devolucao_id) {
-    return NextResponse.json(
-      { error: "devolucao_id e obrigatorio" },
-      { status: 400 },
-    );
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "Body invalido" }, { status: 400 });
+  const parsed = NfeDevolucaoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { devolucao_id } = parsed.data;
 
   // ── 3. Buscar devolução + venda vinculada ─────────────────────────────────
   interface DevolucaoRow {

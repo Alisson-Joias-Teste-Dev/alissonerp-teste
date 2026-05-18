@@ -1,5 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+// Webhook externo Focus NFe — payload variável, usa passthrough.
+const FocusWebhookSchema = z.object({
+  ref: z.string().optional(),
+  status: z.string().optional(),
+  chave_nfe: z.string().optional(),
+  caminho_xml_nota_fiscal: z.string().optional(),
+  caminho_danfe: z.string().optional(),
+  mensagem_sefaz: z.string().optional(),
+  codigo: z.string().optional(),
+  numero: z.union([z.number(), z.string()]).optional(),
+}).passthrough();
 
 // ─── Mapeamento de status Focus → interno ─────────────────────────────────────
 
@@ -59,12 +73,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
   }
 
-  let body: FocusWebhookPayload;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Body invalido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "Body invalido" }, { status: 400 });
+  const parsed = FocusWebhookSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as FocusWebhookPayload;
 
   const { ref, status: focusStatus, chave_nfe, caminho_danfe, mensagem_sefaz, codigo, numero } = body;
 

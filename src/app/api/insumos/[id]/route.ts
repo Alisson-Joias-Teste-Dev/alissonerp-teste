@@ -1,8 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { uploadFile, deleteFile } from "@/lib/storage";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const InsumoPatchSchema = z.object({
+  nome: z.string().optional(),
+  sku: z.string().optional(),
+  categoria_id: z.coerce.number().int().positive().optional(),
+  unidade: z.string().optional(),
+  descricao: z.string().optional(),
+  estoque_minimo: z.coerce.number().optional(),
+  estoque_maximo: z.coerce.number().optional(),
+  custo_compra: z.coerce.number().optional(),
+  foto: z.string().nullable().optional(),
+  foto_remover: z.boolean().optional(),
+  fornecedor_id: z.coerce.number().int().nullable().optional(),
+  peso_pedra: z.coerce.number().nullable().optional(),
+  peso_pedra_ct: z.coerce.number().nullable().optional(),
+  observacao: z.string().nullable().optional(),
+  ativo: z.boolean().optional(),
+}).passthrough();
 
 // PATCH /api/insumos/:id — atualiza campos do insumo (somente full access)
 export async function PATCH(
@@ -19,23 +39,10 @@ export async function PATCH(
   const id = parseInt(rawId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json() as {
-    nome?: string;
-    sku?: string;
-    categoria_id?: number;
-    unidade?: string;
-    descricao?: string;
-    estoque_minimo?: number;
-    estoque_maximo?: number;
-    custo_compra?: number;
-    foto?: string | null;         // base64 "data:image/...;base64,..." para upload
-    foto_remover?: boolean;       // true = remover foto atual
-    fornecedor_id?: number | null;
-    peso_pedra?: number | null;
-    peso_pedra_ct?: number | null;
-    observacao?: string | null;
-    ativo?: boolean;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = InsumoPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const {
     nome, sku, categoria_id, unidade, descricao,

@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_PERMITIDOS = ["estoquista_loja", "gerente_loja", "admin", "desenvolvedor"];
+
+const ConverterPostSchema = z.object({
+  itens: z.array(z.object({
+    produto_id: z.coerce.number().int().positive(),
+    peso_individual: z.coerce.number().positive(),
+    quantidade: z.coerce.number().positive(),
+  })).min(1, "ao menos um item"),
+  foto_base64: z.string().optional(),
+  insumo_destino: z.coerce.number().int().positive().optional(),
+}).passthrough();
 
 // POST /api/estoque-comercial/converter
 // Cria uma conversão de estoque comercial → metal
@@ -21,36 +33,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    itens: { produto_id: number; peso_individual: number; quantidade: number }[];
-    foto_base64?: string;
-    insumo_destino?: number;
-  };
-
-  const { itens, foto_base64, insumo_destino } = body;
-
-  if (!Array.isArray(itens) || itens.length === 0) {
-    return NextResponse.json({ error: "itens é obrigatório (array não vazio)" }, { status: 400 });
-  }
-
-  // Validar cada item
-  for (const item of itens) {
-    if (!item.produto_id || item.produto_id <= 0) {
-      return NextResponse.json({ error: "produto_id inválido em um dos itens" }, { status: 400 });
-    }
-    if (!item.peso_individual || item.peso_individual <= 0) {
-      return NextResponse.json(
-        { error: `peso_individual inválido para produto ${item.produto_id}` },
-        { status: 400 }
-      );
-    }
-    if (!item.quantidade || item.quantidade <= 0) {
-      return NextResponse.json(
-        { error: `quantidade inválida para produto ${item.produto_id}` },
-        { status: 400 }
-      );
-    }
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConverterPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { itens, foto_base64, insumo_destino } = parsed.data;
 
   // Upload da foto (se fornecida — falha não bloqueia a conversão)
   let fotoPath: string | null = null;

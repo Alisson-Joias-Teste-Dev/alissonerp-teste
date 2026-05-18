@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const RolePostSchema = z.object({
+  nome: z.string().min(1, "obrigatório"),
+  descricao: z.string().optional(),
+}).passthrough();
 
 const MODULOS = [
   "dashboard","dashboard_fabrica","ordens","pcp","distribuicao","estoque",
@@ -41,7 +48,10 @@ export async function POST(req: NextRequest) {
   if (errRes) return errRes;
   void user;
 
-  const body = await req.json() as { nome?: string; descricao?: string };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = RolePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
   const nome = body.nome?.trim().toLowerCase();
   const descricao = body.descricao?.trim() || null;
 

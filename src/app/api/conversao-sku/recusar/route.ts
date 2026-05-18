@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, ensureBucket } from "@/lib/storage";
+import { zodError } from "@/lib/schemas/common";
+
+const ConversaoSkuRecusarSchema = z.object({
+  tarefa_id: z.coerce.number().int().positive(),
+  conversao_sku_id: z.coerce.number().int().positive().optional(),
+  motivo: z.string().optional(),
+  foto_base64: z.string().optional(),
+}).passthrough();
 
 // POST /api/conversao-sku/recusar
 export async function POST(req: NextRequest) {
@@ -16,16 +25,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Apenas administradores podem recusar" }, { status: 403 });
   }
 
-  const { tarefa_id, conversao_sku_id, motivo, foto_base64 } = await req.json() as {
-    tarefa_id: number;
-    conversao_sku_id?: number;
-    motivo?: string;
-    foto_base64?: string;
-  };
-
-  if (!tarefa_id) {
-    return NextResponse.json({ error: "tarefa_id é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConversaoSkuRecusarSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { tarefa_id, conversao_sku_id, motivo, foto_base64 } = parsed.data;
 
   const [tarefa] = await sql`
     SELECT id, status::text as status, ordem_id

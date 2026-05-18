@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const RfidScanSchema = z.object({
+  codigo: z.string().min(1, "obrigatório"),
+  action: z.string().optional(),
+  venda_id: z.coerce.number().int().optional(),
+  warehouse_id: z.coerce.number().int().optional(),
+}).passthrough();
 
 // POST /api/rfid/scan
 // Body: { codigo: string, action: "vincular_venda" | "entrada_estoque", venda_id?: number, warehouse_id?: number }
@@ -10,17 +19,11 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const body = await req.json() as {
-    codigo: string;
-    action?: string;
-    venda_id?: number;
-    warehouse_id?: number;
-  };
-
+  const raw = await req.json().catch(() => ({}));
+  const parsed = RfidScanSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
   const { codigo, action } = body;
-  if (!codigo || typeof codigo !== "string" || codigo.trim().length === 0) {
-    return NextResponse.json({ error: "Código RFID obrigatório" }, { status: 400 });
-  }
 
   const code = codigo.trim();
 

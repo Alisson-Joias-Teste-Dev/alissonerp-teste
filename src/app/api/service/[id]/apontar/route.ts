@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const ApontarServicoSchema = z.object({
+  insumo_id: z.coerce.number().int().positive(),
+  quantidade: z.coerce.number().positive(),
+  foto_base64: z.string().optional(),
+  obs: z.string().optional(),
+}).passthrough();
 
 // POST /api/service/[id]/apontar
 // Operador registra consumo de insumo (fecho, corrente, etc.) em um serviço em andamento,
@@ -41,12 +50,10 @@ export async function POST(
     const hasAccess = isFullAccess(caller.role as string) || caller.is_operador_service === true;
     if (!hasAccess) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-    const body = await req.json().catch(() => null) as {
-      insumo_id?: number;
-      quantidade?: number;
-      foto_base64?: string;
-      obs?: string;
-    } | null;
+    const raw = await req.json().catch(() => ({}));
+    const parsed = ApontarServicoSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const body = parsed.data;
 
     const insumoId   = body?.insumo_id  ? parseInt(String(body.insumo_id))     : null;
     const quantidade = body?.quantidade ? parseFloat(String(body.quantidade))   : null;

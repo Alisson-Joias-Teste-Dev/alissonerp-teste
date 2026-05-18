@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const GatewayPostSchema = z.object({
+  nome: z.string().min(1, "obrigatório"),
+  tipo: z.enum(["pix", "cartao", "dinheiro", "ouro", "outro"]),
+  cor: z.string().optional(),
+  obs: z.string().optional(),
+}).passthrough();
 
 export async function GET() {
   const gateways = await sql`
@@ -22,15 +31,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const { nome, tipo, cor, obs } = await req.json().catch(() => ({})) as {
-    nome?: string; tipo?: string; cor?: string; obs?: string;
-  };
-
-  if (!nome?.trim()) return NextResponse.json({ error: "Nome obrigatório" }, { status: 400 });
-  const tiposValidos = ["pix", "cartao", "dinheiro", "ouro", "outro"];
-  if (!tipo || !tiposValidos.includes(tipo)) {
-    return NextResponse.json({ error: "Tipo inválido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = GatewayPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { nome, tipo, cor, obs } = parsed.data;
 
   const [gateway] = await sql`
     INSERT INTO alissonerp.fin_gateways (nome, tipo, cor, obs)

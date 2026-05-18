@@ -11,6 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isPrecificacaoAccess } from "@/lib/roles";
 import sql from "@/lib/db";
@@ -25,6 +26,13 @@ import {
 } from "@/lib/curva-precificacao";
 import { buildFiltrosProdutos } from "@/lib/produtos-filtros";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const PreviewAplicarSchema = z.object({
+  config: z.unknown().optional(),
+  categorias: z.array(z.unknown()).optional(),
+  filtros: z.record(z.string(), z.unknown()).optional(),
+}).passthrough();
 
 interface RequestBody {
   config?: CurvaConfig;
@@ -65,7 +73,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = (await req.json().catch(() => ({}))) as RequestBody;
+  const rawJson = await req.json().catch(() => ({}));
+  const parsed = PreviewAplicarSchema.safeParse(rawJson);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as unknown as RequestBody;
 
   try {
     // ── Carregar config e categorias (body ou DB) ──

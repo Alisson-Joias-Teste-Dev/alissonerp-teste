@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile } from "@/lib/storage";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
@@ -8,6 +9,13 @@ import {
   checkStringLength,
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
+import { zodError } from "@/lib/schemas/common";
+
+const UploadVideoSchema = z.object({
+  base64: z.string().min(1, "obrigatório"),
+  mime: z.string().min(1, "obrigatório"),
+  filename: z.string().optional(),
+}).passthrough();
 
 // POST /api/vendas/upload-video
 // Body: { base64: string, mime: string, filename?: string }
@@ -26,11 +34,10 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 
-  const body = await req.json() as {
-    base64:    string;
-    mime:      string;
-    filename?: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = UploadVideoSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   try {
     checkBase64Length("base64", body.base64, LIMITS.VIDEO_BASE64_MAX);
@@ -40,8 +47,6 @@ export async function POST(req: NextRequest) {
     if (r) return r;
     throw e;
   }
-
-  if (!body.base64) return NextResponse.json({ error: "base64 obrigatório" }, { status: 400 });
 
   const ext  = body.mime?.includes("mp4") ? "mp4" : body.mime?.includes("webm") ? "webm" : "mov";
   const path = `${user.id}/${Date.now()}.${ext}`;

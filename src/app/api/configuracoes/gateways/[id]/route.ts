@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const GatewayPatchSchema = z.object({
+  nome: z.string().optional(),
+  tipo: z.string().optional(),
+  ativo: z.boolean().optional(),
+  cor: z.string().optional(),
+  obs: z.string().optional(),
+}).passthrough();
 
 async function getUser() {
   const supabase = await createServerSupabase();
@@ -20,9 +30,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id } = await params;
   const gid = Number(id);
-  const { nome, tipo, ativo, cor, obs } = await req.json().catch(() => ({})) as {
-    nome?: string; tipo?: string; ativo?: boolean; cor?: string; obs?: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = GatewayPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { nome, tipo, ativo, cor, obs } = parsed.data;
 
   const [updated] = await sql`
     UPDATE alissonerp.fin_gateways

@@ -4,10 +4,17 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { gerarApiKey } from "@/lib/api-publica";
+import { zodError } from "@/lib/schemas/common";
+
+const ApiChavePostSchema = z.object({
+  nome: z.string().min(1, "obrigatório").max(200),
+  rate_limit_por_minuto: z.coerce.number().int().min(1).max(10000).optional(),
+}).passthrough();
 
 async function autorizarAdmin(req: NextRequest) {
   try {
@@ -38,10 +45,10 @@ export async function POST(req: NextRequest) {
   const user = await autorizarAdmin(req);
   if (!user) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const body = await req.json() as {
-    nome: string;
-    rate_limit_por_minuto?: number;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ApiChavePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   if (!body.nome?.trim()) {
     return NextResponse.json({ error: "Nome obrigatório" }, { status: 400 });

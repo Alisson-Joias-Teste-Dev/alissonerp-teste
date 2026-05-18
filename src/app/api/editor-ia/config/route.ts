@@ -9,8 +9,15 @@
  *   Somente roles admin/desenvolvedor.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const EditorIaConfigSchema = z.object({
+  gemini: z.string().optional(),
+  openai: z.string().optional(),
+}).passthrough();
 
 export const runtime = "nodejs";
 
@@ -82,9 +89,12 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Somente admin/desenvolvedor pode alterar chaves." }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  const gemini = typeof body?.gemini === "string" ? body.gemini.trim() : undefined;
-  const openai = typeof body?.openai === "string" ? body.openai.trim() : undefined;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = EditorIaConfigSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const gemini = body.gemini !== undefined ? body.gemini.trim() : undefined;
+  const openai = body.openai !== undefined ? body.openai.trim() : undefined;
 
   const updates: Array<{ chave: string; valor: string | null; descricao: string }> = [];
   if (gemini !== undefined) {

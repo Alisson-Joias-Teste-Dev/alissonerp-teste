@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { authOr401 } from '@/lib/auth-server';
 import { isFullAccess } from '@/lib/roles';
 import { createDeepSeekProvider } from '@/agentes/core/llm/deepseek';
@@ -10,6 +11,15 @@ import {
   checkStringLength,
   payloadTooLargeResponse,
 } from '@/lib/payload-limits';
+import { zodError } from '@/lib/schemas/common';
+
+const PlaygroundPostSchema = z.object({
+  messages: z.array(z.object({
+    role: z.string(),
+    content: z.string(),
+  })).optional(),
+  message: z.string().optional(),
+}).passthrough();
 
 // ATENCAO: esta rota nao funciona em dev/prod hoje — depende de `ai` +
 // `@ai-sdk/deepseek` que NAO estao instaladas no package.json. Qualquer
@@ -39,12 +49,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     throw e;
   }
 
-  let body: { messages?: Array<{ role: string; content: string }>; message?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  const parsed = PlaygroundPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   try {
     checkArrayLength('messages', body.messages, LIMITS.MENSAGENS_CHAT_MAX);

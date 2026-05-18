@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const LookupPostSchema = z.object({
+  epcs: z.array(z.string()).min(1, "epcs obrigatório"),
+}).passthrough();
 
 function extrairIdApi(epc: string): number | null {
   if (!epc || epc.length < 13) return null;
@@ -18,10 +24,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
 
-    const body = await req.json() as { epcs: string[] };
-    if (!Array.isArray(body.epcs) || body.epcs.length === 0) {
-      return NextResponse.json({ error: "epcs é obrigatório (array)" }, { status: 400 });
-    }
+    const raw = await req.json().catch(() => ({}));
+    const parsed = LookupPostSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const body = parsed.data;
 
     const epcs = [...new Set(body.epcs.map(e => e.trim()).filter(Boolean))].slice(0, 500);
 

@@ -11,12 +11,19 @@
  * Persiste em alissonerp.user_views (migration 168).
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
 
 export const dynamic = "force-dynamic";
 
 const SCOPE = "gestao-estoque";
+
+const UserViewPostSchema = z.object({
+  nome: z.string().min(1, "obrigatório").max(80),
+  filtros: z.record(z.string(), z.unknown()),
+}).passthrough();
 
 type ViewRow = {
   id: number;
@@ -50,21 +57,14 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  let body: { nome?: string; filtros?: unknown };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = UserViewPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
-  const nome = (body.nome ?? "").toString().trim();
-  const filtros = body.filtros ?? null;
-
-  if (!nome) return NextResponse.json({ error: "Nome obrigatório" }, { status: 400 });
-  if (nome.length > 80) return NextResponse.json({ error: "Nome até 80 chars" }, { status: 400 });
-  if (!filtros || typeof filtros !== "object") {
-    return NextResponse.json({ error: "Filtros obrigatórios" }, { status: 400 });
-  }
+  const nome = body.nome.trim();
+  const filtros = body.filtros;
 
   try {
     const [row] = await sql<ViewRow[]>`

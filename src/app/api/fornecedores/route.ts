@@ -7,12 +7,21 @@
  * que não constam no mestre. O GET retorna a união de ambos.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { colunaExiste, tabelaExiste } from "@/lib/schema-check";
 import { internalError } from "@/lib/api-error";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
+import { zodError } from "@/lib/schemas/common";
+
+const FornecedorPostSchema = z.object({
+  nome: z.string().min(1, "obrigatório"),
+  cnpj: z.string().nullable().optional(),
+  contato: z.string().nullable().optional(),
+  observacao: z.string().nullable().optional(),
+}).passthrough();
 
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -91,13 +100,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  const nome = String(body?.nome ?? "").trim();
+  const raw = await req.json().catch(() => ({}));
+  const parsed = FornecedorPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const nome = body.nome.trim();
   if (!nome) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
 
-  const cnpj       = body?.cnpj       ? String(body.cnpj).trim()       : null;
-  const contato    = body?.contato    ? String(body.contato).trim()    : null;
-  const observacao = body?.observacao ? String(body.observacao).trim() : null;
+  const cnpj       = body.cnpj       ? String(body.cnpj).trim()       : null;
+  const contato    = body.contato    ? String(body.contato).trim()    : null;
+  const observacao = body.observacao ? String(body.observacao).trim() : null;
 
   try {
     checkStringLength("nome", nome, LIMITS.NOME_MAX);

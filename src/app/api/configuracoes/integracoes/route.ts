@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const IntegracoesPatchSchema = z.record(z.string(), z.string());
 
 const KEYS_WOO = ["woo_url", "woo_consumer_key", "woo_consumer_secret"] as const;
 const KEYS_KOMMO = ["kommo_url", "kommo_token"] as const;
@@ -64,7 +68,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as Record<string, string>;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = IntegracoesPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   for (const key of ALL_KEYS) {
     if (body[key] !== undefined) {

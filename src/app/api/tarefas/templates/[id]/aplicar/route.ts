@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const AplicarTemplateTarefaSchema = z.object({
+  responsavel_id: z.string().optional(),
+  data_limite: z.string().optional(),
+  variaveis: z.record(z.string(), z.string()).optional(),
+}).passthrough();
 
 export async function POST(
   req: NextRequest,
@@ -25,11 +33,10 @@ export async function POST(
   `;
   if (!template) return NextResponse.json({ error: "Template não encontrado ou inativo" }, { status: 404 });
 
-  const body = await req.json().catch(() => ({})) as {
-    responsavel_id?: string;
-    data_limite?: string;
-    variaveis?: Record<string, string>;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = AplicarTemplateTarefaSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const variaveis = body.variaveis ?? {};
 

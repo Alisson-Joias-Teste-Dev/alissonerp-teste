@@ -7,9 +7,14 @@
  */
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { parsearWebhook, enviarMensagem } from "@/lib/whatsapp/evolution";
 import { processarMensagem } from "@/lib/whatsapp/assistente";
+import { zodError } from "@/lib/schemas/common";
+
+// Webhook Evolution API — payload variável, usa passthrough.
+const WhatsappWebhookSchema = z.object({}).passthrough();
 
 const WEBHOOK_SECRET = process.env.EVOLUTION_WEBHOOK_SECRET || "";
 const JONATHAN_WHATSAPP = process.env.JONATHAN_WHATSAPP || "";
@@ -34,12 +39,11 @@ export async function POST(req) {
     }
   }
 
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  const parsedZ = WhatsappWebhookSchema.safeParse(raw);
+  if (!parsedZ.success) return zodError(parsedZ.error);
+  const body = parsedZ.data;
 
   // 2. Parsear webhook — ignorar se inválido ou não for mensagem de texto
   const parsed = parsearWebhook(body);

@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql, { normalizeRow } from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { requireAuth, AuthError } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
+
+const PurificacaoPostSchema = z.object({
+  itens: z.array(z.object({
+    insumo_id: z.coerce.number().int().positive(),
+    peso: z.coerce.number().positive(),
+    teor: z.coerce.number(),
+  })).min(1, "itens obrigatórios"),
+  foto_envio: z.string().nullable().optional(),
+  observacao_envio: z.string().nullable().optional(),
+}).passthrough();
 
 function authErrorResponse(e: unknown) {
   if (e instanceof AuthError) {
@@ -111,13 +123,10 @@ export async function POST(req: NextRequest) {
   let user;
   try { user = await requireAuth(req); } catch (e) { return authErrorResponse(e); }
 
-  const body = await req.json() as {
-    itens: { insumo_id: number; peso: number; teor: number }[];
-    foto_envio?: string | null;
-    observacao_envio?: string | null;
-  };
-
-  const { itens, foto_envio, observacao_envio } = body;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PurificacaoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { itens, foto_envio, observacao_envio } = parsed.data;
 
   // Verificar permissão granular (admin/dev/diretor passam sempre)
   if (!isFullAccess(user.role)) {

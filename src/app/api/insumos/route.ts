@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
+import { zodError } from "@/lib/schemas/common";
+
+const InsumoPostSchema = z.object({
+  nome: z.string().min(1, "obrigatório"),
+  sku: z.string().optional(),
+  categoria_id: z.coerce.number().int().positive(),
+  unidade: z.string().optional(),
+  descricao: z.string().optional(),
+  estoque_minimo: z.coerce.number().optional(),
+  estoque_maximo: z.coerce.number().optional(),
+  custo_compra: z.coerce.number().optional(),
+  peso_pedra: z.coerce.number().nullable().optional(),
+  peso_pedra_ct: z.coerce.number().nullable().optional(),
+}).passthrough();
 
 // GET /api/insumos?categoria_id=1
 export async function GET(req: NextRequest) {
@@ -27,19 +42,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const { nome, sku, categoria_id, unidade, descricao, estoque_minimo, estoque_maximo, custo_compra, peso_pedra, peso_pedra_ct } =
-    await req.json() as {
-      nome: string;
-      sku?: string;
-      categoria_id: number;
-      unidade?: string;
-      descricao?: string;
-      estoque_minimo?: number;
-      estoque_maximo?: number;
-      custo_compra?: number;
-      peso_pedra?: number | null;
-      peso_pedra_ct?: number | null;
-    };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = InsumoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { nome, sku, categoria_id, unidade, descricao, estoque_minimo, estoque_maximo, custo_compra, peso_pedra, peso_pedra_ct } = parsed.data;
 
   try {
     checkStringLength("nome", nome, LIMITS.NOME_MAX);

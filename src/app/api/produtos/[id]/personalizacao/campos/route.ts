@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const CamposPostSchema = z.object({
+  campos: z.array(z.object({}).passthrough()).min(1, "pelo menos 1 campo"),
+}).passthrough();
 
 /**
  * Gerenciamento de campos de personalizacao por produto.
@@ -136,21 +142,12 @@ export async function POST(
   const produtoId = parseProdutoId(id);
   if (!produtoId) return NextResponse.json({ error: "id inválido" }, { status: 400 });
 
-  let bodyRaw: { campos?: unknown[] };
-  try {
-    bodyRaw = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
-  }
-
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = CamposPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const bodyRaw = parsed.data;
   const camposBody = bodyRaw.campos;
-  if (!Array.isArray(camposBody)) {
-    return NextResponse.json({ error: "campos deve ser um array" }, { status: 400 });
-  }
-
-  if (camposBody.length === 0) {
-    return NextResponse.json({ error: "Pelo menos 1 campo é obrigatório" }, { status: 400 });
-  }
 
   // Validar cada campo
   for (let i = 0; i < camposBody.length; i++) {

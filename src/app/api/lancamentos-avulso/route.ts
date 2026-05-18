@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { requireAuth, AuthError } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
+
+const LancamentoPostSchema = z.object({
+  tipo_lancamento: z.string().min(1, "obrigatório"),
+  insumo_id: z.coerce.number().int().positive(),
+  deposito_id: z.coerce.number().int().nullable().optional(),
+  deposito_destino_id: z.coerce.number().int().nullable().optional(),
+  peso: z.coerce.number().positive(),
+  obs: z.string().nullable().optional(),
+  local_estoque_id: z.coerce.number().int().nullable().optional(),
+}).passthrough();
 
 // POST /api/lancamentos-avulso
 // Body: { tipo_lancamento, insumo_id, peso, deposito_id?, deposito_destino_id?, obs?, local_estoque_id? }
@@ -18,25 +30,12 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 
-  const { tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, obs, local_estoque_id } =
-    await req.json() as {
-      tipo_lancamento: string;
-      insumo_id: number;
-      deposito_id?: number | null;
-      deposito_destino_id?: number | null;
-      peso: number;
-      obs?: string | null;
-      local_estoque_id?: number | null;
-    };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = LancamentoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, obs, local_estoque_id } = parsed.data;
 
   const localEstoqueDefault = await getParametroNumber(PARAM.LOCAL_ESTOQUE_DEFAULT_ID);
-
-  if (!tipo_lancamento || !insumo_id || !peso || peso <= 0) {
-    return NextResponse.json(
-      { error: "tipo_lancamento, insumo_id e peso são obrigatórios" },
-      { status: 400 },
-    );
-  }
 
   if (tipo_lancamento === "transferencia" && deposito_id && deposito_destino_id &&
       Number(deposito_id) === Number(deposito_destino_id)) {

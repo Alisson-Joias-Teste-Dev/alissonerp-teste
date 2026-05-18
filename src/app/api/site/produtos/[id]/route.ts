@@ -5,11 +5,17 @@
  * produto. Cria o registro em alissonerp.site_produtos se ainda não existir.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { tabelaExiste } from "@/lib/schema-check";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const SiteProdutoPatchSchema = z.object({
+  publicado_no_site: z.boolean(),
+}).passthrough();
 
 export async function PATCH(
   req: NextRequest,
@@ -25,14 +31,10 @@ export async function PATCH(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  const publicado = typeof body?.publicado_no_site === "boolean"
-    ? body.publicado_no_site
-    : null;
-
-  if (publicado === null) {
-    return NextResponse.json({ error: "publicado_no_site é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = SiteProdutoPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const publicado = parsed.data.publicado_no_site;
 
   try {
     if (!(await tabelaExiste("alissonerp", "site_produtos"))) {

@@ -6,11 +6,23 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { normalizeCategoriaRow } from "@/lib/curva-precificacao";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const CurvaCategoriaPatchSchema = z.object({
+  nome: z.string().optional(),
+  max_weight: z.coerce.number().optional(),
+  variation: z.coerce.number().optional(),
+  comm_variation: z.coerce.number().optional(),
+  max_discount: z.coerce.number().optional(),
+  ativo: z.boolean().optional(),
+  ordem: z.coerce.number().int().optional(),
+}).passthrough();
 
 async function authorize(req?: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -29,8 +41,11 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const catId = Number(id);
   if (!catId) return NextResponse.json({ error: "id inválido" }, { status: 400 });
 
-  const body = await req.json();
-  const { nome, max_weight, variation, comm_variation, max_discount, ativo, ordem } = body as Record<string, unknown>;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = CurvaCategoriaPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
+  const { nome, max_weight, variation, comm_variation, max_discount, ativo, ordem } = body;
 
   if (max_weight !== undefined && Number(max_weight) <= 0) {
     return NextResponse.json({ error: "max_weight deve ser positivo" }, { status: 400 });

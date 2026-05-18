@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
 
 interface Params { params: Promise<{ id: string }> }
 
@@ -8,6 +10,13 @@ const ROLES_CONTAR = [
   "desenvolvedor", "admin", "gerente_fabrica", "gerente_loja",
   "estoquista_fabrica", "estoquista_loja"
 ];
+
+const ContarPostSchema = z.object({
+  contagens: z.array(z.object({
+    produto_id: z.coerce.number().int().positive(),
+    quantidade_contada: z.coerce.number().int(),
+  })).min(1, "ao menos uma contagem"),
+}).passthrough();
 
 // POST /api/estoque-comercial/inventario/[id]/contar
 // Registra a contagem de um ou mais itens
@@ -36,13 +45,10 @@ export async function POST(
     return NextResponse.json({ error: `Inventário já está ${inv.status}` }, { status: 409 });
   }
 
-  const body = await req.json() as {
-    contagens: Array<{ produto_id: number; quantidade_contada: number }>;
-  };
-
-  if (!body.contagens || !Array.isArray(body.contagens) || body.contagens.length === 0) {
-    return NextResponse.json({ error: "contagens[] obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ContarPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Atualizar status para em_contagem se ainda está aberto
   if (inv.status === 'aberto') {

@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_PROTEGIDAS = ["desenvolvedor", "admin"] as const;
+
+const RolePatchSchema = z.object({
+  descricao: z.string().optional(),
+  ativo: z.boolean().optional(),
+}).passthrough();
 
 // PATCH /api/configuracoes/roles/[nome]
 // Body: { descricao?: string, ativo?: boolean }
@@ -27,7 +34,10 @@ export async function PATCH(
     );
   }
 
-  const body = await req.json() as { descricao?: string; ativo?: boolean };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = RolePatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const updates: { descricao?: string; ativo?: boolean } = {};
   if (body.descricao !== undefined) updates.descricao = body.descricao.trim();

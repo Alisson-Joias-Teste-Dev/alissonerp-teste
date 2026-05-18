@@ -12,10 +12,17 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
+import { zodError } from "@/lib/schemas/common";
+
+const ProdutoInsumoPatchSchema = z.object({
+  insumo_id: z.coerce.number().int().positive(),
+  preco_compra_usd: z.coerce.number(),
+}).passthrough();
 
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -71,12 +78,10 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    const body = await req.json() as { insumo_id?: number; preco_compra_usd?: number };
-    const { insumo_id, preco_compra_usd } = body;
-
-    if (!insumo_id || preco_compra_usd === undefined || preco_compra_usd === null) {
-      return NextResponse.json({ error: "insumo_id e preco_compra_usd são obrigatórios" }, { status: 400 });
-    }
+    const raw = await req.json().catch(() => ({}));
+    const parsed = ProdutoInsumoPatchSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const { insumo_id, preco_compra_usd } = parsed.data;
 
     // Atualizar último preço de compra — trigger propaga para produto_composicao
     await sql`

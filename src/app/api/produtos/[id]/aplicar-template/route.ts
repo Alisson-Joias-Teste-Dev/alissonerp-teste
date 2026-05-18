@@ -8,10 +8,16 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, hasRole } from "@/lib/roles";
 import { aplicarRotaPadrao } from "@/lib/aplicar-rota-padrao";
+import { zodError } from "@/lib/schemas/common";
+
+const AplicarTemplateSchema = z.object({
+  template_id: z.coerce.number().int().positive(),
+}).passthrough();
 
 const ROLES_PERMITIDOS = [
   "admin", "desenvolvedor", "diretor", "gerente_fabrica", "gerente_loja", "pcp",
@@ -37,13 +43,11 @@ export async function POST(
     return NextResponse.json({ error: "produto_id inválido" }, { status: 400 });
   }
 
-  let body: { template_id?: unknown };
-  try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }
-
-  const templateId = Number(body.template_id);
-  if (!Number.isInteger(templateId) || templateId <= 0) {
-    return NextResponse.json({ error: "template_id inválido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = AplicarTemplateSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const templateId = parsed.data.template_id;
 
   try {
     const r = await aplicarRotaPadrao(produtoId, { templateId, sobrescrever: true });

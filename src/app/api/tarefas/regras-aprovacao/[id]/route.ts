@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const RegraAprovacaoPatchSchema = z.object({
+  nome: z.string().optional(),
+  descricao: z.string().optional(),
+  tipo_evento: z.string().optional(),
+  condicao_json: z.record(z.string(), z.unknown()).optional(),
+  aprovador_role: z.string().nullable().optional(),
+  aprovador_id: z.string().nullable().optional(),
+  template_id: z.coerce.number().int().nullable().optional(),
+  prioridade_regra: z.coerce.number().int().optional(),
+  ativo: z.boolean().optional(),
+}).passthrough();
 
 export async function PATCH(
   req: NextRequest,
@@ -20,17 +34,10 @@ export async function PATCH(
   const regraId = Number(id);
   if (isNaN(regraId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json() as {
-    nome?: string;
-    descricao?: string;
-    tipo_evento?: string;
-    condicao_json?: Record<string, unknown>;
-    aprovador_role?: string | null;
-    aprovador_id?: string | null;
-    template_id?: number | null;
-    prioridade_regra?: number;
-    ativo?: boolean;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = RegraAprovacaoPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   await sql`
     UPDATE alissonerp.tarefas_regras_aprovacao SET

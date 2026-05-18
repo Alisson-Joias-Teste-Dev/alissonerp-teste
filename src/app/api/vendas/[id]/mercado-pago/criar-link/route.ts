@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createPreference, getWebhookBaseUrl } from "@/lib/mercado-pago";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const CriarLinkSchema = z.object({
+  pagamento_id: z.coerce.number().int().positive().optional(),
+  valor: z.coerce.number().optional(),
+  installments: z.coerce.number().int().optional(),
+}).passthrough();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /api/vendas/[id]/mercado-pago/criar-link
@@ -84,11 +92,10 @@ export async function POST(
     return NextResponse.json({ error: "Venda sem itens" }, { status: 400 });
   }
 
-  const body = await req.json().catch(() => ({})) as {
-    pagamento_id?: number;
-    valor?: number;
-    installments?: number;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = CriarLinkSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // ─── Calcula valor do pagamento MP ────────────────────────────────────────
   // Se body.valor vem, usa ele. Senão: total_venda - soma(confirmados de outras formas).

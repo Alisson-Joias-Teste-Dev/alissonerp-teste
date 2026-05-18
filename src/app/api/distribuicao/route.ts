@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const DistribuicaoPostSchema = z.object({
+  deposito_id: z.coerce.number().int().positive(),
+  setor_id: z.coerce.number().int().nullable().optional(),
+  ordem_ids: z.array(z.coerce.number().int().positive()).min(1, "ao menos uma ordem"),
+  user_id: z.string().nullable().optional(),
+}).passthrough();
 
 // GET /api/distribuicao?etapas=em_andamento|concluido
 export async function GET(req: NextRequest) {
@@ -78,25 +87,15 @@ export async function GET(req: NextRequest) {
 
 // POST /api/distribuicao — criar distribuição com ordens
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { deposito_id, setor_id, ordem_ids, user_id } = body as {
-    deposito_id: number;
-    setor_id?: number | null;
-    ordem_ids: number[];
-    user_id?: string | null;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = DistribuicaoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { deposito_id, setor_id, ordem_ids } = parsed.data;
 
   // Auth obrigatória
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  if (!deposito_id || !ordem_ids?.length) {
-    return NextResponse.json(
-      { error: "Depósito e ao menos uma ordem são obrigatórios" },
-      { status: 400 },
-    );
-  }
 
   // Validar exclusividade: nenhuma ordem pode estar em outra distribuição ativa
   for (const ordens_id of ordem_ids) {

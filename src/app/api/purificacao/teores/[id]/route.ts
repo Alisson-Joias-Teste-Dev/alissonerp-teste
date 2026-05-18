@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { requireAuth, AuthError } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_EDITAR_TEOR = ["admin", "desenvolvedor"];
+
+const TeorPatchSchema = z.object({
+  teor: z.coerce.number().optional(),
+  ativo: z.boolean().optional(),
+}).passthrough();
 
 // PATCH /api/purificacao/teores/[id] — atualizar teor
 export async function PATCH(
@@ -25,12 +32,10 @@ export async function PATCH(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const body = await req.json() as {
-    teor?: number;
-    ativo?: boolean;
-  };
-
-  const { teor, ativo } = body;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TeorPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { teor, ativo } = parsed.data;
 
   // Validar role (vem da sessão autenticada, nunca do body)
   if (!ROLES_EDITAR_TEOR.includes(user.role)) {

@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const TarefaTemplatePatchSchema = z.object({
+  nome: z.string().optional(),
+  descricao: z.string().optional(),
+  titulo_padrao: z.string().optional(),
+  descricao_padrao: z.string().optional(),
+  prioridade: z.string().optional(),
+  responsavel_default_id: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  tipo: z.string().optional(),
+  ativo: z.boolean().optional(),
+}).passthrough();
 
 export async function GET(
   _req: NextRequest,
@@ -43,17 +57,10 @@ export async function PATCH(
   const templateId = Number(id);
   if (isNaN(templateId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json() as {
-    nome?: string;
-    descricao?: string;
-    titulo_padrao?: string;
-    descricao_padrao?: string;
-    prioridade?: string;
-    responsavel_default_id?: string | null;
-    tags?: string[];
-    tipo?: string;
-    ativo?: boolean;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TarefaTemplatePatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   await sql`
     UPDATE alissonerp.tarefas_templates SET

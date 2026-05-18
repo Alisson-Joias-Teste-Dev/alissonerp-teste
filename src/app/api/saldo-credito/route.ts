@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, hasRole } from "@/lib/roles";
 import { getSaldoAtual, getSaldoLimite, ajustarSaldo } from "@/lib/saldo-credito";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const SaldoCreditoPostSchema = z.object({
+  valor: z.coerce.number(),
+  descricao: z.string().min(1, "obrigatório"),
+}).passthrough();
+
+const SaldoCreditoPatchSchema = z.object({
+  limite: z.coerce.number().min(0),
+}).passthrough();
 
 const ROLES_VER_SALDO = ["desenvolvedor", "admin", "diretor", "gerente_loja"];
 
@@ -44,12 +55,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Apenas admin/diretor pode ajustar saldo" }, { status: 403 });
   }
 
-  const body = await req.json() as { valor?: number; descricao?: string };
+  const raw = await req.json().catch(() => ({}));
+  const parsedPost = SaldoCreditoPostSchema.safeParse(raw);
+  if (!parsedPost.success) return zodError(parsedPost.error);
+  const body = parsedPost.data;
   if (!body.valor || body.valor === 0) {
     return NextResponse.json({ error: "Valor obrigatório e diferente de zero" }, { status: 400 });
-  }
-  if (!body.descricao?.trim()) {
-    return NextResponse.json({ error: "Descrição obrigatória" }, { status: 400 });
   }
 
   try {
@@ -75,10 +86,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Apenas admin/diretor pode alterar limite" }, { status: 403 });
   }
 
-  const body = await req.json() as { limite?: number };
-  if (body.limite == null || body.limite < 0) {
-    return NextResponse.json({ error: "Limite inválido" }, { status: 400 });
-  }
+  const rawPatch = await req.json().catch(() => ({}));
+  const parsedPatch = SaldoCreditoPatchSchema.safeParse(rawPatch);
+  if (!parsedPatch.success) return zodError(parsedPatch.error);
+  const body = parsedPatch.data;
 
   await sql`
     UPDATE alissonerp.configuracoes_sistema

@@ -4,10 +4,23 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
+import { zodError } from "@/lib/schemas/common";
+
+const ComposicaoPostSchema = z.object({
+  insumo_id: z.coerce.number().int().positive(),
+  tipo: z.enum(["metal", "pedra", "outro"]),
+  quantidade: z.coerce.number().positive(),
+  tamanho: z.coerce.number().nullable().optional(),
+  unidade_tamanho: z.string().optional(),
+  preco_compra_usd: z.coerce.number().nullable().optional(),
+  obrigatorio: z.boolean().optional(),
+  observacao: z.string().nullable().optional(),
+}).passthrough();
 
 export async function GET(
   req: NextRequest,
@@ -67,18 +80,11 @@ export async function POST(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json();
-  const { insumo_id, tipo, quantidade, tamanho, unidade_tamanho, preco_compra_usd, obrigatorio, observacao } = body;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ComposicaoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { insumo_id, tipo, quantidade, tamanho, unidade_tamanho, preco_compra_usd, obrigatorio, observacao } = parsed.data;
 
-  if (!insumo_id || !tipo || !quantidade) {
-    return NextResponse.json({ error: "insumo_id, tipo e quantidade são obrigatórios" }, { status: 400 });
-  }
-  if (!["metal", "pedra", "outro"].includes(tipo)) {
-    return NextResponse.json({ error: "tipo deve ser 'metal', 'pedra' ou 'outro'" }, { status: 400 });
-  }
-  if (Number(quantidade) <= 0) {
-    return NextResponse.json({ error: "quantidade deve ser maior que zero" }, { status: 400 });
-  }
   if (tipo === "pedra" && !preco_compra_usd) {
     return NextResponse.json({ error: "preco_compra_usd é obrigatório para pedras" }, { status: 400 });
   }

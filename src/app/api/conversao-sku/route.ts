@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, ensureBucket } from "@/lib/storage";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_PERMITIDOS = ["estoquista_loja", "gerente_loja", "admin", "desenvolvedor"];
+
+const ConversaoSkuPostSchema = z.object({
+  sku_origem_id: z.coerce.number().int().positive(),
+  sku_origem_quantidade: z.coerce.number().positive(),
+  sku_origem_peso: z.coerce.number().positive(),
+  local_origem_id: z.coerce.number().int().positive(),
+  sku_destino_id: z.coerce.number().int().positive(),
+  sku_destino_quantidade_desejada: z.coerce.number().positive(),
+  local_destino_id: z.coerce.number().int().positive(),
+  foto_base64: z.string().optional(),
+  motivo: z.string().optional(),
+}).passthrough();
 
 // POST /api/conversao-sku
 // Cria uma solicitação de conversão SKU
@@ -20,46 +34,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    sku_origem_id: number;
-    sku_origem_quantidade: number;
-    sku_origem_peso: number;
-    local_origem_id: number;
-    sku_destino_id: number;
-    sku_destino_quantidade_desejada: number;
-    local_destino_id: number;
-    foto_base64?: string;
-    motivo?: string;
-  };
-
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConversaoSkuPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
   const {
     sku_origem_id, sku_origem_quantidade, sku_origem_peso,
     local_origem_id, sku_destino_id, sku_destino_quantidade_desejada,
     local_destino_id, foto_base64, motivo,
-  } = body;
-
-  // Validações
-  if (!sku_origem_id || sku_origem_id <= 0) {
-    return NextResponse.json({ error: "sku_origem_id inválido" }, { status: 400 });
-  }
-  if (!sku_origem_quantidade || sku_origem_quantidade <= 0) {
-    return NextResponse.json({ error: "sku_origem_quantidade inválido" }, { status: 400 });
-  }
-  if (!sku_origem_peso || sku_origem_peso <= 0) {
-    return NextResponse.json({ error: "sku_origem_peso inválido" }, { status: 400 });
-  }
-  if (!sku_destino_id || sku_destino_id <= 0) {
-    return NextResponse.json({ error: "sku_destino_id inválido" }, { status: 400 });
-  }
-  if (!sku_destino_quantidade_desejada || sku_destino_quantidade_desejada <= 0) {
-    return NextResponse.json({ error: "sku_destino_quantidade_desejada inválido" }, { status: 400 });
-  }
-  if (!local_origem_id || local_origem_id <= 0) {
-    return NextResponse.json({ error: "local_origem_id inválido" }, { status: 400 });
-  }
-  if (!local_destino_id || local_destino_id <= 0) {
-    return NextResponse.json({ error: "local_destino_id inválido" }, { status: 400 });
-  }
+  } = parsed.data;
 
   // Upload da foto
   let fotoPath: string | null = null;

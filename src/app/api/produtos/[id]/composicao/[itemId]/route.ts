@@ -4,10 +4,21 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
+import { zodError } from "@/lib/schemas/common";
+
+const ComposicaoItemPatchSchema = z.object({
+  quantidade: z.coerce.number().optional(),
+  tamanho: z.coerce.number().nullable().optional(),
+  unidade_tamanho: z.string().optional(),
+  preco_compra_usd: z.coerce.number().nullable().optional(),
+  obrigatorio: z.boolean().optional(),
+  observacao: z.string().nullable().optional(),
+}).passthrough();
 
 async function authorize(req?: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -30,8 +41,10 @@ export async function PATCH(
   const { error } = await authorize(req);
   if (error) return error;
 
-  const body = await req.json();
-  const { quantidade, tamanho, unidade_tamanho, preco_compra_usd, obrigatorio, observacao } = body;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ComposicaoItemPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { quantidade, tamanho, unidade_tamanho, preco_compra_usd, obrigatorio, observacao } = parsed.data;
 
   if (quantidade !== undefined && Number(quantidade) <= 0) {
     return NextResponse.json({ error: "quantidade deve ser maior que zero" }, { status: 400 });

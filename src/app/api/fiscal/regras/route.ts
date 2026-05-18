@@ -1,7 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_FISCAL } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const RegraFiscalPostSchema = z.object({
+  empresa_emitente_id: z.coerce.number().int().nullable().optional(),
+  ncm: z.string().min(1, "obrigatório"),
+  uf_destino: z.string().nullable().optional(),
+  cfop_saida: z.string().min(1, "obrigatório"),
+  cfop_devolucao: z.string().nullable().optional(),
+  csosn: z.string().nullable().optional(),
+  cst_icms: z.string().nullable().optional(),
+  origem: z.coerce.number().int().optional(),
+  aliq_ibpt_federal: z.coerce.number().optional(),
+  aliq_ibpt_estadual: z.coerce.number().optional(),
+  aliq_ibpt_municipal: z.coerce.number().optional(),
+  mva_st: z.coerce.number().nullable().optional(),
+  aliq_icms_st: z.coerce.number().nullable().optional(),
+}).passthrough();
 
 async function getUserRole(userId: string): Promise<string | null> {
   const [row] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid`;
@@ -73,12 +91,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = RegraFiscalPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
 
   const ncm = typeof body.ncm === "string" ? body.ncm.replace(/\D/g, "") : "";
   if (ncm.length !== 8) {

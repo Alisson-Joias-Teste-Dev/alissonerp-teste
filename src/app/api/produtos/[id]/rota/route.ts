@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isProdutosAccess, isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const RotaProdutoPutSchema = z.object({
+  etapas: z.array(z.object({
+    setor_id: z.coerce.number().int().positive(),
+  }).passthrough()).optional(),
+}).passthrough();
 
 /**
  * Rota de fabricação por produto (sequência ordenada de setores).
@@ -72,19 +80,14 @@ export async function PUT(
   const produtoId = parseProdutoId(id);
   if (!produtoId) return NextResponse.json({ error: "id inválido" }, { status: 400 });
 
-  let body: { etapas?: Array<{ setor_id?: unknown }> };
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = RotaProdutoPutSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const etapasInput = Array.isArray(body.etapas) ? body.etapas : [];
-  const setorIds: number[] = [];
-  for (const e of etapasInput) {
-    const sid = Number(e?.setor_id);
-    if (!Number.isInteger(sid) || sid <= 0) {
-      return NextResponse.json({ error: "Etapa com setor_id inválido" }, { status: 400 });
-    }
-    setorIds.push(sid);
-  }
+  const setorIds: number[] = etapasInput.map(e => e.setor_id);
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

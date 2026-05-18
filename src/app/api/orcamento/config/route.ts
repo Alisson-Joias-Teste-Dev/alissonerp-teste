@@ -1,9 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_CONFIG = ["desenvolvedor", "admin", "gerente_loja"] as const;
+
+const OrcamentoConfigPostSchema = z.object({
+  start_mkp: z.coerce.number().optional(),
+  discount_percent: z.coerce.number().optional(),
+  profile: z.string().optional(),
+  pricing_categories: z.unknown().optional(),
+  groove_rules: z.unknown().optional(),
+  stone_markup: z.coerce.number().optional(),
+  stone_prices: z.unknown().optional(),
+  calibracao: z.unknown().optional(),
+  risco_width: z.coerce.number().optional(),
+  risco_depth: z.coerce.number().optional(),
+  preco_gravacao: z.coerce.number().optional(),
+  stone_markups_table: z.unknown().optional(),
+  espessura_minima_por_modelo: z.unknown().optional(),
+  nomes_modelos: z.unknown().optional(),
+  promocao_inicio: z.string().nullable().optional(),
+  promocao_fim: z.string().nullable().optional(),
+  dome_percentage: z.coerce.number().optional(),
+}).passthrough();
 
 // GET /api/orcamento/config — busca config ativa
 export async function GET() {
@@ -31,7 +53,11 @@ export async function POST(req: NextRequest) {
   const canConfig = isFullAccess(role) || ROLES_CONFIG.includes(role as typeof ROLES_CONFIG[number]);
   if (!canConfig) return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
 
-  const body = await req.json();
+  const raw = await req.json().catch(() => ({}));
+  const parsed = OrcamentoConfigPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = parsed.data as any;
   const {
     start_mkp, discount_percent, profile,
     pricing_categories, groove_rules,

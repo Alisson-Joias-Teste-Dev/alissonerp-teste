@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const RfidReverterSchema = z.object({
+  epc: z.string().min(1, "obrigatório"),
+  motivo: z.string().optional(),
+}).passthrough();
 
 /**
  * POST /api/rfid/reverter
@@ -27,15 +34,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
   }
 
-  let body: { epc?: unknown; motivo?: unknown };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
-  }
-
-  const epc = typeof body?.epc === "string" ? body.epc.trim() : "";
-  if (!epc || !/^AJ\d{2}\d{8}$/.test(epc)) {
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = RfidReverterSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const epc = body.epc.trim();
+  if (!/^AJ\d{2}\d{8}$/.test(epc)) {
     return NextResponse.json(
       { error: "epc invalido — esperado formato AJ{AA}{NNNNNNNN}" },
       { status: 400 },
@@ -43,7 +48,7 @@ export async function POST(req: NextRequest) {
   }
 
   const motivo =
-    typeof body?.motivo === "string" && body.motivo.trim().length > 0
+    typeof body.motivo === "string" && body.motivo.trim().length > 0
       ? body.motivo.trim().slice(0, 500)
       : null;
 

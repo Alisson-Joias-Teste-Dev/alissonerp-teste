@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createInStorePixQr, getWebhookBaseUrl } from "@/lib/mercado-pago";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const CriarPixInstoreSchema = z.object({
+  valor: z.coerce.number().optional(),
+  pagamento_id: z.coerce.number().int().positive().optional(),
+}).passthrough();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /api/vendas/[id]/mercado-pago/criar-pix-instore
@@ -52,7 +59,10 @@ export async function POST(
     return NextResponse.json({ error: "Você só pode cobrar suas próprias vendas" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({})) as { valor?: number; pagamento_id?: number };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = CriarPixInstoreSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // ─── Calcula valor ────────────────────────────────────────────────────────
   const [{ soma_confirmados }] = await sql`

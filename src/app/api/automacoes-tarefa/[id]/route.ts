@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const AutomacaoPatchSchema = z.object({
+  titulo: z.string().optional(),
+  descricao: z.string().optional(),
+  responsavel_id: z.string().optional(),
+  prioridade: z.string().optional(),
+  recorrencia: z.string().optional(),
+  dia_semana: z.coerce.number().int().optional(),
+  dia_mes: z.coerce.number().int().optional(),
+  ativa: z.boolean().optional(),
+  tags: z.array(z.string()).optional(),
+}).passthrough();
 
 // PATCH /api/automacoes-tarefa/[id] — atualizar automação
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -9,7 +23,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const { id } = await params;
-  const body = await req.json() as Record<string, unknown>;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = AutomacaoPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
 
   await sql`
     UPDATE alissonerp.automacoes_tarefa SET

@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_FISCAL } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const ProdutoFiscalPutSchema = z.object({
+  ncm: z.string().nullable().optional(),
+  cest: z.string().nullable().optional(),
+  cfop_saida: z.string().nullable().optional(),
+  origem: z.coerce.number().int().optional(),
+  unidade_comercial: z.string().optional(),
+  ean: z.string().nullable().optional(),
+}).passthrough();
 
 async function getUserRole(userId: string): Promise<string | null> {
   const [row] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid`;
@@ -57,12 +68,11 @@ export async function PUT(
     return NextResponse.json({ error: "id_produto invalido" }, { status: 400 });
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = ProdutoFiscalPutSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
 
   // Validacoes
   const ncm = body.ncm != null && body.ncm !== "" ? String(body.ncm).replace(/\D/g, "") : null;

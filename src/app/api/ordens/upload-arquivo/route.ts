@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createClient } from "@supabase/supabase-js";
 import { uploadFile, deleteFile } from "@/lib/storage";
 import { internalError } from "@/lib/api-error";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { LIMITS, checkBase64Length, payloadTooLargeResponse } from "@/lib/payload-limits";
+import { zodError } from "@/lib/schemas/common";
+
+const UploadJsonSchema = z.object({
+  bucket: z.string().min(1, "obrigatório"),
+  path: z.string().min(1, "obrigatório"),
+  base64: z.string().min(1, "obrigatório"),
+  contentType: z.string().optional(),
+}).passthrough();
+
+const UploadDeleteSchema = z.object({
+  bucket: z.string().min(1, "obrigatório"),
+  path: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 const BUCKETS_PERMITIDOS = ["ordem-fotos", "ordem-videos"];
 
@@ -74,12 +88,13 @@ export async function POST(req: NextRequest) {
 
   } else {
     // ── JSON (base64) — para imagens e arquivos ≤10MB ──────────────────
-    const body = await req.json() as {
-      bucket?: string; path?: string; base64?: string; contentType?: string;
-    };
-    bucket   = body.bucket ?? null;
-    filePath = body.path   ?? null;
-    const base64      = body.base64 ?? null;
+    const raw = await req.json().catch(() => ({}));
+    const parsed = UploadJsonSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const body = parsed.data;
+    bucket   = body.bucket;
+    filePath = body.path;
+    const base64      = body.base64;
     const contentType = body.contentType ?? "application/octet-stream";
 
     try {
@@ -90,9 +105,6 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
-    if (!bucket || !filePath || !base64) {
-      return NextResponse.json({ error: "bucket, path e base64 são obrigatórios" }, { status: 400 });
-    }
     if (!BUCKETS_PERMITIDOS.includes(bucket)) {
       return NextResponse.json({ error: "Bucket inválido" }, { status: 400 });
     }
@@ -113,8 +125,10 @@ export async function DELETE(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const body = await req.json() as { bucket?: string; path?: string };
-  const { bucket, path } = body;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = UploadDeleteSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { bucket, path } = parsed.data;
   if (!bucket || !path) {
     return NextResponse.json({ error: "bucket e path são obrigatórios" }, { status: 400 });
   }

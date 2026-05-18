@@ -1,6 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const MetaPostSchema = z.object({
+  vendedor_id: z.coerce.number().int().positive(),
+  mes: z.coerce.number().int().min(1).max(12),
+  ano: z.coerce.number().int().positive(),
+  meta_prata: z.coerce.number().optional(),
+  meta_ouro: z.coerce.number().optional(),
+  meta_diamante: z.coerce.number().optional(),
+  horario_inicio: z.string().optional(),
+  horas_por_dia: z.coerce.number().optional(),
+  dias_nao_trabalhados: z.array(z.coerce.number().int()).optional(),
+  meta_valor: z.coerce.number().optional(),
+  meta_quantidade: z.coerce.number().nullable().optional(),
+}).passthrough();
 
 // ─── GET /api/vendas/metas?mes=&ano=&vendedor_id= ─────────────────────────────
 export async function GET(req: NextRequest) {
@@ -62,28 +78,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Apenas gerentes podem definir metas" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    vendedor_id:          number;
-    mes:                  number;
-    ano:                  number;
-    meta_prata:           number;
-    meta_ouro:            number;
-    meta_diamante:        number;
-    horario_inicio?:      string;
-    horas_por_dia?:       number;
-    dias_nao_trabalhados?: number[];
-    // Compat legado
-    meta_valor?:          number;
-    meta_quantidade?:     number | null;
-  };
-
-  // Validações
-  if (!body.vendedor_id || !body.mes || !body.ano) {
-    return NextResponse.json({ error: "vendedor_id, mes e ano obrigatórios" }, { status: 400 });
-  }
-  if (body.mes < 1 || body.mes > 12) {
-    return NextResponse.json({ error: "Mês inválido (1-12)" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = MetaPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const prata    = body.meta_prata ?? body.meta_valor ?? 0;
   const ouro     = body.meta_ouro ?? 0;

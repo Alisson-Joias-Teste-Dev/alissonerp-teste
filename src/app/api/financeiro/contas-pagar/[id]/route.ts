@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+
+const ContaPagarPatchSchema = z.object({
+  situacao: z.string().optional(),
+  valor: z.coerce.number().optional(),
+  data_vencimento: z.string().optional(),
+  data_pagamento: z.string().optional(),
+  obs: z.string().optional(),
+}).passthrough();
 
 // Inter status que ainda estão "no ar" — bloqueia edição manual pra evitar
 // inconsistência entre o estado interno e o pagamento já em processamento.
@@ -32,13 +42,10 @@ export async function PATCH(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const body = await req.json().catch(() => ({})) as {
-    situacao?: string;
-    valor?: number;
-    data_vencimento?: string;
-    data_pagamento?: string;
-    obs?: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ContaPagarPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Carrega estado atual da conta — usado pra validar regras de negócio
   // antes do UPDATE (Inter ativo + auto-fill de data_pagamento).

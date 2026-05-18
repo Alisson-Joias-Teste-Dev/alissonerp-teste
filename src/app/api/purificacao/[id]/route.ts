@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { requireAuth, AuthError } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
+
+const PurificacaoPatchSchema = z.object({
+  peso_retornado_24k: z.coerce.number().positive(),
+  foto_retorno: z.string().nullable().optional(),
+  observacao_retorno: z.string().nullable().optional(),
+}).passthrough();
 
 const ROLES_CANCELAR = ["admin", "desenvolvedor"];
 
@@ -78,13 +86,10 @@ export async function PATCH(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const body = await req.json() as {
-    peso_retornado_24k: number;
-    foto_retorno?: string | null;
-    observacao_retorno?: string | null;
-  };
-
-  const { peso_retornado_24k, foto_retorno, observacao_retorno } = body;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PurificacaoPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { peso_retornado_24k, foto_retorno, observacao_retorno } = parsed.data;
 
   // Verificar permissão granular (admin/dev/diretor passam sempre)
   if (!isFullAccess(user.role)) {

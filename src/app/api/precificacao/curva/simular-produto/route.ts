@@ -12,6 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isPrecificacaoAccess } from "@/lib/roles";
 import sql from "@/lib/db";
@@ -23,6 +24,15 @@ import {
   type CurvaCategoriaInput,
   type Arredondamento,
 } from "@/lib/curva-precificacao";
+import { zodError } from "@/lib/schemas/common";
+
+const SimularProdutoSchema = z.object({
+  peso: z.coerce.number().positive(),
+  cotacao: z.coerce.number().optional(),
+  mkpManual: z.coerce.number().optional(),
+  config: z.unknown().optional(),
+  categorias: z.array(z.unknown()).optional(),
+}).passthrough();
 
 interface RequestBody {
   peso: number;
@@ -39,12 +49,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = (await req.json()) as RequestBody;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = SimularProdutoSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as unknown as RequestBody;
   const { peso, cotacao: cotacaoIn, mkpManual } = body;
-
-  if (peso == null || Number(peso) <= 0) {
-    return NextResponse.json({ error: "peso deve ser > 0" }, { status: 400 });
-  }
 
   try {
     let config = body.config;

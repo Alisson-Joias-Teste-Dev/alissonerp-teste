@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
 
 const ACOES_VALIDAS = ["abrir_purificacao", "concluir_purificacao", "abrir_ligacao", "concluir_ligacao", "editar_teor_ligacao"] as const;
+
+const PermissoesUsuarioPatchSchema = z.object({
+  user_id: z.string().uuid("UUID inválido"),
+  permissoes: z.record(z.string(), z.boolean()),
+}).passthrough();
 
 // GET /api/configuracoes/permissoes-usuario?user_id=UUID
 export async function GET(req: NextRequest) {
@@ -48,15 +55,10 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  const body = await req.json() as {
-    user_id: string;
-    permissoes: Record<string, boolean>;
-  };
-
-  const { user_id, permissoes } = body;
-  if (!user_id || !permissoes) {
-    return NextResponse.json({ error: "user_id e permissoes obrigatórios" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PermissoesUsuarioPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { user_id, permissoes } = parsed.data;
 
   for (const [acao, permitido] of Object.entries(permissoes)) {
     if (!ACOES_VALIDAS.includes(acao as typeof ACOES_VALIDAS[number])) continue;

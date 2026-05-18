@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const SubstitutoPatchSchema = z.object({
+  inicio: z.string().optional(),
+  fim: z.string().nullable().optional(),
+}).passthrough();
 
 export async function DELETE(
   _req: NextRequest,
@@ -41,10 +48,10 @@ export async function PATCH(
   const subId = Number(id);
   if (isNaN(subId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json() as {
-    inicio?: string;
-    fim?: string | null;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = SubstitutoPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   await sql`
     UPDATE alissonerp.tarefas_substitutos SET

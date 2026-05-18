@@ -4,9 +4,17 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isPrecificacaoAccess } from "@/lib/roles";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const RegrasPatchSchema = z.object({
+  preco_limiar_subir: z.coerce.number().optional(),
+  preco_limiar_descer: z.coerce.number().optional(),
+  preco_arredondamento: z.string().optional(),
+}).passthrough();
 
 const CHAVES = ["preco_limiar_subir", "preco_limiar_descer", "preco_arredondamento"] as const;
 type Chave = (typeof CHAVES)[number];
@@ -49,11 +57,10 @@ export async function PATCH(req: NextRequest) {
   if (errRes) return errRes;
   if (!isPrecificacaoAccess(user.role)) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const body = await req.json() as {
-    preco_limiar_subir?: number;
-    preco_limiar_descer?: number;
-    preco_arredondamento?: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = RegrasPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const ARREDONDAMENTOS = ["dezena", "unidade", "centena"];
 

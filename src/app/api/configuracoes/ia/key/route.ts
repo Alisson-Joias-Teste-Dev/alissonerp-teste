@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const IaKeyPostSchema = z.object({
+  provedor: z.enum(["claude", "openai", "gemini"]),
+  api_key: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 // POST /api/configuracoes/ia/key
 // Body: { provedor: "claude" | "openai" | "gemini", api_key: string }
@@ -20,16 +27,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as { provedor?: string; api_key?: string };
-
-  const PROVEDORES_VALIDOS = ["claude", "openai", "gemini"];
-
-  if (!body.provedor || !PROVEDORES_VALIDOS.includes(body.provedor)) {
-    return NextResponse.json({ error: "Provedor inválido" }, { status: 400 });
-  }
-  if (!body.api_key || body.api_key.trim() === "") {
-    return NextResponse.json({ error: "API key não pode estar vazia" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = IaKeyPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const chave = `ia_key_${body.provedor}`;
 

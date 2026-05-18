@@ -1,8 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const PersonalizadoPostSchema = z.object({
+  descricao: z.string().min(1, "obrigatório"),
+  preco_por_letra: z.coerce.number().nonnegative(),
+  peso_por_letra: z.union([z.coerce.number(), z.string(), z.null()]).optional(),
+  max_caracteres: z.coerce.number().int().optional(),
+  min_caracteres: z.coerce.number().int().optional(),
+  caracteres_permitidos: z.string().optional(),
+  label: z.string().optional(),
+  exemplo: z.string().optional(),
+  obrigatorio: z.boolean().optional(),
+}).passthrough();
 
 /**
  * POST /api/produtos/personalizados
@@ -72,22 +86,11 @@ export async function POST(req: NextRequest) {
   }
 
   // ─── Parse + valida body ──────────────────────────────────────────────
-  let body: {
-    descricao?: unknown;
-    preco_por_letra?: unknown;
-    peso_por_letra?: unknown;
-    max_caracteres?: unknown;
-    min_caracteres?: unknown;
-    caracteres_permitidos?: unknown;
-    label?: unknown;
-    exemplo?: unknown;
-    obrigatorio?: unknown;
-  };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = PersonalizadoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
 
   const descricao =
     typeof body.descricao === "string" && body.descricao.trim().length > 0

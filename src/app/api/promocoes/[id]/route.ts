@@ -7,6 +7,7 @@
  * Bloqueia edicao se a promocao ja iniciou (ativa) ou foi encerrada/cancelada.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { requireAuth, AuthError, ForbiddenError } from "@/lib/auth-server";
 import sql from "@/lib/db";
 import { isFullAccess } from "@/lib/roles";
@@ -16,6 +17,19 @@ import {
   checarConflitoPromocoes,
 } from "@/lib/promocoes-helpers";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const PromocaoPatchSchema = z.object({
+  nome_campanha: z.string().optional(),
+  data_inicio: z.string().optional(),
+  data_fim: z.string().optional(),
+  observacao: z.string().nullable().optional(),
+  max_parcelas_cartao: z.coerce.number().int().nullable().optional(),
+  itens: z.array(z.object({
+    produto_id: z.coerce.number().int().positive(),
+    preco_promo: z.coerce.number(),
+  })).optional(),
+}).passthrough();
 
 async function loadCampanha(id: number) {
   const [camp] = await sql<Array<{
@@ -123,16 +137,11 @@ export async function PATCH(
     );
   }
 
-  let body: {
-    nome_campanha?: string;
-    data_inicio?: string;
-    data_fim?: string;
-    observacao?: string | null;
-    max_parcelas_cartao?: number | null;
-    itens?: { produto_id: number; preco_promo: number }[];
-  };
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: "JSON invalido" }, { status: 400 }); }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = PromocaoPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   if (body.max_parcelas_cartao != null) {
     const n = Number(body.max_parcelas_cartao);

@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_GERENTES = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 const ROLES_CONTAR = [...ROLES_GERENTES, "estoquista_fabrica", "estoquista_loja"];
+
+const InventarioPostSchema = z.object({
+  local_estoque_id: z.coerce.number().int().positive(),
+  obs: z.string().optional(),
+  categoria: z.string().optional(),
+}).passthrough();
 
 // GET /api/estoque-comercial/inventario — listar inventários
 export async function GET(_req: NextRequest) {
@@ -45,13 +53,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as { local_estoque_id: number; obs?: string; categoria?: string };
-  const { local_estoque_id, obs, categoria } = body;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = InventarioPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { local_estoque_id, obs, categoria } = parsed.data;
   const cat = categoria?.trim() || null;
-
-  if (!local_estoque_id) {
-    return NextResponse.json({ error: "local_estoque_id obrigatório" }, { status: 400 });
-  }
 
   // Verificar se já existe inventário aberto para esse local
   const [existente] = await sql`

@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { gerarZplEtiquetaJoia, imprimirZplDireto } from "@/lib/rfid-zpl";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const RfidImprimirSchema = z.object({
+  produto_id: z.coerce.number().int().positive(),
+  tipo: z.string().optional(),
+}).passthrough();
 
 // POST /api/rfid/imprimir
 // Body: { produto_id: number, tipo?: string }
@@ -21,11 +28,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as { produto_id?: number; tipo?: string };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = RfidImprimirSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
   const produtoId = body.produto_id;
-  if (!produtoId) {
-    return NextResponse.json({ error: "produto_id obrigatório" }, { status: 400 });
-  }
 
   const [prod] = await sql`
     SELECT id_produto, sku, nome FROM public.produtos WHERE id_produto = ${produtoId}::bigint

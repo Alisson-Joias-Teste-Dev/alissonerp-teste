@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+
+const ConcPendPostSchema = z.object({
+  pagamento_id: z.coerce.number().int().positive(),
+  obs: z.string().optional(),
+}).passthrough();
 
 // ─── GET /api/financeiro/conciliacao-pendente ─────────────────────────────────
 // Lista pagamentos manuais MP (source='manual_mp') confirmados que ainda não
@@ -68,10 +75,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as { pagamento_id: number; obs?: string };
-  if (!body.pagamento_id) {
-    return NextResponse.json({ error: "pagamento_id obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConcPendPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Valida que o pagamento existe e é manual_mp confirmado
   const [pag] = await sql`

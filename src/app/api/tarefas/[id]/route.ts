@@ -1,8 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const TarefaPatchSchema = z.object({
+  titulo: z.string().optional(),
+  descricao: z.string().optional(),
+  responsavel_id: z.string().nullable().optional(),
+  prioridade: z.string().optional(),
+  status: z.string().optional(),
+  data_limite: z.string().nullable().optional(),
+  ordem_id: z.coerce.number().int().nullable().optional(),
+  ordem_ids: z.array(z.coerce.number().int()).nullable().optional(),
+  peso_metal: z.coerce.number().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  tipo: z.string().optional(),
+  motivo_delegacao: z.string().optional(),
+}).passthrough();
 
 export async function GET(
   _req: NextRequest,
@@ -79,20 +96,10 @@ export async function PATCH(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    titulo?: string;
-    descricao?: string;
-    responsavel_id?: string | null;
-    prioridade?: string;
-    status?: string;
-    data_limite?: string | null;
-    ordem_id?: number | null;
-    ordem_ids?: number[] | null;
-    peso_metal?: number | null;
-    tags?: string[];
-    tipo?: string;
-    motivo_delegacao?: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TarefaPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const novoResponsavel = body.responsavel_id;
   const responsavelAnterior = tarefaPatch.responsavel_id;

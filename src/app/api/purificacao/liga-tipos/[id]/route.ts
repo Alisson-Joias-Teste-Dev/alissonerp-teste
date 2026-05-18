@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { requireAuth, AuthError } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_EDITAR = ["admin", "desenvolvedor"];
+
+const LigaTipoPatchSchema = z.object({
+  teor_default: z.coerce.number(),
+}).passthrough();
 
 // PATCH /api/purificacao/liga-tipos/[id] — atualizar teor_default do mapeamento liga
 export async function PATCH(
@@ -25,11 +31,10 @@ export async function PATCH(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const body = await req.json() as {
-    teor_default?: number;
-  };
-
-  const { teor_default } = body;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = LigaTipoPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { teor_default } = parsed.data;
 
   if (!ROLES_EDITAR.includes(user.role)) {
     return NextResponse.json(

@@ -1,8 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { registrarQuebra, buscarOuroRecebido } from "@/lib/registrar-quebra";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { zodError } from "@/lib/schemas/common";
+
+const PcpSaidaPostSchema = z.object({
+  pcp_id: z.coerce.number().int().positive(),
+  peso_bruto: z.coerce.number().positive(),
+  pedras_utilizadas: z.array(z.object({
+    insumo_id: z.coerce.number().int().positive(),
+    qtd_utilizada: z.coerce.number().optional(),
+    peso_ct_utilizado: z.coerce.number().optional(),
+  })).optional(),
+  peso_outros: z.coerce.number().nullable().optional(),
+  metal_externo: z.coerce.number().nullable().optional(),
+  foto_balanca: z.string().nullable().optional(),
+  user_id: z.string().nullable().optional(),
+}).passthrough();
 
 // POST /api/pcp/saida — registra saída final do PCP
 //
@@ -23,6 +39,9 @@ import { getParametroNumber, PARAM } from "@/lib/parametros";
 // CE QBP: saida dep_operador — quebra/perda de pedra (disponivel − utilizada, se > 0)
 // metal_externo: descontado SÓ do PMC, NÃO da movimentação de estoque
 export async function POST(req: NextRequest) {
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PcpSaidaPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
   const {
     pcp_id,
     peso_bruto,
@@ -31,16 +50,7 @@ export async function POST(req: NextRequest) {
     metal_externo: metal_externo_body,
     foto_balanca,
     user_id,
-  } = await req.json() as {
-    pcp_id: number;
-    peso_bruto: number;
-    // Sprint 3: aceita peso_ct_utilizado (quilates) e/ou qtd_utilizada (backward compat)
-    pedras_utilizadas?: { insumo_id: number; qtd_utilizada?: number; peso_ct_utilizado?: number }[];
-    peso_outros?: number | null;
-    metal_externo?: number | null;
-    foto_balanca?: string | null;
-    user_id?: string | null;
-  };
+  } = parsed.data;
 
   // Auth obrigatória — user.id substitui body.user_id para created_by
   const supabase = await createServerSupabase();

@@ -13,10 +13,16 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
+import { zodError } from "@/lib/schemas/common";
+
+const PropagarSchema = z.object({
+  campos: z.array(z.string()).optional(),
+}).passthrough();
 
 export async function POST(
   req: NextRequest,
@@ -32,8 +38,10 @@ export async function POST(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as { campos?: string[] };
-  const campos = body.campos ?? ["medidas"];
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PropagarSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const campos = parsed.data.campos ?? ["medidas"];
 
   if (!Array.isArray(campos) || campos.length === 0) {
     return NextResponse.json({ error: "campos é obrigatório" }, { status: 400 });

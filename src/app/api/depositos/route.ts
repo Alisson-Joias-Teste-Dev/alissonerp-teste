@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const DepositoPostSchema = z.object({
+  nome: z.string().min(1, "obrigatório").max(120),
+  tipo: z.enum(["administrativo", "producao"]).optional(),
+}).passthrough();
 
 // GET /api/depositos — lista todos (ativos + inativos)
 export async function GET(req: NextRequest) {
@@ -28,15 +35,14 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json() as { nome?: string; tipo?: string };
-    const nome = body.nome?.trim();
+    const raw = await req.json().catch(() => ({}));
+    const parsed = DepositoPostSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const body = parsed.data;
+    const nome = body.nome.trim();
     if (!nome) return NextResponse.json({ error: "Nome obrigatório" }, { status: 400 });
 
     const tipo = body.tipo ?? "producao";
-    const TIPOS_VALIDOS = ["administrativo", "producao"];
-    if (!TIPOS_VALIDOS.includes(tipo)) {
-      return NextResponse.json({ error: "Tipo inválido" }, { status: 400 });
-    }
 
     const rows = await sql<{ id: number }[]>`
       INSERT INTO alissonerp.depositos (nome, tipo, ativo)

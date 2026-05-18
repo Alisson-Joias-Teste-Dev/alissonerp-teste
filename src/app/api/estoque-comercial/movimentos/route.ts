@@ -1,11 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_PERMITIDOS = [
   "desenvolvedor", "admin", "gerente_fabrica", "gerente_loja",
   "estoquista_fabrica", "estoquista_loja"
 ];
+
+const MovimentoPostSchema = z.object({
+  produto_id: z.coerce.number().int().positive(),
+  tipo: z.enum(["entrada", "saida"]),
+  quantidade: z.coerce.number().positive(),
+  motivo: z.string().min(1, "obrigatório"),
+  local_estoque_id: z.coerce.number().int().optional(),
+  observacao: z.string().optional(),
+}).passthrough();
 
 // POST /api/estoque-comercial/movimentos
 // Registra uma movimentação (entrada ou saída) manual
@@ -19,26 +30,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    produto_id: number;
-    tipo: "entrada" | "saida";
-    quantidade: number;
-    motivo: string;
-    local_estoque_id?: number;
-    observacao?: string;
-  };
-
+  const raw = await req.json().catch(() => ({}));
+  const parsed = MovimentoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
   const { produto_id, tipo, quantidade, motivo, observacao } = body;
-
-  if (!produto_id || !tipo || !quantidade || !motivo) {
-    return NextResponse.json({ error: "Campos obrigatórios: produto_id, tipo, quantidade, motivo" }, { status: 400 });
-  }
-  if (!["entrada", "saida"].includes(tipo)) {
-    return NextResponse.json({ error: "tipo inválido" }, { status: 400 });
-  }
-  if (quantidade <= 0) {
-    return NextResponse.json({ error: "quantidade deve ser > 0" }, { status: 400 });
-  }
 
   // Detectar se coluna local_estoque_id existe na tabela
   const [hasLocalCol] = await sql`

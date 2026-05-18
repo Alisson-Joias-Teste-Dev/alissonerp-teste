@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { fetchPayment } from "@/lib/mercado-pago";
@@ -6,6 +7,12 @@ import { concluirVenda } from "@/lib/vendas-aprovar";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const VerificarManualSchema = z.object({
+  payment_id: z.string().min(1, "obrigatório"),
+  pagamento_id: z.coerce.number().int().positive().optional(),
+}).passthrough();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /api/vendas/[id]/mercado-pago/verificar-manual
@@ -36,9 +43,11 @@ export async function POST(
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json().catch(() => ({})) as { payment_id?: string; pagamento_id?: number };
-  const mpPaymentId = String(body.payment_id ?? "").trim();
-  if (!mpPaymentId) return NextResponse.json({ error: "Informe o ID do pagamento" }, { status: 400 });
+  const raw = await req.json().catch(() => ({}));
+  const parsed = VerificarManualSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const mpPaymentId = body.payment_id.trim();
   const pagamentoIdExistente = body.pagamento_id ? Number(body.pagamento_id) : null;
 
   // Verificar se já está registrado

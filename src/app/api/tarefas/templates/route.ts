@@ -1,7 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const TarefaTemplatePostSchema = z.object({
+  nome: z.string().min(1, "obrigatório"),
+  descricao: z.string().optional(),
+  titulo_padrao: z.string().min(1, "obrigatório"),
+  descricao_padrao: z.string().optional(),
+  prioridade: z.string().optional(),
+  responsavel_default_id: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  tipo: z.string().optional(),
+}).passthrough();
 
 export async function GET() {
   const supabase = await createServerSupabase();
@@ -33,20 +46,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    nome: string;
-    descricao?: string;
-    titulo_padrao: string;
-    descricao_padrao?: string;
-    prioridade?: string;
-    responsavel_default_id?: string;
-    tags?: string[];
-    tipo?: string;
-  };
-
-  if (!body.nome?.trim() || !body.titulo_padrao?.trim()) {
-    return NextResponse.json({ error: "nome e titulo_padrao são obrigatórios" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TarefaTemplatePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const [template] = await sql`
     INSERT INTO alissonerp.tarefas_templates

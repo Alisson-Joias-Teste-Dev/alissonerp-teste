@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const TarefaComentarioSchema = z.object({
+  texto: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 // ─── POST /api/tarefas/[id]/comentarios ───────────────────────────────────────
 export async function POST(
@@ -18,10 +24,10 @@ export async function POST(
   const [tarefa] = await sql`SELECT id FROM alissonerp.tarefas WHERE id = ${tarefaId}`;
   if (!tarefa) return NextResponse.json({ error: "Tarefa não encontrada" }, { status: 404 });
 
-  const body = await req.json() as { texto: string };
-  if (!body.texto?.trim()) {
-    return NextResponse.json({ error: "Texto obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TarefaComentarioSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const [comentario] = await sql`
     INSERT INTO alissonerp.comentarios_tarefa (tarefa_id, autor_id, texto)

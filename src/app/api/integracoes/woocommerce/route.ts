@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const WooPostSchema = z.object({
+  produto_id: z.coerce.number().int().positive(),
+  nome: z.string().optional(),
+  preco: z.coerce.number().optional(),
+  sku: z.string().optional(),
+  estoque: z.coerce.number().int().optional(),
+}).passthrough();
 
 // ─── POST /api/integracoes/woocommerce ────────────────────────────────────────
 // Sincroniza produto do fabricaAJ → WooCommerce via REST API
@@ -15,17 +25,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    produto_id: number;
-    nome?: string;
-    preco?: number;
-    sku?: string;
-    estoque?: number;
-  };
-
-  if (!body.produto_id) {
-    return NextResponse.json({ error: "produto_id obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = WooPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Buscar credenciais WooCommerce
   let wooUrl = "", wooKey = "", wooSecret = "";

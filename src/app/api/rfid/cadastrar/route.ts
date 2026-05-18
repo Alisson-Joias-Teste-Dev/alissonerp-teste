@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, isFullAccess } from "@/lib/roles";
 import { gerarZplEtiquetaJoia } from "@/lib/rfid-zpl";
+import { zodError } from "@/lib/schemas/common";
+
+const RfidCadastrarSchema = z.object({
+  produto_id: z.coerce.number().int().positive(),
+}).passthrough();
 
 /**
  * POST /api/rfid/cadastrar
@@ -63,27 +69,11 @@ export async function POST(req: NextRequest) {
   // -----------------------------------------------------------
   // 3. Parse + valida body
   // -----------------------------------------------------------
-  let body: { produto_id?: unknown };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
-  }
-
-  const rawProdutoId = body?.produto_id;
-  const produtoId =
-    typeof rawProdutoId === "number"
-      ? rawProdutoId
-      : typeof rawProdutoId === "string" && /^\d+$/.test(rawProdutoId)
-        ? parseInt(rawProdutoId, 10)
-        : NaN;
-
-  if (!Number.isFinite(produtoId) || produtoId <= 0 || !Number.isInteger(produtoId)) {
-    return NextResponse.json(
-      { error: "produto_id invalido — precisa ser inteiro positivo" },
-      { status: 400 },
-    );
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = RfidCadastrarSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const produtoId = parsed.data.produto_id;
 
   // -----------------------------------------------------------
   // 4. Transacao: busca produto + gera EPC + insert

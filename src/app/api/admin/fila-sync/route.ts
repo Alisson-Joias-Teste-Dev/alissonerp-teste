@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { processarFila } from "@/lib/fila-sync-worker";
+import { zodError } from "@/lib/schemas/common";
+
+const FilaSyncPostSchema = z.object({
+  limite: z.coerce.number().int().min(1).max(50).optional(),
+}).passthrough();
 
 async function getCallerRole(userId: string): Promise<string | null> {
   const [caller] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid LIMIT 1`;
@@ -67,8 +73,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({})) as { limite?: number };
-  const limite = Math.min(50, Math.max(1, Number(body.limite ?? 10)));
+  const raw = await req.json().catch(() => ({}));
+  const parsed = FilaSyncPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const limite = Math.min(50, Math.max(1, Number(parsed.data.limite ?? 10)));
 
   const result = await processarFila(limite);
   return NextResponse.json(result);

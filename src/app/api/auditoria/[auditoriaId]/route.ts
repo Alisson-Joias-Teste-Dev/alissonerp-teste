@@ -1,12 +1,14 @@
 import sql from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
 
-interface UpdateBody {
-  situacao: string;
-  parecer?: string | null;
-  motivo_reprovacao?: string | null;
-}
+const AuditoriaPatchSchema = z.object({
+  situacao: z.string().min(1, "obrigatório"),
+  parecer: z.string().nullable().optional(),
+  motivo_reprovacao: z.string().nullable().optional(),
+}).passthrough();
 
 export async function PATCH(
   req: NextRequest,
@@ -20,18 +22,11 @@ export async function PATCH(
   const id = parseInt(auditoriaId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  let body: UpdateBody;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Body inválido" }, { status: 400 });
-  }
-
-  const { situacao, parecer, motivo_reprovacao } = body;
-
-  if (!situacao) {
-    return NextResponse.json({ error: "situacao é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "Body inválido" }, { status: 400 });
+  const parsed = AuditoriaPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { situacao, parecer, motivo_reprovacao } = parsed.data;
 
   const rows = await sql`
     UPDATE alissonerp.auditorias

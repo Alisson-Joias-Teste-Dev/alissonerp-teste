@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { podedarBaixaCaixa } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const BaixaPostSchema = z.object({
+  obs: z.string().optional(),
+}).passthrough();
 
 // ─── GET /api/financeiro/caixa/baixa ─────────────────────────────────────────
 // Retorna histórico de baixas + pagamentos pendentes de baixa
@@ -67,7 +73,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão para dar baixa no caixa" }, { status: 403 });
   }
 
-  const { obs } = await req.json().catch(() => ({ obs: undefined })) as { obs?: string };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = BaixaPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { obs } = parsed.data;
 
   // Buscar pagamentos pendentes de baixa
   const pendentes = await sql`

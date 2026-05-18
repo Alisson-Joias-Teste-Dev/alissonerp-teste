@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const UsoReservaPostSchema = z.object({
+  venda_id: z.coerce.number().int().optional(),
+  device_id_reserva: z.string().min(1, "obrigatório"),
+  justificativa: z.string().min(10, "mínimo 10 caracteres"),
+}).passthrough();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /api/mercado-pago/uso-reserva
@@ -13,18 +21,10 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const body = await req.json() as {
-    venda_id?: number;
-    device_id_reserva: string;
-    justificativa: string;
-  };
-
-  if (!body.device_id_reserva) {
-    return NextResponse.json({ error: "device_id_reserva obrigatório" }, { status: 400 });
-  }
-  if (!body.justificativa?.trim() || body.justificativa.trim().length < 10) {
-    return NextResponse.json({ error: "Justificativa deve ter no mínimo 10 caracteres" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = UsoReservaPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Buscar vendedor_id do usuário logado
   const [usuario] = await sql`

@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile } from "@/lib/storage";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_CONFERENCIA = ["consultora", "gerente_loja", "admin", "desenvolvedor"] as const;
+
+const ServiceReprovarSchema = z.object({
+  servico_id: z.coerce.number().int().positive(),
+  motivo_reprovacao: z.string().min(1, "obrigatório"),
+  foto_reprovacao_base64: z.string().optional(),
+}).passthrough();
 
 // POST /api/service/reprovar
 // Consultora reprova serviço na conferência.
@@ -21,19 +29,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    servico_id: number;
-    motivo_reprovacao: string;
-    foto_reprovacao_base64?: string;
-  };
-  const { servico_id, motivo_reprovacao, foto_reprovacao_base64 } = body;
-
-  if (!servico_id || !motivo_reprovacao?.trim()) {
-    return NextResponse.json(
-      { error: "servico_id e motivo_reprovacao são obrigatórios" },
-      { status: 400 }
-    );
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ServiceReprovarSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { servico_id, motivo_reprovacao, foto_reprovacao_base64 } = parsed.data;
 
   // Buscar serviço + número da ordem
   const [servico] = await sql`

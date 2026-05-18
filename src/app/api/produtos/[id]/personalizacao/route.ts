@@ -1,7 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const PersonalizacaoPostSchema = z.object({
+  tipo: z.string().optional(),
+  obrigatorio: z.boolean().optional(),
+  min_caracteres: z.coerce.number().int(),
+  max_caracteres: z.coerce.number().int(),
+  caracteres_permitidos: z.string().optional(),
+  label: z.string().optional(),
+  placeholder: z.string().optional(),
+  exemplo: z.string().optional(),
+  observacao: z.string().optional(),
+  ativo: z.boolean().optional(),
+  preco_por_letra: z.union([z.coerce.number(), z.string(), z.null()]).optional(),
+  peso_por_letra: z.union([z.coerce.number(), z.string(), z.null()]).optional(),
+  descricao_produto: z.string().optional(),
+}).passthrough();
 
 /**
  * Config de personalizacao por produto.
@@ -207,26 +225,11 @@ export async function POST(
     return NextResponse.json({ error: "id invalido" }, { status: 400 });
   }
 
-  let body: {
-    tipo?: unknown;
-    obrigatorio?: unknown;
-    min_caracteres?: unknown;
-    max_caracteres?: unknown;
-    caracteres_permitidos?: unknown;
-    label?: unknown;
-    placeholder?: unknown;
-    exemplo?: unknown;
-    observacao?: unknown;
-    ativo?: unknown;
-    preco_por_letra?: unknown;
-    peso_por_letra?: unknown;
-    descricao_produto?: unknown;
-  };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = PersonalizacaoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
 
   // Validacao de tipos
   const tipo = typeof body.tipo === "string" && TIPOS_VALIDOS.includes(body.tipo as typeof TIPOS_VALIDOS[number])

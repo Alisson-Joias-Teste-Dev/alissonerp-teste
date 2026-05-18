@@ -6,9 +6,17 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, hasRole } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const RotaTemplatePostSchema = z.object({
+  nome: z.string().min(1).max(120),
+  categoria: z.string().optional(),
+  is_default: z.boolean().optional(),
+}).passthrough();
 
 const ROLES_PERMITIDOS = [
   "admin", "desenvolvedor", "diretor", "gerente_fabrica", "gerente_loja", "pcp",
@@ -54,12 +62,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  let body: { nome?: unknown; categoria?: unknown; is_default?: unknown };
-  try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = RotaTemplatePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
-  const nome = typeof body.nome === "string" ? body.nome.trim() : "";
-  if (!nome) return NextResponse.json({ error: "Nome obrigatório" }, { status: 400 });
-  if (nome.length > 120) return NextResponse.json({ error: "Nome muito longo (máx 120)" }, { status: 400 });
+  const nome = body.nome.trim();
 
   const categoria = typeof body.categoria === "string" && body.categoria.trim()
     ? body.categoria.trim()

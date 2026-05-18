@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_ATRIBUIR_OPERADOR = ["admin", "desenvolvedor", "gerente_fabrica", "pcp"];
+
+const AtribuirOperadorSchema = z.object({
+  deposito_id: z.coerce.number().int().positive(),
+}).passthrough();
 
 // PATCH /api/pcp/[id]/atribuir-operador
 // Body: { deposito_id: number }
@@ -24,12 +30,10 @@ export async function PATCH(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const body = await req.json() as { deposito_id?: number };
-  const { deposito_id } = body;
-
-  if (!deposito_id) {
-    return NextResponse.json({ error: "deposito_id é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = AtribuirOperadorSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { deposito_id } = parsed.data;
 
   // Validar deposito_id != 1 (Almoxarifado Central não é operador)
   if (deposito_id === 1) {

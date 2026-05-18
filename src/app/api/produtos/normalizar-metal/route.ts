@@ -11,9 +11,15 @@
  *   (case-insensitive) → tipo_metal = 'Ouro 18k'.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const NormalizarMetalSchema = z.object({
+  regra: z.string().optional(),
+}).passthrough();
 
 async function auth(req: NextRequest | undefined, acao: "ler" | "escrever" = "ler") {
   const [user, errRes] = await authOr401(req);
@@ -56,8 +62,10 @@ export async function POST(req: NextRequest) {
   const a = await auth(req, "escrever");
   if ("error" in a) return a.error;
 
-  const body = await req.json().catch(() => ({}));
-  const regra = body?.regra ?? "ouro";
+  const raw = await req.json().catch(() => ({}));
+  const parsed = NormalizarMetalSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const regra = parsed.data.regra ?? "ouro";
   if (regra !== "ouro") return NextResponse.json({ error: "Regra desconhecida" }, { status: 400 });
 
   const rows = await sql<{ id_produto: number }[]>`

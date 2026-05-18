@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
 
 type Params = Promise<{ id: string }>;
+
+const LocalEstoquePatchSchema = z.object({
+  nome: z.string().min(1).max(120).optional(),
+  ativo: z.boolean().optional(),
+}).passthrough();
 
 // PATCH /api/locais-estoque/[id] — edita nome e/ou ativo
 // PROTECT: id=1 (Fábrica) não pode ser desativado
@@ -22,7 +29,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
     return NextResponse.json({ error: "Sem permissão — requer admin ou desenvolvedor" }, { status: 403 });
   }
 
-  const body = await req.json() as { nome?: string; ativo?: boolean };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = LocalEstoquePatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Proteção: id=1 (Fábrica) não pode ser desativado
   if (localId === 1 && body.ativo === false) {
@@ -37,7 +47,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
   `;
   if (!existing) return NextResponse.json({ error: "Local não encontrado" }, { status: 404 });
 
-  const nome  = body.nome  !== undefined ? body.nome.trim()  : (existing.nome as string);
+  const nome  = body.nome  !== undefined ? (body.nome as string).trim()  : (existing.nome as string);
   const ativo = body.ativo !== undefined ? body.ativo        : (existing.ativo as boolean);
 
   const [updated] = await sql`

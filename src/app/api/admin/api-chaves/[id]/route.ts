@@ -4,9 +4,17 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const ApiChavePatchSchema = z.object({
+  nome: z.string().min(1).max(200).optional(),
+  ativa: z.boolean().optional(),
+  rate_limit_por_minuto: z.coerce.number().int().min(1).max(10000).optional(),
+}).passthrough();
 
 async function autorizarAdmin(req: NextRequest) {
   try {
@@ -30,7 +38,10 @@ export async function PATCH(
   const chaveId = Number(id);
   if (isNaN(chaveId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json() as { nome?: string; ativa?: boolean; rate_limit_por_minuto?: number };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ApiChavePatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   await sql`
     UPDATE alissonerp.api_chaves SET

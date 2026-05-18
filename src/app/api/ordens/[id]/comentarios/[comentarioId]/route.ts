@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const ComentarioPatchSchema = z.object({
+  texto: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 // PATCH /api/ordens/[id]/comentarios/[comentarioId] — editar (somente autor)
 export async function PATCH(
@@ -15,10 +21,10 @@ export async function PATCH(
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const { comentarioId } = await params;
-  const { texto } = await req.json();
-
-  if (!texto?.trim())
-    return NextResponse.json({ error: "Texto obrigatório" }, { status: 400 });
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ComentarioPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { texto } = parsed.data;
 
   const [c] = await sql`
     SELECT autor_id FROM alissonerp.comentarios_ordem WHERE id = ${parseInt(comentarioId)}

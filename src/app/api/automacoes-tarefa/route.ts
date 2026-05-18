@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const AutomacaoPostSchema = z.object({
+  titulo: z.string().min(1, "obrigatório"),
+  descricao: z.string().optional(),
+  responsavel_id: z.string().optional(),
+  prioridade: z.string().optional(),
+  recorrencia: z.enum(["diaria", "semanal", "mensal"]),
+  dia_semana: z.coerce.number().int().min(0).max(7).optional(),
+  dia_mes: z.coerce.number().int().min(1).max(31).optional(),
+  tags: z.array(z.string()).optional(),
+}).passthrough();
 
 // GET /api/automacoes-tarefa — listar automações
 export async function GET(req: NextRequest) {
@@ -42,21 +55,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Apenas gerentes podem criar automações" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    titulo: string;
-    descricao?: string;
-    responsavel_id?: string;
-    prioridade?: string;
-    recorrencia: string;
-    dia_semana?: number;
-    dia_mes?: number;
-    tags?: string[];
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = AutomacaoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   if (!body.titulo?.trim()) return NextResponse.json({ error: "Título obrigatório" }, { status: 400 });
-  if (!["diaria", "semanal", "mensal"].includes(body.recorrencia)) {
-    return NextResponse.json({ error: "recorrencia deve ser: diaria, semanal ou mensal" }, { status: 400 });
-  }
 
   const [automacao] = await sql`
     INSERT INTO alissonerp.automacoes_tarefa

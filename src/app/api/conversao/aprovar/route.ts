@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, ensureBucket } from "@/lib/storage";
+import { zodError } from "@/lib/schemas/common";
+
+const ConversaoAprovarSchema = z.object({
+  tarefa_id: z.coerce.number().int().positive(),
+  conversao_id: z.coerce.number().int().positive().optional(),
+}).passthrough();
 
 // POST /api/conversao/aprovar
 // Body: { tarefa_id: number, conversao_id: number }
@@ -19,16 +26,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Apenas administradores podem aprovar conversões" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    tarefa_id: number;
-    conversao_id?: number;
-  };
-
-  const { tarefa_id, conversao_id } = body;
-
-  if (!tarefa_id) {
-    return NextResponse.json({ error: "tarefa_id é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConversaoAprovarSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { tarefa_id, conversao_id } = parsed.data;
 
   // Verificar se tarefa existe e está 'aguardando_aprovacao'
   const [tarefa] = await sql`

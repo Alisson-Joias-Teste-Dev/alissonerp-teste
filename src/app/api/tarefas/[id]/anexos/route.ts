@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const TarefaAnexoSchema = z.object({
+  nome: z.string().min(1, "obrigatório"),
+  url: z.string().min(1, "obrigatório"),
+  tamanho: z.coerce.number().optional(),
+  tipo_mime: z.string().optional(),
+}).passthrough();
 
 export async function GET(
   _req: NextRequest,
@@ -43,16 +52,10 @@ export async function POST(
   const tarefaId = Number(id);
   if (isNaN(tarefaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json() as {
-    nome: string;
-    url: string;
-    tamanho?: number;
-    tipo_mime?: string;
-  };
-
-  if (!body.nome || !body.url) {
-    return NextResponse.json({ error: "nome e url são obrigatórios" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TarefaAnexoSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   try {
     const [anexo] = await sql`

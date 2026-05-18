@@ -1,8 +1,26 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const ConfigurarPostSchema = z.object({
+  produtoId: z.coerce.number().int().positive(),
+  tipo: z.string().optional(),
+  label: z.string().optional(),
+  obrigatorio: z.boolean().optional(),
+  min_caracteres: z.coerce.number().int().optional(),
+  max_caracteres: z.coerce.number().int().optional(),
+  caracteres_permitidos: z.string().optional(),
+  campos_gratis: z.coerce.number().int().optional(),
+  preco_campo_adicional: z.union([z.coerce.number(), z.null(), z.literal("")]).optional(),
+  preco_por_letra: z.coerce.number().nullable().optional(),
+  peso_por_letra: z.coerce.number().nullable().optional(),
+  regras: z.record(z.string(), z.unknown()).optional(),
+  descricao_produto: z.string().optional(),
+}).passthrough();
 
 /**
  * POST /api/lia/personalizar/configurar
@@ -77,17 +95,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON invÃ¡lido" }, { status: 400 });
-  }
-
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invÃ¡lido" }, { status: 400 });
+  const parsed = ConfigurarPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
   const produtoId = Number(body.produtoId);
-  if (!Number.isFinite(produtoId) || produtoId <= 0) {
-    return NextResponse.json({ error: "produtoId invÃ¡lido" }, { status: 400 });
-  }
 
   try {
     const resultado = await sql.begin(async (tx: any) => {

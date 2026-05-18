@@ -13,10 +13,16 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, hasRole } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const PersonalizacaoCamposPutSchema = z.object({
+  campos: z.array(z.object({}).passthrough()),
+}).passthrough();
 
 const ROLES_CONFIG = ["admin", "desenvolvedor", "diretor", "gerente_loja", "gerente_fabrica"] as const;
 
@@ -140,12 +146,11 @@ export async function PUT(
   const produtoId = parseId(id);
   if (!produtoId) return NextResponse.json({ error: "produto_id inválido" }, { status: 400 });
 
-  let body: { campos?: unknown };
-  try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }
-
-  if (!Array.isArray(body.campos)) {
-    return NextResponse.json({ error: "campos deve ser array" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = PersonalizacaoCamposPutSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
   const camposIn = body.campos as CampoIn[];
 
   // Validação prévia

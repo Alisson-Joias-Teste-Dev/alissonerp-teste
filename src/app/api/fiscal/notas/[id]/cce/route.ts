@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_FISCAL } from "@/lib/roles";
 import { focusRequest } from "@/lib/fiscal/focus-client";
+import { zodError } from "@/lib/schemas/common";
+
+const CcePostSchema = z.object({
+  descricao_correcao: z.string().min(15, "mínimo 15 caracteres"),
+}).passthrough();
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -50,21 +56,11 @@ export async function POST(
   if (isNaN(notaId))
     return NextResponse.json({ error: "ID invalido" }, { status: 400 });
 
-  let body: { descricao_correcao?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Body invalido" }, { status: 400 });
-  }
-
-  const { descricao_correcao } = body;
-
-  if (!descricao_correcao || descricao_correcao.trim().length < 15) {
-    return NextResponse.json(
-      { error: "descricao_correcao deve ter no minimo 15 caracteres" },
-      { status: 400 },
-    );
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "Body invalido" }, { status: 400 });
+  const parsed = CcePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { descricao_correcao } = parsed.data;
 
   // ── 3. Buscar nota ──────────────────────────────────────────────────────────
   interface NotaRow {

@@ -16,9 +16,15 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, hasRole } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const MoverRotaSchema = z.object({
+  setor_id: z.coerce.number().int().positive(),
+}).passthrough();
 
 const ROLES_PERMITIDOS = [
   "admin", "desenvolvedor", "diretor",
@@ -49,14 +55,11 @@ export async function PATCH(
   const pcpId = parsePcpId(id);
   if (!pcpId) return NextResponse.json({ error: "id inválido" }, { status: 400 });
 
-  let body: { setor_id?: unknown };
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }
-
-  const setorId = Number(body.setor_id);
-  if (!Number.isInteger(setorId) || setorId <= 0) {
-    return NextResponse.json({ error: "setor_id inválido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = MoverRotaSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const setorId = parsed.data.setor_id;
 
   try {
     // 1. Resolve produto_id da OF

@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const FretePostSchema = z.object({
+  bairro: z.string().min(1, "obrigatório"),
+  municipio: z.string().optional(),
+  valor: z.coerce.number().optional(),
+}).passthrough();
 
 // ─── GET /api/configuracoes/fretes-bairro ─────────────────────────────────────
 // Lista todos os bairros com seus valores de frete, ordenados por municipio e bairro.
@@ -35,7 +43,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const { bairro, municipio, valor } = await req.json() as { bairro: string; municipio?: string; valor?: number };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = FretePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { bairro, municipio, valor } = parsed.data;
   if (!bairro?.trim()) return NextResponse.json({ error: "Bairro é obrigatório" }, { status: 400 });
 
   try {

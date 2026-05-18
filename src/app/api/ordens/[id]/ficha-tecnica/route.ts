@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { validarFichaTecnicaServer, type FichaTecnicaDados } from "@/lib/validar-ficha-tecnica";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
+
+const FichaTecOrdemPatchSchema = z.object({
+  dados: z.object({
+    tipo_item: z.string().min(1, "obrigatório"),
+  }).passthrough(),
+}).passthrough();
 
 // PATCH /api/ordens/[id]/ficha-tecnica
 // Body: { dados: FichaTecnicaDados }
@@ -46,10 +54,10 @@ export async function PATCH(
     return NextResponse.json({ error: "Sem permissão para editar esta ordem" }, { status: 403 });
   }
 
-  const body = await req.json() as { dados: FichaTecnicaDados };
-  if (!body.dados || !body.dados.tipo_item) {
-    return NextResponse.json({ error: "dados e tipo_item são obrigatórios" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = FichaTecOrdemPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = { dados: parsed.data.dados as unknown as FichaTecnicaDados };
 
   const erroValidacao = validarFichaTecnicaServer(body.dados);
   const fichaCompleta = erroValidacao === null;

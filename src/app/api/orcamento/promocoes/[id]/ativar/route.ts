@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_CONFIG = ["desenvolvedor", "admin", "gerente_loja"] as const;
+
+const AtivarPostSchema = z.object({
+  data_inicio: z.string().optional(),
+  data_fim: z.string().optional(),
+}).passthrough();
 
 // ─── POST /api/orcamento/promocoes/[id]/ativar ───────────────────────────────
 // Reativa uma campanha do histórico: aplica os descontos dela na config atual
@@ -28,7 +35,10 @@ export async function POST(
   const promoId = Number(id);
   if (!Number.isFinite(promoId)) return NextResponse.json({ error: "ID invalido" }, { status: 400 });
 
-  const body = await req.json().catch(() => ({})) as { data_inicio?: string; data_fim?: string };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = AtivarPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await sql.begin(async (tx: any) => {

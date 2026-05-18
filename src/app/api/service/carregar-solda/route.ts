@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, ROLES_SERVICE_PANEL } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { zodError } from "@/lib/schemas/common";
+
+const CarregarSoldaSchema = z.object({
+  deposito_id: z.coerce.number().int().positive(),
+  peso: z.coerce.number().positive(),
+  foto_base64: z.string().min(1, "obrigatório"),
+  operador_nome: z.string().optional(),
+}).passthrough();
 
 // POST /api/service/carregar-solda
 // Dupla-entrada: sai do Almoxarifado Central (dep 1) e entra no depósito do operador.
@@ -27,27 +36,14 @@ export async function POST(req: NextRequest) {
   if (!hasAccess) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   // ── Body ──────────────────────────────────────────────────────────────────
-  const body = await req.json().catch(() => null) as {
-    deposito_id?: number;
-    peso?: number;
-    foto_base64?: string;
-    operador_nome?: string;
-  } | null;
-
-  const deposito_id   = body?.deposito_id ? parseInt(String(body.deposito_id)) : null;
-  const peso          = body?.peso        ? parseFloat(String(body.peso))       : null;
-  const foto_base64   = body?.foto_base64 ?? null;
-  const operador_nome = body?.operador_nome ?? "operador";
-
-  if (!deposito_id || isNaN(deposito_id)) {
-    return NextResponse.json({ error: "deposito_id obrigatório" }, { status: 400 });
-  }
-  if (!peso || isNaN(peso) || peso <= 0) {
-    return NextResponse.json({ error: "peso deve ser > 0" }, { status: 400 });
-  }
-  if (!foto_base64) {
-    return NextResponse.json({ error: "foto_base64 obrigatória" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = CarregarSoldaSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const deposito_id   = body.deposito_id;
+  const peso          = body.peso;
+  const foto_base64   = body.foto_base64;
+  const operador_nome = body.operador_nome ?? "operador";
 
   const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
   const ouro18kId      = await getParametroNumber(PARAM.OURO_18K_INSUMO_ID);

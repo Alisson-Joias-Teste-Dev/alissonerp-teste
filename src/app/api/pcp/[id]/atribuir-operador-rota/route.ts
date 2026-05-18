@@ -8,9 +8,15 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, hasRole } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const AtribuirOpRotaSchema = z.object({
+  operador_atribuido_id: z.coerce.number().int().positive().nullable().optional(),
+}).passthrough();
 
 const ROLES_PERMITIDOS = [
   "admin", "desenvolvedor", "diretor",
@@ -41,18 +47,11 @@ export async function PATCH(
   const pcpId = parsePcpId(id);
   if (!pcpId) return NextResponse.json({ error: "id inválido" }, { status: 400 });
 
-  let body: { operador_atribuido_id?: unknown };
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }
-
-  let opId: number | null = null;
-  if (body.operador_atribuido_id !== null && body.operador_atribuido_id !== undefined) {
-    const n = Number(body.operador_atribuido_id);
-    if (!Number.isInteger(n) || n <= 0) {
-      return NextResponse.json({ error: "operador_atribuido_id inválido (inteiro > 0 ou null)" }, { status: 400 });
-    }
-    opId = n;
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = AtribuirOpRotaSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const opId = parsed.data.operador_atribuido_id ?? null;
 
   try {
     const [pcp] = await sql`SELECT id FROM alissonerp.pcp WHERE id = ${pcpId}`;

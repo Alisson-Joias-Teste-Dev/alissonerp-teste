@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getPublicUrl, deleteFile } from "@/lib/storage";
 import { checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
+import { zodError } from "@/lib/schemas/common";
+
+const FotoPathSchema = z.object({
+  path: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 const STORAGE_PUBLIC_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public`;
 
@@ -80,19 +86,17 @@ export async function POST(
   // Por ora, qualquer usuário autenticado pode adicionar fotos (colaboração esperada neste sistema).
 
   const { id: ordemId } = await params;
-  const { path } = await req.json();
+  const raw = await req.json().catch(() => ({}));
+  const parsed = FotoPathSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { path } = parsed.data;
 
   try {
-    // Storage path eh string curta (~200 chars max em buckets); 1KB ja eh abuso obvio
     checkStringLength("path", path, 1_024);
   } catch (e) {
     const r = payloadTooLargeResponse(e);
     if (r) return r;
     throw e;
-  }
-
-  if (!path?.trim()) {
-    return NextResponse.json({ error: "Path obrigatório" }, { status: 400 });
   }
 
   await sql`
@@ -118,11 +122,10 @@ export async function DELETE(
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const { id: ordemId } = await params;
-  const { path } = await req.json();
-
-  if (!path?.trim()) {
-    return NextResponse.json({ error: "Path obrigatório" }, { status: 400 });
-  }
+  const rawDel = await req.json().catch(() => ({}));
+  const parsedDel = FotoPathSchema.safeParse(rawDel);
+  if (!parsedDel.success) return zodError(parsedDel.error);
+  const { path } = parsedDel.data;
 
   // Verificar permissão — apenas admin/desenvolvedor pode remover fotos
   const [usuario] = await sql`

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const TransferirServicoSchema = z.object({
+  deposito_destino_id: z.coerce.number().int().positive(),
+}).passthrough();
 
 // POST /api/service/[id]/transferir
 // Transfere um serviço para outro operador.
@@ -35,11 +41,10 @@ export async function POST(
   if (!hasAccess) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   // ── Body ──────────────────────────────────────────────────────────────────
-  const body = await req.json() as { deposito_destino_id: number };
-  const { deposito_destino_id } = body;
-  if (!deposito_destino_id) {
-    return NextResponse.json({ error: "deposito_destino_id é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TransferirServicoSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { deposito_destino_id } = parsed.data;
   if (deposito_destino_id === 1) {
     return NextResponse.json(
       { error: "Não é possível transferir para o Almoxarifado Central" },

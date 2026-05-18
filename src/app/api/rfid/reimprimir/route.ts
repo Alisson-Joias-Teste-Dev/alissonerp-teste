@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, isFullAccess } from "@/lib/roles";
 import { gerarZplEtiquetaJoia } from "@/lib/rfid-zpl";
+import { zodError } from "@/lib/schemas/common";
+
+const RfidReimprimirSchema = z.object({
+  epc: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 /**
  * POST /api/rfid/reimprimir
@@ -48,15 +54,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: { epc?: unknown };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
-  }
-
-  const epc = typeof body?.epc === "string" ? body.epc.trim() : "";
-  if (!epc || !/^AJ\d{2}\d{8}$/.test(epc)) {
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = RfidReimprimirSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const epc = parsed.data.epc.trim();
+  if (!/^AJ\d{2}\d{8}$/.test(epc)) {
     return NextResponse.json(
       { error: "epc invalido — esperado formato AJ{AA}{NNNNNNNN}" },
       { status: 400 },

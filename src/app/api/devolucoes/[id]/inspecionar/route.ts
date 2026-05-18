@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
 import { inspecionarItem, type CondicaoItem } from "@/lib/devolucoes";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const InspecionarPostSchema = z.object({
+  item_id: z.coerce.number().int().positive(),
+  condicao: z.string().min(1, "obrigatório"),
+  observacao: z.string().nullable().optional(),
+}).passthrough();
 
 async function getUserRole(userId: string): Promise<string | null> {
   const [row] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid`;
@@ -29,15 +37,10 @@ export async function POST(
   const devId = Number(id);
   if (isNaN(devId)) return NextResponse.json({ error: "id invalido" }, { status: 400 });
 
-  const body = await req.json() as {
-    item_id: number;
-    condicao: CondicaoItem;
-    observacao?: string | null;
-  };
-
-  if (!body.item_id || !body.condicao) {
-    return NextResponse.json({ error: "item_id e condicao obrigatorios" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = InspecionarPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = { ...parsed.data, condicao: parsed.data.condicao as CondicaoItem };
 
   // Verificar que o item pertence a essa devolucao
   const [item] = await sql`

@@ -1,8 +1,91 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 17/05/2026 — Versão: v2.57.0 <!-- Revisado 17/05/2026 -->
+> 📋 Última atualização automática: 17/05/2026 — Versão: v2.58.0 <!-- Revisado 17/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(security): onda 1J-2 — zod em ~153 rotas restantes (v2.58.0)
+
+Segunda onda 1J — adicionou validação Zod (`safeParse` + `zodError`) em todas
+as rotas POST/PATCH/PUT que ainda não tinham. Resultado: padronização total da
+camada de entrada das API routes, eliminando o uso de `as any`/`as unknown`
+direto no parsing.
+
+**Cobertura:**
+
+- 231 rotas POST/PATCH/PUT mapeadas no início
+- 153 rotas tiveram zod aplicado nesta onda (~66%)
+- 39 rotas puladas (sem body — cron, FormData, ou body já validado por outro
+  mecanismo). Exemplo: `whatsapp/webhook` virou passthrough leniente; rotas
+  como `compras/[id]/concluir` não recebem body.
+
+**Módulos cobertos:**
+
+- **Auth/User**: user/route, user/[id]/route, configuracoes/roles, ia/key,
+  parametros, integracoes, permissoes, permissoes-usuario, sistema, gateways
+- **Cadastros**: setores, depositos, fornecedores, contatos, insumos,
+  locais-estoque, tipos-servico, fretes-bairro, admin/api-chaves
+- **PCP/Distribuição**: pcp/apontamentos, pcp/saida, pcp/transferir,
+  pcp/ordem-teste, pcp/[id]/{atribuir-operador,atribuir-operador-rota,mover-rota},
+  distribuicao, distribuicao/apontamentos, distribuicao/[id]/{saida,estorno,estorno-lote},
+  service/*
+- **Estoque comercial**: converter, inventario, estornar, movimentos,
+  config/[produtoId], transferir, transferir-local
+- **Vendas**: faixas-comissao, metas, solicitar-desconto, solicitacoes-desconto,
+  itens/[itemId], pagamentos/[pagId], mercado-pago/{criar-pix,criar-pix-instore,
+  criar-link,criar-intent-point,verificar-manual}, rfid, upload-video
+- **Produtos**: bulk-edit, classificar-tipo, normalizar-metal, rename-metal,
+  insumos, pedras-bulk, pedras-bulk/reprice, personalizados, [id]/{composicao,
+  composicao/[itemId],ficha-tecnica,personalizacao,personalizacao/campos,
+  personalizacao-campos,propagar,reposicao,rota,aplicar-template,imagens/[imgId]}
+- **Precificação**: simular, rejeitar, regras, solicitar-aprovacao, markup-pedras,
+  curva/config, curva/categorias/[id], curva/preview-aplicar, curva/simular-produto
+- **Compras**: compras (POST), itens, receber
+- **Fiscal**: emitentes, emitentes/[id], regras, regras/[id],
+  contatos-fiscais/[id_contato], produtos-fiscais/[id_produto],
+  emitir/nfce, emitir/nfe-devolucao, notas/[id]/{cancelar,cce}, webhook/focus
+- **Tarefas**: tarefas, tarefas/[id], comentarios, anexos, aprovacao,
+  templates, templates/[id], templates/[id]/aplicar, regras-aprovacao,
+  regras-aprovacao/[id], substitutos, substitutos/[id]
+- **RFID**: cadastrar, confirmar-impressao, imprimir, inventario, lookup,
+  reimprimir, reverter, scan
+- **Outros**: agentes/playground, agentes/telegram/webhook (passthrough),
+  whatsapp/webhook (passthrough), aprovacao/[aprovacaoId], auditoria/[auditoriaId],
+  automacoes-tarefa, automacoes-tarefa/[id], conversao/{aprovar,recusar},
+  conversao-sku, conversao-sku/{aprovar,concluir-servico,recusar},
+  dashboard-comercial/premiacao, devolucoes/[id]/inspecionar, editor-ia/{config,generate},
+  entrega/[entregaId], estoque/transferir-local, fichas-tecnicas, financeiro/{caixa/baixa,
+  cofre-ouro/baixas,conciliacao-pendente,conciliar,contas-pagar/[id],contas-receber/[id]},
+  gestao-estoque/{ai-chat,user-views}, ia/validar-peso, integracoes/{kommo,woocommerce},
+  lancamentos-avulso, lia/personalizar/{chat,configurar}, mercado-pago/{devices,
+  uso-reserva}, notificacoes/adiar, orcamento/{config,promocoes,promocoes/[id]/ativar},
+  ordens/[id]/{comentarios,comentarios/[comentarioId],ficha-tecnica,fotos,upload-arquivo},
+  protocolo/[protocoloId], purificacao, purificacao/[id], purificacao/{ligacao,
+  ligacao/[id],liga-tipos/[id],teores/[id]}, rotas-template, rotas-template/[id],
+  rotas-template/[id]/etapas, saldo-credito, service/{carregar-aditivo,carregar-solda,
+  receber,reprovar,transferir-insumo,[id]/{apontar,concluir,devolver,transferir,
+  transferir-fabrica}}, site/{config,produtos/[id],test}, vale-troca/validar,
+  promocoes/[id]
+
+**Critérios mantidos:**
+
+- `.passthrough()` em todos os schemas — preserva campos extras (não quebra
+  frontend nem callers legados)
+- `.optional()` agressivo — mantém comportamento original onde campos eram
+  tratados como opcionais via `??` ou COALESCE
+- `z.coerce.number()` para numeric strings vindos de IDs em params
+- `z.union([z.coerce.number(), z.string(), z.null()])` para campos que
+  aceitavam múltiplos tipos (ex: preco_por_letra)
+- Webhooks externos (Focus NFe, WhatsApp Evolution, Telegram) usam schema
+  `passthrough()` permissivo — validação interna do payload já existe via
+  `validateWebhookSecret` ou similar
+- Não refatorou lógica de negócio — só adicionou validação na entrada
+
+**Validações:**
+
+- `npx tsc --noEmit` → 0 erros
+- `npx eslint .` → 0 erros, 569 warnings (baseline ~567, +2 pelas mudanças)
+- 5/5 smoke tests passam: onda 1C, 1D, 1H, 1I, 1J
 
 ## fix(security): onda 1K — fechar ressalvas QA final (v2.57.0)
 

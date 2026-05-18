@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
+
+const OrdemTestePostSchema = z.object({
+  peso_negociado: z.coerce.number().optional(),
+  deposito_id: z.coerce.number().int().nullable().optional(),
+  etapa_inicial: z.enum(["novas_ordens", "aguardando", "em_andamento"]).optional(),
+}).passthrough();
 
 // POST /api/pcp/ordem-teste
 // Cria uma ordem de teste direto no PCP, sem passar pelo fluxo normal.
@@ -16,11 +24,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão — só desenvolvedor" }, { status: 403 });
   }
 
-  const { peso_negociado, deposito_id, etapa_inicial } = await req.json() as {
-    peso_negociado?: number;
-    deposito_id?: number | null;
-    etapa_inicial?: "novas_ordens" | "aguardando" | "em_andamento";
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = OrdemTestePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { peso_negociado, deposito_id, etapa_inicial } = parsed.data;
 
   const etapa     = etapa_inicial ?? "novas_ordens";
   const pesoFinal = Number(peso_negociado ?? 2.5);

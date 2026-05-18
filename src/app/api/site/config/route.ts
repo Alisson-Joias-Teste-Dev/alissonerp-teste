@@ -6,11 +6,23 @@
  * No POST, se o cliente enviar consumer_secret vazio, MANTÉM o valor atual.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { tabelaExiste } from "@/lib/schema-check";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const SiteConfigPostSchema = z.object({
+  plataforma: z.string().optional(),
+  site_url: z.string().optional(),
+  consumer_key: z.string().optional(),
+  consumer_secret: z.string().optional(),
+  ativo: z.boolean().optional(),
+  sincronizar_estoque: z.boolean().optional(),
+  sincronizar_preco: z.boolean().optional(),
+}).passthrough();
 
 const MSG_MIGRACAO = "Migration 159 pendente. Execute: node scripts/apply_159.mjs";
 
@@ -69,14 +81,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  const plataforma      = String(body?.plataforma ?? "woocommerce").trim();
-  const site_url        = String(body?.site_url ?? "").trim() || null;
-  const consumer_key    = String(body?.consumer_key ?? "").trim() || null;
-  const consumer_secret = String(body?.consumer_secret ?? "").trim() || null;
-  const ativo           = !!body?.ativo;
-  const sync_estoque    = body?.sincronizar_estoque !== false;
-  const sync_preco      = body?.sincronizar_preco   !== false;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = SiteConfigPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const plataforma      = (body.plataforma ?? "woocommerce").trim();
+  const site_url        = (body.site_url ?? "").trim() || null;
+  const consumer_key    = (body.consumer_key ?? "").trim() || null;
+  const consumer_secret = (body.consumer_secret ?? "").trim() || null;
+  const ativo           = !!body.ativo;
+  const sync_estoque    = body.sincronizar_estoque !== false;
+  const sync_preco      = body.sincronizar_preco   !== false;
 
   try {
     if (!(await tabelaExiste("alissonerp", "site_config"))) {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
@@ -8,6 +9,21 @@ import {
   checkStringLength,
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
+import { zodError } from "@/lib/schemas/common";
+
+const TarefaPostSchema = z.object({
+  titulo: z.string().min(1, "obrigatório"),
+  descricao: z.string().optional(),
+  responsavel_id: z.string().optional(),
+  prioridade: z.string().optional(),
+  data_limite: z.string().optional(),
+  ordem_id: z.coerce.number().int().optional(),
+  ordem_ids: z.array(z.coerce.number().int()).optional(),
+  peso_metal: z.coerce.number().optional(),
+  venda_id: z.coerce.number().int().optional(),
+  tags: z.array(z.string()).optional(),
+  tipo: z.string().optional(),
+}).passthrough();
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase();
@@ -85,19 +101,10 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const body = await req.json() as {
-    titulo: string;
-    descricao?: string;
-    responsavel_id?: string;
-    prioridade?: string;
-    data_limite?: string;
-    ordem_id?: number;
-    ordem_ids?: number[];
-    peso_metal?: number;
-    venda_id?: number;
-    tags?: string[];
-    tipo?: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TarefaPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   try {
     checkStringLength("titulo", body.titulo, LIMITS.TITULO_MAX);

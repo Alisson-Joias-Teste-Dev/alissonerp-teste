@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_ADMIN_FRETE = ["desenvolvedor", "admin", "gerente_loja"];
+
+const FretePatchSchema = z.object({
+  valor: z.coerce.number().min(0).optional(),
+  ativo: z.boolean().optional(),
+  bairro: z.string().optional(),
+}).passthrough();
 
 // ─── PATCH /api/configuracoes/fretes-bairro/[id] ──────────────────────────────
 // Atualiza valor e/ou ativo de um bairro. Requer role admin/desenvolvedor/gerente_loja.
@@ -27,15 +35,10 @@ export async function PATCH(
   const freteId = Number(id);
   if (isNaN(freteId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json() as {
-    valor?:  number;
-    ativo?:  boolean;
-    bairro?: string;
-  };
-
-  if (body.valor !== undefined && (typeof body.valor !== "number" || body.valor < 0)) {
-    return NextResponse.json({ error: "valor deve ser um número >= 0" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = FretePatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   try {
     const [existing] = await sql`

@@ -1,8 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, AuthError } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
+
+const ApontDistPostSchema = z.object({
+  distribuicao_id: z.coerce.number().int().positive(),
+  tipo_apontamento_id: z.coerce.number().int().positive(),
+  deposito_id: z.coerce.number().int().positive(),
+  setor_id: z.coerce.number().int().nullable().optional(),
+  insumo_id: z.coerce.number().int().nullable().optional(),
+  qtd: z.coerce.number().positive(),
+  foto_balanca: z.string().nullable().optional(),
+  user_id: z.string().nullable().optional(),
+}).passthrough();
 
 // POST /api/distribuicao/apontamentos
 // Tipos scope 'ambos' ou 'distribuicao': 1,2,3,5,6,8,9
@@ -16,26 +29,13 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ApontDistPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
   const {
     distribuicao_id, tipo_apontamento_id, deposito_id, setor_id,
     insumo_id, qtd, foto_balanca, user_id,
-  } = await req.json() as {
-    distribuicao_id: number;
-    tipo_apontamento_id: number;
-    deposito_id: number;
-    setor_id: number | null;
-    insumo_id: number | null;
-    qtd: number;
-    foto_balanca?: string | null;
-    user_id?: string | null;
-  };
-
-  if (!distribuicao_id || !tipo_apontamento_id || !deposito_id || !qtd) {
-    return NextResponse.json(
-      { error: "distribuicao_id, tipo_apontamento_id, deposito_id e qtd são obrigatórios" },
-      { status: 400 },
-    );
-  }
+  } = parsed.data;
 
   const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
 

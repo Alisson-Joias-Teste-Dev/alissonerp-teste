@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createPointIntent, cancelPointIntent } from "@/lib/mercado-pago";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const CriarIntentPointSchema = z.object({
+  device_id: z.string().min(1, "obrigatório"),
+  valor: z.coerce.number().optional(),
+  installments: z.coerce.number().int().optional(),
+  payment_type: z.enum(["credit_card", "debit_card", "pix"]).optional(),
+  pagamento_id: z.coerce.number().int().positive().optional(),
+}).passthrough();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST   /api/vendas/[id]/mercado-pago/criar-intent-point
@@ -40,17 +50,10 @@ export async function POST(
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json() as {
-    device_id: string;
-    valor?: number;
-    installments?: number;
-    payment_type?: "credit_card" | "debit_card" | "pix";
-    pagamento_id?: number;
-  };
-
-  if (!body.device_id) {
-    return NextResponse.json({ error: "device_id obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = CriarIntentPointSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // ─── Carrega venda ────────────────────────────────────────────────────────
   const [venda] = await sql`

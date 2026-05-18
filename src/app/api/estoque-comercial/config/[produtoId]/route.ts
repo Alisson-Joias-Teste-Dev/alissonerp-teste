@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const ConfigPatchSchema = z.object({
+  estoque_minimo: z.coerce.number().optional(),
+  ativo: z.boolean().optional(),
+}).passthrough();
 
 interface Params { params: Promise<{ produtoId: string }> }
 
@@ -60,7 +67,10 @@ export async function PATCH(
 
   const { produtoId } = await params;
   const id = Number(produtoId);
-  const body = await req.json() as { estoque_minimo?: number; ativo?: boolean };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConfigPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const [cfg] = await sql`
     INSERT INTO alissonerp.estoque_comercial_config (produto_id, estoque_minimo, ativo, created_by)

@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const UserPostSchema = z.object({
+  nome: z.string().min(1, "obrigatório"),
+  email: z.string().email("e-mail inválido"),
+  senha: z.string().min(6, "mínimo 6 caracteres"),
+  role: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 // POST /api/user — criar novo usuário
 // Requer: admin ou desenvolvedor
@@ -24,12 +33,10 @@ export async function POST(req: NextRequest) {
   }
 
   // 2. Parse body
-  const { nome, email, senha, role } = await req.json() as {
-    nome: string;
-    email: string;
-    senha: string;
-    role: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = UserPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { nome, email, senha, role } = parsed.data;
 
   // 3. Validate required fields
   if (!nome?.trim() || !email?.trim() || !senha || !role) {

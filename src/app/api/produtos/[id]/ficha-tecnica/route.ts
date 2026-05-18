@@ -9,11 +9,17 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isProdutosAccess, isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const FichaTecPutSchema = z.object({
+  foto_base64: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 const BUCKET = "imagens";
 const ORIGEM_FICHA = "ficha_tecnica";
@@ -76,9 +82,11 @@ export async function PUT(
   const produtoId = parseProdutoId(id);
   if (!produtoId) return NextResponse.json({ error: "id inválido" }, { status: 400 });
 
-  let body: { foto_base64?: string };
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = FichaTecPutSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   const fotoBase64 = body.foto_base64;
   if (!fotoBase64 || !fotoBase64.startsWith("data:")) {

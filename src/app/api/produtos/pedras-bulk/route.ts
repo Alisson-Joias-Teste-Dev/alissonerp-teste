@@ -41,10 +41,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
 
 interface PedraItem {
   tipo: string;
@@ -56,6 +58,19 @@ interface PedraItem {
 
 const MAX_BATCH = 200;
 
+const PedraBulkPostSchema = z.object({
+  qtd_inicial: z.coerce.number().optional(),
+  itens: z.array(z.object({}).passthrough()).min(1, "itens obrigatório").max(MAX_BATCH),
+}).passthrough();
+
+const PedraBulkPatchSchema = z.object({
+  qtd: z.coerce.number().optional(),
+}).passthrough();
+
+const PedraBulkDeleteSchema = z.object({
+  label: z.string().optional(),
+}).passthrough();
+
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
@@ -63,19 +78,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  const itensRaw: unknown = body?.itens;
-  const qtdInicial = Math.max(0, Number(body?.qtd_inicial ?? 0) | 0);
-
-  if (!Array.isArray(itensRaw) || itensRaw.length === 0) {
-    return NextResponse.json({ error: "itens é obrigatório" }, { status: 400 });
-  }
-  if (itensRaw.length > MAX_BATCH) {
-    return NextResponse.json(
-      { error: `Máximo de ${MAX_BATCH} pedras por requisição` },
-      { status: 400 }
-    );
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PedraBulkPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  const itensRaw: unknown = body.itens;
+  const qtdInicial = Math.max(0, Number(body.qtd_inicial ?? 0) | 0);
 
   // Sanitiza e valida
   const itens: PedraItem[] = [];
@@ -314,8 +322,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  const qtd = Math.max(1, Number(body?.qtd ?? 1) | 0);
+  const rawPatch = await req.json().catch(() => ({}));
+  const parsedPatch = PedraBulkPatchSchema.safeParse(rawPatch);
+  if (!parsedPatch.success) return zodError(parsedPatch.error);
+  const qtd = Math.max(1, Number(parsedPatch.data.qtd ?? 1) | 0);
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -398,8 +408,10 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  const labelRaw = String(body?.label ?? "").trim();
+  const rawDel = await req.json().catch(() => ({}));
+  const parsedDel = PedraBulkDeleteSchema.safeParse(rawDel);
+  if (!parsedDel.success) return zodError(parsedDel.error);
+  const labelRaw = String(parsedDel.data.label ?? "").trim();
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

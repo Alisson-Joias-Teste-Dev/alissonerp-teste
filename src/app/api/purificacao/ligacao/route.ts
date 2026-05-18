@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql, { normalizeRow } from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { requireAuth, AuthError } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
+
+const LigacaoPostSchema = z.object({
+  tipo_18k_insumo_id: z.coerce.number().int().positive(),
+  peso_24k: z.coerce.number().positive(),
+  pureza: z.coerce.number().optional(),
+  teor: z.coerce.number(),
+  foto_envio: z.string().nullable().optional(),
+  observacao: z.string().nullable().optional(),
+}).passthrough();
 
 function authErrorResponse(e: unknown) {
   if (e instanceof AuthError) {
@@ -119,16 +130,10 @@ export async function POST(req: NextRequest) {
   let user;
   try { user = await requireAuth(req); } catch (e) { return authErrorResponse(e); }
 
-  const body = await req.json() as {
-    tipo_18k_insumo_id: number;
-    peso_24k: number;
-    pureza?: number;
-    teor: number;
-    foto_envio?: string | null;
-    observacao?: string | null;
-  };
-
-  const { tipo_18k_insumo_id, peso_24k, pureza = 100, teor, foto_envio, observacao } = body;
+  const raw = await req.json().catch(() => ({}));
+  const parsed = LigacaoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { tipo_18k_insumo_id, peso_24k, pureza = 100, teor, foto_envio, observacao } = parsed.data;
 
   // Verificar permissão granular (admin/dev/diretor passam sempre)
   if (!isFullAccess(user.role)) {

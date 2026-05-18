@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { processarDecisao } from "@/lib/aprovacao-regras";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const AprovacaoTarefaPostSchema = z.object({
+  aprovador_id: z.string().min(1, "obrigatório"),
+}).passthrough();
+
+const AprovacaoTarefaPatchSchema = z.object({
+  aprovacao_id: z.coerce.number().int().positive(),
+  decisao: z.enum(["aprovado", "rejeitado"]),
+  motivo: z.string().optional(),
+}).passthrough();
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabase();
@@ -33,11 +45,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const { id } = await params;
-  const body = await req.json() as { aprovador_id: string };
-
-  if (!body.aprovador_id) {
-    return NextResponse.json({ error: "aprovador_id obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = AprovacaoTarefaPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   await sql`
     UPDATE alissonerp.tarefas SET status = 'aguardando_aprovacao', updated_at = now()
@@ -71,11 +82,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const { id } = await params;
-  const body = await req.json() as { aprovacao_id: number; decisao: "aprovado" | "rejeitado"; motivo?: string };
-
-  if (!body.aprovacao_id || !body.decisao) {
-    return NextResponse.json({ error: "aprovacao_id e decisao obrigatórios" }, { status: 400 });
-  }
+  const rawPatch = await req.json().catch(() => ({}));
+  const parsedPatch = AprovacaoTarefaPatchSchema.safeParse(rawPatch);
+  if (!parsedPatch.success) return zodError(parsedPatch.error);
+  const body = parsedPatch.data;
 
   const [aprovacao] = await sql`
     SELECT * FROM alissonerp.aprovacoes_tarefa

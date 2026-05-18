@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
 
 const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
+
+const TipoServicoPostSchema = z.object({
+  nome: z.string().min(1, "obrigatório"),
+}).passthrough();
+
+const TipoServicoPatchSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  nome: z.string().optional(),
+  ativo: z.boolean().optional(),
+}).passthrough();
 
 // GET /api/tipos-servico
 // ?todos=true → inclui inativos (admin)
@@ -41,11 +53,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão para criar tipos de serviço" }, { status: 403 });
   }
 
-  const body = await req.json();
-  const nome = (body.nome ?? "").toString().trim();
-  if (!nome) {
-    return NextResponse.json({ error: "Nome é obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = TipoServicoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const nome = parsed.data.nome.trim();
 
   const [novo] = await sql`
     INSERT INTO alissonerp.tipos_servico (nome)
@@ -73,12 +84,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão para editar tipos de serviço" }, { status: 403 });
   }
 
-  const body = await req.json();
-  const { id, nome, ativo } = body;
-
-  if (!id || typeof id !== "number") {
-    return NextResponse.json({ error: "id é obrigatório e deve ser número" }, { status: 400 });
-  }
+  const rawPatch = await req.json().catch(() => ({}));
+  const parsedPatch = TipoServicoPatchSchema.safeParse(rawPatch);
+  if (!parsedPatch.success) return zodError(parsedPatch.error);
+  const { id, nome, ativo } = parsedPatch.data;
 
   // Construir updates dinamicamente
   if (nome !== undefined) {

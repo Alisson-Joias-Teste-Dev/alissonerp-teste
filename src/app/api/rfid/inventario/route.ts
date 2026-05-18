@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const InventarioRfidSchema = z.object({
+  leituras: z.array(z.string()).min(1, "leituras obrigatório"),
+  leitor_id: z.string().optional(),
+  local_estoque_id: z.coerce.number().int().optional(),
+  concluir: z.boolean().optional(),
+}).passthrough();
 
 function extrairIdApi(epc: string): number | null {
   if (!epc || epc.length < 13) return null;
@@ -25,16 +34,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
 
-    const body = await req.json() as {
-      leituras: string[];
-      leitor_id?: string;
-      local_estoque_id?: number;
-      concluir?: boolean;
-    };
-
-    if (!Array.isArray(body.leituras) || body.leituras.length === 0) {
-      return NextResponse.json({ error: "leituras é obrigatório (array de strings)" }, { status: 400 });
-    }
+    const raw = await req.json().catch(() => ({}));
+    const parsed = InventarioRfidSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const body = parsed.data;
 
     if (body.concluir) {
       return NextResponse.json({ ok: true, concluido: true, mensagem: "Inventario concluido" });

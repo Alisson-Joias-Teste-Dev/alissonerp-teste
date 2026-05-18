@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
+
+const EntregaPatchSchema = z.object({
+  etapas: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 // PATCH /api/entrega/[entregaId] — concluir entrega
 export async function PATCH(
@@ -13,7 +19,10 @@ export async function PATCH(
 
   const { entregaId } = await params;
   const id = parseInt(entregaId);
-  const { etapas } = await req.json() as { etapas: string };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = EntregaPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { etapas } = parsed.data;
 
   const rows = await sql`
     UPDATE alissonerp.preparacoes_entrega

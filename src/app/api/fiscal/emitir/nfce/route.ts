@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_FISCAL } from "@/lib/roles";
@@ -9,6 +10,13 @@ import {
   type ItemPagamento,
   type ItemVendaDados,
 } from "@/lib/fiscal/payload-nfce";
+import { zodError } from "@/lib/schemas/common";
+
+const NfcePostSchema = z.object({
+  venda_id: z.coerce.number().int().positive(),
+  pagamentos: z.array(z.object({}).passthrough()).min(1, "ao menos um pagamento"),
+  cliente_id: z.coerce.number().int().nullable().optional(),
+}).passthrough();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -51,21 +59,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
 
   // ── 2. Parse body ─────────────────────────────────────────────────────────
-  let body: EmitirNfceBody;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Body invalido" }, { status: 400 });
-  }
-
-  const { venda_id, pagamentos, cliente_id } = body;
-
-  if (!venda_id || !Array.isArray(pagamentos) || pagamentos.length === 0) {
-    return NextResponse.json(
-      { error: "venda_id e pagamentos sao obrigatorios" },
-      { status: 400 },
-    );
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "Body invalido" }, { status: 400 });
+  const parsed = NfcePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const venda_id = parsed.data.venda_id;
+  const pagamentos = parsed.data.pagamentos as unknown as ItemPagamento[];
+  const cliente_id = parsed.data.cliente_id;
 
   // ── 3. Buscar venda ───────────────────────────────────────────────────────
   interface VendaRow {

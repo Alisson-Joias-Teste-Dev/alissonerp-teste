@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { listPointDevices } from "@/lib/mercado-pago";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const DevicesPatchSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  nome_legivel: z.string().optional(),
+  loja: z.string().nullable().optional(),
+  ativo: z.boolean().optional(),
+  vendedor_id: z.coerce.number().int().nullable().optional(),
+  is_reserva: z.boolean().optional(),
+  parcelas_padrao_mp: z.coerce.number().int().optional(),
+}).passthrough();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GET  /api/mercado-pago/devices            → lista maquininhas cadastradas
@@ -161,17 +173,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    id: number;
-    nome_legivel?: string;
-    loja?: string | null;
-    ativo?: boolean;
-    vendedor_id?: number | null;
-    is_reserva?: boolean;
-    parcelas_padrao_mp?: number;
-  };
-
-  if (!body.id) return NextResponse.json({ error: "id obrigatório" }, { status: 400 });
+  const raw = await req.json().catch(() => ({}));
+  const parsed = DevicesPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Resolver mutualidade: is_reserva e vendedor_id são exclusivos
   let resolvedVendedorId: number | null | undefined = body.vendedor_id;

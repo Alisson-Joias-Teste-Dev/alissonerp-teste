@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { estornarVenda, concluirVenda } from "@/lib/vendas-aprovar";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { zodError } from "@/lib/schemas/common";
+
+const PagamentoPatchSchema = z.object({
+  status: z.enum(["pendente", "confirmado", "cancelado", "estornado"]),
+  data_confirmacao: z.string().nullable().optional(),
+  gateway_id: z.string().nullable().optional(),
+}).passthrough();
 
 async function checkOwnership(userId: string, vendaId: number) {
   const [u] = await sql<{ role: string }[]>`
@@ -49,16 +57,10 @@ export async function PATCH(
     throw e;
   }
 
-  const body = await req.json() as {
-    status:             string;
-    data_confirmacao?:  string | null;
-    gateway_id?:        string | null;
-  };
-
-  const STATUS_VALIDOS = ["pendente", "confirmado", "cancelado", "estornado"];
-  if (!STATUS_VALIDOS.includes(body.status)) {
-    return NextResponse.json({ error: "Status inválido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PagamentoPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Força data_confirmacao ao confirmar (evita pagamento fantasma sem timestamp)
   if (body.status === "confirmado") {

@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const FichaTecPostSchema = z.object({
+  ordem_id: z.coerce.number().int().positive(),
+  tipo_item: z.string().min(1, "obrigatório"),
+  dados: z.record(z.string(), z.unknown()),
+}).passthrough();
 
 // POST /api/fichas-tecnicas
 // Body: { ordem_id, tipo_item, dados }
@@ -9,17 +17,10 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const body = await req.json() as {
-    ordem_id?: number;
-    tipo_item?: string;
-    dados?: Record<string, unknown>;
-  };
-
-  const { ordem_id, tipo_item, dados } = body;
-
-  if (!ordem_id || !tipo_item || !dados) {
-    return NextResponse.json({ error: "ordem_id, tipo_item e dados são obrigatórios" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = FichaTecPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { ordem_id, tipo_item, dados } = parsed.data;
 
   const [ficha] = await sql`
     INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)

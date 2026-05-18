@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { zodError } from "@/lib/schemas/common";
+
+const TransferirInsumoSchema = z.object({
+  dest_deposito_id: z.coerce.number().int().positive(),
+  insumo_id: z.coerce.number().int().positive(),
+  quantidade: z.coerce.number().positive(),
+  foto_base64: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 // POST /api/service/transferir-insumo
 // Transfere insumo do estoque do operador logado para outro operador.
@@ -40,24 +49,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Usuário sem depósito vinculado" }, { status: 422 });
     }
 
-    const body = await req.json().catch(() => null) as {
-      dest_deposito_id?: number;
-      insumo_id?: number;
-      quantidade?: number;
-      foto_base64?: string;
-    } | null;
-
+    const raw = await req.json().catch(() => ({}));
+    const parsed = TransferirInsumoSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    const body = parsed.data;
     const origemId   = caller.deposito_id as number;
-    const destId     = body?.dest_deposito_id ? parseInt(String(body.dest_deposito_id)) : null;
-    const insumoId   = body?.insumo_id        ? parseInt(String(body.insumo_id))        : null;
-    const quantidade = body?.quantidade       ? parseFloat(String(body.quantidade))     : null;
-    const fotoBase64 = body?.foto_base64      ?? null;
-
-    if (!destId   || isNaN(destId))   return NextResponse.json({ error: "dest_deposito_id obrigatório" }, { status: 400 });
-    if (!insumoId || isNaN(insumoId)) return NextResponse.json({ error: "insumo_id obrigatório" },       { status: 400 });
-    if (!quantidade || isNaN(quantidade) || quantidade <= 0)
-      return NextResponse.json({ error: "quantidade deve ser > 0" }, { status: 400 });
-    if (!fotoBase64) return NextResponse.json({ error: "foto_base64 obrigatória" }, { status: 400 });
+    const destId     = body.dest_deposito_id;
+    const insumoId   = body.insumo_id;
+    const quantidade = body.quantidade;
+    const fotoBase64 = body.foto_base64;
     if (destId === origemId) return NextResponse.json({ error: "Destino deve ser um operador diferente" }, { status: 400 });
 
     // ── 1. Verificar depósito destino ─────────────────────────────────────────

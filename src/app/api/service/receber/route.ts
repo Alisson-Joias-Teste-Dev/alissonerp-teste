@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const ServiceReceberSchema = z.object({
+  protocolo_id: z.coerce.number().int().positive(),
+  foto_base64: z.string().min(1, "obrigatório"),
+}).passthrough();
 
 // POST /api/service/receber
 // Quem clicou "Receber" fica com a peça — primeiro operador que chamar esta rota leva.
@@ -30,18 +37,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Usuário não possui depósito/operador vinculado" }, { status: 422 });
   }
 
-  const body = await req.json() as {
-    protocolo_id: number;
-    foto_base64: string;
-  };
-
-  const { protocolo_id, foto_base64 } = body;
-  if (!protocolo_id) {
-    return NextResponse.json({ error: "protocolo_id é obrigatório" }, { status: 400 });
-  }
-  if (!foto_base64) {
-    return NextResponse.json({ error: "foto_base64 é obrigatória" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ServiceReceberSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { protocolo_id, foto_base64 } = parsed.data;
 
   // 1. Validar protocolo
   const [protocolo] = await sql`

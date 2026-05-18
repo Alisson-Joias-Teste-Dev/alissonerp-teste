@@ -8,10 +8,21 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { normalizeConfigRow } from "@/lib/curva-precificacao";
+import { zodError } from "@/lib/schemas/common";
+
+const CurvaConfigPatchSchema = z.object({
+  start_mkp: z.coerce.number().optional(),
+  start_commission: z.coerce.number().optional(),
+  gold_cost_percentage: z.coerce.number().optional(),
+  sucata_compra_min_pct: z.coerce.number().optional(),
+  sucata_compra_max_pct: z.coerce.number().optional(),
+  arredondamento: z.string().optional(),
+}).passthrough();
 
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -53,7 +64,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json();
+  const raw = await req.json().catch(() => ({}));
+  const parsed = CurvaConfigPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
   const {
     start_mkp,
     start_commission,
@@ -61,7 +75,7 @@ export async function PATCH(req: NextRequest) {
     sucata_compra_min_pct,
     sucata_compra_max_pct,
     arredondamento,
-  } = body as Record<string, unknown>;
+  } = body;
 
   // Validacoes
   if (start_mkp !== undefined && Number(start_mkp) <= 0) {

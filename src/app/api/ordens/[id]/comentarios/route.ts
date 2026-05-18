@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile } from "@/lib/storage";
@@ -8,6 +9,14 @@ import {
   checkStringLength,
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
+import { zodError } from "@/lib/schemas/common";
+
+const ComentarioPostSchema = z.object({
+  texto: z.string().min(1, "obrigatório"),
+  mencoes: z.array(z.string()).optional(),
+  foto_path: z.string().nullable().optional(),
+  foto_base64: z.string().nullable().optional(),
+}).passthrough();
 
 // GET /api/ordens/[id]/comentarios
 export async function GET(
@@ -54,7 +63,10 @@ export async function POST(
   const ordemId = parseInt(id);
   if (isNaN(ordemId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const body = await req.json();
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ComentarioPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
   const { texto, mencoes = [], foto_path: fotaPathBody = null, foto_base64 = null } = body;
 
   try {

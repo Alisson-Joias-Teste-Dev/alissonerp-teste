@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const KommoPostSchema = z.object({
+  contato_id: z.coerce.number().int().positive(),
+  nome: z.string().optional(),
+  email: z.string().optional(),
+  telefone: z.string().optional(),
+}).passthrough();
 
 // ─── POST /api/integracoes/kommo ──────────────────────────────────────────────
 // Sincroniza contato/lead do fabricaAJ → Kommo CRM
@@ -15,16 +24,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    contato_id: number;
-    nome?: string;
-    email?: string;
-    telefone?: string;
-  };
-
-  if (!body.contato_id) {
-    return NextResponse.json({ error: "contato_id obrigatório" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = KommoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Buscar credenciais Kommo
   let kommoUrl = "", kommoToken = "";

@@ -1,12 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { recalcularTotaisPCP } from "@/lib/recalcular-totais-pcp";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { logAudit } from "@/lib/audit";
+import { zodError } from "@/lib/schemas/common";
+
+const ApontPcpPostSchema = z.object({
+  tipo_apontamento_id: z.coerce.number().int().positive(),
+  deposito_id: z.coerce.number().int().positive(),
+  setor_id: z.coerce.number().int().nullable().optional(),
+  insumo_id: z.coerce.number().int().nullable().optional(),
+  pcp_id: z.coerce.number().int().positive(),
+  qtd: z.coerce.number(),
+  foto_balanca: z.string().nullable().optional(),
+  peso_g_pedra: z.coerce.number().nullable().optional(),
+  created_by: z.string().nullable().optional(),
+}).passthrough();
 
 // POST /api/pcp/apontamentos
 export async function POST(req: NextRequest) {
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ApontPcpPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
   const {
     tipo_apontamento_id,
     deposito_id,
@@ -15,20 +32,9 @@ export async function POST(req: NextRequest) {
     pcp_id,
     qtd,
     foto_balanca,
-    // Sprint 3: novos campos para pedras (tipos 3/6)
     peso_g_pedra,
     created_by,
-  } = await req.json() as {
-    tipo_apontamento_id: number;
-    deposito_id: number;
-    setor_id: number | null;
-    insumo_id: number | null;
-    pcp_id: number;
-    qtd: number;
-    foto_balanca?: string | null;
-    peso_g_pedra?: number | null;
-    created_by?: string | null;
-  };
+  } = parsed.data;
 
   // Para tipos 3 e 6 (pedras): calcular peso_ct e peso_g_pedra_final
   const ehPedra = tipo_apontamento_id === 3 || tipo_apontamento_id === 6;

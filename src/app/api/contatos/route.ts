@@ -1,6 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const ContatoBaseFields = {
+  nome: z.string().min(1).optional(),
+  cpf_cnpj: z.string().optional(),
+  telefone: z.string().optional(),
+  celular: z.string().optional(),
+  email: z.string().optional(),
+  endereco: z.string().optional(),
+  numero: z.string().optional(),
+  complemento: z.string().optional(),
+  bairro: z.string().optional(),
+  municipio: z.string().optional(),
+  cep: z.string().optional(),
+  uf: z.string().optional(),
+};
+
+const ContatoPostSchema = z.object({
+  ...ContatoBaseFields,
+  nome: z.string().min(1, "obrigatório"),
+}).passthrough();
+
+const ContatoPatchSchema = z.object({
+  ...ContatoBaseFields,
+  id: z.coerce.number().int().positive(),
+}).passthrough();
 
 // POST /api/contatos — cadastrar novo contato
 export async function POST(req: NextRequest) {
@@ -8,20 +35,10 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const body = await req.json() as {
-    nome: string;
-    cpf_cnpj?: string;
-    telefone?: string;
-    celular?: string;
-    email?: string;
-    endereco?: string;
-    numero?: string;
-    complemento?: string;
-    bairro?: string;
-    municipio?: string;
-    cep?: string;
-    uf?: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ContatoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   if (!body.nome?.trim()) {
     return NextResponse.json({ error: "Nome é obrigatório" }, { status: 400 });
@@ -77,21 +94,10 @@ export async function PATCH(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const body = await req.json() as {
-    id: number;
-    nome?: string;
-    cpf_cnpj?: string;
-    telefone?: string;
-    celular?: string;
-    email?: string;
-    endereco?: string;
-    numero?: string;
-    complemento?: string;
-    bairro?: string;
-    municipio?: string;
-    cep?: string;
-    uf?: string;
-  };
+  const rawPatch = await req.json().catch(() => ({}));
+  const parsedPatch = ContatoPatchSchema.safeParse(rawPatch);
+  if (!parsedPatch.success) return zodError(parsedPatch.error);
+  const body = parsedPatch.data;
 
   if (!body.id) return NextResponse.json({ error: "ID obrigatório" }, { status: 400 });
 

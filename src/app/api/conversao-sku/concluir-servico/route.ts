@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_EXECUTORES = ["operador", "gerente_fabrica", "admin", "desenvolvedor"];
+
+const ConcluirServicoSchema = z.object({
+  conversao_sku_id: z.coerce.number().int().positive(),
+  peso_final: z.coerce.number().positive(),
+  quantidade_produzida: z.coerce.number().positive(),
+  foto_balanca_base64: z.string().optional(),
+  peso_sobra_real: z.coerce.number(),
+  foto_sobra_base64: z.string().optional(),
+}).passthrough();
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();
@@ -18,20 +29,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json() as {
-    conversao_sku_id: number;
-    peso_final: number;
-    quantidade_produzida: number;
-    foto_balanca_base64?: string;
-    peso_sobra_real: number;
-    foto_sobra_base64?: string;
-  };
-
-  const { conversao_sku_id, peso_final, quantidade_produzida, foto_balanca_base64, peso_sobra_real, foto_sobra_base64 } = body;
-
-  if (!conversao_sku_id) return NextResponse.json({ error: "conversao_sku_id obrigatório" }, { status: 400 });
-  if (!peso_final || peso_final <= 0) return NextResponse.json({ error: "peso_final inválido" }, { status: 400 });
-  if (!quantidade_produzida || quantidade_produzida <= 0) return NextResponse.json({ error: "quantidade_produzida inválida" }, { status: 400 });
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConcluirServicoSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { conversao_sku_id, peso_final, quantidade_produzida, foto_balanca_base64, peso_sobra_real, foto_sobra_base64 } = parsed.data;
 
   const [conv] = await sql`
     SELECT cs.*, o.numero_ordem

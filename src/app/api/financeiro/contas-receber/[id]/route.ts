@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+
+const ContaReceberPatchSchema = z.object({
+  situacao: z.string().optional(),
+  valor: z.coerce.number().optional(),
+  data_vencimento: z.string().optional(),
+  data_recebimento: z.string().optional(),
+  obs: z.string().optional(),
+}).passthrough();
 
 // ─── PATCH /api/financeiro/contas-receber/[id] ────────────────────────────────
 export async function PATCH(
@@ -28,13 +38,10 @@ export async function PATCH(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const body = await req.json().catch(() => ({})) as {
-    situacao?: string;
-    valor?: number;
-    data_vencimento?: string;
-    data_recebimento?: string;
-    obs?: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ContaReceberPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   // Auto-fill: marcar como recebido/pago sem informar data → usa CURRENT_DATE.
   const marcouRecebido = body.situacao === "pago" || body.situacao === "recebido";

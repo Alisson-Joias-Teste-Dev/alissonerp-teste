@@ -1,7 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { recalcularTotaisPCP } from "@/lib/recalcular-totais-pcp";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const SaidaPostSchema = z.object({
+  ordem_id: z.coerce.number().int().positive(),
+  peso_bruto: z.coerce.number().optional(),
+  pedras_utilizadas: z.array(z.object({
+    insumo_id: z.coerce.number().int().positive(),
+    qtd_utilizada: z.coerce.number().optional(),
+    peso_ct_utilizado: z.coerce.number().optional(),
+  })).optional(),
+  foto_balanca: z.string().nullable().optional(),
+  user_id: z.string().nullable().optional(),
+  sem_peso: z.boolean().optional(),
+  justificativa_sem_peso: z.string().nullable().optional(),
+}).passthrough();
 
 // POST /api/distribuicao/[id]/saida — registra saída por ordem
 //
@@ -32,6 +48,9 @@ export async function POST(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
+  const raw = await req.json().catch(() => ({}));
+  const parsed = SaidaPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
   const {
     ordem_id,
     peso_bruto,
@@ -40,16 +59,7 @@ export async function POST(
     user_id,
     sem_peso,
     justificativa_sem_peso,
-  } = await req.json() as {
-    ordem_id: number;
-    peso_bruto?: number;
-    // Sprint 3: aceita peso_ct_utilizado (quilates) e/ou qtd_utilizada (backward compat)
-    pedras_utilizadas?: { insumo_id: number; qtd_utilizada?: number; peso_ct_utilizado?: number }[];
-    foto_balanca?: string | null;
-    user_id?: string | null;
-    sem_peso?: boolean;
-    justificativa_sem_peso?: string | null;
-  };
+  } = parsed.data;
 
   // Auth obrigatória
   const supabase = await createServerSupabase();

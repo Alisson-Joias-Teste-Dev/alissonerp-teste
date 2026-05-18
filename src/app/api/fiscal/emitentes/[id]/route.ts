@@ -1,7 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_FISCAL } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const EmitentePatchSchema = z.object({
+  nome_fantasia: z.string().nullable().optional(),
+  razao_social: z.string().optional(),
+  ie: z.string().nullable().optional(),
+  im: z.string().nullable().optional(),
+  regime_tributario: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+  logradouro: z.string().nullable().optional(),
+  numero: z.string().nullable().optional(),
+  complemento: z.string().nullable().optional(),
+  bairro: z.string().nullable().optional(),
+  codigo_ibge_municipio: z.string().nullable().optional(),
+  municipio: z.string().nullable().optional(),
+  uf: z.string().nullable().optional(),
+  cep: z.string().nullable().optional(),
+  focus_token: z.string().nullable().optional(),
+  ambiente: z.enum(["homologacao", "producao"]).optional(),
+  serie_nfe: z.coerce.number().int().optional(),
+  serie_nfce: z.coerce.number().int().optional(),
+  proxima_nfe: z.coerce.number().int().optional(),
+  proxima_nfce: z.coerce.number().int().optional(),
+  local_estoque_id: z.coerce.number().int().nullable().optional(),
+  ativo: z.boolean().optional(),
+}).passthrough();
 
 async function getUserRole(userId: string): Promise<string | null> {
   const [row] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid`;
@@ -67,22 +93,14 @@ export async function PATCH(
   const emId = Number(id);
   if (isNaN(emId)) return NextResponse.json({ error: "id invalido" }, { status: 400 });
 
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = EmitentePatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
 
-  // Validacoes pontuais
-  if (body.regime_tributario !== undefined && ![1, 2, 3].includes(Number(body.regime_tributario))) {
-    return NextResponse.json({ error: "regime_tributario invalido" }, { status: 400 });
-  }
   if (body.uf !== undefined && body.uf !== null && String(body.uf).length !== 2) {
     return NextResponse.json({ error: "uf deve ter 2 caracteres" }, { status: 400 });
-  }
-  if (body.ambiente !== undefined && !["homologacao", "producao"].includes(String(body.ambiente))) {
-    return NextResponse.json({ error: "ambiente invalido" }, { status: 400 });
   }
 
   const tokenProvided = Object.prototype.hasOwnProperty.call(body, "focus_token");

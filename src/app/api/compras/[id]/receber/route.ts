@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
 
 type Params = Promise<{ id: string }>;
+
+const ReceberPatchSchema = z.object({
+  data_recebimento: z.string().nullable().optional(),
+}).passthrough();
 
 // PATCH /api/compras/[id]/receber
 // Marca a compra como 'recebida' (novo estado intermediário antes de concluir).
@@ -15,9 +21,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
   const { id } = await params;
   const compraId = parseInt(id);
 
-  const { data_recebimento } = await req.json() as {
-    data_recebimento?: string | null;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ReceberPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { data_recebimento } = parsed.data;
   const recebido_por = user.id;
 
   // Verificar existência e estado

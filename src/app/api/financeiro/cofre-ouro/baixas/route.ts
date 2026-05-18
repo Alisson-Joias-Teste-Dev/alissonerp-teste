@@ -1,7 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { logAudit } from "@/lib/audit";
 import sql from "@/lib/db";
 import { requireAuth, AuthError } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
+
+const CofreBaixaPostSchema = z.object({
+  gramas: z.coerce.number().positive(),
+  destino: z.enum(["alisson", "fabrica", "service"]),
+  transportador_id: z.string().optional(),
+  transportador_nome: z.string().optional(),
+  obs: z.string().optional(),
+}).passthrough();
+
+const CofreBaixaPatchSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  status: z.string().min(1),
+}).passthrough();
 
 // GET /api/financeiro/cofre-ouro/baixas — lista baixas
 export async function GET() {
@@ -36,20 +51,10 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 
-  const body = await req.json() as {
-    gramas: number;
-    destino: "alisson" | "fabrica" | "service";
-    transportador_id?: string;
-    transportador_nome?: string;
-    obs?: string;
-  };
-
-  if (!body.gramas || body.gramas <= 0) {
-    return NextResponse.json({ error: "Gramas inválido" }, { status: 400 });
-  }
-  if (!["alisson", "fabrica", "service"].includes(body.destino)) {
-    return NextResponse.json({ error: "Destino inválido" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsedPost = CofreBaixaPostSchema.safeParse(raw);
+  if (!parsedPost.success) return zodError(parsedPost.error);
+  const body = parsedPost.data;
 
   // Validar saldo disponível
   const [disp] = await sql`SELECT * FROM alissonerp.vw_cofre_ouro_disponivel`;
@@ -139,7 +144,10 @@ export async function PATCH(req: NextRequest) {
     throw e;
   }
 
-  const { id, status } = await req.json() as { id: number; status: string };
+  const rawPatch = await req.json().catch(() => ({}));
+  const parsedPatch = CofreBaixaPatchSchema.safeParse(rawPatch);
+  if (!parsedPatch.success) return zodError(parsedPatch.error);
+  const { id, status } = parsedPatch.data;
 
   const [baixa] = await sql`
     UPDATE alissonerp.cofre_ouro_baixas

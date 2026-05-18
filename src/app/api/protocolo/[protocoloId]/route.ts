@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { ROLES_CONCLUIR_PROTOCOLO } from "@/lib/roles";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { authOr401 } from "@/lib/auth-server";
+import { zodError } from "@/lib/schemas/common";
+
+const ProtocoloPatchSchema = z.object({
+  etapas: z.string().min(1, "obrigatório"),
+  recebedor_id: z.string().optional(),
+  foto_conclusao: z.string().optional(),
+  ordens_detalhes: z.array(z.object({
+    ordem_id: z.coerce.number().int().positive(),
+    foto_base64: z.string(),
+  })).optional(),
+}).passthrough();
 
 // GET /api/protocolo/[protocoloId] — ordens do protocolo
 export async function GET(
@@ -50,12 +62,10 @@ export async function PATCH(
 
   const { protocoloId } = await params;
   const id = parseInt(protocoloId);
-  const body = await req.json() as {
-    etapas: string;
-    recebedor_id?: string;
-    foto_conclusao?: string;
-    ordens_detalhes?: { ordem_id: number; foto_base64: string }[];
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ProtocoloPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
   const { etapas, recebedor_id, foto_conclusao, ordens_detalhes } = body;
 
   // Validar role ao concluir

@@ -4,9 +4,18 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, hasRole } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const RotaTemplatePatchSchema = z.object({
+  nome: z.string().optional(),
+  categoria: z.string().nullable().optional(),
+  is_default: z.boolean().optional(),
+  ativo: z.boolean().optional(),
+}).passthrough();
 
 const ROLES_PERMITIDOS = [
   "admin", "desenvolvedor", "diretor", "gerente_fabrica", "gerente_loja", "pcp",
@@ -41,8 +50,11 @@ export async function PATCH(
   const tplId = parseId(id);
   if (!tplId) return NextResponse.json({ error: "id inválido" }, { status: 400 });
 
-  let body: { nome?: unknown; categoria?: unknown; is_default?: unknown; ativo?: unknown };
-  try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  const parsed = RotaTemplatePatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data as Record<string, unknown>;
 
   try {
     const [tpl] = await sql<{ id: number; categoria: string | null; is_default: boolean; ativo: boolean }[]>`

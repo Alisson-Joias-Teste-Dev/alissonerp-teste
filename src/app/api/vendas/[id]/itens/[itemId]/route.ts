@@ -1,8 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { zodError } from "@/lib/schemas/common";
+
+const ItemVendaPatchSchema = z.object({
+  quantidade: z.coerce.number().optional(),
+  preco_lista: z.coerce.number().optional(),
+  pct_desconto: z.coerce.number().optional(),
+  preco_unitario: z.coerce.number().optional(),
+  total_item: z.coerce.number().optional(),
+  pct_comissao: z.coerce.number().optional(),
+  valor_comissao: z.coerce.number().optional(),
+  observacao: z.string().nullable().optional(),
+}).passthrough();
 
 async function checkOwnership(userId: string, vendaId: number) {
   const [u] = await sql<{ role: string }[]>`
@@ -46,16 +59,10 @@ export async function PATCH(
   `;
   if (!item) return NextResponse.json({ error: "Item não encontrado" }, { status: 404 });
 
-  const body = await req.json() as {
-    quantidade?:    number;
-    preco_lista?:   number;
-    pct_desconto?:  number;
-    preco_unitario?: number;
-    total_item?:    number;
-    pct_comissao?:  number;
-    valor_comissao?: number;
-    observacao?:    string | null;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ItemVendaPatchSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
   await sql`
     UPDATE alissonerp.itens_venda_erp SET

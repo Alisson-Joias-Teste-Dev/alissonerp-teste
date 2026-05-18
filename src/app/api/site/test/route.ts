@@ -14,9 +14,17 @@
  * Se retornar `ok: true`, as credenciais podem sincronizar produtos.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
+import { zodError } from "@/lib/schemas/common";
+
+const SiteTestSchema = z.object({
+  site_url: z.string().optional(),
+  consumer_key: z.string().optional(),
+  consumer_secret: z.string().optional(),
+}).passthrough();
 
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -25,10 +33,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  let site_url        = String(body?.site_url ?? "").trim();
-  let consumer_key    = String(body?.consumer_key ?? "").trim();
-  let consumer_secret = String(body?.consumer_secret ?? "").trim();
+  const raw = await req.json().catch(() => ({}));
+  const parsed = SiteTestSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
+  let site_url        = (body.site_url ?? "").trim();
+  let consumer_key    = (body.consumer_key ?? "").trim();
+  let consumer_secret = (body.consumer_secret ?? "").trim();
 
   // Fallback: pega do banco se faltar
   if (!site_url || !consumer_key || !consumer_secret) {

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { zodError } from "@/lib/schemas/common";
+
+const AdiarPostSchema = z.object({
+  minutos: z.coerce.number().min(1).max(60).optional(),
+}).passthrough();
 
 // POST /api/notificacoes/adiar
 // Silencia APENAS O SOM do alarme do usuário logado por N minutos.
@@ -20,13 +26,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   let minutos = 5;
-  try {
-    const body = (await req.json()) as { minutos?: number } | null;
-    if (body && typeof body.minutos === "number" && isFinite(body.minutos)) {
-      minutos = Math.min(60, Math.max(1, Math.round(body.minutos)));
+  const raw = await req.json().catch(() => null);
+  if (raw !== null) {
+    const parsed = AdiarPostSchema.safeParse(raw);
+    if (!parsed.success) return zodError(parsed.error);
+    if (parsed.data.minutos !== undefined) {
+      minutos = Math.min(60, Math.max(1, Math.round(parsed.data.minutos)));
     }
-  } catch {
-    // body vazio ou inválido: mantém default
   }
 
   const [atualizado] = await sql<

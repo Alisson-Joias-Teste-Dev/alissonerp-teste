@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { recalcularTotaisPCP } from "@/lib/recalcular-totais-pcp";
+import { zodError } from "@/lib/schemas/common";
+
+const EstornoLotePostSchema = z.object({
+  motivo: z.string().min(1, "obrigatório"),
+  justificativa: z.string().min(10, "mínimo 10 caracteres"),
+}).passthrough();
 
 // POST /api/distribuicao/[id]/estorno-lote
 // Body: { motivo: string, justificativa: string }
@@ -41,15 +48,11 @@ export async function POST(
   }
 
   // ── Body ────────────────────────────────────────────────────────────────────
-  const { motivo, justificativa } = await req.json() as {
-    motivo: string;
-    justificativa: string;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = EstornoLotePostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { motivo, justificativa } = parsed.data;
 
-  if (!motivo?.trim()) return NextResponse.json({ error: "Motivo obrigatório" }, { status: 400 });
-  if (!justificativa?.trim() || justificativa.trim().length < 10) {
-    return NextResponse.json({ error: "Justificativa obrigatória (mínimo 10 caracteres)" }, { status: 400 });
-  }
   if (motivo === "outro" && justificativa.trim().length < 20) {
     return NextResponse.json({ error: "Para 'Outro motivo', justificativa mínima de 20 caracteres" }, { status: 400 });
   }

@@ -6,9 +6,15 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
+
+const OperadoresPutSchema = z.object({
+  deposito_ids: z.array(z.number().int().positive()).default([]),
+}).passthrough();
 
 function parseSetorId(raw: string): number | null {
   if (!/^\d+$/.test(raw)) return null;
@@ -68,19 +74,10 @@ export async function PUT(
   const setorId = parseSetorId(id);
   if (!setorId) return NextResponse.json({ error: "id inválido" }, { status: 400 });
 
-  let body: { deposito_ids?: unknown };
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }
-
-  const arr = Array.isArray(body.deposito_ids) ? body.deposito_ids : [];
-  const ids: number[] = [];
-  for (const x of arr) {
-    const n = Number(x);
-    if (!Number.isInteger(n) || n <= 0) {
-      return NextResponse.json({ error: "deposito_ids contém valor inválido" }, { status: 400 });
-    }
-    ids.push(n);
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = OperadoresPutSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const ids = parsed.data.deposito_ids;
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

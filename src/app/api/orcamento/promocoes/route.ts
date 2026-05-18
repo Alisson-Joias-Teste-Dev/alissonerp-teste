@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { zodError } from "@/lib/schemas/common";
 
 const ROLES_CONFIG = ["desenvolvedor", "admin", "gerente_loja"] as const;
+
+const PromoPostSchema = z.object({
+  nome: z.string().min(1, "obrigatório"),
+  data_inicio: z.string().min(1, "obrigatório"),
+  data_fim: z.string().min(1, "obrigatório"),
+  descontos: z.array(z.object({
+    categoria_id: z.coerce.number().int().optional(),
+    nome: z.string().optional(),
+    desconto_promocao: z.coerce.number().optional(),
+  })).optional(),
+}).passthrough();
 
 // ─── GET /api/orcamento/promocoes ────────────────────────────────────────────
 // Lista o histórico de campanhas (mais recentes primeiro).
@@ -41,20 +54,16 @@ export async function POST(req: NextRequest) {
   const canConfig = isFullAccess(role) || ROLES_CONFIG.includes(role as typeof ROLES_CONFIG[number]);
   if (!canConfig) return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
 
-  const body = await req.json() as {
-    nome?: string;
-    data_inicio?: string;
-    data_fim?: string;
-    descontos?: Array<{ categoria_id?: number; nome?: string; desconto_promocao?: number }>;
-  };
+  const raw = await req.json().catch(() => ({}));
+  const parsed = PromoPostSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const body = parsed.data;
 
-  const nome = (body.nome ?? "").trim();
-  const data_inicio = body.data_inicio?.trim();
-  const data_fim = body.data_fim?.trim();
+  const nome = body.nome.trim();
+  const data_inicio = body.data_inicio.trim();
+  const data_fim = body.data_fim.trim();
   const descontos = Array.isArray(body.descontos) ? body.descontos : [];
 
-  if (!nome) return NextResponse.json({ error: "Nome da campanha obrigatorio" }, { status: 400 });
-  if (!data_inicio || !data_fim) return NextResponse.json({ error: "Datas obrigatorias" }, { status: 400 });
   if (data_inicio > data_fim) return NextResponse.json({ error: "Data inicio > fim" }, { status: 400 });
 
   // Em transação: persiste no histórico, atualiza pricing_categories da config ativa
