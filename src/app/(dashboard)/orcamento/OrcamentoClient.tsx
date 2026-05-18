@@ -266,6 +266,30 @@ export default function OrcamentoClient({
     setClientName(orc.cliente_nome_contato || orc.nome_cliente || "");
     setClienteId(orc.cliente_id || null);
 
+    // Bug fix v2.60.3: orçamento legado (ou salvo antes do v2.58.2) pode ter
+    // nome_cliente preenchido mas cliente_id=null. Resultado: usuário vê o nome
+    // na tela, acha que está vinculado, mas backend rejeita aprovação com
+    // "Vincule um cliente antes de aprovar". Tenta re-vincular automaticamente
+    // por nome exato. Se não achar match único, mantém null (UX existente
+    // — sem borda verde "Vinculado" — sinaliza que precisa selecionar).
+    if (!orc.cliente_id && (orc.cliente_nome_contato || orc.nome_cliente)) {
+      const nomeAlvo = String(orc.cliente_nome_contato || orc.nome_cliente).trim();
+      if (nomeAlvo.length > 0) {
+        fetch(`/api/vendas/clientes/busca?q=${encodeURIComponent(nomeAlvo)}`)
+          .then((r) => (r.ok ? r.json() : []))
+          .then((lista: unknown) => {
+            if (!Array.isArray(lista)) return;
+            const alvo = nomeAlvo.toLowerCase();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const exatos = (lista as any[]).filter((c) => String(c?.nome ?? "").trim().toLowerCase() === alvo);
+            if (exatos.length === 1 && exatos[0]?.id_contato) {
+              setClienteId(Number(exatos[0].id_contato));
+            }
+          })
+          .catch(() => { /* silent — usuário será forçado a vincular manualmente */ });
+      }
+    }
+
     // Snapshot salvo: prioriza coluna nova (jsonb). Fallback p/ campos avulsos
     // (orçamentos antigos pré-migration 258 podem vir sem snapshot mesmo
     // estando travados pelo backfill).
