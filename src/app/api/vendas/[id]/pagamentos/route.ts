@@ -6,6 +6,7 @@ import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
+import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 
 const PagamentoPostSchema = z.object({
   forma: z.string().min(1, "forma obrigatória").max(100),
@@ -76,13 +77,14 @@ export async function POST(
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
+  const descontoThreshold = await getDescontoThreshold(vendaId);
   const [venda] = await sql`
     SELECT v.id, v.bloqueado, v.situacao,
     v.desconto_aprovado_por,
     v.desconto_cartao_aprovado_por,
     EXISTS(
       SELECT 1 FROM alissonerp.itens_venda_erp
-      WHERE venda_id = ${vendaId} AND pct_desconto > 30
+      WHERE venda_id = ${vendaId} AND pct_desconto > ${descontoThreshold}
     ) AS tem_desconto_alto
     FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
   `;
@@ -97,10 +99,10 @@ export async function POST(
     throw e;
   }
 
-  // ── Travar venda: sem pagamento enquanto desconto >30% não aprovado ──────
+  // ── Travar venda: sem pagamento enquanto desconto > threshold não aprovado ─
   if (venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
     return NextResponse.json(
-      { error: "Venda travada — desconto acima de 30% aguarda aprovação do diretor. Pagamento só pode ser gerado após aprovação do desconto." },
+      { error: `Venda travada — desconto acima de ${descontoThreshold}% aguarda aprovação do diretor. Pagamento só pode ser gerado após aprovação do desconto.` },
       { status: 409 }
     );
   }

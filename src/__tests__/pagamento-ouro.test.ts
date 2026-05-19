@@ -67,7 +67,9 @@ function makeParams(id: number = VENDA_ID) {
 /** Configura sql para venda válida (não bloqueada, sem desconto alto) */
 function setupVendaOk(jaConfirmado = 0, totalVenda = 1000) {
   sqlMock
-    // 1. SELECT venda (bloqueado, situacao, desconto_aprovado_por, tem_desconto_alto)
+    // 1. getDescontoThreshold
+    .mockResolvedValueOnce([{ threshold: 30 }])
+    // 2. SELECT venda (bloqueado, situacao, desconto_aprovado_por, tem_desconto_alto)
     .mockResolvedValueOnce([{
       id: VENDA_ID,
       bloqueado: false,
@@ -75,9 +77,9 @@ function setupVendaOk(jaConfirmado = 0, totalVenda = 1000) {
       desconto_aprovado_por: null,
       tem_desconto_alto: false,
     }])
-    // 2. SELECT role para checkOwnership (Onda 1D)
+    // 3. SELECT role para checkOwnership (Onda 1D)
     .mockResolvedValueOnce([{ role: "admin" }])
-    // 3. SELECT totais (para guard venda já paga)
+    // 4. SELECT totais (para guard venda já paga)
     .mockResolvedValueOnce([{
       total_venda: totalVenda,
       soma_confirmados: jaConfirmado,
@@ -142,25 +144,28 @@ describe("POST /api/vendas/[id]/pagamentos — forma Ouro", () => {
   // ── Guards de venda ─────────────────────────────────────────────────────────
 
   it("retorna 409 quando venda está bloqueada", async () => {
-    // bloqueio acontece ANTES do checkOwnership — so 1 query (SELECT venda)
-    sqlMock.mockResolvedValueOnce([{
-      id: VENDA_ID, bloqueado: true, situacao: "rascunho",
-      desconto_aprovado_por: null, tem_desconto_alto: false,
-    }]);
+    sqlMock
+      .mockResolvedValueOnce([{ threshold: 30 }])
+      .mockResolvedValueOnce([{
+        id: VENDA_ID, bloqueado: true, situacao: "rascunho",
+        desconto_aprovado_por: null, tem_desconto_alto: false,
+      }]);
     const res = await POST(makeRequest({ forma: "Ouro", ouro_peso: 5, ouro_valor_grama: 200, ouro_foto_path: "p.jpg" }), makeParams());
     expect(res.status).toBe(409);
     const data = await res.json();
     expect(data.error).toMatch(/bloqueada/i);
   });
 
-  it("retorna 409 quando desconto >30% não aprovado", async () => {
+  it("retorna 409 quando desconto acima do threshold não aprovado", async () => {
     sqlMock
+      .mockResolvedValueOnce([{ threshold: 30 }])
       .mockResolvedValueOnce([{
         id: VENDA_ID, bloqueado: false, situacao: "rascunho",
         desconto_aprovado_por: null, tem_desconto_alto: true,
       }])
       // checkOwnership ocorre ANTES do guard de desconto agora (Onda 1D)
-      .mockResolvedValueOnce([{ role: "admin" }]);
+      .mockResolvedValueOnce([{ role: "admin" }])                              // SELECT role
+      .mockResolvedValueOnce([{ vendedor_id: 1 }]);                             // requireVendaOwnership (admin full access)
     const res = await POST(makeRequest({ forma: "Ouro", ouro_peso: 5, ouro_valor_grama: 200, ouro_foto_path: "p.jpg" }), makeParams());
     expect(res.status).toBe(409);
     const data = await res.json();
@@ -169,6 +174,7 @@ describe("POST /api/vendas/[id]/pagamentos — forma Ouro", () => {
 
   it("retorna 409 quando venda já está totalmente paga", async () => {
     sqlMock
+      .mockResolvedValueOnce([{ threshold: 30 }])
       .mockResolvedValueOnce([{
         id: VENDA_ID, bloqueado: false, situacao: "rascunho",
         desconto_aprovado_por: null, tem_desconto_alto: false,
@@ -265,13 +271,15 @@ describe("POST /api/vendas/[id]/pagamentos — forma Ouro", () => {
 
   it("Dinheiro ainda funciona sem campos Ouro", async () => {
     sqlMock
-      .mockResolvedValueOnce([{
+      .mockResolvedValueOnce([{ threshold: 30 }])                              // getDescontoThreshold
+      .mockResolvedValueOnce([{                                                  // SELECT venda
         id: VENDA_ID, bloqueado: false, situacao: "rascunho",
         desconto_aprovado_por: null, tem_desconto_alto: false,
       }])
-      // SELECT role para checkOwnership (Onda 1D)
-      .mockResolvedValueOnce([{ role: "admin" }])
-      .mockResolvedValueOnce([{ total_venda: 1000, soma_confirmados: 0 }])
+      // checkOwnership (Onda 1D)
+      .mockResolvedValueOnce([{ role: "admin" }])                               // SELECT role
+      .mockResolvedValueOnce([{ vendedor_id: 1 }])                              // requireVendaOwnership (admin)
+      .mockResolvedValueOnce([{ total_venda: 1000, soma_confirmados: 0 }])      // SELECT totais
       // sql`now()` é um fragmento de template — consome 1 slot antes do INSERT real
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: 11 }]); // INSERT
@@ -287,13 +295,15 @@ describe("POST /api/vendas/[id]/pagamentos — forma Ouro", () => {
 
   it("A Receber ainda funciona sem campos Ouro", async () => {
     sqlMock
-      .mockResolvedValueOnce([{
+      .mockResolvedValueOnce([{ threshold: 30 }])                              // getDescontoThreshold
+      .mockResolvedValueOnce([{                                                  // SELECT venda
         id: VENDA_ID, bloqueado: false, situacao: "rascunho",
         desconto_aprovado_por: null, tem_desconto_alto: false,
       }])
-      // SELECT role para checkOwnership (Onda 1D)
-      .mockResolvedValueOnce([{ role: "admin" }])
-      .mockResolvedValueOnce([{ total_venda: 1000, soma_confirmados: 0 }])
+      // checkOwnership (Onda 1D)
+      .mockResolvedValueOnce([{ role: "admin" }])                               // SELECT role
+      .mockResolvedValueOnce([{ vendedor_id: 1 }])                              // requireVendaOwnership (admin)
+      .mockResolvedValueOnce([{ total_venda: 1000, soma_confirmados: 0 }])      // SELECT totais
       .mockResolvedValueOnce([{ id: 22 }]); // INSERT
 
     const res = await POST(

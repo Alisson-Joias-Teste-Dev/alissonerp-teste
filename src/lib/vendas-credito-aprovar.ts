@@ -12,6 +12,7 @@
 import sql from "@/lib/db";
 import { getSaldoAtual, debitarSaldo } from "@/lib/saldo-credito";
 import { approveVenda } from "@/lib/vendas-aprovar";
+import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -260,23 +261,24 @@ export async function processarAprovacaoCredito(
     }
   }
 
-  // 1b. Bloquear se venda tem desconto >30% não aprovado
+  // 1b. Bloquear se venda tem desconto > threshold não aprovado
+  const credThreshold = await getDescontoThreshold(vendaId);
   const [descCheck] = await sql`
     SELECT
       v.desconto_aprovado_por,
       EXISTS(
         SELECT 1 FROM alissonerp.itens_venda_erp
-        WHERE venda_id = ${vendaId} AND pct_desconto > 30
+        WHERE venda_id = ${vendaId} AND pct_desconto > ${credThreshold}
       ) AS tem_desconto_alto
     FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
   `;
   if (descCheck?.tem_desconto_alto && !descCheck?.desconto_aprovado_por) {
-    console.error(`[processarAprovacaoCredito] BLOQUEADO venda=${vendaId}: desconto >30% sem aprovação`);
+    console.error(`[processarAprovacaoCredito] BLOQUEADO venda=${vendaId}: desconto >${credThreshold}% sem aprovação`);
     await sql`
       INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-      VALUES ('processarAprovacaoCredito_bloqueado', ${JSON.stringify({ vendaId, aprovadorId, decisao, motivo: "desconto_pendente" })}::text::jsonb, 409, 'desconto >30% sem aprovação')
+      VALUES ('processarAprovacaoCredito_bloqueado', ${JSON.stringify({ vendaId, aprovadorId, decisao, motivo: "desconto_pendente" })}::text::jsonb, 409, 'desconto >${credThreshold}% sem aprovação')
     `.catch(() => {});
-    return { ok: false, acao: "erro", message: "Venda tem desconto acima de 30% aguardando aprovação. Solicite aprovação de desconto antes de aprovar crédito." };
+    return { ok: false, acao: "erro", message: `Venda tem desconto acima de ${credThreshold}% aguardando aprovação. Solicite aprovação de desconto antes de aprovar crédito.` };
   }
 
   // 2. Se rejeitado → limpa e notifica

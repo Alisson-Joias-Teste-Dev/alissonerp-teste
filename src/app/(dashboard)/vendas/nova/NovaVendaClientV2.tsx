@@ -673,10 +673,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const totalPago = pagamentos.reduce((s, p) => s + p.valor, 0);
   const pagamentoCobre = pagForma === "Múltiplas" ? Math.abs(totalPago - totalVenda) < 0.01 : true;
   const temAReceber = pagForma === "A Receber" || (pagForma === "Múltiplas" && pagamentos.some(p => p.forma === "A Receber"));
-  const LIMITE_DESCONTO_APROVACAO = 30;
   const LIMITE_DESCONTO_CARTAO = 20;
-  // Admin/dev (maxDesconto=100) aprovar diretamente — sem tarefa de aprovação
-  const precisaAprovacaoDesconto = role !== "admin" && itens.some(i => i.pct_desconto > LIMITE_DESCONTO_APROVACAO);
+  // Só precisa aprovação se desconto > maxDesconto (exceto admin = bypass com 100)
+  const precisaAprovacaoDesconto = maxDesconto < 100 && itens.some(i => i.pct_desconto > maxDesconto);
   const temDescontoCartao = itens.some(i => i.pct_desconto > LIMITE_DESCONTO_CARTAO);
   const [descontoCartaoAprovado, setDescontoCartaoAprovado] = useState(false);
   const [descontoCartaoAprovadoNome, setDescontoCartaoAprovadoNome] = useState<string | null>(null);
@@ -1425,7 +1424,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       if (itens.length === 0) { setSaveErr("Adicione pelo menos 1 serviço para faturamento"); return; }
     }
     if (step === 3 && tipoVenda !== "servico" && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
-    if (step === 3 && precisaAprovacaoDesconto) { setSaveErr("Desconto acima de 30% requer aprovação. Clique em 'Solicitar Aprovação'."); return; }
+    if (step === 3 && precisaAprovacaoDesconto) { setSaveErr(`Desconto acima de ${maxDesconto}% requer aprovação. Clique em 'Solicitar Aprovação'.`); return; }
     if (step === 3 && cartaoBloqueado && pagForma === "Cartão de Crédito") { setSaveErr("Cartão de crédito bloqueado para esta venda devido a descontos acima de 20%. Solicite aprovação ou escolha outra forma de pagamento."); return; }
     // Valida pendencias de personalizacao no passo 3
     if (step === 3) {
@@ -1446,7 +1445,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     if (step === 3 && tipoVenda !== "servico") {
       const authPendente = Object.values(pendingAuths).some(a => a.status === "local" || a.status === "pendente");
       if (authPendente) {
-        setSaveErr("Existem descontos acima de 30% aguardando autorização da direção.");
+        setSaveErr(`Existem descontos acima de ${maxDesconto}% aguardando autorização da direção.`);
         return;
       }
     }
@@ -1527,7 +1526,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   async function concluirVenda(vendaIdOverride?: number) {
     setConcluindo(true); setSaveErr("");
     if (precisaAprovacaoDesconto) {
-      setSaveErr("Esta venda tem desconto acima de 30% aguardando aprovação. Retorne ao passo 3 e clique em 'Solicitar Aprovação'.");
+      setSaveErr(`Esta venda tem desconto acima de ${maxDesconto}% aguardando aprovação. Retorne ao passo 3 e clique em 'Solicitar Aprovação'.`);
       setConcluindo(false);
       return;
     }
@@ -2078,8 +2077,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                       <input type="number" min={0} step={1} value={pctDesconto}
                         onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(""); }}
                         className="w-20 border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
-                        style={{ borderColor: pctDesconto > LIMITE_DESCONTO_APROVACAO ? "#F97316" : C.cremeBorder, color: pctDesconto > LIMITE_DESCONTO_APROVACAO ? "#EA580C" : undefined }} />
-                      {pctDesconto > LIMITE_DESCONTO_APROVACAO && <p className="text-[11px] mt-0.5" style={{ color: "#EA580C" }}>Precisa aprovação</p>}
+                        style={{ borderColor: pctDesconto > maxDesconto ? "#F97316" : C.cremeBorder, color: pctDesconto > maxDesconto ? "#EA580C" : undefined }} />
+                      {pctDesconto > maxDesconto && <p className="text-[11px] mt-0.5" style={{ color: "#EA580C" }}>Precisa aprovação</p>}
                     </div>
                     <div className="text-xs" style={{ color: "#6B7280" }}>
                       = {produtoSel ? fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario) : "—"}
@@ -2677,8 +2676,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                           <input type="number" min={0} step={1} value={pctDesconto}
                             onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(""); }}
                             className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
-                            style={{ borderColor: pctDesconto > LIMITE_DESCONTO_APROVACAO ? "#F97316" : C.cremeBorder, color: pctDesconto > LIMITE_DESCONTO_APROVACAO ? "#EA580C" : undefined }} />
-                          {pctDesconto > LIMITE_DESCONTO_APROVACAO && <p className="text-[11px] mt-0.5" style={{ color: "#EA580C" }}>Precisa aprovação</p>}
+                            style={{ borderColor: pctDesconto > maxDesconto ? "#F97316" : C.cremeBorder, color: pctDesconto > maxDesconto ? "#EA580C" : undefined }} />
+                          {pctDesconto > maxDesconto && <p className="text-[11px] mt-0.5" style={{ color: "#EA580C" }}>Precisa aprovação</p>}
                         </div>
                         <div>
                           <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Preço un</label>

@@ -16,6 +16,7 @@ import {
 } from "@/lib/personalizacao-validacao";
 import { zodError, IdSchema } from "@/lib/schemas/common";
 import { LIMITS } from "@/lib/payload-limits";
+import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 
 const VendaItemPostSchema = z.object({
   produto_id: IdSchema.nullable().optional(),
@@ -266,8 +267,9 @@ export async function POST(
     RETURNING id
   `;
 
-  // Se novo item tem desconto >30% numa venda em rascunho, invalida aprovação anterior
-  if (venda.situacao === "rascunho" && (body.pct_desconto ?? 0) > 30) {
+  // Se novo item tem desconto > threshold numa venda em rascunho, invalida aprovação anterior
+  const thresholdNovoItem = await getDescontoThreshold(vendaId);
+  if (venda.situacao === "rascunho" && (body.pct_desconto ?? 0) > thresholdNovoItem) {
     await sql`
       UPDATE alissonerp.vendas_erp
       SET desconto_aprovado_por           = NULL,

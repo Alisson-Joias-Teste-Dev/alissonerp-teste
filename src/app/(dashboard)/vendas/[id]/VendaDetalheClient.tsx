@@ -1653,7 +1653,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const temPagamentoPendente = venda.pagamentos.some(p => p.status === "pendente");
   const temManualMpPendente = venda.pagamentos.some(p => p.forma === "Manual (MP)" && p.status === "pendente");
   const podeAprovarConcluir = venda.situacao === "aprovado" && temPagamentoPendente;
-  const temDescontoAlto = venda.itens.some(i => Number(i.pct_desconto) > 30);
+  const descontoThreshold = venda.descontoThreshold ?? 30;
+  const temDescontoAlto = venda.itens.some(i => Number(i.pct_desconto) > descontoThreshold);
   const precisaSolicitarDesconto = temDescontoAlto && !venda.desconto_aprovado_por_nome && !venda.aprovacao_credito_tarefa_id && venda.situacao === "rascunho";
   const LIMITE_DESCONTO_CARTAO = 20;
   const temDescontoCartao = venda.itens.some(i => Number(i.pct_desconto) > LIMITE_DESCONTO_CARTAO);
@@ -1843,7 +1844,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-3"
           style={{ backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#9A3412" }}>
           <p className="text-sm font-medium">
-            Esta venda tem desconto acima de 30%. É necessário solicitar aprovação do administrador antes de prosseguir.
+            Esta venda tem desconto acima de {descontoThreshold}%. É necessário solicitar aprovação do administrador antes de prosseguir.
           </p>
           <button onClick={async () => {
               setUpdating(true); setSaveErr("");

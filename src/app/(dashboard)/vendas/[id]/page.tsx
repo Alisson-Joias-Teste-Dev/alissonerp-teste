@@ -43,7 +43,7 @@ export default async function VendaDetalhePage({ params }: Props) {
     }
   }
 
-  const descontoAuthThreshold = role === "gerente_loja" ? 30 : undefined;
+  const descontoAuthThreshold = maxDesconto;
 
   return (
     <VendaDetalheClient

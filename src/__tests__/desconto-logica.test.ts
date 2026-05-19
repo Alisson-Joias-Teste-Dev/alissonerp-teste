@@ -6,8 +6,6 @@ import { describe, it, expect } from "vitest";
 
 // ── Regras replicadas do componente ──────────────────────────────────────────
 
-const LIMITE_DESCONTO_APROVACAO = 30;
-
 interface ItemVenda {
   _key: string;
   quantidade: number;
@@ -36,7 +34,7 @@ function makeItem(overrides: Partial<ItemVenda> = {}): ItemVenda {
 
 /** precisaAprovacaoDesconto — replicado de NovaVendaClientV2 */
 function precisaAprovacaoDesconto(itens: ItemVenda[], maxDesconto: number): boolean {
-  return maxDesconto < 100 && itens.some(i => i.pct_desconto > LIMITE_DESCONTO_APROVACAO);
+  return maxDesconto < 100 && itens.some(i => i.pct_desconto > maxDesconto);
 }
 
 /** updateItem("preco_lista") — replicado de NovaVendaClientV2 (com fix BR milhar) */
@@ -68,17 +66,17 @@ function getMaxDesconto(role: string, mxPermitido?: number | null): number {
 // ── Testes ────────────────────────────────────────────────────────────────────
 
 describe("precisaAprovacaoDesconto", () => {
-  it("retorna false quando todos os itens têm desconto ≤ 30%", () => {
-    const itens = [makeItem({ pct_desconto: 0 }), makeItem({ pct_desconto: 30 })];
-    expect(precisaAprovacaoDesconto(itens, 30)).toBe(false);
+  it("retorna false quando todos os itens têm desconto ≤ threshold", () => {
+    const itens = [makeItem({ pct_desconto: 0 }), makeItem({ pct_desconto: 20 })];
+    expect(precisaAprovacaoDesconto(itens, 20)).toBe(false);
   });
 
-  it("retorna true quando qualquer item tem desconto > 30% (consultora)", () => {
-    const itens = [makeItem({ pct_desconto: 20 }), makeItem({ pct_desconto: 31 })];
-    expect(precisaAprovacaoDesconto(itens, 30)).toBe(true);
+  it("retorna true quando qualquer item tem desconto > threshold (consultora)", () => {
+    const itens = [makeItem({ pct_desconto: 20 }), makeItem({ pct_desconto: 21 })];
+    expect(precisaAprovacaoDesconto(itens, 20)).toBe(true);
   });
 
-  it("retorna true mesmo que apenas 1 item de vários supere 30%", () => {
+  it("retorna true mesmo que apenas 1 item de vários supere o threshold", () => {
     const itens = [
       makeItem({ _key: "a", pct_desconto: 10 }),
       makeItem({ _key: "b", pct_desconto: 5 }),
@@ -91,12 +89,12 @@ describe("precisaAprovacaoDesconto", () => {
     expect(precisaAprovacaoDesconto([], 30)).toBe(false);
   });
 
-  it("retorna false para desconto exatamente 30 (limite não inclusivo)", () => {
+  it("retorna false para desconto exatamente igual ao threshold (limite não inclusivo)", () => {
     expect(precisaAprovacaoDesconto([makeItem({ pct_desconto: 30 })], 30)).toBe(false);
   });
 
-  it("retorna true para desconto 30.01", () => {
-    expect(precisaAprovacaoDesconto([makeItem({ pct_desconto: 30.01 })], 30)).toBe(true);
+  it("retorna true para desconto 20.01 com threshold=20", () => {
+    expect(precisaAprovacaoDesconto([makeItem({ pct_desconto: 20.01 })], 20)).toBe(true);
   });
 
   it("admin/dev (maxDesconto=100) NUNCA precisa de aprovação, mesmo com 99%", () => {
@@ -104,13 +102,22 @@ describe("precisaAprovacaoDesconto", () => {
     expect(precisaAprovacaoDesconto(itens, 100)).toBe(false);
   });
 
-  it("gerente com maxDesconto=30 precisa de aprovação para 31%", () => {
+  it("threshold=30: 31% precisa aprovação, 30% não precisa", () => {
     expect(precisaAprovacaoDesconto([makeItem({ pct_desconto: 31 })], 30)).toBe(true);
+    expect(precisaAprovacaoDesconto([makeItem({ pct_desconto: 30 })], 30)).toBe(false);
   });
 
-  it("usuário com mx_desconto_permitido=45 ainda precisa aprovação para 31%", () => {
-    // O limite de aprovação é sempre 30%, independente do maxDesconto (exceto admin)
-    expect(precisaAprovacaoDesconto([makeItem({ pct_desconto: 31 })], 45)).toBe(true);
+  it("usuário com mx_desconto_permitido=45 NÃO precisa aprovação para 31%", () => {
+    // O threshold de aprovação AGORA é o mx_desconto_permitido (45), não mais 30 fixo
+    expect(precisaAprovacaoDesconto([makeItem({ pct_desconto: 31 })], 45)).toBe(false);
+  });
+
+  it("usuário com mx_desconto_permitido=20 precisa aprovação para 21%", () => {
+    expect(precisaAprovacaoDesconto([makeItem({ pct_desconto: 21 })], 20)).toBe(true);
+  });
+
+  it("usuário com mx_desconto_permitido=15 precisa aprovação para 16%", () => {
+    expect(precisaAprovacaoDesconto([makeItem({ pct_desconto: 16 })], 15)).toBe(true);
   });
 });
 

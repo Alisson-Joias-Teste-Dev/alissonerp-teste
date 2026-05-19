@@ -4,6 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { creditarSaldo } from "@/lib/saldo-credito";
 import { concluirVenda } from "@/lib/vendas-aprovar";
+import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 
 // ─── POST /api/vendas/[id]/pagamentos/[pagId]/confirmar ─────────────────────
 // Registra recebimento de pagamento "A Receber".
@@ -127,10 +128,11 @@ export async function POST(
           SELECT desconto_revalidacao_necessaria, desconto_aprovado_por
           FROM alissonerp.vendas_erp WHERE id = ${vendaId}
         `;
+        const thresholdDesc = await getDescontoThreshold(vendaId);
         const [temAltoDesc] = await sql`
           SELECT EXISTS(
             SELECT 1 FROM alissonerp.itens_venda_erp
-            WHERE venda_id = ${vendaId} AND pct_desconto > 30
+            WHERE venda_id = ${vendaId} AND pct_desconto > ${thresholdDesc}
           ) AS tem
         `;
         const bloqueadoPorDesconto =

@@ -56,16 +56,19 @@ function makeParams(id: string) {
 function setupSqlDesconto(overrides: { adminResult?: unknown[]; tarefaResult?: unknown[] } = {}) {
   sqlMock
     .mockResolvedValueOnce([{ role: "consultora" }])                          // 1. SELECT role FROM usuarios
-    .mockResolvedValueOnce([{                                                  // 2. SELECT venda
+    .mockResolvedValueOnce([{ threshold: 30 }])                               // 2. getDescontoThreshold
+    .mockResolvedValueOnce([{                                                  // 3. SELECT venda
       id: 1, situacao: "rascunho", bloqueado: false, aprovacao_credito_tarefa_id: null,
     }])
-    .mockResolvedValueOnce(overrides.adminResult ?? [{ id: "admin-uuid-456" }]) // 3. SELECT admin
-    .mockResolvedValueOnce([{ numero_venda: "V-001", total_venda: "500.00" }])  // 4. SELECT venda info
-    .mockResolvedValueOnce([{ sku: "SKU-001", nome_produto: "Anel", preco_lista: "200.00", pct_desconto: "35", preco_unitario: "130.00", quantidade: 1 }]) // 5. SELECT itens desconto
-    .mockResolvedValueOnce(overrides.tarefaResult ?? [{ id: 99 }])              // 6. INSERT tarefa
-    .mockResolvedValueOnce([{ id: 1 }])                                         // 7. INSERT aprovacoes_tarefa
-    .mockResolvedValueOnce([])                                                  // 8. UPDATE vendas_erp
-    .mockResolvedValueOnce([]);                                                 // 9. INSERT notificacoes
+    .mockResolvedValueOnce([{ vendedor_id: 1 }])                              // 4. requireVendaOwnership: SELECT vendas_erp
+    .mockResolvedValueOnce([{ vendedor_id: 1 }])                              // 5. requireVendaOwnership: getUserVendedorId
+    .mockResolvedValueOnce(overrides.adminResult ?? [{ id: "admin-uuid-456" }]) // 6. SELECT admin
+    .mockResolvedValueOnce([{ numero_venda: "V-001", total_venda: "500.00" }])  // 7. SELECT venda info
+    .mockResolvedValueOnce([{ sku: "SKU-001", nome_produto: "Anel", preco_lista: "200.00", pct_desconto: "35", preco_unitario: "130.00", quantidade: 1 }]) // 8. SELECT itens desconto
+    .mockResolvedValueOnce(overrides.tarefaResult ?? [{ id: 99 }])              // 9. INSERT tarefa
+    .mockResolvedValueOnce([{ id: 1 }])                                         // 10. INSERT aprovacoes_tarefa
+    .mockResolvedValueOnce([])                                                  // 11. UPDATE vendas_erp
+    .mockResolvedValueOnce([]);                                                 // 12. INSERT notificacoes
 }
 
 // ── Testes ───────────────────────────────────────────────────────────────────
@@ -103,6 +106,7 @@ describe("POST solicitar-aprovacao — tipo='desconto'", () => {
   it("retorna 409 quando venda não está em rascunho", async () => {
     sqlMock
       .mockResolvedValueOnce([{ role: "consultora" }])
+      .mockResolvedValueOnce([{ threshold: 30 }])
       .mockResolvedValueOnce([{ id: 1, situacao: "aprovado", bloqueado: false, aprovacao_credito_tarefa_id: null }]);
 
     const res = await POST(makeRequest("1", { tipo: "desconto" }), makeParams("1"));
@@ -112,7 +116,10 @@ describe("POST solicitar-aprovacao — tipo='desconto'", () => {
   it("retorna early quando já existe aprovação pendente (aprovacao_credito_tarefa_id set)", async () => {
     sqlMock
       .mockResolvedValueOnce([{ role: "consultora" }])
-      .mockResolvedValueOnce([{ id: 1, situacao: "rascunho", bloqueado: false, aprovacao_credito_tarefa_id: 77 }]);
+      .mockResolvedValueOnce([{ threshold: 30 }])
+      .mockResolvedValueOnce([{ id: 1, situacao: "rascunho", bloqueado: false, aprovacao_credito_tarefa_id: 77 }])
+      .mockResolvedValueOnce([{ vendedor_id: 1 }])
+      .mockResolvedValueOnce([{ vendedor_id: 1 }]);
 
     const res = await POST(makeRequest("1", { tipo: "desconto" }), makeParams("1"));
     const data = await res.json();
@@ -120,13 +127,13 @@ describe("POST solicitar-aprovacao — tipo='desconto'", () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.aguardando_aprovacao_desconto).toBe(true);
-    // Não deve ter feito mais queries (nenhum INSERT tarefa)
-    expect(sqlMock).toHaveBeenCalledTimes(2);
+    expect(sqlMock).toHaveBeenCalledTimes(5);
   });
 
   it("retorna 500 quando nenhum admin ativo é encontrado", async () => {
     sqlMock
       .mockResolvedValueOnce([{ role: "consultora" }])
+      .mockResolvedValueOnce([{ threshold: 30 }])
       .mockResolvedValueOnce([{ id: 1, situacao: "rascunho", bloqueado: false, aprovacao_credito_tarefa_id: null }])
       .mockResolvedValueOnce([]); // nenhum admin
 

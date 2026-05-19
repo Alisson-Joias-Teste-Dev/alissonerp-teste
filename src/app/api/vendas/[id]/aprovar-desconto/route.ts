@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 
 // POST /api/vendas/[id]/aprovar-desconto
-// Admin/desenvolvedor aprova desconto acima de 30% diretamente da notificação.
+// Admin/desenvolvedor aprova desconto acima do threshold diretamente da notificação.
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -25,11 +26,12 @@ export async function POST(
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.situacao !== "rascunho") return NextResponse.json({ error: "Venda não está em rascunho" }, { status: 409 });
 
-  // Verificar se há itens com desconto > 30%
+  // Verificar se há itens com desconto acima do threshold da vendedora
+  const thresholdAprov = await getDescontoThreshold(vendaId);
   const [temDesconto] = await sql`
-    SELECT EXISTS(SELECT 1 FROM alissonerp.itens_venda_erp WHERE venda_id = ${vendaId} AND pct_desconto > 30) AS tem
+    SELECT EXISTS(SELECT 1 FROM alissonerp.itens_venda_erp WHERE venda_id = ${vendaId} AND pct_desconto > ${thresholdAprov}) AS tem
   `;
-  if (!temDesconto?.tem) return NextResponse.json({ error: "Nenhum item com desconto acima de 30%" }, { status: 409 });
+  if (!temDesconto?.tem) return NextResponse.json({ error: `Nenhum item com desconto acima de ${thresholdAprov}%` }, { status: 409 });
 
   // Aprovar desconto
   await sql`
@@ -74,7 +76,7 @@ export async function POST(
       VALUES (
         ${tarefaInfo.criado_por}::uuid, 'aprovacao',
         ${"Desconto aprovado — Venda " + tarefaInfo.numero_venda},
-        ${"Seu desconto acima de 30% foi aprovado. Você já pode solicitar aprovação da venda."},
+        ${`Seu desconto acima de ${thresholdAprov}% foi aprovado. Você já pode solicitar aprovação da venda.`},
         ${user.id}::uuid,
         ${`/vendas/${vendaId}`},
         ${vendaId}

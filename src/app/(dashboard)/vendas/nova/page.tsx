@@ -59,7 +59,7 @@ export default async function NovaVendaPage() {
     vendedores = rows.map(r => ({ id: Number(r.id), nome: r.nome as string }));
   }
 
-  const descontoAuthThreshold = role === "gerente_loja" ? 30 : undefined;
+  const descontoAuthThreshold = maxDesconto;
 
   return (
     <NovaVendaClientV2

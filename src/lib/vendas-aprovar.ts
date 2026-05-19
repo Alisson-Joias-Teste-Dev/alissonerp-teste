@@ -19,6 +19,7 @@
 
 import sql from "@/lib/db";
 import { verificarReposicaoAutomatica } from "@/lib/reposicao-automatica";
+import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 
 // ─── Tipos internos ──────────────────────────────────────────────────────────
 
@@ -596,12 +597,13 @@ export async function approveVenda(
   userId: string,
   opts: ApproveVendaOpts = {}
 ): Promise<{ ok: true; ordem_criada?: string; ja_aprovada?: boolean; tiny_erro?: string }> {
+  const approveVendaThreshold = await getDescontoThreshold(vendaId);
   const [venda] = await sql`
     SELECT v.id, v.situacao, v.bloqueado, v.tiny_pedido_id,
            v.desconto_aprovado_por,
            EXISTS(
              SELECT 1 FROM alissonerp.itens_venda_erp
-             WHERE venda_id = ${vendaId} AND pct_desconto > 30
+             WHERE venda_id = ${vendaId} AND pct_desconto > ${approveVendaThreshold}
            ) AS tem_desconto_alto
     FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
   `;
@@ -625,14 +627,14 @@ export async function approveVenda(
     return { ok: true, ja_aprovada: true };
   }
 
-  // ── Bloquear aprovação se desconto >30% não aprovado ─────────────────────
+  // ── Bloquear aprovação se desconto > threshold não aprovado ──────────────
   if (venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
-    console.error(`[approveVenda] BLOQUEADO venda=${vendaId}: desconto >30% sem aprovação (desconto_aprovado_por=NULL)`);
+    console.error(`[approveVenda] BLOQUEADO venda=${vendaId}: desconto >${approveVendaThreshold}% sem aprovação (desconto_aprovado_por=NULL)`);
     await sql`
       INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-      VALUES ('approveVenda_bloqueado', ${JSON.stringify({ vendaId, userId, motivo: "desconto_pendente" })}::text::jsonb, 409, 'desconto >30% sem aprovação')
+      VALUES ('approveVenda_bloqueado', ${JSON.stringify({ vendaId, userId, motivo: "desconto_pendente" })}::text::jsonb, 409, 'desconto >${approveVendaThreshold}% sem aprovação')
     `.catch(() => {});
-    throw new Error("Venda tem desconto acima de 30% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir.");
+    throw new Error(`Venda tem desconto acima de ${approveVendaThreshold}% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir.`);
   }
 
   // 1. Envia pro Tiny (noop se tiny_pedido_id já existe)

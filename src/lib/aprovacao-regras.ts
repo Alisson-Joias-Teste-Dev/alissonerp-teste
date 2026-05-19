@@ -183,4 +183,32 @@ async function processarDecisao(
   `;
 }
 
-export { avaliarRegras, encontrarAprovador, criarTarefaAprovacao, processarDecisao };
+/**
+ * Retorna o threshold de desconto (mx_desconto_permitido) da vendedora
+ * que criou a venda. Usa fallback por role se mx_desconto_permitido for NULL/0.
+ *
+ * Ordem de precedência (mesma lógica de page.tsx):
+ *   1. mx_desconto_permitido > 0 → esse valor
+ *   2. gerente_fabrica/financeiro → 30
+ *   3. gerente_loja → 50
+ *   4. consultora (default) → 15
+ */
+async function getDescontoThreshold(vendaId: number): Promise<number> {
+  const [row] = await sql`
+    SELECT
+      COALESCE(
+        NULLIF(u.mx_desconto_permitido, 0),
+        CASE
+          WHEN u.role IN ('gerente_fabrica','financeiro') THEN 30
+          WHEN u.role = 'gerente_loja' THEN 50
+          ELSE 15
+        END
+      )::numeric AS threshold
+    FROM alissonerp.vendas_erp ve
+    JOIN alissonerp.usuarios u ON u.id = ve.vendedor_id
+    WHERE ve.id = ${vendaId}
+  `;
+  return Number(row?.threshold ?? 15);
+}
+
+export { avaliarRegras, encontrarAprovador, criarTarefaAprovacao, processarDecisao, getDescontoThreshold };

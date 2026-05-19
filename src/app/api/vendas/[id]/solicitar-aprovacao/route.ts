@@ -4,7 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { submeterVendaParaAprovacaoCredito } from "@/lib/vendas-credito-aprovar";
 import { approveVenda } from "@/lib/vendas-aprovar";
-import { avaliarRegras, criarTarefaAprovacao } from "@/lib/aprovacao-regras";
+import { avaliarRegras, criarTarefaAprovacao, getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
@@ -41,13 +41,14 @@ export async function POST(
   if (!usuario) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
 
   // Validar venda em rascunho
+  const descontoThreshold = await getDescontoThreshold(vendaId);
   const [venda] = await sql`
     SELECT v.id, v.situacao, v.bloqueado, v.aprovacao_credito_tarefa_id,
            v.desconto_aprovado_por,
            v.desconto_cartao_aprovado_por,
            EXISTS(
              SELECT 1 FROM alissonerp.itens_venda_erp
-             WHERE venda_id = ${vendaId} AND pct_desconto > 30
+             WHERE venda_id = ${vendaId} AND pct_desconto > ${descontoThreshold}
            ) AS tem_desconto_alto
     FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
   `;
@@ -67,10 +68,10 @@ export async function POST(
     if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
     throw e;
   }
-  // ── Bloquear solicitação de crédito/gerente se desconto >30% não aprovado ─
+  // ── Bloquear solicitação de crédito/gerente se desconto > threshold não aprovado ─
   if (tipo !== "desconto" && venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
     return NextResponse.json(
-      { error: "Esta venda tem desconto acima de 30%. Solicite aprovação de desconto primeiro (tipo=desconto)." },
+      { error: `Esta venda tem desconto acima de ${descontoThreshold}%. Solicite aprovação de desconto primeiro (tipo=desconto).` },
       { status: 409 }
     );
   }
@@ -110,7 +111,7 @@ export async function POST(
     const itensDetalhe = await sql`
       SELECT sku, nome_produto, preco_lista, pct_desconto, preco_unitario, quantidade
       FROM alissonerp.itens_venda_erp
-      WHERE venda_id = ${vendaId} AND pct_desconto > 30
+      WHERE venda_id = ${vendaId} AND pct_desconto > ${descontoThreshold}
       ORDER BY id
     `;
     const linhasItens = itensDetalhe.map((it) => {

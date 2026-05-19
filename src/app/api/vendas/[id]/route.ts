@@ -7,6 +7,7 @@ import { isFullAccess } from "@/lib/roles";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 import { zodError, IdSchema } from "@/lib/schemas/common";
+import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 
 const toNum = (v: unknown) => (v === null || v === undefined ? v : Number(v));
 
@@ -134,6 +135,8 @@ export async function GET(
     ORDER BY id DESC
   `;
 
+  const descontoThreshold = await getDescontoThreshold(vendaId);
+
   return NextResponse.json({
     ...venda,
     devolucoes: devolucoes.map((d) => ({
@@ -159,6 +162,7 @@ export async function GET(
     desconto_aprovado_em: venda.desconto_aprovado_em ?? null,
     desconto_cartao_aprovado_por_nome: venda.desconto_cartao_aprovado_por_nome ?? null,
     desconto_cartao_aprovado_em: venda.desconto_cartao_aprovado_em ?? null,
+    descontoThreshold,
     itens: itens.map((i) => ({
       ...i,
       quantidade:      Number(i.quantidade),
@@ -353,13 +357,14 @@ export async function PATCH(
       );
     }
   }
-  // ── Bloquear aprovação se desconto >30% sem aprovação (não-admin/dev) ────
+  // ── Bloquear aprovação se desconto > threshold sem aprovação (não-admin/dev) ─
   if (body.situacao === "aprovado" && !isFullAccess(usuario.role)) {
+    const threshold = await getDescontoThreshold(vendaId);
     const [dcCheck] = await sql`
       SELECT
         EXISTS(
           SELECT 1 FROM alissonerp.itens_venda_erp
-          WHERE venda_id = ${vendaId} AND pct_desconto > 30
+          WHERE venda_id = ${vendaId} AND pct_desconto > ${threshold}
         ) AS tem_desconto_alto,
         desconto_aprovado_por IS NOT NULL AS desconto_ja_aprovado
       FROM alissonerp.vendas_erp
@@ -367,7 +372,7 @@ export async function PATCH(
     `;
     if (dcCheck?.tem_desconto_alto && !dcCheck?.desconto_ja_aprovado) {
       return NextResponse.json(
-        { error: "Venda tem desconto acima de 30% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir." },
+        { error: `Venda tem desconto acima de ${threshold}% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir.` },
         { status: 409 }
       );
     }

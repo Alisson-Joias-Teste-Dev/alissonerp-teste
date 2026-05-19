@@ -6,6 +6,7 @@ import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { zodError } from "@/lib/schemas/common";
 import { isFullAccess } from "@/lib/roles";
+import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 
 const ItemVendaPatchSchema = z.object({
   quantidade: z.coerce.number().optional(),
@@ -102,11 +103,12 @@ export async function PATCH(
 
   // Se desconto foi alterado numa venda em rascunho, invalida aprovação anterior
   if (body.pct_desconto !== undefined && venda.situacao === "rascunho") {
+    const thresholdItem = await getDescontoThreshold(vendaId);
     const [vendaAtual] = await sql`
       SELECT desconto_aprovado_por,
         EXISTS(
           SELECT 1 FROM alissonerp.itens_venda_erp
-          WHERE venda_id = ${vendaId} AND pct_desconto > 30
+          WHERE venda_id = ${vendaId} AND pct_desconto > ${thresholdItem}
         ) AS tem_desconto_alto
       FROM alissonerp.vendas_erp WHERE id = ${vendaId}
     `;
