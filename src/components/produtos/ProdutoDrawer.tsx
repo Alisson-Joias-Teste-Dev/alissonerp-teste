@@ -844,12 +844,18 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       const extrasOk = await persistirReposicaoERota(produto.id_produto);
       if (extrasOk) setExtrasDirty(false);
 
-      // Se há pedras-componente, soma ao preço do ouro e salva como preco_tiny
-      if (!ehPedra && pedrasComp.length > 0) {
-        const subtotalPedrasSave = pedrasComp.reduce((s, p) => s + p.preco_unitario * p.quantidade, 0);
-        const precoOuroAtual = parseFloat(produto.preco_sync ?? String(produto.preco_curva ?? "") ?? produto.preco_tiny ?? "0") || 0;
-        if (precoOuroAtual > 0) {
-          body.preco_tiny = Math.round((precoOuroAtual + subtotalPedrasSave) * 100) / 100;
+      // Se há pedras-componente: salva subtotal em preco_pedras (para a lista mostrar curva+pedras)
+      if (!ehPedra) {
+        if (pedrasComp.length > 0) {
+          const subtotalPedrasSave = pedrasComp.reduce((s, p) => s + p.preco_unitario * p.quantidade, 0);
+          body.preco_pedras = Math.round(subtotalPedrasSave * 100) / 100;
+          const precoOuroAtual = parseFloat(produto.preco_sync ?? String(produto.preco_curva ?? "") ?? produto.preco_tiny ?? "0") || 0;
+          if (precoOuroAtual > 0) {
+            body.preco_tiny = Math.round((precoOuroAtual + subtotalPedrasSave) * 100) / 100;
+          }
+        } else {
+          // Sem pedras: zera preco_pedras para limpar valor antigo
+          body.preco_pedras = 0;
         }
       }
 

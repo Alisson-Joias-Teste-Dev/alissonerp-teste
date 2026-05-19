@@ -747,9 +747,14 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
                                 promo: preco_vigente sobrescreve quando em_promocao=true */}
                             <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
                               {(() => {
+                                const precoPedrasComp = parseFloat(p.preco_pedras ?? "0") || 0;
                                 const precoLista = isPedra
                                   ? p.preco_tiny
-                                  : (p.preco_curva != null ? String(p.preco_curva) : (p.preco_sync ?? p.preco_tiny));
+                                  : (p.preco_curva != null
+                                      ? String(p.preco_curva + precoPedrasComp)
+                                      : (p.preco_sync != null
+                                          ? String(parseFloat(p.preco_sync) + precoPedrasComp)
+                                          : p.preco_tiny));
                                 const emPromo = !!p.em_promocao;
                                 const precoPromo = p.preco_vigente != null ? String(p.preco_vigente) : null;
                                 if (emPromo && precoPromo != null && parseFloat(precoPromo) > 0 && precoLista != null) {
