@@ -43,6 +43,24 @@ interface BomItemLocal {
   observacao: string | null;
 }
 
+// Pedra cadastrada no catálogo (categoria='Pedras') — usada como
+// componente pra somar ao preço do produto novo.
+interface PedraCatalogo {
+  id: number;
+  nome: string;
+  preco_unitario: number;
+  peso_g: number | null;
+}
+
+// Pedra-componente selecionada no cadastro do produto.
+interface PedraComponenteLocal {
+  _key: string;
+  pedra_produto_id: number;
+  nome: string;
+  preco_unitario: number;
+  quantidade: number;
+}
+
 type RegraIncremental = {
   tipo: "incremental";
   base_numeracao: number;
@@ -547,6 +565,12 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   const [bom, setBom] = useState<BomItemLocal[]>([]);
   const [showBomForm, setShowBomForm] = useState(false);
 
+  // Pedras-componente (para precificação automática: catálogo de pedras × qtd)
+  const [pedrasComp, setPedrasComp] = useState<PedraComponenteLocal[]>([]);
+  const [catalogoPedras, setCatalogoPedras] = useState<PedraCatalogo[]>([]);
+  const [pedraSelId, setPedraSelId] = useState<string>("");
+  const [pedraSelQtd, setPedraSelQtd] = useState<string>("1");
+
   // Step 3: Ficha Técnica (substituiu Medidas — campos legados mantidos só por compat)
   const [larguraAro, setLarguraAro] = useState("");
   const [alturaAro, setAlturaAro] = useState("");
@@ -586,20 +610,26 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
     setComprimentosSel([40, 45, 50]); setTipoRegra("incremental");
     setBaseNumeracao(16); setIncremento(0.1); setTabelaPeso({}); setQuantidadesVar({});
     setEstoqueInicial("0"); setEstoqueMinimo("0"); setTempoFabricacaoDias(""); setRotaEtapas([]);
+    setPedrasComp([]); setPedraSelId(""); setPedraSelQtd("1");
     loadSetup();
   }, [open]);
 
   const loadSetup = useCallback(async () => {
     setLoadingSetup(true);
     try {
-      const [setupRes, insumoRes, fornRes, curvaConfigRes, curvaCategoriasRes, setoresRes] = await Promise.all([
+      const [setupRes, insumoRes, fornRes, curvaConfigRes, curvaCategoriasRes, setoresRes, pedrasCatRes] = await Promise.all([
         fetch("/api/produtos/setup"),
         fetch("/api/produtos/insumos"),
         fetch("/api/fornecedores"),
         fetch("/api/precificacao/curva/config"),
         fetch("/api/precificacao/curva/categorias"),
         fetch("/api/setores"),
+        fetch("/api/produtos/pedras-catalogo"),
       ]);
+      if (pedrasCatRes.ok) {
+        const d = await pedrasCatRes.json() as PedraCatalogo[];
+        setCatalogoPedras(Array.isArray(d) ? d : []);
+      }
       if (setupRes.ok) {
         const d = await setupRes.json() as { nextSku: string; nextSkuAJ: string; cotacao: { ouro: number; dollar: number } };
         setNextSku(d.nextSku);
@@ -915,6 +945,24 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
         } catch (err) { console.warn("Falha ao salvar ficha técnica:", err); }
       }
 
+      // ── Pedras-componente (catálogo somando ao preço) ─────────────────────
+      // Best-effort: se falhar, produto já foi criado com sucesso. Vendedora
+      // pode reaplicar via tela de edição.
+      if (pedrasComp.length > 0) {
+        try {
+          await fetch(`/api/produtos/${produtoId}/pedras-componente`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              pedras: pedrasComp.map((p) => ({
+                pedra_produto_id: p.pedra_produto_id,
+                quantidade: p.quantidade,
+              })),
+            }),
+          });
+        } catch (err) { console.warn("Falha ao salvar pedras-componente:", err); }
+      }
+
       // ── Estoque inicial: registra entrada em movimentações ───────────────
       const estoqueInicialNum = parseInt(estoqueInicial || "0", 10);
       if (estoqueInicialNum > 0) {
@@ -1069,14 +1117,139 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                         <>
                           <p>Categoria: <span className="font-medium">{factorsAuto.categoriaNome}{faixaAtual ? ` (${faixaAtual})` : ""}</span></p>
                           <p>Markup: <span className="font-medium">{factorsAuto.mkp.toFixed(3)}×</span> · Fator: <span className="font-medium">1.0</span></p>
-                          {precoEstimadoAuto != null && (
-                            <p className="mt-1 font-semibold text-sm">
-                              Preço estimado: {precoEstimadoAuto.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                            </p>
-                          )}
+                          {precoEstimadoAuto != null && (() => {
+                            // Soma das pedras-componente. Vazio → mantém UX antiga
+                            // ("Preço estimado: X"). Com pedras → quebra Ouro/Pedras/TOTAL.
+                            const subtotalPedras = pedrasComp.reduce(
+                              (s, p) => s + p.preco_unitario * p.quantidade,
+                              0,
+                            );
+                            const qtdPedras = pedrasComp.reduce((s, p) => s + p.quantidade, 0);
+                            const total = precoEstimadoAuto + subtotalPedras;
+                            const fmtBRL = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+                            if (subtotalPedras === 0) {
+                              return (
+                                <p className="mt-1 font-semibold text-sm">
+                                  Preço estimado: {fmtBRL(precoEstimadoAuto)}
+                                </p>
+                              );
+                            }
+                            return (
+                              <>
+                                <p className="mt-1">Ouro: <span className="font-medium">{fmtBRL(precoEstimadoAuto)}</span></p>
+                                <p>Pedras ({qtdPedras} un): <span className="font-medium">{fmtBRL(subtotalPedras)}</span></p>
+                                <p className="mt-1 font-bold text-base border-t pt-1" style={{ borderColor: "#A7F3D0" }}>
+                                  TOTAL: {fmtBRL(total)}
+                                </p>
+                              </>
+                            );
+                          })()}
                         </>
                       ) : (
                         <p>Curva de precificação não carregada</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── PEDRAS DO CATÁLOGO (somam ao preço final) ──────────────── */}
+                  {pesoNum > 0 && userRole && ROLES_VE_PRECIFICACAO.has(userRole) && (
+                    <div className="rounded-lg border bg-white px-4 py-3" style={{ borderColor: C.cremeBorder }}>
+                      <p className="text-xs font-semibold text-gray-700 mb-2">
+                        Pedras do catálogo
+                        <span className="ml-1 text-[10px] text-gray-400 font-normal">
+                          {pedrasComp.length > 0 ? `${pedrasComp.length} tipo(s)` : "opcional — soma ao preço final"}
+                        </span>
+                      </p>
+
+                      {/* Lista das pedras já adicionadas */}
+                      {pedrasComp.length > 0 && (
+                        <div className="space-y-1.5 mb-2">
+                          {pedrasComp.map((p) => (
+                            <div
+                              key={p._key}
+                              className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border"
+                              style={{ borderColor: C.cremeBorder }}
+                            >
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <span className="text-sm font-medium text-gray-800 truncate">{p.nome}</span>
+                                <span className="text-xs text-gray-500 font-mono shrink-0">
+                                  {p.quantidade}un × {p.preco_unitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                                </span>
+                                <span className="text-xs font-semibold text-gray-700 shrink-0">
+                                  = {(p.quantidade * p.preco_unitario).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setPedrasComp((arr) => arr.filter((x) => x._key !== p._key))}
+                                className="text-gray-400 hover:text-red-500 transition-colors shrink-0 ml-2"
+                                aria-label="Remover pedra"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Formulário de adição: select pedra + qtd */}
+                      <div className="flex items-end gap-2">
+                        <div className="flex-1 min-w-0">
+                          <label className={labelCls}>Pedra do catálogo</label>
+                          <select
+                            value={pedraSelId}
+                            onChange={(e) => setPedraSelId(e.target.value)}
+                            className={inputCls}
+                          >
+                            <option value="">— Selecione —</option>
+                            {catalogoPedras.map((p) => (
+                              <option key={p.id} value={String(p.id)}>
+                                {p.nome} — {p.preco_unitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="w-20">
+                          <label className={labelCls}>Qtd</label>
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={pedraSelQtd}
+                            onChange={(e) => setPedraSelQtd(e.target.value)}
+                            className={inputCls}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const pedra = catalogoPedras.find((p) => p.id === Number(pedraSelId));
+                            const qtd = Math.max(1, Math.floor(Number(pedraSelQtd) || 0));
+                            if (!pedra || qtd < 1) return;
+                            setPedrasComp((arr) => [
+                              ...arr,
+                              {
+                                _key: `pc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                                pedra_produto_id: pedra.id,
+                                nome: pedra.nome,
+                                preco_unitario: pedra.preco_unitario,
+                                quantidade: qtd,
+                              },
+                            ]);
+                            setPedraSelId("");
+                            setPedraSelQtd("1");
+                          }}
+                          disabled={!pedraSelId || Number(pedraSelQtd) < 1}
+                          className="px-3 py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-40"
+                          style={{ backgroundColor: C.esmeralda }}
+                        >
+                          + Adicionar
+                        </button>
+                      </div>
+                      {catalogoPedras.length === 0 && (
+                        <p className="text-[10px] text-gray-400 mt-2">
+                          Nenhuma pedra com preço cadastrada no catálogo. Cadastre em <strong>Precificação → Pedras</strong>.
+                        </p>
                       )}
                     </div>
                   )}
