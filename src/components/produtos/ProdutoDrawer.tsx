@@ -1926,7 +1926,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                           const n = parseFloat(t);
                           return isNaN(n) ? 0 : n;
                         };
-                        const precoOuro = parseNum(produto?.preco_sync ?? produto?.preco_tiny);
+                        const precoOuro = parseNum(produto?.preco_sync ?? produto?.preco_curva ?? produto?.preco_tiny);
                         const subtotalPedras = pedrasComp.reduce((s, p) => s + p.preco_unitario * p.quantidade, 0);
                         const total = precoOuro + subtotalPedras;
                         const qtdTotal = pedrasComp.reduce((s, p) => s + p.quantidade, 0);
