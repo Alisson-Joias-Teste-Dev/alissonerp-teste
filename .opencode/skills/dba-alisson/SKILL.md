@@ -30,11 +30,13 @@ Se o arquivo estiver vazio ou não existir, consulte o banco real exclusivamente
 psql "$DATABASE_URL" -c "SELECT ..."
 ```
 
-⚠️ **IMPORTANTE: Use APENAS `psql` para consultar o banco.** 
+⚠️ **REGRA ABSOLUTA: Use APENAS `psql` para consultar o banco.** 
 - NUNCA use `node -e "require('pg')..."` ou `import postgres` ou qualquer biblioteca JavaScript/Python para conectar no banco
 - NUNCA use scripts `.mjs` ou `.ts` com `pg` ou `postgres` como cliente
-- Se `psql` não estiver instalado, PARE e informe o usuário: "psql não está disponível. Preciso que você instale o PostgreSQL client ou autorize uma alternativa."
-- A única exceção é o próprio dump de schema (`pg_dump`), que pode ser executado diretamente via bash
+- NUNCA ofereça ou sugira node+pg como alternativa — é proibido
+- Se `psql` não estiver instalado: PARE. Diga APENAS "psql não está disponível. instale o postgresql-client ou me autorize uma alternativa." NÃO ofereça soluções — o usuário decide.
+- Violar esta regra = quebrar a segurança do banco
+- A única exceção é o dump de schema via `pg_dump`, que pode ser executado via bash
 
 ### ❷ Nunca executar nada que modifique o banco sem aprovação explícita
 
