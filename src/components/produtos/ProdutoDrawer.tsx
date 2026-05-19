@@ -697,6 +697,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       setShowPropagar(false);
       setPropagarMsg(null);
       setError(null);
+      setPedrasComp([]);
+      setCatalogoPedras([]);
+      setPedraSelId("");
+      setPedraSelQtd("1");
     }
   }, [produtoId, loadProduto]);
 

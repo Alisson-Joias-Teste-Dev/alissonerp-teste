@@ -113,6 +113,7 @@ interface Venda {
   }>;
   empresa_emitente_id?: number | null;
   nota_fiscal_id?: number | null;
+  descontoThreshold?: number | null;
   devolucoes?: Array<{
     id: number;
     numero: string;
