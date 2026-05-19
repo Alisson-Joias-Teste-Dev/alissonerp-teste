@@ -501,7 +501,7 @@ export default function TarefasClient() {
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
           >
-            <div className="flex gap-3 md:gap-4 p-4 md:p-6 min-h-full md:w-max">
+            <div className="flex gap-3 md:gap-4 p-4 md:p-6 pb-24 md:pb-6 min-h-full md:w-max">
               {STATUS_COLS.map(col => (
                 <DroppableColumn
                   key={col.key}
