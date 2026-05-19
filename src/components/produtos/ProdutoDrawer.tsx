@@ -116,6 +116,23 @@ interface Props {
   podeEditar?: boolean;
 }
 
+// Pedra do catálogo (categoria='Pedras', ativa, com preço)
+interface PedraCatalogo {
+  id: number;
+  nome: string;
+  preco_unitario: number;
+  peso_g: number | null;
+}
+
+// Pedra selecionada para compor o preço do produto
+interface PedraComponenteLocal {
+  _key: string;
+  pedra_produto_id: number;
+  nome: string;
+  preco_unitario: number;
+  quantidade: number;
+}
+
 // ─── Design constants ─────────────────────────────────────────────────────────
 
 const C = {
@@ -515,6 +532,12 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   const [fichaTecnicaUploadBase64, setFichaTecnicaUploadBase64] = useState<string | null>(null);
   const fichaTecnicaInputRef = useRef<HTMLInputElement>(null);
 
+  // Pedras-componente (só precificação — NÃO abate estoque)
+  const [pedrasComp, setPedrasComp] = useState<PedraComponenteLocal[]>([]);
+  const [catalogoPedras, setCatalogoPedras] = useState<PedraCatalogo[]>([]);
+  const [pedraSelId, setPedraSelId] = useState("");
+  const [pedraSelQtd, setPedraSelQtd] = useState("1");
+
   // Variações (quando eh_pai)
   const [variacoes, setVariacoes] = useState<Variacao[]>([]);
 
@@ -579,10 +602,34 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       setFichaTecnicaUrl(j.ficha?.url ?? null);
     }).catch(() => { /* ignore */ });
     try {
-      const res = await fetch(`/api/produtos/${produtoId}`);
+      const [res, pedrasCatRes, pedrasCompRes] = await Promise.all([
+        fetch(`/api/produtos/${produtoId}`),
+        fetch("/api/produtos/pedras-catalogo"),
+        fetch(`/api/produtos/${produtoId}/pedras-componente`),
+      ]);
       if (!res.ok) {
         const b = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(b.error ?? "Erro ao carregar produto");
+      }
+      // Catálogo de pedras disponíveis
+      if (pedrasCatRes.ok) {
+        const d = await pedrasCatRes.json() as PedraCatalogo[];
+        setCatalogoPedras(Array.isArray(d) ? d : []);
+      }
+      // Pedras já vinculadas ao produto (precificação)
+      if (pedrasCompRes.ok) {
+        const d = await pedrasCompRes.json() as Array<{ id: number; pedra_produto_id: number; nome: string; quantidade: number; preco_unitario: number }>;
+        if (Array.isArray(d)) {
+          setPedrasComp(d.map((p) => ({
+            _key: `existing-${p.id}`,
+            pedra_produto_id: p.pedra_produto_id,
+            nome: p.nome,
+            preco_unitario: p.preco_unitario,
+            quantidade: p.quantidade,
+          })));
+        }
+      } else {
+        setPedrasComp([]);
       }
       const data = await res.json() as { produto: ProdutoDetalhe; composicao: BomItem[]; variacoes: Variacao[]; cotacao_ouro?: number; cotacao_dolar?: number; markup_pedras?: Array<{ tamanho_min: string | number; tamanho_max: string | number; markup: string | number }> };
       setProduto(data.produto);
@@ -793,6 +840,21 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       // (Esses dois endpoints são separados — UPSERT idempotente, sem dirty-check.)
       const extrasOk = await persistirReposicaoERota(produto.id_produto);
       if (extrasOk) setExtrasDirty(false);
+
+      // Pedras-componente (só precificação — NÃO abate estoque)
+      // Sempre envia, mesmo lista vazia (limpa as pedras se remover todas)
+      try {
+        await fetch(`/api/produtos/${produto.id_produto}/pedras-componente`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pedras: pedrasComp.map((p) => ({
+              pedra_produto_id: p.pedra_produto_id,
+              quantidade: p.quantidade,
+            })),
+          }),
+        });
+      } catch { /* best-effort — não bloqueia o save principal */ }
 
       if (Object.keys(body).length === 0) {
         setSaveMsg({ ok: extrasOk, texto: extrasOk ? "Alterações salvas com sucesso." : "Erro ao salvar reposição/rota." });
@@ -1761,6 +1823,132 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                     })()}
                   </div>
 
+                </div>
+              </section>
+
+              {/* ── PEDRAS DO CATÁLOGO (só precificação — NÃO abate estoque) ── */}
+              <section>
+                <p className={sectionTitleCls}>Pedras do catálogo <span className="normal-case tracking-normal text-gray-400">(soma ao preço do ouro)</span></p>
+                <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-100">
+                  {/* Seletor */}
+                  <div className="flex gap-2 items-end">
+                    <div className="flex-1">
+                      <p className={labelCls}>Pedra</p>
+                      <select
+                        value={pedraSelId}
+                        onChange={(e) => setPedraSelId(e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      >
+                        <option value="">— selecione —</option>
+                        {catalogoPedras.map((p) => (
+                          <option key={p.id} value={String(p.id)}>
+                            {p.nome} — {p.preco_unitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="w-20">
+                      <p className={labelCls}>Qtd</p>
+                      <input
+                        type="number"
+                        min={1}
+                        value={pedraSelQtd}
+                        onChange={(e) => setPedraSelQtd(e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const pedra = catalogoPedras.find((p) => p.id === Number(pedraSelId));
+                        if (!pedra) return;
+                        const qtd = Math.max(1, parseInt(pedraSelQtd) || 1);
+                        // Se já existe essa pedra, soma a quantidade
+                        const existente = pedrasComp.find((p) => p.pedra_produto_id === pedra.id);
+                        if (existente) {
+                          setPedrasComp((prev) => prev.map((p) =>
+                            p.pedra_produto_id === pedra.id
+                              ? { ...p, quantidade: p.quantidade + qtd }
+                              : p
+                          ));
+                        } else {
+                          setPedrasComp((prev) => [...prev, {
+                            _key: `new-${pedra.id}-${Date.now()}`,
+                            pedra_produto_id: pedra.id,
+                            nome: pedra.nome,
+                            preco_unitario: pedra.preco_unitario,
+                            quantidade: qtd,
+                          }]);
+                        }
+                        setPedraSelId("");
+                        setPedraSelQtd("1");
+                      }}
+                      disabled={!pedraSelId}
+                      className="px-3 py-1.5 rounded-md text-sm font-semibold text-white disabled:opacity-40"
+                      style={{ backgroundColor: "#184036" }}
+                    >
+                      + Add
+                    </button>
+                  </div>
+
+                  {/* Lista de pedras adicionadas */}
+                  {pedrasComp.length > 0 && (
+                    <div className="space-y-1.5">
+                      {pedrasComp.map((p) => (
+                        <div key={p._key} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-200 text-sm">
+                          <span className="font-medium text-gray-800 flex-1 truncate">{p.nome}</span>
+                          <span className="text-gray-500 font-mono text-xs mx-2">×{p.quantidade}</span>
+                          <span className="text-gray-700 font-mono text-xs mr-3">
+                            {(p.preco_unitario * p.quantidade).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setPedrasComp((prev) => prev.filter((x) => x._key !== p._key))}
+                            className="text-red-400 hover:text-red-600 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+
+                      {/* Breakdown Ouro / Pedras / TOTAL */}
+                      {(() => {
+                        const parseNum = (v: string | number | null | undefined) => {
+                          if (v == null) return 0;
+                          if (typeof v === "number") return isNaN(v) ? 0 : v;
+                          let t = String(v).trim();
+                          if (!t) return 0;
+                          if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+                          const n = parseFloat(t);
+                          return isNaN(n) ? 0 : n;
+                        };
+                        const precoOuro = parseNum(produto?.preco_sync ?? produto?.preco_tiny);
+                        const subtotalPedras = pedrasComp.reduce((s, p) => s + p.preco_unitario * p.quantidade, 0);
+                        const total = precoOuro + subtotalPedras;
+                        const qtdTotal = pedrasComp.reduce((s, p) => s + p.quantidade, 0);
+                        return (
+                          <div className="mt-2 rounded-lg border p-3 space-y-1 text-sm" style={{ borderColor: "#A7F3D0", backgroundColor: "#ECFDF5" }}>
+                            <div className="flex justify-between text-gray-600">
+                              <span>Ouro</span>
+                              <span className="font-mono">{precoOuro > 0 ? precoOuro.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—"}</span>
+                            </div>
+                            <div className="flex justify-between text-gray-600">
+                              <span>Pedras ({qtdTotal} un)</span>
+                              <span className="font-mono">{subtotalPedras.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+                            </div>
+                            <div className="flex justify-between font-bold border-t border-green-200 pt-1 mt-1" style={{ color: "#065F46" }}>
+                              <span>TOTAL</span>
+                              <span className="font-mono">{precoOuro > 0 ? total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—"}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {pedrasComp.length === 0 && (
+                    <p className="text-xs text-gray-400 text-center py-2">Nenhuma pedra vinculada — opcional</p>
+                  )}
                 </div>
               </section>
 
