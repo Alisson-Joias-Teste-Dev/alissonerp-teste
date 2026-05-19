@@ -845,6 +845,15 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       const extrasOk = await persistirReposicaoERota(produto.id_produto);
       if (extrasOk) setExtrasDirty(false);
 
+      // Se há pedras-componente, soma ao preço do ouro e salva como preco_tiny
+      if (!ehPedra && pedrasComp.length > 0) {
+        const subtotalPedrasSave = pedrasComp.reduce((s, p) => s + p.preco_unitario * p.quantidade, 0);
+        const precoOuroAtual = parseFloat(produto.preco_sync ?? String(produto.preco_curva ?? "") ?? produto.preco_tiny ?? "0") || 0;
+        if (precoOuroAtual > 0) {
+          body.preco_tiny = Math.round((precoOuroAtual + subtotalPedrasSave) * 100) / 100;
+        }
+      }
+
       // Pedras-componente (só precificação — NÃO abate estoque)
       // Sempre envia, mesmo lista vazia (limpa as pedras se remover todas)
       try {
@@ -1768,10 +1777,11 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                       const markupLive = parseNum(markupEdit);
                       const fatorLive  = parseNum(fatorEdit) || 1;
                       const podeCalc = pesoLive > 0 && markupLive > 0 && cotacaoOuro > 0 && curvaConfig != null;
+                      const subtotalPedrasOficial = pedrasComp.reduce((s, p) => s + p.preco_unitario * p.quantidade, 0);
                       // Curva canônica (mesma fórmula da aba /precificacao):
                       //   preço = peso × (cotacao × fator) × (goldCostPct/100) × markup → arredondado
                       // O `fator` é específico do SKU e multiplica a cotação (default 1 quando ausente).
-                      const precoLive = podeCalc
+                      const precoOuroLive = podeCalc
                         ? calcularPrecoSync(
                             pesoLive,
                             cotacaoOuro * fatorLive,
@@ -1780,6 +1790,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                             curvaConfig!.goldCostPercentage,
                           )
                         : null;
+                      const precoLive = precoOuroLive != null ? precoOuroLive + subtotalPedrasOficial : null;
                       const toStrCmp = (v: unknown) => (v == null ? "" : String(v));
                       const editando =
                         (pesoEdit || "")   !== toStrCmp(produto.peso_precificado) ||
@@ -1797,13 +1808,15 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                           </>
                         );
                       }
+                      const precoOuroBase = parseNum(produto.preco_sync && parseFloat(produto.preco_sync) > 0 ? produto.preco_sync : produto.preco_curva);
+                      const precoTotalBase = precoOuroBase > 0 ? precoOuroBase + subtotalPedrasOficial : 0;
                       if (produto.preco_sync && parseFloat(produto.preco_sync) > 0) {
                         return (
                           <>
                             <p className="text-2xl font-mono font-bold" style={{ color: "#184036" }}>
-                              {formatPreco(produto.preco_sync)}
+                              {formatPreco(String(precoTotalBase || produto.preco_sync))}
                             </p>
-                            <p className="text-[11px] text-gray-500 mt-1">peso × cotação × markup × fator</p>
+                            <p className="text-[11px] text-gray-500 mt-1">peso × cotação × markup × fator{subtotalPedrasOficial > 0 ? " + pedras" : ""}</p>
                           </>
                         );
                       }
@@ -1811,10 +1824,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                         return (
                           <>
                             <p className="text-2xl font-mono font-bold" style={{ color: "#184036" }}>
-                              {formatPreco(String(produto.preco_curva))}
+                              {formatPreco(String(precoTotalBase || produto.preco_curva))}
                               <sup className="ml-1 text-[10px] font-bold" style={{ color: "#059669" }}>C</sup>
                             </p>
-                            <p className="text-[11px] text-gray-500 mt-1">peso × cotação × markup × fator (curva)</p>
+                            <p className="text-[11px] text-gray-500 mt-1">peso × cotação × markup × fator (curva){subtotalPedrasOficial > 0 ? " + pedras" : ""}</p>
                           </>
                         );
                       }
