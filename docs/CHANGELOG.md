@@ -1,8 +1,42 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 18/05/2026 — Versão: v2.60.1 <!-- Revisado 18/05/2026 -->
+> 📋 Última atualização automática: 19/05/2026 — Versão: v2.60.2 <!-- Revisado 19/05/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(orcamento): rascunho Bordas Elevadas preserva modelo/valor/peso (v2.60.2)
+
+**Sintoma:** vendedora salvava rascunho de aliança modelo "Bordas Elevadas"
+(perfil QuadradoCanal) e ao reabrir o modelo, valor e peso vinham completamente
+alterados. Outros perfis (Anatômico, Concavo, Simples, etc.) não eram afetados.
+
+**Causa raiz:** race condition em `OrcamentoClient.tsx`. `aplicarOrcamento`
+restaurava `canalWidth`, `stoneRows`, `stoneCount` corretamente via `setParams`,
+mas 6 `useEffect` de auto-ajuste disparavam logo após o render com os params
+ainda nos valores default. Para QuadradoCanal isso era catastrófico:
+`computeMaxStoneRows(canalWidth=default 4mm, stoneSize=2mm)` retornava 2, e o
+efeito forçava `stoneRows` de 3 para 2. Em cascata, `stoneCapacity`,
+`derivedStoneCount` e `stoneEntries` recalculavam todos errados — peso e valor
+finais ficavam diferentes do negociado. Outros perfis não tinham essa lógica
+de fileiras dentro do canal, por isso passavam ilesos.
+
+**Por que voltava:** o componente já tinha um `isHydratingRef` em uso (para
+suprimir `markDirty` durante carga), mas os useEffects de auto-ajuste **não**
+respeitavam o gate. Cada vez que alguém revisava o orçamento, "limpava" os
+efeitos de proteção achando que eram redundantes — o bug ressurgia.
+
+**Fix:** adicionar `if (isHydratingRef.current) return;` no início dos 6
+useEffects de auto-ajuste (linhas ~911, ~968, ~988, ~1082, ~1135, ~1153 em
+`src/app/(dashboard)/orcamento/OrcamentoClient.tsx`). Liberação do gate em
+`aplicarOrcamento` reforçada com `queueMicrotask + setTimeout(0)` (2 ticks)
+para garantir que todos os efeitos do ciclo de hidratação rodem com gate ativo.
+
+**Anti-regressão:**
+
+- Comentário-bloqueio com "⚠️ NUNCA REMOVER" em cada um dos 6 useEffects.
+- Entrada em `CLAUDE.md` §3 Pitfalls Criticos listando os 6 useEffects e o
+  invariante.
+- Este CHANGELOG documenta a causa raiz e o motivo da regressão recorrente.
 
 ## fix(vendas): correções QA em solicitação de alteração (v2.60.1)
 

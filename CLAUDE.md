@@ -127,6 +127,7 @@ movimentacoes_estoque.local_estoque_id: NOT NULL
 Estoque comercial: inserir item de venda CRIA RESERVA (nunca saida direta) — reserva vira saida ao APROVAR venda
 Curva precificacao: chamar aplicarCurvaProduto() apos criar/editar produto com peso+categoria (src/lib/aplicar-curva-produto.ts)
 Vale-troca: vale > total venda gera NOVO vale com troco (vale_origem_id rastreia cadeia) — cada vale usado UMA vez
+Orcamento rascunho QuadradoCanal (Bordas Elevadas): 6 useEffects de auto-ajuste em OrcamentoClient.tsx (linhas ~911, ~968, ~988, ~1082, ~1135, ~1153) DEVEM começar com `if (isHydratingRef.current) return;` — sem isso, ao reabrir rascunho o sistema recalcula canalWidth/stoneRows/stoneCount e sobrescreve modelo/valor/peso negociados. Bug recorrente desde v2.42 — NUNCA REMOVER OS GATES.
 ABC: classificar por receita_total_12m (ultimos 12 meses), NUNCA por capital (estoque * preco) — produto sem venda em 12m = C automatico
 parametros_sistema: usar PARAM.X de src/lib/parametros.ts, NUNCA literals como deposito_id=1
 reposicao de estoque: verificar SUM(disponivel) pre-reserva, nao SUM(saldo)

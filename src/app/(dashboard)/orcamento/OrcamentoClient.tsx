@@ -405,9 +405,15 @@ export default function OrcamentoClient({
       if (orc.peso) setPecaPeso(Number(orc.peso));
     }
     setTab("design");
-    // Hidratação termina no próximo tick — depois disso onChange do usuário
-    // marca dirty normalmente.
-    setTimeout(() => { isHydratingRef.current = false; }, 0);
+    // ⚠️ Liberação do gate em 2 ticks (microtask + macrotask). Isso garante que
+    // TODOS os useEffects de auto-ajuste (canal/stoneRows/stoneCount/stoneEntries)
+    // do ciclo de hidratação rodem com o gate AINDA ATIVO, sem sobrescrever os
+    // valores restaurados. O fetch async de pedraSelecionada1 resolve depois e
+    // dispara o useEffect de stoneEntries com o gate já liberado, mas aí todos
+    // os params estão estabilizados — comportamento desejado.
+    queueMicrotask(() => {
+      setTimeout(() => { isHydratingRef.current = false; }, 0);
+    });
   }
 
   // Quando initialOrcamento é passado (rota /orcamento/[id]), carrega direto
@@ -908,7 +914,10 @@ export default function OrcamentoClient({
   // Roda 1x ao montar — garante que mesmo sem clicar no botão de perfil, a
   // consultora começa com a espessura mínima configurada já preenchida.
   // O MedidaStepper sincroniza o display ao detectar a mudança em `num`.
+  // ⚠️ Gate isHydratingRef: durante carga de rascunho, NÃO sobrescrever espessura
+  // já restaurada (bug recorrente Bordas Elevadas / QuadradoCanal).
   useEffect(() => {
+    if (isHydratingRef.current) return;
     const espMin1 = espessuraMinimaPorModelo[PROFILE_TO_KEY[profile] ?? ""] ?? 1.0;
     if (params.height < espMin1) {
       setParams((p) => ({ ...p, height: espMin1 }));
@@ -965,7 +974,12 @@ export default function OrcamentoClient({
 
   // Auto-ajusta espessura, largura e fileiras em um único batch (anel 1)
   // Evita cascata de re-renders
+  // ⚠️ Gate isHydratingRef: BUG RECORRENTE — durante carga de rascunho
+  // QuadradoCanal/Bordas Elevadas, esse efeito disparava com canalWidth ainda
+  // no default (4mm) e forçava stoneRows pra baixo, sobrescrevendo o valor
+  // salvo (6mm/3 fileiras). NUNCA REMOVER O GATE.
   useEffect(() => {
+    if (isHydratingRef.current) return;
     if (!params.hasStones) return;
     const updates: Partial<RingParams> = {};
     const minT = computeMinThickness(params.stoneSize, calibracao, params.stoneDrill);
@@ -985,7 +999,9 @@ export default function OrcamentoClient({
   }, [params.hasStones, params.stoneSize, params.stoneDrill, profile, calibracao]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-ajusta anel 2 (par)
+  // ⚠️ Gate isHydratingRef: mesmo motivo do anel 1. NUNCA REMOVER.
   useEffect(() => {
+    if (isHydratingRef.current) return;
     if (!params2.hasStones) return;
     const updates: Partial<RingParams> = {};
     const minT = computeMinThickness(params2.stoneSize, calibracao, params2.stoneDrill);
@@ -1079,7 +1095,10 @@ export default function OrcamentoClient({
     return params2.stoneCount;
   }, [params2.hasStones, params2.stoneFull, params2.stoneHalfMoon, stoneCapacity2, params2.stoneCount]);
 
+  // ⚠️ Gate isHydratingRef: durante carga de rascunho, preserva stoneCount salvo
+  // mesmo se stoneFull/HalfMoon vierem true (recalculo só após hidratação).
   useEffect(() => {
+    if (isHydratingRef.current) return;
     if (params.hasStones) {
       if (params.stoneFull && params.stoneCount !== stoneCapacity) updateParam("stoneCount", stoneCapacity);
       else if (params.stoneHalfMoon) {
@@ -1132,7 +1151,11 @@ export default function OrcamentoClient({
     return { ...baseEntry, ...calc };
   }
   // Anel 1
+  // ⚠️ Gate isHydratingRef: durante carga de rascunho, preserva stoneEntries
+  // (pedras_detalhadas) salvas no banco. Sem o gate, esse efeito disparava com
+  // derivedStoneCount errado e sobrescrevia a entrada salva.
   useEffect(() => {
+    if (isHydratingRef.current) return;
     if (!params.hasStones) {
       setStoneEntries((prev) => prev.length > 0 ? [] : prev);
       return;
@@ -1149,8 +1172,9 @@ export default function OrcamentoClient({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.hasStones, params.stoneType, params.stoneSize, derivedStoneCount, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups, pedraSelecionada1]);
-  // Anel 2
+  // Anel 2 — mesmo gate
   useEffect(() => {
+    if (isHydratingRef.current) return;
     if (!params2.hasStones) {
       setStoneEntries2((prev) => prev.length > 0 ? [] : prev);
       return;
