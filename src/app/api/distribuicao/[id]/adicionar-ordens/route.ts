@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
-import { isFullAccess } from "@/lib/roles";
+import { temAcessoModulo } from "@/lib/permissoes";
 import { LIMITS, checkArrayLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 import { zodError, IdSchema } from "@/lib/schemas/common";
 
@@ -19,7 +19,7 @@ export async function POST(
 ) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  if (!isFullAccess(user.role) && !["pcp", "ourives"].includes(user.role)) {
+  if (!(await temAcessoModulo(user.role, "distribuicao", "escrever"))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
