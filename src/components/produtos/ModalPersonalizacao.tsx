@@ -14,6 +14,7 @@ import {
   Scale,
 } from "lucide-react";
 import CamposPersonalizaveisEditor from "@/components/produtos/CamposPersonalizaveisEditor";
+import ChatPersonalizacao from "@/components/produtos/ChatPersonalizacao";
 
 // ─── Paleta ERP ────────────────────────────────────────────────────────────
 const C = {
@@ -813,6 +814,20 @@ export default function ModalPersonalizacao({
                 </span>
               </div>
               <CamposPersonalizaveisEditor produtoId={produtoEdicao.id} />
+            </section>
+          )}
+
+          {/* ── LIA — ASSISTENTE DE PERSONALIZAÇÃO ── */}
+          {modoEdicao && produtoEdicao && (
+            <section
+              className="px-5 py-4 border-t"
+              style={{ borderColor: C.cremeBorder }}
+            >
+              <ChatPersonalizacao
+                produtoId={produtoEdicao.id}
+                produtoNome={descricao}
+                produtoSku={produtoEdicao.sku ?? ""}
+              />
             </section>
           )}
         </div>
