@@ -8,13 +8,15 @@ import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 import { zodError, IdSchema } from "@/lib/schemas/common";
 
+const toNum = (v: unknown) => (v === null || v === undefined ? v : Number(v));
+
 const VendaPatchSchema = z.object({
   situacao: z.string().max(50).optional(),
   cliente_id: IdSchema.nullable().optional(),
   vendedor_id: IdSchema.nullable().optional(),
   data_venda: z.string().max(50).optional(),
   data_entrega: z.string().max(50).nullable().optional(),
-  total_frete: z.number().nonnegative().optional(),
+  total_frete: z.preprocess(toNum, z.number().nonnegative().optional()),
   forma_envio: z.string().max(100).nullable().optional(),
   forma_frete: z.string().max(100).nullable().optional(),
   observacoes: z.string().max(LIMITS.OBSERVACOES_MAX).nullable().optional(),

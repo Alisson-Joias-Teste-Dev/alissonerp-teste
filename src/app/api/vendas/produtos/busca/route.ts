@@ -89,6 +89,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json(
     produtos.map((p) => ({
+      id: Number(p.id),
       ...p,
       preco_venda:       p.preco_venda       != null ? Number(p.preco_venda)       : null,
       peso_precificado:  p.peso_precificado  != null ? Number(p.peso_precificado)  : null,

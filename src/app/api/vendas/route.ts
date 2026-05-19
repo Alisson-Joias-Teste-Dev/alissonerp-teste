@@ -18,18 +18,21 @@ import { AuthError } from "@/lib/auth-server";
 // Schemas para POST /api/vendas — itens e pagamentos sao validados em loop
 // dentro da transacao (regras de negocio: produto_id > 0, preco_lista >= 0,
 // nome_produto trim != "", etc). Aqui validamos so a forma geral do body.
+// Preprocess: converte strings para numeros sem alterar null/undefined
+const toNum = (v: unknown) => (v === null || v === undefined ? v : Number(v));
+
 const VendaItemSchema = z.object({
-  produto_id: z.number().int().nullable().optional(),
+  produto_id: z.preprocess(toNum, z.number().int().nullable().optional()),
   nome_produto: z.string().min(1).max(LIMITS.NOME_MAX),
   sku: z.string().max(100).nullable().optional(),
-  quantidade: z.number().int().min(1),
-  preco_lista: z.number().nonnegative(),
-  pct_desconto: z.number().min(0).max(100),
-  preco_unitario: z.number().nonnegative(),
-  total_item: z.number().nonnegative(),
-  pct_comissao: z.number().min(0).max(100),
-  valor_comissao: z.number().nonnegative(),
-  peso_estimado: z.number().nullable().optional(),
+  quantidade: z.preprocess(toNum, z.number().int().min(1)),
+  preco_lista: z.preprocess(toNum, z.number().nonnegative()),
+  pct_desconto: z.preprocess(toNum, z.number().min(0).max(100)),
+  preco_unitario: z.preprocess(toNum, z.number().nonnegative()),
+  total_item: z.preprocess(toNum, z.number().nonnegative()),
+  pct_comissao: z.preprocess(toNum, z.number().min(0).max(100)),
+  valor_comissao: z.preprocess(toNum, z.number().nonnegative()),
+  peso_estimado: z.preprocess(toNum, z.number().nullable().optional()),
   observacao: z.string().max(LIMITS.OBSERVACOES_MAX).nullable().optional(),
   personalizacao: z.record(z.string(), z.unknown()).nullable().optional(),
 }).passthrough();
@@ -37,8 +40,8 @@ const VendaItemSchema = z.object({
 const VendaPagamentoSchema = z.object({
   forma: z.string().min(1).max(100),
   gateway: z.string().max(100).nullable().optional(),
-  valor: z.number().nonnegative(),
-  parcelas: z.number().int().min(1).max(99).optional(),
+  valor: z.preprocess(toNum, z.number().nonnegative()),
+  parcelas: z.preprocess(toNum, z.number().int().min(1).max(99).optional()),
   status: z.string().max(50).optional(),
 }).passthrough();
 
@@ -46,7 +49,7 @@ const VendaPostSchema = z.object({
   cliente_id: IdSchema.nullable().optional(),
   vendedor_id: IdSchema.nullable().optional(),
   data_entrega: z.string().max(50).nullable().optional(),
-  total_frete: z.number().nonnegative().optional(),
+  total_frete: z.preprocess(toNum, z.number().nonnegative().optional()),
   forma_envio: z.string().max(100).nullable().optional(),
   forma_frete: z.string().max(100).nullable().optional(),
   observacoes: z.string().max(LIMITS.OBSERVACOES_MAX).nullable().optional(),
