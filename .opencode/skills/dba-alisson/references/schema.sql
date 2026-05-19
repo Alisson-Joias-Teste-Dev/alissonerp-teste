@@ -1,0 +1,5306 @@
+-- =============================================================
+-- PLANTA BAIXA DO BANCO — Alisson Joias ERP
+-- Gerado em: 2026-05-19T20:04:22.881Z
+-- Gerado por: dba-alisson (skill guardiã)
+-- USAR SEMPRE como referência antes de responder sobre estrutura.
+-- =============================================================
+
+-- =============================================================
+-- SCHEMAS PRINCIPAIS
+-- =============================================================
+--   alissonerp
+--   public
+--   auth
+
+-- =============================================================
+-- SCHEMA: alissonerp
+-- =============================================================
+
+-- --- _backup_fn_processar_fechamento_dist_pre_guard_20260429 (1 colunas) ---
+--   info                                text
+
+-- --- _backup_joias_skus_dup_2026_05_16 (5 colunas) ---
+--   id_produto                          bigint
+--   sku_original                        character varying
+--   nome                                character varying
+--   situacao                            character varying
+--   backup_em                           timestamp with time zone
+
+-- --- _backup_produtos_teste_evolury_2026_05_16 (44 colunas) ---
+--   id_produto                          bigint
+--   id_api_produto                      bigint
+--   sku                                 character varying
+--   nome                                character varying
+--   tipo_metal                          character varying
+--   tipo                                character varying
+--   situacao                            character varying
+--   unidade                             character varying
+--   gtin                                character varying
+--   categoria                           character varying
+--   marca                               character varying
+--   qtd_estoque                         bigint
+--   preco_tiny                          numeric
+--   preco_promocional                   numeric
+--   preco_custo                         numeric
+--   preco_custo_medio                   numeric
+--   preco_na_cotacao                    numeric
+--   custo_na_cotacao                    numeric
+--   peso_precificado                    double precision
+--   markup                              double precision
+--   fator                               real
+--   fornecedor_etl                      character varying
+--   preco_sync                          numeric
+--   imagem                              text
+--   data_atualizacao_preco              timestamp without time zone
+--   diferenca_percentual                numeric
+--   fornecedor_id_api                   bigint
+--   estoque_minimo                      integer
+--   estoque_maximo                      integer
+--   imagem_capa                         uuid
+--   tipo_de_pedra                       character varying
+--   url_drive                           character varying
+--   peso_real                           real
+--   iframe                              character varying
+--   data_atualizacao                    timestamp without time zone
+--   id_kommo                            bigint
+--   data_ultima_compra                  date
+--   prompt_imagem_ia                    text
+--   sob_encomenda                       character varying
+--   prazo_producao                      integer
+--   categoria_precificacao              character varying
+--   tem_pedra_preciosa                  boolean
+--   preco_pedras                        numeric
+--   preco_total_sync                    numeric
+
+-- --- _backup_servicos_20260331 (25 colunas) ---
+--   id                                  integer
+--   ordem_id                            integer
+--   pcp_id                              integer
+--   operador_id                         integer
+--   tentativa                           integer
+--   peso_entrada                        numeric
+--   peso_saida                          numeric
+--   usou_solda                          boolean
+--   peso_fio_antes                      numeric
+--   peso_fio_depois                     numeric
+--   consumo_solda                       numeric
+--   colocou_pedra                       boolean
+--   pedras_colocadas                    jsonb
+--   status                              character varying
+--   foto_recebimento                    text
+--   foto_conclusao                      text
+--   foto_fio_solda                      text
+--   recebido_em                         timestamp with time zone
+--   concluido_em                        timestamp with time zone
+--   concluido_por                       uuid
+--   created_at                          timestamp with time zone
+--   motivo_reprovacao                   text
+--   foto_reprovacao                     text
+--   reprovado_em                        timestamp with time zone
+--   reprovado_por                       uuid
+
+-- --- _backup_tedmd_20260313 (14 colunas) ---
+--   id                                  bigint
+--   entrada                             real
+--   saida                               real
+--   insumo_id                           integer
+--   deposito_id                         integer
+--   setor_id                            integer
+--   ordem_id                            integer
+--   marcador                            USER-DEFINED
+--   obs                                 text
+--   data_hora                           timestamp with time zone
+--   valor_total                         numeric
+--   preco_compra                        numeric
+--   created_at                          timestamp with time zone
+--   created_by                          uuid
+
+-- --- _backup_transferservice_20260331 (9 colunas) ---
+--   id                                  integer
+--   pcp_id                              integer
+--   ordem_id                            integer
+--   setor_id                            integer
+--   deposito_id                         integer
+--   obs                                 text
+--   created_at                          timestamp with time zone
+--   updated_at                          timestamp with time zone
+--   created_by                          uuid
+
+-- --- api_chaves (9 colunas) ---
+-- Comentário: Chaves de API para integração com o site externo
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.api_chaves_id_seq'::regclass)
+--   nome                                text  NOT NULL
+--   chave_hash                          text  NOT NULL
+--                                       → SHA-256(key) — a chave real nunca é armazenada
+--   chave_preview                       text  NOT NULL
+--                                       → sk_live_XXXXXXXX... mostrado na UI para identificação
+--   ativa                               boolean  NOT NULL  DEFAULT true
+--   rate_limit_por_minuto               integer  NOT NULL  DEFAULT 60
+--   total_requisicoes                   bigint  NOT NULL  DEFAULT 0
+--   ultimo_uso                          timestamp with time zone
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+
+-- --- api_log (7 colunas) ---
+-- Comentário: Log de requisições da API pública — retidos 90 dias
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.api_log_id_seq'::regclass)
+--   chave_id                            integer
+--   endpoint                            text  NOT NULL
+--   metodo                              text  NOT NULL  DEFAULT 'GET'::text
+--   status_code                         integer
+--   ip                                  text
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: chave_id → alissonerp.api_chaves(id)
+
+-- --- apontamentos_distribuicao (12 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.apontamentos_distribuicao_id_seq'::re...
+--   tipo_apontamento_id                 integer
+--   deposito_id                         integer
+--   setor_id                            integer
+--   insumo_id                           integer
+--   distribuicao_id                     integer
+--   qtd                                 real  NOT NULL
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   foto_balanca                        text
+--   peso_ct                             numeric
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: distribuicao_id → alissonerp.distribuicoes(id)
+--                                      FK: insumo_id → alissonerp.insumos(id)
+--                                      FK: setor_id → alissonerp.setores(id)
+--                                      FK: tipo_apontamento_id → alissonerp.tipos_apontamento(id)
+
+-- --- apontamentos_pcp (13 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.apontamentos_pcp_id_seq'::regclass)
+--   tipo_apontamento_id                 integer
+--   deposito_id                         integer
+--   setor_id                            integer
+--   insumo_id                           integer
+--   pcp_id                              integer
+--   qtd                                 real  NOT NULL
+--   marcador                            jsonb
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   foto_balanca                        text
+--   peso_ct                             numeric
+--   peso_g_pedra                        numeric
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: insumo_id → alissonerp.insumos(id)
+--                                      FK: pcp_id → alissonerp.pcp(id)
+--                                      FK: setor_id → alissonerp.setores(id)
+--                                      FK: tipo_apontamento_id → alissonerp.tipos_apontamento(id)
+
+-- --- apontamentos_pote (7 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.apontamentos_pote_id_seq'::regclass)
+--   pcp_id                              integer
+--   peso_bruto                          real
+--   peso_liquido                        real
+--   foto_balanca                        uuid
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: pcp_id → alissonerp.pcp(id)
+
+-- --- apontamentos_servico (11 colunas) ---
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.apontamentos_servico_id_seq'::regclass)
+--   servico_id                          integer  NOT NULL
+--   operador_id                         integer
+--   operador_nome                       text
+--   insumo_id                           integer  NOT NULL
+--   insumo_nome                         text
+--   quantidade                          numeric  NOT NULL
+--   movimentacao_id                     bigint
+--   foto_url                            text
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: insumo_id → alissonerp.insumos(id)
+--                                      FK: movimentacao_id → alissonerp.movimentacoes_estoque(id)
+--                                      FK: operador_id → alissonerp.depositos(id)
+--                                      FK: servico_id → alissonerp.servicos(id)
+
+-- --- aprovacoes_consultora (8 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.aprovacoes_consultora_id_seq'::regclass)
+--   etapas                              USER-DEFINED  DEFAULT 'pendente'::alissonerp.enum_etapas_aprovacao
+--   ordem_id                            integer
+--   consultora_id                       bigint
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+
+-- --- aprovacoes_tarefa (8 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.aprovacoes_tarefa_id_seq'::regclass)
+--   tarefa_id                           integer  NOT NULL
+--   solicitante_id                      uuid
+--   aprovador_id                        uuid
+--   status                              character varying  DEFAULT 'pendente'::character varying
+--   motivo                              text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   respondido_em                       timestamp with time zone
+--                                      PK: id
+--                                      FK: aprovador_id → auth.users(id)
+--                                      FK: solicitante_id → auth.users(id)
+--                                      FK: tarefa_id → alissonerp.tarefas(id)
+
+-- --- audit_log (8 colunas) ---
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.audit_log_id_seq'::regclass)
+--   tabela                              text  NOT NULL
+--   operacao                            text  NOT NULL
+--   registro_id                         text  NOT NULL
+--   dados_antes                         jsonb
+--   dados_depois                        jsonb
+--   usuario_id                          uuid
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- auditorias (25 colunas) ---
+-- Comentário: Auditoria de qualidade pós-PCP. Criada automaticamente ao concluir saída.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.auditorias_id_seq'::regclass)
+--   situacao                            character varying  DEFAULT '1'::character varying
+--   tipo_auditoria                      character varying
+--   rota_processo                       character varying
+--   ordem_id                            integer
+--   data_conclusao                      timestamp with time zone
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   responsavel_id                      uuid
+--   parecer                             text
+--   motivo_reprovacao                   text
+--   tipo_retrabalho                     character varying
+--   peso_negociado                      real  DEFAULT 0
+--   peso_final                          real  DEFAULT 0
+--   pmc                                 real  DEFAULT 0
+--   quebra                              real  DEFAULT 0
+--   quebra_percentual                   real  DEFAULT 0
+--   total_metal                         real  DEFAULT 0
+--   retorno_metal                       real  DEFAULT 0
+--   metal_externo                       real  DEFAULT 0
+--   ourives_nome                        text
+--   ordem_retrabalho_id                 integer
+--   ficha_tecnica_obs                   text
+--   dados_ordem                         jsonb
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: ordem_retrabalho_id → alissonerp.ordens(id)
+--                                      FK: responsavel_id → auth.users(id)
+
+-- --- automacoes_execucoes (5 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.automacoes_execucoes_id_seq'::regclass)
+--   automacao_id                        integer  NOT NULL
+--   tarefa_id                           integer
+--   executado_em                        date  NOT NULL  DEFAULT CURRENT_DATE
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: automacao_id → alissonerp.automacoes_tarefa(id)
+--                                      FK: tarefa_id → alissonerp.tarefas(id)
+
+-- --- automacoes_tarefa (14 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.automacoes_tarefa_id_seq'::regclass)
+--   titulo                              text  NOT NULL
+--   descricao                           text
+--   responsavel_id                      uuid
+--   prioridade                          character varying  DEFAULT 'media'::character varying
+--   recorrencia                         character varying  NOT NULL  DEFAULT 'diaria'::character varying
+--   dia_semana                          integer
+--   dia_mes                             integer
+--   tags                                ARRAY  DEFAULT '{}'::text[]
+--   ativa                               boolean  DEFAULT true
+--   criado_por                          uuid
+--   ultima_execucao                     date
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: criado_por → auth.users(id)
+--                                      FK: responsavel_id → auth.users(id)
+
+-- --- backup_estorno_inv_20260517 (5 colunas) ---
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.backup_estorno_inv_20260517_id_seq'::...
+--   mov_id                              bigint
+--   sle_id                              bigint
+--   item_inv_id                         integer
+--   executado_em                        timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- backup_pre_limpeza_20260315 (9 colunas) ---
+--   src                                 text
+--   id                                  bigint
+--   ordem_id                            integer
+--   insumo_id                           integer
+--   deposito_id                         integer
+--   entrada                             real
+--   saida                               real
+--   marcador                            USER-DEFINED
+--   data_hora                           timestamp with time zone
+
+-- --- categorias_insumo (3 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.categorias_insumo_id_seq'::regclass)
+--   nome                                character varying  NOT NULL
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- cofre_ouro_baixas (16 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.cofre_ouro_baixas_id_seq'::regclass)
+--   gramas                              numeric  NOT NULL
+--   destino                             character varying  NOT NULL
+--   status                              character varying  NOT NULL  DEFAULT 'pendente'::character varying
+--   protocolo_id                        integer
+--   realizado_por                       uuid
+--   realizado_nome                      text
+--   transportador_id                    uuid
+--   transportador_nome                  text
+--   recebedor_id                        uuid
+--   recebedor_nome                      text
+--   confirmado_em                       timestamp with time zone
+--   foto_comprovacao                    text
+--   obs                                 text
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: protocolo_id → alissonerp.protocolos(id)
+--                                      FK: realizado_por → auth.users(id)
+--                                      FK: recebedor_id → auth.users(id)
+--                                      FK: transportador_id → auth.users(id)
+
+-- --- cofre_ouro_rastreios (10 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.cofre_ouro_rastreios_id_seq'::regclass)
+--   pagamento_id                        integer
+--   baixa_id                            integer
+--   protocolo_id                        integer
+--   evento                              character varying  NOT NULL
+--   gramas                              numeric
+--   origem_nome                         text
+--   destino_nome                        text
+--   observacao                          text
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: baixa_id → alissonerp.cofre_ouro_baixas(id)
+--                                      FK: pagamento_id → alissonerp.pagamentos_venda(id)
+--                                      FK: protocolo_id → alissonerp.protocolos(id)
+
+-- --- comentarios_ordem (13 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.comentarios_ordem_id_seq'::regclass)
+--   ordem_id                            integer  NOT NULL
+--   autor_id                            uuid  NOT NULL
+--   texto                               text  NOT NULL
+--   mencoes                             ARRAY  DEFAULT '{}'::uuid[]
+--   editado                             boolean  DEFAULT false
+--   editado_em                          timestamp with time zone
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   excluido                            boolean  DEFAULT false
+--   excluido_em                         timestamp with time zone
+--   excluido_por                        uuid
+--   texto_original                      text
+--   foto_path                           text
+--                                      PK: id
+--                                      FK: ordem_id → alissonerp.ordens(id)
+
+-- --- comentarios_tarefa (5 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.comentarios_tarefa_id_seq'::regclass)
+--   tarefa_id                           integer  NOT NULL
+--   autor_id                            uuid
+--   texto                               text  NOT NULL
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: autor_id → auth.users(id)
+--                                      FK: tarefa_id → alissonerp.tarefas(id)
+
+-- --- compras (14 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.compras_id_seq'::regclass)
+--   fornecedor_id                       bigint
+--   situacao                            character varying  DEFAULT 'pendente'::character varying
+--   total                               numeric  DEFAULT 0
+--   obs                                 text
+--   bloqueado                           boolean  DEFAULT false
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   local_destino_id                    integer
+--   numero_nf                           character varying
+--   data_compra                         date
+--   data_recebimento                    date
+--   recebido_por                        uuid
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: local_destino_id → alissonerp.locais_estoque(id)
+--                                      FK: recebido_por → auth.users(id)
+
+-- --- comunicacoes_crediario (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.comunicacoes_crediario_id_seq'::regcl...
+--   conta_receber_id                    integer  NOT NULL
+--   tipo                                character varying  NOT NULL
+--   mensagem                            text  NOT NULL
+--   usuario_id                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: conta_receber_id → alissonerp.contas_receber(id)
+--                                      FK: usuario_id → auth.users(id)
+
+-- --- config_orcamento (24 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.config_orcamento_id_seq'::regclass)
+--   name                                character varying  NOT NULL  DEFAULT 'default'::character varying
+--   start_mkp                           numeric  NOT NULL  DEFAULT 3.5
+--   discount_percent                    numeric  NOT NULL  DEFAULT 0
+--   gold_price                          numeric  NOT NULL  DEFAULT 0
+--   camera_override                     numeric
+--   profile                             character varying  DEFAULT 'Anatomica'::character varying
+--   pricing_categories                  jsonb  NOT NULL  DEFAULT '[]'::jsonb
+--   groove_rules                        jsonb  NOT NULL  DEFAULT '[]'::jsonb
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_by                          uuid
+--   stone_markup                        numeric  NOT NULL  DEFAULT 2.5
+--   stone_prices                        jsonb  NOT NULL  DEFAULT '[{"tipo": "diamante", "preco_usd_ct": 80}, {"tipo": "moi...
+--   calibracao                          jsonb  DEFAULT '{"largura_min": {"grao": 0.8, "pave": 1.4, "canaleta": 1...
+--                                       → Parametros de validacao do orcamento de aliancas. Espessura minima = pedra*multiplicador + constante. Largura minima varia por tipo de cravacao (canaleta/grao/pave). Folga = espaco minimo entre pedras.
+--   risco_width                         numeric  DEFAULT 0.10
+--   risco_depth                         numeric  DEFAULT 0.20
+--   preco_gravacao                      numeric  DEFAULT 100.00
+--   stone_markups_table                 jsonb  DEFAULT '{}'::jsonb
+--                                       → Markups por pedra por tamanho. Ex: {"diamante":{"0":3.9,"1":3.7,...}}
+--   espessura_minima_por_modelo         jsonb  DEFAULT '{"boleada": 1.0, "concava": 1.0, "simples": 1.0, "anatom...
+--   nomes_modelos                       jsonb  DEFAULT '{"boleada": "Boleada", "concava": "Concava", "simples": ...
+--   promocao_inicio                     date
+--   promocao_fim                        date
+--   dome_percentage                     numeric  DEFAULT 100
+--   snapshot_lock_enabled               boolean  NOT NULL  DEFAULT true
+--                                      PK: id
+--                                      FK: updated_by → auth.users(id)
+
+-- --- config_orcamento_promocoes (8 colunas) ---
+-- Comentário: Histórico de campanhas de promoção de orçamento (alianças).
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.config_orcamento_promocoes_id_seq'::r...
+--   nome                                text  NOT NULL
+--   data_inicio                         date  NOT NULL
+--   data_fim                            date  NOT NULL
+--   descontos                           jsonb  NOT NULL  DEFAULT '[]'::jsonb
+--                                       → Array [{categoria_id, nome, desconto_promocao}] no momento do snapshot.
+--   criado_em                           timestamp with time zone  NOT NULL  DEFAULT now()
+--   criado_por                          uuid
+--   ativada_em                          timestamp with time zone
+--                                       → Última vez que foi marcada como ativa (NULL = ainda não reativada).
+--                                      PK: id
+--                                      FK: criado_por → alissonerp.usuarios(id)
+
+-- --- config_premiacao (3 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT 1
+--   texto                               text  NOT NULL
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- config_sistema (3 colunas) ---
+--   id                                  smallint  NOT NULL  DEFAULT 1
+--   comentarios_ordens_ativo            boolean  NOT NULL  DEFAULT true
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- configuracoes_secrets (5 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.configuracoes_secrets_id_seq'::regclass)
+--   chave                               character varying  NOT NULL
+--   valor_encrypted                     text  NOT NULL
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   updated_by                          uuid
+--                                      PK: id
+
+-- --- configuracoes_sistema (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.configuracoes_sistema_id_seq'::regclass)
+--   chave                               character varying  NOT NULL
+--   valor                               text  NOT NULL
+--   descricao                           text
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   updated_by                          uuid
+--                                      PK: id
+
+-- --- contas_pagar (21 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.contas_pagar_id_seq'::regclass)
+--   descricao                           text  NOT NULL
+--   fornecedor_id                       bigint
+--   valor                               numeric  NOT NULL
+--   data_vencimento                     date
+--   data_pagamento                      date
+--   situacao                            character varying  DEFAULT 'pendente'::character varying
+--   categoria                           character varying
+--   compra_id                           integer
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   fornecedor_nome                     text
+--   inter_pagamento_id                  character varying
+--   inter_status                        character varying
+--   inter_tipo                          character varying
+--   inter_dados                         jsonb
+--   inter_enviado_em                    timestamp with time zone
+--   inter_atualizado_em                 timestamp with time zone
+--   inter_erro                          text
+--                                      PK: id
+--                                      FK: compra_id → alissonerp.compras(id)
+--                                      FK: created_by → auth.users(id)
+
+-- --- contas_receber (15 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.contas_receber_id_seq'::regclass)
+--   descricao                           text  NOT NULL
+--   cliente_id                          bigint
+--   venda_id                            integer
+--   valor                               numeric  NOT NULL
+--   data_vencimento                     date
+--   data_recebimento                    date
+--   situacao                            character varying  DEFAULT 'pendente'::character varying
+--   categoria                           character varying
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   venda_erp_id                        integer
+--   cliente_nome                        text
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: venda_erp_id → alissonerp.vendas_erp(id)
+
+-- --- contatos_fiscais (6 colunas) ---
+-- Comentário: Campos fiscais de cliente/fornecedor. PK = public.contatos.id_contato (FK logica).
+--   id_contato                          bigint  NOT NULL
+--                                       → Ref logica a public.contatos.id_contato (sem FK fisica)
+--   ie                                  character varying
+--                                       → Inscricao Estadual (so dig). Vazio se isento ou nao contribuinte.
+--   indicador_ie                        smallint
+--                                       → 1=Contribuinte ICMS, 2=Isento, 9=Nao contribuinte
+--   codigo_ibge_municipio               character varying
+--                                       → Codigo IBGE do municipio (7 digitos) — obrigatorio na NF-e
+--   regime_tributario                   smallint
+--                                       → 1=Simples, 2=Lucro Presumido, 3=Lucro Real
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id_contato
+
+-- --- conversao_itens (11 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.conversao_itens_id_seq'::regclass)
+--   conversao_id                        integer  NOT NULL
+--   produto_id                          bigint  NOT NULL
+--   peso_individual                     numeric  NOT NULL
+--   quantidade                          integer  NOT NULL
+--   movimento_reserva_id                bigint
+--   movimento_rota_id                   bigint
+--   movimento_baixa_id                  bigint
+--   peso_aceito                         numeric
+--   foto_item                           text
+--   reserva_id                          integer
+--                                      PK: id
+--                                      FK: conversao_id → alissonerp.conversoes_estoque(id)
+--                                      FK: movimento_baixa_id → alissonerp.movimentacoes_estoque_comercial(id)
+--                                      FK: movimento_reserva_id → alissonerp.movimentacoes_estoque_comercial(id)
+--                                      FK: movimento_rota_id → alissonerp.movimentacoes_estoque_comercial(id)
+--                                      FK: reserva_id → alissonerp.reservas_estoque_comercial(id)
+
+-- --- conversoes_estoque (17 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.conversoes_estoque_id_seq'::regclass)
+--   ordem_id                            integer  NOT NULL
+--   peso_total                          numeric  NOT NULL
+--   quantidade_total                    integer  NOT NULL
+--   foto_abertura                       text
+--   insumo_destino                      integer  DEFAULT 1
+--   status_conversao                    character varying  NOT NULL  DEFAULT 'pendente'::character varying
+--   tarefa_aprovacao_id                 integer
+--   aprovado_por                        uuid
+--   aprovado_em                         timestamp with time zone
+--   recusado_por                        uuid
+--   recusado_em                         timestamp with time zone
+--   foto_recusa                         text
+--   motivo_recusa                       text
+--   created_by                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: aprovado_por → auth.users(id)
+--                                      FK: created_by → auth.users(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: recusado_por → auth.users(id)
+--                                      FK: tarefa_aprovacao_id → alissonerp.tarefas(id)
+
+-- --- conversoes_sku (32 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.conversoes_sku_id_seq'::regclass)
+--   ordem_id                            integer  NOT NULL
+--   sku_origem_id                       bigint  NOT NULL
+--   sku_origem_quantidade               integer  NOT NULL
+--   sku_origem_peso                     numeric  NOT NULL
+--   local_origem_id                     integer  NOT NULL
+--   sku_destino_id                      bigint  NOT NULL
+--   sku_destino_quantidade_desejada     integer  NOT NULL
+--   local_destino_id                    integer  NOT NULL
+--   peso_final                          numeric
+--   quantidade_produzida                integer
+--   foto_balanca_final                  text
+--   peso_sobra_calculado                numeric
+--   peso_sobra_real                     numeric
+--   foto_sobra                          text
+--   quebra                              numeric
+--   insumo_destino_sobra                integer  DEFAULT 1
+--   foto_abertura                       text
+--   status_conversao                    character varying  NOT NULL  DEFAULT 'pendente'::character varying
+--   reserva_id                          integer
+--   ordem_servico_id                    integer
+--   tarefa_aprovacao_id                 integer
+--   aprovado_por                        uuid
+--   aprovado_em                         timestamp with time zone
+--   recusado_por                        uuid
+--   recusado_em                         timestamp with time zone
+--   foto_recusa                         text
+--   motivo_recusa                       text
+--   created_by                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   motivo                              text
+--                                      PK: id
+--                                      FK: aprovado_por → auth.users(id)
+--                                      FK: created_by → auth.users(id)
+--                                      FK: local_destino_id → alissonerp.locais_estoque(id)
+--                                      FK: local_origem_id → alissonerp.locais_estoque(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: ordem_servico_id → alissonerp.ordens(id)
+--                                      FK: recusado_por → auth.users(id)
+--                                      FK: reserva_id → alissonerp.reservas_estoque_comercial(id)
+--                                      FK: tarefa_aprovacao_id → alissonerp.tarefas(id)
+
+-- --- curva_categorias (10 colunas) ---
+-- Comentário: Faixas de peso da curva de precificacao. Interpolacao linear entre pontos.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.curva_categorias_id_seq'::regclass)
+--   nome                                character varying  NOT NULL
+--   max_weight                          numeric  NOT NULL
+--                                       → Peso maximo da faixa em gramas (limite superior)
+--   variation                           numeric  NOT NULL  DEFAULT 0
+--                                       → Quanto reduz o MKP em relacao ao degrau anterior
+--   comm_variation                      numeric  NOT NULL  DEFAULT 0
+--                                       → Quanto reduz a comissao em relacao ao degrau anterior
+--   max_discount                        numeric  NOT NULL  DEFAULT 0
+--                                       → %% maximo de desconto permitido para produtos desta faixa
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   ordem                               integer  NOT NULL
+--                                       → Ordem de aplicacao (sequencial por peso crescente)
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+
+-- --- curva_config (9 colunas) ---
+-- Comentário: Configuracao global da curva de precificacao (singleton id=1)
+--   id                                  smallint  NOT NULL
+--   start_mkp                           numeric  NOT NULL  DEFAULT 5.000
+--                                       → Markup inicial (peso = 0.1g). Ex: 5.000
+--   start_commission                    numeric  NOT NULL  DEFAULT 8.000
+--                                       → Comissao inicial em % (peso = 0.1g). Ex: 8.000
+--   gold_cost_percentage                numeric  NOT NULL  DEFAULT 100.000
+--                                       → %% da cotacao que entra como custo do ouro (100 = 100%%)
+--   sucata_compra_min_pct               numeric  NOT NULL  DEFAULT 80.000
+--                                       → %% minimo da cotacao pago na compra de sucata
+--   sucata_compra_max_pct               numeric  NOT NULL  DEFAULT 85.000
+--                                       → %% maximo da cotacao pago na compra de sucata
+--   arredondamento                      character varying  NOT NULL  DEFAULT 'dezena'::character varying
+--                                       → dezena | unidade | centena
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_by                          uuid
+--                                      PK: id
+
+-- --- dashboard_configs (5 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.dashboard_configs_id_seq'::regclass)
+--   usuario_id                          uuid  NOT NULL
+--   layout                              jsonb  NOT NULL  DEFAULT '[]'::jsonb
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: usuario_id → alissonerp.usuarios(id)
+
+-- --- depositos (7 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.depositos_id_seq'::regclass)
+--   nome                                character varying  NOT NULL
+--   tipo                                USER-DEFINED  NOT NULL  DEFAULT 'producao'::alissonerp.enum_tipo_deposito
+--   ativo                               boolean  DEFAULT true
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   local_estoque_id                    integer
+--                                      PK: id
+--                                      FK: local_estoque_id → alissonerp.locais_estoque(id)
+
+-- --- devolucoes_itens (11 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.devolucoes_itens_id_seq'::regclass)
+--   devolucao_id                        integer  NOT NULL
+--   item_venda_id                       integer  NOT NULL
+--   produto_id                          bigint
+--   quantidade                          numeric  NOT NULL
+--   valor_unitario                      numeric  NOT NULL
+--   valor_total                         numeric  NOT NULL
+--   condicao                            character varying  NOT NULL  DEFAULT 'pendente'::character varying
+--   inspecao_por                        uuid
+--   inspecao_em                         timestamp with time zone
+--   inspecao_observacao                 text
+--                                      PK: id
+--                                      FK: devolucao_id → alissonerp.devolucoes_venda(id)
+--                                      FK: inspecao_por → auth.users(id)
+--                                      FK: item_venda_id → alissonerp.itens_venda_erp(id)
+
+-- --- devolucoes_venda (23 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.devolucoes_venda_id_seq'::regclass)
+--   numero                              character varying  NOT NULL
+--   venda_id                            integer  NOT NULL
+--   tipo                                character varying  NOT NULL
+--   motivo                              text
+--   status                              character varying  NOT NULL  DEFAULT 'rascunho'::character varying
+--   tipo_compensacao                    character varying  NOT NULL
+--   valor_total_devolvido               numeric  NOT NULL  DEFAULT 0
+--   valor_retido                        numeric  NOT NULL  DEFAULT 0
+--   valor_compensacao                   numeric  NOT NULL  DEFAULT 0
+--   percentual_retencao                 numeric  NOT NULL  DEFAULT 0
+--   foi_entregue                        boolean  NOT NULL  DEFAULT false
+--   tarefa_id                           integer
+--   aprovador_id                        uuid
+--   rejeitado_motivo                    text
+--   criado_por                          uuid  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   aprovado_em                         timestamp with time zone
+--   nota_fiscal_devolucao_id            integer
+--                                       → FK logica para alissonerp.notas_fiscais.id (FK fisica adicionada em 149)
+--   nfe_numero                          integer
+--   nfe_chave_44                        character varying
+--                                       → Chave da NF-e de entrada (devolucao) — CFOP tipicamente 1202/2202
+--   nfe_emitida_em                      timestamp with time zone
+--                                      PK: id
+--                                      FK: aprovador_id → auth.users(id)
+--                                      FK: criado_por → auth.users(id)
+--                                      FK: tarefa_id → alissonerp.tarefas(id)
+--                                      FK: venda_id → alissonerp.vendas_erp(id)
+--                                      FK: nota_fiscal_devolucao_id → alissonerp.notas_fiscais(id)
+
+-- --- distribuicao_ordens (13 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.distribuicao_ordens_id_seq'::regclass)
+--   distribuicao_id                     integer
+--   ordens_id                           integer
+--   peso_bruto                          numeric
+--   peso_pedras                         numeric  DEFAULT 0
+--   peso_ouro_real                      numeric
+--   quebra                              numeric
+--   ouro_entregue                       numeric
+--   data_baixa                          timestamp with time zone
+--   saida_por                           uuid
+--   foto_balanca                        text
+--   sem_peso                            boolean  DEFAULT false
+--                                       → Se true, ordem saiu do lote sem peso (serviço, cancelada, fundição falha, etc.)
+--   justificativa_sem_peso              text
+--                                       → Obrigatória quando sem_peso=true. Motivo pelo qual a ordem não tem peso.
+--                                      PK: id
+--                                      FK: distribuicao_id → alissonerp.distribuicoes(id)
+--                                      FK: ordens_id → alissonerp.ordens(id)
+
+-- --- distribuicao_saida_pedras (7 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.distribuicao_saida_pedras_id_seq'::re...
+--   distribuicao_ordem_id               integer  NOT NULL
+--   insumo_id                           integer  NOT NULL
+--   qtd_utilizada                       integer  NOT NULL
+--   peso_unitario                       numeric
+--   peso_total                          numeric
+--   peso_ct_utilizado                   numeric
+--                                      PK: id
+--                                      FK: distribuicao_ordem_id → alissonerp.distribuicao_ordens(id)
+--                                      FK: insumo_id → alissonerp.insumos(id)
+
+-- --- distribuicoes (24 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.distribuicoes_id_seq'::regclass)
+--   etapas                              USER-DEFINED  DEFAULT 'em_andamento'::alissonerp.enum_etapas_distribuicao
+--   setor                               USER-DEFINED
+--   operador                            uuid
+--   saida_id                            integer
+--   total_metal                         real  DEFAULT 0
+--   retorno_metal                       real  DEFAULT 0
+--   total_pedras_un                     real  DEFAULT 0
+--   total_pedras_g                      real  DEFAULT 0
+--   total_outros_pesos                  real  DEFAULT 0
+--   total_geral_outros_pesos            real  DEFAULT 0
+--   pmc                                 real  DEFAULT 0
+--   quebra                              real  DEFAULT 0
+--   porcentagem_de_quebra               real  DEFAULT 0
+--   peso_final                          real  DEFAULT 0
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   deposito_id                         integer
+--   setor_id                            integer
+--   ouro_entregue                       real
+--                                       → Ouro líquido entregue ao lote: (tipos 1+2) − retorno (tipo 5), categoria metal
+--   ouro_pecas                          real
+--                                       → Soma de distribuicao_ordens.peso_ouro_real para todas as ordens do lote
+--   quebra_lote                         real
+--                                       → Resultado do lote: ouro_entregue − ouro_pecas (positivo = quebra, negativo = saldo)
+--   total_pedras_ct                     numeric  DEFAULT 0
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: operador → auth.users(id)
+--                                      FK: saida_id → alissonerp.saidas_distribuicao(id)
+--                                      FK: setor_id → alissonerp.setores(id)
+
+-- --- editor_ia_historico (17 colunas) ---
+-- Comentário: Historico global do Editor IA com deduplicacao por hash (input + params).
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.editor_ia_historico_id_seq'::regclass)
+--   user_id                             uuid
+--   user_nome                           text
+--   input_hash                          text  NOT NULL
+--   params_hash                         text  NOT NULL
+--   categoria                           text
+--   cenario_id                          text
+--   cenario_nome                        text
+--   modelo                              text  NOT NULL
+--   aspect_ratio                        text
+--   detalhes                            text
+--   prompt_final                        text
+--   imagem_url                          text  NOT NULL
+--   storage_path                        text  NOT NULL
+--   elapsed_ms                          integer
+--   cache_hits                          integer  NOT NULL  DEFAULT 0
+--                                       → Incrementa cada vez que a mesma combinacao input+params eh solicitada novamente.
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: user_id → auth.users(id)
+
+-- --- empresas_emitentes (25 colunas) ---
+-- Comentário: Emitentes fiscais (fabrica + lojas). Multi-CNPJ.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.empresas_emitentes_id_seq'::regclass)
+--   nome_fantasia                       character varying
+--   razao_social                        character varying  NOT NULL
+--   cnpj                                character varying  NOT NULL
+--   ie                                  character varying
+--   im                                  character varying
+--   regime_tributario                   smallint  NOT NULL  DEFAULT 1
+--                                       → 1=Simples Nacional, 2=Lucro Presumido, 3=Lucro Real
+--   logradouro                          character varying
+--   numero                              character varying
+--   complemento                         character varying
+--   bairro                              character varying
+--   codigo_ibge_municipio               character varying
+--   municipio                           character varying
+--   uf                                  character
+--   cep                                 character varying
+--   focus_token_criptografado           text
+--                                       → Token Focus NFe cifrado (pgp_sym_encrypt no app)
+--   ambiente                            character varying  NOT NULL  DEFAULT 'homologacao'::character varying
+--                                       → homologacao (SEFAZ testes) | producao
+--   serie_nfe                           smallint  NOT NULL  DEFAULT 1
+--   serie_nfce                          smallint  NOT NULL  DEFAULT 1
+--   proxima_nfe                         integer  NOT NULL  DEFAULT 1
+--                                       → Proximo numero de NF-e 55 a emitir (por serie)
+--   proxima_nfce                        integer  NOT NULL  DEFAULT 1
+--                                       → Proximo numero de NFC-e 65 a emitir (por serie)
+--   local_estoque_id                    integer
+--                                       → Local fisico que este CNPJ representa (fabrica ou loja)
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: local_estoque_id → alissonerp.locais_estoque(id)
+
+-- --- epc_serial (3 colunas) ---
+-- Comentário: Controle atomico do serial sequencial de EPC por ano. Uma linha por ano.
+--   ano                                 integer  NOT NULL
+--                                       → Ano em 2 digitos (ex: 26 para 2026) — igual ao {AA} do EPC.
+--   proximo_serial                      bigint  NOT NULL  DEFAULT 1
+--                                       → Proximo serial a ser alocado. Atualizado pela funcao gerar_proximo_epc().
+--   atualizado_em                       timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: ano
+
+-- --- erp_produtos (20 colunas) ---
+-- Comentário: Produtos ERP com relação pai/variação. Referencia public.produtos sem alterá-lo.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.erp_produtos_id_seq'::regclass)
+--   produto_id                          bigint  NOT NULL
+--   sku                                 character varying  NOT NULL
+--   nome                                character varying
+--   parent_sku                          character varying
+--                                       → SKU do produto pai: split_part(sku, "-", 1) quando tem "-" e não começa com "AJ".
+--   parent_id                           integer
+--   eh_variacao                         boolean  NOT NULL  DEFAULT false
+--   eh_pai                              boolean  NOT NULL  DEFAULT false
+--   sufixo_variacao                     character varying
+--   numeracao                           character varying
+--   cor_metal                           character varying
+--   comprimento                         numeric
+--   largura_aro                         numeric
+--   altura_aro                          numeric
+--   base                                numeric
+--   observacao_erp                      text
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   date_created                        timestamp with time zone  NOT NULL  DEFAULT now()
+--   date_updated                        timestamp with time zone  NOT NULL  DEFAULT now()
+--   fornecedor                          character varying
+--                                       → Nome livre do fornecedor do produto. Pode coincidir com alissonerp.fornecedores.nome, mas sem FK.
+--                                      PK: id
+--                                      FK: parent_id → alissonerp.erp_produtos(id)
+
+-- --- estoque_comercial_config (7 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.estoque_comercial_config_id_seq'::reg...
+--   produto_id                          bigint  NOT NULL
+--   estoque_minimo                      integer  NOT NULL  DEFAULT 0
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   created_by                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+
+-- --- estornos_distribuicao (8 colunas) ---
+-- Comentário: Registro imutável de cada estorno — quem, quando, por quê, snapshot JSONB do que foi revertido
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.estornos_distribuicao_id_seq'::regclass)
+--   distribuicao_id                     integer  NOT NULL
+--   ordem_id                            integer
+--   motivo                              character varying  NOT NULL
+--   justificativa                       text  NOT NULL
+--   estornado_por                       uuid  NOT NULL
+--   dados_revertidos                    jsonb  NOT NULL  DEFAULT '{}'::jsonb
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: distribuicao_id → alissonerp.distribuicoes(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+
+-- --- faixas_comissao (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.faixas_comissao_id_seq'::regclass)
+--   desconto_pct                        numeric  NOT NULL
+--   comissao_pct                        numeric  NOT NULL
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_by                          uuid
+--                                      PK: id
+--                                      FK: updated_by → auth.users(id)
+
+-- --- fechamentos_distribuicao (11 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.fechamentos_distribuicao_id_seq'::reg...
+--   distribuicao_id                     integer
+--   ordem_id                            integer
+--   peso                                real  DEFAULT 0
+--   pmc                                 real  DEFAULT 0
+--   total_pedras_un                     real  DEFAULT 0
+--   total_pedras_g                      real  DEFAULT 0
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   foto_balanca                        text
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: distribuicao_id → alissonerp.distribuicoes(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+
+-- --- fechamentos_fabrica (9 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.fechamentos_fabrica_id_seq'::regclass)
+--   setor_id                            integer
+--   deposito_id                         integer
+--   entrada                             real  DEFAULT 0
+--   saida                               real  DEFAULT 0
+--   quebra                              real  DEFAULT 0
+--   quebra_percentual                   real  DEFAULT 0
+--   ids_processados                     jsonb
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: setor_id → alissonerp.setores(id)
+
+-- --- fichas_tecnicas (7 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.fichas_tecnicas_id_seq'::regclass)
+--   ordem_id                            integer
+--   tipo_item                           character varying  NOT NULL
+--   dados                               jsonb  NOT NULL  DEFAULT '{}'::jsonb
+--   created_by                          uuid
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: ordem_id → alissonerp.ordens(id)
+
+-- --- fichas_tecnicas_produto (26 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.fichas_tecnicas_produto_id_seq'::regc...
+--   produto_id                          bigint  NOT NULL
+--   tipo_peca                           character varying
+--   largura                             numeric
+--   altura                              numeric
+--   profundidade                        numeric
+--   diametro_interno                    numeric
+--   peso_estimado_metal                 numeric
+--   qtd_pedras                          integer  DEFAULT 0
+--   tamanho_pedras_mm                   numeric
+--   tamanho_pedras_ct                   numeric
+--   tipo_cravacao                       character varying
+--   qtd_garras                          integer  DEFAULT 0
+--   largura_garra                       numeric
+--   altura_garra                        numeric
+--   modelo                              character varying
+--   modelo_interno                      character varying
+--   arquivo_3dm                         text
+--   arquivo_glb                         text
+--   ia_provider                         character varying
+--   ia_raw_response                     jsonb
+--   ia_confianca                        numeric
+--   revisado_por                        uuid
+--   revisado_em                         timestamp with time zone
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- fila_sync_externo (10 colunas) ---
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.fila_sync_externo_id_seq'::regclass)
+--   sistema                             character varying  NOT NULL
+--   acao                                character varying  NOT NULL  DEFAULT 'sync'::character varying
+--   payload                             jsonb  NOT NULL
+--   status                              character varying  NOT NULL  DEFAULT 'pendente'::character varying
+--   tentativas                          integer  NOT NULL  DEFAULT 0
+--   ultimo_erro                         text
+--   criado_em                           timestamp with time zone  NOT NULL  DEFAULT now()
+--   processado_em                       timestamp with time zone
+--   proxima_execucao                    timestamp with time zone
+--                                      PK: id
+
+-- --- fin_caixa_baixas (7 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.fin_caixa_baixas_id_seq'::regclass)
+--   total                               numeric  NOT NULL
+--   qtd_pagamentos                      integer  NOT NULL
+--   realizado_por                       uuid
+--   realizado_nome                      text
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- fin_conciliacoes (10 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.fin_conciliacoes_id_seq'::regclass)
+--   lancamento_id                       integer
+--   conta_pagar_id                      integer
+--   conta_receber_id                    integer
+--   tipo                                character varying  DEFAULT 'manual'::character varying
+--   status                              character varying  DEFAULT 'pendente'::character varying
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   pagamento_venda_id                  integer
+--                                      PK: id
+--                                      FK: conta_pagar_id → alissonerp.contas_pagar(id)
+--                                      FK: conta_receber_id → alissonerp.contas_receber(id)
+--                                      FK: created_by → auth.users(id)
+--                                      FK: lancamento_id → alissonerp.fin_lancamentos_bancarios(id)
+--                                      FK: pagamento_venda_id → alissonerp.pagamentos_venda(id)
+
+-- --- fin_extratos_bancarios (12 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.fin_extratos_bancarios_id_seq'::regcl...
+--   banco                               character varying
+--   agencia                             character varying
+--   conta                               character varying
+--   data_inicio                         date
+--   data_fim                            date
+--   arquivo_nome                        text
+--   arquivo_url                         text
+--   processado                          boolean  DEFAULT false
+--   total_lancamentos                   integer  DEFAULT 0
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+
+-- --- fin_gateways (7 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.fin_gateways_id_seq'::regclass)
+--   nome                                text  NOT NULL
+--   tipo                                character varying  NOT NULL  DEFAULT 'outro'::character varying
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   cor                                 character varying  DEFAULT '#6B7280'::character varying
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- fin_lancamentos_bancarios (11 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.fin_lancamentos_bancarios_id_seq'::re...
+--   extrato_id                          integer
+--   fitid                               character varying
+--   tipo                                character varying
+--   valor                               numeric  NOT NULL
+--   data_transacao                      date
+--   descricao                           text
+--   memo                                text
+--   conciliado                          boolean  DEFAULT false
+--   conciliacao_id                      integer
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: extrato_id → alissonerp.fin_extratos_bancarios(id)
+
+-- --- fornecedores (8 colunas) ---
+-- Comentário: Cadastro mestre opcional de fornecedores. Usado para autocomplete em produtos.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.fornecedores_id_seq'::regclass)
+--   nome                                character varying  NOT NULL
+--   cnpj                                character varying
+--   contato                             character varying
+--   observacao                          text
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+
+-- --- fretes_bairro (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.fretes_bairro_id_seq'::regclass)
+--   bairro                              text  NOT NULL
+--   municipio                           text  NOT NULL  DEFAULT 'Fortaleza'::text
+--   valor                               numeric  NOT NULL  DEFAULT 0
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- gateways_pagamento (5 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.gateways_pagamento_id_seq'::regclass)
+--   nome                                text  NOT NULL
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   ordem                               integer  NOT NULL  DEFAULT 0
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+
+-- --- insumos (20 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.insumos_id_seq'::regclass)
+--   sku                                 character varying
+--   nome                                character varying  NOT NULL
+--   categoria_id                        integer
+--   saldo                               real  DEFAULT 0
+--   peso_pedra                          real  DEFAULT 0
+--   peso_total                          real  DEFAULT 0
+--   custo_compra                        real  DEFAULT 0
+--   estoque_minimo                      real  DEFAULT 0
+--   estoque_maximo                      real  DEFAULT 0
+--   fornecedor_id                       bigint
+--   ativo                               boolean  DEFAULT true
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   unidade                             character varying  DEFAULT 'g'::character varying
+--   descricao                           text
+--   foto                                text
+--   observacao                          text
+--   sku_interno                         text
+--   peso_pedra_ct                       numeric
+--                                      PK: id
+--                                      FK: categoria_id → alissonerp.categorias_insumo(id)
+
+-- --- inter_sync_log (10 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.inter_sync_log_id_seq'::regclass)
+--   conta_pagar_id                      integer
+--   operacao                            character varying  NOT NULL
+--   inter_pagamento_id                  character varying
+--   status_retornado                    character varying
+--   sucesso                             boolean  NOT NULL
+--   erro                                text
+--   request_body                        jsonb
+--   response_body                       jsonb
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: conta_pagar_id → alissonerp.contas_pagar(id)
+
+-- --- inventarios_comercial (10 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.inventarios_comercial_id_seq'::regclass)
+--   local_estoque_id                    integer  NOT NULL
+--   status                              character varying  NOT NULL  DEFAULT 'aberto'::character varying
+--   obs                                 text
+--   data_abertura                       timestamp with time zone  NOT NULL  DEFAULT now()
+--   data_conclusao                      timestamp with time zone
+--   created_by                          uuid
+--   concluido_por                       uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   categoria                           text
+--                                      PK: id
+--                                      FK: concluido_por → auth.users(id)
+--                                      FK: created_by → auth.users(id)
+--                                      FK: local_estoque_id → alissonerp.locais_estoque(id)
+
+-- --- itens_compra (14 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.itens_compra_id_seq'::regclass)
+--   compra_id                           integer
+--   insumo_id                           integer
+--   deposito_id                         integer  DEFAULT 1
+--   qtd                                 real  NOT NULL
+--   valor_unitario                      numeric
+--   valor_total                         numeric
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   unidade                             character varying
+--   peso_ct                             numeric
+--   qtd_pecas                           integer
+--   custo_por_ct                        numeric
+--   lote_referencia                     character varying
+--   observacao                          text
+--                                      PK: id
+--                                      FK: compra_id → alissonerp.compras(id)
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: insumo_id → alissonerp.insumos(id)
+
+-- --- itens_distribuicao (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.itens_distribuicao_id_seq'::regclass)
+--   distribuicao_id                     integer
+--   deposito_id                         integer
+--   insumo_id                           integer
+--   peso                                real  DEFAULT 0
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: distribuicao_id → alissonerp.distribuicoes(id)
+--                                      FK: insumo_id → alissonerp.insumos(id)
+
+-- --- itens_inventario_comercial (10 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.itens_inventario_comercial_id_seq'::r...
+--   inventario_id                       integer  NOT NULL
+--   produto_id                          bigint  NOT NULL
+--   quantidade_sistema                  integer  NOT NULL  DEFAULT 0
+--   quantidade_contada                  integer
+--   diferenca                           integer
+--   movimento_ajuste_id                 integer
+--   contado_por                         uuid
+--   contado_em                          timestamp with time zone
+--   conferido                           boolean  DEFAULT false
+--                                      PK: id
+--                                      FK: contado_por → auth.users(id)
+--                                      FK: inventario_id → alissonerp.inventarios_comercial(id)
+--                                      FK: movimento_ajuste_id → alissonerp.movimentacoes_estoque_comercial(id)
+
+-- --- itens_ordem (10 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.itens_ordem_id_seq'::regclass)
+--   ordem_id                            integer  NOT NULL
+--   produto_id                          bigint
+--   nome_produto                        text
+--   sku                                 text
+--   quantidade                          integer  NOT NULL  DEFAULT 1
+--   peso_estimado                       numeric
+--   observacao                          text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   personalizacao                      jsonb
+--                                       → Personalizacao propagada da venda (copia do itens_venda_erp.personalizacao). Ourives/fabrica le pra saber o que gravar na peca.
+--                                      PK: id
+--                                      FK: ordem_id → alissonerp.ordens(id)
+
+-- --- itens_ordem_insumos (7 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.itens_ordem_insumos_id_seq'::regclass)
+--   ordem_id                            integer
+--   deposito_id                         integer
+--   insumo_id                           integer
+--   peso                                real  DEFAULT 0
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: insumo_id → alissonerp.insumos(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+
+-- --- itens_ordem_produtos (5 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.itens_ordem_produtos_id_seq'::regclass)
+--   ordem_id                            integer
+--   produto_id                          bigint
+--   quantidade                          real  DEFAULT 1
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: ordem_id → alissonerp.ordens(id)
+
+-- --- itens_venda_erp (18 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.itens_venda_erp_id_seq'::regclass)
+--   venda_id                            integer  NOT NULL
+--   produto_id                          bigint
+--   nome_produto                        text  NOT NULL
+--   sku                                 text
+--   quantidade                          integer  NOT NULL  DEFAULT 1
+--   preco_lista                         numeric  NOT NULL
+--   pct_desconto                        numeric  NOT NULL  DEFAULT 0
+--   preco_unitario                      numeric  NOT NULL
+--   total_item                          numeric  NOT NULL
+--   pct_comissao                        numeric  NOT NULL  DEFAULT 0
+--   valor_comissao                      numeric  NOT NULL  DEFAULT 0
+--   desconto_autorizado_por             uuid
+--   observacao                          text
+--   peso_estimado                       numeric
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   personalizacao                      jsonb
+--                                       → Personalizacao aplicada no item. Ex: {"tipo":"nome","valor":"JOAO","max_caracteres":4,"label":"Nome a gravar"}. Snapshot da config no momento da venda — preserva historia mesmo se admin mudar regra depois. Propaga para itens_ordem.personalizacao.
+--   markup_aplicado                     numeric
+--                                       → Markup do item quando criado a partir de orcamento (faixa pricing_categories). NULL para produto comum, que segue faixas_comissao por desconto.
+--                                      PK: id
+--                                      FK: desconto_autorizado_por → auth.users(id)
+--                                      FK: venda_id → alissonerp.vendas_erp(id)
+
+-- --- itens_venda_personalizacao (12 colunas) ---
+-- Comentário: Valores preenchidos pelo cliente/consultora durante a venda. Snapshot — guarda nome+tipo+extras pra preservar histórico.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.itens_venda_personalizacao_id_seq'::r...
+--   item_venda_id                       integer  NOT NULL
+--   campo_id                            integer
+--   nome_campo                          character varying  NOT NULL
+--   tipo                                character varying  NOT NULL
+--   valor_texto                         text
+--   valor_numero                        numeric
+--   valores_selec                       jsonb
+--   preco_extra                         numeric
+--   peso_extra                          numeric
+--   ordem                               integer  NOT NULL  DEFAULT 0
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: campo_id → alissonerp.produto_personalizacao(id)
+
+-- --- joias_leituras (9 colunas) ---
+-- Comentário: Timeline de eventos RFID: cadastro, reimpressao, inventario, movimentacao, cancelamento. EPC nao tem FK — permite manter historico apos delete da joia.
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.joias_leituras_id_seq'::regclass)
+--   epc                                 text  NOT NULL
+--   evento                              text  NOT NULL
+--                                       → Tipo de evento: cadastro (1a impressao), reimpressao, inventario (leitura em contagem), movimentacao (mudanca de local), cancelamento (rollback ou baixa).
+--   localizacao                         text
+--   leitor_id                           text
+--                                       → Identificador do dispositivo de leitura/gravacao. Ex: ZEBRA-ZD621R, TSL-1128-SN123.
+--   operador                            uuid
+--   metadata                            jsonb
+--   lido_em                             timestamp with time zone  NOT NULL  DEFAULT now()
+--   inventario_id                       integer
+--                                      PK: id
+--                                      FK: inventario_id → alissonerp.inventarios_comercial(id)
+--                                      FK: operador → alissonerp.usuarios(id)
+
+-- --- joias_rfid (17 colunas) ---
+-- Comentário: 1 linha = 1 joia fisica com EPC unico. Dados do produto desnormalizados no momento do cadastro (snapshot).
+--   id                                  uuid  NOT NULL  DEFAULT gen_random_uuid()
+--   epc                                 text  NOT NULL
+--                                       → Electronic Product Code unico (AJ{AA}{NNNNNNNN}) gravado na tag RFID.
+--   produto_id                          bigint
+--                                       → FK public.produtos.id_produto (BIGINT). SKU/nome/preco copiados como snapshot.
+--   sku                                 text  NOT NULL
+--   nome                                text  NOT NULL
+--   categoria                           text
+--   peso_g                              numeric
+--   preco_venda                         numeric
+--   localizacao_atual                   text  NOT NULL  DEFAULT 'fabrica'::text
+--                                       → Local atual da peca (ex: fabrica, vitrine, reposicao). Atualizado por eventos futuros.
+--   status                              text  NOT NULL  DEFAULT 'ativo'::text
+--                                       → ativo = rastreavel em producao | pendente_impressao = aguarda confirmacao Zebra | cancelado = removido
+--   criado_por                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   venda_id                            integer
+--   item_venda_id                       integer
+--   sold_at                             timestamp with time zone
+--   reservado_em                        timestamp with time zone
+--                                      PK: id
+--                                      FK: criado_por → alissonerp.usuarios(id)
+--                                      FK: item_venda_id → alissonerp.itens_venda_erp(id)
+--                                      FK: venda_id → alissonerp.vendas_erp(id)
+
+-- --- lancamentos_avulso (11 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.lancamentos_avulso_id_seq'::regclass)
+--   tipo_lancamento                     USER-DEFINED  NOT NULL
+--   deposito_id                         integer
+--   setor_id                            integer
+--   insumo_id                           integer
+--   peso                                real
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   deposito_destino_id                 integer
+--   local_estoque_id                    integer  DEFAULT 1
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: deposito_destino_id → alissonerp.depositos(id)
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: insumo_id → alissonerp.insumos(id)
+--                                      FK: local_estoque_id → alissonerp.locais_estoque(id)
+--                                      FK: setor_id → alissonerp.setores(id)
+
+-- --- liga_tipo_ouro (6 colunas) ---
+-- Comentário: Mapeia qual liga usar para cada tipo de Ouro 18k. teor_default = teor alvo da fundição (ex: 0.75 para 18k).
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.liga_tipo_ouro_id_seq'::regclass)
+--   tipo_18k_insumo_id                  integer  NOT NULL
+--   liga_insumo_id                      integer  NOT NULL
+--   nome                                character varying  NOT NULL
+--   teor_default                        numeric  NOT NULL  DEFAULT 0.7500
+--   ativo                               boolean  DEFAULT true
+--                                      PK: id
+--                                      FK: liga_insumo_id → alissonerp.insumos(id)
+--                                      FK: tipo_18k_insumo_id → alissonerp.insumos(id)
+
+-- --- ligacoes (24 colunas) ---
+-- Comentário: Ligação: transforma Ouro 24k fino em Ouro 18k adicionando liga metálica italiana.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.ligacoes_id_seq'::regclass)
+--   status                              character varying  NOT NULL  DEFAULT 'em_processo'::character varying
+--   tipo_18k_insumo_id                  integer  NOT NULL
+--   tipo_18k_nome                       character varying  NOT NULL
+--   liga_insumo_id                      integer  NOT NULL
+--   liga_nome                           character varying  NOT NULL
+--   peso_24k                            numeric  NOT NULL
+--   teor                                numeric  NOT NULL
+--   peso_liga_calculado                 numeric  NOT NULL
+--   peso_18k_esperado                   numeric  NOT NULL
+--   foto_envio                          text
+--   observacao_envio                    text
+--   data_envio                          timestamp with time zone  DEFAULT now()
+--   criado_por                          uuid  NOT NULL
+--   peso_18k_real                       numeric
+--   perda_processo                      numeric
+--   perda_percentual                    numeric
+--   foto_resultado                      text
+--   observacao_resultado                text
+--   data_conclusao                      timestamp with time zone
+--   concluido_por                       uuid
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   pureza                              numeric  NOT NULL  DEFAULT 100.00
+--                                       → Pureza do ouro de entrada (100=24k puro, 75=18k, 58.3=14k)
+--                                      PK: id
+--                                      FK: liga_insumo_id → alissonerp.insumos(id)
+--                                      FK: tipo_18k_insumo_id → alissonerp.insumos(id)
+
+-- --- locais_estoque (8 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.locais_estoque_id_seq'::regclass)
+--   nome                                character varying  NOT NULL
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   parent_local_id                     integer
+--   is_group                            boolean  NOT NULL  DEFAULT false
+--   allow_negative                      boolean  NOT NULL  DEFAULT false
+--                                      PK: id
+--                                      FK: parent_local_id → alissonerp.locais_estoque(id)
+
+-- --- markup_alteracoes (19 colunas) ---
+-- Comentário: Fila de aprovação de mudanças de markup (ouro ou pedra). Criado quando usuário simula e envia pra aprovação. Aprovação real e aplicação são implementadas em P3.3.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.markup_alteracoes_id_seq'::regclass)
+--   tipo                                character varying  NOT NULL
+--   faixa_id                            integer  NOT NULL
+--   faixa_nome                          character varying  NOT NULL
+--   markup_anterior                     numeric  NOT NULL
+--   markup_novo                         numeric  NOT NULL
+--   produtos_afetados                   integer  DEFAULT 0
+--   variacao_media                      numeric  DEFAULT 0
+--   variacao_min                        numeric  DEFAULT 0
+--   variacao_max                        numeric  DEFAULT 0
+--   simulacao_json                      jsonb
+--   status                              character varying  DEFAULT 'pendente'::character varying
+--   criado_por                          uuid  NOT NULL
+--   data_criacao                        timestamp with time zone  DEFAULT now()
+--   aprovado_por                        uuid
+--   data_aprovacao                      timestamp with time zone
+--   motivo_rejeicao                     text
+--   aplicado                            boolean  DEFAULT false
+--   data_aplicacao                      timestamp with time zone
+--                                      PK: id
+
+-- --- markup_pedras (10 colunas) ---
+-- Comentário: Faixas de markup por tamanho de pedra.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.markup_pedras_id_seq'::regclass)
+--   nome                                character varying  NOT NULL
+--   tamanho_min                         numeric  NOT NULL
+--   tamanho_max                         numeric  NOT NULL
+--   unidade                             character varying  DEFAULT 'ct'::character varying
+--   markup                              numeric  NOT NULL
+--                                       → Multiplicador aplicado sobre custo de compra. Ex: markup=2.5 → custo R$100 → preço R$250.
+--   ativo                               boolean  DEFAULT true
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--                                      PK: id
+
+-- --- metas_vendedoras (14 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.metas_vendedoras_id_seq'::regclass)
+--   vendedor_id                         bigint  NOT NULL
+--   mes                                 integer  NOT NULL
+--   ano                                 integer  NOT NULL
+--   meta_valor                          numeric  NOT NULL
+--   meta_quantidade                     integer
+--   created_by                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   meta_prata                          numeric
+--   meta_ouro                           numeric
+--   meta_diamante                       numeric
+--   horario_inicio                      time without time zone  DEFAULT '09:00:00'::time without time zone
+--   horas_por_dia                       integer  DEFAULT 8
+--   dias_nao_trabalhados                ARRAY  DEFAULT '{}'::integer[]
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+
+-- --- movimentacoes_estoque (15 colunas) ---
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.movimentacoes_estoque_id_seq'::regclass)
+--   entrada                             real  DEFAULT 0
+--   saida                               real  DEFAULT 0
+--   insumo_id                           integer  NOT NULL
+--   deposito_id                         integer
+--   setor_id                            integer
+--   ordem_id                            integer
+--   marcador                            USER-DEFINED
+--   obs                                 text
+--   data_hora                           timestamp with time zone  DEFAULT now()
+--   valor_total                         numeric
+--   preco_compra                        numeric
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   local_estoque_id                    integer  NOT NULL
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: insumo_id → alissonerp.insumos(id)
+--                                      FK: local_estoque_id → alissonerp.locais_estoque(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: setor_id → alissonerp.setores(id)
+
+-- --- movimentacoes_estoque_comercial (17 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.movimentacoes_estoque_comercial_id_se...
+--   produto_id                          bigint  NOT NULL
+--   tipo                                character varying  NOT NULL
+--   quantidade                          integer  NOT NULL
+--   motivo                              character varying  NOT NULL
+--   referencia_id                       integer
+--   referencia_tipo                     character varying
+--   observacao                          text
+--   created_by                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   devolucao_id                        integer
+--   status                              character varying  NOT NULL  DEFAULT 'efetivado'::character varying
+--   local_estoque_id                    integer  NOT NULL
+--                                       → Local físico onde a movimentação ocorreu (1=Fábrica, 2=Loja, 3=Service, 4=Cofre). NOT NULL desde a Fase 6 da centralização (migration 187, 2026-04-27).
+--   estorno_de_id                       integer
+--   estornado_por_id                    integer
+--   ordem_id                            integer
+--   protocolo_id                        integer
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: devolucao_id → alissonerp.devolucoes_venda(id)
+--                                      FK: estornado_por_id → alissonerp.movimentacoes_estoque_comercial(id)
+--                                      FK: estorno_de_id → alissonerp.movimentacoes_estoque_comercial(id)
+--                                      FK: local_estoque_id → alissonerp.locais_estoque(id)
+
+-- --- mp_point_devices (13 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.mp_point_devices_id_seq'::regclass)
+--   device_id                           text  NOT NULL
+--   nome_legivel                        text  NOT NULL
+--   store_id                            text
+--   pos_id                              text
+--   operating_mode                      text
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   loja                                text
+--   last_sync_at                        timestamp with time zone
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   vendedor_id                         bigint
+--   is_reserva                          boolean  NOT NULL  DEFAULT false
+--                                      PK: id
+
+-- --- notas_fiscais (27 colunas) ---
+-- Comentário: Notas fiscais (55 + 65). Polimorfica via (origem_tabela, origem_id).
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.notas_fiscais_id_seq'::regclass)
+--   modelo                              smallint  NOT NULL
+--                                       → 55 = NF-e | 65 = NFC-e
+--   serie                               smallint  NOT NULL
+--   numero                              integer  NOT NULL
+--   chave_44                            character varying
+--                                       → Chave de acesso SEFAZ (NULL ate autorizacao)
+--   empresa_emitente_id                 integer  NOT NULL
+--   tipo_operacao                       character varying  NOT NULL
+--   origem_tabela                       character varying  NOT NULL
+--                                       → vendas_erp | transferencias_estoque_comercial | devolucoes_venda
+--   origem_id                           bigint  NOT NULL
+--   cliente_contato_id                  bigint
+--                                       → Ref logica a public.contatos.id_contato (NULL em remessa interna)
+--   natureza_operacao                   character varying  NOT NULL
+--   cfop                                character varying
+--   valor_produtos                      numeric  NOT NULL  DEFAULT 0
+--   valor_desconto                      numeric  NOT NULL  DEFAULT 0
+--   valor_frete                         numeric  NOT NULL  DEFAULT 0
+--   valor_total                         numeric  NOT NULL  DEFAULT 0
+--   status                              character varying  NOT NULL  DEFAULT 'rascunho'::character varying
+--   focus_ref                           character varying
+--                                       → Idempotency key enviado ao Focus NFe (evita dupla emissao em retry)
+--   xml_assinado                        text
+--   xml_protocolo                       text
+--   pdf_danfe_url                       text
+--   codigo_sefaz                        character varying
+--   mensagem_sefaz                      text
+--   emitida_por_user_id                 uuid
+--                                       → Ref auth.users.id (sem FK fisica pois auth eh gerenciado pelo Supabase)
+--   ambiente                            character varying  NOT NULL
+--                                       → Snapshot do ambiente em que foi emitida (homolog vs prod)
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: empresa_emitente_id → alissonerp.empresas_emitentes(id)
+
+-- --- notas_fiscais_eventos (12 colunas) ---
+-- Comentário: Eventos pos-emissao: cancelamento, CC-e, inutilizacao, manifestacao.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.notas_fiscais_eventos_id_seq'::regclass)
+--   nota_fiscal_id                      integer  NOT NULL
+--   tipo                                character varying  NOT NULL
+--   sequencia                           smallint  NOT NULL  DEFAULT 1
+--                                       → Sequencia do evento na SEFAZ (CC-e pode ter varias)
+--   justificativa                       text
+--                                       → Obrigatoria em cancelamento (min 15 chars) e CC-e
+--   xml_evento                          text
+--   xml_protocolo                       text
+--   status                              character varying  NOT NULL  DEFAULT 'processando'::character varying
+--   codigo_sefaz                        character varying
+--   mensagem_sefaz                      text
+--   criado_por_user_id                  uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: nota_fiscal_id → alissonerp.notas_fiscais(id)
+
+-- --- notas_fiscais_itens (24 colunas) ---
+-- Comentário: Snapshot fiscal por item da nota (imutavel apos autorizacao).
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.notas_fiscais_itens_id_seq'::regclass)
+--   nota_fiscal_id                      integer  NOT NULL
+--   numero_item                         smallint  NOT NULL
+--   produto_id                          bigint
+--                                       → Ref logica a public.produtos.id_produto
+--   codigo_produto                      character varying
+--   descricao                           character varying  NOT NULL
+--   ncm                                 character varying
+--   cest                                character varying
+--   cfop                                character varying  NOT NULL
+--   unidade                             character varying  NOT NULL
+--   ean                                 character varying
+--   origem                              smallint
+--   quantidade                          numeric  NOT NULL
+--   valor_unitario                      numeric  NOT NULL
+--   valor_total                         numeric  NOT NULL
+--   valor_desconto                      numeric  NOT NULL  DEFAULT 0
+--   csosn                               character varying
+--   cst_icms                            character varying
+--   vbc_icms                            numeric  NOT NULL  DEFAULT 0
+--   aliq_icms                           numeric  NOT NULL  DEFAULT 0
+--   valor_icms                          numeric  NOT NULL  DEFAULT 0
+--   vbc_icms_st                         numeric  NOT NULL  DEFAULT 0
+--   valor_icms_st                       numeric  NOT NULL  DEFAULT 0
+--   valor_aprox_tributos                numeric  NOT NULL  DEFAULT 0
+--                                       → IBPT (Lei 12.741) — valor aproximado de tributos por item
+--                                      PK: id
+--                                      FK: nota_fiscal_id → alissonerp.notas_fiscais(id)
+
+-- --- notificacoes (15 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.notificacoes_id_seq'::regclass)
+--   usuario_id                          uuid  NOT NULL
+--   tipo                                character varying  NOT NULL  DEFAULT 'mencao'::character varying
+--   titulo                              character varying  NOT NULL
+--   mensagem                            text
+--   lida                                boolean  DEFAULT false
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   link                                character varying
+--   ordem_id                            integer
+--   comentario_id                       integer
+--   remetente_id                        uuid
+--   lida_em                             timestamp with time zone
+--   aguardando_resposta                 boolean  DEFAULT false
+--   respondida_em                       timestamp with time zone
+--   venda_id                            integer
+--                                      PK: id
+--                                      FK: comentario_id → alissonerp.comentarios_ordem(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: usuario_id → alissonerp.usuarios(id)
+--                                      FK: venda_id → alissonerp.vendas_erp(id)
+
+-- --- orcamento_fichas_tecnicas (34 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.orcamento_fichas_tecnicas_id_seq'::re...
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   modelo                              character varying
+--   aro_numeracao                       character varying
+--   largura                             numeric
+--   espessura                           numeric
+--   peso_estimado                       numeric
+--   tipo_fonte                          character varying
+--   texto                               character varying
+--   qtd_pedras                          integer
+--   tamanho_pedra                       numeric
+--   tipo_aplicacao_pedra                character varying
+--   perfil                              character varying
+--   diametro                            numeric
+--   densidade_ouro                      numeric
+--   cor_metal                           character varying
+--   profundidade_concava                numeric
+--   friso_lado                          character varying
+--   friso_largura                       numeric
+--   friso_profundidade                  numeric
+--   friso_offset                        numeric
+--   canal_largura                       numeric
+--   canal_borda_altura                  numeric
+--   chanfro_tamanho                     numeric
+--   dome_porcentagem                    integer
+--   pedra_fileiras                      integer
+--   pedra_drill                         boolean  DEFAULT false
+--   pedra_meia_lua                      boolean  DEFAULT false
+--   pedra_volta_completa                boolean  DEFAULT false
+--   pedras_detalhadas                   jsonb  NOT NULL  DEFAULT '[]'::jsonb
+--   has_friso                           boolean  DEFAULT false
+--                                       → Se true, aliança tem friso (groove) aplicado sobre o perfil base
+--   friso_tipo                          character varying
+--                                       → Tipo de friso: lateral (um lado), centro (centralizado), duplo (ambos os lados)
+--   friso_kind                          character varying  DEFAULT 'friso'::character varying
+--                                       → Variante: friso (sulco largo) ou risco (sulco fino ~0.1mm)
+--   tipo_pedra                          text
+--                                       → Tipo da pedra principal (diamante/zirconia/etc). Migrado retroativamente em 260 — coluna existia em prod sem migration declarando.
+--                                      PK: id
+
+-- --- orcamentos (29 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.orcamentos_id_seq'::regclass)
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   numero_orcamento                    character varying  NOT NULL
+--   tipo                                character varying  NOT NULL  DEFAULT 'alianca'::character varying
+--   vendedor_id                         integer
+--   usuario_id                          uuid
+--   nome_cliente                        character varying  NOT NULL
+--   nome_modelo                         character varying
+--   peso                                numeric
+--   valor                               numeric
+--   markup                              numeric
+--   desconto_pct                        numeric  DEFAULT 0
+--   cotacao_ouro                        numeric
+--   ficha_tecnica_id                    integer
+--   status                              character varying  NOT NULL  DEFAULT 'rascunho'::character varying
+--   observacoes                         text
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   valor_ouro                          numeric
+--   valor_pedras                        numeric
+--   cotacao_dolar                       numeric
+--   cliente_id                          bigint
+--   ordem_gerada_id                     integer
+--   foto_3d                             text
+--   venda_gerada_id                     integer
+--   quantidade                          integer  DEFAULT 1
+--   ficha_tecnica_2_id                  integer
+--   snapshot                            jsonb
+--   congelado_em                        timestamp with time zone
+--   valor_negociado_locked              boolean  NOT NULL  DEFAULT false
+--                                      PK: id
+--                                      FK: ficha_tecnica_2_id → alissonerp.orcamento_fichas_tecnicas(id)
+--                                      FK: ficha_tecnica_id → alissonerp.orcamento_fichas_tecnicas(id)
+--                                      FK: ordem_gerada_id → alissonerp.ordens(id)
+--                                      FK: usuario_id → auth.users(id)
+--                                      FK: venda_gerada_id → alissonerp.vendas_erp(id)
+
+-- --- ordem_comentario_mencoes (7 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.ordem_comentario_mencoes_id_seq'::reg...
+--   comentario_id                       integer  NOT NULL
+--   ordem_id                            integer  NOT NULL
+--   user_id_mencionado                  uuid  NOT NULL
+--   user_id_mencionador                 uuid  NOT NULL
+--   lido                                boolean  DEFAULT false
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: comentario_id → alissonerp.ordem_comentarios(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: user_id_mencionado → alissonerp.usuarios(id)
+--                                      FK: user_id_mencionador → alissonerp.usuarios(id)
+
+-- --- ordem_comentarios (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.ordem_comentarios_id_seq'::regclass)
+--   ordem_id                            integer  NOT NULL
+--   user_id                             uuid  NOT NULL
+--   texto                               text  NOT NULL
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: user_id → alissonerp.usuarios(id)
+
+-- --- ordens (44 colunas) ---
+-- Comentário: Tabela central. FKs cross-schema: vendedor/cliente→public, setor→alissonerp. directus_ordem_id cruza dados durante migração.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.ordens_id_seq'::regclass)
+--   numero_ordem                        text
+--   cliente_id                          bigint
+--   vendedor_id                         bigint
+--   pedido_id                           integer
+--   tipo_ordem                          USER-DEFINED
+--   data_entrega                        date
+--   peso_metal_negociado                real  DEFAULT 0
+--   peso_metal_externo                  real  DEFAULT 0
+--   ficha_tecnica_id                    integer
+--   itens_para_fabricacao               character varying
+--   situacao                            USER-DEFINED  DEFAULT 'criado'::alissonerp.enum_situacao_ordem
+--   status                              USER-DEFINED  DEFAULT 'aguardando'::alissonerp.enum_status_ordem
+--   rota                                USER-DEFINED
+--   tipo_controle                       character varying  DEFAULT 'individual'::character varying
+--   setor_atual                         integer
+--   local_atual                         integer
+--   distribuicao_id                     integer
+--   protocolo_loja                      boolean  DEFAULT false
+--   id_ordem_relacionada                integer
+--   id_asana                            bigint
+--   directus_ordem_id                   integer
+--   motivo_reprovacao                   integer
+--   origem_reprovacao                   text
+--   data_conclusao                      timestamp with time zone
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   updated_by                          uuid
+--   numero_pedido                       text
+--   eh_teste                            boolean  DEFAULT false
+--   fotos_paths                         ARRAY
+--   origem                              character varying  NOT NULL  DEFAULT 'erp'::character varying
+--                                       → Origem da ordem: legado (importado do Directus) | erp (criado no novo sistema)
+--   foto_peca_servico                   text
+--   peso_peca_servico                   numeric
+--   video_observacao                    text
+--   detalhes_ordem                      text
+--                                       → Detalhes/observações da ordem — migrado do directus.ordens.detalhes_ordem via directus_ordem_id
+--   tipos_servico_ids                   ARRAY  DEFAULT '{}'::integer[]
+--   venda_id                            integer
+--   venda_item_ids                      ARRAY
+--   ficha_pendente                      boolean  NOT NULL  DEFAULT false
+--                                       → TRUE = ficha técnica incompleta; ordem aguarda preenchimento antes de ir para PCP
+--   cancelado_por                       uuid
+--   cancelado_em                        timestamp with time zone
+--   produto_reposicao_id                bigint
+--                                       → Quando a ordem foi criada pela rotina de reposição automática (estoque < mínimo), aponta pro produto que está sendo reposto. NULL para ordens normais.
+--                                      PK: id
+--                                      FK: distribuicao_id → alissonerp.distribuicoes(id)
+--                                      FK: cancelado_por → alissonerp.usuarios(id)
+--                                      FK: created_by → auth.users(id)
+--                                      FK: id_ordem_relacionada → alissonerp.ordens(id)
+--                                      FK: local_atual → alissonerp.depositos(id)
+--                                      FK: setor_atual → alissonerp.setores(id)
+--                                      FK: updated_by → auth.users(id)
+--                                      FK: venda_id → alissonerp.vendas_erp(id)
+
+-- --- outros_insumos_distribuicao (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.outros_insumos_distribuicao_id_seq'::...
+--   distribuicao_id                     integer
+--   insumo_id                           integer
+--   peso                                real  DEFAULT 0
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: distribuicao_id → alissonerp.distribuicoes(id)
+--                                      FK: insumo_id → alissonerp.insumos(id)
+
+-- --- outros_insumos_pcp (8 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.outros_insumos_pcp_id_seq'::regclass)
+--   pcp_id                              integer
+--   ordem_id                            integer
+--   insumo_id                           integer
+--   deposito_id                         integer
+--   peso                                real
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: insumo_id → alissonerp.insumos(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: pcp_id → alissonerp.pcp(id)
+
+-- --- pagamentos_venda (21 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.pagamentos_venda_id_seq'::regclass)
+--   venda_id                            integer  NOT NULL
+--   forma                               character varying  NOT NULL
+--   gateway                             character varying
+--   valor                               numeric  NOT NULL
+--   parcelas                            integer  NOT NULL  DEFAULT 1
+--   status                              character varying  NOT NULL  DEFAULT 'pendente'::character varying
+--   gateway_id                          text
+--   gateway_payload                     jsonb
+--   data_confirmacao                    timestamp with time zone
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   valor_liquido                       numeric
+--   taxas_mp                            numeric
+--   vale_troca_id                       integer
+--   caixa_baixa_id                      integer
+--   fin_gateway_id                      integer
+--   ouro_gramas                         numeric
+--   ouro_valor_grama                    numeric
+--   source                              character varying
+--   ouro_peso                           numeric
+--   ouro_foto_path                      text
+--                                      PK: id
+--                                      FK: caixa_baixa_id → alissonerp.fin_caixa_baixas(id)
+--                                      FK: fin_gateway_id → alissonerp.fin_gateways(id)
+--                                      FK: vale_troca_id → alissonerp.vale_troca(id)
+--                                      FK: venda_id → alissonerp.vendas_erp(id)
+
+-- --- parametros (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT 1
+--   cotacao_ouro                        numeric
+--   cotacao_dolar                       numeric
+--   cotacao_euro                        numeric
+--   cotacao_prata                       numeric
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- parametros_sistema (6 colunas) ---
+--   chave                               character varying  NOT NULL
+--   valor                               text  NOT NULL
+--   tipo                                character varying  NOT NULL  DEFAULT 'number'::character varying
+--   descricao                           text
+--   atualizado_em                       timestamp with time zone  DEFAULT now()
+--   atualizado_por                      uuid
+--                                      PK: chave
+--                                      FK: atualizado_por → alissonerp.usuarios(id)
+
+-- --- pcp (33 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.pcp_id_seq'::regclass)
+--   etapas                              USER-DEFINED  DEFAULT 'novas_ordens'::alissonerp.enum_etapas_pcp
+--   ordem_id                            integer
+--   saida_ordem_id                      integer
+--   operador                            uuid
+--   bloqueado                           boolean  DEFAULT false
+--   local_atual                         boolean  DEFAULT true
+--   total_metal                         real  DEFAULT 0
+--   retorno_metal                       real  DEFAULT 0
+--   total_pedras_un                     real  DEFAULT 0
+--   total_pedras_g                      real  DEFAULT 0
+--   total_geral_outros_pesos            real  DEFAULT 0
+--   total_outros_pesos_g                real  DEFAULT 0
+--   pmc                                 real  DEFAULT 0
+--   quebra                              real  DEFAULT 0
+--   porcentagem_de_quebra               real  DEFAULT 0
+--   peso_final                          real  DEFAULT 0
+--   peso_unitario                       real  DEFAULT 0
+--   quantidade                          real  DEFAULT 0
+--   metal_externo                       real  DEFAULT 0
+--   data_conclusao                      timestamp with time zone
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   updated_by                          uuid
+--   deposito_id                         integer
+--   dist_ouro_real                      real  DEFAULT 0
+--                                       → Soma de distribuicao_ordens.peso_ouro_real para todas as saídas desta ordem
+--   dist_pedras_qtd                     real  DEFAULT 0
+--                                       → Soma de qtd_utilizada de distribuicao_saida_pedras para esta ordem
+--   dist_pedras_g                       real  DEFAULT 0
+--                                       → Soma de peso_total de distribuicao_saida_pedras para esta ordem
+--   dist_quebra                         real  DEFAULT 0
+--                                       → Soma de distribuicao_ordens.quebra para todas as saídas desta ordem
+--   total_pedras_ct                     numeric  DEFAULT 0
+--   rota_etapa_atual                    integer  NOT NULL  DEFAULT 1
+--                                       → Quando a ordem usa rota de fabricação (produto_rota), indica qual etapa (1-indexed) está sendo executada. Default 1 (primeira). Avança quando a fabricação transfere de setor.
+--   operador_atribuido_id               integer
+--                                       → Operador (depósito) atribuído individualmente a esta OF na rota de fabricação. Override sobre a lista de colaboradores do setor (setor_operadores). NULL = qualquer um da lista do setor pode atender.
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: operador_atribuido_id → alissonerp.depositos(id)
+--                                      FK: operador → auth.users(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: saida_ordem_id → alissonerp.saidas_ordem(id)
+--                                      FK: updated_by → auth.users(id)
+
+-- --- pedras_ordens (8 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.pedras_ordens_id_seq'::regclass)
+--   ordem_id                            integer
+--   deposito_id                         integer
+--   peso                                real
+--   peso_pedra                          real
+--   qtd_pedras                          real
+--   data_hora                           timestamp with time zone  DEFAULT now()
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+
+-- --- permissoes_usuario (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.permissoes_usuario_id_seq'::regclass)
+--   usuario_id                          uuid  NOT NULL
+--   acao                                character varying  NOT NULL
+--   permitido                           boolean  NOT NULL  DEFAULT false
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: usuario_id → alissonerp.usuarios(id)
+
+-- --- precificacao_config (4 colunas) ---
+-- Comentário: Snapshots de configuração do app de precificação (categorias, MKP, comissões). Histórico eterno.
+--   id                                  uuid  NOT NULL  DEFAULT gen_random_uuid()
+--   content                             jsonb  NOT NULL
+--   label                               text
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- precificacao_historico (11 colunas) ---
+-- Comentário: Log de cada cálculo feito no app de precificação.
+--   id                                  uuid  NOT NULL  DEFAULT gen_random_uuid()
+--   gold_price                          numeric
+--   weight                              numeric
+--   mkp                                 numeric
+--   commission_percent                  numeric
+--   commission_value                    numeric
+--   base_price                          numeric
+--   final_price                         numeric
+--   discount_percent                    numeric
+--   category_name                       text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- preparacoes_entrega (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.preparacoes_entrega_id_seq'::regclass)
+--   etapas                              USER-DEFINED  DEFAULT 'pendente'::alissonerp.enum_etapas_entrega
+--   ordem_id                            integer
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+
+-- --- produto_composicao (12 colunas) ---
+-- Comentário: BOM (Bill of Materials) — composição do produto em insumos.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.produto_composicao_id_seq'::regclass)
+--   produto_id                          bigint  NOT NULL
+--   insumo_id                           integer  NOT NULL
+--   tipo                                character varying  NOT NULL
+--   quantidade                          numeric  NOT NULL  DEFAULT 1
+--   tamanho                             numeric
+--                                       → Tamanho da pedra em quilates (ct) ou mm. Usado para buscar faixa de markup em markup_pedras.
+--   unidade_tamanho                     character varying  DEFAULT 'ct'::character varying
+--   preco_compra_usd                    numeric
+--                                       → Preço unitário de compra em USD. custo_pedra = preco_compra_usd × cotacao_dolar × markup_pedra.
+--   obrigatorio                         boolean  DEFAULT true
+--   observacao                          text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- produto_curva_aplicada (5 colunas) ---
+-- Comentário: Comissao, max desconto e markup aplicados em cada produto pela curva dinamica. Populada por /api/precificacao/curva/aplicar.
+--   produto_id                          bigint  NOT NULL
+--                                       → FK para public.produtos.id_produto
+--   comissao_pct                        numeric
+--                                       → Comissao %% calculada pela curva
+--   max_desconto_pct                    numeric
+--                                       → %% maximo de desconto permitido em venda/orcamento
+--   markup_aplicado                     numeric
+--                                       → Markup calculado pela curva no momento da aplicacao (auditoria)
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: produto_id
+
+-- --- produto_imagens (15 colunas) ---
+-- Comentário: Galeria de imagens por produto. Migrado do Directus (legado mantido como backup).
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.produto_imagens_id_seq'::regclass)
+--   produto_id                          bigint  NOT NULL
+--   bucket                              text  NOT NULL  DEFAULT 'imagens'::text
+--   bucket_path                         text  NOT NULL
+--   url_publica                         text  NOT NULL
+--   ordem                               integer  NOT NULL  DEFAULT 0
+--   eh_capa                             boolean  NOT NULL  DEFAULT false
+--   origem                              text
+--   origem_uuid                         uuid
+--                                       → UUID do arquivo original no Directus (directus_files.id) — usado para idempotência da migração.
+--   origem_tabela                       text
+--                                       → Tabela de origem no Directus: produtos_files_1 (galeria principal/capa), produtos_files_2, etc, ou imagem_capa (campo de public.produtos).
+--   filename                            text
+--   mime_type                           text
+--   filesize                            bigint
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+
+-- --- produto_pedra_extras (6 colunas) ---
+-- Comentário: Extensão de public.produtos para pedras-produto: custo USD e quantidade em estoque. preco_tiny (em public.produtos) = preco_compra_usd × dolar × markup_faixa(ct).
+--   produto_id                          bigint  NOT NULL
+--   preco_compra_usd                    numeric
+--                                       → Custo de compra em USD. Usado junto com cotação do dólar e markup por tamanho.
+--   quantidade                          integer  DEFAULT 0
+--                                       → Quantidade em estoque (unidades avulsas da pedra-produto).
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   peso_ct                             numeric
+--                                       → Peso da pedra em quilates (ct). Fonte de verdade para pedras-produto, pois public.produtos.peso_precificado é arredondado pelo trigger arredondar_peso_para_cima. Pontos = peso_ct × 100.
+--                                      PK: produto_id
+
+-- --- produto_pedras_componente (7 colunas) ---
+-- Comentário: Pedras (de public.produtos categoria=Pedras) usadas como componente de uma joia. Subtotal soma no preço final.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.produto_pedras_componente_id_seq'::re...
+--   produto_id                          bigint  NOT NULL
+--                                       → FK lógica para public.produtos.id_produto (a joia)
+--   pedra_produto_id                    bigint  NOT NULL
+--                                       → FK lógica para public.produtos.id_produto (a pedra, categoria=Pedras)
+--   quantidade                          integer  NOT NULL
+--   preco_unitario_snapshot             numeric
+--                                       → Preço da pedra no momento da gravação. Usado para calcular preço final da joia.
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- produto_personalizacao (25 colunas) ---
+-- Comentário: Campos personalizáveis configurados por produto (1:N). Tipos: texto/numero/selecao_unica/selecao_multipla.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.produto_personalizacao_id_seq'::regcl...
+--   produto_id                          bigint  NOT NULL
+--   tipo                                character varying  NOT NULL  DEFAULT 'nome'::character varying
+--                                       → Tipo de dado a personalizar: nome | iniciais | data | numero | simbolo | livre.
+--   obrigatorio                         boolean  NOT NULL  DEFAULT true
+--                                       → Se true, venda nao pode ser finalizada sem o campo preenchido.
+--   min_caracteres                      integer  NOT NULL  DEFAULT 1
+--   max_caracteres                      integer  NOT NULL
+--   caracteres_permitidos               character varying  NOT NULL  DEFAULT 'alfa_acento_espaco'::character varying
+--                                       → alfa=A-Z | alfa_acento=A-Z+acentos | alfa_acento_espaco=A-Z+acentos+espacos | alfanum=A-Z+0-9 | alfanum_acento_espaco | numero=0-9 | qualquer.
+--   label                               character varying  NOT NULL  DEFAULT 'Nome a gravar'::character varying
+--   placeholder                         character varying
+--   exemplo                             character varying
+--   observacao                          text
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   preco_por_letra                     numeric
+--                                       → Se preenchido, preco do item na venda = qtd_letras * preco_por_letra (recalculado server-side em POST /api/vendas). Se NULL, usa preco_tiny do produto.
+--   peso_por_letra                      numeric
+--                                       → Se preenchido, peso_estimado do item na venda = qtd_letras * peso_por_letra (recalculado server-side em POST /api/vendas). Se NULL, usa peso_precificado do produto.
+--   ordem                               integer  NOT NULL  DEFAULT 0
+--   min_valor                           numeric
+--   max_valor                           numeric
+--   preco_extra                         numeric
+--   peso_extra                          numeric
+--   personalizavel                      boolean  NOT NULL  DEFAULT true
+--                                       → Se true, produto exibe campos de personalizacao no wizard de venda. Herdado da tabela de config.
+--   descricao_personalizacao            text
+--                                       → Texto livre descritivo da personalizacao esperada (ex: "Gravar nome do casal e data de casamento"). Aparece como guia para a consultora.
+--   campos_gratis                       integer  DEFAULT 1
+--                                       → Quantidade de campos de personalizacao inclusos no preco do produto. Ex: 3 = 3 nomes gratis.
+--   preco_campo_adicional               numeric
+--                                       → Valor cobrado por campo extra alem de campos_gratis. Ex: 100.00 = R$ 100 por nome adicional. Se NULL, nao permite adicionar campos extras.
+--                                      PK: id
+
+-- --- produto_personalizacao_campos (13 colunas) ---
+-- Comentário: Campos de personalizacao por config de produto. N campos por produto. A config mae (produto_personalizacao) gerencia ativo/preco_por_letra/peso_por_letra comuns.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.produto_personalizacao_campos_id_seq'...
+--   config_id                           integer  NOT NULL
+--   label                               character varying  NOT NULL  DEFAULT 'Nome a gravar'::character varying
+--   placeholder                         character varying
+--   exemplo                             character varying
+--   tipo                                character varying  NOT NULL  DEFAULT 'nome'::character varying
+--   obrigatorio                         boolean  NOT NULL  DEFAULT true
+--   min_caracteres                      integer  NOT NULL  DEFAULT 1
+--   max_caracteres                      integer  NOT NULL
+--   caracteres_permitidos               character varying  NOT NULL  DEFAULT 'alfa_acento_espaco'::character varying
+--   posicao                             integer  NOT NULL  DEFAULT 0
+--                                       → Ordem de exibicao no wizard. 0 = primeiro campo.
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: config_id → alissonerp.produto_personalizacao(id)
+
+-- --- produto_personalizacao_opcao (8 colunas) ---
+-- Comentário: Opções dos campos do tipo seleção (única ou múltipla). Cada opção pode ter preço/peso extra.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.produto_personalizacao_opcao_id_seq':...
+--   campo_id                            integer  NOT NULL
+--   ordem                               integer  NOT NULL  DEFAULT 0
+--   valor                               character varying  NOT NULL
+--   preco_extra                         numeric
+--   peso_extra                          numeric
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: campo_id → alissonerp.produto_personalizacao(id)
+
+-- --- produto_personalizacao_regras (10 colunas) ---
+-- Comentário: Regras de formatacao automatica para personalizacao. Aplicadas no front-end e validadas no back-end. 1:1 com config.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.produto_personalizacao_regras_id_seq'...
+--   config_id                           integer  NOT NULL
+--   primeira_letra_maiuscula            boolean  NOT NULL  DEFAULT true
+--                                       → Se true, converte primeira letra para maiuscula e resto para minusculo automaticamente.
+--   sem_espacos                         boolean  NOT NULL  DEFAULT false
+--                                       → Se true, remove espacos do valor digitado.
+--   sem_numeros                         boolean  NOT NULL  DEFAULT true
+--                                       → Se true, remove numeros do valor digitado.
+--   sem_simbolos                        boolean  NOT NULL  DEFAULT true
+--                                       → Se true, remove simbolos/pontuacao do valor digitado.
+--   sem_acentos                         boolean  NOT NULL  DEFAULT false
+--                                       → Se true, remove acentos do valor digitado.
+--   observacao                          text
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: config_id → alissonerp.produto_personalizacao(id)
+
+-- --- produto_reposicao_config (6 colunas) ---
+-- Comentário: Configuração de reposição automática por produto. Quando saldo+OFs_abertas < estoque_minimo, cria OFs de fabricação de 1 unidade até cobrir.
+--   produto_id                          bigint  NOT NULL
+--   estoque_minimo                      integer  NOT NULL  DEFAULT 0
+--                                       → Saldo mínimo desejado. Reposição se ativa pra (saldo_atual + qtd_em_OFs_abertas) < estoque_minimo.
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--                                       → Se false, desabilita reposição automática para esse produto (mantém o registro/configuração).
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   tempo_fabricacao_dias               integer
+--                                       → Tempo padrão de fabricação da peça em dias. Usado pelo auto-OF (data_entrega = hoje + N) e exibido como prazo informativo no cadastro/drawer do produto.
+--                                      PK: produto_id
+
+-- --- produto_rota (6 colunas) ---
+-- Comentário: Rota de fabricação por produto: lista ordenada de setores que a peça percorre.
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.produto_rota_id_seq'::regclass)
+--   produto_id                          bigint  NOT NULL
+--   ordem                               integer  NOT NULL
+--                                       → 1-indexed: primeira etapa = 1, segunda = 2, etc. Único por produto_id.
+--   setor_id                            integer  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: setor_id → alissonerp.setores(id)
+
+-- --- produto_tipo_item (4 colunas) ---
+--   produto_id                          bigint  NOT NULL
+--   tipo_item                           text  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: produto_id
+
+-- --- produtos_fiscais (8 colunas) ---
+-- Comentário: Campos fiscais de produto. PK = public.produtos.id_produto (FK logica).
+--   id_produto                          bigint  NOT NULL
+--                                       → Ref logica a public.produtos.id_produto (sem FK fisica)
+--   ncm                                 character varying
+--                                       → Nomenclatura Comum do Mercosul (8 digitos). Ex: 71131910 (joia ouro)
+--   cest                                character varying
+--                                       → Codigo Especificador da Substituicao Tributaria (7 digitos)
+--   cfop_saida                          character varying
+--   origem                              smallint  NOT NULL  DEFAULT 0
+--                                       → 0=Nacional,1=Importacao direta,2=Importado de terceiros,...
+--   unidade_comercial                   character varying  NOT NULL  DEFAULT 'UN'::character varying
+--                                       → UN, PC, CT (carat), GR, DZ, etc.
+--   ean                                 character varying
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id_produto
+
+-- --- promocao_itens (5 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.promocao_itens_id_seq'::regclass)
+--   promocao_id                         integer  NOT NULL
+--   produto_id                          bigint  NOT NULL
+--   preco_original                      numeric  NOT NULL
+--   preco_promo                         numeric  NOT NULL
+--                                      PK: id
+--                                      FK: promocao_id → alissonerp.promocoes_produtos(id)
+
+-- --- promocoes_produtos (10 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.promocoes_produtos_id_seq'::regclass)
+--   nome_campanha                       character varying  NOT NULL
+--   data_inicio                         date  NOT NULL
+--   data_fim                            date  NOT NULL
+--   situacao_manual                     character varying  NOT NULL  DEFAULT 'agendada'::character varying
+--   observacao                          text
+--   criado_por                          uuid  NOT NULL
+--   criado_em                           timestamp with time zone  NOT NULL  DEFAULT now()
+--   atualizado_em                       timestamp with time zone  NOT NULL  DEFAULT now()
+--   max_parcelas_cartao                 integer
+--                                       → Máximo de parcelas permitidas no cartão para vendas com itens desta promoção. NULL = sem restrição (default 12).
+--                                      PK: id
+
+-- --- protocolo_fotos (7 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.protocolo_fotos_id_seq'::regclass)
+--   protocolo_id                        integer
+--   arquivo_id                          uuid
+--   tipo                                character varying
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   foto_url                            text
+--   foto_base64                         text
+--                                      PK: id
+--                                      FK: protocolo_id → alissonerp.protocolos(id)
+
+-- --- protocolo_ordens (3 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.protocolo_ordens_id_seq'::regclass)
+--   protocolo_id                        integer
+--   ordem_id                            integer
+--                                      PK: id
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: protocolo_id → alissonerp.protocolos(id)
+
+-- --- protocolos (12 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.protocolos_id_seq'::regclass)
+--   direcao                             USER-DEFINED  NOT NULL
+--   etapas                              USER-DEFINED  DEFAULT 'pendente'::alissonerp.enum_etapas_protocolo
+--   motoboy_id                          uuid
+--   recebedor_id                        uuid
+--   data_conclusao                      timestamp with time zone
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   foto_criacao                        text
+--                                       → Path no Storage (protocolo-fotos) da foto tirada na criação
+--   foto_conclusao                      text
+--                                       → Path no Storage (protocolo-fotos) da foto tirada na conclusão
+--   tipo_protocolo                      character varying  NOT NULL  DEFAULT 'fabrica'::character varying
+--                                       → Tipo: fabrica (vai pra fábrica via motoboy) ou service (vai pra service ao lado)
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: motoboy_id → auth.users(id)
+--                                      FK: recebedor_id → auth.users(id)
+
+-- --- purificacoes (19 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.purificacoes_id_seq'::regclass)
+--   status                              character varying  NOT NULL  DEFAULT 'em_processo'::character varying
+--   itens                               jsonb  NOT NULL  DEFAULT '[]'::jsonb
+--   peso_total_enviado                  numeric  NOT NULL
+--   teor_medio                          numeric  NOT NULL
+--   peso_esperado_24k                   numeric  NOT NULL
+--   foto_envio                          text
+--   observacao_envio                    text
+--   data_envio                          timestamp with time zone  DEFAULT now()
+--   criado_por                          uuid  NOT NULL
+--   peso_retornado_24k                  numeric
+--   perda_processo                      numeric
+--   perda_percentual                    numeric
+--   foto_retorno                        text
+--   observacao_retorno                  text
+--   data_retorno                        timestamp with time zone
+--   concluido_por                       uuid
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- quebra_operador (18 colunas) ---
+-- Comentário: Quebra de ouro por operador. Registrada em transferências operador→operador e saídas PCP. Pote (dep ID=1) NUNCA registra.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.quebra_operador_id_seq'::regclass)
+--   ordem_id                            integer
+--   pcp_id                              integer
+--   deposito_id                         integer  NOT NULL
+--   setor_id                            integer
+--   insumo_id                           integer  NOT NULL  DEFAULT 1
+--   numero_ordem                        character varying
+--   deposito_nome                       character varying
+--   setor_nome                          character varying
+--   insumo_nome                         character varying  DEFAULT 'Ouro 18k Amarelo'::character varying
+--   tipo                                character varying  NOT NULL
+--   ouro_recebido                       numeric  NOT NULL
+--   ouro_entregue                       numeric  NOT NULL
+--   quebra                              numeric  NOT NULL
+--   percentual_quebra                   numeric
+--   data_registro                       timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   distribuicao_id                     integer
+--                                      PK: id
+
+-- --- reembolsos (13 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.reembolsos_id_seq'::regclass)
+--   devolucao_id                        integer  NOT NULL
+--   metodo                              character varying  NOT NULL
+--   valor                               numeric  NOT NULL
+--   mp_payment_id                       character varying
+--   mp_refund_id                        character varying
+--   mp_status                           character varying
+--   mp_erro                             text
+--   conta_pagar_id                      integer
+--   status                              character varying  NOT NULL  DEFAULT 'pendente'::character varying
+--   processado_em                       timestamp with time zone
+--   criado_por                          uuid  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: conta_pagar_id → alissonerp.contas_pagar(id)
+--                                      FK: criado_por → auth.users(id)
+--                                      FK: devolucao_id → alissonerp.devolucoes_venda(id)
+
+-- --- regras_fiscais (17 colunas) ---
+-- Comentário: Matriz fiscal: por NCM x UF destino, define CFOP/CSOSN/CST/aliquotas
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.regras_fiscais_id_seq'::regclass)
+--   empresa_emitente_id                 integer
+--                                       → NULL = regra geral (fallback)
+--   ncm                                 character varying  NOT NULL
+--   uf_destino                          character
+--                                       → NULL = qualquer UF (fallback)
+--   cfop_saida                          character varying  NOT NULL
+--   cfop_devolucao                      character varying
+--   csosn                               character varying
+--                                       → Simples Nacional: 101/102/103/201/202/203/300/400/500/900
+--   cst_icms                            character varying
+--                                       → Usado em devolucao/entrada ou regime nao-Simples
+--   origem                              smallint  NOT NULL  DEFAULT 0
+--                                       → 0=Nacional,1=Importacao direta,2=Importado terceirizado,...8
+--   aliq_ibpt_federal                   numeric  NOT NULL  DEFAULT 0
+--                                       → IBPT federal (Lei 12.741) em %
+--   aliq_ibpt_estadual                  numeric  NOT NULL  DEFAULT 0
+--   aliq_ibpt_municipal                 numeric  NOT NULL  DEFAULT 0
+--   mva_st                              numeric
+--   aliq_icms_st                        numeric
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: empresa_emitente_id → alissonerp.empresas_emitentes(id)
+
+-- --- reservas_estoque_comercial (13 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.reservas_estoque_comercial_id_seq'::r...
+--   produto_id                          bigint  NOT NULL
+--   venda_id                            integer
+--   item_venda_id                       integer
+--   quantidade                          integer  NOT NULL
+--   local_estoque_id                    integer  NOT NULL  DEFAULT 2
+--   status                              character varying  NOT NULL  DEFAULT 'ativo'::character varying
+--   efetivado_em                        timestamp with time zone
+--   cancelado_em                        timestamp with time zone
+--   movimento_id                        integer
+--   created_by                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   ordem_id                            integer
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: item_venda_id → alissonerp.itens_venda_erp(id)
+--                                      FK: local_estoque_id → alissonerp.locais_estoque(id)
+--                                      FK: movimento_id → alissonerp.movimentacoes_estoque_comercial(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: venda_id → alissonerp.vendas_erp(id)
+
+-- --- role_permissoes (8 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.role_permissoes_id_seq'::regclass)
+--   role                                character varying  NOT NULL
+--   modulo                              character varying  NOT NULL
+--   pode_ler                            boolean  NOT NULL  DEFAULT false
+--   pode_escrever                       boolean  NOT NULL  DEFAULT false
+--   criado_em                           timestamp with time zone  NOT NULL  DEFAULT now()
+--   atualizado_em                       timestamp with time zone  NOT NULL  DEFAULT now()
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--                                      PK: id
+
+-- --- roles (4 colunas) ---
+--   nome                                character varying  NOT NULL
+--   descricao                           character varying
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   criado_em                           timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: nome
+
+-- --- rotas_template (8 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.rotas_template_id_seq'::regclass)
+--   nome                                character varying  NOT NULL
+--   categoria                           character varying
+--   is_default                          boolean  NOT NULL  DEFAULT false
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   created_by                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+
+-- --- rotas_template_etapas (4 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.rotas_template_etapas_id_seq'::regclass)
+--   template_id                         integer  NOT NULL
+--   ordem                               integer  NOT NULL
+--   setor_id                            integer  NOT NULL
+--                                      PK: id
+--                                      FK: setor_id → alissonerp.setores(id)
+--                                      FK: template_id → alissonerp.rotas_template(id)
+
+-- --- saidas_distribuicao (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.saidas_distribuicao_id_seq'::regclass)
+--   deposito_id                         integer
+--   pf                                  real
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: deposito_id → alissonerp.depositos(id)
+
+-- --- saidas_ordem (9 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.saidas_ordem_id_seq'::regclass)
+--   ordem_id                            integer
+--   deposito_id                         integer
+--   peso                                real
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   metal_externo                       numeric  DEFAULT 0
+--                                       → Peso do metal externo (ouro do cliente) na saída. Descontado do PMC mas não da movimentação de estoque.
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+
+-- --- saldo_credito_loja (10 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.saldo_credito_loja_id_seq'::regclass)
+--   tipo                                character varying  NOT NULL
+--   valor                               numeric  NOT NULL
+--   saldo_antes                         numeric  NOT NULL
+--   saldo_depois                        numeric  NOT NULL
+--   venda_id                            integer
+--   pagamento_id                        integer
+--   descricao                           text
+--   usuario_id                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: pagamento_id → alissonerp.pagamentos_venda(id)
+--                                      FK: usuario_id → auth.users(id)
+--                                      FK: venda_id → alissonerp.vendas_erp(id)
+
+-- --- servicos (26 colunas) ---
+-- Comentário: Módulo Service v2.13.0: rastreio de serviços e garantias com controle de solda e pedras
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.servicos_id_seq'::regclass)
+--   ordem_id                            integer  NOT NULL
+--   pcp_id                              integer
+--   operador_id                         integer
+--   tentativa                           integer  NOT NULL  DEFAULT 1
+--   peso_entrada                        numeric  NOT NULL
+--   peso_saida                          numeric
+--   usou_solda                          boolean
+--   peso_fio_antes                      numeric
+--   peso_fio_depois                     numeric
+--   consumo_solda                       numeric
+--   colocou_pedra                       boolean  DEFAULT false
+--   pedras_colocadas                    jsonb  DEFAULT '[]'::jsonb
+--   status                              character varying  NOT NULL  DEFAULT 'aguardando'::character varying
+--   foto_recebimento                    text
+--   foto_conclusao                      text
+--   foto_fio_solda                      text
+--   recebido_em                         timestamp with time zone
+--   concluido_em                        timestamp with time zone
+--   concluido_por                       uuid
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   motivo_reprovacao                   text
+--   foto_reprovacao                     text
+--   reprovado_em                        timestamp with time zone
+--   reprovado_por                       uuid
+--   transferencia_service_id            integer
+--                                      PK: id
+--                                      FK: operador_id → alissonerp.depositos(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: pcp_id → alissonerp.pcp(id)
+--                                      FK: transferencia_service_id → alissonerp.transferencias_ordem(id)
+
+-- --- setor_operadores (4 colunas) ---
+-- Comentário: Colaboradores responsáveis por setor (depósito = operador, conforme convenção do PCP). N:N — um operador pode estar em vários setores; um setor pode ter vários operadores. Quando uma OF cai no setor, qualquer um da lista pode pegar.
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.setor_operadores_id_seq'::regclass)
+--   setor_id                            integer  NOT NULL
+--   deposito_id                         integer  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: setor_id → alissonerp.setores(id)
+
+-- --- setores (8 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.setores_id_seq'::regclass)
+--   nome                                character varying  NOT NULL
+--   ativo                               boolean  DEFAULT true
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   deposito_id                         integer
+--   requer_peso                         boolean  NOT NULL  DEFAULT true
+--                                       → Se true, etapas neste setor exigem foto da balança + validação de peso pela IA. Se false (desenho, impressão, cravação cera/resina), só foto é obrigatória — sem pesagem.
+--   ordem                               integer  DEFAULT 999
+--                                      PK: id
+--                                      FK: deposito_id → alissonerp.depositos(id)
+
+-- --- site_config (12 colunas) ---
+-- Comentário: Configuração global da loja WooCommerce/WordPress (1 linha: id=1).
+--   id                                  integer  NOT NULL  DEFAULT 1
+--   plataforma                          character varying  NOT NULL  DEFAULT 'woocommerce'::character varying
+--   site_url                            character varying
+--   consumer_key                        character varying
+--   consumer_secret                     character varying
+--   ativo                               boolean  NOT NULL  DEFAULT false
+--   sincronizar_estoque                 boolean  NOT NULL  DEFAULT true
+--   sincronizar_preco                   boolean  NOT NULL  DEFAULT true
+--   categoria_padrao_wc                 integer
+--   ultima_sync_at                      timestamp with time zone
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+
+-- --- site_produtos (12 colunas) ---
+-- Comentário: Mapping produto_id ↔ wc_product_id com status de sincronização.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.site_produtos_id_seq'::regclass)
+--   produto_id                          integer  NOT NULL
+--   sku                                 character varying  NOT NULL
+--   wc_product_id                       integer
+--   wc_permalink                        character varying
+--   publicado_no_site                   boolean  NOT NULL  DEFAULT false
+--   status_sync                         character varying  NOT NULL  DEFAULT 'pendente'::character varying
+--   hash_enviado                        character varying
+--   ultimo_erro                         text
+--   ultima_tentativa_at                 timestamp with time zone
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+
+-- --- solicitacoes_alteracao (16 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.solicitacoes_alteracao_id_seq'::regcl...
+--   tipo                                text  NOT NULL
+--   venda_id                            integer  NOT NULL
+--   pagamento_id                        integer
+--   campo                               text
+--   valor_atual                         jsonb
+--   valor_solicitado                    jsonb  NOT NULL
+--   motivo                              text  NOT NULL
+--   solicitado_por_id                   uuid  NOT NULL
+--   solicitado_por_nome                 text  NOT NULL
+--   status                              text  NOT NULL  DEFAULT 'pendente'::text
+--   decidido_por_id                     uuid
+--   decidido_por_nome                   text
+--   motivo_decisao                      text
+--   decidido_em                         timestamp with time zone
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: pagamento_id → alissonerp.pagamentos_venda(id)
+--                                      FK: venda_id → alissonerp.vendas_erp(id)
+
+-- --- solicitacoes_desconto (15 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.solicitacoes_desconto_id_seq'::regclass)
+--   venda_id                            integer
+--   item_id                             integer
+--   produto_nome                        text  NOT NULL
+--   preco_lista                         numeric  NOT NULL
+--   pct_desconto_solicitado             numeric  NOT NULL
+--   preco_solicitado                    numeric  NOT NULL
+--   status                              text  NOT NULL  DEFAULT 'pendente'::text
+--   solicitado_por_id                   uuid
+--   solicitado_por_nome                 text
+--   autorizado_por_id                   uuid
+--   autorizado_por_nome                 text
+--   observacao                          text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: autorizado_por_id → auth.users(id)
+--                                      FK: item_id → alissonerp.itens_venda_erp(id)
+--                                      FK: solicitado_por_id → auth.users(id)
+--                                      FK: venda_id → alissonerp.vendas_erp(id)
+
+-- --- stock_ledger_entry (25 colunas) ---
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.stock_ledger_entry_id_seq'::regclass)
+--   item_id                             bigint  NOT NULL
+--   item_type                           text  NOT NULL
+--   warehouse_id                        integer  NOT NULL
+--   actual_qty                          numeric  NOT NULL
+--   qty_after                           numeric  NOT NULL  DEFAULT 0
+--   valuation_rate                      numeric
+--   stock_value                         numeric
+--   stock_value_diff                    numeric
+--   voucher_type                        text  NOT NULL  DEFAULT 'manual'::text
+--   voucher_id                          integer
+--   voucher_detail_id                   integer
+--   weight_grams                        numeric
+--   purity                              text
+--   gold_color                          text
+--   stone_carat                         numeric
+--   obs                                 text
+--   is_cancelled                        boolean  NOT NULL  DEFAULT false
+--   cancelled_by_id                     bigint
+--   posting_date                        date  NOT NULL  DEFAULT CURRENT_DATE
+--   posting_time                        time without time zone  NOT NULL  DEFAULT CURRENT_TIME
+--   batch_id                            bigint
+--   created_by                          uuid  NOT NULL
+--   approved_by                         uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: cancelled_by_id → alissonerp.stock_ledger_entry(id)
+--                                      FK: warehouse_id → alissonerp.locais_estoque(id)
+
+-- --- tarefas (18 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.tarefas_id_seq'::regclass)
+--   titulo                              text  NOT NULL
+--   descricao                           text
+--   responsavel_id                      uuid
+--   criado_por                          uuid
+--   prioridade                          character varying  NOT NULL  DEFAULT 'media'::character varying
+--   status                              character varying  NOT NULL  DEFAULT 'pendente'::character varying
+--   data_limite                         date
+--   ordem_id                            integer
+--   tags                                ARRAY  DEFAULT '{}'::text[]
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   concluida_em                        timestamp with time zone
+--   posicao                             integer  DEFAULT 0
+--   venda_id                            integer
+--   tipo                                text
+--   peso_metal                          numeric
+--   ordem_ids                           ARRAY
+--                                      PK: id
+--                                      FK: criado_por → auth.users(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: responsavel_id → auth.users(id)
+--                                      FK: venda_id → alissonerp.vendas_erp(id)
+
+-- --- tarefas_anexos (8 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.tarefas_anexos_id_seq'::regclass)
+--   tarefa_id                           integer  NOT NULL
+--   usuario_id                          uuid
+--   nome                                character varying  NOT NULL
+--   url                                 text  NOT NULL
+--   tamanho                             integer
+--   tipo_mime                           character varying
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: tarefa_id → alissonerp.tarefas(id)
+--                                      FK: usuario_id → auth.users(id)
+
+-- --- tarefas_historico (9 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.tarefas_historico_id_seq'::regclass)
+--   tarefa_id                           integer  NOT NULL
+--   usuario_id                          uuid
+--   acao                                character varying  NOT NULL
+--   campo                               character varying
+--   valor_anterior                      text
+--   valor_novo                          text
+--   comentario                          text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: tarefa_id → alissonerp.tarefas(id)
+--                                      FK: usuario_id → auth.users(id)
+
+-- --- tarefas_regras_aprovacao (13 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.tarefas_regras_aprovacao_id_seq'::reg...
+--   nome                                character varying  NOT NULL
+--   descricao                           text
+--   tipo_evento                         character varying  NOT NULL
+--   condicao_json                       jsonb  NOT NULL  DEFAULT '{}'::jsonb
+--   aprovador_role                      character varying
+--   aprovador_id                        uuid
+--   template_id                         integer
+--   ativo                               boolean  DEFAULT true
+--   prioridade_regra                    integer  DEFAULT 0
+--   criado_por                          uuid
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: aprovador_id → auth.users(id)
+--                                      FK: criado_por → auth.users(id)
+--                                      FK: template_id → alissonerp.tarefas_templates(id)
+
+-- --- tarefas_substitutos (8 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.tarefas_substitutos_id_seq'::regclass)
+--   usuario_id                          uuid  NOT NULL
+--   substituto_id                       uuid  NOT NULL
+--   inicio                              date  NOT NULL  DEFAULT CURRENT_DATE
+--   fim                                 date
+--   ativo                               boolean  DEFAULT true
+--   criado_por                          uuid
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: criado_por → auth.users(id)
+--                                      FK: substituto_id → auth.users(id)
+--                                      FK: usuario_id → auth.users(id)
+
+-- --- tarefas_templates (13 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.tarefas_templates_id_seq'::regclass)
+--   nome                                character varying  NOT NULL
+--   descricao                           text
+--   titulo_padrao                       text  NOT NULL
+--   descricao_padrao                    text
+--   prioridade                          character varying  DEFAULT 'media'::character varying
+--   responsavel_default_id              uuid
+--   tags                                ARRAY  DEFAULT '{}'::text[]
+--   tipo                                character varying
+--   ativo                               boolean  DEFAULT true
+--   criado_por                          uuid
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: criado_por → auth.users(id)
+--                                      FK: responsavel_default_id → auth.users(id)
+
+-- --- teores_ouro (7 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.teores_ouro_id_seq'::regclass)
+--   insumo_id                           integer  NOT NULL
+--   nome                                character varying  NOT NULL
+--   teor                                numeric  NOT NULL
+--   ativo                               boolean  DEFAULT true
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+--                                      FK: insumo_id → alissonerp.insumos(id)
+
+-- --- tiny_sync_produtos (7 colunas) ---
+--   produto_id                          bigint  NOT NULL
+--   operacao                            text  NOT NULL
+--   status                              text  NOT NULL  DEFAULT 'pendente'::text
+--   tentativas                          integer  NOT NULL  DEFAULT 0
+--   erro                                text
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: produto_id
+
+-- --- tipos_apontamento (5 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.tipos_apontamento_id_seq'::regclass)
+--   descricao                           character varying  NOT NULL
+--   scope                               USER-DEFINED  NOT NULL
+--   ativo                               boolean  DEFAULT true
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- tipos_servico (4 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.tipos_servico_id_seq'::regclass)
+--   nome                                text  NOT NULL
+--   ativo                               boolean  NOT NULL  DEFAULT true
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+
+-- --- transferencias_estoque_comercial (16 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.transferencias_estoque_comercial_id_s...
+--   produto_id                          bigint  NOT NULL
+--   quantidade                          integer  NOT NULL
+--   local_origem_id                     integer  NOT NULL
+--   local_destino_id                    integer  NOT NULL
+--   status                              character varying  NOT NULL  DEFAULT 'pendente'::character varying
+--   obs                                 text
+--   enviado_por                         uuid
+--   recebido_por                        uuid
+--   recebido_em                         timestamp with time zone
+--   cancelado_em                        timestamp with time zone
+--   movimento_saida_id                  integer
+--   movimento_entrada_id                integer
+--   created_by                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   ordem_solicitacao                   character varying  NOT NULL  DEFAULT ''::character varying
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: enviado_por → auth.users(id)
+--                                      FK: local_destino_id → alissonerp.locais_estoque(id)
+--                                      FK: local_origem_id → alissonerp.locais_estoque(id)
+--                                      FK: movimento_entrada_id → alissonerp.movimentacoes_estoque_comercial(id)
+--                                      FK: movimento_saida_id → alissonerp.movimentacoes_estoque_comercial(id)
+--                                      FK: recebido_por → auth.users(id)
+
+-- --- transferencias_ordem (12 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.transferencias_ordem_id_seq'::regclass)
+--   pcp_id                              integer
+--   ordem_id                            integer
+--   setor_id                            integer
+--   deposito_id                         integer
+--   obs                                 text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--   tipo_transferencia                  character varying  DEFAULT 'interna'::character varying
+--   protocolo_id                        integer
+--   deposito_origem_id                  integer
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: deposito_id → alissonerp.depositos(id)
+--                                      FK: deposito_origem_id → alissonerp.depositos(id)
+--                                      FK: ordem_id → alissonerp.ordens(id)
+--                                      FK: pcp_id → alissonerp.pcp(id)
+--                                      FK: protocolo_id → alissonerp.protocolos(id)
+--                                      FK: setor_id → alissonerp.setores(id)
+
+-- --- user_views (7 colunas) ---
+-- Comentário: Filtros nomeados por usuario/modulo (Inteligencia de Estoque e futuros dashboards)
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.user_views_id_seq'::regclass)
+--   user_auth_id                        uuid  NOT NULL
+--   scope                               text  NOT NULL
+--   nome                                text  NOT NULL
+--   filtros                             jsonb  NOT NULL
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- uso_maquina_reserva (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.uso_maquina_reserva_id_seq'::regclass)
+--   venda_id                            bigint
+--   vendedor_id                         bigint  NOT NULL
+--   device_id_reserva                   text  NOT NULL
+--   justificativa                       text  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+
+-- --- usuarios (16 colunas) ---
+--   id                                  uuid  NOT NULL
+--   email                               character varying  NOT NULL
+--   nome                                character varying  NOT NULL
+--   role                                character varying  NOT NULL  DEFAULT 'ourives'::character varying
+--   vendedor_id                         bigint
+--   mx_desconto_permitido               numeric  DEFAULT 0
+--   ativo                               boolean  DEFAULT true
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   deposito_id                         integer
+--   tipos_ordem_permitidos              jsonb  DEFAULT '[]'::jsonb
+--   is_operador_service                 boolean  DEFAULT false
+--                                       → Flag: usuário tem acesso ao app Service (dark mobile). Independente da role.
+--   tipos_protocolo_permitidos          jsonb  DEFAULT '[]'::jsonb
+--                                       → Array de tipos de protocolo que o usuário pode criar: ["fabrica","service"]. Vazio = sem permissão. Admin/dev ignoram.
+--   is_transportador                    boolean  NOT NULL  DEFAULT false
+--   notif_alarme_silenciado_ate         timestamp with time zone
+--   parcelas_padrao_mp                  integer  NOT NULL  DEFAULT 1
+--                                      PK: id
+--                                      FK: id → auth.users(id)
+
+-- --- vale_troca (12 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.vale_troca_id_seq'::regclass)
+--   numero                              character varying  NOT NULL
+--   devolucao_id                        integer
+--   cliente_id                          integer
+--   valor_original                      numeric  NOT NULL
+--   valor_disponivel                    numeric  NOT NULL
+--   status                              character varying  NOT NULL  DEFAULT 'ativo'::character varying
+--   venda_utilizado_id                  integer
+--   utilizado_em                        timestamp with time zone
+--   vale_origem_id                      integer
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   created_by                          uuid
+--                                      PK: id
+--                                      FK: created_by → auth.users(id)
+--                                      FK: devolucao_id → alissonerp.devolucoes_venda(id)
+--                                      FK: vale_origem_id → alissonerp.vale_troca(id)
+--                                      FK: venda_utilizado_id → alissonerp.vendas_erp(id)
+
+-- --- vendas_erp (53 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.vendas_erp_id_seq'::regclass)
+--   numero_venda                        text  NOT NULL
+--   cliente_id                          bigint
+--   vendedor_id                         bigint
+--   data_venda                          date  NOT NULL  DEFAULT CURRENT_DATE
+--   data_entrega                        date
+--   total_produtos                      numeric  NOT NULL  DEFAULT 0
+--   total_desconto                      numeric  NOT NULL  DEFAULT 0
+--   total_frete                         numeric  NOT NULL  DEFAULT 0
+--   total_venda                         numeric  NOT NULL  DEFAULT 0
+--   total_comissao                      numeric  NOT NULL  DEFAULT 0
+--   situacao                            character varying  NOT NULL  DEFAULT 'rascunho'::character varying
+--   forma_envio                         character varying
+--   forma_frete                         character varying
+--   observacoes                         text
+--   observacoes_internas                text
+--   tiny_pedido_id                      bigint
+--   tiny_sync_status                    character varying  DEFAULT 'pendente'::character varying
+--   tiny_sync_at                        timestamp with time zone
+--   tiny_sync_erro                      text
+--   bloqueado                           boolean  NOT NULL  DEFAULT false
+--   created_by                          uuid
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   video_obs_interna                   text
+--   token_compartilhamento              uuid  DEFAULT gen_random_uuid()
+--   public_venda_id                     integer
+--   orcamento_id                        integer
+--   endereco_entrega                    text
+--   endereco_entrega_numero             text
+--   endereco_entrega_complemento        text
+--   endereco_entrega_bairro             text
+--   endereco_entrega_cidade             text
+--   endereco_entrega_cep                text
+--   endereco_entrega_uf                 character varying
+--   credito_gerente_usado               numeric  DEFAULT 0
+--   aprovacao_credito_tipo              character varying
+--   aprovacao_credito_tarefa_id         integer
+--   empresa_emitente_id                 integer
+--                                       → CNPJ que emite a NFC-e desta venda (derivado do vendedor/loja)
+--   nota_fiscal_id                      integer
+--                                       → FK logica para alissonerp.notas_fiscais.id (FK fisica adicionada em 149)
+--   nfce_numero                         integer
+--   nfce_chave_44                       character varying
+--                                       → Chave de acesso de 44 digitos (snapshot — fonte de verdade fica em notas_fiscais)
+--   nfce_emitida_em                     timestamp with time zone
+--   tipo_venda                          text
+--   numero_rastreio                     text
+--   venda_garantia_id                   integer
+--   desconto_aprovado_por               uuid
+--   desconto_aprovado_em                timestamp with time zone
+--   desconto_revalidacao_necessaria     boolean  DEFAULT false
+--   aprovacao_desconto_tarefa_id        integer
+--   is_legacy                           boolean  NOT NULL  DEFAULT false
+--   desconto_cartao_aprovado_por        uuid
+--   desconto_cartao_aprovado_em         timestamp with time zone
+--                                      PK: id
+--                                      FK: nota_fiscal_id → alissonerp.notas_fiscais(id)
+--                                      FK: aprovacao_credito_tarefa_id → alissonerp.tarefas(id)
+--                                      FK: aprovacao_desconto_tarefa_id → alissonerp.tarefas(id)
+--                                      FK: created_by → auth.users(id)
+--                                      FK: desconto_cartao_aprovado_por → alissonerp.usuarios(id)
+--                                      FK: empresa_emitente_id → alissonerp.empresas_emitentes(id)
+--                                      FK: orcamento_id → alissonerp.orcamentos(id)
+--                                      FK: venda_garantia_id → alissonerp.vendas_erp(id)
+
+-- --- vendedores_fiscais (3 colunas) ---
+-- Comentário: Vinculo fiscal vendedor x empresa emitente. PK = public.vendedores.id_vendedor (FK logica).
+--   id_vendedor                         bigint  NOT NULL
+--                                       → Ref logica a public.vendedores.id_vendedor (sem FK fisica)
+--   empresa_emitente_id                 integer
+--                                       → CNPJ emitente que este vendedor representa (NULL = generico/fabrica)
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id_vendedor
+--                                      FK: empresa_emitente_id → alissonerp.empresas_emitentes(id)
+
+-- --- webhook_config (8 colunas) ---
+-- Comentário: Configuracao dos 9 webhooks n8n. URLs e status.
+--   id                                  integer  NOT NULL  DEFAULT nextval('alissonerp.webhook_config_id_seq'::regclass)
+--   nome                                character varying  NOT NULL
+--   url                                 text  NOT NULL
+--   ativo                               boolean  DEFAULT true
+--   descricao                           text
+--   ultimo_disparo                      timestamp with time zone
+--   total_disparos                      integer  DEFAULT 0
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- webhook_log (7 colunas) ---
+-- Comentário: Log de todos os disparos de webhooks.
+--   id                                  bigint  NOT NULL  DEFAULT nextval('alissonerp.webhook_log_id_seq'::regclass)
+--   webhook_nome                        character varying
+--   payload                             jsonb
+--   response_status                     integer
+--   response_body                       text
+--   erro                                text
+--   created_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- =============================================================
+-- SCHEMA: public
+-- =============================================================
+
+-- --- backup_itens_venda_3313 (13 colunas) ---
+--   id                                  integer
+--   venda_id                            integer
+--   produto_id                          integer
+--   sku                                 text
+--   quantidade                          numeric
+--   preco_tabela                        numeric
+--   preco_unitario_final                numeric
+--   preco_total                         numeric
+--   desconto_percentual                 numeric
+--   desconto_valor                      numeric
+--   comissao_valor                      numeric
+--   comissao_percentual                 numeric
+--   n8n                                 boolean
+
+-- --- backup_itens_venda_pre_correcao_marco (13 colunas) ---
+--   id                                  integer
+--   venda_id                            integer
+--   produto_id                          integer
+--   sku                                 text
+--   quantidade                          numeric
+--   preco_tabela                        numeric
+--   preco_unitario_final                numeric
+--   preco_total                         numeric
+--   desconto_percentual                 numeric
+--   desconto_valor                      numeric
+--   comissao_valor                      numeric
+--   comissao_percentual                 numeric
+--   n8n                                 boolean
+
+-- --- backup_itens_venda_test_3313 (13 colunas) ---
+--   id                                  integer
+--   venda_id                            integer
+--   produto_id                          integer
+--   sku                                 text
+--   quantidade                          numeric
+--   preco_tabela                        numeric
+--   preco_unitario_final                numeric
+--   preco_total                         numeric
+--   desconto_percentual                 numeric
+--   desconto_valor                      numeric
+--   comissao_valor                      numeric
+--   comissao_percentual                 numeric
+--   n8n                                 boolean
+
+-- --- banco_imagens (3 colunas) ---
+--   id                                  bigint  NOT NULL
+--   produto_id_api                      bigint
+--   imagem                              text
+--                                      PK: id
+
+-- --- categoria_precificação (5 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   categoryName                        character varying
+--   range                               character varying
+--   curvePoints                         ARRAY
+--                                      PK: id
+
+-- --- categorias (3 colunas) ---
+--   id                                  bigint  NOT NULL
+--   descricao                           character varying  NOT NULL
+--   pai_id                              bigint
+--                                      PK: id
+
+-- --- categorias_receitas_despesas (4 colunas) ---
+--   id_categoria                        bigint  NOT NULL
+--   id_api_categoria                    bigint
+--   descricao                           text
+--   grupo                               text
+--                                      PK: id_categoria
+
+-- --- comissoes (4 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   nome                                character varying
+--   tabela                              json
+--                                      PK: id
+
+-- --- complementos_contatos (8 colunas) ---
+--   id                                  bigint  NOT NULL
+--   produtos_interessse                 text
+--   instagram                           text
+--   orcamento_mensal                    text
+--   data_casamento                      text
+--   data_noivado                        text
+--   contato_id_api                      bigint
+--   estado_civil                        text
+--                                      PK: id
+
+-- --- config_orcamento_aliancas (11 colunas) ---
+--   id                                  uuid  NOT NULL  DEFAULT gen_random_uuid()
+--   name                                text  NOT NULL
+--   start_mkp                           numeric
+--   discount_percent                    numeric
+--   gold_price                          numeric
+--   camera_override                     numeric
+--   profile                             text
+--   pricing_categories                  jsonb  NOT NULL
+--   groove_rules                        jsonb  NOT NULL
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- contas_a_pagar (24 colunas) ---
+--   id                                  bigint  NOT NULL
+--   id_api_conta                        bigint
+--   situacao                            text
+--   data                                date
+--   data_vencimento                     date
+--   data_competencia                    date
+--   data_liquidacao                     date
+--   dia_vencimento                      text
+--   dia_semanavencimento                text
+--   numero_documento                    text
+--   serie_documento                     text
+--   ocorrencia                          text
+--   qtd_parcelas                        text
+--   valor                               double precision
+--   saldo                               double precision
+--   valor_pago                          double precision
+--   multa                               double precision
+--   juros                               double precision
+--   forma_pagamento                     text
+--   historico                           text
+--   marcador                            text
+--   fornecedor_id_api                   bigint
+--   categoria_id_api                    bigint
+--   hash                                text
+--                                      PK: id
+
+-- --- contas_a_receber (27 colunas) ---
+--   id                                  bigint  NOT NULL
+--   id_api_conta                        bigint
+--   situacao                            character varying
+--   data                                date
+--   data_vencimento                     date
+--   data_competencia                    date
+--   data_liquidacao                     date
+--   dia_vencimento                      numeric
+--   dia_semana_vencimento               numeric
+--   numero_documento                    character varying
+--   serie_documento                     numeric
+--   ocorrencia                          character varying
+--   quantidade_parcelas                 numeric
+--   valor                               numeric
+--   saldo                               numeric
+--   juros                               numeric
+--   multa                               numeric
+--   valor_pago                          numeric
+--   cliente_id_api                      bigint
+--   categoria_id_api                    bigint
+--   forma_recebimento                   character varying
+--   historico                           character varying
+--   link_boleto                         character varying
+--   qtd_parcelas_antecipadas            numeric
+--   marcadores                          character varying
+--   hash                                text
+--   pedido_id_api                       bigint
+--                                      PK: id
+
+-- --- contatos (24 colunas) ---
+--   id_contato                          bigint  NOT NULL
+--   id_api_contato                      bigint
+--   tipo_idapi                          bigint
+--   nome                                text
+--   codigo                              text
+--   fantasia                            text
+--   tipo_pessoa                         text
+--   cpf_cnpj                            text
+--   inscricao_estadual                  text
+--   rg                                  text
+--   telefone                            text
+--   celular                             text
+--   email                               text
+--   endereco                            text
+--   numero                              text
+--   complemento                         text
+--   bairro                              text
+--   municipio                           text
+--   cep                                 text
+--   uf                                  text
+--   pais                                text
+--   vendedor_idapi                      bigint
+--   data_atualizacao                    timestamp with time zone
+--   id_kommo                            bigint
+--                                      PK: id_contato
+
+-- --- controle_de_execucao (3 colunas) ---
+--   id                                  bigint  NOT NULL
+--   timestamp                           timestamp with time zone
+--   descricao                           text
+--                                      PK: id
+
+-- --- controle_entregas (19 colunas) ---
+-- Comentário: Registros de entregas de pedidos realizadas pelo entregador
+--   id                                  bigint  NOT NULL  DEFAULT nextval('controle_entregas_id_seq'::regclass)
+--   pedido_id                           bigint
+--                                       → ID da venda entregue (referencia vendas.id)
+--   entregador_responsavel              text  NOT NULL
+--                                       → Nome do entregador responsável pela entrega
+--   data_entrega                        timestamp with time zone  NOT NULL
+--                                       → Data em que a entrega foi realizada
+--   valor_entrega                       numeric  NOT NULL
+--                                       → Valor cobrado pela entrega
+--   observacoes                         text
+--                                       → Observações op… obrigatório)
+--   anexos_path                         ARRAY  NOT NULL
+--   numero_pedido_plataforma            text
+--                                       → Snapshot: Número do pedido na plataforma (n_pedido_ecommerce)
+--   numero_pedido_tiny                  text
+--                                       → Snapshot: Número do pedido no Tiny (numero_pedido)
+--   nome_cliente                        text  NOT NULL
+--                                       → Snapshot: Nome do cliente no momento da entrega
+--   frete_pago_cliente                  numeric
+--                                       → Snapshot: Valor do frete pago pelo cliente
+--   bairro_entrega                      text
+--                                       → Snapshot: Bairro de entrega do pedido
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   created_by                          uuid
+--                                       → UUID do usuário que criou o registro (referencia user_profiles.id_user)
+--   vendedor_responsavel_id             bigint  NOT NULL
+--   entrega_type                        character varying  NOT NULL
+--   status_aprovacao                    character varying  NOT NULL  DEFAULT '3'::character varying
+--   descricao_entrega                   text
+--                                      PK: id
+
+-- --- controle_requisicao (5 colunas) ---
+--   id                                  bigint  NOT NULL
+--   nome_fluxo                          text
+--   duração                             text
+--   total_reqs                          text
+--   reqs_minuto                         text
+--                                      PK: id
+
+-- --- controle_sequencia (2 colunas) ---
+--   nome_tabela                         text  NOT NULL
+--   ultimo_numero                       integer
+--                                      PK: nome_tabela
+
+-- --- cotacao (4 colunas) ---
+--   id                                  bigint  NOT NULL
+--   data_hora                           timestamp without time zone
+--   moeda                               text
+--   cotacao                             real
+--                                      PK: id
+
+-- --- estoque (12 colunas) ---
+--   id_estoque                          bigint  NOT NULL
+--   produto_id_api                      bigint
+--   sku                                 character varying
+--   estoque_loja                        numeric
+--   estoque_reposicao_srvc              numeric
+--   estoque_marketing                   numeric
+--   estoque_alisson                     numeric
+--   estoque_dara                        numeric
+--   estoque_service                     numeric
+--   estoque_fabrica                     numeric
+--   saldo                               bigint
+--   reserva                             bigint
+--                                      PK: id_estoque
+
+-- --- ficha_tecnica (4 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   descricao                           text
+--   ficha_tecnica                       json
+--                                      PK: id
+
+-- --- ficha_tecnica_orcamento (12 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   modelo                              character varying
+--   aro_numeracao                       character varying
+--   largura                             character varying
+--   espessura                           character varying
+--   peso_estimado                       character varying
+--   tipo_fonte                          character varying
+--   texto                               text
+--   qtd_pedras                          character varying
+--   tamanho_pedra                       character varying
+--   tipo_aplicacao_pedra                character varying
+--                                      PK: id
+
+-- --- ficha_tecnica_produto (13 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   produto_id                          bigint
+--   modelo                              character varying
+--   largura                             numeric
+--   espessura                           numeric
+--   peso_estimado                       numeric
+--   tipo_fonte                          character varying
+--   texto                               character varying
+--   qtd_pedras                          numeric
+--   tamanho_pedra                       numeric
+--   tipo_apilicacao_pedra               numeric
+--   aro_numeracao                       character varying
+--                                      PK: id
+
+-- --- fila_webhooks_n8n (5 colunas) ---
+--   id                                  bigint  NOT NULL
+--   produto_id                          bigint  NOT NULL
+--   enviado                             boolean  NOT NULL  DEFAULT false
+--   criado_em                           timestamp with time zone  NOT NULL  DEFAULT now()
+--   enviado_em                          timestamp with time zone
+--                                      PK: id
+
+-- --- fin_conciliacoes (8 colunas) ---
+-- Comentário: Match entre lançamentos bancários e contas_a_pagar
+--   id                                  bigint  NOT NULL  DEFAULT nextval('fin_conciliacoes_id_seq'::regclass)
+--   lancamento_id                       bigint  NOT NULL
+--   conta_pagar_id                      bigint  NOT NULL
+--   status                              text  NOT NULL  DEFAULT 'confirmado'::text
+--   diferenca_valor                     numeric  NOT NULL  DEFAULT 0
+--   diferenca_dias                      integer  NOT NULL  DEFAULT 0
+--   confirmado_em                       timestamp with time zone
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: lancamento_id → public.fin_lancamentos_bancarios(id)
+
+-- --- fin_extratos_bancarios (11 colunas) ---
+-- Comentário: Extratos OFX/CSV importados pela Esmeralda
+--   id                                  bigint  NOT NULL  DEFAULT nextval('fin_extratos_bancarios_id_seq'::regclass)
+--   banco                               text  NOT NULL
+--   nome_arquivo                        text
+--   status                              text  NOT NULL  DEFAULT 'processando'::text
+--   total_importado                     integer  DEFAULT 0
+--   total_conciliado                    integer  DEFAULT 0
+--   total_divergencias                  integer  DEFAULT 0
+--   importado_em                        timestamp with time zone  NOT NULL  DEFAULT now()
+--   arquivo_id                          uuid
+--   conteudo_ofx                        text
+--   n8n_execution_id                    character varying
+--                                      PK: id
+
+-- --- fin_lancamentos_bancarios (7 colunas) ---
+-- Comentário: Lançamentos individuais do extrato bancário
+--   id                                  bigint  NOT NULL  DEFAULT nextval('fin_lancamentos_bancarios_id_seq'::regclass)
+--   extrato_id                          bigint  NOT NULL
+--   data_lancamento                     date  NOT NULL
+--   descricao                           text
+--   valor                               numeric  NOT NULL
+--   tipo                                text  NOT NULL
+--   fitid                               text  NOT NULL
+--                                       → ID único OFX — garante idempotência no reimport
+--                                      PK: id
+--                                      FK: extrato_id → public.fin_extratos_bancarios(id)
+
+-- --- fonte_entrada_kommo (3 colunas) ---
+--   id                                  bigint  NOT NULL
+--   id_fonte                            bigint
+--   descricao                           character varying
+--                                      PK: id
+
+-- --- forma_envio (6 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   id_api                              bigint
+--   tipo                                character varying
+--   situacao                            character varying
+--   nome                                character varying
+--                                      PK: id
+
+-- --- forma_frete (8 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   nome                                character varying
+--   codigo                              character varying
+--   codigo_externo                      character varying
+--   tipo_entrega                        character varying
+--   id_api                              bigint
+--   id_api_logistica                    bigint
+--                                      PK: id
+
+-- --- forma_pagamento (6 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   descricao                           character varying
+--   slug                                character varying  NOT NULL
+--   id_api_tiny                         bigint
+--   status                              boolean  DEFAULT false
+--                                      PK: id
+
+-- --- historico_ordem (3 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   ordem                               json
+--                                      PK: id
+
+-- --- historico_preco (6 colunas) ---
+--   id                                  bigint  NOT NULL
+--   id_api_produto                      bigint
+--   preco_atualizado                    double precision
+--   data                                timestamp without time zone
+--   preco_antigo                        double precision
+--   variacao_percentual                 numeric
+--                                      PK: id
+
+-- --- historico_venda_ja (3 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   venda                               json
+--                                      PK: id
+
+-- --- indicadores_marketing (17 colunas) ---
+--   id                                  bigint  NOT NULL
+--   gid                                 bigint
+--   c-                                  character varying
+--   data_publicacao                     date
+--   responsavel                         character varying
+--   campanha                            character varying
+--   drive_url                           character varying
+--   estrategia_storie                   character varying
+--   produtos                            character varying
+--   alcance                             character varying
+--   conclusao                           character varying
+--   engajamento                         character varying
+--   qtd_comentarios                     character varying
+--   ctr                                 character varying
+--   abandono                            character varying
+--   descricao                           character varying
+--   url_task                            character varying
+--                                      PK: id
+
+-- --- itens_da_ordem (7 colunas) ---
+--   id                                  bigint  NOT NULL
+--   ordem_id                            bigint
+--   produto_id                          bigint
+--   gtin                                character varying
+--   qtd                                 numeric
+--   preco                               numeric
+--   ipi                                 numeric
+--                                      PK: id
+
+-- --- itens_pedido (6 colunas) ---
+--   id_item                             bigint  NOT NULL
+--   produto_id_api                      bigint
+--   inf_adicional                       text
+--   quantidade                          bigint
+--   valor_unitario                      double precision
+--   pedido_id_api                       bigint
+--                                      PK: id_item
+
+-- --- itens_venda (13 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('itens_venda_id_seq'::regclass)
+--   venda_id                            integer
+--   produto_id                          integer
+--   sku                                 text
+--   quantidade                          numeric
+--   preco_tabela                        numeric
+--   preco_unitario_final                numeric
+--   preco_total                         numeric
+--   desconto_percentual                 numeric
+--   desconto_valor                      numeric
+--   comissao_valor                      numeric
+--   comissao_percentual                 numeric
+--                                       → Percentual de comissão aplicado no momento da conclusão da venda. Valor estático que não muda mesmo se a tabela de comissão do vendedor for alterada posteriormente.
+--   n8n                                 boolean
+--                                      PK: id
+
+-- --- leads (17 colunas) ---
+--   id                                  bigint  NOT NULL
+--   id_lead                             bigint  NOT NULL
+--   fonte_entrada_id                    bigint
+--   consultor                           character varying
+--   data_entrada                        date
+--   data_fechamento                     date
+--   motivo_perda                        character varying
+--   pedido_tiny                         character varying
+--   contao_nome                         character varying
+--   contato_telefone                    character varying
+--   etapa_lead                          character varying
+--   nome_lead                           character varying
+--   data_criacao                        timestamp with time zone  DEFAULT now()
+--   data_atualizacao                    timestamp with time zone  DEFAULT now()
+--   id_vendedor                         bigint
+--   status_pedido                       boolean
+--   status_id                           bigint
+--                                      PK: id, id_lead
+
+-- --- loock (4 colunas) ---
+--   id                                  bigint  NOT NULL
+--   flow_name                           character varying
+--   timestamp                           timestamp without time zone
+--   status                              character varying
+--                                      PK: id
+
+-- --- map_asana (3 colunas) ---
+--   id                                  bigint  NOT NULL
+--   numero_pedido                       text  NOT NULL
+--   gid                                 bigint
+--                                      PK: id
+
+-- --- map_vendedor_kommo (3 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   id_api_kommo                        bigint
+--                                      PK: id
+
+-- --- meio_pagamento (7 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   descricao                           character varying
+--   forma_pagamento_id                  bigint
+--   slug                                character varying
+--   id_api_tiny                         bigint
+--   status                              boolean  DEFAULT true
+--                                      PK: id
+
+-- --- metas_mensais (11 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   mes_ano                             date  NOT NULL
+--   horas_dia                           integer  NOT NULL
+--   hora_inicio                         integer  NOT NULL
+--   dias_trabalhados                    integer  NOT NULL
+--   valor_ouro                          numeric  NOT NULL
+--   valor_prata                         numeric  NOT NULL
+--   valor_diamante                      numeric  NOT NULL
+--   consultora                          bigint  NOT NULL
+--   dias_nao_trabalhados                text
+--                                      PK: id
+
+-- --- metas_por_hora (8 colunas) ---
+--   id                                  bigint  NOT NULL
+--   meta_mensal_id                      bigint
+--   created_at                          timestamp without time zone  NOT NULL  DEFAULT now()
+--   data_hora                           timestamp without time zone  NOT NULL
+--   consultora                          bigint  NOT NULL
+--   tipo_meta                           text  NOT NULL
+--   valor_meta                          numeric  NOT NULL
+--   meta_acumulada                      numeric
+--                                      PK: id
+
+-- --- notificacoes (10 colunas) ---
+-- Comentário: Tabela de notificações do sistema
+--   id                                  integer  NOT NULL  DEFAULT nextval('notificacoes_id_seq'::regclass)
+--   user_id                             uuid  NOT NULL
+--                                       → UUID do usuário que recebe a notificação
+--   tipo                                character varying  NOT NULL
+--                                       → Tipo de notificação: mencao_comentario, resposta_comentario, etc
+--   entidade_tipo                       character varying  NOT NULL
+--                                       → Tipo da entidade que gerou a notificação: comentario, ordem, tarefa, etc
+--   entidade_id                         integer  NOT NULL
+--                                       → ID da entidade relacionada
+--   dados_contexto                      jsonb  NOT NULL  DEFAULT '{}'::jsonb
+--   lida                                boolean  NOT NULL  DEFAULT false
+--   lida_em                             timestamp with time zone
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   deleted_at                          timestamp with time zone
+--                                      PK: id
+
+-- --- orcamento (17 colunas) ---
+--   id                                  bigint  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL
+--   vendedor_id                         bigint
+--   sku                                 character varying
+--   status                              bigint
+--                                       → OS STATUS DO ORÇAMENTO POSSÍVEIS SÃO: 1: CANCELADO, 2: APROVADO, 3: PENDENTE
+--   nome_cliente                        character varying
+--   nome_modelo                         character varying
+--   peso                                numeric
+--   valor                               numeric
+--   fichaTecnica_id                     bigint
+--   cliente_id                          bigint
+--   numero_orcamento                    character varying
+--   cancelamento_descricao              text
+--                                       → Descrição do porquê aquele orçamento foi cancelado
+--   cancelado_by                        uuid
+--   aprovado_by                         uuid
+--   cancelado_at                        timestamp with time zone
+--   aprovado_at                         timestamp with time zone
+--                                      PK: id
+
+-- --- ordem_compras (14 colunas) ---
+--   id                                  bigint  NOT NULL
+--   id_ordem                            bigint
+--   numero_pedido                       character varying
+--   data                                date
+--   situacao                            character varying
+--   desconto                            character varying
+--   frete                               numeric
+--   total_produtos                      numeric
+--   total_compra                        numeric
+--   fornecedor_id                       bigint
+--   categoria                           character varying
+--   frete_por_conta                     character varying
+--   observacoes                         character varying
+--   observacoes_internas                character varying
+--                                      PK: id
+
+-- --- pagamentos (9 colunas) ---
+--   id                                  bigint  NOT NULL
+--   id_api_pagamento                    bigint
+--   data                                date
+--   conta_id_api                        bigint
+--   valor_pago                          double precision
+--   valor_taxa                          double precision
+--   valor_juros                         double precision
+--   valor_acrescimo                     double precision
+--   tipo                                text
+--                                      PK: id
+
+-- --- parametros (6 colunas) ---
+--   id                                  bigint  NOT NULL
+--   ouro                                real
+--   dollar                              double precision
+--   euro                                double precision
+--   prata_api                           real
+--   prata_manual                        double precision
+--                                      PK: id
+
+-- --- parcelas_da_ordem (7 colunas) ---
+--   id                                  bigint  NOT NULL
+--   ordem_id                            bigint  NOT NULL
+--   numero                              integer
+--   data_vencimento                     timestamp without time zone
+--   valor                               numeric
+--   meio_pagamento                      character varying
+--   observacoes                         character varying
+--                                      PK: id
+
+-- --- parcelas_pedidos (8 colunas) ---
+--   id_parcela                          bigint  NOT NULL
+--   dias                                bigint
+--   data                                date
+--   valor                               double precision
+--   observacao                          text
+--   forma_pagamento                     text
+--   meio_pagamento                      text
+--   pedido_id_api                       bigint
+--                                      PK: id_parcela
+
+-- --- pedidos (40 colunas) ---
+--   id                                  bigint  NOT NULL
+--   id_api_pedido                       bigint
+--   numero_pedido                       text
+--   data_pedido                         date
+--   observacoes                         text
+--   obs_internas                        text
+--   data_prevista                       date
+--   data_envio                          date
+--   data_entrega                        date
+--   data_faturamento                    date
+--   situacao                            text
+--   ordem_compra                        text
+--   cliente_id_api                      bigint
+--   vendedor_id_api                     bigint
+--   transportador                       text
+--   frete_por_conta                     text
+--   forma_envio                         text
+--   forma_frete                         text
+--   codigo_rastreamento                 text
+--   url_rastreamento                    text
+--   deposito                            text
+--   natureza_operacao                   text
+--   ecommerce                           text
+--   n_pedido_ecommerce                  text
+--   canal_venda                         text
+--   n_canal_venda                       text
+--   condicao_pagamento                  text
+--   forma_pagamento                     text
+--   meio_pagamento                      text
+--   valor_produtos                      double precision
+--   valor_frete                         double precision
+--   valor_outras_despesas               double precision
+--   valor_total_pedido                  double precision
+--   valor_desconto                      double precision
+--   marcador                            text
+--   cpf_cnpj                            text
+--   etapa                               character varying
+--   consultora_lead                     bigint
+--   id_lead                             bigint
+--   endereco_entrega                    jsonb
+--                                      PK: id
+
+-- --- produtos (44 colunas) ---
+--   id_produto                          bigint  NOT NULL
+--   id_api_produto                      bigint
+--   sku                                 character varying
+--   nome                                character varying
+--   tipo_metal                          character varying
+--   tipo                                character varying
+--   situacao                            character varying
+--   unidade                             character varying
+--   gtin                                character varying
+--   categoria                           character varying
+--   marca                               character varying
+--   qtd_estoque                         bigint
+--   preco_tiny                          numeric
+--   preco_promocional                   numeric
+--   preco_custo                         numeric
+--   preco_custo_medio                   numeric
+--   preco_na_cotacao                    numeric
+--   custo_na_cotacao                    numeric
+--   peso_precificado                    double precision
+--   markup                              double precision
+--   fator                               real
+--   fornecedor_etl                      character varying
+--   preco_sync                          numeric
+--   imagem                              text
+--   data_atualizacao_preco              timestamp without time zone
+--   diferenca_percentual                numeric  DEFAULT NULL::numeric
+--   fornecedor_id_api                   bigint
+--   estoque_minimo                      integer
+--   estoque_maximo                      integer
+--   imagem_capa                         uuid
+--   tipo_de_pedra                       character varying
+--   url_drive                           character varying
+--   peso_real                           real
+--   iframe                              character varying
+--   data_atualizacao                    timestamp without time zone
+--   id_kommo                            bigint
+--   data_ultima_compra                  date
+--   prompt_imagem_ia                    text
+--   sob_encomenda                       character varying
+--   prazo_producao                      integer
+--   categoria_precificacao              character varying
+--   tem_pedra_preciosa                  boolean  DEFAULT false
+--   preco_pedras                        numeric  DEFAULT 0
+--   preco_total_sync                    numeric
+--                                      PK: id_produto
+
+-- --- public_links (7 colunas) ---
+--   id                                  uuid  NOT NULL  DEFAULT gen_random_uuid()
+--   resource_type                       text  NOT NULL
+--   resource_id                         text  NOT NULL
+--   created_by                          uuid
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   expires_at                          timestamp with time zone
+--   extra_json                          jsonb  DEFAULT '{}'::jsonb
+--                                      PK: id
+
+-- --- recebimentos (10 colunas) ---
+--   id                                  bigint  NOT NULL
+--   id_api_recebimento                  bigint
+--   conta_id_api                        bigint
+--   data                                date
+--   valor_pago                          numeric
+--   valor_taxa                          numeric
+--   valor_juros                         numeric
+--   valor_desconto                      numeric
+--   valor_acrescimo                     numeric
+--   tipo                                character varying
+--                                      PK: id
+
+-- --- relacao_tinny_moura (3 colunas) ---
+--   id_tiny                             bigint  NOT NULL
+--   produto_id_moura                    bigint
+--   sku                                 character varying
+--                                      PK: id_tiny
+
+-- --- solicitacoes_vale_troca (8 colunas) ---
+--   id                                  uuid  NOT NULL  DEFAULT gen_random_uuid()
+--   venda_id                            integer  NOT NULL
+--   cliente_id                          integer  NOT NULL
+--   vale_origem_id                      uuid
+--   valor                               numeric  NOT NULL
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   id_asana                            text
+--                                       → Id da tarefa criada no Asana
+--                                      PK: id
+
+-- --- staging_markup_aprovacao (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('staging_markup_aprovacao_id_seq'::regclass)
+--   dados_json                          jsonb  NOT NULL
+--   status                              character varying  DEFAULT 'pendente'::character varying
+--   criado_em                           timestamp without time zone  DEFAULT CURRENT_TIMESTAMP
+--   atualizado_em                       timestamp without time zone  DEFAULT CURRENT_TIMESTAMP
+--   sku                                 text
+--                                      PK: id
+
+-- --- suporte_conversas (6 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('suporte_conversas_id_seq'::regclass)
+--   telefone                            text  NOT NULL
+--   historico                           jsonb  NOT NULL  DEFAULT '[]'::jsonb
+--   dados_temp                          jsonb  NOT NULL  DEFAULT '{}'::jsonb
+--   escalado                            boolean  NOT NULL  DEFAULT false
+--   updated_at                          timestamp without time zone  DEFAULT now()
+--                                      PK: id
+
+-- --- teste (2 colunas) ---
+--   id                                  integer
+--   teste                               character varying
+
+-- --- tipos_contatos (3 colunas) ---
+--   id_tipo                             bigint  NOT NULL
+--   id_api_tipo                         bigint
+--   descrição                           text
+--                                      PK: id_tipo
+
+-- --- user_profiles (13 colunas) ---
+--   id_user                             uuid  NOT NULL  DEFAULT gen_random_uuid()
+--   email                               character varying  NOT NULL
+--   password_hash                       character varying  NOT NULL
+--   name                                character varying  NOT NULL
+--   role                                character varying  NOT NULL  DEFAULT 'user'::character varying
+--   avatar_url                          text
+--   phone                               character varying
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp with time zone  DEFAULT now()
+--   last_login                          timestamp with time zone
+--   is_active                           boolean  DEFAULT true
+--   vendedor_id                         bigint
+--   mx_desconto_permitido               numeric
+--                                      PK: id_user
+
+-- --- vales_troca (9 colunas) ---
+--   id                                  uuid  NOT NULL  DEFAULT gen_random_uuid()
+--   codigo_voucher                      text  NOT NULL
+--   valor                               numeric  NOT NULL
+--   cliente_id                          integer  NOT NULL
+--   criado_por                          uuid
+--   status                              character varying  NOT NULL  DEFAULT 'ativo'::character varying
+--                                       → tipos possíveis: ativo, pendente, utilizado, cancelado
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   observacao                          text
+--   venda_id                            integer
+--                                      PK: id
+
+-- --- vendas (28 colunas) ---
+--   id                                  integer  NOT NULL  DEFAULT nextval('vendas_id_seq'::regclass)
+--   created_at                          timestamp with time zone  DEFAULT now()
+--   updated_at                          timestamp without time zone  DEFAULT now()
+--   cliente_id                          integer
+--   vendedor_id                         integer
+--   data_venda                          date
+--   data_envio                          timestamp with time zone
+--   status                              integer
+--   total_produtos                      numeric
+--   total_venda                         numeric
+--   total_itens_qnt                     integer
+--   total_itens_unidades                integer
+--   forma_envio_id                      integer
+--   forma_frete_id                      integer
+--   endereco_cobranca                   jsonb
+--   dados_entrega                       jsonb
+--   dados_pagamento                     jsonb
+--   observacoes_internas                text
+--   observacoes                         text
+--   arquivos_path                       ARRAY
+--   frete_pago_cliente                  double precision
+--   lead_id                             bigint
+--   numero_pedido_tiny                  text
+--   id_api_tiny                         bigint
+--   public_link_uuid                    text
+--   entregue                            boolean  NOT NULL  DEFAULT false
+--                                       → Indica se a venda já foi entregue (possui registro na tabela controle_entregas)
+--   numero_pedido                       bigint
+--   pedido_numero                       integer
+--                                      PK: id
+
+-- --- vendedores (11 colunas) ---
+--   id_vendedor                         bigint  NOT NULL
+--   nome                                text
+--   id_api_vendedor                     bigint
+--   foto                                text
+--   situacao                            USER-DEFINED
+--   id_api_kommo                        bigint
+--   cpf                                 text
+--   email                               text
+--   user_id                             uuid
+--   comissao                            bigint
+--   gerente_orcamento                   boolean
+--                                      PK: id_vendedor
+
+-- =============================================================
+-- SCHEMA: auth
+-- =============================================================
+
+-- --- audit_log_entries (5 colunas) ---
+-- Comentário: Auth: Audit trail for user actions.
+--   instance_id                         uuid
+--   id                                  uuid  NOT NULL
+--   payload                             json
+--   created_at                          timestamp with time zone
+--   ip_address                          character varying  NOT NULL  DEFAULT ''::character varying
+--                                      PK: id
+
+-- --- flow_state (12 colunas) ---
+-- Comentário: stores metadata for pkce logins
+--   id                                  uuid  NOT NULL
+--   user_id                             uuid
+--   auth_code                           text  NOT NULL
+--   code_challenge_method               USER-DEFINED  NOT NULL
+--   code_challenge                      text  NOT NULL
+--   provider_type                       text  NOT NULL
+--   provider_access_token               text
+--   provider_refresh_token              text
+--   created_at                          timestamp with time zone
+--   updated_at                          timestamp with time zone
+--   authentication_method               text  NOT NULL
+--   auth_code_issued_at                 timestamp with time zone
+--                                      PK: id
+
+-- --- identities (9 colunas) ---
+-- Comentário: Auth: Stores identities associated to a user.
+--   provider_id                         text  NOT NULL
+--   user_id                             uuid  NOT NULL
+--   identity_data                       jsonb  NOT NULL
+--   provider                            text  NOT NULL
+--   last_sign_in_at                     timestamp with time zone
+--   created_at                          timestamp with time zone
+--   updated_at                          timestamp with time zone
+--   email                               text
+--                                       → Auth: Email is a generated column that references the optional email property in the identity_data
+--   id                                  uuid  NOT NULL  DEFAULT gen_random_uuid()
+--                                      PK: id
+--                                      FK: user_id → auth.users(id)
+
+-- --- instances (5 colunas) ---
+-- Comentário: Auth: Manages users across multiple sites.
+--   id                                  uuid  NOT NULL
+--   uuid                                uuid
+--   raw_base_config                     text
+--   created_at                          timestamp with time zone
+--   updated_at                          timestamp with time zone
+--                                      PK: id
+
+-- --- mfa_amr_claims (5 colunas) ---
+-- Comentário: auth: stores authenticator method reference claims for multi factor authentication
+--   session_id                          uuid  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL
+--   updated_at                          timestamp with time zone  NOT NULL
+--   authentication_method               text  NOT NULL
+--   id                                  uuid  NOT NULL
+--                                      PK: id
+--                                      FK: session_id → auth.sessions(id)
+
+-- --- mfa_challenges (7 colunas) ---
+-- Comentário: auth: stores metadata about challenge requests made
+--   id                                  uuid  NOT NULL
+--   factor_id                           uuid  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL
+--   verified_at                         timestamp with time zone
+--   ip_address                          inet  NOT NULL
+--   otp_code                            text
+--   web_authn_session_data              jsonb
+--                                      PK: id
+--                                      FK: factor_id → auth.mfa_factors(id)
+
+-- --- mfa_factors (13 colunas) ---
+-- Comentário: auth: stores metadata about factors
+--   id                                  uuid  NOT NULL
+--   user_id                             uuid  NOT NULL
+--   friendly_name                       text
+--   factor_type                         USER-DEFINED  NOT NULL
+--   status                              USER-DEFINED  NOT NULL
+--   created_at                          timestamp with time zone  NOT NULL
+--   updated_at                          timestamp with time zone  NOT NULL
+--   secret                              text
+--   phone                               text
+--   last_challenged_at                  timestamp with time zone
+--   web_authn_credential                jsonb
+--   web_authn_aaguid                    uuid
+--   last_webauthn_challenge_data        jsonb
+--                                       → Stores the latest WebAuthn challenge data including attestation/assertion for customer verification
+--                                      PK: id
+--                                      FK: user_id → auth.users(id)
+
+-- --- oauth_authorizations (17 colunas) ---
+--   id                                  uuid  NOT NULL
+--   authorization_id                    text  NOT NULL
+--   client_id                           uuid  NOT NULL
+--   user_id                             uuid
+--   redirect_uri                        text  NOT NULL
+--   scope                               text  NOT NULL
+--   state                               text
+--   resource                            text
+--   code_challenge                      text
+--   code_challenge_method               USER-DEFINED
+--   response_type                       USER-DEFINED  NOT NULL  DEFAULT 'code'::auth.oauth_response_type
+--   status                              USER-DEFINED  NOT NULL  DEFAULT 'pending'::auth.oauth_authorization_status
+--   authorization_code                  text
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   expires_at                          timestamp with time zone  NOT NULL  DEFAULT (now() + '00:03:00'::interval)
+--   approved_at                         timestamp with time zone
+--   nonce                               text
+--                                      PK: id
+--                                      FK: client_id → auth.oauth_clients(id)
+--                                      FK: user_id → auth.users(id)
+
+-- --- oauth_client_states (4 colunas) ---
+-- Comentário: Stores OAuth states for third-party provider authentication flows where Supabase acts as the OAuth client.
+--   id                                  uuid  NOT NULL
+--   provider_type                       text  NOT NULL
+--   code_verifier                       text
+--   created_at                          timestamp with time zone  NOT NULL
+--                                      PK: id
+
+-- --- oauth_clients (12 colunas) ---
+--   id                                  uuid  NOT NULL
+--   client_secret_hash                  text
+--   registration_type                   USER-DEFINED  NOT NULL
+--   redirect_uris                       text  NOT NULL
+--   grant_types                         text  NOT NULL
+--   client_name                         text
+--   client_uri                          text
+--   logo_uri                            text
+--   created_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   deleted_at                          timestamp with time zone
+--   client_type                         USER-DEFINED  NOT NULL  DEFAULT 'confidential'::auth.oauth_client_type
+--                                      PK: id
+
+-- --- oauth_consents (6 colunas) ---
+--   id                                  uuid  NOT NULL
+--   user_id                             uuid  NOT NULL
+--   client_id                           uuid  NOT NULL
+--   scopes                              text  NOT NULL
+--   granted_at                          timestamp with time zone  NOT NULL  DEFAULT now()
+--   revoked_at                          timestamp with time zone
+--                                      PK: id
+--                                      FK: client_id → auth.oauth_clients(id)
+--                                      FK: user_id → auth.users(id)
+
+-- --- one_time_tokens (7 colunas) ---
+--   id                                  uuid  NOT NULL
+--   user_id                             uuid  NOT NULL
+--   token_type                          USER-DEFINED  NOT NULL
+--   token_hash                          text  NOT NULL
+--   relates_to                          text  NOT NULL
+--   created_at                          timestamp without time zone  NOT NULL  DEFAULT now()
+--   updated_at                          timestamp without time zone  NOT NULL  DEFAULT now()
+--                                      PK: id
+--                                      FK: user_id → auth.users(id)
+
+-- --- refresh_tokens (9 colunas) ---
+-- Comentário: Auth: Store of tokens used to refresh JWT tokens once they expire.
+--   instance_id                         uuid
+--   id                                  bigint  NOT NULL  DEFAULT nextval('auth.refresh_tokens_id_seq'::regclass)
+--   token                               character varying
+--   user_id                             character varying
+--   revoked                             boolean
+--   created_at                          timestamp with time zone
+--   updated_at                          timestamp with time zone
+--   parent                              character varying
+--   session_id                          uuid
+--                                      PK: id
+--                                      FK: session_id → auth.sessions(id)
+
+-- --- saml_providers (9 colunas) ---
+-- Comentário: Auth: Manages SAML Identity Provider connections.
+--   id                                  uuid  NOT NULL
+--   sso_provider_id                     uuid  NOT NULL
+--   entity_id                           text  NOT NULL
+--   metadata_xml                        text  NOT NULL
+--   metadata_url                        text
+--   attribute_mapping                   jsonb
+--   created_at                          timestamp with time zone
+--   updated_at                          timestamp with time zone
+--   name_id_format                      text
+--                                      PK: id
+--                                      FK: sso_provider_id → auth.sso_providers(id)
+
+-- --- saml_relay_states (8 colunas) ---
+-- Comentário: Auth: Contains SAML Relay State information for each Service Provider initiated login.
+--   id                                  uuid  NOT NULL
+--   sso_provider_id                     uuid  NOT NULL
+--   request_id                          text  NOT NULL
+--   for_email                           text
+--   redirect_to                         text
+--   created_at                          timestamp with time zone
+--   updated_at                          timestamp with time zone
+--   flow_state_id                       uuid
+--                                      PK: id
+--                                      FK: flow_state_id → auth.flow_state(id)
+--                                      FK: sso_provider_id → auth.sso_providers(id)
+
+-- --- schema_migrations (1 colunas) ---
+-- Comentário: Auth: Manages updates to the auth system.
+--   version                             character varying  NOT NULL
+--                                      PK: version
+
+-- --- sessions (15 colunas) ---
+-- Comentário: Auth: Stores session data associated to a user.
+--   id                                  uuid  NOT NULL
+--   user_id                             uuid  NOT NULL
+--   created_at                          timestamp with time zone
+--   updated_at                          timestamp with time zone
+--   factor_id                           uuid
+--   aal                                 USER-DEFINED
+--   not_after                           timestamp with time zone
+--                                       → Auth: Not after is a nullable column that contains a timestamp after which the session should be regarded as expired.
+--   refreshed_at                        timestamp without time zone
+--   user_agent                          text
+--   ip                                  inet
+--   tag                                 text
+--   oauth_client_id                     uuid
+--   refresh_token_hmac_key              text
+--                                       → Holds a HMAC-SHA256 key used to sign refresh tokens for this session.
+--   refresh_token_counter               bigint
+--                                       → Holds the ID (counter) of the last issued refresh token.
+--   scopes                              text
+--                                      PK: id
+--                                      FK: oauth_client_id → auth.oauth_clients(id)
+--                                      FK: user_id → auth.users(id)
+
+-- --- sso_domains (5 colunas) ---
+-- Comentário: Auth: Manages SSO email address domain mapping to an SSO Identity Provider.
+--   id                                  uuid  NOT NULL
+--   sso_provider_id                     uuid  NOT NULL
+--   domain                              text  NOT NULL
+--   created_at                          timestamp with time zone
+--   updated_at                          timestamp with time zone
+--                                      PK: id
+--                                      FK: sso_provider_id → auth.sso_providers(id)
+
+-- --- sso_providers (5 colunas) ---
+-- Comentário: Auth: Manages SSO identity provider information; see saml_providers for SAML.
+--   id                                  uuid  NOT NULL
+--   resource_id                         text
+--                                       → Auth: Uniquely identifies a SSO provider according to a user-chosen resource ID (case insensitive), useful in infrastructure as code.
+--   created_at                          timestamp with time zone
+--   updated_at                          timestamp with time zone
+--   disabled                            boolean
+--                                      PK: id
+
+-- --- users (35 colunas) ---
+-- Comentário: Auth: Stores user login data within a secure schema.
+--   instance_id                         uuid
+--   id                                  uuid  NOT NULL  DEFAULT gen_random_uuid()
+--   aud                                 character varying
+--   role                                character varying
+--   email                               character varying
+--   encrypted_password                  character varying
+--   email_confirmed_at                  timestamp with time zone
+--   invited_at                          timestamp with time zone
+--   confirmation_token                  character varying
+--   confirmation_sent_at                timestamp with time zone
+--   recovery_token                      character varying
+--   recovery_sent_at                    timestamp with time zone
+--   email_change_token_new              character varying
+--   email_change                        character varying
+--   email_change_sent_at                timestamp with time zone
+--   last_sign_in_at                     timestamp with time zone
+--   raw_app_meta_data                   jsonb
+--   raw_user_meta_data                  jsonb
+--   is_super_admin                      boolean
+--   created_at                          timestamp with time zone  DEFAULT timezone('utc'::text, now())
+--   updated_at                          timestamp with time zone  DEFAULT timezone('utc'::text, now())
+--   phone                               text  DEFAULT NULL::character varying
+--   phone_confirmed_at                  timestamp with time zone
+--   phone_change                        text  DEFAULT ''::character varying
+--   phone_change_token                  character varying  DEFAULT ''::character varying
+--   phone_change_sent_at                timestamp with time zone
+--   confirmed_at                        timestamp with time zone
+--   email_change_token_current          character varying  DEFAULT ''::character varying
+--   email_change_confirm_status         smallint  DEFAULT 0
+--   banned_until                        timestamp with time zone
+--   reauthentication_token              character varying  DEFAULT ''::character varying
+--   reauthentication_sent_at            timestamp with time zone
+--   is_sso_user                         boolean  NOT NULL  DEFAULT false
+--                                       → Auth: Set this column to true when the account comes from SSO. These accounts can have duplicate emails.
+--   deleted_at                          timestamp with time zone
+--   is_anonymous                        boolean  NOT NULL  DEFAULT false
+--                                      PK: id
+
+-- =============================================================
+-- VIEWS
+-- =============================================================
+
+-- alissonerp.vw_aging_contas
+-- alissonerp.vw_apontamentos_ordem
+-- alissonerp.vw_auditorias_completa
+-- alissonerp.vw_cofre_ouro
+-- alissonerp.vw_cofre_ouro_disponivel
+-- alissonerp.vw_comissoes
+-- alissonerp.vw_contatos
+-- alissonerp.vw_crediario
+-- alissonerp.vw_dash_comissoes
+--   Dashboard Comercial: tabelas de comissão (JSON com faixas de desconto)
+-- alissonerp.vw_dash_controle_entregas
+--   Dashboard Comercial: entregas aprovadas (coluna "aprovada" normaliza status_aprovacao=2)
+-- alissonerp.vw_dash_forma_envio
+--   Dashboard Comercial: formas de envio (lookup)
+-- alissonerp.vw_dash_forma_frete
+--   Dashboard Comercial: formas de frete (lookup)
+-- alissonerp.vw_dash_itens_venda
+--   Dashboard Comercial: itens das vendas (para cálculo de comissão)
+-- alissonerp.vw_dash_leads
+--   Dashboard Comercial: leads do Kommo (coluna contato_nome corrige typo original)
+-- alissonerp.vw_dash_metas_mensais
+--   Dashboard Comercial: metas mensais por consultora (Ouro/Prata/Diamante)
+-- alissonerp.vw_dash_metas_por_hora
+--   Dashboard Comercial: metas granulares por hora (derivadas de metas_mensais)
+-- alissonerp.vw_dash_parcelas_pedidos
+--   Dashboard Comercial: parcelas (para cálculo de vale-troca por venda)
+-- alissonerp.vw_dash_pedidos_parcelas_detalhado
+--   Dashboard Comercial: view agregada parcelas+pedido (comparativo histórico)
+-- alissonerp.vw_dash_vendas
+--   Dashboard Comercial: vendas do Tiny ERP (read-only mirror de public.vendas)
+-- alissonerp.vw_dash_vendas_todas
+--   Dashboard Comercial: vendas unificadas legado (public.vendas) + ERP (vendas_erp). ERP inclui situacao aprovado/confirmado/enviado/entregue/concluido. ERP inclui >= 2026-04-23 e pré-cutoff sem duplicata aprovada no legado. valor_vale_troca pré-computado por fonte.
+-- alissonerp.vw_dash_vendedores
+--   Dashboard Comercial: vendedores/consultoras (id_vendedor, nome, foto, situacao)
+-- alissonerp.vw_dashboard_auditoria
+-- alissonerp.vw_detalhe_pote
+-- alissonerp.vw_estoque_comercial_alerta_v2
+-- alissonerp.vw_estoque_directus
+-- alissonerp.vw_estoque_directus_saldo
+-- alissonerp.vw_estoque_ordem
+-- alissonerp.vw_fichas_tecnicas
+-- alissonerp.vw_insumos_directus
+-- alissonerp.vw_kpis_gerais
+-- alissonerp.vw_movimentacoes_directus
+-- alissonerp.vw_ordem_detalhe
+-- alissonerp.vw_ordens_aguardando_auditoria_loja
+-- alissonerp.vw_ordens_completa
+-- alissonerp.vw_ordens_por_tipo
+-- alissonerp.vw_ordens_prontas_ida
+-- alissonerp.vw_ordens_prontas_pcp
+--   Ordens com auditoria loja aprovada, rota=pcp, sem PCP ainda.
+-- alissonerp.vw_ordens_prontas_volta
+-- alissonerp.vw_ouro_em_producao
+-- alissonerp.vw_pcp_completa
+--   View enriquecida do PCP do Directus com etapas mapeadas + dados da ordem. SOMENTE LEITURA.
+-- alissonerp.vw_pcp_erp
+-- alissonerp.vw_producao_mensal
+-- alissonerp.vw_produtividade_ourives
+-- alissonerp.vw_produto_capa
+--   Capa resolvida por produto: tenta capa própria → capa do pai (se variação) → fallback imagem_capa do Directus.
+-- alissonerp.vw_produto_imagens
+--   Galeria completa por produto em jsonb. Variações herdam do pai automaticamente. Cada elemento: {id, url, eh_capa, ordem, origem}. Usar em SELECT como vi.imagens.
+-- alissonerp.vw_produto_preco_vigente
+-- alissonerp.vw_produtos
+-- alissonerp.vw_produtos_erp
+-- alissonerp.vw_protocolo_ordens
+-- alissonerp.vw_protocolos_completo
+-- alissonerp.vw_protocolos_loja_completo
+--   Protocolos volta (loja) com criador. LEITURA.
+-- alissonerp.vw_quebra_mensal
+--   Tendencia mensal de quebra de ouro. Percentual sobre PMC (saída peças). LEITURA.
+-- alissonerp.vw_quebra_operadores
+-- alissonerp.vw_quebra_por_deposito
+-- alissonerp.vw_quebra_por_ourives
+--   Quebra de ouro por ourives (PCP concluidos). Percentual sobre PMC (saída peças). LEITURA.
+-- alissonerp.vw_quebra_por_setor
+--   Quebra de ouro agregada por setor (via distribuicao). Percentual sobre PMC. LEITURA.
+-- alissonerp.vw_quebra_setor_operador
+--   Quebra por operador dentro de cada setor (via distribuicao). Percentual sobre PMC. LEITURA.
+-- alissonerp.vw_resumo_financeiro
+-- alissonerp.vw_saldo_estoque
+-- alissonerp.vw_saldo_estoque_comercial
+-- alissonerp.vw_saldo_estoque_comercial_consolidado
+-- alissonerp.vw_saldo_estoque_comercial_v2
+-- alissonerp.vw_saldo_por_local
+-- alissonerp.vw_saldo_pote
+-- alissonerp.vw_saldo_pote_ouro
+-- alissonerp.vw_saldo_unificado
+--   Saldo consolidado por produto. ERP é fonte canônica quando há estoque_comercial_config.ativo = true; produtos legados (sem config) caem no fallback GREATEST de Tiny/Directus/filhos/pedra_extras. Migration 189.
+-- alissonerp.vw_timeline_ordem
+-- alissonerp.vw_transferencias_ordem
+-- alissonerp.vw_user_profiles
+-- alissonerp.vw_vendas
+-- alissonerp.vw_vendas_completa
+-- alissonerp.vw_vendas_erp_completa
+-- alissonerp.vw_vendedores
+-- public.contasareceberdetalhada
+-- public.crm_agente_runs
+-- public.crm_agentes_ia
+-- public.crm_audit_log
+-- public.crm_automacao_etapas
+-- public.crm_automacao_execucoes
+-- public.crm_automacao_gatilhos
+-- public.crm_automacoes
+-- public.crm_brechas
+-- public.crm_ciclo_vida_eventos
+-- public.crm_config_geral
+-- public.crm_contato_canais
+-- public.crm_conversas
+-- public.crm_conversas_completas
+--   Conversas com nome do cliente, vendedor e etapa do funil. Read-only.
+-- public.crm_funil_blocos
+-- public.crm_funil_etapas
+-- public.crm_funil_etapas_completas
+-- public.crm_funil_movimentos
+-- public.crm_funis
+-- public.crm_instagram_posts
+-- public.crm_kommo_config
+-- public.crm_mensagens
+-- public.crm_meta_config
+-- public.crm_motivos_perda
+-- public.crm_notificacoes
+-- public.crm_oportunidade_historico
+-- public.crm_oportunidades
+-- public.crm_oportunidades_completas
+-- public.crm_origens_lead
+-- public.crm_prompt_templates
+-- public.crm_sdr_runs
+-- public.crm_tarefas
+-- public.crm_unipile_config
+-- public.crm_user_perfil
+--   Perfil completo do user logado: email + nome ERP + role + vendedor ligado.
+-- public.crm_webhook_config
+-- public.crm_webhook_log
+-- public.fin_divergencias_pendentes
+--   Esmeralda vê apenas divergências — matches perfeitos são invisíveis
+-- public.pedidos_dashboard
+-- public.pedidos_parcelas_detalhado
+-- public.produtos_views
+-- public.users
+-- public.v_estoque_detalhado_insumo
+-- public.v_quebra_distribuicao
+-- public.v_saldo_quebra_final
+-- public.view_monitoramento_ordens
+
+-- =============================================================
+-- FUNÇÕES
+-- =============================================================
+
+-- alissonerp.atualizar_preco_produto_v2() → trigger
+-- alissonerp.fn_adicionar_dias_uteis(p_data_inicio date, p_dias_uteis integer) → date
+--   Retorna a data após N dias úteis (seg-sex). Não conta o dia de início.
+-- alissonerp.fn_aprovacao_para_entrega() → trigger
+--   Flow 06: aprovacoes_consultora→aprovado dispara INSERT em preparacoes_entrega.
+-- alissonerp.fn_atualizar_descricao_tarefa_conversao() → trigger
+-- alissonerp.fn_atualizar_parametros_sistema() → trigger
+-- alissonerp.fn_audit_log() → trigger
+-- alissonerp.fn_auditar_divergencia_total() → trigger
+-- alissonerp.fn_auto_auditoria_loja() → trigger
+-- alissonerp.fn_bloquear_compra() → trigger
+-- alissonerp.fn_bloquear_venda() → trigger
+-- alissonerp.fn_calc_qty_after_sle() → trigger
+-- alissonerp.fn_calcular_item_compra() → trigger
+-- alissonerp.fn_calcular_peso_pedra_gramas() → trigger
+-- alissonerp.fn_calcular_pmc_distribuicao(p_peso_final real, p_total_outros real, p_entrada real, p_retorno real) → TABLE(pmc real, quebra real, percentual real)
+-- alissonerp.fn_calcular_pmc_pcp(p_peso_final real, p_total_outros real, p_metal_externo real, p_entrada real,...) → TABLE(pmc real, quebra real, percentual real)
+-- alissonerp.fn_cancelar_pcp_ordem() → trigger
+-- alissonerp.fn_cofre_baixa_updated_at() → trigger
+-- alissonerp.fn_compra_gerar_conta_pagar() → trigger
+-- alissonerp.fn_concluir_compra() → trigger
+--   Concluir compra → CE entrada por item + bloquear edição.
+-- alissonerp.fn_concluir_distribuicao() → trigger
+--   Flow 1014: PMC=pf-outros (sem metal_ext), quebra=(entrada-retorno)-PMC, %=quebra/PMC. CE TEDMD+TEDPD.
+-- alissonerp.fn_concluir_protocolo() → trigger
+--   Flows 03+05: ida→cria PCPs em batch (saida_ordem vazia + pcp com zeros). volta→cria aprovacoes_consultora.
+-- alissonerp.fn_concluir_protocolo_conversao() → trigger
+-- alissonerp.fn_concluir_protocolo_conversao_sku() → trigger
+-- alissonerp.fn_cr_marcar_pago_mp(p_venda_id integer) → integer
+-- alissonerp.fn_criar_fechamento_por_ordem() → trigger
+--   Flow 1012: INSERT em fechamentos_distribuicao ao vincular ordem (trigger em distribuicao_ordens).
+-- alissonerp.fn_criar_item_distribuicao(p_dist_id integer, p_insumo_id integer, p_deposito_id integer, p_qtd real, p_...) → void
+--   Flow 1011: Upsert em itens_distribuicao. Tipos 5,6 subtraem.
+-- alissonerp.fn_criar_itens_ordem(p_ordem_id integer, p_insumo_id integer, p_deposito_id integer, p_qtd real, p...) → void
+--   Flow 1001: Cria/atualiza itens_ordem_insumos. Se existe soma peso, senao insere.
+-- alissonerp.fn_criar_itens_ordem(p_ordem_id integer, p_insumo_id integer, p_deposito_id integer, p_qtd real, p...) → void
+-- alissonerp.fn_criar_par_movimentacao(p_insumo_id integer, p_quantidade real, p_dep_origem integer, p_set_origem in...) → TABLE(saida_id bigint, entrada_id bigint)
+-- alissonerp.fn_criar_servico_from_pcp() → trigger
+-- alissonerp.fn_curva_touch_updated_at() → trigger
+-- alissonerp.fn_devolucoes_updated_at() → trigger
+-- alissonerp.fn_disparar_webhook(p_nome character varying, p_payload jsonb DEFAULT '{}'::jsonb) → void
+--   Registra disparo no log + atualiza contador. HTTP feito pelo frontend.
+-- alissonerp.fn_estoque_comercial_aprovar_venda() → trigger
+-- alissonerp.fn_estoque_comercial_baixa_venda() → trigger
+-- alissonerp.fn_estoque_comercial_cancelamento_venda() → trigger
+-- alissonerp.fn_estoque_comercial_entrega_venda() → trigger
+-- alissonerp.fn_estoque_comercial_reversao_item() → trigger
+-- alissonerp.fn_estoque_comercial_update_qtd_item() → trigger
+-- alissonerp.fn_handle_new_user() → trigger
+-- alissonerp.fn_mirror_movimento_to_sle() → trigger
+-- alissonerp.fn_ponte_directus_para_alissonerp() → trigger
+--   TEMPORÁRIO: Copia ordens situacao=2 do directus→alissonerp + auditoria loja. Inclui ficha_tecnica_id (v030). Remover quando migrar PDV.
+-- alissonerp.fn_prevent_negative_sle() → trigger
+-- alissonerp.fn_prevent_sle_delete() → trigger
+-- alissonerp.fn_processar_apontamento_dist() → trigger
+--   Flow 1007: Branch tipo 1-9 com CE marcadores dist (ADD,EIMD,EPD,RMD,RPD,EOID) + Flow 1011.
+-- alissonerp.fn_processar_apontamento_pcp() → trigger
+--   Flow 1000: Branch por tipo 1-7, CE dupla-entrada, atualiza totais PCP, chama fn_criar_itens_ordem.
+-- alissonerp.fn_processar_aprovacao_cartao() → trigger
+-- alissonerp.fn_processar_auditoria() → trigger
+--   Loja aprovada→libera produção. Fábrica aprovada→libera volta. Loja reprovada→rascunho. Fábrica reprovada→retrabalho (tipo=servico).
+-- alissonerp.fn_processar_conversao() → trigger
+-- alissonerp.fn_processar_conversao_sku() → trigger
+-- alissonerp.fn_processar_fechamento_dist() → trigger
+--   Flow 1013: ACUMULA no PCP (soma!), CE TEDD, move ordem → dep1, cria transferencia + copia itens.
+-- alissonerp.fn_processar_lancamento_avulso() → trigger
+--   Flow 1006: Branch T/E/S/Sangria → CE com marcadores TA/EA/SA/Sangria.
+-- alissonerp.fn_processar_outros_insumos_dist() → trigger
+--   Flow 1010: CE SOID + acumula total_outros_pesos/total_geral_outros_pesos.
+-- alissonerp.fn_processar_outros_insumos_pcp() → trigger
+--   Flow 1004: CE marcador SOI + atualiza total_geral_outros_pesos no PCP.
+-- alissonerp.fn_processar_saida_ordem() → trigger
+--   Conclui PCP + cria auditoria fábrica pendente com dados PMC/quebra.
+-- alissonerp.fn_processar_transferencia() → trigger
+--   Flow 1002: CE TED por insumo entre setores + atualiza local_atual/setor_atual da ordem + PCP→em_andamento + cria próxima transferência vazia.
+-- alissonerp.fn_produto_imagens_touch() → trigger
+-- alissonerp.fn_proteger_campos_pdv() → trigger
+-- alissonerp.fn_proteger_itens_venda_fechada() → trigger
+-- alissonerp.fn_proteger_venda_fechada() → trigger
+-- alissonerp.fn_rastreio_baixa_ouro() → trigger
+-- alissonerp.fn_rastreio_concluir_baixa() → trigger
+-- alissonerp.fn_rastreio_pagamento_ouro() → trigger
+-- alissonerp.fn_recalcular_totais_venda() → trigger
+-- alissonerp.fn_repost_future_sle() → trigger
+-- alissonerp.fn_resumo_recebido_mp(p_inicio date DEFAULT NULL::date, p_fim date DEFAULT NULL::date) → TABLE(qtd bigint, total_bruto numeric, total_taxas numeric, total_liquido numeric)
+-- alissonerp.fn_rotas_template_updated_at() → trigger
+-- alissonerp.fn_sync_erp_to_public_produto() → trigger
+-- alissonerp.fn_sync_item_venda_from_public() → trigger
+-- alissonerp.fn_sync_venda_from_public() → trigger
+-- alissonerp.fn_sync_venda_update_from_public() → trigger
+-- alissonerp.fn_tarefas_historico() → trigger
+-- alissonerp.fn_tarefas_verificar_vencimento() → trigger
+-- alissonerp.fn_touch_updated_at() → trigger
+-- alissonerp.fn_transferencia_ec_envio() → trigger
+-- alissonerp.fn_transferencia_ec_recebimento() → trigger
+-- alissonerp.fn_update_estoque_comercial_config_ts() → trigger
+-- alissonerp.fn_updated_at_conversoes() → trigger
+-- alissonerp.fn_updated_at_conversoes_sku() → trigger
+-- alissonerp.fn_updated_at_mp_point_devices() → trigger
+-- alissonerp.fn_updated_at_tarefas() → trigger
+-- alissonerp.fn_updated_at_vendas_erp() → trigger
+-- alissonerp.fn_user_role() → character varying
+-- alissonerp.fn_user_views_touch_updated() → trigger
+-- alissonerp.fn_venda_cancelar_conta_receber() → trigger
+-- alissonerp.fn_venda_gerar_conta_receber() → trigger
+-- alissonerp.fn_venda_gerar_conta_receber_on_insert() → trigger
+-- alissonerp.gerar_proximo_epc() → text
+--   Gera proximo EPC sequencial no formato AJ{AA}{NNNNNNNN} (12 chars ASCII / 96 bits hex). Atomico.
+-- alissonerp.get_sle_balance(p_item_id bigint, p_item_type text DEFAULT 'produto'::text, p_warehouse_id in...) → numeric
+-- alissonerp.get_sle_balance_all(p_item_id bigint, p_item_type text DEFAULT 'produto'::text) → TABLE(warehouse_id integer, warehouse_nome text, saldo_fisico numeric)
+-- alissonerp.get_stock_ledger_report(p_item_id bigint DEFAULT NULL::bigint, p_warehouse_id integer DEFAULT NULL::i...) → TABLE(id bigint, item_id bigint, item_nome text, item_sku text, warehouse_nome text, actual_qty numeric, qty_after numeric, voucher_type text, voucher_id integer, posting_date date, created_by_email text, is_cancelled boolean)
+-- alissonerp.proximo_sku_pz() → text
+--   Retorna proximo SKU PZ disponivel (formato PZ0001..PZ9999). Atomico via nextval.
+-- alissonerp.tg_joias_rfid_touch_updated() → trigger
+-- alissonerp.tg_produto_personalizacao_campos_touch_updated() → trigger
+-- alissonerp.tg_produto_personalizacao_regras_touch_updated() → trigger
+-- alissonerp.tg_produto_personalizacao_touch_updated() → trigger
+-- public.arredondar_peso_para_cima() → trigger
+-- public.atualiza_obs_produto() → trigger
+-- public.atualizar_item_comissao(p_id uuid, p_preco_tabela numeric, p_desconto_percentual numeric, p_desconto_...) → json
+-- public.atualizar_metas_horarias_fortaleza() → void
+-- public.atualizar_preco_produto() → trigger
+-- public.atualizar_saldo_estoque() → trigger
+-- public.atualizar_total_metal_pcp() → trigger
+-- public.buscar_pedido(p_numero_pedido text) → json
+-- public.calcular_diferenca_percentual() → trigger
+-- public.chamar_atualizacao_de_metas_trigger_func() → trigger
+-- public.criar_notificacao_mencao() → trigger
+-- public.crm_adicionar_mensagem(p_conversa_id uuid, p_papel text, p_conteudo text, p_canal_message_id text DE...) → uuid
+-- public.crm_atribuir_vendedor(p_conversa_id uuid, p_vendedor_id bigint) → void
+-- public.crm_buscar_ou_criar_contato_dm(p_canal text, p_canal_id text, p_nome text, p_username text DEFAULT NULL::tex...) → bigint
+-- public.crm_criar_conversa_se_necessario(p_canal text, p_canal_thread_id text, p_canal_contato_id text, p_contato_id b...) → uuid
+-- public.crm_criar_oportunidade(p_contato_id bigint, p_titulo text, p_funil_id uuid, p_etapa_id uuid DEFAULT ...) → uuid
+-- public.crm_marcar_conversa_lida(p_conversa_id uuid) → void
+-- public.crm_mover_etapa_funil(p_conversa_id uuid, p_etapa_para_id uuid, p_motivo text DEFAULT NULL::text) → void
+-- public.crm_mover_oportunidade_etapa(p_oportunidade_id uuid, p_etapa_destino_id uuid, p_motivo text DEFAULT NULL::...) → void
+-- public.crm_processar_webhook_unipile(p_payload jsonb) → jsonb
+--   Ingestão completa de webhook Unipile sem precisar de service_role. SECURITY DEFINER.
+-- public.crm_user_eh_admin() → boolean
+-- public.crm_user_vendedor_id() → bigint
+-- public.definir_meta_acumulada_inicial() → trigger
+-- public.disparar_atualizacao_produtos() → trigger
+-- public.disparar_webhook_n8n() → trigger
+-- public.fin_auto_conciliar(p_extrato_id bigint) → TABLE(lancamento_id bigint, conta_pagar_id bigint, conta_tiny_id text, status_conciliacao text, diferenca_valor numeric, diferenca_dias integer, data_lancamento date)
+--   Faz o match automatico entre lancamentos bancarios e contas_a_pagar.
+Retorna apenas os itens conciliados (confirmados e divergentes).
+Itens sem match sao ignorados e ficam sem conciliacao.
+-- public.fn_atualizar_ordem_por_entrega() → trigger
+-- public.fn_gerar_numero_orcamento() → trigger
+-- public.fn_gerar_venda_sequencial() → trigger
+-- public.fn_gerar_venda_sequencial_manual() → trigger
+-- public.fn_inicializar_orcamento() → trigger
+-- public.fn_proteger_delete_itens_venda() → trigger
+-- public.fn_proteger_preco_itens_venda() → trigger
+-- public.fn_users_profile_updated_date_column() → trigger
+-- public.gerar_metas_por_hora_final() → trigger
+-- public.get_auditoria_completa(data_inicio timestamp without time zone, data_fim timestamp without time zone) → TABLE(dep_id integer, dep_nome character varying, setor_nome character varying, cat_nome character varying, ent real, ret real, quebra real)
+-- public.get_auditoria_operadores(data_inicio timestamp without time zone, data_fim timestamp without time zone) → TABLE(deposito_id integer, deposito_nome character varying, setor_nome character varying, categoria_id integer, categoria_nome character varying, total_ent real, total_sai real, valor_quebra real)
+-- public.get_auditoria_v4(data_inicio timestamp without time zone, data_fim timestamp without time zone) → TABLE(dep_id integer, dep_nome character varying, setor_nome character varying, cat_nome character varying, ent real, ret real, quebra real)
+-- public.get_consolidado_estoque(data_inicio timestamp without time zone, data_fim timestamp without time zone) → TABLE(deposito_id integer, deposito_nome character varying, setor_nome character varying, categoria_id integer, categoria_nome character varying, total_entrada real, total_saida_total real, quebra_identificada real, ultima_movimentacao timestamp with time zone)
+-- public.get_quebra_por_periodo(data_inicio timestamp without time zone, data_fim timestamp without time zone) → TABLE(categoria_id integer, categoria_nome character varying, deposito_id integer, deposito_nome character varying, setor_nome character varying, total_entrada real, total_saida real, saldo_quebra real, ultima_movimentacao timestamp with time zone)
+-- public.get_saldo_absoluto_cofre() → real
+-- public.get_saldo_real_cofre() → real
+-- public.handle_new_user() → trigger
+-- public.handle_updated_at() → trigger
+-- public.n8n_trigger_function_240c32bc_cedc_46cd_a8e7_e2f6e780268f() → trigger
+-- public.n8n_trigger_function_be0584e3_2e2d_424a_b038_a20d0519b999() → trigger
+-- public.n8n_trigger_function_e82b0522_503c_44a5_9c54_a4c9e621379d() → trigger
+-- public.notificar_apenas_mudanca_situacao() → trigger
+-- public.notificar_mudanca_estoque() → trigger
+-- public.notificar_n8n_nova_venda() → trigger
+-- public.notificar_nova_ordem() → trigger
+-- public.notify_n8n_solicitacao_vale_troca() → trigger
+-- public.obter_saldo_pote_geral() → numeric
+-- public.preencher_numero_ordem() → trigger
+-- public.processar_aprovacao_orcamento() → trigger
+-- public.recalcular_diferenca_produto(produto_id integer) → void
+-- public.registrar_modificacao_contatos() → trigger
+--   Função para atualizar o timestamp da coluna data_atualizacao na tabela de contatos.
+-- public.registrar_modificacao_produtos() → trigger
+-- public.registrar_mudanca_situacao() → trigger
+-- public.set_updated_at() → trigger
+-- public.sync_venda_entregue() → trigger
+-- public.texto_para_numeric(p_texto text) → numeric
+-- public.unaccent(regdictionary, text) → text
+-- public.unaccent(text) → text
+-- public.unaccent_init(internal) → internal
+-- public.unaccent_lexize(internal, internal, internal, internal) → internal
+-- public.update_data_atualizacao() → trigger
+-- public.update_entregas_updated_at() → trigger
+-- public.update_timestamp_columns() → trigger
+
+-- =============================================================
+-- TRIGGERS
+-- =============================================================
+
+-- alissonerp.apontamentos_distribuicao  |  AFTER INSERT  |  trigger: trg_after_insert_apontamento_dist
+-- alissonerp.apontamentos_pcp  |  AFTER INSERT  |  trigger: trg_after_insert_apontamento_pcp
+-- alissonerp.aprovacoes_consultora  |  AFTER UPDATE  |  trigger: trg_aprovacao_entrega
+-- alissonerp.auditorias  |  BEFORE UPDATE  |  trigger: trg_processar_auditoria
+-- alissonerp.cofre_ouro_baixas  |  BEFORE UPDATE  |  trigger: trg_cofre_baixa_updated_at
+-- alissonerp.cofre_ouro_baixas  |  AFTER INSERT  |  trigger: trg_rastreio_baixa_ouro
+-- alissonerp.cofre_ouro_baixas  |  AFTER UPDATE  |  trigger: trg_rastreio_concluir_baixa
+-- alissonerp.compras  |  BEFORE UPDATE  |  trigger: trg_aa_bloquear_compra
+-- alissonerp.compras  |  AFTER UPDATE  |  trigger: trg_compra_gerar_conta_pagar
+-- alissonerp.compras  |  BEFORE UPDATE  |  trigger: trg_concluir_compra
+-- alissonerp.conversao_itens  |  AFTER INSERT  |  trigger: trg_atualizar_tarefa_conversao
+-- alissonerp.conversoes_estoque  |  AFTER INSERT  |  trigger: trg_criar_tarefa_conversao
+-- alissonerp.conversoes_estoque  |  BEFORE UPDATE  |  trigger: trg_updated_at_conversoes
+-- alissonerp.conversoes_sku  |  AFTER INSERT  |  trigger: trg_criar_tarefa_conversao_sku
+-- alissonerp.conversoes_sku  |  BEFORE UPDATE  |  trigger: trg_updated_at_conversoes_sku
+-- alissonerp.curva_categorias  |  BEFORE UPDATE  |  trigger: trg_curva_categorias_updated_at
+-- alissonerp.curva_config  |  BEFORE UPDATE  |  trigger: trg_curva_config_updated_at
+-- alissonerp.devolucoes_venda  |  BEFORE UPDATE  |  trigger: trg_devolucoes_updated_at
+-- alissonerp.distribuicao_ordens  |  AFTER INSERT  |  trigger: trg_after_insert_distribuicao_ordem
+-- alissonerp.distribuicoes  |  AFTER INSERT  |  trigger: trg_audit_distribuicoes
+-- alissonerp.distribuicoes  |  AFTER UPDATE  |  trigger: trg_audit_distribuicoes
+-- alissonerp.distribuicoes  |  AFTER DELETE  |  trigger: trg_audit_distribuicoes
+-- alissonerp.distribuicoes  |  BEFORE UPDATE  |  trigger: trg_concluir_distribuicao
+-- alissonerp.erp_produtos  |  AFTER INSERT  |  trigger: trg_sync_erp_to_public_produto
+-- alissonerp.erp_produtos  |  AFTER UPDATE  |  trigger: trg_sync_erp_to_public_produto
+-- alissonerp.estoque_comercial_config  |  BEFORE UPDATE  |  trigger: trg_update_estoque_comercial_config_ts
+-- alissonerp.fechamentos_distribuicao  |  AFTER INSERT  |  trigger: trg_fechamento_distribuicao
+-- alissonerp.fechamentos_distribuicao  |  AFTER UPDATE  |  trigger: trg_fechamento_distribuicao
+-- alissonerp.fornecedores  |  BEFORE UPDATE  |  trigger: trg_fornecedores_updated_at
+-- alissonerp.insumos  |  BEFORE UPDATE  |  trigger: trg_calcular_peso_pedra
+-- alissonerp.insumos  |  BEFORE INSERT  |  trigger: trg_calcular_peso_pedra
+-- alissonerp.itens_compra  |  BEFORE INSERT  |  trigger: trg_calcular_item_compra
+-- alissonerp.itens_compra  |  BEFORE UPDATE  |  trigger: trg_calcular_item_compra
+-- alissonerp.itens_venda_erp  |  AFTER INSERT  |  trigger: trg_estoque_comercial_baixa_venda
+-- alissonerp.itens_venda_erp  |  AFTER DELETE  |  trigger: trg_estoque_comercial_reversao_item
+-- alissonerp.itens_venda_erp  |  AFTER UPDATE  |  trigger: trg_estoque_comercial_update_qtd_item
+-- alissonerp.itens_venda_erp  |  BEFORE INSERT  |  trigger: trg_proteger_insert_itens_venda_fechada
+-- alissonerp.itens_venda_erp  |  BEFORE DELETE  |  trigger: trg_proteger_itens_venda_fechada
+-- alissonerp.itens_venda_erp  |  BEFORE UPDATE  |  trigger: trg_proteger_itens_venda_fechada
+-- alissonerp.itens_venda_erp  |  AFTER DELETE  |  trigger: trg_recalcular_totais_venda
+-- alissonerp.itens_venda_erp  |  AFTER INSERT  |  trigger: trg_recalcular_totais_venda
+-- alissonerp.itens_venda_erp  |  AFTER UPDATE  |  trigger: trg_recalcular_totais_venda
+-- alissonerp.joias_rfid  |  BEFORE UPDATE  |  trigger: trg_joias_rfid_touch_updated
+-- alissonerp.lancamentos_avulso  |  AFTER INSERT  |  trigger: trg_lancamento_avulso
+-- alissonerp.movimentacoes_estoque  |  AFTER INSERT  |  trigger: trg_audit_mov_estoque
+-- alissonerp.movimentacoes_estoque_comercial  |  AFTER INSERT  |  trigger: trg_mirror_movimento_to_sle
+-- alissonerp.mp_point_devices  |  BEFORE UPDATE  |  trigger: trg_updated_at_mp_point_devices
+-- alissonerp.ordens  |  AFTER DELETE  |  trigger: trg_audit_ordens
+-- alissonerp.ordens  |  AFTER UPDATE  |  trigger: trg_audit_ordens
+-- alissonerp.ordens  |  AFTER INSERT  |  trigger: trg_audit_ordens
+-- alissonerp.ordens  |  AFTER INSERT  |  trigger: trg_auto_auditoria_loja
+-- alissonerp.ordens  |  AFTER UPDATE  |  trigger: trg_cancelar_pcp_ordem
+-- alissonerp.ordens  |  BEFORE UPDATE  |  trigger: trg_ordens_proteger_pdv
+-- alissonerp.outros_insumos_distribuicao  |  AFTER INSERT  |  trigger: trg_after_insert_outros_insumos_dist
+-- alissonerp.outros_insumos_pcp  |  AFTER INSERT  |  trigger: trg_after_insert_outros_insumos_pcp
+-- alissonerp.pagamentos_venda  |  AFTER INSERT  |  trigger: trg_rastreio_pagamento_ouro
+-- alissonerp.parametros_sistema  |  BEFORE UPDATE  |  trigger: trg_atualizar_parametros_sistema
+-- alissonerp.pcp  |  AFTER DELETE  |  trigger: trg_audit_pcp
+-- alissonerp.pcp  |  AFTER UPDATE  |  trigger: trg_audit_pcp
+-- alissonerp.pcp  |  AFTER INSERT  |  trigger: trg_audit_pcp
+-- alissonerp.pcp  |  AFTER INSERT  |  trigger: trg_criar_servico_from_pcp
+-- alissonerp.produto_imagens  |  BEFORE UPDATE  |  trigger: trg_produto_imagens_touch
+-- alissonerp.produto_personalizacao  |  BEFORE UPDATE  |  trigger: trg_produto_personalizacao_touch_updated
+-- alissonerp.produto_personalizacao_campos  |  BEFORE UPDATE  |  trigger: trg_produto_personalizacao_campos_touch_updated
+-- alissonerp.produto_personalizacao_regras  |  BEFORE UPDATE  |  trigger: trg_produto_personalizacao_regras_touch_updated
+-- alissonerp.protocolos  |  AFTER UPDATE  |  trigger: trg_audit_protocolos
+-- alissonerp.protocolos  |  AFTER DELETE  |  trigger: trg_audit_protocolos
+-- alissonerp.protocolos  |  AFTER INSERT  |  trigger: trg_audit_protocolos
+-- alissonerp.protocolos  |  AFTER UPDATE  |  trigger: trg_concluir_conversao
+-- alissonerp.protocolos  |  AFTER UPDATE  |  trigger: trg_concluir_conversao_sku
+-- alissonerp.protocolos  |  BEFORE UPDATE  |  trigger: trg_concluir_protocolo
+-- alissonerp.rotas_template  |  BEFORE UPDATE  |  trigger: trg_rotas_template_updated_at
+-- alissonerp.saidas_ordem  |  AFTER INSERT  |  trigger: trg_after_saida_ordem
+-- alissonerp.site_config  |  BEFORE UPDATE  |  trigger: trg_site_config_updated_at
+-- alissonerp.site_produtos  |  BEFORE UPDATE  |  trigger: trg_site_produtos_updated_at
+-- alissonerp.stock_ledger_entry  |  BEFORE INSERT  |  trigger: trg_calc_qty_after_sle
+-- alissonerp.stock_ledger_entry  |  BEFORE INSERT  |  trigger: trg_prevent_negative_sle
+-- alissonerp.stock_ledger_entry  |  BEFORE DELETE  |  trigger: trg_prevent_sle_delete
+-- alissonerp.stock_ledger_entry  |  AFTER INSERT  |  trigger: trg_repost_future_sle
+-- alissonerp.tarefas  |  AFTER UPDATE  |  trigger: trg_aprovacao_cartao
+-- alissonerp.tarefas  |  AFTER INSERT  |  trigger: trg_tarefas_historico
+-- alissonerp.tarefas  |  AFTER UPDATE  |  trigger: trg_tarefas_historico
+-- alissonerp.tarefas  |  BEFORE UPDATE  |  trigger: trg_tarefas_verificar_vencimento
+-- alissonerp.tarefas  |  BEFORE INSERT  |  trigger: trg_tarefas_verificar_vencimento
+-- alissonerp.tarefas  |  BEFORE UPDATE  |  trigger: trg_updated_at_tarefas
+-- alissonerp.transferencias_estoque_comercial  |  BEFORE INSERT  |  trigger: trg_transferencia_ec_envio
+-- alissonerp.transferencias_estoque_comercial  |  BEFORE UPDATE  |  trigger: trg_transferencia_ec_recebimento
+-- alissonerp.transferencias_ordem  |  AFTER INSERT  |  trigger: trg_after_transferencia_ordem
+-- alissonerp.transferencias_ordem  |  AFTER UPDATE  |  trigger: trg_after_transferencia_ordem
+-- alissonerp.user_views  |  BEFORE UPDATE  |  trigger: trg_user_views_touch
+-- alissonerp.vendas_erp  |  BEFORE UPDATE  |  trigger: trg_aa_proteger_venda_fechada
+-- alissonerp.vendas_erp  |  AFTER UPDATE  |  trigger: trg_auditar_divergencia_total
+-- alissonerp.vendas_erp  |  BEFORE UPDATE  |  trigger: trg_bloquear_venda
+-- alissonerp.vendas_erp  |  BEFORE UPDATE  |  trigger: trg_estoque_comercial_cancelamento_venda
+-- alissonerp.vendas_erp  |  BEFORE UPDATE  |  trigger: trg_estoque_comercial_entrega_venda
+-- alissonerp.vendas_erp  |  BEFORE UPDATE  |  trigger: trg_updated_at_vendas_erp
+-- alissonerp.vendas_erp  |  BEFORE UPDATE  |  trigger: trg_venda_cancelar_conta_receber
+-- alissonerp.vendas_erp  |  AFTER UPDATE  |  trigger: trg_venda_gerar_conta_receber
+-- alissonerp.vendas_erp  |  AFTER INSERT  |  trigger: trg_venda_gerar_conta_receber_insert
+-- public.config_orcamento_aliancas  |  BEFORE UPDATE  |  trigger: set_updated_at
+-- public.contatos  |  AFTER INSERT  |  trigger: Webhook Contatos Envio tiny
+-- public.contatos  |  AFTER UPDATE  |  trigger: Webhook Contatos Envio tiny
+-- public.contatos  |  BEFORE UPDATE  |  trigger: on_contatos_update
+-- public.contatos  |  BEFORE INSERT  |  trigger: on_contatos_update
+-- public.controle_entregas  |  BEFORE UPDATE  |  trigger: trigger_entregas_updated_at
+-- public.controle_entregas  |  AFTER DELETE  |  trigger: trigger_sync_venda_entregue
+-- public.controle_entregas  |  AFTER INSERT  |  trigger: trigger_sync_venda_entregue
+-- public.estoque  |  BEFORE UPDATE  |  trigger: trigger_atualizar_saldo_estoque
+-- public.estoque  |  BEFORE INSERT  |  trigger: trigger_atualizar_saldo_estoque
+-- public.estoque  |  AFTER INSERT  |  trigger: webhook_estoque_insert_seguro
+-- public.estoque  |  AFTER UPDATE  |  trigger: webhook_estoque_update_seguro
+-- public.fila_webhooks_n8n  |  AFTER INSERT  |  trigger: trg_webhook_novo_produto
+-- public.itens_venda  |  BEFORE DELETE  |  trigger: trg_proteger_delete_itens_venda
+-- public.itens_venda  |  BEFORE UPDATE  |  trigger: trg_proteger_preco_itens_venda
+-- public.itens_venda  |  AFTER INSERT  |  trigger: trg_sync_item_venda_insert_from_public
+-- public.leads  |  BEFORE UPDATE  |  trigger: trg_leads_update
+-- public.metas_mensais  |  AFTER UPDATE  |  trigger: trigger_gerar_metas_por_hora
+-- public.metas_mensais  |  AFTER INSERT  |  trigger: trigger_gerar_metas_por_hora
+-- public.metas_por_hora  |  BEFORE UPDATE  |  trigger: trg_definir_meta_acumulada
+-- public.metas_por_hora  |  BEFORE INSERT  |  trigger: trg_definir_meta_acumulada
+-- public.orcamento  |  BEFORE INSERT  |  trigger: trg_antes_inserir_orcamento
+-- public.orcamento  |  BEFORE UPDATE  |  trigger: trg_aprovacao_orcamento
+-- public.orcamento  |  BEFORE INSERT  |  trigger: trg_gerar_numero_orcamento
+-- public.parametros  |  AFTER UPDATE  |  trigger: trigger_parametros_atualizados
+-- public.produtos  |  AFTER UPDATE  |  trigger: on_product_update
+-- public.produtos  |  AFTER UPDATE  |  trigger: on_produto_update_notify_situacao
+-- public.produtos  |  BEFORE UPDATE  |  trigger: on_produtos_update
+-- public.produtos  |  AFTER UPDATE  |  trigger: trg_notifica_estoque
+-- public.produtos  |  BEFORE INSERT  |  trigger: trigger_arredondar_peso
+-- public.produtos  |  BEFORE UPDATE  |  trigger: trigger_arredondar_peso
+-- public.produtos  |  BEFORE UPDATE  |  trigger: trigger_atualizar_preco_produto
+-- public.produtos  |  BEFORE INSERT  |  trigger: trigger_atualizar_preco_produto
+-- public.produtos  |  BEFORE UPDATE  |  trigger: z_trigger_atualiza_diferenca_percentual
+-- public.produtos  |  BEFORE INSERT  |  trigger: z_trigger_atualiza_diferenca_percentual
+-- public.solicitacoes_vale_troca  |  BEFORE UPDATE  |  trigger: handle_updated_at
+-- public.solicitacoes_vale_troca  |  AFTER INSERT  |  trigger: trg_solicitacao_vale_troca
+-- public.vendas  |  BEFORE UPDATE  |  trigger: on_update_vendas
+-- public.vendas  |  AFTER UPDATE  |  trigger: trg_notificar_n8n
+-- public.vendas  |  AFTER INSERT  |  trigger: trg_notificar_n8n
+-- public.vendas  |  AFTER INSERT  |  trigger: trg_sync_venda_insert_from_public
+-- public.vendas  |  AFTER UPDATE  |  trigger: trg_sync_venda_update_from_public
+-- public.vendas  |  BEFORE INSERT  |  trigger: trg_venda_sequencial
+
+-- =============================================================
+-- ÍNDICES
+-- =============================================================
+
+-- alissonerp.api_chaves  |  índice: api_chaves_chave_hash_key
+-- alissonerp.api_chaves  |  índice: api_chaves_pkey
+-- alissonerp.api_log  |  índice: api_log_pkey
+-- alissonerp.api_log  |  índice: idx_api_log_chave_id
+-- alissonerp.api_log  |  índice: idx_api_log_created_at
+-- alissonerp.apontamentos_distribuicao  |  índice: apontamentos_distribuicao_pkey
+-- alissonerp.apontamentos_pcp  |  índice: apontamentos_pcp_pkey
+-- alissonerp.apontamentos_pcp  |  índice: idx_apt_pcp_pcp
+-- alissonerp.apontamentos_pote  |  índice: apontamentos_pote_pkey
+-- alissonerp.apontamentos_servico  |  índice: apontamentos_servico_pkey
+-- alissonerp.apontamentos_servico  |  índice: idx_apontamentos_servico_operador_id
+-- alissonerp.apontamentos_servico  |  índice: idx_apontamentos_servico_servico_id
+-- alissonerp.aprovacoes_consultora  |  índice: aprovacoes_consultora_pkey
+-- alissonerp.aprovacoes_tarefa  |  índice: aprovacoes_tarefa_pkey
+-- alissonerp.aprovacoes_tarefa  |  índice: idx_aprovacoes_aprovador
+-- alissonerp.aprovacoes_tarefa  |  índice: idx_aprovacoes_status
+-- alissonerp.aprovacoes_tarefa  |  índice: idx_aprovacoes_tarefa_id
+-- alissonerp.audit_log  |  índice: audit_log_pkey
+-- alissonerp.audit_log  |  índice: idx_audit_data
+-- alissonerp.audit_log  |  índice: idx_audit_tabela
+-- alissonerp.auditorias  |  índice: auditorias_pkey
+-- alissonerp.auditorias  |  índice: idx_auditoria_ordem_tipo
+-- alissonerp.auditorias  |  índice: idx_auditorias_ordem_id
+-- alissonerp.auditorias  |  índice: idx_auditorias_situacao
+-- alissonerp.auditorias  |  índice: idx_auditorias_tipo
+-- alissonerp.automacoes_execucoes  |  índice: automacoes_execucoes_pkey
+-- alissonerp.automacoes_execucoes  |  índice: idx_exec_automacao
+-- alissonerp.automacoes_tarefa  |  índice: automacoes_tarefa_pkey
+-- alissonerp.automacoes_tarefa  |  índice: idx_automacoes_ativa
+-- alissonerp.backup_estorno_inv_20260517  |  índice: backup_estorno_inv_20260517_pkey
+-- alissonerp.categorias_insumo  |  índice: categorias_insumo_pkey
+-- alissonerp.cofre_ouro_baixas  |  índice: cofre_ouro_baixas_pkey
+-- alissonerp.cofre_ouro_rastreios  |  índice: cofre_ouro_rastreios_pkey
+-- alissonerp.comentarios_ordem  |  índice: comentarios_ordem_pkey
+-- alissonerp.comentarios_ordem  |  índice: idx_comentarios_autor
+-- alissonerp.comentarios_ordem  |  índice: idx_comentarios_created
+-- alissonerp.comentarios_ordem  |  índice: idx_comentarios_ordem_id
+-- alissonerp.comentarios_tarefa  |  índice: comentarios_tarefa_pkey
+-- alissonerp.comentarios_tarefa  |  índice: idx_comentarios_tarefa
+-- alissonerp.compras  |  índice: compras_pkey
+-- alissonerp.compras  |  índice: idx_compras_data_compra
+-- alissonerp.compras  |  índice: idx_compras_local_destino
+-- alissonerp.comunicacoes_crediario  |  índice: comunicacoes_crediario_pkey
+-- alissonerp.comunicacoes_crediario  |  índice: idx_com_cr_conta
+-- alissonerp.config_orcamento  |  índice: config_orcamento_name_key
+-- alissonerp.config_orcamento  |  índice: config_orcamento_pkey
+-- alissonerp.config_orcamento_promocoes  |  índice: config_orcamento_promocoes_pkey
+-- alissonerp.config_orcamento_promocoes  |  índice: idx_orcamento_promocoes_criado_em
+-- alissonerp.config_premiacao  |  índice: config_premiacao_pkey
+-- alissonerp.config_sistema  |  índice: config_sistema_pkey
+-- alissonerp.configuracoes_secrets  |  índice: configuracoes_secrets_chave_key
+-- alissonerp.configuracoes_secrets  |  índice: configuracoes_secrets_pkey
+-- alissonerp.configuracoes_sistema  |  índice: configuracoes_sistema_chave_key
+-- alissonerp.configuracoes_sistema  |  índice: configuracoes_sistema_pkey
+-- alissonerp.contas_pagar  |  índice: contas_pagar_pkey
+-- alissonerp.contas_pagar  |  índice: idx_contas_pagar_inter_pagamento
+-- alissonerp.contas_pagar  |  índice: idx_contas_pagar_inter_status_pendente
+-- alissonerp.contas_pagar  |  índice: idx_cp_situacao
+-- alissonerp.contas_pagar  |  índice: idx_cp_vencimento
+-- alissonerp.contas_receber  |  índice: contas_receber_pkey
+-- alissonerp.contas_receber  |  índice: idx_cr_situacao
+-- alissonerp.contas_receber  |  índice: idx_cr_situacao_venda
+-- alissonerp.contas_receber  |  índice: idx_cr_vencimento
+-- alissonerp.contas_receber  |  índice: idx_cr_venda_erp_id
+-- alissonerp.contatos_fiscais  |  índice: contatos_fiscais_pkey
+-- alissonerp.contatos_fiscais  |  índice: idx_contatos_fiscais_ibge
+-- alissonerp.conversao_itens  |  índice: conversao_itens_pkey
+-- alissonerp.conversao_itens  |  índice: idx_conversao_itens_conversao
+-- alissonerp.conversao_itens  |  índice: idx_conversao_itens_produto
+-- alissonerp.conversoes_estoque  |  índice: conversoes_estoque_pkey
+-- alissonerp.conversoes_estoque  |  índice: idx_conversoes_ordem
+-- alissonerp.conversoes_estoque  |  índice: idx_conversoes_status
+-- alissonerp.conversoes_sku  |  índice: conversoes_sku_pkey
+-- alissonerp.conversoes_sku  |  índice: idx_conversoes_sku_ordem
+-- alissonerp.conversoes_sku  |  índice: idx_conversoes_sku_status
+-- alissonerp.curva_categorias  |  índice: curva_categorias_pkey
+-- alissonerp.curva_categorias  |  índice: idx_curva_categorias_ativo_peso
+-- alissonerp.curva_categorias  |  índice: idx_curva_categorias_ordem
+-- alissonerp.curva_config  |  índice: curva_config_pkey
+-- alissonerp.dashboard_configs  |  índice: dashboard_configs_pkey
+-- alissonerp.dashboard_configs  |  índice: dashboard_configs_usuario_id_key
+-- alissonerp.dashboard_configs  |  índice: idx_dashboard_configs_usuario
+-- alissonerp.depositos  |  índice: depositos_pkey
+-- alissonerp.devolucoes_itens  |  índice: devolucoes_itens_pkey
+-- alissonerp.devolucoes_itens  |  índice: idx_devolucoes_itens_devolucao
+-- alissonerp.devolucoes_itens  |  índice: idx_devolucoes_itens_item
+-- alissonerp.devolucoes_itens  |  índice: idx_devolucoes_itens_produto
+-- alissonerp.devolucoes_venda  |  índice: devolucoes_venda_numero_key
+-- alissonerp.devolucoes_venda  |  índice: devolucoes_venda_pkey
+-- alissonerp.devolucoes_venda  |  índice: idx_devolucoes_created
+-- alissonerp.devolucoes_venda  |  índice: idx_devolucoes_criado_por
+-- alissonerp.devolucoes_venda  |  índice: idx_devolucoes_nfe_chave
+-- alissonerp.devolucoes_venda  |  índice: idx_devolucoes_status
+-- alissonerp.devolucoes_venda  |  índice: idx_devolucoes_tarefa
+-- alissonerp.devolucoes_venda  |  índice: idx_devolucoes_venda
+-- alissonerp.distribuicao_ordens  |  índice: distribuicao_ordens_distribuicao_id_ordens_id_key
+-- alissonerp.distribuicao_ordens  |  índice: distribuicao_ordens_pkey
+-- alissonerp.distribuicao_saida_pedras  |  índice: distribuicao_saida_pedras_pkey
+-- alissonerp.distribuicoes  |  índice: distribuicoes_pkey
+-- alissonerp.editor_ia_historico  |  índice: editor_ia_historico_pkey
+-- alissonerp.editor_ia_historico  |  índice: idx_editor_ia_historico_created
+-- alissonerp.editor_ia_historico  |  índice: idx_editor_ia_historico_dedup
+-- alissonerp.editor_ia_historico  |  índice: idx_editor_ia_historico_user_created
+-- alissonerp.empresas_emitentes  |  índice: empresas_emitentes_cnpj_key
+-- alissonerp.empresas_emitentes  |  índice: empresas_emitentes_pkey
+-- alissonerp.empresas_emitentes  |  índice: idx_empresas_emitentes_ativo
+-- alissonerp.empresas_emitentes  |  índice: idx_empresas_emitentes_cnpj
+-- alissonerp.empresas_emitentes  |  índice: idx_empresas_emitentes_local
+-- alissonerp.epc_serial  |  índice: epc_serial_pkey
+-- alissonerp.erp_produtos  |  índice: erp_produtos_pkey
+-- alissonerp.erp_produtos  |  índice: erp_produtos_produto_id_key
+-- alissonerp.erp_produtos  |  índice: erp_produtos_sku_key
+-- alissonerp.erp_produtos  |  índice: idx_erp_produtos_eh_pai
+-- alissonerp.erp_produtos  |  índice: idx_erp_produtos_eh_variacao
+-- alissonerp.erp_produtos  |  índice: idx_erp_produtos_fornecedor
+-- alissonerp.erp_produtos  |  índice: idx_erp_produtos_parent_id
+-- alissonerp.erp_produtos  |  índice: idx_erp_produtos_parent_sku
+-- alissonerp.erp_produtos  |  índice: idx_erp_produtos_produto_id
+-- alissonerp.erp_produtos  |  índice: idx_erp_produtos_sku
+-- alissonerp.estoque_comercial_config  |  índice: estoque_comercial_config_pkey
+-- alissonerp.estoque_comercial_config  |  índice: estoque_comercial_config_produto_id_key
+-- alissonerp.estornos_distribuicao  |  índice: estornos_distribuicao_pkey
+-- alissonerp.estornos_distribuicao  |  índice: idx_estornos_dist_dist
+-- alissonerp.estornos_distribuicao  |  índice: idx_estornos_dist_ordem
+-- alissonerp.faixas_comissao  |  índice: faixas_comissao_desconto_pct_key
+-- alissonerp.faixas_comissao  |  índice: faixas_comissao_pkey
+-- alissonerp.fechamentos_distribuicao  |  índice: fechamentos_distribuicao_pkey
+-- alissonerp.fechamentos_distribuicao  |  índice: idx_unico_fechamento_dist
+-- alissonerp.fechamentos_fabrica  |  índice: fechamentos_fabrica_pkey
+-- alissonerp.fichas_tecnicas  |  índice: fichas_tecnicas_pkey
+-- alissonerp.fichas_tecnicas  |  índice: idx_fichas_tecnicas_ordem_id
+-- alissonerp.fichas_tecnicas_produto  |  índice: fichas_tecnicas_produto_pkey
+-- alissonerp.fichas_tecnicas_produto  |  índice: fichas_tecnicas_produto_produto_id_key
+-- alissonerp.fichas_tecnicas_produto  |  índice: idx_fichas_tecnicas_produto_id
+-- alissonerp.fila_sync_externo  |  índice: fila_sync_externo_pkey
+-- alissonerp.fila_sync_externo  |  índice: idx_fila_sync_pendente
+-- alissonerp.fila_sync_externo  |  índice: idx_fila_sync_sistema
+-- alissonerp.fila_sync_externo  |  índice: idx_fila_sync_status_criado
+-- alissonerp.fin_caixa_baixas  |  índice: fin_caixa_baixas_pkey
+-- alissonerp.fin_conciliacoes  |  índice: fin_conciliacoes_pkey
+-- alissonerp.fin_conciliacoes  |  índice: idx_fin_conciliacoes_pagamento_venda_id
+-- alissonerp.fin_extratos_bancarios  |  índice: fin_extratos_bancarios_pkey
+-- alissonerp.fin_gateways  |  índice: fin_gateways_pkey
+-- alissonerp.fin_lancamentos_bancarios  |  índice: fin_lancamentos_bancarios_fitid_key
+-- alissonerp.fin_lancamentos_bancarios  |  índice: fin_lancamentos_bancarios_pkey
+-- alissonerp.fin_lancamentos_bancarios  |  índice: idx_flb_data
+-- alissonerp.fin_lancamentos_bancarios  |  índice: idx_flb_extrato
+-- alissonerp.fin_lancamentos_bancarios  |  índice: idx_flb_fitid
+-- alissonerp.fornecedores  |  índice: fornecedores_nome_key
+-- alissonerp.fornecedores  |  índice: fornecedores_pkey
+-- alissonerp.fretes_bairro  |  índice: fretes_bairro_pkey
+-- alissonerp.fretes_bairro  |  índice: idx_fretes_bairro_uniq
+-- alissonerp.gateways_pagamento  |  índice: gateways_pagamento_nome_key
+-- alissonerp.gateways_pagamento  |  índice: gateways_pagamento_pkey
+-- alissonerp.insumos  |  índice: idx_insumos_categoria
+-- alissonerp.insumos  |  índice: idx_insumos_sku
+-- alissonerp.insumos  |  índice: insumos_pkey
+-- alissonerp.inter_sync_log  |  índice: idx_inter_sync_log_conta
+-- alissonerp.inter_sync_log  |  índice: idx_inter_sync_log_created
+-- alissonerp.inter_sync_log  |  índice: inter_sync_log_pkey
+-- alissonerp.inventarios_comercial  |  índice: idx_inv_ec_status
+-- alissonerp.inventarios_comercial  |  índice: idx_inventarios_comercial_categoria
+-- alissonerp.inventarios_comercial  |  índice: inventarios_comercial_pkey
+-- alissonerp.itens_compra  |  índice: idx_itens_compra_lote
+-- alissonerp.itens_compra  |  índice: itens_compra_pkey
+-- alissonerp.itens_distribuicao  |  índice: itens_distribuicao_pkey
+-- alissonerp.itens_inventario_comercial  |  índice: idx_itens_inv_ec_inv
+-- alissonerp.itens_inventario_comercial  |  índice: itens_inventario_comercial_inventario_id_produto_id_key
+-- alissonerp.itens_inventario_comercial  |  índice: itens_inventario_comercial_pkey
+-- alissonerp.itens_ordem  |  índice: idx_itens_ordem_ordem_id
+-- alissonerp.itens_ordem  |  índice: idx_itens_ordem_produto_id
+-- alissonerp.itens_ordem  |  índice: itens_ordem_pkey
+-- alissonerp.itens_ordem_insumos  |  índice: itens_ordem_insumos_pkey
+-- alissonerp.itens_ordem_produtos  |  índice: itens_ordem_produtos_pkey
+-- alissonerp.itens_venda_erp  |  índice: itens_venda_erp_pkey
+-- alissonerp.itens_venda_erp  |  índice: uq_itens_venda_erp_prod_sku
+-- alissonerp.itens_venda_personalizacao  |  índice: idx_itens_venda_personalizacao_item
+-- alissonerp.itens_venda_personalizacao  |  índice: itens_venda_personalizacao_pkey
+-- alissonerp.joias_leituras  |  índice: idx_joias_leituras_epc
+-- alissonerp.joias_leituras  |  índice: idx_joias_leituras_evento
+-- alissonerp.joias_leituras  |  índice: idx_joias_leituras_inventario_id
+-- alissonerp.joias_leituras  |  índice: idx_joias_leituras_operador
+-- alissonerp.joias_leituras  |  índice: joias_leituras_pkey
+-- alissonerp.joias_rfid  |  índice: idx_joias_rfid_criado_por
+-- alissonerp.joias_rfid  |  índice: idx_joias_rfid_epc
+-- alissonerp.joias_rfid  |  índice: idx_joias_rfid_localizacao_ativo
+-- alissonerp.joias_rfid  |  índice: idx_joias_rfid_produto
+-- alissonerp.joias_rfid  |  índice: idx_joias_rfid_sku
+-- alissonerp.joias_rfid  |  índice: idx_joias_rfid_status_produto
+-- alissonerp.joias_rfid  |  índice: idx_joias_rfid_venda
+-- alissonerp.joias_rfid  |  índice: joias_rfid_epc_key
+-- alissonerp.joias_rfid  |  índice: joias_rfid_pkey
+-- alissonerp.lancamentos_avulso  |  índice: lancamentos_avulso_pkey
+-- alissonerp.liga_tipo_ouro  |  índice: liga_tipo_ouro_pkey
+-- alissonerp.liga_tipo_ouro  |  índice: liga_tipo_ouro_tipo_18k_insumo_id_key
+-- alissonerp.ligacoes  |  índice: idx_ligacoes_data
+-- alissonerp.ligacoes  |  índice: idx_ligacoes_status
+-- alissonerp.ligacoes  |  índice: ligacoes_pkey
+-- alissonerp.locais_estoque  |  índice: locais_estoque_pkey
+-- alissonerp.markup_alteracoes  |  índice: idx_markup_alteracoes_criado_por
+-- alissonerp.markup_alteracoes  |  índice: idx_markup_alteracoes_status
+-- alissonerp.markup_alteracoes  |  índice: markup_alteracoes_pkey
+-- alissonerp.markup_pedras  |  índice: idx_markup_pedras_faixa
+-- alissonerp.markup_pedras  |  índice: markup_pedras_pkey
+-- alissonerp.metas_vendedoras  |  índice: metas_vendedoras_pkey
+-- alissonerp.metas_vendedoras  |  índice: metas_vendedoras_vendedor_id_mes_ano_key
+-- alissonerp.movimentacoes_estoque  |  índice: idx_mov_data
+-- alissonerp.movimentacoes_estoque  |  índice: idx_mov_dep_ins
+-- alissonerp.movimentacoes_estoque  |  índice: idx_mov_deposito
+-- alissonerp.movimentacoes_estoque  |  índice: idx_mov_insumo
+-- alissonerp.movimentacoes_estoque  |  índice: idx_mov_marcador
+-- alissonerp.movimentacoes_estoque  |  índice: idx_mov_ordem
+-- alissonerp.movimentacoes_estoque  |  índice: idx_movimentacoes_local_estoque
+-- alissonerp.movimentacoes_estoque  |  índice: movimentacoes_estoque_pkey
+-- alissonerp.movimentacoes_estoque_comercial  |  índice: idx_mov_ec_created_at
+-- alissonerp.movimentacoes_estoque_comercial  |  índice: idx_mov_ec_devolucao
+-- alissonerp.movimentacoes_estoque_comercial  |  índice: idx_mov_ec_estorno_de
+-- alissonerp.movimentacoes_estoque_comercial  |  índice: idx_mov_ec_local
+-- alissonerp.movimentacoes_estoque_comercial  |  índice: idx_mov_ec_produto_id
+-- alissonerp.movimentacoes_estoque_comercial  |  índice: idx_mov_ec_referencia
+-- alissonerp.movimentacoes_estoque_comercial  |  índice: idx_mov_ec_status
+-- alissonerp.movimentacoes_estoque_comercial  |  índice: movimentacoes_estoque_comercial_pkey
+-- alissonerp.mp_point_devices  |  índice: idx_mp_point_devices_ativo
+-- alissonerp.mp_point_devices  |  índice: mp_point_devices_device_id_key
+-- alissonerp.mp_point_devices  |  índice: mp_point_devices_pkey
+-- alissonerp.notas_fiscais  |  índice: idx_notas_fiscais_cliente
+-- alissonerp.notas_fiscais  |  índice: idx_notas_fiscais_created
+-- alissonerp.notas_fiscais  |  índice: idx_notas_fiscais_empresa_modelo_num
+-- alissonerp.notas_fiscais  |  índice: idx_notas_fiscais_origem
+-- alissonerp.notas_fiscais  |  índice: idx_notas_fiscais_status
+-- alissonerp.notas_fiscais  |  índice: notas_fiscais_chave_44_key
+-- alissonerp.notas_fiscais  |  índice: notas_fiscais_focus_ref_key
+-- alissonerp.notas_fiscais  |  índice: notas_fiscais_pkey
+-- alissonerp.notas_fiscais  |  índice: uq_notas_fiscais_numeracao
+-- alissonerp.notas_fiscais_eventos  |  índice: idx_notas_eventos_created
+-- alissonerp.notas_fiscais_eventos  |  índice: idx_notas_eventos_nota_tipo
+-- alissonerp.notas_fiscais_eventos  |  índice: notas_fiscais_eventos_pkey
+-- alissonerp.notas_fiscais_itens  |  índice: idx_notas_itens_produto
+-- alissonerp.notas_fiscais_itens  |  índice: notas_fiscais_itens_pkey
+-- alissonerp.notas_fiscais_itens  |  índice: uq_notas_itens_numero
+-- alissonerp.notificacoes  |  índice: idx_notif_aguardando_resposta
+-- alissonerp.notificacoes  |  índice: idx_notif_usuario_id
+-- alissonerp.notificacoes  |  índice: idx_notificacoes_created
+-- alissonerp.notificacoes  |  índice: idx_notificacoes_lida
+-- alissonerp.notificacoes  |  índice: idx_notificacoes_usuario
+-- alissonerp.notificacoes  |  índice: notificacoes_pkey
+-- alissonerp.orcamento_fichas_tecnicas  |  índice: orcamento_fichas_tecnicas_pkey
+-- alissonerp.orcamentos  |  índice: idx_orcamentos_cliente
+-- alissonerp.orcamentos  |  índice: idx_orcamentos_created
+-- alissonerp.orcamentos  |  índice: idx_orcamentos_status
+-- alissonerp.orcamentos  |  índice: idx_orcamentos_usuario
+-- alissonerp.orcamentos  |  índice: idx_orcamentos_vendedor
+-- alissonerp.orcamentos  |  índice: idx_orcamentos_vendedor_id
+-- alissonerp.orcamentos  |  índice: orcamentos_pkey
+-- alissonerp.orcamentos  |  índice: uq_orcamentos_numero_orcamento
+-- alissonerp.ordem_comentario_mencoes  |  índice: ordem_comentario_mencoes_pkey
+-- alissonerp.ordem_comentarios  |  índice: ordem_comentarios_pkey
+-- alissonerp.ordens  |  índice: idx_ordens_cliente
+-- alissonerp.ordens  |  índice: idx_ordens_directus
+-- alissonerp.ordens  |  índice: idx_ordens_directus_unique
+-- alissonerp.ordens  |  índice: idx_ordens_distribuicao
+-- alissonerp.ordens  |  índice: idx_ordens_local
+-- alissonerp.ordens  |  índice: idx_ordens_numero
+-- alissonerp.ordens  |  índice: idx_ordens_produto_reposicao
+-- alissonerp.ordens  |  índice: idx_ordens_setor
+-- alissonerp.ordens  |  índice: idx_ordens_situacao
+-- alissonerp.ordens  |  índice: idx_ordens_status
+-- alissonerp.ordens  |  índice: idx_ordens_venda_id
+-- alissonerp.ordens  |  índice: idx_ordens_vendedor
+-- alissonerp.ordens  |  índice: ordens_numero_ordem_key
+-- alissonerp.ordens  |  índice: ordens_pkey
+-- alissonerp.outros_insumos_distribuicao  |  índice: outros_insumos_distribuicao_pkey
+-- alissonerp.outros_insumos_pcp  |  índice: outros_insumos_pcp_pkey
+-- alissonerp.pagamentos_venda  |  índice: idx_pagamentos_vale_troca
+-- alissonerp.pagamentos_venda  |  índice: idx_pagamentos_venda_baixa
+-- alissonerp.pagamentos_venda  |  índice: idx_pagamentos_venda_gateway_id
+-- alissonerp.pagamentos_venda  |  índice: pagamentos_venda_pkey
+-- alissonerp.pagamentos_venda  |  índice: uq_pagamentos_gateway_id
+-- alissonerp.parametros  |  índice: parametros_pkey
+-- alissonerp.parametros_sistema  |  índice: parametros_sistema_pkey
+-- alissonerp.pcp  |  índice: idx_pcp_etapas
+-- alissonerp.pcp  |  índice: idx_pcp_operador_atribuido
+-- alissonerp.pcp  |  índice: idx_pcp_ordem
+-- alissonerp.pcp  |  índice: pcp_pkey
+-- alissonerp.pedras_ordens  |  índice: pedras_ordens_pkey
+-- alissonerp.permissoes_usuario  |  índice: idx_permissoes_usuario_acao
+-- alissonerp.permissoes_usuario  |  índice: permissoes_usuario_pkey
+-- alissonerp.permissoes_usuario  |  índice: permissoes_usuario_usuario_id_acao_key
+-- alissonerp.precificacao_config  |  índice: idx_precificacao_config_updated
+-- alissonerp.precificacao_config  |  índice: precificacao_config_pkey
+-- alissonerp.precificacao_historico  |  índice: idx_precificacao_historico_created
+-- alissonerp.precificacao_historico  |  índice: precificacao_historico_pkey
+-- alissonerp.preparacoes_entrega  |  índice: preparacoes_entrega_pkey
+-- alissonerp.produto_composicao  |  índice: idx_produto_composicao_insumo_id
+-- alissonerp.produto_composicao  |  índice: idx_produto_composicao_produto_id
+-- alissonerp.produto_composicao  |  índice: idx_produto_composicao_tipo
+-- alissonerp.produto_composicao  |  índice: produto_composicao_pkey
+-- alissonerp.produto_composicao  |  índice: produto_composicao_produto_id_insumo_id_key
+-- alissonerp.produto_curva_aplicada  |  índice: idx_produto_curva_aplicada_updated
+-- alissonerp.produto_curva_aplicada  |  índice: produto_curva_aplicada_pkey
+-- alissonerp.produto_imagens  |  índice: idx_produto_imagens_produto
+-- alissonerp.produto_imagens  |  índice: produto_imagens_origem_uuid_key
+-- alissonerp.produto_imagens  |  índice: produto_imagens_pkey
+-- alissonerp.produto_imagens  |  índice: uniq_produto_imagens_capa
+-- alissonerp.produto_pedra_extras  |  índice: produto_pedra_extras_pkey
+-- alissonerp.produto_pedras_componente  |  índice: idx_ppc_pedra_produto_id
+-- alissonerp.produto_pedras_componente  |  índice: idx_ppc_produto_id
+-- alissonerp.produto_pedras_componente  |  índice: produto_pedras_componente_pkey
+-- alissonerp.produto_pedras_componente  |  índice: produto_pedras_componente_produto_id_pedra_produto_id_key
+-- alissonerp.produto_personalizacao  |  índice: idx_produto_personalizacao_ativo
+-- alissonerp.produto_personalizacao  |  índice: produto_personalizacao_pkey
+-- alissonerp.produto_personalizacao  |  índice: uq_produto_personalizacao_produto
+-- alissonerp.produto_personalizacao_campos  |  índice: idx_personalizacao_campos_config_id
+-- alissonerp.produto_personalizacao_campos  |  índice: produto_personalizacao_campos_pkey
+-- alissonerp.produto_personalizacao_opcao  |  índice: idx_personalizacao_opcao_campo
+-- alissonerp.produto_personalizacao_opcao  |  índice: produto_personalizacao_opcao_campo_id_valor_key
+-- alissonerp.produto_personalizacao_opcao  |  índice: produto_personalizacao_opcao_pkey
+-- alissonerp.produto_personalizacao_regras  |  índice: idx_produto_personalizacao_regras_config
+-- alissonerp.produto_personalizacao_regras  |  índice: produto_personalizacao_regras_pkey
+-- alissonerp.produto_reposicao_config  |  índice: produto_reposicao_config_pkey
+-- alissonerp.produto_rota  |  índice: idx_produto_rota_produto
+-- alissonerp.produto_rota  |  índice: idx_produto_rota_setor
+-- alissonerp.produto_rota  |  índice: produto_rota_pkey
+-- alissonerp.produto_rota  |  índice: produto_rota_produto_id_ordem_key
+-- alissonerp.produto_tipo_item  |  índice: idx_produto_tipo_item_tipo
+-- alissonerp.produto_tipo_item  |  índice: produto_tipo_item_pkey
+-- alissonerp.produtos_fiscais  |  índice: idx_produtos_fiscais_ncm
+-- alissonerp.produtos_fiscais  |  índice: produtos_fiscais_pkey
+-- alissonerp.promocao_itens  |  índice: idx_promocao_itens_produto
+-- alissonerp.promocao_itens  |  índice: promocao_itens_pkey
+-- alissonerp.promocao_itens  |  índice: promocao_itens_promocao_id_produto_id_key
+-- alissonerp.promocoes_produtos  |  índice: idx_promocoes_periodo_ativas
+-- alissonerp.promocoes_produtos  |  índice: promocoes_produtos_pkey
+-- alissonerp.protocolo_fotos  |  índice: protocolo_fotos_pkey
+-- alissonerp.protocolo_ordens  |  índice: protocolo_ordens_pkey
+-- alissonerp.protocolo_ordens  |  índice: protocolo_ordens_protocolo_id_ordem_id_key
+-- alissonerp.protocolos  |  índice: protocolos_pkey
+-- alissonerp.purificacoes  |  índice: idx_purificacoes_data
+-- alissonerp.purificacoes  |  índice: idx_purificacoes_status
+-- alissonerp.purificacoes  |  índice: purificacoes_pkey
+-- alissonerp.quebra_operador  |  índice: idx_quebra_op_deposito_periodo
+-- alissonerp.quebra_operador  |  índice: idx_quebra_op_ordem
+-- alissonerp.quebra_operador  |  índice: idx_quebra_op_periodo
+-- alissonerp.quebra_operador  |  índice: idx_quebra_op_setor_periodo
+-- alissonerp.quebra_operador  |  índice: idx_quebra_op_tipo
+-- alissonerp.quebra_operador  |  índice: quebra_operador_pkey
+-- alissonerp.reembolsos  |  índice: idx_reembolsos_devolucao
+-- alissonerp.reembolsos  |  índice: idx_reembolsos_status
+-- alissonerp.reembolsos  |  índice: reembolsos_pkey
+-- alissonerp.regras_fiscais  |  índice: idx_regras_fiscais_ativo
+-- alissonerp.regras_fiscais  |  índice: idx_regras_fiscais_ncm
+-- alissonerp.regras_fiscais  |  índice: regras_fiscais_pkey
+-- alissonerp.regras_fiscais  |  índice: uq_regras_fiscais_full
+-- alissonerp.regras_fiscais  |  índice: uq_regras_fiscais_geral
+-- alissonerp.regras_fiscais  |  índice: uq_regras_fiscais_sem_empresa
+-- alissonerp.regras_fiscais  |  índice: uq_regras_fiscais_sem_uf
+-- alissonerp.reservas_estoque_comercial  |  índice: idx_reservas_ec_ativo
+-- alissonerp.reservas_estoque_comercial  |  índice: idx_reservas_ec_item
+-- alissonerp.reservas_estoque_comercial  |  índice: idx_reservas_ec_ordem
+-- alissonerp.reservas_estoque_comercial  |  índice: idx_reservas_ec_produto
+-- alissonerp.reservas_estoque_comercial  |  índice: idx_reservas_ec_status
+-- alissonerp.reservas_estoque_comercial  |  índice: idx_reservas_ec_venda
+-- alissonerp.reservas_estoque_comercial  |  índice: reservas_estoque_comercial_pkey
+-- alissonerp.role_permissoes  |  índice: idx_role_permissoes_modulo
+-- alissonerp.role_permissoes  |  índice: idx_role_permissoes_role
+-- alissonerp.role_permissoes  |  índice: role_permissoes_pkey
+-- alissonerp.role_permissoes  |  índice: role_permissoes_role_modulo_key
+-- alissonerp.roles  |  índice: roles_pkey
+-- alissonerp.rotas_template  |  índice: rotas_template_pkey
+-- alissonerp.rotas_template  |  índice: uniq_rota_template_default_cat
+-- alissonerp.rotas_template_etapas  |  índice: idx_rota_template_etapas_template
+-- alissonerp.rotas_template_etapas  |  índice: rotas_template_etapas_pkey
+-- alissonerp.rotas_template_etapas  |  índice: rotas_template_etapas_template_id_ordem_key
+-- alissonerp.saidas_distribuicao  |  índice: saidas_distribuicao_pkey
+-- alissonerp.saidas_ordem  |  índice: saidas_ordem_pkey
+-- alissonerp.saldo_credito_loja  |  índice: idx_saldo_credito_created
+-- alissonerp.saldo_credito_loja  |  índice: idx_saldo_credito_pagamento
+-- alissonerp.saldo_credito_loja  |  índice: idx_saldo_credito_venda
+-- alissonerp.saldo_credito_loja  |  índice: saldo_credito_loja_pkey
+-- alissonerp.servicos  |  índice: idx_servicos_operador
+-- alissonerp.servicos  |  índice: idx_servicos_ordem
+-- alissonerp.servicos  |  índice: idx_servicos_pcp
+-- alissonerp.servicos  |  índice: idx_servicos_status
+-- alissonerp.servicos  |  índice: servicos_pkey
+-- alissonerp.setor_operadores  |  índice: idx_setor_operadores_deposito
+-- alissonerp.setor_operadores  |  índice: idx_setor_operadores_setor
+-- alissonerp.setor_operadores  |  índice: setor_operadores_pkey
+-- alissonerp.setor_operadores  |  índice: setor_operadores_setor_id_deposito_id_key
+-- alissonerp.setores  |  índice: setores_pkey
+-- alissonerp.setores  |  índice: uniq_setores_nome_ativo
+-- alissonerp.site_config  |  índice: site_config_pkey
+-- alissonerp.site_produtos  |  índice: idx_site_produtos_sku
+-- alissonerp.site_produtos  |  índice: idx_site_produtos_status
+-- alissonerp.site_produtos  |  índice: site_produtos_pkey
+-- alissonerp.site_produtos  |  índice: site_produtos_produto_id_unique
+-- alissonerp.solicitacoes_alteracao  |  índice: idx_sol_alt_status
+-- alissonerp.solicitacoes_alteracao  |  índice: idx_sol_alt_venda
+-- alissonerp.solicitacoes_alteracao  |  índice: solicitacoes_alteracao_pkey
+-- alissonerp.solicitacoes_desconto  |  índice: solicitacoes_desconto_item_id_idx
+-- alissonerp.solicitacoes_desconto  |  índice: solicitacoes_desconto_pkey
+-- alissonerp.solicitacoes_desconto  |  índice: solicitacoes_desconto_status_idx
+-- alissonerp.solicitacoes_desconto  |  índice: solicitacoes_desconto_venda_id_idx
+-- alissonerp.stock_ledger_entry  |  índice: idx_sle_item_date
+-- alissonerp.stock_ledger_entry  |  índice: idx_sle_item_warehouse
+-- alissonerp.stock_ledger_entry  |  índice: idx_sle_voucher
+-- alissonerp.stock_ledger_entry  |  índice: stock_ledger_entry_pkey
+-- alissonerp.tarefas  |  índice: idx_tarefas_data_limite
+-- alissonerp.tarefas  |  índice: idx_tarefas_ordem
+-- alissonerp.tarefas  |  índice: idx_tarefas_responsavel
+-- alissonerp.tarefas  |  índice: idx_tarefas_status
+-- alissonerp.tarefas  |  índice: idx_tarefas_venda
+-- alissonerp.tarefas  |  índice: tarefas_pkey
+-- alissonerp.tarefas_anexos  |  índice: idx_tarefas_anexos_tarefa
+-- alissonerp.tarefas_anexos  |  índice: tarefas_anexos_pkey
+-- alissonerp.tarefas_historico  |  índice: idx_tarefas_historico_acao
+-- alissonerp.tarefas_historico  |  índice: idx_tarefas_historico_tarefa
+-- alissonerp.tarefas_historico  |  índice: idx_tarefas_historico_usuario
+-- alissonerp.tarefas_historico  |  índice: tarefas_historico_pkey
+-- alissonerp.tarefas_regras_aprovacao  |  índice: idx_tarefas_regras_ativo
+-- alissonerp.tarefas_regras_aprovacao  |  índice: idx_tarefas_regras_tipo
+-- alissonerp.tarefas_regras_aprovacao  |  índice: tarefas_regras_aprovacao_pkey
+-- alissonerp.tarefas_substitutos  |  índice: idx_tarefas_substitutos_substituto
+-- alissonerp.tarefas_substitutos  |  índice: idx_tarefas_substitutos_usuario
+-- alissonerp.tarefas_substitutos  |  índice: tarefas_substitutos_pkey
+-- alissonerp.tarefas_templates  |  índice: idx_tarefas_templates_ativo
+-- alissonerp.tarefas_templates  |  índice: tarefas_templates_pkey
+-- alissonerp.teores_ouro  |  índice: teores_ouro_insumo_id_key
+-- alissonerp.teores_ouro  |  índice: teores_ouro_pkey
+-- alissonerp.tiny_sync_produtos  |  índice: idx_tiny_sync_produtos_status
+-- alissonerp.tiny_sync_produtos  |  índice: tiny_sync_produtos_pkey
+-- alissonerp.tipos_apontamento  |  índice: tipos_apontamento_pkey
+-- alissonerp.tipos_servico  |  índice: tipos_servico_pkey
+-- alissonerp.transferencias_estoque_comercial  |  índice: idx_transf_ec_produto
+-- alissonerp.transferencias_estoque_comercial  |  índice: idx_transf_ec_status
+-- alissonerp.transferencias_estoque_comercial  |  índice: transferencias_estoque_comercial_pkey
+-- alissonerp.transferencias_ordem  |  índice: transferencias_ordem_pkey
+-- alissonerp.user_views  |  índice: idx_user_views_user_scope
+-- alissonerp.user_views  |  índice: user_views_pkey
+-- alissonerp.user_views  |  índice: user_views_user_auth_id_scope_nome_key
+-- alissonerp.uso_maquina_reserva  |  índice: uso_maquina_reserva_pkey
+-- alissonerp.usuarios  |  índice: usuarios_email_key
+-- alissonerp.usuarios  |  índice: usuarios_pkey
+-- alissonerp.vale_troca  |  índice: idx_vale_troca_cliente
+-- alissonerp.vale_troca  |  índice: idx_vale_troca_devolucao
+-- alissonerp.vale_troca  |  índice: idx_vale_troca_numero
+-- alissonerp.vale_troca  |  índice: idx_vale_troca_origem
+-- alissonerp.vale_troca  |  índice: idx_vale_troca_status
+-- alissonerp.vale_troca  |  índice: vale_troca_numero_key
+-- alissonerp.vale_troca  |  índice: vale_troca_pkey
+-- alissonerp.vendas_erp  |  índice: idx_vendas_erp_empresa_emitente
+-- alissonerp.vendas_erp  |  índice: idx_vendas_erp_is_legacy
+-- alissonerp.vendas_erp  |  índice: idx_vendas_erp_nfce_chave
+-- alissonerp.vendas_erp  |  índice: idx_vendas_erp_public_venda_id
+-- alissonerp.vendas_erp  |  índice: idx_vendas_orcamento
+-- alissonerp.vendas_erp  |  índice: uq_vendas_erp_public_venda_id
+-- alissonerp.vendas_erp  |  índice: vendas_erp_numero_venda_key
+-- alissonerp.vendas_erp  |  índice: vendas_erp_pkey
+-- alissonerp.vendedores_fiscais  |  índice: idx_vendedores_fiscais_empresa
+-- alissonerp.vendedores_fiscais  |  índice: vendedores_fiscais_pkey
+-- alissonerp.webhook_config  |  índice: webhook_config_nome_key
+-- alissonerp.webhook_config  |  índice: webhook_config_pkey
+-- alissonerp.webhook_log  |  índice: idx_wh_log_data
+-- alissonerp.webhook_log  |  índice: idx_wh_log_nome
+-- alissonerp.webhook_log  |  índice: webhook_log_pkey
+-- public.banco_imagens  |  índice: banco_imagens_pkey
+-- public.categoria_precificação  |  índice: categoria_precificação_pkey
+-- public.categorias  |  índice: categorias_pkey
+-- public.categorias  |  índice: idx_categorias_pai_id
+-- public.categorias_receitas_despesas  |  índice: categorias_receitas_despesas_id_categoria_key
+-- public.categorias_receitas_despesas  |  índice: categorias_receitas_despesas_id_key
+-- public.categorias_receitas_despesas  |  índice: categorias_receitas_despesas_pkey
+-- public.comissoes  |  índice: comissoes_pkey
+-- public.complementos_contatos  |  índice: complementos_contatos_contato_id_api_key
+-- public.complementos_contatos  |  índice: complementos_contatos_pkey
+-- public.config_orcamento_aliancas  |  índice: config_orcamento_aliancas_name_idx
+-- public.config_orcamento_aliancas  |  índice: config_orcamento_aliancas_name_key
+-- public.config_orcamento_aliancas  |  índice: config_orcamento_aliancas_pkey
+-- public.contas_a_pagar  |  índice: contas_a_pagar_id_api_conta_key
+-- public.contas_a_pagar  |  índice: contas_a_pagar_pkey
+-- public.contas_a_receber  |  índice: contas_a_receber_id_api_conta_key
+-- public.contas_a_receber  |  índice: contas_a_receber_pkey
+-- public.contatos  |  índice: contatos_cpf_cnpj_key
+-- public.contatos  |  índice: contatos_id_api_contato_key
+-- public.contatos  |  índice: contatos_pkey
+-- public.controle_de_execucao  |  índice: controle_de_execucao_pkey
+-- public.controle_entregas  |  índice: controle_entregas_pkey
+-- public.controle_entregas  |  índice: idx_entregas_created_at
+-- public.controle_entregas  |  índice: idx_entregas_data
+-- public.controle_entregas  |  índice: idx_entregas_data_entrega
+-- public.controle_entregas  |  índice: idx_entregas_entregador
+-- public.controle_entregas  |  índice: idx_entregas_pedido_id
+-- public.controle_entregas  |  índice: idx_entregas_status
+-- public.controle_entregas  |  índice: idx_entregas_status_data
+-- public.controle_entregas  |  índice: idx_entregas_type
+-- public.controle_entregas  |  índice: idx_entregas_type_and_data
+-- public.controle_requisicao  |  índice: controle_requisicao_pkey
+-- public.controle_sequencia  |  índice: controle_sequencia_pkey
+-- public.cotacao  |  índice: cotacao_pkey
+-- public.estoque  |  índice: estoque_pkey
+-- public.estoque  |  índice: estoque_produto_id_api_key
+-- public.ficha_tecnica  |  índice: ficha_tecnica_pkey
+-- public.ficha_tecnica_orcamento  |  índice: ficha_tecnica_orcamento_pkey
+-- public.ficha_tecnica_orcamento  |  índice: idx_ficha_tecnica_orc_id
+-- public.ficha_tecnica_produto  |  índice: ficha_tecnica_produto_pkey
+-- public.fila_webhooks_n8n  |  índice: fila_webhooks_n8n_pkey
+-- public.fila_webhooks_n8n  |  índice: idx_fila_webhooks_pendentes
+-- public.fin_conciliacoes  |  índice: fin_conciliacoes_conta_pagar_id_key
+-- public.fin_conciliacoes  |  índice: fin_conciliacoes_lancamento_id_key
+-- public.fin_conciliacoes  |  índice: fin_conciliacoes_pkey
+-- public.fin_conciliacoes  |  índice: idx_fin_conc_status
+-- public.fin_extratos_bancarios  |  índice: fin_extratos_bancarios_pkey
+-- public.fin_lancamentos_bancarios  |  índice: fin_lancamentos_bancarios_extrato_id_fitid_key
+-- public.fin_lancamentos_bancarios  |  índice: fin_lancamentos_bancarios_pkey
+-- public.fin_lancamentos_bancarios  |  índice: idx_fin_lanc_data
+-- public.fin_lancamentos_bancarios  |  índice: idx_fin_lanc_extrato
+-- public.fonte_entrada_kommo  |  índice: fonte_entrada_kommo_id_fonte_key
+-- public.fonte_entrada_kommo  |  índice: fonte_entrada_kommo_pkey
+-- public.forma_envio  |  índice: logistica_id_api_key
+-- public.forma_envio  |  índice: logistica_pkey
+-- public.forma_frete  |  índice: forma_frete_id_api_key
+-- public.forma_frete  |  índice: forma_frete_pkey
+-- public.forma_pagamento  |  índice: forma_pagamento_pkey
+-- public.forma_pagamento  |  índice: forma_pagamento_slug_unique
+-- public.historico_ordem  |  índice: historico_ordem_pkey
+-- public.historico_preco  |  índice: historico_preco_pkey
+-- public.historico_venda_ja  |  índice: historico_venda_ja_pkey
+-- public.indicadores_marketing  |  índice: indicadores_marketing_pkey
+-- public.itens_da_ordem  |  índice: itens_da_ordem_pkey
+-- public.itens_pedido  |  índice: itens_pedido_pkey
+-- public.itens_venda  |  índice: itens_venda_pkey
+-- public.leads  |  índice: leads_id_lead_key
+-- public.leads  |  índice: leads_pkey
+-- public.loock  |  índice: look_id_key
+-- public.loock  |  índice: look_pkey
+-- public.map_asana  |  índice: map_asana_gid_key
+-- public.map_asana  |  índice: map_asana_pkey
+-- public.map_vendedor_kommo  |  índice: map_vendedor_kommo_id_api_kommo_key
+-- public.map_vendedor_kommo  |  índice: map_vendedor_kommo_pkey
+-- public.meio_pagamento  |  índice: idx_meio_pagamento_forma
+-- public.meio_pagamento  |  índice: meio_pagamento_pkey
+-- public.meio_pagamento  |  índice: meio_pagamento_slug_forma_unique
+-- public.metas_mensais  |  índice: metas_mensais_pkey
+-- public.metas_por_hora  |  índice: idx_metas_data_consultora
+-- public.metas_por_hora  |  índice: idx_metas_por_hora_data_hora
+-- public.metas_por_hora  |  índice: metas_por_hora_pkey
+-- public.notificacoes  |  índice: idx_notificacoes_date_created
+-- public.notificacoes  |  índice: idx_notificacoes_entidade
+-- public.notificacoes  |  índice: idx_notificacoes_user_id
+-- public.notificacoes  |  índice: idx_notificacoes_user_lida
+-- public.notificacoes  |  índice: notificacoes_pkey
+-- public.orcamento  |  índice: orcamento_pkey
+-- public.ordem_compras  |  índice: ordem_compras_id_ordem_key
+-- public.ordem_compras  |  índice: ordem_compras_pkey
+-- public.pagamentos  |  índice: pagamentos_id_api_pagamento_key
+-- public.pagamentos  |  índice: pagamentos_pkey
+-- public.parametros  |  índice: parametros_pkey
+-- public.parcelas_da_ordem  |  índice: parcelas_da_ordem_pkey
+-- public.parcelas_pedidos  |  índice: parcelas_pedidos_pkey
+-- public.pedidos  |  índice: pedidos_id_api_pedido_key
+-- public.pedidos  |  índice: pedidos_id_lead_key
+-- public.pedidos  |  índice: pedidos_pkey
+-- public.produtos  |  índice: idx_produtos_sku_fp1037
+-- public.produtos  |  índice: idx_produtos_tem_pedra
+-- public.produtos  |  índice: produtos_id_api_produto_key
+-- public.produtos  |  índice: produtos_pkey
+-- public.public_links  |  índice: idx_public_links_resource
+-- public.public_links  |  índice: public_links_pkey
+-- public.recebimentos  |  índice: recebimentos_id_api_recebimento_key
+-- public.recebimentos  |  índice: recebimentos_pkey
+-- public.relacao_tinny_moura  |  índice: relacao_tinny_moura_pkey
+-- public.solicitacoes_vale_troca  |  índice: solicitacoes_vale_troca_pkey
+-- public.staging_markup_aprovacao  |  índice: staging_markup_aprovacao_pkey
+-- public.suporte_conversas  |  índice: idx_suporte_telefone
+-- public.suporte_conversas  |  índice: suporte_conversas_pkey
+-- public.suporte_conversas  |  índice: suporte_conversas_telefone_key
+-- public.tipos_contatos  |  índice: tipos_contatos_id_api_tipo_key
+-- public.tipos_contatos  |  índice: tipos_contatos_pkey
+-- public.user_profiles  |  índice: idx_users_email
+-- public.user_profiles  |  índice: idx_users_is_active
+-- public.user_profiles  |  índice: idx_users_role
+-- public.user_profiles  |  índice: user_profiles_id_user_key
+-- public.user_profiles  |  índice: users_email_key
+-- public.user_profiles  |  índice: users_pkey
+-- public.vales_troca  |  índice: idx_codigo_voucher_ativo
+-- public.vales_troca  |  índice: vales_troca_pkey
+-- public.vendas  |  índice: idx_vendas_entregue
+-- public.vendas  |  índice: idx_vendas_id_api_tiny
+-- public.vendas  |  índice: vendas_id_api_tiny_key
+-- public.vendas  |  índice: vendas_lead_id_key
+-- public.vendas  |  índice: vendas_pkey
+-- public.vendedores  |  índice: vendedores_cpf_key
+-- public.vendedores  |  índice: vendedores_email_key
+-- public.vendedores  |  índice: vendedores_id_api_kommo_key
+-- public.vendedores  |  índice: vendedores_id_api_vendedor_key
+-- public.vendedores  |  índice: vendedores_pkey
+
+-- =============================================================
+-- ENUMS / TYPES PERSONALIZADOS
+-- =============================================================
+
+-- alissonerp.enum_direcao_protocolo = {ida, volta}
+-- alissonerp.enum_etapas_aprovacao = {pendente, aguardando, aprovado, reprovado}
+-- alissonerp.enum_etapas_distribuicao = {em_andamento, concluido}
+-- alissonerp.enum_etapas_entrega = {pendente, concluido}
+-- alissonerp.enum_etapas_pcp = {novas_ordens, pendencia, aguardando, em_andamento, concluido, cancelado}
+-- alissonerp.enum_etapas_protocolo = {pendente, concluido}
+-- alissonerp.enum_marcador_estoque = {AD, EM, EP, RM, RP, BI, SM, SP, SOI, TED, ADD, EIMD, EPD, RPD, RMD, EOID, SOID, TEDMD, TEDPD, TEDD, TA, EA, SA, Sangria, ENTRADA, QUEBRA_LOTE, QUEBRA_PCP, QBP, ESTORNO, PURIF_SAIDA, PURIF_ENTRADA, PURIF_CANCEL, LIGA_SAIDA_24K, LIGA_SAIDA_LIGA, LIGA_ENTRADA_18K, LIGA_CANCEL}
+-- alissonerp.enum_rota_ordem = {pcp, protocolo}
+-- alissonerp.enum_setor_distribuicao = {fundicao, aliancas, cnc, laser, banca, tamboreador, epg}
+-- alissonerp.enum_situacao_ativa = {ativo, inativo}
+-- alissonerp.enum_situacao_ordem = {cancelado, criado, rascunho}
+-- alissonerp.enum_status_ordem = {aguardando, em_andamento, concluido, cancelado}
+-- alissonerp.enum_tipo_apontamento_scope = {pcp, distribuicao, ambos}
+-- alissonerp.enum_tipo_deposito = {administrativo, producao}
+-- alissonerp.enum_tipo_lancamento = {transferencia, entrada, saida, sangria}
+-- alissonerp.enum_tipo_metal = {ouro, prata}
+-- alissonerp.enum_tipo_ordem = {servico_venda, fabricacao, reposicao_venda, reposicao_loja, compra_fornecedor, garantia, servico_interno, servico_loja, conversao, conversao_sku}
+-- public.situacao = {Ativo, Inativo}
+
+-- =============================================================
+-- FIM DA PLANTA BAIXA
+-- =============================================================

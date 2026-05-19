@@ -7,19 +7,20 @@
 
 ## 📅 Última sessão
 **Data:** 2026-05-19 (hoje — sessão longa, várias tarefas)
-**Quem mexeu:** Claude (Opus 4.7) + Alisson
+**Quem mexeu:** opencode + Alisson
 
 ---
 
 ## 🔧 Em andamento
-Nada em aberto. Última tarefa finalizada: feature pedras-componente (cadastro de produto com soma Ouro+Pedras em tempo real).
+Nada em aberto. Skills/agentes criados hoje: `dba-alisson` (skill + agente subagent + AGENTS.md global).
 
 ---
 
 ## ➡️ Próximo passo
-1. Testar em produção (`erp.alissonjoias.com.br`) a feature de pedras no cadastro de produto novo
-2. Decidir o que fazer com branch `feat/proxima-tarefa` (ainda aberta, 10 commits não mergeados — ver Branches)
-3. Verificar migrations 258–261 se foram executadas em produção
+1. Reiniciar opencode para carregar a skill/agente `dba-alisson`, AGENTS.md e as permissões
+2. Testar em produção (`erp.alissonjoias.com.br`) a feature de pedras no cadastro de produto novo
+3. Decidir o que fazer com branch `feat/proxima-tarefa` (ainda aberta, 10 commits não mergeados — ver Branches)
+4. Verificar migrations 258–261 se foram executadas em produção
 
 ---
 
@@ -30,6 +31,9 @@ Nada em aberto. Última tarefa finalizada: feature pedras-componente (cadastro d
 - 19/05 — **31 solicitações de desconto antigas rejeitadas** em bloco.
 - 19/05 — **PIX → Pix normalizado** nas formas de pagamento.
 - 19/05 — **16 branches antigas deletadas** (ficaram só `homolog` e `main` + algumas em uso).
+- 19/05 — **Distribuição:** corrigido 403 para `gerente_fabrica` — trocado array hardcoded de roles por `temAcessoModulo()` nas 4 rotas de distribuição (commit `ba31876`).
+- 19/05 — **Skill `dba-alisson` criada:** guardião do banco — única skill autorizada a tocar no banco de dados. Toda consulta/modificação SQL deve passar por ela. Schema completo dumpado em `references/schema.sql` (5304 linhas).
+- 19/05 — **Agente `dba-alisson` + AGENTS.md criados:** após teste mostrar que outro agente ignorou a skill e consultou o banco direto com node+pg, foi criado um agente subagent com permissões próprias (+ `AGENTS.md` com regra global: só dba-alisson toca no banco). `opencode.json` ajustado com `instructions: ["AGENTS.md"]` e permissões `psql/pg_dump/node *postgres*: ask`.
 - 18/05 — Vendedora/gerente NÃO pode mais editar pagamento confirmado nem campos financeiros da venda. Tem que solicitar alteração ao admin.
 - 18/05 — Admin/desenvolvedor/diretor = `ROLES_FINANCEIRO` (únicos que podem mexer em valores).
 - 18/05 — Migration 262 criou tabela `solicitacoes_alteracao` (já executada em produção).
@@ -77,6 +81,7 @@ Nenhuma trava crítica identificada no momento. ✅
 ## ⚠️ Avisos importantes ativos
 - **Docker Desktop não está subindo** na máquina local. Pode desinstalar sem prejuízo — projeto não usa Docker localmente (só pro deploy em produção, que roda no servidor).
 - **CRM tem schema próprio** (`crm.*`) — NÃO mexer. É projeto paralelo no mesmo banco.
+- **Skill `dba-alisson` é a única autorizada a tocar no banco.** Nenhuma outra skill/agente pode executar SQL. Há um agente subagent (`dba-alisson`) com permissões irrestritas e `AGENTS.md` com regra global. `psql`/`pg_dump`/`node *postgres*` configurados como "ask" (pedem aprovação) no `opencode.json`.
 
 ---
 
@@ -91,12 +96,12 @@ Nenhuma trava crítica identificada no momento. ✅
 **Limpeza feita hoje:** 16 branches antigas deletadas ✅
 
 **Última sincronização homolog ↔ main:** 19/05/2026
-**Última subida pra main:** 19/05/2026 — `ab76119` (pedras-componente feature v2.60.5)
+**Última subida pra main:** 19/05/2026 — `ba31876` (fix distribuição permissoes + skill dba-alisson)
 
 ---
 
 ## 🗄️ Última versão em produção
-- **Em main hoje:** `ab76119` — pedras-componente feature completa
+- **Em main hoje:** `ba31876` — fix distribuição permissoes + skill dba-alisson
 - **Em homolog hoje:** mesmo commit (sincronizado)
 - **Última versão semântica:** `v2.60.5` (pedras-componente no cadastro de produto)
 
@@ -116,11 +121,11 @@ Nenhuma trava crítica identificada no momento. ✅
 ---
 
 ## 📜 Histórico recente (últimas 5 tarefas)
-1. **19/05** — Pedras-componente: cadastro de produto com seleção de pedras do catálogo + soma Ouro/Pedras/TOTAL — ✅ v2.60.5
-2. **19/05** — Operacional: desativar Camila, ajustar limites Cristiane/Débora/Germana, rejeitar 31 requests, normalizar Pix, limpar 16 branches — ✅ feito
-3. **18/05** — Unificar regra de desconto (orçamento + venda direta usam mesmo `mx_desconto_permitido`) — ✅ v2.60.4
-4. **18/05** — Consertar bug recorrente: `id_contato`/`id` no orçamento (causa raiz no endpoint) — ✅ v2.60.4
-5. **18/05** — Bloquear vendedora de editar pagamento confirmado + fluxo solicitação de alteração — ✅ v2.60.1/2 + migration 262
+1. **19/05** — Skill `dba-alisson` criada: guardião do banco, fonte única da verdade, schema dumpado (5304 linhas) + permissões no opencode.json — ✅ 
+2. **19/05** — Distribuição: corrigido 403 para `gerente_fabrica` nas 4 rotas (hardcoded role → `temAcessoModulo()`) — ✅ commit `ba31876`
+3. **19/05** — Pedras-componente: cadastro de produto com seleção de pedras do catálogo + soma Ouro/Pedras/TOTAL — ✅ v2.60.5
+4. **19/05** — Operacional: desativar Camila, ajustar limites Cristiane/Débora/Germana, rejeitar 31 requests, normalizar Pix, limpar 16 branches — ✅ feito
+5. **18/05** — Unificar regra de desconto (orçamento + venda direta usam mesmo `mx_desconto_permitido`) — ✅ v2.60.4
 
 ---
 
@@ -128,9 +133,10 @@ Nenhuma trava crítica identificada no momento. ✅
 - **Servidor local (`npm run dev`):** rodando em `http://localhost:3000`
 - **Banco Supabase:** `72.60.55.140:5543` — conecta normal
 - **Docker Desktop:** pode desinstalar (não usa localmente)
-- **TypeScript (`tsc --noEmit`):** sem erros nos 2 repos (verificado hoje, após pedras-componente)
-- **Produção:** `erp.alissonjoias.com.br` — último deploy `ab76119`
+- **TypeScript (`tsc --noEmit`):** sem erros (verificado hoje)
+- **Produção:** `erp.alissonjoias.com.br` — último deploy `ba31876`
+- **Skill guardiã:** `dba-alisson` ativa — ver `.opencode/skills/dba-alisson/`
 
 ---
 
-_Última atualização: 2026-05-19 (fim de sessão)_
+_Última atualização: 2026-05-19 (fim de sessão — dba-alisson skill + agent + AGENTS.md)_

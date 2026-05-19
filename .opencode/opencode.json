@@ -1,6 +1,14 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
   "plugin": [
     ".opencode/plugins/graphify.js"
-  ]
+  ],
+  "permission": {
+    "bash": {
+      "psql *": "ask",
+      "pg_dump *": "ask",
+      "node *[Pp]ostgres*": "ask"
+    }
+  }
 }
