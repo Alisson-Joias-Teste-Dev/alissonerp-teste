@@ -634,6 +634,7 @@ function EngravingText({
             fontSize={fontSize}
             anchorX="center"
             anchorY="middle"
+            font="/fonts/Roboto-Bold.woff2"
             fontStyle={fontType === 2 ? "italic" : "normal"}
             fontWeight={700}
             renderOrder={10}
