@@ -420,8 +420,19 @@ export async function POST(req: NextRequest) {
                 ORDER BY posicao ASC
               `;
 
-              const personalizacaoMulti = item.personalizacao as { campos?: Array<Record<string, unknown>> } | null;
-              const camposRecebidos = personalizacaoMulti?.campos ?? [];
+              const persRaw = item.personalizacao as Record<string, unknown> | null;
+              let camposRecebidos: Array<Record<string, unknown>> = [];
+              if (persRaw) {
+                if ("campos" in persRaw && Array.isArray(persRaw.campos)) {
+                  camposRecebidos = persRaw.campos as Array<Record<string, unknown>>;
+                } else if ("valor" in persRaw && typeof persRaw.valor === "string" && persRaw.valor) {
+                  // Fallback: formato legado { valor: "..." } enviado para produto multi-campo
+                  // trata o valor como preenchimento do primeiro campo
+                  camposRecebidos = camposConfig.map((_cc: Record<string, unknown>, idx: number) => ({
+                    valor: idx === 0 ? persRaw.valor : null,
+                  }));
+                }
+              }
 
               // Validar cada campo recebido contra sua config
               for (let i = 0; i < camposConfig.length; i++) {
