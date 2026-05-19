@@ -626,24 +626,10 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated, inline 
 
   if (!open) return null;
 
-  // Wrapper externo: modal com overlay OU inline dentro do fluxo da página.
-  const Wrapper = inline
-    ? ({ children }: { children: React.ReactNode }) => (
-        <div className="bg-white rounded-2xl border w-full" style={{ borderColor: C.cremeBorder }}>
-          <div className="flex flex-col overflow-hidden relative">{children}</div>
-        </div>
-      )
-    : ({ children }: { children: React.ReactNode }) => (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-          <div className="relative bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-            {children}
-          </div>
-        </div>
-      );
-
-  return (
-    <Wrapper>
+  // Conteúdo interno do modal — extraído para evitar wrapper recriado a cada render
+  // (causava perda de foco em inputs por unmount/remount).
+  const conteudo = (
+    <>
         {/* Header — escondido em modo inline (a página já tem título) */}
         {!inline && (
           <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
@@ -1200,6 +1186,19 @@ export default function GerenciarPedrasModal({ open, onClose, onCreated, inline 
             </div>
           </div>
         )}
-    </Wrapper>
+    </>
+  );
+
+  return inline ? (
+    <div className="bg-white rounded-2xl border w-full" style={{ borderColor: C.cremeBorder }}>
+      <div className="flex flex-col overflow-hidden relative">{conteudo}</div>
+    </div>
+  ) : (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        {conteudo}
+      </div>
+    </div>
   );
 }
