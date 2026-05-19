@@ -171,8 +171,8 @@ function DroppableColumn({
   activeId: number | null;
 }) {
   return (
-    <div className="flex flex-col min-w-[260px] max-w-[280px]">
-      <div className="flex items-center gap-2 mb-3 px-1">
+    <div className="flex flex-col w-[85vw] sm:w-auto sm:min-w-[260px] sm:max-w-[280px] snap-start flex-shrink-0">
+      <div className="flex items-center gap-2 mb-3 px-1 sticky top-0 z-10 py-1" style={{ backgroundColor: C.cremeBg }}>
         <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: col.color }} />
         <span className="font-semibold text-xs uppercase tracking-wide flex-1" style={{ color: col.color }}>
           {col.label}
@@ -371,46 +371,51 @@ export default function TarefasClient() {
       {/* Header */}
       <div className="px-4 md:px-6 pt-4 pb-3 border-b space-y-3"
         style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}>
+        {/* Linha 1: Título + Tabs (desktop juntos / mobile separados) */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-bold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            <h1 className="text-lg font-bold flex-shrink-0" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
               Tarefas
             </h1>
-            <div className="flex rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-              {VIEW_TABS.filter(t => t.key !== "time" || podeGerenciar).map(({ key, label, icon: Icon }) => (
-                <button key={key} onClick={() => setAba(key)}
-                  className="px-3 py-1.5 text-xs font-semibold transition-colors flex items-center gap-1"
-                  style={{ backgroundColor: aba === key ? C.esmeralda : C.cremeBg, color: aba === key ? C.creme : "#6B7280" }}>
-                  <Icon size={11} />
-                  {label}
+            {/* Tabs: scroll horizontal no mobile, inline no desktop */}
+            <div className="flex-1 md:flex-initial -mx-4 md:mx-0 px-4 md:px-0 overflow-x-auto md:overflow-visible scrollbar-hide">
+              <div className="flex rounded-lg border overflow-hidden w-max md:w-auto" style={{ borderColor: C.cremeBorder }}>
+                {VIEW_TABS.filter(t => t.key !== "time" || podeGerenciar).map(({ key, label, icon: Icon }) => (
+                  <button key={key} onClick={() => setAba(key)}
+                    className="px-3 py-2 md:py-1.5 text-xs font-semibold transition-colors flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+                    style={{ backgroundColor: aba === key ? C.esmeralda : C.cremeBg, color: aba === key ? C.creme : "#6B7280" }}>
+                    <Icon size={12} />
+                    {label}
+                  </button>
+                ))}
+                <button onClick={() => setAba("automacoes")}
+                  className="px-3 py-2 md:py-1.5 text-xs font-semibold transition-colors flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+                  style={{ backgroundColor: aba === "automacoes" ? C.esmeralda : C.cremeBg, color: aba === "automacoes" ? C.creme : "#6B7280" }}>
+                  <Zap size={12} />Automações
                 </button>
-              ))}
-              <button onClick={() => setAba("automacoes")}
-                className="px-3 py-1.5 text-xs font-semibold transition-colors flex items-center gap-1"
-                style={{ backgroundColor: aba === "automacoes" ? C.esmeralda : C.cremeBg, color: aba === "automacoes" ? C.creme : "#6B7280" }}>
-                <Zap size={11} />Automações
-              </button>
-              {podeGerenciar && (
-                <button onClick={() => setAba("config")}
-                  className="px-3 py-1.5 text-xs font-semibold transition-colors flex items-center gap-1"
-                  style={{ backgroundColor: aba === "config" ? C.esmeralda : C.cremeBg, color: aba === "config" ? C.creme : "#6B7280" }}>
-                  <Settings size={11} />Config
-                </button>
-              )}
+                {podeGerenciar && (
+                  <button onClick={() => setAba("config")}
+                    className="px-3 py-2 md:py-1.5 text-xs font-semibold transition-colors flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+                    style={{ backgroundColor: aba === "config" ? C.esmeralda : C.cremeBg, color: aba === "config" ? C.creme : "#6B7280" }}>
+                    <Settings size={12} />Config
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="relative">
+          {/* Filtros: mobile vai pra linha de baixo (full-width); desktop mantém */}
+          <div className="flex items-center gap-2 w-full md:w-auto">
+            <div className="relative flex-1 md:flex-initial">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
               <input type="text" placeholder="Buscar..." value={filtro}
                 onChange={e => setFiltro(e.target.value)}
-                className="pl-8 pr-3 py-1.5 border rounded-lg text-xs w-40 outline-none"
+                className="pl-8 pr-3 py-2 md:py-1.5 border rounded-lg text-sm md:text-xs w-full md:w-40 outline-none"
                 style={{ borderColor: C.cremeBorder }} />
             </div>
             {/* Filtros adicionais */}
             <select value={filtroPrioridade} onChange={e => setFiltroPrioridade(e.target.value)}
-              className="px-2 py-1.5 border rounded-lg text-xs outline-none"
+              className="px-2 py-2 md:py-1.5 border rounded-lg text-sm md:text-xs outline-none flex-1 md:flex-initial min-w-0"
               style={{ borderColor: C.cremeBorder }}>
               <option value="">Prioridade</option>
               <option value="urgente">Urgente</option>
@@ -419,7 +424,7 @@ export default function TarefasClient() {
               <option value="baixa">Baixa</option>
             </select>
             <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}
-              className="px-2 py-1.5 border rounded-lg text-xs outline-none"
+              className="px-2 py-2 md:py-1.5 border rounded-lg text-sm md:text-xs outline-none flex-1 md:flex-initial min-w-0"
               style={{ borderColor: C.cremeBorder }}>
               <option value="">Tipo</option>
               <option value="geral">Geral</option>
@@ -427,50 +432,53 @@ export default function TarefasClient() {
               <option value="sangria">Sangria</option>
               <option value="protocolo_metal">Protocolo metal</option>
             </select>
+            {/* Botão Nova: só desktop; mobile usa FAB */}
             <button onClick={() => setShowNova(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
               style={{ backgroundColor: C.esmeralda, color: C.creme }}>
               <Plus size={13} /> Nova
             </button>
           </div>
         </div>
 
-        {/* Dashboard Stats */}
+        {/* Dashboard Stats — scroll horizontal claro no mobile */}
         {stats && (
-          <div className="flex gap-3 flex-wrap">
-            {[
-              { label: "Pendentes", value: stats.minhas_pendentes, color: "#6B7280", icon: Circle },
-              { label: "Em andamento", value: stats.em_andamento, color: "#D97706", icon: Clock },
-              { label: "Aguard. Aprovação", value: stats.aguardando_minha_aprovacao, color: "#7C3AED", icon: ShieldCheck },
-              { label: "Concluídas", value: stats.concluidas, color: "#059669", icon: CheckCircle2 },
-              { label: "Vencidas", value: stats.vencidas, color: "#DC2626", icon: AlertTriangle },
-            ].map(stat => (
-              <button key={stat.label}
-                onClick={() => {
-                  setFiltroVisao("");
-                  if (stat.label === "Aguard. Aprovação") setAba("aguardando");
-                  else if (stat.label === "Concluídas") setAba("concluidas");
-                  else if (stat.label === "Pendentes") setAba("minhas");
-                  else if (stat.label === "Em andamento") {
-                    setFiltroPrioridade("");
-                    setFiltroTipo("");
-                    setFiltro("");
-                    setAba("minhas");
-                  }
-                  else if (stat.label === "Vencidas") {
-                    setFiltroPrioridade("");
-                    setFiltroTipo("");
-                    setFiltro("");
-                    setFiltroVisao("vencidas");
-                    setAba("minhas");
-                  }
-                }}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors hover:opacity-80"
-                style={{ backgroundColor: stat.color + "15", color: stat.color }}>
-                <stat.icon size={12} />
-                {stat.label}: {stat.value}
-              </button>
-            ))}
+          <div className="-mx-4 md:mx-0 px-4 md:px-0 overflow-x-auto md:overflow-visible scrollbar-hide">
+            <div className="flex gap-2 md:gap-3 md:flex-wrap w-max md:w-auto">
+              {[
+                { label: "Pendentes", value: stats.minhas_pendentes, color: "#6B7280", icon: Circle },
+                { label: "Em andamento", value: stats.em_andamento, color: "#D97706", icon: Clock },
+                { label: "Aguard. Aprovação", value: stats.aguardando_minha_aprovacao, color: "#7C3AED", icon: ShieldCheck },
+                { label: "Concluídas", value: stats.concluidas, color: "#059669", icon: CheckCircle2 },
+                { label: "Vencidas", value: stats.vencidas, color: "#DC2626", icon: AlertTriangle },
+              ].map(stat => (
+                <button key={stat.label}
+                  onClick={() => {
+                    setFiltroVisao("");
+                    if (stat.label === "Aguard. Aprovação") setAba("aguardando");
+                    else if (stat.label === "Concluídas") setAba("concluidas");
+                    else if (stat.label === "Pendentes") setAba("minhas");
+                    else if (stat.label === "Em andamento") {
+                      setFiltroPrioridade("");
+                      setFiltroTipo("");
+                      setFiltro("");
+                      setAba("minhas");
+                    }
+                    else if (stat.label === "Vencidas") {
+                      setFiltroPrioridade("");
+                      setFiltroTipo("");
+                      setFiltro("");
+                      setFiltroVisao("vencidas");
+                      setAba("minhas");
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 md:px-2.5 md:py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors hover:opacity-80 whitespace-nowrap flex-shrink-0"
+                  style={{ backgroundColor: stat.color + "15", color: stat.color }}>
+                  <stat.icon size={12} />
+                  {stat.label}: {stat.value}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -485,7 +493,7 @@ export default function TarefasClient() {
           <Loader2 size={24} className="animate-spin" style={{ color: C.esmeralda }} />
         </div>
       ) : aba === "kanban" ? (
-        <div className="flex-1 overflow-x-auto">
+        <div className="flex-1 overflow-x-auto snap-x snap-mandatory md:snap-none scrollbar-hide">
           <DndContext
             sensors={sensors}
             collisionDetection={closestCorners}
@@ -493,7 +501,7 @@ export default function TarefasClient() {
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
           >
-            <div className="flex gap-4 p-4 md:p-6 min-h-full" style={{ minWidth: `${STATUS_COLS.length * 290}px` }}>
+            <div className="flex gap-3 md:gap-4 p-4 md:p-6 min-h-full md:w-max">
               {STATUS_COLS.map(col => (
                 <DroppableColumn
                   key={col.key}
@@ -517,7 +525,7 @@ export default function TarefasClient() {
       ) : (
         /* Lista simples para outras views */
         <div className="flex-1 overflow-y-auto">
-          <div className="p-4 md:p-6 space-y-2">
+          <div className="p-4 md:p-6 space-y-2 pb-24 md:pb-6">
             {tarefasFiltradas.length === 0 ? (
               <p className="text-sm text-center py-12" style={{ color: "#9CA3AF" }}>
                 Nenhuma tarefa encontrada
@@ -530,18 +538,18 @@ export default function TarefasClient() {
                 return (
                   <div key={t.id}
                     onClick={() => setDrawerTarefa(t)}
-                    className="p-3 rounded-xl border cursor-pointer hover:shadow-sm transition-all flex items-center gap-3"
+                    className="p-4 md:p-3 rounded-xl border cursor-pointer hover:shadow-sm active:scale-[0.99] transition-all flex items-center gap-3"
                     style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}>
-                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: colInfo?.color ?? "#9CA3AF" }} />
+                    <div className="w-2.5 h-2.5 md:w-2 md:h-2 rounded-full flex-shrink-0" style={{ backgroundColor: colInfo?.color ?? "#9CA3AF" }} />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                      <div className="flex items-center gap-2 mb-1.5 md:mb-1 flex-wrap md:flex-nowrap">
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
                           style={{ backgroundColor: pri.bg, color: pri.text }}>
                           {pri.label}
                         </span>
-                        <p className="text-sm font-medium truncate" style={{ color: "#1A1A1A" }}>{t.titulo}</p>
+                        <p className="text-sm font-medium truncate flex-1 min-w-0" style={{ color: "#1A1A1A" }}>{t.titulo}</p>
                       </div>
-                      <div className="flex items-center gap-2 text-[11px]" style={{ color: "#9CA3AF" }}>
+                      <div className="flex items-center gap-2 text-[11px] flex-wrap" style={{ color: "#9CA3AF" }}>
                         {t.responsavel_nome && <span>{t.responsavel_nome.split(" ")[0]}</span>}
                         {t.data_limite && (
                           <span style={{ color: isVencida ? "#EF4444" : "#9CA3AF" }}>
@@ -563,6 +571,17 @@ export default function TarefasClient() {
             )}
           </div>
         </div>
+      )}
+
+      {/* FAB Nova Tarefa — só mobile, escondido nas abas config/automacoes (que têm botão próprio) */}
+      {aba !== "config" && aba !== "automacoes" && (
+        <button
+          onClick={() => setShowNova(true)}
+          aria-label="Nova tarefa"
+          className="md:hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+          <Plus size={26} />
+        </button>
       )}
 
       {/* Drawer de detalhe */}
@@ -588,8 +607,14 @@ export default function TarefasClient() {
       {/* Modal Nova Tarefa */}
       {showNova && (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40" onClick={e => { if (e.target === e.currentTarget) setShowNova(false); }}>
-          <div className="bg-white w-full md:max-w-md md:rounded-2xl rounded-t-2xl p-5 space-y-3 shadow-2xl">
-            <h2 className="text-base font-bold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>Nova Tarefa</h2>
+          <div className="bg-white w-full md:max-w-md md:rounded-2xl rounded-t-2xl p-5 space-y-3 shadow-2xl max-h-[92vh] md:max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between sticky -top-5 -mx-5 px-5 -mt-5 pt-5 pb-2 bg-white z-10">
+              <h2 className="text-base font-bold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>Nova Tarefa</h2>
+              <button onClick={() => setShowNova(false)} aria-label="Fechar"
+                className="md:hidden p-1 rounded-lg hover:bg-gray-100">
+                <span className="text-2xl leading-none text-gray-400">&times;</span>
+              </button>
+            </div>
             <input type="text" placeholder="Título *" autoFocus
               value={novaForm.titulo} onChange={e => setNovaForm({ ...novaForm, titulo: e.target.value })}
               className="w-full px-3 py-2.5 border rounded-xl text-sm outline-none"

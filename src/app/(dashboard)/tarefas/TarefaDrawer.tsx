@@ -339,7 +339,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b px-5 flex-shrink-0 overflow-x-auto" style={{ borderColor: C.cremeBorder }}>
+        <div className="flex border-b px-4 md:px-5 flex-shrink-0 overflow-x-auto scrollbar-hide" style={{ borderColor: C.cremeBorder }}>
           {([
             ["detalhes",    "Detalhes"],
             ["comentarios", `Coment.${comentarios.length > 0 ? ` (${comentarios.length})` : ""}`],
@@ -348,7 +348,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
             ["anexos",      "Anexos"],
           ] as const).map(([key, label]) => (
             <button key={key} onClick={() => setAba(key)}
-              className="px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap"
+              className="px-3 py-3 md:py-2.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap flex-shrink-0"
               style={{
                 borderColor: aba === key ? C.esmeralda : "transparent",
                 color: aba === key ? C.esmeralda : "#9CA3AF",

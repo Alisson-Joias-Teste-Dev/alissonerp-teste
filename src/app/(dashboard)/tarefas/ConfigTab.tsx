@@ -221,11 +221,11 @@ export default function ConfigTab({ usuarios, podeGerenciar }: Props) {
   return (
     <div className="flex flex-col h-full">
       {/* Sub-tabs */}
-      <div className="px-4 pt-4 pb-3 flex items-center gap-2">
-        <div className="flex rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+      <div className="px-4 pt-4 pb-3 flex items-center gap-2 overflow-x-auto scrollbar-hide">
+        <div className="flex rounded-lg border overflow-hidden flex-shrink-0" style={{ borderColor: C.cremeBorder }}>
           {([["templates", "Templates"], ["regras", "Regras de Aprovação"]] as const).map(([key, label]) => (
             <button key={key} onClick={() => setAba(key)}
-              className="px-3 py-1.5 text-xs font-semibold transition-colors"
+              className="px-3 py-2 md:py-1.5 text-xs font-semibold transition-colors whitespace-nowrap"
               style={{ backgroundColor: aba === key ? C.esmeralda : C.cremeBg, color: aba === key ? C.creme : "#6B7280" }}>
               {label}
             </button>
@@ -243,51 +243,73 @@ export default function ConfigTab({ usuarios, podeGerenciar }: Props) {
             setShowRegraForm(true);
           }
         }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0"
           style={{ backgroundColor: C.esmeralda, color: C.creme }}>
           <Plus size={13} /> Novo
         </button>
       </div>
 
+      {/* FAB Novo Template/Regra — só mobile */}
+      <button onClick={() => {
+        if (aba === "templates") {
+          setEditingTemplate(null);
+          setTemplateForm({ nome: "", descricao: "", titulo_padrao: "", descricao_padrao: "", prioridade: "media", tipo: "", tags: "", responsavel_default_id: "" });
+          setShowTemplateForm(true);
+        } else {
+          setEditingRegra(null);
+          setRegraForm({ nome: "", descricao: "", tipo_evento: "desconto_acima", condicao_percentual: "30", condicao_valor: "1000", aprovador_role: "", aprovador_id: "", template_id: "", prioridade_regra: "0" });
+          setShowRegraForm(true);
+        }
+      }}
+        aria-label="Novo"
+        className="md:hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+        style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+        <Plus size={26} />
+      </button>
+
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-4 pb-4">
+      <div className="flex-1 overflow-y-auto px-4 pb-24 md:pb-4">
         {loading ? (
           <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: C.esmeralda }} /></div>
         ) : aba === "templates" ? (
           <div className="space-y-2">
             {templates.map(t => (
-              <div key={t.id} className="p-3 rounded-xl border flex items-center gap-3"
+              <div key={t.id} className="p-3 rounded-xl border flex flex-col md:flex-row md:items-center gap-2 md:gap-3"
                 style={{ borderColor: C.cremeBorder, backgroundColor: "#fff", opacity: t.ativo ? 1 : 0.5 }}>
-                <FileText size={16} style={{ color: C.esmeralda }} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>{t.nome}</p>
-                  <p className="text-[11px]" style={{ color: "#9CA3AF" }}>
-                    {t.titulo_padrao?.substring(0, 60)}{(t.titulo_padrao?.length ?? 0) > 60 ? "..." : ""}
-                    {t.tipo && ` · ${t.tipo}`}
-                  </p>
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <FileText size={16} className="flex-shrink-0" style={{ color: C.esmeralda }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{ color: "#1A1A1A" }}>{t.nome}</p>
+                    <p className="text-[11px] truncate" style={{ color: "#9CA3AF" }}>
+                      {t.titulo_padrao?.substring(0, 60)}{(t.titulo_padrao?.length ?? 0) > 60 ? "..." : ""}
+                      {t.tipo && ` · ${t.tipo}`}
+                    </p>
+                  </div>
                 </div>
-                <button onClick={() => toggleTemplateAtivo(t.id, t.ativo)}
-                  className="text-[10px] font-semibold px-2 py-1 rounded-lg"
-                  style={{ backgroundColor: t.ativo ? "#D1FAE5" : "#FEE2E2", color: t.ativo ? "#059669" : "#DC2626" }}>
-                  {t.ativo ? "Ativo" : "Inativo"}
-                </button>
-                <button onClick={() => {
-                  setEditingTemplate(t);
-                  setTemplateForm({
-                    nome: t.nome, descricao: t.descricao ?? "", titulo_padrao: t.titulo_padrao,
-                    descricao_padrao: t.descricao_padrao ?? "", prioridade: t.prioridade,
-                    tipo: t.tipo ?? "", tags: t.tags.join(", "),
-                    responsavel_default_id: t.responsavel_default_id ?? "",
-                  });
-                  setShowTemplateForm(true);
-                }}
-                  className="p-1.5 rounded-lg hover:bg-gray-100" style={{ color: "#6B7280" }}>
-                  <Edit3 size={13} />
-                </button>
-                <button onClick={() => deletarTemplate(t.id)}
-                  className="p-1.5 rounded-lg hover:bg-red-50" style={{ color: "#EF4444" }}>
-                  <Trash2 size={13} />
-                </button>
+                <div className="flex items-center gap-1 md:gap-2 flex-shrink-0 justify-end">
+                  <button onClick={() => toggleTemplateAtivo(t.id, t.ativo)}
+                    className="text-[10px] font-semibold px-2 py-1 rounded-lg"
+                    style={{ backgroundColor: t.ativo ? "#D1FAE5" : "#FEE2E2", color: t.ativo ? "#059669" : "#DC2626" }}>
+                    {t.ativo ? "Ativo" : "Inativo"}
+                  </button>
+                  <button onClick={() => {
+                    setEditingTemplate(t);
+                    setTemplateForm({
+                      nome: t.nome, descricao: t.descricao ?? "", titulo_padrao: t.titulo_padrao,
+                      descricao_padrao: t.descricao_padrao ?? "", prioridade: t.prioridade,
+                      tipo: t.tipo ?? "", tags: t.tags.join(", "),
+                      responsavel_default_id: t.responsavel_default_id ?? "",
+                    });
+                    setShowTemplateForm(true);
+                  }}
+                    className="p-2 md:p-1.5 rounded-lg hover:bg-gray-100" style={{ color: "#6B7280" }}>
+                    <Edit3 size={14} />
+                  </button>
+                  <button onClick={() => deletarTemplate(t.id)}
+                    className="p-2 md:p-1.5 rounded-lg hover:bg-red-50" style={{ color: "#EF4444" }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
             ))}
             {templates.length === 0 && (
@@ -297,44 +319,48 @@ export default function ConfigTab({ usuarios, podeGerenciar }: Props) {
         ) : (
           <div className="space-y-2">
             {regras.map(r => (
-              <div key={r.id} className="p-3 rounded-xl border flex items-center gap-3"
+              <div key={r.id} className="p-3 rounded-xl border flex flex-col md:flex-row md:items-center gap-2 md:gap-3"
                 style={{ borderColor: C.cremeBorder, backgroundColor: "#fff", opacity: r.ativo ? 1 : 0.5 }}>
-                <Shield size={16} style={{ color: "#7C3AED" }} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>{r.nome}</p>
-                  <p className="text-[11px]" style={{ color: "#9CA3AF" }}>
-                    {eventoLabels[r.tipo_evento] ?? r.tipo_evento}
-                    {r.aprovador_nome ? ` · Aprovador: ${r.aprovador_nome}` : ""}
-                    {r.aprovador_role ? ` · Role: ${r.aprovador_role}` : ""}
-                    {r.template_nome ? ` · Template: ${r.template_nome}` : ""}
-                  </p>
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <Shield size={16} className="flex-shrink-0" style={{ color: "#7C3AED" }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{ color: "#1A1A1A" }}>{r.nome}</p>
+                    <p className="text-[11px] truncate" style={{ color: "#9CA3AF" }}>
+                      {eventoLabels[r.tipo_evento] ?? r.tipo_evento}
+                      {r.aprovador_nome ? ` · Aprovador: ${r.aprovador_nome}` : ""}
+                      {r.aprovador_role ? ` · Role: ${r.aprovador_role}` : ""}
+                      {r.template_nome ? ` · Template: ${r.template_nome}` : ""}
+                    </p>
+                  </div>
                 </div>
-                <button onClick={() => toggleRegraAtivo(r.id, r.ativo)}
-                  className="text-[10px] font-semibold px-2 py-1 rounded-lg"
-                  style={{ backgroundColor: r.ativo ? "#D1FAE5" : "#FEE2E2", color: r.ativo ? "#059669" : "#DC2626" }}>
-                  {r.ativo ? "Ativo" : "Inativo"}
-                </button>
-                <button onClick={() => {
-                  setEditingRegra(r);
-                  const cond = r.condicao_json as Record<string, number>;
-                  setRegraForm({
-                    nome: r.nome, descricao: r.descricao ?? "", tipo_evento: r.tipo_evento,
-                    condicao_percentual: String(cond.percentual ?? 30),
-                    condicao_valor: String(cond.valor ?? 1000),
-                    aprovador_role: r.aprovador_role ?? "",
-                    aprovador_id: r.aprovador_id ?? "",
-                    template_id: r.template_id ? String(r.template_id) : "",
-                    prioridade_regra: String(r.prioridade_regra),
-                  });
-                  setShowRegraForm(true);
-                }}
-                  className="p-1.5 rounded-lg hover:bg-gray-100" style={{ color: "#6B7280" }}>
-                  <Edit3 size={13} />
-                </button>
-                <button onClick={() => deletarRegra(r.id)}
-                  className="p-1.5 rounded-lg hover:bg-red-50" style={{ color: "#EF4444" }}>
-                  <Trash2 size={13} />
-                </button>
+                <div className="flex items-center gap-1 md:gap-2 flex-shrink-0 justify-end">
+                  <button onClick={() => toggleRegraAtivo(r.id, r.ativo)}
+                    className="text-[10px] font-semibold px-2 py-1 rounded-lg"
+                    style={{ backgroundColor: r.ativo ? "#D1FAE5" : "#FEE2E2", color: r.ativo ? "#059669" : "#DC2626" }}>
+                    {r.ativo ? "Ativo" : "Inativo"}
+                  </button>
+                  <button onClick={() => {
+                    setEditingRegra(r);
+                    const cond = r.condicao_json as Record<string, number>;
+                    setRegraForm({
+                      nome: r.nome, descricao: r.descricao ?? "", tipo_evento: r.tipo_evento,
+                      condicao_percentual: String(cond.percentual ?? 30),
+                      condicao_valor: String(cond.valor ?? 1000),
+                      aprovador_role: r.aprovador_role ?? "",
+                      aprovador_id: r.aprovador_id ?? "",
+                      template_id: r.template_id ? String(r.template_id) : "",
+                      prioridade_regra: String(r.prioridade_regra),
+                    });
+                    setShowRegraForm(true);
+                  }}
+                    className="p-2 md:p-1.5 rounded-lg hover:bg-gray-100" style={{ color: "#6B7280" }}>
+                    <Edit3 size={14} />
+                  </button>
+                  <button onClick={() => deletarRegra(r.id)}
+                    className="p-2 md:p-1.5 rounded-lg hover:bg-red-50" style={{ color: "#EF4444" }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
             ))}
             {regras.length === 0 && (

@@ -123,15 +123,15 @@ export default function AutomacoesTab({ usuarios, podeGerenciar }: { usuarios: U
   }
 
   return (
-    <div className="flex-1 p-4 md:p-6">
-      <div className="flex items-center justify-between mb-5">
-        <div>
+    <div className="flex-1 p-4 md:p-6 pb-24 md:pb-6 overflow-y-auto">
+      <div className="flex items-center justify-between mb-5 gap-3">
+        <div className="min-w-0">
           <h3 className="text-sm font-semibold" style={{ color: C.esmeralda }}>Automações</h3>
           <p className="text-xs" style={{ color: "#9CA3AF" }}>Tarefas criadas automaticamente por recorrência</p>
         </div>
         {podeGerenciar && (
           <button onClick={() => setShowNova(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold"
+            className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0"
             style={{ backgroundColor: C.esmeralda, color: C.creme }}>
             <Plus size={13} /> Nova Automação
           </button>
@@ -213,14 +213,31 @@ export default function AutomacoesTab({ usuarios, podeGerenciar }: { usuarios: U
         </div>
       )}
 
+      {/* FAB Nova Automação — só mobile */}
+      {podeGerenciar && (
+        <button
+          onClick={() => setShowNova(true)}
+          aria-label="Nova automação"
+          className="md:hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+          <Plus size={26} />
+        </button>
+      )}
+
       {/* Modal nova automação */}
       {showNova && (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40"
           onClick={e => { if (e.target === e.currentTarget) setShowNova(false); }}>
-          <div className="bg-white w-full md:max-w-md md:rounded-2xl rounded-t-2xl p-5 space-y-3 shadow-2xl">
-            <h2 className="text-base font-bold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
-              Nova Automação
-            </h2>
+          <div className="bg-white w-full md:max-w-md md:rounded-2xl rounded-t-2xl p-5 space-y-3 shadow-2xl max-h-[92vh] md:max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between sticky -top-5 -mx-5 px-5 -mt-5 pt-5 pb-2 bg-white z-10">
+              <h2 className="text-base font-bold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
+                Nova Automação
+              </h2>
+              <button onClick={() => setShowNova(false)} aria-label="Fechar"
+                className="md:hidden p-1 rounded-lg hover:bg-gray-100">
+                <span className="text-2xl leading-none text-gray-400">&times;</span>
+              </button>
+            </div>
             <input type="text" placeholder="Título da tarefa *" autoFocus
               value={novaForm.titulo} onChange={e => setNovaForm({ ...novaForm, titulo: e.target.value })}
               className="w-full px-3 py-2.5 border rounded-xl text-sm outline-none"
