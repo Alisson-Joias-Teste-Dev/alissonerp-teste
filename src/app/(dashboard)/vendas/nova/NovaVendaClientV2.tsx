@@ -1234,9 +1234,29 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         quantidade: i.quantidade, preco_lista: i.preco_lista, pct_desconto: i.pct_desconto,
         preco_unitario: i.preco_unitario, total_item: i.total_item,
         pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao, peso_estimado: i.peso_estimado,
-        personalizacao: getPersValor(i).trim()
-          ? { valor: getPersValor(i).trim() }
-          : null,
+        personalizacao: (() => {
+          const pers = i.personalizacao;
+          if (!pers) return null;
+          if (isPersMulti(i)) {
+            const pcampos = (pers as PersonalizacaoMulti).campos
+              .map(c => ({ label: c.label, valor: c.valor.trim() || null }));
+            return pcampos.some(c => c.valor !== null) ? { campos: pcampos } : null;
+          }
+          const valor = getPersValor(i).trim();
+          if (!valor) return null;
+          if (i.produto_id != null) {
+            const cfg = personalizacoesCache[i.produto_id];
+            if (cfg?.campos && cfg.campos.length > 0) {
+              return {
+                campos: cfg.campos.map((c, idx) => ({
+                  label: c.label,
+                  valor: idx === 0 ? valor : null,
+                })),
+              };
+            }
+          }
+          return { valor };
+        })(),
       })),
       pagamentos: pagamentosBody,
     };
