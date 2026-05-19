@@ -382,6 +382,11 @@ export async function PATCH(
     if (n != null && (isNaN(n) || n < 0)) return NextResponse.json({ error: "preco_tiny inválido" }, { status: 400 });
     pubUpdate.preco_tiny = n;
   }
+  if (body.preco_pedras !== undefined) {
+    const n = body.preco_pedras == null ? null : Number(body.preco_pedras);
+    if (n != null && (isNaN(n) || n < 0)) return NextResponse.json({ error: "preco_pedras inválido" }, { status: 400 });
+    pubUpdate.preco_pedras = n;
+  }
 
   // Campos exclusivos de pedra-produto (alissonerp.produto_pedra_extras)
   let precoCompraUsd: number | null | undefined = undefined;
@@ -473,6 +478,9 @@ export async function PATCH(
     }
     if (pubUpdate.preco_tiny !== undefined) {
       await sql`UPDATE public.produtos SET preco_tiny = ${pubUpdate.preco_tiny as number | null} WHERE id_produto = ${produtoId}`;
+    }
+    if (pubUpdate.preco_pedras !== undefined) {
+      await sql`UPDATE public.produtos SET preco_pedras = ${pubUpdate.preco_pedras as number | null} WHERE id_produto = ${produtoId}`;
     }
     // tipo_item: upsert ou delete em alissonerp.produto_tipo_item
     if (tipoItem !== undefined) {
