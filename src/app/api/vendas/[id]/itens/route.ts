@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { isFullAccess } from "@/lib/roles";
 import {
   validarPersonalizacao,
   normalizarPersonalizacao,
@@ -32,12 +33,13 @@ const VendaItemPostSchema = z.object({
   personalizacao: z.record(z.string(), z.unknown()).nullable().optional(),
 }).passthrough();
 
-async function checkOwnership(userId: string, vendaId: number) {
-  const [u] = await sql<{ role: string }[]>`
-    SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid LIMIT 1
+async function checkOwnership(userId: string, vendaId: number): Promise<{ role: string; mxDesconto: number }> {
+  const [u] = await sql<{ role: string; mx_desconto_permitido: number | null }[]>`
+    SELECT role, mx_desconto_permitido FROM alissonerp.usuarios WHERE id = ${userId}::uuid LIMIT 1
   `;
   if (!u) throw new ForbiddenError("Usuario nao encontrado");
   await requireVendaOwnership({ id: userId, role: u.role, email: "" }, vendaId);
+  return { role: u.role, mxDesconto: Number(u.mx_desconto_permitido ?? 0) };
 }
 
 // ─── GET /api/vendas/[id]/itens ────────────────────────────────────────────────
@@ -113,7 +115,13 @@ export async function POST(
   }
 
   // Onda 1D: bloqueia consultora de adicionar item em venda alheia
-  try { await checkOwnership(user.id, vendaId); }
+  let userRole: string;
+  let userMxDesconto: number;
+  try {
+    const own = await checkOwnership(user.id, vendaId);
+    userRole = own.role;
+    userMxDesconto = own.mxDesconto;
+  }
   catch (e) {
     if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
     if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
@@ -138,6 +146,23 @@ export async function POST(
     observacao?:   string | null;
     personalizacao?: { valor?: string } | null;
   };
+
+  // ── Gate de desconto (v2.60.4): bloqueia vendedora/gerente de ultrapassar
+  // mx_desconto_permitido. Espelha a regra que já existia em /api/orcamento
+  // (linha 151-165) — antes, venda direta de peça pronta aceitava qualquer
+  // desconto. Agora ambos os caminhos usam a MESMA regra. Admin/desenvolvedor/
+  // diretor (isFullAccess) podem ultrapassar. Retorna 403+solicitar:true pra
+  // engatar no fluxo de solicitação de alteração.
+  const descAplicado = Number(body.pct_desconto ?? 0);
+  if (!isFullAccess(userRole) && Number.isFinite(descAplicado) && descAplicado > userMxDesconto) {
+    return NextResponse.json(
+      {
+        error: `Desconto ${descAplicado}% excede seu limite (${userMxDesconto}%). Solicite aprovação.`,
+        solicitar: true,
+      },
+      { status: 403 },
+    );
+  }
 
   // ── Personalizacao: valida contra config do produto (se existir) ────────────
   // Alem disso, se config tem preco_por_letra > 0, RECALCULA preco_unitario/

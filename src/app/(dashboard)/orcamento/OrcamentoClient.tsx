@@ -282,8 +282,10 @@ export default function OrcamentoClient({
             const alvo = nomeAlvo.toLowerCase();
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const exatos = (lista as any[]).filter((c) => String(c?.nome ?? "").trim().toLowerCase() === alvo);
-            if (exatos.length === 1 && exatos[0]?.id_contato) {
-              setClienteId(Number(exatos[0].id_contato));
+            if (exatos.length === 1) {
+              // Endpoint retorna `id` (SELECT id_contato AS id) — fallback robusto.
+              const idC = exatos[0]?.id_contato ?? exatos[0]?.id;
+              if (idC != null) setClienteId(Number(idC));
             }
           })
           .catch(() => { /* silent — usuário será forçado a vincular manualmente */ });
@@ -590,9 +592,17 @@ export default function OrcamentoClient({
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function selecionarCliente(c: any) {
-    // Bug #17: contatos.id_contato eh a PK real (CLAUDE.md). O fallback ?? c.id
-    // mascarava bugs futuros se a API mudasse — agora exige id_contato.
-    setClienteId(c.id_contato);
+    // Bug fix v2.60.3 (root cause): endpoint /api/vendas/clientes/busca retorna
+    // o campo aliasado como `id` (SELECT id_contato AS id ...). O "fix" do Bug #17
+    // que exigia c.id_contato quebrava o vínculo silenciosamente — cliente parecia
+    // selecionado no UI mas state ficava undefined, e backend rejeitava aprovação
+    // com "Vincule um cliente antes de aprovar". Aceita ambos os formatos.
+    const idCliente = c.id_contato ?? c.id;
+    if (idCliente == null) {
+      useErrorStore.getState().push("Cliente sem ID — não foi possível vincular.", { level: "warning" });
+      return;
+    }
+    setClienteId(Number(idCliente));
     setClientName(c.nome);
     setShowClienteDropdown(false);
     setClienteResults([]);

@@ -5,6 +5,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { zodError } from "@/lib/schemas/common";
+import { isFullAccess } from "@/lib/roles";
 
 const ItemVendaPatchSchema = z.object({
   quantidade: z.coerce.number().optional(),
@@ -17,12 +18,13 @@ const ItemVendaPatchSchema = z.object({
   observacao: z.string().nullable().optional(),
 }).passthrough();
 
-async function checkOwnership(userId: string, vendaId: number) {
-  const [u] = await sql<{ role: string }[]>`
-    SELECT role FROM alissonerp.usuarios WHERE id = ${userId}::uuid LIMIT 1
+async function checkOwnership(userId: string, vendaId: number): Promise<{ role: string; mxDesconto: number }> {
+  const [u] = await sql<{ role: string; mx_desconto_permitido: number | null }[]>`
+    SELECT role, mx_desconto_permitido FROM alissonerp.usuarios WHERE id = ${userId}::uuid LIMIT 1
   `;
   if (!u) throw new ForbiddenError("Usuario nao encontrado");
   await requireVendaOwnership({ id: userId, role: u.role, email: "" }, vendaId);
+  return { role: u.role, mxDesconto: Number(u.mx_desconto_permitido ?? 0) };
 }
 
 // ─── PATCH /api/vendas/[id]/itens/[itemId] ─────────────────────────────────────
@@ -47,7 +49,13 @@ export async function PATCH(
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
 
   // Onda 1D: consultora so edita item de venda propria
-  try { await checkOwnership(user.id, vendaId); }
+  let userRole: string;
+  let userMxDesconto: number;
+  try {
+    const own = await checkOwnership(user.id, vendaId);
+    userRole = own.role;
+    userMxDesconto = own.mxDesconto;
+  }
   catch (e) {
     if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
     if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
@@ -63,6 +71,21 @@ export async function PATCH(
   const parsed = ItemVendaPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
+
+  // ── Gate de desconto (v2.60.4): bloqueia vendedora/gerente de ultrapassar
+  // mx_desconto_permitido ao EDITAR item. Espelha regra do POST e do orçamento.
+  if (body.pct_desconto !== undefined && !isFullAccess(userRole)) {
+    const descNovo = Number(body.pct_desconto);
+    if (Number.isFinite(descNovo) && descNovo > userMxDesconto) {
+      return NextResponse.json(
+        {
+          error: `Desconto ${descNovo}% excede seu limite (${userMxDesconto}%). Solicite aprovação.`,
+          solicitar: true,
+        },
+        { status: 403 },
+      );
+    }
+  }
 
   await sql`
     UPDATE alissonerp.itens_venda_erp SET
