@@ -23,7 +23,6 @@ import {
 } from "@/lib/curva-precificacao";
 import GaleriaProduto from "./GaleriaProduto";
 import AplicarTemplateModal from "@/components/produtos/AplicarTemplateModal";
-import ChatPersonalizacao from "./ChatPersonalizacao";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
