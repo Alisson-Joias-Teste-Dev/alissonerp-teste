@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
       COALESCE(est.saldo, 0) AS saldo_disponivel,
       (ftp.id IS NOT NULL) AS tem_ficha_tecnica,
       COALESCE(rfid.qtd, 0) AS rfid_disponivel,
+      COALESCE(ecc.controla_estoque, true) AS controla_estoque,
       -- Promocao vigente (migration 248) + regra de pagamento (migration 257)
       CASE WHEN vpv.em_promocao THEN vpv.preco_vigente ELSE NULL END AS preco_promo,
       COALESCE(vpv.em_promocao, false) AS em_promocao,
@@ -48,6 +49,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
     LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
     LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
+    LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
     LEFT JOIN (
       SELECT produto_id, SUM(disponivel) AS saldo
       FROM alissonerp.vw_saldo_estoque_comercial
@@ -67,7 +69,11 @@ export async function GET(req: NextRequest) {
       AND (ep.eh_pai IS NULL OR ep.eh_pai = false)
       AND pp.preco_venda IS NOT NULL
       AND pp.preco_venda > 0
-      AND (COALESCE(est.saldo, 0) > 0 OR prc.ativo = true)
+      AND (
+        COALESCE(ecc.controla_estoque, true) = false
+        OR COALESCE(est.saldo, 0) > 0
+        OR prc.ativo = true
+      )
     ORDER BY
       (p.situacao = 'A')                     DESC,
       (pp.preco_venda IS NOT NULL AND pp.preco_venda > 0) DESC,

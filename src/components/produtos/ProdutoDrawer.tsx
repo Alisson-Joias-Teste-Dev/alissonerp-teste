@@ -24,6 +24,7 @@ import {
 import { enriquecerPedra, totalizarPedras, fmtCt, fmtPt } from "@/lib/pedras-helpers";
 import GaleriaProduto from "./GaleriaProduto";
 import AplicarTemplateModal from "@/components/produtos/AplicarTemplateModal";
+import { useAuth } from "@/hooks/useAuth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,8 @@ interface ProdutoDetalhe {
   id_api_produto?: number | null;
   tiny_sync_status?: string | null;
   tiny_sync_erro?: string | null;
+  // Controle de estoque
+  controla_estoque?: boolean;
 }
 
 interface Variacao {
@@ -555,6 +558,11 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   const [editingItem, setEditingItem] = useState<BomItem | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  // Controle de estoque
+  const { modulos_escrita } = useAuth();
+  const userPermissaoControlarEstoque = podeEditar && modulos_escrita.includes("controlar_estoque");
+  const [confirmDesligarEstoque, setConfirmDesligarEstoque] = useState(false);
+
   // Load product details
   const loadProduto = useCallback(async () => {
     if (!produtoId) return;
@@ -958,6 +966,37 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
     }
   }
 
+  // ── Controla Estoque toggle ──────────────────────────────────────────────
+  async function patchControlaEstoque(valor: boolean) {
+    if (!produto) return;
+    try {
+      const res = await fetch(`/api/produtos/${produto.id_produto}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ controla_estoque: valor }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(b.error ?? "Erro ao alterar controle de estoque");
+      }
+      setProduto((prev) => (prev ? { ...prev, controla_estoque: valor } : prev));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erro desconhecido");
+    }
+  }
+
+  function handleToggleControlaEstoque() {
+    if (!produto) return;
+    const novoValor = !(produto.controla_estoque ?? true);
+    if (!novoValor) {
+      // Desligando → mostra confirmação
+      setConfirmDesligarEstoque(true);
+      return;
+    }
+    // Ligando → aplica direto
+    patchControlaEstoque(true);
+  }
+
   async function handleDeleteBomItem(itemId: number) {
     if (!produto) return;
     setDeletingId(itemId);
@@ -1346,6 +1385,32 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                       </select>
                     </div>
                   </div>
+
+                  {/* ── Controla Estoque ── */}
+                  {userPermissaoControlarEstoque && (
+                    <div className="flex items-center justify-between py-2 border-t border-gray-100 mt-2">
+                      <div>
+                        <span className="text-sm font-medium text-gray-800">Controla Estoque</span>
+                        <p className="text-xs text-gray-500">
+                          Desligar: produto some do estoque/inventário. Dados preservados.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleToggleControlaEstoque}
+                        className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none shrink-0"
+                        style={{ backgroundColor: (produto.controla_estoque ?? true) ? C.esmeralda : "#D1D5DB" }}
+                        role="switch"
+                        aria-checked={produto.controla_estoque ?? true}
+                      >
+                        <span
+                          className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+                          style={{ transform: (produto.controla_estoque ?? true) ? "translateX(18px)" : "translateX(2px)" }}
+                        />
+                      </button>
+                    </div>
+                  )}
+
                   {showAvancado && (<>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -2326,6 +2391,35 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
           </div>
         )}
       </div>
+
+      {confirmDesligarEstoque && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setConfirmDesligarEstoque(false)}>
+          <div className="bg-white rounded-xl p-6 max-w-sm mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-gray-800 mb-2">Desligar controle de estoque?</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Este produto não será mais rastreado no estoque/inventário. Os dados de estoque serão preservados.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmDesligarEstoque(false)}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-gray-800 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  setConfirmDesligarEstoque(false);
+                  patchControlaEstoque(false);
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#DC2626" }}
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {mostrarTemplate && produto && (
         <AplicarTemplateModal

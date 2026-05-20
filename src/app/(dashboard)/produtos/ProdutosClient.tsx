@@ -57,6 +57,8 @@ export interface Produto {
   em_promocao?: boolean | null;
   nome_campanha?: string | null;
   promo_data_fim?: string | null;
+  // Controle de estoque
+  controla_estoque?: boolean;
 }
 
 interface CategoriaPai {
@@ -761,7 +763,11 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
 
                             {/* Estoque */}
                             <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
-                              {(p.saldo_estoque ?? 0) > 0 ? (
+                              {p.controla_estoque === false ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                                  ⛔ Sem estoque
+                                </span>
+                              ) : (p.saldo_estoque ?? 0) > 0 ? (
                                 <span className="text-emerald-700 font-semibold">{p.saldo_estoque}</span>
                               ) : (
                                 <span className="text-gray-300">0</span>

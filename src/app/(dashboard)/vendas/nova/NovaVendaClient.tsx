@@ -37,6 +37,7 @@ interface Produto {
   preco_promo?: number | null;
   em_promocao?: boolean;
   promocao_nome?: string | null;
+  controla_estoque?: boolean;
 }
 interface FaixaComissao { desconto_pct: number; comissao_pct: number; }
 interface ItemVenda {

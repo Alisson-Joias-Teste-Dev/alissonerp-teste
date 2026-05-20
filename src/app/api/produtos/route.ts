@@ -258,6 +258,7 @@ export async function GET(req: NextRequest) {
         LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
         LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
+        LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
         WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wVariacoes} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
       `;
 
@@ -366,7 +367,8 @@ export async function GET(req: NextRequest) {
               AND pp3.nome NOT ILIKE '%zirconia%'
             ORDER BY ppc2.quantidade DESC
             LIMIT 1
-          ) AS pedras_nome_principal
+          ) AS pedras_nome_principal,
+          COALESCE(ecc.controla_estoque, true) AS controla_estoque
         FROM public.produtos p
         LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
         LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
@@ -376,6 +378,7 @@ export async function GET(req: NextRequest) {
         LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
         LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
         LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+        LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
         WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wVariacoes} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
         ORDER BY ${orderVariacoes}
         LIMIT  ${limit}
@@ -391,6 +394,7 @@ export async function GET(req: NextRequest) {
       FROM public.produtos p
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
+      LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
       WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
     `;
 
@@ -475,7 +479,8 @@ export async function GET(req: NextRequest) {
             AND pp3.nome NOT ILIKE '%zirconia%'
           ORDER BY ppc2.quantidade DESC
           LIMIT 1
-        ) AS pedras_nome_principal
+        ) AS pedras_nome_principal,
+        COALESCE(ecc.controla_estoque, true) AS controla_estoque
       FROM public.produtos p
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
@@ -484,6 +489,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
       LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+      LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
       WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
       ORDER BY ${orderFieldIdent} ${orderDir} NULLS LAST
       LIMIT  ${limit}

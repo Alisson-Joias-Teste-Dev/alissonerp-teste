@@ -43,6 +43,7 @@ const ProdutosPatchSchema = z.object({
   fornecedor: z.string().max(200).nullable().optional(),
   foto_base64: z.string().max(LIMITS.IMAGE_BASE64_MAX).optional(),
   aplicar_rota_padrao: z.boolean().optional(),
+  controla_estoque: z.boolean().optional(),
 }).passthrough();
 
 export async function GET(
@@ -118,7 +119,8 @@ export async function GET(
             ) ELSE 0 END AS qtd_variacoes,
             p.id_api_produto,
             ts.status AS tiny_sync_status,
-            ts.erro   AS tiny_sync_erro
+            ts.erro   AS tiny_sync_erro,
+            COALESCE(ecc.controla_estoque, true) AS controla_estoque
           FROM public.produtos p
           LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
           LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
@@ -126,6 +128,7 @@ export async function GET(
           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
           LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
           LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+          LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
           WHERE p.id_produto = ${produtoId}
         `
       : await sql`
@@ -172,13 +175,15 @@ export async function GET(
             0::integer    AS qtd_variacoes,
             p.id_api_produto,
             ts.status AS tiny_sync_status,
-            ts.erro   AS tiny_sync_erro
+            ts.erro   AS tiny_sync_erro,
+            COALESCE(ecc.controla_estoque, true) AS controla_estoque
           FROM public.produtos p
           LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
           LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
           LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
           LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+          LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
           WHERE p.id_produto = ${produtoId}
         `;
 
@@ -402,9 +407,21 @@ export async function PATCH(
     tipoItem === undefined &&
     !fotoBase64 &&
     precoCompraUsd === undefined &&
-    quantidadePedra === undefined
+    quantidadePedra === undefined &&
+    body.controla_estoque === undefined
   ) {
     return NextResponse.json({ error: "Nenhum campo editável informado" }, { status: 400 });
+  }
+
+  // ── Verificar permissão de controla_estoque antes de qualquer UPDATE ─────
+  if (body.controla_estoque !== undefined) {
+    const [permCE] = await sql`
+      SELECT pode_escrever FROM alissonerp.role_permissoes
+      WHERE role = ${user.role} AND modulo = 'controlar_estoque'
+    `;
+    if (!permCE?.pode_escrever) {
+      return NextResponse.json({ error: "Sem permissão para controlar estoque" }, { status: 403 });
+    }
   }
 
   try {
@@ -570,6 +587,15 @@ export async function PATCH(
       } catch (err) {
         console.warn("[PATCH /api/produtos/[id]] falha ao aplicar rota padrão:", err);
       }
+    }
+
+    // ── Controla estoque (alissonerp.estoque_comercial_config) ────────────────
+    if (body.controla_estoque !== undefined) {
+      await sql`
+        UPDATE alissonerp.estoque_comercial_config
+        SET controla_estoque = ${body.controla_estoque}, updated_at = NOW()
+        WHERE produto_id = ${produtoId}
+      `;
     }
 
     // ── Propagar campos simples para variações (se for pai) ──────────────────
