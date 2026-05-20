@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.vw_saldo_estoque_comercial
       GROUP BY produto_id
     ) est ON est.produto_id = p.id_produto
+    LEFT JOIN alissonerp.produto_reposicao_config prc ON prc.produto_id = p.id_produto AND prc.ativo = true
     LEFT JOIN alissonerp.fichas_tecnicas_produto ftp ON ftp.produto_id = p.id_produto
     LEFT JOIN (
       SELECT produto_id, COUNT(*)::int AS qtd
@@ -64,6 +65,9 @@ export async function GET(req: NextRequest) {
       p.situacao = 'A'
       AND (p.sku ILIKE ${'%' + q + '%'} OR ${termos.map(t => sql`p.nome ILIKE ${'%' + t + '%'}`).reduce((a, b) => sql`${a} AND ${b}`)})
       AND (ep.eh_pai IS NULL OR ep.eh_pai = false)
+      AND pp.preco_venda IS NOT NULL
+      AND pp.preco_venda > 0
+      AND (COALESCE(est.saldo, 0) > 0 OR prc.ativo = true)
     ORDER BY
       (p.situacao = 'A')                     DESC,
       (pp.preco_venda IS NOT NULL AND pp.preco_venda > 0) DESC,
