@@ -120,6 +120,80 @@ export const METAL_COLORS = [
   { label: "Ouro Rose", value: "#E8A090", density: 14.69 },
 ];
 
+// ── Densidade por teor (migration 263) ──────────────────────────────────────
+// Calcula densidade da liga a partir do % de ouro puro + cor.
+// Fórmula física: mistura ponderada por massa (média harmônica).
+// 75% (18k) calibrado pra bater com padrão de literatura:
+//   amarelo 15,58 / branco 15,80 / rose 15,30 g/cm³
+
+export const D_OURO_PURO = 19.32; // g/cm³
+export const D_LIGAS_POR_COR = {
+  amarelo: 9.4,  // Cu + Ag
+  branco:  10.7, // Pd/Ni + Cu
+  rose:    8.9,  // mais Cu
+} as const;
+
+export type CorMetal = keyof typeof D_LIGAS_POR_COR;
+
+export function corDoMetal(label: string): CorMetal {
+  const l = label.toLowerCase();
+  if (l.includes("branco")) return "branco";
+  if (l.includes("rose"))   return "rose";
+  return "amarelo";
+}
+
+/** Calcula densidade (g/cm³) a partir do teor de ouro (%) e cor.
+ *  Aceita o label do METAL_COLORS (ex: "Ouro Amarelo") ou a chave. */
+export function densidadePorTeor(teorPct: number, labelOuCor: string): number {
+  const cor = (labelOuCor in D_LIGAS_POR_COR)
+    ? (labelOuCor as CorMetal)
+    : corDoMetal(labelOuCor);
+  const fOuro = teorPct / 100;
+  const fLiga = 1 - fOuro;
+  const dLiga = D_LIGAS_POR_COR[cor];
+  const d = 1 / (fOuro / D_OURO_PURO + fLiga / dLiga);
+  return Math.round(d * 100) / 100;
+}
+
+// Acréscimo metal premium (migration 264): integrado diretamente em
+// computePricing via parâmetro acrescimoMetalMultiplier. O cálculo do
+// multiplier (1.0 amarelo / 1+pct/100 branco|rose) é feito no
+// OrcamentoClient (acrescimoMultiplier callback) usando corDoMetal.
+
+// ── Rótulos da Ficha Técnica (migration 266) ────────────────────────────────
+// Chaves canônicas + labels padrão. Cada uma pode ser renomeada via config
+// (labels_ficha_tecnica em config_orcamento).
+
+export const FICHA_LABELS_DEFAULT: Record<string, string> = {
+  modelo:         "Modelo",
+  aro:            "Aro",
+  largura:        "Largura",
+  espessura:      "Espessura",
+  prof_concava:   "Prof. côncava",
+  chanfro:        "Chanfro",
+  larg_canal:     "Larg. canal",
+  alt_borda:      "Alt. borda",
+  metal:          "Metal",
+  friso:          "Friso",
+  pedras:         "Pedras",
+  fileiras:       "Fileiras",
+  furo_passante:  "Furo passante",
+  gravacao:       "Gravação",
+  peso_estimado:  "Peso estimado",
+  peso_total_par: "Peso total do par",
+};
+
+/** Retorna o rótulo customizado se existir, senão o padrão.
+ *  Strings vazias/null caem no padrão (evita ficha sem texto). */
+export function getFichaLabel(
+  chave: keyof typeof FICHA_LABELS_DEFAULT | string,
+  customs?: Record<string, string> | null,
+): string {
+  const c = customs?.[chave]?.trim();
+  if (c) return c;
+  return FICHA_LABELS_DEFAULT[chave] ?? chave;
+}
+
 // ── Helpers de cálculo ──────────────────────────────────────────────────────
 
 export function findGrooveRule(width: number, rules: GrooveRule[]): GrooveRule {
@@ -150,7 +224,10 @@ export function computeCalculatedCategories(
 
 export function computeWeight(
   params: RingParams,
-  profile: ProfileType
+  profile: ProfileType,
+  /** Migration 265: ajuste % global do ouro removido por pedra. Default 1.0
+   *  (sem ajuste). 1.20 = pedra remove 20% mais; 0.80 = 20% menos. */
+  ajustePedraMultiplier: number = 1.0,
 ): { volume: number; weight: number; weightRaw: number } {
   const rIn = params.diameter / 2;
   const rOut = rIn + params.height;
@@ -185,7 +262,7 @@ export function computeWeight(
       : params.stoneHalfMoon
         ? Math.floor(computeStoneCapacity(params.diameter, params.height, params.canalBorderHeight, params.stoneSize, params.stoneRows, profile) / 2)
         : params.stoneCount;
-    stoneLoss = holeVolume * stoneCount;
+    stoneLoss = holeVolume * stoneCount * ajustePedraMultiplier;
   }
 
   const adjustedVolume = Math.max(baseVolume * factor - grooveLoss - canalLoss - stoneLoss, 0.1);
@@ -225,12 +302,16 @@ export function computePricing(
   /** Desconto da promoção (%, 0-100). Aplicado em cima do markup, ANTES
    *  do discountPercent manual. Default 0 = comportamento original preservado. */
   descontoPromocao: number = 0,
+  /** Multiplicador do acréscimo metal premium (migration 264). 1.0 = sem
+   *  acréscimo (amarelo); 1.30 = +30% (branco/rose com config padrão).
+   *  Aplicado APÓS o markup e ANTES da promoção/desconto. */
+  acrescimoMetalMultiplier: number = 1.0,
 ): PricingResult {
   // Busca o markup correto pela faixa de peso
   const { activeCategory } = computeCalculatedCategories(startMkp, categories, weight);
   const mkp = activeCategory?.targetMkp ?? startMkp;
   const cost = weight * goldPrice;
-  const priceBase = cost * mkp;
+  const priceBase = cost * mkp * acrescimoMetalMultiplier;
   // Aplica desconto da promoção (se houver) antes do desconto manual
   const pricePromo = descontoPromocao > 0
     ? priceBase * (1 - Math.min(100, Math.max(0, descontoPromocao)) / 100)

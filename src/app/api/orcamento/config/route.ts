@@ -25,6 +25,10 @@ const OrcamentoConfigPostSchema = z.object({
   promocao_inicio: z.string().nullable().optional(),
   promocao_fim: z.string().nullable().optional(),
   dome_percentage: z.coerce.number().optional(),
+  teor_ouro_default: z.coerce.number().int().min(67).max(75).optional(),
+  acrescimo_metal_premium: z.coerce.number().min(0).max(100).optional(),
+  ajuste_pedra_pct: z.coerce.number().min(1).max(500).optional(),
+  labels_ficha_tecnica: z.record(z.string(), z.string()).optional(),
 }).passthrough();
 
 // GET /api/orcamento/config — busca config ativa
@@ -71,6 +75,10 @@ export async function POST(req: NextRequest) {
     promocao_inicio,
     promocao_fim,
     dome_percentage,
+    teor_ouro_default,
+    acrescimo_metal_premium,
+    ajuste_pedra_pct,
+    labels_ficha_tecnica,
   } = body;
 
   // IMPORTANTE: usar sql.json() em vez de JSON.stringify+::jsonb.
@@ -96,6 +104,10 @@ export async function POST(req: NextRequest) {
       promocao_inicio = ${promocao_inicio !== undefined ? promocao_inicio : sql`promocao_inicio`},
       promocao_fim = ${promocao_fim !== undefined ? promocao_fim : sql`promocao_fim`},
       dome_percentage = COALESCE(${dome_percentage ?? null}::numeric, dome_percentage),
+      teor_ouro_default = COALESCE(${teor_ouro_default ?? null}::integer, teor_ouro_default),
+      acrescimo_metal_premium = COALESCE(${acrescimo_metal_premium ?? null}::numeric, acrescimo_metal_premium),
+      ajuste_pedra_pct = COALESCE(${ajuste_pedra_pct ?? null}::numeric, ajuste_pedra_pct),
+      labels_ficha_tecnica = COALESCE(${labels_ficha_tecnica != null ? sql.json(labels_ficha_tecnica) : null}, labels_ficha_tecnica),
       updated_at = now(),
       updated_by = ${user.id}::uuid
     WHERE name = 'default'

@@ -23,6 +23,8 @@ import {
   STONE_TYPES, STONE_CUTS, STONE_SIZES_MM, STONE_CT_TABLE, GROOVE_TYPE_OPTIONS,
   findGrooveRule, computeWeight, computeStoneCapacity, computePricing,
   computeCalculatedCategories, computeStoneEntryPrice, computeStonesTotalRS,
+  densidadePorTeor, corDoMetal,
+  FICHA_LABELS_DEFAULT, getFichaLabel,
 } from "./constants";
 import {
   CALIBRACAO_DEFAULTS, computeMinThickness, computeMinWidth,
@@ -335,7 +337,11 @@ export default function OrcamentoClient({
       if (aroSize) setRingSize(aroSize);
       const metalMatch = METAL_COLORS.find(m => m.label === ft.cor_metal || m.value === ft.cor_metal);
       const metalHex = metalMatch?.value ?? "#FFD700";
-      const metalDensity = metalMatch?.density ?? 14.69;
+      // Prefere densidade salva no snapshot (preserva integridade do orçamento histórico).
+      // Fallback: densidade da constante (orçamentos antigos sem campo salvo).
+      const metalDensity = ft.densidade_ouro != null
+        ? Number(ft.densidade_ouro)
+        : (metalMatch?.density ?? 14.69);
       const hasGrooveLoaded = perfil === "FrisoUnico" || perfil === "FrisoLateral" || !!ft.has_friso;
       const grooveKindLoaded = (ft.friso_kind || "friso") as "friso" | "risco";
       const grooveTypeLoaded = perfil === "FrisoLateral" ? "duplo" as const
@@ -377,7 +383,9 @@ export default function OrcamentoClient({
         if (aroSize2) setRingSize2(aroSize2);
         const metalMatch2 = METAL_COLORS.find(m => m.label === ft2.cor_metal || m.value === ft2.cor_metal);
         const metalHex2 = metalMatch2?.value ?? "#FFD700";
-        const metalDensity2 = metalMatch2?.density ?? 14.69;
+        const metalDensity2 = ft2.densidade_ouro != null
+          ? Number(ft2.densidade_ouro)
+          : (metalMatch2?.density ?? 14.69);
         setParams2(p => applyRingParams({ ...p, metalColor: metalHex2, goldDensity: metalDensity2 }, ft2));
       }
 
@@ -508,6 +516,66 @@ export default function OrcamentoClient({
   });
   const [currentMesh2, setCurrentMesh2] = useState<THREE.Mesh | null>(null);
   const [stoneEntries2, setStoneEntries2] = useState<StoneEntry[]>([]);
+
+  // ── Teor de ouro (migration 263) ────────────────────────────────────────
+  // % de ouro puro (67-75). Define a densidade usada nos cálculos.
+  // Default 75 (18k). Quando muda → recalcula goldDensity de params/params2.
+  const [teorOuro, setTeorOuro] = useState<number>(
+    Number(config?.teor_ouro_default ?? 75)
+  );
+
+  // ── Acréscimo metal premium (migration 264) ─────────────────────────────
+  // % aplicado quando metal é branco ou rose. Default 30. Amarelo nunca aplica.
+  const [acrescimoMetal, setAcrescimoMetal] = useState<number>(
+    Number(config?.acrescimo_metal_premium ?? 30)
+  );
+
+  // ── Ajuste pedra (migration 265) ─────────────────────────────────────────
+  // % global do ouro removido por cada pedra cravejada. Default 100.
+  // 120 = pedra remove 20% MAIS de ouro. 80 = 20% MENOS.
+  const [ajustePedra, setAjustePedra] = useState<number>(
+    Number(config?.ajuste_pedra_pct ?? 100)
+  );
+  const ajustePedraMultiplier = ajustePedra / 100;
+
+  // ── Rótulos customizados da Ficha Técnica (migration 266) ────────────────
+  // Map chave → texto. Vazio cai no padrão (getFichaLabel cobre).
+  const [labelsFicha, setLabelsFicha] = useState<Record<string, string>>(() => {
+    const raw = (config as { labels_ficha_tecnica?: Record<string, string> | null } | null)?.labels_ficha_tecnica;
+    return (raw && typeof raw === "object") ? { ...raw } : {};
+  });
+
+  // Helper: multiplier por cor (1.0 amarelo, 1+pct/100 branco/rose).
+  // Resolvido aqui pra reuso nas 4 chamadas de computePricing das alianças.
+  const acrescimoMultiplier = useCallback((metalColor: string): number => {
+    const m = METAL_COLORS.find(mc => mc.value === metalColor);
+    if (!m) return 1.0;
+    const cor = corDoMetal(m.label);
+    return cor === "amarelo" ? 1.0 : 1 + acrescimoMetal / 100;
+  }, [acrescimoMetal]);
+
+  // Recalcula goldDensity dos 2 anéis quando teor ou cor muda.
+  // GATE isHydratingRef: durante carga de rascunho/orçamento antigo, NÃO
+  // recalcular — preserva goldDensity salva no snapshot. Bug recorrente
+  // descrito no CLAUDE.md secao 3 (orcamento rascunho).
+  useEffect(() => {
+    if (isHydratingRef.current) return;
+    const m1 = METAL_COLORS.find(m => m.value === params.metalColor);
+    if (m1) {
+      const d = densidadePorTeor(teorOuro, m1.label);
+      if (params.goldDensity !== d) {
+        setParams(p => ({ ...p, goldDensity: d }));
+      }
+    }
+    const m2 = METAL_COLORS.find(m => m.value === params2.metalColor);
+    if (m2) {
+      const d2 = densidadePorTeor(teorOuro, m2.label);
+      if (params2.goldDensity !== d2) {
+        setParams2(p => ({ ...p, goldDensity: d2 }));
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teorOuro, params.metalColor, params2.metalColor]);
 
   // Modal de Ficha Técnica
   const [showFichaTecnica, setShowFichaTecnica] = useState(false);
@@ -1265,7 +1333,7 @@ export default function OrcamentoClient({
     return () => { ctrl.abort(); };
   }, [params2.hasStones, params2.stoneType, params2.stoneSize]);
 
-  const weightEst = useMemo(() => computeWeight(params, profile), [params, profile]);
+  const weightEst = useMemo(() => computeWeight(params, profile, ajustePedraMultiplier), [params, profile, ajustePedraMultiplier]);
   // Helper: pega o desconto da promoção da faixa que cobre esse peso (0 se inativa).
   // Bug #11: recebe `startMkp` como parâmetro em vez de pegar do `params` global.
   // Antes, anel 2 e peça personalizada (que podem ter markup próprio) sempre
@@ -1282,31 +1350,34 @@ export default function OrcamentoClient({
   const effDiscount1 = Math.max(params.discountPercent, descPromo1);
   // Vendedora (sem canManageConfig) não pode mexer no desconto quando promo ativa pra faixa
   const lockDiscount1 = !canManageConfig && descPromo1 > 0;
+  // Multiplicador de acréscimo metal premium pra anel 1 (1.0 amarelo / 1+pct/100 branco|rose)
+  const acrescimoMult1 = acrescimoMultiplier(params.metalColor);
   const pricing: PricingResult = useMemo(
-    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, effDiscount1, pricingCategories, 0),
+    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, effDiscount1, pricingCategories, 0, acrescimoMult1),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [weightEst.weight, params.goldPrice, params.startMkp, effDiscount1, pricingCategories]
+    [weightEst.weight, params.goldPrice, params.startMkp, effDiscount1, pricingCategories, acrescimoMult1]
   );
   // Preço cheio (sem promo + sem desconto manual) — usado para mostrar "De R$ X"
   const pricingCheio: PricingResult = useMemo(
-    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, 0, pricingCategories, 0),
-    [weightEst.weight, params.goldPrice, params.startMkp, pricingCategories]
+    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, 0, pricingCategories, 0, acrescimoMult1),
+    [weightEst.weight, params.goldPrice, params.startMkp, pricingCategories, acrescimoMult1]
   );
   const { calc: calcCategories } = computeCalculatedCategories(params.startMkp, pricingCategories, weightEst.weight);
 
   // Pricing aliança 2 (par)
-  const weightEst2 = useMemo(() => computeWeight(params2, profile2), [params2, profile2]);
+  const weightEst2 = useMemo(() => computeWeight(params2, profile2, ajustePedraMultiplier), [params2, profile2, ajustePedraMultiplier]);
   const descPromo2 = descPromoParaPeso(weightEst2.weight, params2.startMkp);
   const effDiscount2 = Math.max(params2.discountPercent, descPromo2);
   const lockDiscount2 = !canManageConfig && descPromo2 > 0;
+  const acrescimoMult2 = acrescimoMultiplier(params2.metalColor);
   const pricing2: PricingResult = useMemo(
-    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories, 0),
+    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories, 0, acrescimoMult2),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories]
+    [weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories, acrescimoMult2]
   );
   const pricingCheio2: PricingResult = useMemo(
-    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, 0, pricingCategories, 0),
-    [weightEst2.weight, params2.goldPrice, params2.startMkp, pricingCategories]
+    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, 0, pricingCategories, 0, acrescimoMult2),
+    [weightEst2.weight, params2.goldPrice, params2.startMkp, pricingCategories, acrescimoMult2]
   );
 
   // Gravação: primeiro nome incluso, adicionais cobram R$ precoGravacao cada.
@@ -1596,6 +1667,10 @@ export default function OrcamentoClient({
           nomes_modelos: nomesModelos,
           promocao_inicio: promocaoInicio || null,
           promocao_fim: promocaoFim || null,
+          teor_ouro_default: teorOuro,
+          acrescimo_metal_premium: acrescimoMetal,
+          ajuste_pedra_pct: ajustePedra,
+          labels_ficha_tecnica: labelsFicha,
         }),
       });
       if (!res.ok) {
@@ -2057,7 +2132,11 @@ export default function OrcamentoClient({
               <div className="flex gap-2">
                 {METAL_COLORS.map((mc) => (
                   <button key={mc.value}
-                    onClick={() => { setPecaMetalColor(mc.value); setPecaGoldDensity(mc.density); }}
+                    onClick={() => {
+                      setPecaMetalColor(mc.value);
+                      // Densidade calculada pelo teor configurado (consistente com alianças)
+                      setPecaGoldDensity(densidadePorTeor(teorOuro, mc.label));
+                    }}
                     className="w-10 h-10 rounded-full border-2 transition-all"
                     style={{
                       backgroundColor: mc.value,
@@ -2387,7 +2466,7 @@ export default function OrcamentoClient({
         {/* Markup e Desconto */}
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
           <h3 className="text-sm font-bold text-gray-800">Markup e Desconto</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Markup base (multiplicador)</label>
               <input type="number" min={1} step={0.1} value={params.startMkp}
@@ -2409,6 +2488,42 @@ export default function OrcamentoClient({
                 onChange={e => setDefaultDomePercentage(parseInt(e.target.value) || 100)}
                 className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none" style={{ borderColor: C.cremeBorder }} />
               <p className="text-[10px] text-gray-400 mt-1">Curvatura padrão dos perfis Anatomica, Boleada e Boleada Dupla em alianças novas</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Teor do ouro (%)</label>
+              <select
+                value={teorOuro}
+                onChange={e => setTeorOuro(parseInt(e.target.value))}
+                className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none"
+                style={{ borderColor: C.cremeBorder }}>
+                {[67, 68, 69, 70, 71, 72, 73, 74, 75].map(t => (
+                  <option key={t} value={t}>{t}%</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-gray-400 mt-1">
+                Densidades: Amarelo {densidadePorTeor(teorOuro, "Amarelo")} ·
+                Branco {densidadePorTeor(teorOuro, "Branco")} ·
+                Rose {densidadePorTeor(teorOuro, "Rose")} g/cm³
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Acréscimo metal premium (%)</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={acrescimoMetal}
+                onChange={e => {
+                  const v = parseFloat(e.target.value);
+                  setAcrescimoMetal(isNaN(v) ? 0 : Math.min(100, Math.max(0, v)));
+                }}
+                className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none"
+                style={{ borderColor: C.cremeBorder }} />
+              <p className="text-[10px] text-gray-400 mt-1">
+                Acréscimo aplicado em alianças com metal Branco ou Rose.
+                Amarelo não é afetado. 0 = desligado.
+              </p>
             </div>
           </div>
         </div>
@@ -2591,6 +2706,75 @@ export default function OrcamentoClient({
         </div>
           );
         })()}
+        {/* Ouro removido por pedra cravejada (migration 265) */}
+        <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-gray-800">Ouro removido por pedra cravejada</h3>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Quanto cada pedra &quot;come&quot; de ouro pra cravar. O ajuste em lote multiplica todas as pedras de uma vez.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <label className="text-xs font-medium text-gray-500">Ajuste em lote (%)</label>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                step={1}
+                value={ajustePedra}
+                onChange={e => {
+                  const v = parseFloat(e.target.value);
+                  setAjustePedra(isNaN(v) ? 100 : Math.min(500, Math.max(1, v)));
+                }}
+                className="w-24 px-3 py-2 text-sm rounded-lg border outline-none"
+                style={{ borderColor: C.cremeBorder }} />
+            </div>
+          </div>
+
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b" style={{ borderColor: C.cremeBorder }}>
+                <th className="text-left py-2 text-xs text-gray-500">Tamanho</th>
+                <th className="text-right py-2 text-xs text-gray-500">Volume removido</th>
+                <th className="text-right py-2 text-xs text-gray-500">Ouro removido (sem furo)</th>
+                <th className="text-right py-2 text-xs text-gray-500">Ouro removido (com furo, borda 1.4mm)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5].map(mm => {
+                // Referência: ouro amarelo 75% = 15.58 g/cm³ (literatura)
+                const D_REF = densidadePorTeor(teorOuro, "Amarelo");
+                const radius = (mm * 0.90) / 2;
+                const depthSemFuro = mm * 0.60;
+                const volSemFuro = Math.PI * radius * radius * depthSemFuro * ajustePedraMultiplier;
+                const pesoSemFuro = (volSemFuro * D_REF) / 1000;
+                const depthComFuro = 1.4;
+                const volComFuro = Math.PI * radius * radius * depthComFuro * ajustePedraMultiplier;
+                const pesoComFuro = (volComFuro * D_REF) / 1000;
+                return (
+                  <tr key={mm} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                    <td className="py-2 text-sm font-medium" style={{ color: C.esmeralda }}>{mm}mm</td>
+                    <td className="py-2 text-right text-xs text-gray-500 font-mono">{volSemFuro.toFixed(2)} mm³</td>
+                    <td className="py-2 text-right text-sm font-mono">{pesoSemFuro.toFixed(3)}g</td>
+                    <td className="py-2 text-right text-sm font-mono">{pesoComFuro.toFixed(3)}g</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <div className="rounded-lg p-3 text-[11px] text-gray-500 leading-relaxed" style={{ backgroundColor: C.cremeBg }}>
+            <strong style={{ color: C.esmeralda }}>Como o cálculo funciona:</strong><br />
+            • Raio do furo = 90% do diâmetro da pedra<br />
+            • Profundidade sem furo (berço cônico) = 60% do tamanho da pedra<br />
+            • Profundidade com furo passante = espessura da chapa (varia por aliança)<br />
+            • Volume = π × raio² × profundidade × ajuste%<br />
+            • Densidade de referência: ouro amarelo {teorOuro}% ({densidadePorTeor(teorOuro, "Amarelo")} g/cm³)<br />
+            <em>Para outras cores e teores, a densidade muda automaticamente (campo &quot;Teor do ouro&quot; acima).</em>
+          </div>
+        </div>
+
         {/* Regras friso */}
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
           <h3 className="text-sm font-bold text-gray-800">Regras de friso</h3>
@@ -2669,6 +2853,55 @@ export default function OrcamentoClient({
             </tbody>
           </table>
         </div>
+        {/* Rótulos da Ficha Técnica (migration 266) */}
+        <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
+          <div>
+            <h3 className="text-sm font-bold text-gray-800">Rótulos da Ficha Técnica</h3>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              Renomeie os campos que aparecem na ficha enviada pra fábrica. Deixe em branco pra usar o nome padrão.
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b" style={{ borderColor: C.cremeBorder }}>
+                <th className="text-left py-2 text-xs text-gray-500 w-1/3">Nome padrão</th>
+                <th className="text-left py-2 text-xs text-gray-500">Nome customizado (opcional)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(FICHA_LABELS_DEFAULT).map(([chave, padrao]) => (
+                <tr key={chave} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                  <td className="py-2 pr-2 text-sm" style={{ color: C.esmeralda }}>{padrao}</td>
+                  <td className="py-2">
+                    <input
+                      type="text"
+                      value={labelsFicha[chave] ?? ""}
+                      placeholder={padrao}
+                      maxLength={60}
+                      onChange={e => {
+                        const v = e.target.value;
+                        setLabelsFicha(prev => {
+                          const next = { ...prev };
+                          if (v.trim()) next[chave] = v;
+                          else delete next[chave];
+                          return next;
+                        });
+                      }}
+                      className="w-full px-3 py-2 text-sm rounded border outline-none"
+                      style={{ borderColor: C.cremeBorder }}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="rounded-lg p-3 text-[11px] text-gray-500" style={{ backgroundColor: C.cremeBg }}>
+            <strong style={{ color: C.esmeralda }}>Onde aparece:</strong> esses rótulos são usados na Ficha Técnica
+            (botão &quot;Ver Ficha Técnica&quot; do orçamento) e no PDF que vai pra fábrica.
+            Não afetam o orçamento do cliente.
+          </div>
+        </div>
+
         {/* Padrão Risco */}
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
           <h3 className="text-sm font-bold text-gray-800">Padrao do Risco</h3>
@@ -2979,7 +3212,10 @@ export default function OrcamentoClient({
               <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Metal</h3>
               <div className="grid grid-cols-3 gap-1.5">
                 {METAL_COLORS.map((mc) => (
-                  <button key={mc.value} onClick={() => { updateParam("metalColor", mc.value); updateParam("goldDensity", mc.density); }}
+                  // goldDensity é recalculada pelo useEffect de teor (linha ~524)
+                  // a partir do teorOuro atual + cor escolhida. Não setamos aqui
+                  // pra evitar 1 frame com densidade errada.
+                  <button key={mc.value} onClick={() => { updateParam("metalColor", mc.value); }}
                     className="py-1.5 px-2 text-[11px] font-semibold rounded-md border transition-all text-center"
                     style={activeParams.metalColor === mc.value
                       ? { backgroundColor: mc.value, color: mc.value === "#E8E8E8" ? "#333" : "#fff", borderColor: C.esmeralda, boxShadow: `0 0 0 2px ${C.esmeralda}` }
@@ -3586,6 +3822,7 @@ export default function OrcamentoClient({
                 stoneEntries={stoneEntries}
                 labelDoModelo={labelDoModelo}
                 metalLabel={METAL_COLORS.find((m) => m.value === params.metalColor)?.label ?? "—"}
+                labelsFicha={labelsFicha}
               />
               {allianceMode === "par" && (
                 <FichaAlianca
@@ -3597,6 +3834,7 @@ export default function OrcamentoClient({
                   stoneEntries={stoneEntries2}
                   labelDoModelo={labelDoModelo}
                   metalLabel={METAL_COLORS.find((m) => m.value === params2.metalColor)?.label ?? "—"}
+                  labelsFicha={labelsFicha}
                 />
               )}
               {/* Peso total (sem preço — só dados técnicos) */}
@@ -3604,7 +3842,7 @@ export default function OrcamentoClient({
                 <div className="rounded-lg border p-3 space-y-1" style={{ borderColor: C.cremeBorder, backgroundColor: "#F0F7F4" }}>
                   <div className="flex items-baseline justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: C.esmeralda }}>
-                      Peso total do par
+                      {getFichaLabel("peso_total_par", labelsFicha)}
                     </span>
                     <span className="font-mono font-bold" style={{ color: C.esmeralda }}>
                       {pricingTotal.weight.toFixed(2)} g
@@ -3632,7 +3870,7 @@ export default function OrcamentoClient({
 // ── Sub-componente: Ficha Técnica de uma aliança ─────────────────────────────
 function FichaAlianca({
   titulo, profile, ringSize, params, weight, stoneEntries,
-  labelDoModelo, metalLabel,
+  labelDoModelo, metalLabel, labelsFicha,
 }: {
   titulo: string;
   profile: ProfileType;
@@ -3642,43 +3880,47 @@ function FichaAlianca({
   stoneEntries: StoneEntry[];
   labelDoModelo: (p: string) => string;
   metalLabel: string;
+  /** Rótulos customizados via aba Configurações (migration 266). */
+  labelsFicha?: Record<string, string>;
 }) {
   const totalPedras = stoneEntries.reduce((acc, s) => acc + (s.qtd ?? 0), 0);
+  // Helper local — encurta as chamadas
+  const L = (k: string) => getFichaLabel(k, labelsFicha);
   return (
     <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: C.cremeBorder }}>
       <h4 className="text-[10px] font-bold uppercase tracking-wider" style={{ color: C.esmeralda }}>{titulo}</h4>
-      <Linha k="Modelo" v={labelDoModelo(profile)} />
-      <Linha k="Aro" v={`${ringSize.size} (Ø ${ringSize.diameter.toFixed(2)}mm)`} />
-      <Linha k="Largura" v={`${params.width.toFixed(2)} mm`} />
-      <Linha k="Espessura" v={`${params.height.toFixed(2)} mm`} />
-      {profile === ProfileType.Concava && <Linha k="Prof. côncava" v={`${params.concaveDepth.toFixed(2)} mm`} />}
-      {profile === ProfileType.Chanfrada && <Linha k="Chanfro" v={`${params.chamferSize.toFixed(2)} mm`} />}
+      <Linha k={L("modelo")}        v={labelDoModelo(profile)} />
+      <Linha k={L("aro")}           v={`${ringSize.size} (Ø ${ringSize.diameter.toFixed(2)}mm)`} />
+      <Linha k={L("largura")}       v={`${params.width.toFixed(2)} mm`} />
+      <Linha k={L("espessura")}     v={`${params.height.toFixed(2)} mm`} />
+      {profile === ProfileType.Concava && <Linha k={L("prof_concava")} v={`${params.concaveDepth.toFixed(2)} mm`} />}
+      {profile === ProfileType.Chanfrada && <Linha k={L("chanfro")} v={`${params.chamferSize.toFixed(2)} mm`} />}
       {profile === ProfileType.QuadradoCanal && (<>
-        <Linha k="Larg. canal" v={`${params.canalWidth.toFixed(2)} mm`} />
-        <Linha k="Alt. borda" v={`${params.canalBorderHeight.toFixed(2)} mm`} />
+        <Linha k={L("larg_canal")}  v={`${params.canalWidth.toFixed(2)} mm`} />
+        <Linha k={L("alt_borda")}   v={`${params.canalBorderHeight.toFixed(2)} mm`} />
       </>)}
-      <Linha k="Metal" v={metalLabel} />
+      <Linha k={L("metal")} v={metalLabel} />
       {params.hasGroove && (
-        <Linha k="Friso" v={`${params.grooveKind === "risco" ? "Risco" : "Friso"} ${params.grooveType} · ${params.grooveWidth.toFixed(2)}×${params.grooveDepth.toFixed(2)}mm`} />
+        <Linha k={L("friso")} v={`${params.grooveKind === "risco" ? "Risco" : "Friso"} ${params.grooveType} · ${params.grooveWidth.toFixed(2)}×${params.grooveDepth.toFixed(2)}mm`} />
       )}
       {totalPedras > 0 && (() => {
         const tipoPedra = stoneEntries[0]?.tipo ?? "";
         const tamanho = stoneEntries[0]?.tamanho_mm;
         return (
-          <Linha k="Pedras" v={`${totalPedras} un · ${tipoPedra}${tamanho ? ` · ${tamanho}mm` : ""}`} />
+          <Linha k={L("pedras")} v={`${totalPedras} un · ${tipoPedra}${tamanho ? ` · ${tamanho}mm` : ""}`} />
         );
       })()}
       {params.hasStones && profile === ProfileType.QuadradoCanal && params.stoneRows > 0 && (
-        <Linha k="Fileiras" v={`${params.stoneRows}`} />
+        <Linha k={L("fileiras")} v={`${params.stoneRows}`} />
       )}
       {params.hasStones && (
-        <Linha k="Furo passante" v={params.stoneDrill ? "Sim" : "Não"} />
+        <Linha k={L("furo_passante")} v={params.stoneDrill ? "Sim" : "Não"} />
       )}
       {params.textEnabled && params.textContent && (
-        <Linha k="Gravação" v={`"${params.textContent}"`} />
+        <Linha k={L("gravacao")} v={`"${params.textContent}"`} />
       )}
       <div className="border-t pt-1.5 mt-1.5" style={{ borderColor: C.cremeBorder }}>
-        <Linha k="Peso estimado" v={`${weight.toFixed(2)} g`} bold />
+        <Linha k={L("peso_estimado")} v={`${weight.toFixed(2)} g`} bold />
       </div>
     </div>
   );

@@ -105,6 +105,20 @@ export interface ConfigOrcamento {
   calibracao?: CalibracaoDefaults | null;
   /** Curvatura padrão (%) aplicada a alianças novas (migration 255). */
   dome_percentage?: number;
+  /** Migration 263: teor de ouro padrão (67–75%). Usado pra calcular
+   *  densidade dinamicamente no frontend. Default 75 (18k). */
+  teor_ouro_default?: number;
+  /** Migration 264: acréscimo (%) aplicado quando aliança é ouro branco
+   *  ou rose. Default 30. Range 0-100. */
+  acrescimo_metal_premium?: number;
+  /** Migration 265: ajuste global do ouro removido por pedra (%).
+   *  Default 100 (sem ajuste). 120 = pedra remove 20% mais; 80 = 20% menos.
+   *  Range 1-500. */
+  ajuste_pedra_pct?: number;
+  /** Migration 266: rótulos customizados da Ficha Técnica.
+   *  Map chave → nome customizado. Ex: { "aro": "Tamanho do dedo" }.
+   *  Default {} = usa labels padrão do código. */
+  labels_ficha_tecnica?: Record<string, string> | null;
   risco_width?: number;
   risco_depth?: number;
   preco_gravacao?: number;
