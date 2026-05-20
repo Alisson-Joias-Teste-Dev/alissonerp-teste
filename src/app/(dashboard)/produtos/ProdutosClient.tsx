@@ -141,10 +141,9 @@ function SortHeader({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-const ROLES_SEM_MARKUP = ["consultora", "gerente_loja"];
+import { type CampoVisivel, TODOS_VISIVEIS } from "@/lib/produto-visibilidade";
 
-export default function ProdutosClient({ podeEditar = true, role = "" }: { podeEditar?: boolean; role?: string }) {
-  const podeVerMarkup = !ROLES_SEM_MARKUP.includes(role);
+export default function ProdutosClient({ podeEditar = true, role = "", camposVisiveis = TODOS_VISIVEIS }: { podeEditar?: boolean; role?: string; camposVisiveis?: CampoVisivel }) {
   // Filters
   const [busca, setBusca] = useState("");
   const [tipoMetal, setTipoMetal] = useState("");
@@ -884,7 +883,7 @@ export default function ProdutosClient({ podeEditar = true, role = "" }: { podeE
         onClose={() => setSelectedId(null)}
         onSaved={() => { fetchProdutos(); bumpRefresh(); }}
         podeEditar={podeEditar}
-        podeVerMarkup={podeVerMarkup}
+        camposVisiveis={camposVisiveis}
       />
 
       {/* Modal de Cadastro */}

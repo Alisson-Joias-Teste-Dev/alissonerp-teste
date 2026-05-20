@@ -113,8 +113,10 @@ interface Props {
   onClose: () => void;
   onSaved?: () => void;
   podeEditar?: boolean;
-  podeVerMarkup?: boolean;
+  camposVisiveis?: import("@/lib/produto-visibilidade").CampoVisivel;
 }
+
+const _CV_ALL = { foto: true, preco_venda: true, composicao_preco: true, markup: true, peso_aprox: true, ficha_tecnica: true, dados_avancados: true };
 
 // Pedra do catálogo (categoria='Pedras', ativa, com preço)
 interface PedraCatalogo {
@@ -469,7 +471,8 @@ function BomRowForm({ produtoId, item, insumos, onSaved, onCancel }: BomRowFormP
 
 // ─── Main Drawer ──────────────────────────────────────────────────────────────
 
-export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar = true, podeVerMarkup = true }: Props) {
+export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar = true, camposVisiveis = _CV_ALL }: Props) {
+  const cv = camposVisiveis;
   const aberto = produtoId !== null;
 
   const [produto, setProduto] = useState<ProdutoDetalhe | null>(null);
@@ -1289,10 +1292,12 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                 <p className={sectionTitleCls}>Dados Básicos</p>
                 <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-100">
                   {/* Galeria de imagens */}
+                  {cv.foto && (
                   <div>
                     <p className={labelCls}>Imagens</p>
                     <GaleriaProduto produtoId={produto.id_produto} podeEditar={podeEditar} />
                   </div>
+                  )}
                   <div>
                     <p className={labelCls}>Nome</p>
                     <input
@@ -1562,6 +1567,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
               )}
 
               {/* ── FICHA TÉCNICA (foto + medidas) ── */}
+              {cv.ficha_tecnica && (
               <section>
                 <p className={sectionTitleCls}>Ficha Técnica</p>
 
@@ -1672,13 +1678,15 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                   </p>
                 )}
               </section>
+              )}
 
               {/* ── PRECIFICAÇÃO (editável) ── sempre visível */}
               <section>
                 <p className={sectionTitleCls}>Ficha Técnica &amp; Preço</p>
                 <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-100">
-                  {/* Peso e Markup — sempre visíveis (são o que altera o preço) */}
-                  <div className={`grid ${showAvancado ? "grid-cols-3" : "grid-cols-2"} gap-3`}>
+                  {/* Peso e Markup */}
+                  <div className="grid gap-3" style={{ gridTemplateColumns: [cv.peso_aprox, cv.markup].filter(Boolean).length === 2 ? (showAvancado ? "repeat(3,1fr)" : "repeat(2,1fr)") : "1fr" }}>
+                  {cv.peso_aprox && (
                     <div>
                       <p className={labelCls}>Peso aproximado (g)</p>
                       <input
@@ -1690,7 +1698,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                         className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
                       />
                     </div>
-                    {podeVerMarkup && (
+                  )}
+                    {cv.markup && (
                     <div>
                       <p className={labelCls}>Markup <span className="text-gray-400 normal-case tracking-normal">(somente leitura)</span></p>
                       <input
@@ -1736,9 +1745,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                   </div>
                   )}
                   {/* ── PREÇO DE VENDA OFICIAL (calculado pelo ERP) ── */}
-                  {/* Não há mais input manual de preco_tiny. O preço oficial é
-                      SEMPRE o calculado via peso × cotação × markup × fator.
-                      Para ajustar, o usuário edita peso/markup acima. */}
+                  {cv.preco_venda && (
                   <div className="rounded-lg border-2 p-4" style={{ borderColor: "#A7F3D0", backgroundColor: "#ECFDF5" }}>
                     <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: "#065F46" }}>
                       Preço de Venda (oficial do ERP)
@@ -1820,6 +1827,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                       );
                     })()}
                   </div>
+                  )}
 
                 </div>
               </section>
@@ -1910,7 +1918,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                       ))}
 
                       {/* Breakdown Ouro / Pedras / TOTAL */}
-                      {(() => {
+                      {cv.composicao_preco && (() => {
                         const parseNum = (v: string | number | null | undefined) => {
                           if (v == null) return 0;
                           if (typeof v === "number") return isNaN(v) ? 0 : v;
@@ -2175,6 +2183,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
               )}
 
               {/* ── Toggle "Ver dados avançados" ── */}
+              {cv.dados_avancados && (
               <section className="flex justify-center pt-2">
                 <button
                   type="button"
@@ -2189,6 +2198,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                   )}
                 </button>
               </section>
+              )}
               </>
             );
           })()}
