@@ -27,6 +27,7 @@ export default function GaleriaProduto({ produtoId, podeEditar = false, onCapaCh
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | "upload" | null>(null);
   const [capaIdx, setCapaIdx] = useState(0);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function carregar() {
@@ -133,11 +134,12 @@ export default function GaleriaProduto({ produtoId, podeEditar = false, onCapaCh
 
       {/* foto principal */}
       {capa ? (
-        <div className="relative rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+        <div className="relative rounded-lg overflow-hidden border border-gray-200 bg-gray-50 aspect-square">
           <img
             src={capa.url_publica}
             alt={capa.filename ?? "Foto do produto"}
-            className="w-full h-44 object-contain bg-white"
+            className="w-full h-full object-contain bg-white cursor-zoom-in"
+            onClick={() => setLightbox(capa.url_publica)}
           />
           {capa.eh_capa && (
             <span className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-0.5 bg-amber-400/95 text-amber-900 text-[10px] font-semibold rounded-md shadow">
@@ -223,6 +225,28 @@ export default function GaleriaProduto({ produtoId, podeEditar = false, onCapaCh
           {imagens.length} {imagens.length === 1 ? "imagem" : "imagens"}
           {!readonly && " · passe o mouse na thumb pra definir capa ou excluir"}
         </p>
+      )}
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition"
+          >
+            <X size={18} />
+          </button>
+          <img
+            src={lightbox}
+            alt="Foto ampliada"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
       )}
     </div>
   );
