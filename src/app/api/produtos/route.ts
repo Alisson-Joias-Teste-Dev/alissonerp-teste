@@ -295,15 +295,15 @@ export async function GET(req: NextRequest) {
             WHERE filho_ep.parent_id = ep.id
           ) ELSE est.disponivel END, 0)::int AS saldo_estoque,
           -- Preço mínimo das variações filhas (quando pai com variable).
-          -- Se null, o produto é simples ou não tem filhos com preço.
+          -- Se null, o produto é simples ou não tem filhos com preço calculado.
           (
-            SELECT MIN(prod_f.preco_tiny::numeric)::int
+            SELECT MIN(pp_f.preco_venda::numeric)::int
             FROM alissonerp.erp_produtos pai_e2
             INNER JOIN alissonerp.erp_produtos filho_e2 ON filho_e2.parent_id = pai_e2.id
-            INNER JOIN public.produtos prod_f ON prod_f.id_produto = filho_e2.produto_id
+            LEFT JOIN alissonerp.vw_produto_preco pp_f ON pp_f.id_produto = filho_e2.produto_id
             WHERE pai_e2.produto_id = p.id_produto
-              AND prod_f.preco_tiny IS NOT NULL
-              AND prod_f.preco_tiny::numeric > 0
+              AND pp_f.preco_venda IS NOT NULL
+              AND pp_f.preco_venda::numeric > 0
           ) AS preco_filhos_min,
           ARRAY_REMOVE(ARRAY[
             CASE WHEN ${wSemCat}   THEN 'sem_categoria' END,
