@@ -190,7 +190,10 @@ export function computeCalculatedCategories(
 
 export function computeWeight(
   params: RingParams,
-  profile: ProfileType
+  profile: ProfileType,
+  /** Migration 265: ajuste % global do ouro removido por pedra. Default 1.0
+   *  (sem ajuste). 1.20 = pedra remove 20% mais; 0.80 = 20% menos. */
+  ajustePedraMultiplier: number = 1.0,
 ): { volume: number; weight: number; weightRaw: number } {
   const rIn = params.diameter / 2;
   const rOut = rIn + params.height;
@@ -225,7 +228,7 @@ export function computeWeight(
       : params.stoneHalfMoon
         ? Math.floor(computeStoneCapacity(params.diameter, params.height, params.canalBorderHeight, params.stoneSize, params.stoneRows, profile) / 2)
         : params.stoneCount;
-    stoneLoss = holeVolume * stoneCount;
+    stoneLoss = holeVolume * stoneCount * ajustePedraMultiplier;
   }
 
   const adjustedVolume = Math.max(baseVolume * factor - grooveLoss - canalLoss - stoneLoss, 0.1);

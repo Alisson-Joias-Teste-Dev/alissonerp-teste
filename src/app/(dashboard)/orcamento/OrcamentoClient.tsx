@@ -529,6 +529,14 @@ export default function OrcamentoClient({
     Number(config?.acrescimo_metal_premium ?? 30)
   );
 
+  // ── Ajuste pedra (migration 265) ─────────────────────────────────────────
+  // % global do ouro removido por cada pedra cravejada. Default 100.
+  // 120 = pedra remove 20% MAIS de ouro. 80 = 20% MENOS.
+  const [ajustePedra, setAjustePedra] = useState<number>(
+    Number(config?.ajuste_pedra_pct ?? 100)
+  );
+  const ajustePedraMultiplier = ajustePedra / 100;
+
   // Helper: multiplier por cor (1.0 amarelo, 1+pct/100 branco/rose).
   // Resolvido aqui pra reuso nas 4 chamadas de computePricing das alianças.
   const acrescimoMultiplier = useCallback((metalColor: string): number => {
@@ -1317,7 +1325,7 @@ export default function OrcamentoClient({
     return () => { ctrl.abort(); };
   }, [params2.hasStones, params2.stoneType, params2.stoneSize]);
 
-  const weightEst = useMemo(() => computeWeight(params, profile), [params, profile]);
+  const weightEst = useMemo(() => computeWeight(params, profile, ajustePedraMultiplier), [params, profile, ajustePedraMultiplier]);
   // Helper: pega o desconto da promoção da faixa que cobre esse peso (0 se inativa).
   // Bug #11: recebe `startMkp` como parâmetro em vez de pegar do `params` global.
   // Antes, anel 2 e peça personalizada (que podem ter markup próprio) sempre
@@ -1349,7 +1357,7 @@ export default function OrcamentoClient({
   const { calc: calcCategories } = computeCalculatedCategories(params.startMkp, pricingCategories, weightEst.weight);
 
   // Pricing aliança 2 (par)
-  const weightEst2 = useMemo(() => computeWeight(params2, profile2), [params2, profile2]);
+  const weightEst2 = useMemo(() => computeWeight(params2, profile2, ajustePedraMultiplier), [params2, profile2, ajustePedraMultiplier]);
   const descPromo2 = descPromoParaPeso(weightEst2.weight, params2.startMkp);
   const effDiscount2 = Math.max(params2.discountPercent, descPromo2);
   const lockDiscount2 = !canManageConfig && descPromo2 > 0;
@@ -1653,6 +1661,7 @@ export default function OrcamentoClient({
           promocao_fim: promocaoFim || null,
           teor_ouro_default: teorOuro,
           acrescimo_metal_premium: acrescimoMetal,
+          ajuste_pedra_pct: ajustePedra,
         }),
       });
       if (!res.ok) {
@@ -2688,6 +2697,75 @@ export default function OrcamentoClient({
         </div>
           );
         })()}
+        {/* Ouro removido por pedra cravejada (migration 265) */}
+        <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-gray-800">Ouro removido por pedra cravejada</h3>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Quanto cada pedra &quot;come&quot; de ouro pra cravar. O ajuste em lote multiplica todas as pedras de uma vez.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <label className="text-xs font-medium text-gray-500">Ajuste em lote (%)</label>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                step={1}
+                value={ajustePedra}
+                onChange={e => {
+                  const v = parseFloat(e.target.value);
+                  setAjustePedra(isNaN(v) ? 100 : Math.min(500, Math.max(1, v)));
+                }}
+                className="w-24 px-3 py-2 text-sm rounded-lg border outline-none"
+                style={{ borderColor: C.cremeBorder }} />
+            </div>
+          </div>
+
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b" style={{ borderColor: C.cremeBorder }}>
+                <th className="text-left py-2 text-xs text-gray-500">Tamanho</th>
+                <th className="text-right py-2 text-xs text-gray-500">Volume removido</th>
+                <th className="text-right py-2 text-xs text-gray-500">Ouro removido (sem furo)</th>
+                <th className="text-right py-2 text-xs text-gray-500">Ouro removido (com furo, borda 1.4mm)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5].map(mm => {
+                // Referência: ouro amarelo 75% = 15.58 g/cm³ (literatura)
+                const D_REF = densidadePorTeor(teorOuro, "Amarelo");
+                const radius = (mm * 0.90) / 2;
+                const depthSemFuro = mm * 0.60;
+                const volSemFuro = Math.PI * radius * radius * depthSemFuro * ajustePedraMultiplier;
+                const pesoSemFuro = (volSemFuro * D_REF) / 1000;
+                const depthComFuro = 1.4;
+                const volComFuro = Math.PI * radius * radius * depthComFuro * ajustePedraMultiplier;
+                const pesoComFuro = (volComFuro * D_REF) / 1000;
+                return (
+                  <tr key={mm} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                    <td className="py-2 text-sm font-medium" style={{ color: C.esmeralda }}>{mm}mm</td>
+                    <td className="py-2 text-right text-xs text-gray-500 font-mono">{volSemFuro.toFixed(2)} mm³</td>
+                    <td className="py-2 text-right text-sm font-mono">{pesoSemFuro.toFixed(3)}g</td>
+                    <td className="py-2 text-right text-sm font-mono">{pesoComFuro.toFixed(3)}g</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <div className="rounded-lg p-3 text-[11px] text-gray-500 leading-relaxed" style={{ backgroundColor: C.cremeBg }}>
+            <strong style={{ color: C.esmeralda }}>Como o cálculo funciona:</strong><br />
+            • Raio do furo = 90% do diâmetro da pedra<br />
+            • Profundidade sem furo (berço cônico) = 60% do tamanho da pedra<br />
+            • Profundidade com furo passante = espessura da chapa (varia por aliança)<br />
+            • Volume = π × raio² × profundidade × ajuste%<br />
+            • Densidade de referência: ouro amarelo {teorOuro}% ({densidadePorTeor(teorOuro, "Amarelo")} g/cm³)<br />
+            <em>Para outras cores e teores, a densidade muda automaticamente (campo &quot;Teor do ouro&quot; acima).</em>
+          </div>
+        </div>
+
         {/* Regras friso */}
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
           <h3 className="text-sm font-bold text-gray-800">Regras de friso</h3>

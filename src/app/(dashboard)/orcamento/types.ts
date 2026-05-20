@@ -111,6 +111,10 @@ export interface ConfigOrcamento {
   /** Migration 264: acréscimo (%) aplicado quando aliança é ouro branco
    *  ou rose. Default 30. Range 0-100. */
   acrescimo_metal_premium?: number;
+  /** Migration 265: ajuste global do ouro removido por pedra (%).
+   *  Default 100 (sem ajuste). 120 = pedra remove 20% mais; 80 = 20% menos.
+   *  Range 1-500. */
+  ajuste_pedra_pct?: number;
   risco_width?: number;
   risco_depth?: number;
   preco_gravacao?: number;
