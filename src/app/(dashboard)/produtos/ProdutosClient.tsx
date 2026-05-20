@@ -141,7 +141,10 @@ function SortHeader({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boolean }) {
+const ROLES_SEM_MARKUP = ["consultora", "gerente_loja"];
+
+export default function ProdutosClient({ podeEditar = true, role = "" }: { podeEditar?: boolean; role?: string }) {
+  const podeVerMarkup = !ROLES_SEM_MARKUP.includes(role);
   // Filters
   const [busca, setBusca] = useState("");
   const [tipoMetal, setTipoMetal] = useState("");
@@ -881,6 +884,7 @@ export default function ProdutosClient({ podeEditar = true }: { podeEditar?: boo
         onClose={() => setSelectedId(null)}
         onSaved={() => { fetchProdutos(); bumpRefresh(); }}
         podeEditar={podeEditar}
+        podeVerMarkup={podeVerMarkup}
       />
 
       {/* Modal de Cadastro */}

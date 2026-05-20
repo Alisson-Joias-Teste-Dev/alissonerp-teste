@@ -19,5 +19,5 @@ export default async function ProdutosPage() {
 
   const podeEditar = await temAcessoModulo(role ?? "", "produtos", "escrever");
 
-  return <ProdutosClient podeEditar={podeEditar} />;
+  return <ProdutosClient podeEditar={podeEditar} role={role ?? ""} />;
 }

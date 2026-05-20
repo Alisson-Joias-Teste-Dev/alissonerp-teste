@@ -113,6 +113,7 @@ interface Props {
   onClose: () => void;
   onSaved?: () => void;
   podeEditar?: boolean;
+  podeVerMarkup?: boolean;
 }
 
 // Pedra do catálogo (categoria='Pedras', ativa, com preço)
@@ -468,7 +469,7 @@ function BomRowForm({ produtoId, item, insumos, onSaved, onCancel }: BomRowFormP
 
 // ─── Main Drawer ──────────────────────────────────────────────────────────────
 
-export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar = true }: Props) {
+export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar = true, podeVerMarkup = true }: Props) {
   const aberto = produtoId !== null;
 
   const [produto, setProduto] = useState<ProdutoDetalhe | null>(null);
@@ -1689,6 +1690,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                         className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
                       />
                     </div>
+                    {podeVerMarkup && (
                     <div>
                       <p className={labelCls}>Markup <span className="text-gray-400 normal-case tracking-normal">(somente leitura)</span></p>
                       <input
@@ -1706,6 +1708,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                         Alterar em /precificação →
                       </a>
                     </div>
+                    )}
                     {showAvancado && (
                       <div>
                         <p className={labelCls}>Fator</p>
