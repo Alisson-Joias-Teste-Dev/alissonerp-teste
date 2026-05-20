@@ -672,13 +672,13 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
                           <span className={`font-medium leading-tight ${isChild ? "text-xs text-gray-600" : "text-sm text-gray-800"}`}>
                             {p.nome}
                           </span>
-                          {p.pedras_ct_total != null && p.pedras_ct_total > 0 ? (
+                          {p.pedras_ct_total != null && Number(p.pedras_ct_total) > 0 ? (
                             <span
                               className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold font-mono"
                               style={{ backgroundColor: "#EDE9FE", color: "#5B21B6" }}
-                              title={`${p.pedras_ct_total.toFixed(3).replace(".", ",")} ct · ${(p.pedras_ct_total * 100).toFixed(1).replace(".", ",")} pt`}
+                              title={`${Number(p.pedras_ct_total).toFixed(3).replace(".", ",")} ct · ${(Number(p.pedras_ct_total) * 100).toFixed(1).replace(".", ",")} pt`}
                             >
-                              💎 {p.pedras_ct_total.toFixed(3).replace(".", ",")}ct
+                              💎 {Number(p.pedras_ct_total).toFixed(3).replace(".", ",")}ct
                             </span>
                           ) : p.tem_pedra_preciosa ? (
                             <span
@@ -716,13 +716,13 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
 
                       {/* Coluna Pedras */}
                       <td className="px-3 py-2.5">
-                        {(p.pedras_ct_total ?? 0) > 0 && p.pedras_nome_principal ? (
+                        {Number(p.pedras_ct_total ?? 0) > 0 && p.pedras_nome_principal ? (
                           <div className="flex flex-col gap-0.5">
                             <span className="text-[11px] font-medium" style={{ color: "#184036" }}>
                               {p.pedras_qtd_total}× {p.pedras_nome_principal}
                             </span>
                             <span className="font-mono text-[10px] text-gray-400">
-                              {((p.pedras_ct_total ?? 0) * 100).toFixed(1).replace(".", ",")} pt · {(p.pedras_ct_total ?? 0).toFixed(3).replace(".", ",")} ct
+                              {(Number(p.pedras_ct_total ?? 0) * 100).toFixed(1).replace(".", ",")} pt · {Number(p.pedras_ct_total ?? 0).toFixed(3).replace(".", ",")} ct
                             </span>
                           </div>
                         ) : (
