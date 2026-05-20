@@ -155,6 +155,11 @@ export function densidadePorTeor(teorPct: number, labelOuCor: string): number {
   return Math.round(d * 100) / 100;
 }
 
+// Acréscimo metal premium (migration 264): integrado diretamente em
+// computePricing via parâmetro acrescimoMetalMultiplier. O cálculo do
+// multiplier (1.0 amarelo / 1+pct/100 branco|rose) é feito no
+// OrcamentoClient (acrescimoMultiplier callback) usando corDoMetal.
+
 // ── Helpers de cálculo ──────────────────────────────────────────────────────
 
 export function findGrooveRule(width: number, rules: GrooveRule[]): GrooveRule {
@@ -260,12 +265,16 @@ export function computePricing(
   /** Desconto da promoção (%, 0-100). Aplicado em cima do markup, ANTES
    *  do discountPercent manual. Default 0 = comportamento original preservado. */
   descontoPromocao: number = 0,
+  /** Multiplicador do acréscimo metal premium (migration 264). 1.0 = sem
+   *  acréscimo (amarelo); 1.30 = +30% (branco/rose com config padrão).
+   *  Aplicado APÓS o markup e ANTES da promoção/desconto. */
+  acrescimoMetalMultiplier: number = 1.0,
 ): PricingResult {
   // Busca o markup correto pela faixa de peso
   const { activeCategory } = computeCalculatedCategories(startMkp, categories, weight);
   const mkp = activeCategory?.targetMkp ?? startMkp;
   const cost = weight * goldPrice;
-  const priceBase = cost * mkp;
+  const priceBase = cost * mkp * acrescimoMetalMultiplier;
   // Aplica desconto da promoção (se houver) antes do desconto manual
   const pricePromo = descontoPromocao > 0
     ? priceBase * (1 - Math.min(100, Math.max(0, descontoPromocao)) / 100)

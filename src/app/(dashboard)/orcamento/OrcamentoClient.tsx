@@ -23,7 +23,7 @@ import {
   STONE_TYPES, STONE_CUTS, STONE_SIZES_MM, STONE_CT_TABLE, GROOVE_TYPE_OPTIONS,
   findGrooveRule, computeWeight, computeStoneCapacity, computePricing,
   computeCalculatedCategories, computeStoneEntryPrice, computeStonesTotalRS,
-  densidadePorTeor,
+  densidadePorTeor, corDoMetal,
 } from "./constants";
 import {
   CALIBRACAO_DEFAULTS, computeMinThickness, computeMinWidth,
@@ -522,6 +522,21 @@ export default function OrcamentoClient({
   const [teorOuro, setTeorOuro] = useState<number>(
     Number(config?.teor_ouro_default ?? 75)
   );
+
+  // ── Acréscimo metal premium (migration 264) ─────────────────────────────
+  // % aplicado quando metal é branco ou rose. Default 30. Amarelo nunca aplica.
+  const [acrescimoMetal, setAcrescimoMetal] = useState<number>(
+    Number(config?.acrescimo_metal_premium ?? 30)
+  );
+
+  // Helper: multiplier por cor (1.0 amarelo, 1+pct/100 branco/rose).
+  // Resolvido aqui pra reuso nas 4 chamadas de computePricing das alianças.
+  const acrescimoMultiplier = useCallback((metalColor: string): number => {
+    const m = METAL_COLORS.find(mc => mc.value === metalColor);
+    if (!m) return 1.0;
+    const cor = corDoMetal(m.label);
+    return cor === "amarelo" ? 1.0 : 1 + acrescimoMetal / 100;
+  }, [acrescimoMetal]);
 
   // Recalcula goldDensity dos 2 anéis quando teor ou cor muda.
   // GATE isHydratingRef: durante carga de rascunho/orçamento antigo, NÃO
@@ -1319,15 +1334,17 @@ export default function OrcamentoClient({
   const effDiscount1 = Math.max(params.discountPercent, descPromo1);
   // Vendedora (sem canManageConfig) não pode mexer no desconto quando promo ativa pra faixa
   const lockDiscount1 = !canManageConfig && descPromo1 > 0;
+  // Multiplicador de acréscimo metal premium pra anel 1 (1.0 amarelo / 1+pct/100 branco|rose)
+  const acrescimoMult1 = acrescimoMultiplier(params.metalColor);
   const pricing: PricingResult = useMemo(
-    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, effDiscount1, pricingCategories, 0),
+    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, effDiscount1, pricingCategories, 0, acrescimoMult1),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [weightEst.weight, params.goldPrice, params.startMkp, effDiscount1, pricingCategories]
+    [weightEst.weight, params.goldPrice, params.startMkp, effDiscount1, pricingCategories, acrescimoMult1]
   );
   // Preço cheio (sem promo + sem desconto manual) — usado para mostrar "De R$ X"
   const pricingCheio: PricingResult = useMemo(
-    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, 0, pricingCategories, 0),
-    [weightEst.weight, params.goldPrice, params.startMkp, pricingCategories]
+    () => computePricing(weightEst.weight, params.goldPrice, params.startMkp, 0, pricingCategories, 0, acrescimoMult1),
+    [weightEst.weight, params.goldPrice, params.startMkp, pricingCategories, acrescimoMult1]
   );
   const { calc: calcCategories } = computeCalculatedCategories(params.startMkp, pricingCategories, weightEst.weight);
 
@@ -1336,14 +1353,15 @@ export default function OrcamentoClient({
   const descPromo2 = descPromoParaPeso(weightEst2.weight, params2.startMkp);
   const effDiscount2 = Math.max(params2.discountPercent, descPromo2);
   const lockDiscount2 = !canManageConfig && descPromo2 > 0;
+  const acrescimoMult2 = acrescimoMultiplier(params2.metalColor);
   const pricing2: PricingResult = useMemo(
-    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories, 0),
+    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories, 0, acrescimoMult2),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories]
+    [weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories, acrescimoMult2]
   );
   const pricingCheio2: PricingResult = useMemo(
-    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, 0, pricingCategories, 0),
-    [weightEst2.weight, params2.goldPrice, params2.startMkp, pricingCategories]
+    () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, 0, pricingCategories, 0, acrescimoMult2),
+    [weightEst2.weight, params2.goldPrice, params2.startMkp, pricingCategories, acrescimoMult2]
   );
 
   // Gravação: primeiro nome incluso, adicionais cobram R$ precoGravacao cada.
@@ -1634,6 +1652,7 @@ export default function OrcamentoClient({
           promocao_inicio: promocaoInicio || null,
           promocao_fim: promocaoFim || null,
           teor_ouro_default: teorOuro,
+          acrescimo_metal_premium: acrescimoMetal,
         }),
       });
       if (!res.ok) {
@@ -2467,6 +2486,25 @@ export default function OrcamentoClient({
                 Densidades: Amarelo {densidadePorTeor(teorOuro, "Amarelo")} ·
                 Branco {densidadePorTeor(teorOuro, "Branco")} ·
                 Rose {densidadePorTeor(teorOuro, "Rose")} g/cm³
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Acréscimo metal premium (%)</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={acrescimoMetal}
+                onChange={e => {
+                  const v = parseFloat(e.target.value);
+                  setAcrescimoMetal(isNaN(v) ? 0 : Math.min(100, Math.max(0, v)));
+                }}
+                className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none"
+                style={{ borderColor: C.cremeBorder }} />
+              <p className="text-[10px] text-gray-400 mt-1">
+                Acréscimo aplicado em alianças com metal Branco ou Rose.
+                Amarelo não é afetado. 0 = desligado.
               </p>
             </div>
           </div>

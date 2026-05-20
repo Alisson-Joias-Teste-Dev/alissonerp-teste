@@ -108,6 +108,9 @@ export interface ConfigOrcamento {
   /** Migration 263: teor de ouro padrão (67–75%). Usado pra calcular
    *  densidade dinamicamente no frontend. Default 75 (18k). */
   teor_ouro_default?: number;
+  /** Migration 264: acréscimo (%) aplicado quando aliança é ouro branco
+   *  ou rose. Default 30. Range 0-100. */
+  acrescimo_metal_premium?: number;
   risco_width?: number;
   risco_depth?: number;
   preco_gravacao?: number;
