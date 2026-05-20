@@ -596,14 +596,24 @@ export async function PATCH(
     if (body.preco_servico !== undefined) {
       const [tblCheck] = await sql`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'alissonerp' AND table_name = 'erp_produtos') AS exists`;
       if (tblCheck?.exists) {
-        await sql`
-          INSERT INTO alissonerp.erp_produtos (produto_id, sku, nome, preco_servico)
-          SELECT id_produto, sku, nome, ${body.preco_servico == null ? null : Number(body.preco_servico)}
-          FROM public.produtos WHERE id_produto = ${produtoId}
-          ON CONFLICT (produto_id) DO UPDATE SET
-            preco_servico = EXCLUDED.preco_servico,
-            date_updated = NOW()
+        const ps = body.preco_servico == null ? null : Number(body.preco_servico);
+        // UPDATE first — evita conflito UNIQUE(sku) quando produto existe mas sem linha em erp_produtos
+        const { count } = await sql`
+          UPDATE alissonerp.erp_produtos
+          SET preco_servico = ${ps}, date_updated = NOW()
+          WHERE produto_id = ${produtoId}
         `;
+        if (count === 0) {
+          // Fallback: cria linha com SKU unico (evita conflito UNIQUE(sku) com SKUs duplicados)
+          const [p] = await sql`SELECT sku, nome FROM public.produtos WHERE id_produto = ${produtoId}`;
+          if (p) {
+            await sql`
+              INSERT INTO alissonerp.erp_produtos (produto_id, sku, nome, preco_servico)
+              VALUES (${produtoId}, ${`SKU-${produtoId}`}, ${p.nome}, ${ps})
+              ON CONFLICT (produto_id) DO UPDATE SET preco_servico = EXCLUDED.preco_servico, date_updated = NOW()
+            `;
+          }
+        }
       }
     }
 
