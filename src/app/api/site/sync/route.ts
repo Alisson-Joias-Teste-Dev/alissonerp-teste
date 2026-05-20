@@ -110,56 +110,13 @@ export async function POST(req: NextRequest) {
     }[]>`
       SELECT
         p.id_produto AS produto_id, p.sku, p.nome,
-        -- Preço calculado pelo ERP (preco_sync → preco_curva runtime → filhos → preco_tiny)
-        COALESCE(
-          NULLIF(p.preco_sync::numeric, 0),
-          CASE
-            WHEN p.peso_precificado > 0 AND p.markup > 0
-             AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
-            THEN ROUND(p.peso_precificado::numeric * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-                     * p.markup::numeric * COALESCE(p.fator::numeric, 1) / 10)::numeric * 10
-          END,
-          (
-            SELECT MIN(COALESCE(
-              NULLIF(fp.preco_sync::numeric, 0),
-              CASE
-                WHEN fp.peso_precificado > 0 AND fp.markup > 0
-                 AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
-                THEN ROUND(fp.peso_precificado::numeric * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-                         * fp.markup::numeric * COALESCE(fp.fator::numeric, 1) / 10)::numeric * 10
-              END,
-              NULLIF(fp.preco_tiny::numeric, 0)
-            ))
-            FROM alissonerp.erp_produtos pai_e
-            INNER JOIN alissonerp.erp_produtos filho_e ON filho_e.parent_id = pai_e.id
-            INNER JOIN public.produtos fp ON fp.id_produto = filho_e.produto_id
-            WHERE pai_e.produto_id = p.id_produto
-          ),
-          NULLIF(p.preco_tiny::numeric, 0),
-          0
-        ) AS preco,
-        GREATEST(
-          COALESCE((
-            SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END)::int
-            FROM alissonerp.movimentacoes_estoque_comercial m
-            WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'
-          ), 0),
-          COALESCE((
-            SELECT SUM(CASE WHEN m_f.tipo = 'entrada' THEN m_f.quantidade ELSE -m_f.quantidade END)::int
-            FROM alissonerp.erp_produtos pp
-            INNER JOIN alissonerp.erp_produtos fp ON fp.parent_id = pp.id
-            INNER JOIN public.produtos fpr ON fpr.id_produto = fp.produto_id
-            INNER JOIN alissonerp.movimentacoes_estoque_comercial m_f ON m_f.produto_id = fpr.id_produto AND m_f.status = 'efetivado'
-            WHERE pp.produto_id = p.id_produto
-          ), 0),
-          COALESCE((
-            SELECT SUM(v.saldo)::int FROM alissonerp.vw_estoque_directus_saldo v
-            WHERE v.insumo_sku = p.sku
-          ), 0)
-        ) AS saldo,
+        pp.preco_venda AS preco,
+        COALESCE(est.disponivel, 0)::int AS saldo,
         sp.wc_product_id
       FROM alissonerp.site_produtos sp
       JOIN public.produtos p ON p.id_produto = sp.produto_id
+      LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+      LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
       WHERE sp.publicado_no_site = true AND p.situacao = 'A'
     `;
 
@@ -195,23 +152,11 @@ export async function POST(req: NextRequest) {
         if (r.type === "variable" && r.wc_product_id) {
           const filhos = await sql<{ sku: string; preco: number; saldo: number }[]>`
             SELECT p.sku,
-                   COALESCE(
-                     NULLIF(p.preco_sync::numeric, 0),
-                     CASE
-                       WHEN p.peso_precificado > 0 AND p.markup > 0
-                        AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
-                       THEN ROUND(p.peso_precificado::numeric * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-                                * p.markup::numeric * COALESCE(p.fator::numeric, 1) / 10)::numeric * 10
-                     END,
-                     NULLIF(p.preco_tiny::numeric, 0),
-                     0
-                   )::float                                 AS preco,
-                   COALESCE((
-                     SELECT SUM(CASE WHEN m.tipo = 'entrada' THEN m.quantidade ELSE -m.quantidade END)::int
-                     FROM alissonerp.movimentacoes_estoque_comercial m
-                     WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'
-                   ), 0)::int                               AS saldo
+                   COALESCE(pp.preco_venda, 0)::float AS preco,
+                   COALESCE(est.disponivel, 0)::int   AS saldo
             FROM public.produtos p
+            LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+            LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
             WHERE p.sku LIKE ${alvo.sku + "-%"}
           `;
           const porSku = new Map(filhos.map(f => [f.sku, { preco: Number(f.preco), saldo: Number(f.saldo) }]));
@@ -223,14 +168,7 @@ export async function POST(req: NextRequest) {
           if (vi.erros.length > 0) {
             varMsg = `${vi.erros.length} var falharam: ${vi.erros[0].msg}`;
           }
-          // Alinha preço do pai com o menor dos filhos
-          if (vi.precos_variacoes.length > 0) {
-            const menor = Math.min(...vi.precos_variacoes);
-            const precoPaiAtual = Math.round(Number(alvo.preco ?? 0));
-            if (menor > 0 && menor !== precoPaiAtual) {
-              await sql`UPDATE public.produtos SET preco_tiny = ${menor} WHERE id_produto = ${alvo.produto_id}`;
-            }
-          }
+          // Preço do pai é calculado pela view vw_produto_preco — não precisa persistir
         }
 
         await sql`

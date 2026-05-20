@@ -430,7 +430,7 @@ function AbaIntegracao({ onAtivoChange }: { onAtivoChange?: (v: boolean) => void
               onChange={(e) => setCfg({ ...cfg, sincronizar_preco: e.target.checked })}
               className="w-4 h-4 rounded accent-[#184036]"
             />
-            Sincronizar preço de venda (preco_tiny → regular_price)
+            Sincronizar preço de venda (curva dinâmica → regular_price)
           </label>
         </div>
       </div>

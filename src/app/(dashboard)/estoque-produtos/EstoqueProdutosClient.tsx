@@ -40,7 +40,7 @@ interface Item {
   sku: string;
   nome: string | null;
   saldo: number;
-  preco_tiny: string | null;
+  preco: string | null;
   valor_total: string;
   data_ultima_compra: string | null;
 }
@@ -62,7 +62,7 @@ interface ApiResponse {
   dir: "asc" | "desc";
 }
 
-type OrderField = "sku" | "nome" | "saldo" | "preco_tiny" | "valor_total" | "data_ultima_compra";
+type OrderField = "sku" | "nome" | "saldo" | "preco" | "valor_total" | "data_ultima_compra";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function formatDateBR(iso: string | null): string {
@@ -377,7 +377,7 @@ export default function EstoqueProdutosClient() {
                   <ColHeader label="SKU" field="sku" currentField={order} currentDir={dir} onToggle={toggleOrder} />
                   <ColHeader label="Produto" field="nome" currentField={order} currentDir={dir} onToggle={toggleOrder} />
                   <ColHeader label="Saldo" field="saldo" currentField={order} currentDir={dir} onToggle={toggleOrder} align="right" />
-                  <ColHeader label="Preço" field="preco_tiny" currentField={order} currentDir={dir} onToggle={toggleOrder} align="right" />
+                  <ColHeader label="Preço" field="preco" currentField={order} currentDir={dir} onToggle={toggleOrder} align="right" />
                   <ColHeader label="Valor Total" field="valor_total" currentField={order} currentDir={dir} onToggle={toggleOrder} align="right" />
                   <ColHeader label="Última Compra" field="data_ultima_compra" currentField={order} currentDir={dir} onToggle={toggleOrder} align="right" />
                 </tr>
@@ -403,7 +403,7 @@ export default function EstoqueProdutosClient() {
                 )}
 
                 {itens.map((it) => {
-                  const semPreco = !it.preco_tiny || Number(it.preco_tiny) === 0;
+                  const semPreco = !it.preco || Number(it.preco) === 0;
                   const semData = !it.data_ultima_compra;
                   return (
                     <tr
@@ -422,11 +422,11 @@ export default function EstoqueProdutosClient() {
                       </td>
                       <td className="px-4 py-3 text-right font-mono tabular-nums text-xs">
                         {semPreco ? (
-                          <span style={{ color: P.vermelho }} title="Sem preço cadastrado no Tiny">
+                          <span style={{ color: P.vermelho }} title="Sem preço calculado pela curva">
                             sem preço
                           </span>
                         ) : (
-                          <span style={{ color: P.esmeralda }}>{formatMoeda(it.preco_tiny)}</span>
+                          <span style={{ color: P.esmeralda }}>{formatMoeda(it.preco)}</span>
                         )}
                       </td>
                       <td

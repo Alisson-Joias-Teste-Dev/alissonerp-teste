@@ -2,13 +2,13 @@
  * GET /api/estoque-produtos
  *
  * Dashboard de estoque de produtos acabados:
- *   - JOIN public.estoque (saldo) + public.produtos (nome, preco_tiny, data_ultima_compra)
+ *   - JOIN public.estoque (saldo legado) + vw_produto_preco (preço calculado pela curva)
  *   - Somente produtos com saldo > 0
  *   - Retorna itens paginados + KPIs agregados (total_valor, total_skus, total_pecas)
  *
  * Query params:
  *   busca   → ILIKE em nome/sku
- *   order   → sku | nome | saldo | preco_tiny | valor_total | data_ultima_compra
+ *   order   → sku | nome | saldo | preco | valor_total | data_ultima_compra
  *   dir     → asc | desc (default desc)
  *   page    → 1..N (default 1)
  *   limit   → 1..200 (default 50)
@@ -25,7 +25,7 @@ const ORDER_WHITELIST = [
   "sku",
   "nome",
   "saldo",
-  "preco_tiny",
+  "preco",
   "valor_total",
   "data_ultima_compra",
 ] as const;
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
     orderField === "sku" ? sql`e.sku` :
     orderField === "nome" ? sql`p.nome` :
     orderField === "saldo" ? sql`e.saldo` :
-    orderField === "preco_tiny" ? sql`p.preco_tiny` :
+    orderField === "preco" ? sql`pp.preco_venda` :
     orderField === "data_ultima_compra" ? sql`p.data_ultima_compra` :
     sql`valor_total`;
 
@@ -68,12 +68,13 @@ export async function GET(req: NextRequest) {
       skus_sem_preco: number;
     }[]>`
       SELECT
-        COALESCE(SUM(e.saldo * COALESCE(p.preco_tiny, 0)), 0)::numeric(14,2) AS total_valor,
+        COALESCE(SUM(e.saldo * COALESCE(pp.preco_venda, 0)), 0)::numeric(14,2) AS total_valor,
         COUNT(*)::int AS total_skus,
         COALESCE(SUM(e.saldo), 0)::int AS total_pecas,
-        COUNT(*) FILTER (WHERE p.preco_tiny IS NULL OR p.preco_tiny = 0)::int AS skus_sem_preco
+        COUNT(*) FILTER (WHERE pp.preco_venda IS NULL OR pp.preco_venda = 0)::int AS skus_sem_preco
       FROM public.estoque e
       JOIN public.produtos p ON p.id_api_produto = e.produto_id_api
+      LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
       WHERE e.saldo > 0
         ${wBusca}
     `;
@@ -84,7 +85,7 @@ export async function GET(req: NextRequest) {
       sku: string;
       nome: string | null;
       saldo: number;
-      preco_tiny: string | null;
+      preco: string | null;
       valor_total: string;
       data_ultima_compra: string | null;
     }[]>`
@@ -93,11 +94,12 @@ export async function GET(req: NextRequest) {
         e.sku,
         p.nome,
         e.saldo,
-        p.preco_tiny,
-        (e.saldo * COALESCE(p.preco_tiny, 0))::numeric(14,2) AS valor_total,
+        pp.preco_venda::text AS preco,
+        (e.saldo * COALESCE(pp.preco_venda, 0))::numeric(14,2) AS valor_total,
         p.data_ultima_compra
       FROM public.estoque e
       JOIN public.produtos p ON p.id_api_produto = e.produto_id_api
+      LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
       WHERE e.saldo > 0
         ${wBusca}
       ORDER BY ${orderIdent} ${dir} NULLS LAST, e.sku ASC

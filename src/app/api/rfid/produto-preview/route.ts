@@ -40,16 +40,17 @@ export async function GET(req: NextRequest) {
   try {
     const [produto] = await sql`
       SELECT
-        id_produto,
-        sku,
-        nome,
-        categoria,
-        peso_real,
-        peso_precificado,
-        preco_tiny,
-        imagem
-      FROM public.produtos
-      WHERE id_produto = ${id}
+        p.id_produto,
+        p.sku,
+        p.nome,
+        p.categoria,
+        p.peso_real,
+        p.peso_precificado,
+        pp.preco_venda AS preco,
+        p.imagem
+      FROM public.produtos p
+      LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+      WHERE p.id_produto = ${id}
     `;
 
     if (!produto) {
@@ -63,7 +64,7 @@ export async function GET(req: NextRequest) {
       categoria:        produto.categoria,
       peso_real:        produto.peso_real != null ? Number(produto.peso_real) : null,
       peso_precificado: produto.peso_precificado != null ? Number(produto.peso_precificado) : null,
-      preco_tiny:       produto.preco_tiny != null ? Number(produto.preco_tiny) : null,
+      preco:            produto.preco != null ? Number(produto.preco) : null,
       imagem:           produto.imagem,
       tem_sku_e_nome:   Boolean(produto.sku) && Boolean(produto.nome),
     });

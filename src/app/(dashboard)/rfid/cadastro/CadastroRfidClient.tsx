@@ -66,7 +66,7 @@ interface ProdutoPreview {
   categoria: string | null;
   peso_real: number | null;
   peso_precificado: number | null;
-  preco_tiny: number | null;
+  preco: number | null;
   imagem: string | null;
   tem_sku_e_nome: boolean;
   qtd_estoque?: number;
@@ -1259,7 +1259,7 @@ function CardProduto({
           <div>
             <span className="text-gray-500">Preço: </span>
             <span className="font-mono" style={{ color: C.esmeralda }}>
-              {formatBRL(produto.preco_tiny)}
+              {produto.preco != null ? formatBRL(produto.preco) : "—"}
             </span>
           </div>
           <div className="col-span-2 text-[11px] text-gray-400 mt-1">
