@@ -6,6 +6,8 @@ export type CampoVisivel = {
   peso_aprox: boolean;
   ficha_tecnica: boolean;
   dados_avancados: boolean;
+  pedras_catalogo: boolean;
+  rota_fabricacao: boolean;
 };
 
 export type ProdutoVisibilidadeConfig = Record<string, CampoVisivel>;
@@ -18,6 +20,8 @@ export const CAMPOS_LABELS: Record<keyof CampoVisivel, string> = {
   peso_aprox:       "Peso aproximado (g)",
   ficha_tecnica:    "Ficha técnica (medidas)",
   dados_avancados:  "Dados avançados (metal, BOM, variações)",
+  pedras_catalogo:  "Pedras do catálogo (tabela + preços)",
+  rota_fabricacao:  "Rota de fabricação (etapas)",
 };
 
 export const CAMPOS_ORDER: (keyof CampoVisivel)[] = [
@@ -28,6 +32,8 @@ export const CAMPOS_ORDER: (keyof CampoVisivel)[] = [
   "peso_aprox",
   "ficha_tecnica",
   "dados_avancados",
+  "pedras_catalogo",
+  "rota_fabricacao",
 ];
 
 export const ROLES_CONFIGURAVEIS = [
@@ -51,18 +57,20 @@ export const ROLE_LABELS: Record<string, string> = {
 };
 
 export const VISIBILIDADE_DEFAULT: ProdutoVisibilidadeConfig = {
-  consultora:      { foto: true,  preco_venda: true,  composicao_preco: true,  markup: false, peso_aprox: true,  ficha_tecnica: true,  dados_avancados: false },
-  gerente_loja:    { foto: true,  preco_venda: true,  composicao_preco: true,  markup: true,  peso_aprox: true,  ficha_tecnica: true,  dados_avancados: true  },
-  gerente_fabrica: { foto: true,  preco_venda: false, composicao_preco: false, markup: false, peso_aprox: true,  ficha_tecnica: true,  dados_avancados: true  },
-  ourives:         { foto: true,  preco_venda: false, composicao_preco: false, markup: false, peso_aprox: true,  ficha_tecnica: true,  dados_avancados: false },
-  pcp:             { foto: true,  preco_venda: false, composicao_preco: false, markup: false, peso_aprox: true,  ficha_tecnica: true,  dados_avancados: true  },
-  motoboy:         { foto: true,  preco_venda: false, composicao_preco: false, markup: false, peso_aprox: false, ficha_tecnica: false, dados_avancados: false },
-  financeiro:      { foto: true,  preco_venda: true,  composicao_preco: true,  markup: true,  peso_aprox: true,  ficha_tecnica: false, dados_avancados: false },
+  //                                                                                                        pedras  rota
+  consultora:      { foto: true,  preco_venda: true,  composicao_preco: true,  markup: false, peso_aprox: true,  ficha_tecnica: true,  dados_avancados: false, pedras_catalogo: false, rota_fabricacao: false },
+  gerente_loja:    { foto: true,  preco_venda: true,  composicao_preco: true,  markup: true,  peso_aprox: true,  ficha_tecnica: true,  dados_avancados: true,  pedras_catalogo: true,  rota_fabricacao: false },
+  gerente_fabrica: { foto: true,  preco_venda: false, composicao_preco: false, markup: false, peso_aprox: true,  ficha_tecnica: true,  dados_avancados: true,  pedras_catalogo: true,  rota_fabricacao: true  },
+  ourives:         { foto: true,  preco_venda: false, composicao_preco: false, markup: false, peso_aprox: true,  ficha_tecnica: true,  dados_avancados: false, pedras_catalogo: false, rota_fabricacao: true  },
+  pcp:             { foto: true,  preco_venda: false, composicao_preco: false, markup: false, peso_aprox: true,  ficha_tecnica: true,  dados_avancados: true,  pedras_catalogo: false, rota_fabricacao: true  },
+  motoboy:         { foto: true,  preco_venda: false, composicao_preco: false, markup: false, peso_aprox: false, ficha_tecnica: false, dados_avancados: false, pedras_catalogo: false, rota_fabricacao: false },
+  financeiro:      { foto: true,  preco_venda: true,  composicao_preco: true,  markup: true,  peso_aprox: true,  ficha_tecnica: false, dados_avancados: false, pedras_catalogo: true,  rota_fabricacao: false },
 };
 
 export const TODOS_VISIVEIS: CampoVisivel = {
   foto: true, preco_venda: true, composicao_preco: true, markup: true,
   peso_aprox: true, ficha_tecnica: true, dados_avancados: true,
+  pedras_catalogo: true, rota_fabricacao: true,
 };
 
 export function getCamposVisiveis(role: string, config: ProdutoVisibilidadeConfig): CampoVisivel {

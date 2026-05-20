@@ -116,7 +116,7 @@ interface Props {
   camposVisiveis?: import("@/lib/produto-visibilidade").CampoVisivel;
 }
 
-const _CV_ALL = { foto: true, preco_venda: true, composicao_preco: true, markup: true, peso_aprox: true, ficha_tecnica: true, dados_avancados: true };
+const _CV_ALL = { foto: true, preco_venda: true, composicao_preco: true, markup: true, peso_aprox: true, ficha_tecnica: true, dados_avancados: true, pedras_catalogo: true, rota_fabricacao: true };
 
 // Pedra do catálogo (categoria='Pedras', ativa, com preço)
 interface PedraCatalogo {
@@ -1834,6 +1834,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
               </section>
 
               {/* ── PEDRAS DO CATÁLOGO (só precificação — NÃO abate estoque) ── */}
+              {cv.pedras_catalogo && (
               <section>
                 <p className={sectionTitleCls}>Pedras do catálogo <span className="normal-case tracking-normal text-gray-400">(soma ao preço do ouro)</span></p>
                 <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-100">
@@ -1958,6 +1959,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                   )}
                 </div>
               </section>
+              )}
 
               {/* ── CAMPOS EDITÁVEIS ── (só modo avançado) */}
               {showAvancado && (
@@ -2038,6 +2040,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                 </div>
               </section>
 
+              {cv.rota_fabricacao && (
               <section>
                 <div className="flex items-center justify-between gap-2">
                   <p className={sectionTitleCls}>Rota de Fabricação</p>
@@ -2148,6 +2151,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                   )}
                 </div>
               </section>
+              )}
 
 
               {/* ── VARIAÇÕES (só se for pai) ── (só modo avançado) */}
