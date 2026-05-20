@@ -368,7 +368,28 @@ export async function GET(req: NextRequest) {
             SELECT count(*)::integer
             FROM alissonerp.erp_produtos filhos
             WHERE filhos.parent_id = ep.id
-          ) ELSE 0 END AS qtd_variacoes
+          ) ELSE 0 END AS qtd_variacoes,
+          -- Ct total das pedras preciosas vinculadas (exceto zircônia)
+          (
+            SELECT COALESCE(SUM(
+              ppc.quantidade::numeric *
+              CASE ROUND(CAST(REPLACE(COALESCE(
+                (REGEXP_MATCH(COALESCE(pp2.nome,''), '(\d+(?:[.,]\d+)?)\s*mm'))[1],
+                '0'), ',', '.') AS numeric), 1)
+                WHEN 1.0 THEN 0.005 WHEN 1.1 THEN 0.006 WHEN 1.2 THEN 0.007
+                WHEN 1.3 THEN 0.009 WHEN 1.4 THEN 0.012 WHEN 1.5 THEN 0.015
+                WHEN 1.6 THEN 0.017 WHEN 1.7 THEN 0.019 WHEN 1.8 THEN 0.022
+                WHEN 1.9 THEN 0.026 WHEN 2.0 THEN 0.030 WHEN 2.1 THEN 0.035
+                WHEN 2.2 THEN 0.040 WHEN 2.3 THEN 0.046 WHEN 2.4 THEN 0.053
+                WHEN 2.5 THEN 0.060
+                ELSE 0
+              END
+            ), 0)
+            FROM alissonerp.produto_pedras_componente ppc
+            LEFT JOIN public.produtos pp2 ON pp2.id_produto = ppc.pedra_produto_id
+            WHERE ppc.produto_id = p.id_produto
+              AND pp2.nome NOT ILIKE '%zirconia%'
+          ) AS pedras_ct_total
         FROM public.produtos p
         LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
         LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
@@ -454,7 +475,27 @@ export async function GET(req: NextRequest) {
         NULL::text    AS parent_sku,
         NULL::text    AS sufixo_variacao,
         NULL::text    AS numeracao,
-        0::integer    AS qtd_variacoes
+        0::integer    AS qtd_variacoes,
+        (
+          SELECT COALESCE(SUM(
+            ppc.quantidade::numeric *
+            CASE ROUND(CAST(REPLACE(COALESCE(
+              (REGEXP_MATCH(COALESCE(pp2.nome,''), '(\d+(?:[.,]\d+)?)\s*mm'))[1],
+              '0'), ',', '.') AS numeric), 1)
+              WHEN 1.0 THEN 0.005 WHEN 1.1 THEN 0.006 WHEN 1.2 THEN 0.007
+              WHEN 1.3 THEN 0.009 WHEN 1.4 THEN 0.012 WHEN 1.5 THEN 0.015
+              WHEN 1.6 THEN 0.017 WHEN 1.7 THEN 0.019 WHEN 1.8 THEN 0.022
+              WHEN 1.9 THEN 0.026 WHEN 2.0 THEN 0.030 WHEN 2.1 THEN 0.035
+              WHEN 2.2 THEN 0.040 WHEN 2.3 THEN 0.046 WHEN 2.4 THEN 0.053
+              WHEN 2.5 THEN 0.060
+              ELSE 0
+            END
+          ), 0)
+          FROM alissonerp.produto_pedras_componente ppc
+          LEFT JOIN public.produtos pp2 ON pp2.id_produto = ppc.pedra_produto_id
+          WHERE ppc.produto_id = p.id_produto
+            AND pp2.nome NOT ILIKE '%zirconia%'
+        ) AS pedras_ct_total
       FROM public.produtos p
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto

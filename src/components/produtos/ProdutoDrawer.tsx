@@ -21,6 +21,7 @@ import {
   calcularPrecoSync,
   type CurvaConfig,
 } from "@/lib/curva-precificacao";
+import { enriquecerPedra, totalizarPedras, fmtCt, fmtPt } from "@/lib/pedras-helpers";
 import GaleriaProduto from "./GaleriaProduto";
 import AplicarTemplateModal from "@/components/produtos/AplicarTemplateModal";
 
@@ -1029,7 +1030,28 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
           <div className="min-w-0">
             {produto ? (
               <>
-                <h2 className="text-base font-semibold text-gray-800 truncate">{produto.nome}</h2>
+                <div className="flex items-center gap-2 min-w-0">
+                  <h2 className="text-base font-semibold text-gray-800 truncate">{produto.nome}</h2>
+                  {(() => {
+                    const pedrasNaoZirconia = pedrasComp.filter(
+                      (p) => !p.nome.toLowerCase().includes("zirconia")
+                    );
+                    if (pedrasNaoZirconia.length === 0) return null;
+                    const total = totalizarPedras(
+                      pedrasNaoZirconia.map((p) => enriquecerPedra({ ...p, sku: "" }))
+                    );
+                    if (total.ctTotal <= 0) return null;
+                    return (
+                      <span
+                        className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold font-mono"
+                        style={{ backgroundColor: "#EDE9FE", color: "#5B21B6" }}
+                        title={`${fmtCt(total.ctTotal)} · ${fmtPt(total.pontosTotal)}`}
+                      >
+                        💎 {fmtCt(total.ctTotal)}
+                      </span>
+                    );
+                  })()}
+                </div>
                 <div className="flex items-center gap-2 mt-0.5">
                   <p className="text-xs text-gray-400 font-mono">{produto.sku}</p>
                   {produto.tiny_sync_status === "pendente" && (

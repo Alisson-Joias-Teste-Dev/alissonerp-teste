@@ -35,6 +35,7 @@ export interface Produto {
   preco_total_sync: string | null;
   diferenca_percentual: string | null;
   tem_pedra_preciosa: boolean;
+  pedras_ct_total: number | null;
   situacao: string | null;
   categoria: string | null;
   foto_produto: string | null;
@@ -668,7 +669,15 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
                           <span className={`font-medium leading-tight ${isChild ? "text-xs text-gray-600" : "text-sm text-gray-800"}`}>
                             {p.nome}
                           </span>
-                          {p.tem_pedra_preciosa && (
+                          {p.pedras_ct_total != null && p.pedras_ct_total > 0 ? (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold font-mono"
+                              style={{ backgroundColor: "#EDE9FE", color: "#5B21B6" }}
+                              title={`${p.pedras_ct_total.toFixed(3).replace(".", ",")} ct · ${(p.pedras_ct_total * 100).toFixed(1).replace(".", ",")} pt`}
+                            >
+                              💎 {p.pedras_ct_total.toFixed(3).replace(".", ",")}ct
+                            </span>
+                          ) : p.tem_pedra_preciosa ? (
                             <span
                               className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold"
                               style={{ backgroundColor: "#EDE9FE", color: "#5B21B6" }}
@@ -676,7 +685,7 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
                             >
                               💎
                             </span>
-                          )}
+                          ) : null}
                           {isPai && <VariacoesBadge n={p.qtd_variacoes} />}
                           {isChild && p.numeracao && (
                             <span className="text-[10px] text-blue-500 font-mono">nº{p.numeracao}</span>
