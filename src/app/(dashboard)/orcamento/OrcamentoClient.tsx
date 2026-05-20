@@ -336,7 +336,11 @@ export default function OrcamentoClient({
       if (aroSize) setRingSize(aroSize);
       const metalMatch = METAL_COLORS.find(m => m.label === ft.cor_metal || m.value === ft.cor_metal);
       const metalHex = metalMatch?.value ?? "#FFD700";
-      const metalDensity = metalMatch?.density ?? 14.69;
+      // Prefere densidade salva no snapshot (preserva integridade do orçamento histórico).
+      // Fallback: densidade da constante (orçamentos antigos sem campo salvo).
+      const metalDensity = ft.densidade_ouro != null
+        ? Number(ft.densidade_ouro)
+        : (metalMatch?.density ?? 14.69);
       const hasGrooveLoaded = perfil === "FrisoUnico" || perfil === "FrisoLateral" || !!ft.has_friso;
       const grooveKindLoaded = (ft.friso_kind || "friso") as "friso" | "risco";
       const grooveTypeLoaded = perfil === "FrisoLateral" ? "duplo" as const
@@ -378,7 +382,9 @@ export default function OrcamentoClient({
         if (aroSize2) setRingSize2(aroSize2);
         const metalMatch2 = METAL_COLORS.find(m => m.label === ft2.cor_metal || m.value === ft2.cor_metal);
         const metalHex2 = metalMatch2?.value ?? "#FFD700";
-        const metalDensity2 = metalMatch2?.density ?? 14.69;
+        const metalDensity2 = ft2.densidade_ouro != null
+          ? Number(ft2.densidade_ouro)
+          : (metalMatch2?.density ?? 14.69);
         setParams2(p => applyRingParams({ ...p, metalColor: metalHex2, goldDensity: metalDensity2 }, ft2));
       }
 
@@ -518,10 +524,11 @@ export default function OrcamentoClient({
   );
 
   // Recalcula goldDensity dos 2 anéis quando teor ou cor muda.
-  // Mantém compat com orçamentos antigos: a goldDensity salva no rascunho
-  // é sobrescrita aqui durante hidratação, então usamos isHydratingRef
-  // (definido mais abaixo) — porém só após a hidratação inicial.
+  // GATE isHydratingRef: durante carga de rascunho/orçamento antigo, NÃO
+  // recalcular — preserva goldDensity salva no snapshot. Bug recorrente
+  // descrito no CLAUDE.md secao 3 (orcamento rascunho).
   useEffect(() => {
+    if (isHydratingRef.current) return;
     const m1 = METAL_COLORS.find(m => m.value === params.metalColor);
     if (m1) {
       const d = densidadePorTeor(teorOuro, m1.label);
@@ -2088,7 +2095,11 @@ export default function OrcamentoClient({
               <div className="flex gap-2">
                 {METAL_COLORS.map((mc) => (
                   <button key={mc.value}
-                    onClick={() => { setPecaMetalColor(mc.value); setPecaGoldDensity(mc.density); }}
+                    onClick={() => {
+                      setPecaMetalColor(mc.value);
+                      // Densidade calculada pelo teor configurado (consistente com alianças)
+                      setPecaGoldDensity(densidadePorTeor(teorOuro, mc.label));
+                    }}
                     className="w-10 h-10 rounded-full border-2 transition-all"
                     style={{
                       backgroundColor: mc.value,
@@ -3027,7 +3038,10 @@ export default function OrcamentoClient({
               <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Metal</h3>
               <div className="grid grid-cols-3 gap-1.5">
                 {METAL_COLORS.map((mc) => (
-                  <button key={mc.value} onClick={() => { updateParam("metalColor", mc.value); updateParam("goldDensity", mc.density); }}
+                  // goldDensity é recalculada pelo useEffect de teor (linha ~524)
+                  // a partir do teorOuro atual + cor escolhida. Não setamos aqui
+                  // pra evitar 1 frame com densidade errada.
+                  <button key={mc.value} onClick={() => { updateParam("metalColor", mc.value); }}
                     className="py-1.5 px-2 text-[11px] font-semibold rounded-md border transition-all text-center"
                     style={activeParams.metalColor === mc.value
                       ? { backgroundColor: mc.value, color: mc.value === "#E8E8E8" ? "#333" : "#fff", borderColor: C.esmeralda, boxShadow: `0 0 0 2px ${C.esmeralda}` }
