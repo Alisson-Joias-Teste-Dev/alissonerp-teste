@@ -315,27 +315,8 @@ export async function GET(req: NextRequest) {
           vpv.em_promocao,
           vpv.nome_campanha,
           vpv.data_fim AS promo_data_fim,
-          -- Preço da curva = peso × cotação_ouro × markup_aplicado × fator, arredondado à dezena.
-          -- Usa markup_aplicado de produto_curva_aplicada (se a curva foi aplicada);
-          -- senão usa o markup da própria public.produtos. Cotação buscada de public.parametros.
-          --
-          -- EXCEÇÃO: produtos da categoria "Pedras" NÃO entram no racional do ouro —
-          -- seu preço vem direto de preco_tiny (cadastro manual, R$/unidade).
-          -- Retornamos NULL aqui para que a UI mostre apenas preco_tiny.
-          CASE
-            WHEN p.categoria ILIKE 'Pedras%' THEN NULL
-            WHEN p.peso_precificado > 0
-             AND cpa.markup_aplicado > 0
-             AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
-            THEN ROUND(
-              p.peso_precificado::numeric
-              * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-              * cpa.markup_aplicado::numeric
-              * COALESCE(p.fator::numeric, 1)
-              / 10
-            )::int * 10
-            ELSE NULL
-          END AS preco_curva,
+          -- Preço da curva — calculado pela view oficial vw_produto_preco.
+          pp.preco_venda AS preco_curva,
           ti.tipo_item,
           ep.id               AS erp_id,
           ep.eh_pai,
@@ -394,6 +375,7 @@ export async function GET(req: NextRequest) {
         LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
         LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
         LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
+        LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
         WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wVariacoes} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
         ORDER BY ${orderVariacoes}
         LIMIT  ${limit}
@@ -448,21 +430,8 @@ export async function GET(req: NextRequest) {
         vpv.em_promocao,
         vpv.nome_campanha,
         vpv.data_fim AS promo_data_fim,
-        -- Pedras ficam fora do cálculo (ver comentário na query principal).
-        CASE
-          WHEN p.categoria ILIKE 'Pedras%' THEN NULL
-          WHEN p.peso_precificado > 0
-           AND cpa.markup_aplicado > 0
-           AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
-          THEN ROUND(
-            p.peso_precificado::numeric
-            * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-            * cpa.markup_aplicado::numeric
-            * COALESCE(p.fator::numeric, 1)
-            / 10
-          )::int * 10
-          ELSE NULL
-        END AS preco_curva,
+        -- Preço da curva — calculado pela view oficial vw_produto_preco.
+        pp.preco_venda AS preco_curva,
         ti.tipo_item,
         NULL::integer AS erp_id,
         NULL::boolean AS eh_pai,
@@ -514,6 +483,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
       LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
+      LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
       WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
       ORDER BY ${orderFieldIdent} ${orderDir} NULLS LAST
       LIMIT  ${limit}

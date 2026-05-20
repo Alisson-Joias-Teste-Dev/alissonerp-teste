@@ -29,22 +29,8 @@ export async function GET(req: NextRequest) {
       p.id_produto AS id,
       p.sku,
       p.nome,
-      -- Preço calculado exclusivamente pela curva dinâmica.
-      -- Só calcula se tem peso + markup_aplicado da curva + cotação do ouro.
-      -- Produtos sem peso ou sem curva retornam NULL (sem preço calculado).
-      CASE
-        WHEN p.peso_precificado > 0
-         AND cpa.markup_aplicado > 0
-         AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
-          THEN ROUND(
-            p.peso_precificado::numeric
-            * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-            * cpa.markup_aplicado::numeric
-            * COALESCE(p.fator::numeric, 1)
-            / 10
-          )::int * 10
-        ELSE NULL
-      END AS preco_venda,
+      -- Preço calculado pela view oficial vw_produto_preco (curva dinâmica).
+      pp.preco_venda,
       p.peso_precificado,
       p.unidade,
       ep.sufixo_variacao,
@@ -60,7 +46,7 @@ export async function GET(req: NextRequest) {
       CASE WHEN vpv.em_promocao THEN vpv.max_parcelas_cartao ELSE NULL END AS max_parcelas_promo
     FROM public.produtos p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
-    LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
+    LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
     LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
     LEFT JOIN (
       SELECT produto_id, SUM(disponivel) AS saldo
@@ -80,7 +66,7 @@ export async function GET(req: NextRequest) {
       AND (ep.eh_pai IS NULL OR ep.eh_pai = false)
     ORDER BY
       (p.situacao = 'A')                     DESC,
-      (cpa.markup_aplicado IS NOT NULL AND cpa.markup_aplicado > 0) DESC,
+      (pp.preco_venda IS NOT NULL AND pp.preco_venda > 0) DESC,
       (p.tipo = 'S')                          DESC,
       (LOWER(p.sku)  = LOWER(${q}))           DESC,
       (LOWER(p.nome) LIKE LOWER(${q + '%'}))  DESC,

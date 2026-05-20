@@ -93,26 +93,8 @@ export async function GET(
             p.categoria              AS categoria_geral,
             p.markup,
             p.fator,
-            -- Preço calculado pela curva (peso × ouro × markup_aplicado × fator).
-            -- Usa markup da curva se aplicada, senão markup do produto. Fator default 1.
-            -- EXCEÇÃO: pedras não seguem a curva (preço vem direto de preco_tiny).
-            CASE
-              WHEN p.categoria ILIKE 'Pedras%' THEN NULL
-              WHEN p.peso_precificado > 0
-               AND ((SELECT markup_aplicado FROM alissonerp.produto_curva_aplicada WHERE produto_id = p.id_produto) > 0 OR p.markup > 0)
-               AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
-              THEN ROUND(
-                p.peso_precificado::numeric
-                * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-                * COALESCE(
-                    (SELECT markup_aplicado::numeric FROM alissonerp.produto_curva_aplicada WHERE produto_id = p.id_produto),
-                    p.markup::numeric
-                  )
-                * COALESCE(p.fator::numeric, 1)
-                / 10
-              )::int * 10
-              ELSE NULL
-            END AS preco_curva,
+            -- Preço calculado pela view oficial vw_produto_preco (curva dinâmica).
+            pp.preco_venda AS preco_curva,
             (SELECT tipo_item FROM alissonerp.produto_tipo_item WHERE produto_id = p.id_produto) AS tipo_item,
             NULL::text   AS sub_categoria,
             ppe.preco_compra_usd  AS preco_compra_usd,
@@ -143,6 +125,7 @@ export async function GET(
           LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
           LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
+          LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
           WHERE p.id_produto = ${produtoId}
         `
       : await sql`
@@ -167,26 +150,8 @@ export async function GET(
             p.categoria              AS categoria_geral,
             p.markup,
             p.fator,
-            -- Preço calculado pela curva (peso × ouro × markup_aplicado × fator).
-            -- Usa markup da curva se aplicada, senão markup do produto. Fator default 1.
-            -- EXCEÇÃO: pedras não seguem a curva (preço vem direto de preco_tiny).
-            CASE
-              WHEN p.categoria ILIKE 'Pedras%' THEN NULL
-              WHEN p.peso_precificado > 0
-               AND ((SELECT markup_aplicado FROM alissonerp.produto_curva_aplicada WHERE produto_id = p.id_produto) > 0 OR p.markup > 0)
-               AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
-              THEN ROUND(
-                p.peso_precificado::numeric
-                * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-                * COALESCE(
-                    (SELECT markup_aplicado::numeric FROM alissonerp.produto_curva_aplicada WHERE produto_id = p.id_produto),
-                    p.markup::numeric
-                  )
-                * COALESCE(p.fator::numeric, 1)
-                / 10
-              )::int * 10
-              ELSE NULL
-            END AS preco_curva,
+            -- Preço calculado pela view oficial vw_produto_preco (curva dinâmica).
+            pp.preco_venda AS preco_curva,
             (SELECT tipo_item FROM alissonerp.produto_tipo_item WHERE produto_id = p.id_produto) AS tipo_item,
             NULL::text    AS sub_categoria,
             ppe.preco_compra_usd  AS preco_compra_usd,
@@ -213,6 +178,7 @@ export async function GET(
           LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
           LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
+          LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
           WHERE p.id_produto = ${produtoId}
         `;
 
