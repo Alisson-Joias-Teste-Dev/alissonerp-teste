@@ -693,7 +693,7 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
                           {isChild && p.numeracao && (
                             <span className="text-[10px] text-blue-500 font-mono">nº{p.numeracao}</span>
                           )}
-                          {(p.pendencias?.length ?? 0) > 0 && (
+                          {podeEditar && (p.pendencias?.length ?? 0) > 0 && (
                             <span
                               className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold"
                               style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}
