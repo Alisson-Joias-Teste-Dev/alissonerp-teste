@@ -379,8 +379,8 @@ export async function PATCH(
   // tipo_item vai para tabela auxiliar
   let tipoItem: "joia" | "insumo" | null | undefined = undefined;
   if (body.tipo_item !== undefined) {
-    if (body.tipo_item === null || body.tipo_item === "") tipoItem = null;
-    else if (body.tipo_item === "joia" || body.tipo_item === "insumo") tipoItem = body.tipo_item;
+      if (body.tipo_item === null || body.tipo_item === "") tipoItem = null;
+      else if (body.tipo_item === "joia" || body.tipo_item === "insumo" || body.tipo_item === "servico") tipoItem = body.tipo_item;
     else return NextResponse.json({ error: "tipo_item inválido" }, { status: 400 });
   }
 
