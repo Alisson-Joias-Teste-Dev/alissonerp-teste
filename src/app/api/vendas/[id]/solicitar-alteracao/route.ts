@@ -16,7 +16,7 @@ const SolicitarAlteracaoSchema = z.object({
 // Campos permitidos pra solicitação de alteração de venda — espelha a lista
 // de CAMPOS_ADMIN_ONLY do PATCH /api/vendas/[id].
 const CAMPOS_VENDA_PERMITIDOS = new Set([
-  "situacao", "total_frete", "cliente_id", "vendedor_id", "data_venda",
+  "situacao", "cliente_id", "vendedor_id", "data_venda",
 ]);
 
 // Status válidos para pagamento (espelha enum do PagamentoPatchSchema).
@@ -86,7 +86,7 @@ export async function POST(
       return NextResponse.json({ error: "Campo não permitido para solicitação" }, { status: 400 });
     }
     const [venda] = await sql<Record<string, unknown>[]>`
-      SELECT situacao, total_frete, cliente_id, vendedor_id, data_venda
+      SELECT situacao, cliente_id, vendedor_id, data_venda
       FROM alissonerp.vendas_erp WHERE id = ${vendaId}
     `;
     if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });

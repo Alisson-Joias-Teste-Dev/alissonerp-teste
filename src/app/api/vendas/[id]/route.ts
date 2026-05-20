@@ -185,8 +185,10 @@ export async function GET(
 }
 
 // ─── PATCH /api/vendas/[id] ────────────────────────────────────────────────────
-// Campos editáveis: situacao, data_entrega, total_frete, forma_envio, forma_frete,
-//                   observacoes, observacoes_internas
+// Campos editáveis em rascunho: situacao, data_entrega, total_frete,
+//   forma_envio, forma_frete, observacoes, observacoes_internas, numero_rastreio
+// Após rascunho (aprovado+): apenas situacao pode ser alterada.
+// Pagamentos são gerenciados por endpoint próprio (/pagamentos/).
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -229,7 +231,7 @@ export async function PATCH(
 
   // Gate financeiro por campo — vendedora/gerente abre solicitação ao tentar
   // alterar campos protegidos. Frontend usa flag `solicitar` pra abrir modal.
-  const CAMPOS_ADMIN_ONLY = ["total_frete", "cliente_id", "vendedor_id", "data_venda"];
+  const CAMPOS_ADMIN_ONLY = ["cliente_id", "vendedor_id", "data_venda"];
   const ROLES_FINANCEIRO = ["admin", "desenvolvedor", "diretor"];
   if (!ROLES_FINANCEIRO.includes(usuario.role)) {
     for (const campo of CAMPOS_ADMIN_ONLY) {
@@ -299,6 +301,22 @@ export async function PATCH(
   if (body.cliente_id !== undefined || body.vendedor_id !== undefined || body.data_venda !== undefined) {
     if (venda.situacao !== "rascunho") {
       return NextResponse.json({ error: "Estes campos só podem ser alterados em rascunho" }, { status: 409 });
+    }
+  }
+
+  // ── Guard: após "rascunho", bloquear edição de dados da venda ────────────────
+  if (venda.situacao !== "rascunho") {
+    const CAMPOS_BLOQUEADOS_APOS_RASCUNHO = [
+      "data_entrega", "total_frete", "forma_envio", "forma_frete",
+      "observacoes", "observacoes_internas", "video_obs_interna", "numero_rastreio",
+    ] as const;
+    for (const campo of CAMPOS_BLOQUEADOS_APOS_RASCUNHO) {
+      if ((rawBody as Record<string, unknown>)[campo] !== undefined) {
+        return NextResponse.json(
+          { error: `"${campo}" não pode ser alterado após a venda ser aprovada.` },
+          { status: 409 },
+        );
+      }
     }
   }
 

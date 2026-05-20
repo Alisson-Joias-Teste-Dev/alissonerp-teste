@@ -48,6 +48,9 @@ export async function PATCH(
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
+  if (venda.situacao !== "rascunho") {
+    return NextResponse.json({ error: "Venda já aprovada. Não é possível alterar itens." }, { status: 409 });
+  }
 
   // Onda 1D: consultora so edita item de venda propria
   let userRole: string;
@@ -154,6 +157,9 @@ export async function DELETE(
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
   if (venda.situacao === "cancelado") return NextResponse.json({ error: "Venda cancelada" }, { status: 409 });
+  if (venda.situacao !== "rascunho") {
+    return NextResponse.json({ error: "Venda já aprovada. Não é possível remover itens." }, { status: 409 });
+  }
 
   // Onda 1D: consultora so deleta item de venda propria
   try { await checkOwnership(user.id, vendaId); }

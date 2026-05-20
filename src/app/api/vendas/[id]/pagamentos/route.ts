@@ -90,6 +90,9 @@ export async function POST(
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
+  if (venda.situacao === "entregue" || venda.situacao === "concluido") {
+    return NextResponse.json({ error: "Venda já finalizada. Não é possível adicionar pagamentos." }, { status: 409 });
+  }
 
   // Onda 1D: bloqueia consultora de criar pagamento em venda alheia
   try { await checkOwnership(user.id, vendaId); }

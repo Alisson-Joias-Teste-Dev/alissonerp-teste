@@ -645,21 +645,17 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   }, [venda, formaEnvioOpts, formaFreteAll]);
 
   // ── Editability ─────────────────────────────────────────────────────────────
-  const ROLES_EDITAR_APROVADO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "financeiro"];
-  const podeEditarAprovado = ROLES_EDITAR_APROVADO.includes(role);
-
   const edit = useMemo(() => {
-    if (!venda || venda.bloqueado || venda.situacao === "cancelado")
-      return { full: false, limited: false, metadata: false, readOnly: true };
+    if (!venda || venda.bloqueado || ["cancelado", "concluido"].includes(venda.situacao))
+      return { full: false, limited: false, metadata: false, readOnly: true, pagamento: false };
     if (venda.situacao === "rascunho")
-      return { full: true, limited: true, metadata: true, readOnly: false };
-    if (venda.situacao === "aprovado") {
-      return { full: false, limited: podeEditarAprovado, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
-    }
-    if (venda.situacao === "enviado" || venda.situacao === "entregue")
-      return { full: false, limited: false, metadata: podeEditarAprovado, readOnly: !podeEditarAprovado };
-    return { full: false, limited: false, metadata: false, readOnly: true };
-  }, [venda, podeEditarAprovado]);
+      return { full: true, limited: true, metadata: true, readOnly: false, pagamento: true };
+    if (venda.situacao === "aprovado" || venda.situacao === "enviado")
+      return { full: false, limited: false, metadata: false, readOnly: true, pagamento: true };
+    if (venda.situacao === "entregue")
+      return { full: false, limited: false, metadata: false, readOnly: true, pagamento: false };
+    return { full: false, limited: false, metadata: false, readOnly: true, pagamento: false };
+  }, [venda]);
 
   // ── Derived data ────────────────────────────────────────────────────────────
   const itens: ItemVenda[] = useMemo(() =>
@@ -1401,7 +1397,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   // Extrai o nome do campo que o backend bloqueou a partir da mensagem de erro.
   // Backend retorna algo como: `O campo "situacao" só pode ser alterado...`
   function detectarCampoBloqueado(patch: Record<string, unknown>, errorMsg: string | undefined): string | null {
-    const ADMIN_ONLY = ["situacao", "total_frete", "cliente_id", "vendedor_id", "data_venda"];
+    const ADMIN_ONLY = ["situacao", "cliente_id", "vendedor_id", "data_venda"];
     if (errorMsg) {
       const match = /"([a-z_]+)"/.exec(errorMsg);
       if (match && ADMIN_ONLY.includes(match[1])) return match[1];
@@ -2649,7 +2645,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           </button>
                         )}
 
-                        {edit.limited && pag.status === "pendente" && (
+                        {edit.pagamento && pag.status === "pendente" && (
                           <button onClick={() => handleRemovePagamento(pag.id)} disabled={updating}
                             className="text-gray-300 hover:text-red-400 disabled:opacity-40"><X size={13} /></button>
                         )}
@@ -2797,7 +2793,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                       <span style={{ color: "#D97706" }}>Saldo pendente</span>
                       <span className="tabular-nums" style={{ color: "#D97706" }}>{fmt(venda.total_venda - venda.total_pago)}</span>
                     </div>
-                    {edit.limited && !addingPag && (
+                    {edit.pagamento && !addingPag && (
                       <button
                         onClick={() => {
                           const restante = (venda.total_venda - venda.total_pago).toFixed(2).replace(".", ",");
@@ -2842,7 +2838,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
           />
 
           {/* ── Formulário de pagamento padronizado ── */}
-          {edit.limited && (() => {
+          {edit.pagamento && (() => {
             const saldoPendente = Math.max(0, totalVenda - (venda?.total_pago ?? 0));
 
             // Função de add pagamento (modo edição: salva imediato)

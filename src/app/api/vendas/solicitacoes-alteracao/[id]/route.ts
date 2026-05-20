@@ -23,7 +23,7 @@ const DecidirSchema = z.object({
 
 // Campos editáveis na venda (espelha CAMPOS_ADMIN_ONLY do PATCH /api/vendas/[id]).
 const CAMPOS_VENDA_PERMITIDOS = new Set([
-  "situacao", "total_frete", "cliente_id", "vendedor_id", "data_venda",
+  "situacao", "cliente_id", "vendedor_id", "data_venda",
 ]);
 
 const STATUS_PAGAMENTO_VALIDOS = new Set([
@@ -227,7 +227,7 @@ export async function PATCH(
         await logAudit(tx, auditParams);
       });
     } else {
-      // Todos os demais campos (total_frete, cliente_id, vendedor_id, data_venda,
+      // Todos os demais campos (cliente_id, vendedor_id, data_venda,
       // situacao simples): aplica + marca + audit em transação única.
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -347,18 +347,6 @@ async function aplicarCampoVendaTx(
       // Somente transições simples chegam aqui (rascunho, cancelado, enviado, entregue).
       // aprovado/concluido são roteados antes pelo helper com tx própria.
       await tx`UPDATE alissonerp.vendas_erp SET situacao = ${v}, updated_at = NOW() WHERE id = ${vendaId}`;
-      return;
-    }
-    case "total_frete": {
-      const v = Number(valorJson);
-      if (isNaN(v) || v < 0) throw new Error("total_frete inválido");
-      await tx`
-        UPDATE alissonerp.vendas_erp
-        SET total_frete = ${v},
-            total_venda = total_produtos + ${v},
-            updated_at  = NOW()
-        WHERE id = ${vendaId}
-      `;
       return;
     }
     case "cliente_id": {

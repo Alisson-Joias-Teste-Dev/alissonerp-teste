@@ -114,6 +114,9 @@ export async function POST(
   if (venda.situacao === "cancelado") {
     return NextResponse.json({ error: "Venda cancelada" }, { status: 409 });
   }
+  if (venda.situacao !== "rascunho") {
+    return NextResponse.json({ error: "Venda já aprovada. Não é possível adicionar itens." }, { status: 409 });
+  }
 
   // Onda 1D: bloqueia consultora de adicionar item em venda alheia
   let userRole: string;
