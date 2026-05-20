@@ -764,8 +764,8 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
                             {/* Estoque */}
                             <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
                               {p.controla_estoque === false ? (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
-                                  ⛔ Sem estoque
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: "#E5E7EB", color: "#4B5563" }}>
+                                  Não controla estoque
                                 </span>
                               ) : (p.saldo_estoque ?? 0) > 0 ? (
                                 <span className="text-emerald-700 font-semibold">{p.saldo_estoque}</span>
