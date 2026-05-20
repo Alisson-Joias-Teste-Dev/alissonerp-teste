@@ -1862,6 +1862,7 @@ function TabDepositos() {
 const MODULO_LABEL: Record<string, string> = {
   dashboard:        "Dashboard",
   dashboard_fabrica:"Dashboard Fábrica",
+  dashboard_comercial: "Dashboard Comercial",
   ordens:           "Ordens",
   pcp:              "PCP",
   distribuicao:     "Distribuição",
@@ -1887,7 +1888,7 @@ const MODULO_GRUPOS = [
   { label: "📦 Suprimentos", modulos: ["estoque", "quebra", "insumos", "compras"] },
   { label: "🚚 Logística",   modulos: ["protocolo", "conferencia", "entrega"] },
   { label: "✅ Qualidade",   modulos: ["auditoria"] },
-  { label: "💼 Comercial",   modulos: ["vendas", "financeiro", "produtos", "precificacao"] },
+  { label: "💼 Comercial",   modulos: ["vendas", "dashboard_comercial", "financeiro", "produtos", "precificacao"] },
   { label: "⚙️ Sistema",    modulos: ["configuracoes"] },
 ];
 

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
-import { isFullAccess } from "@/lib/roles";
 import type { RankingConsultora, TipoMeta } from "@/lib/types/dashboard-comercial";
 import { safeDiv } from "@/lib/dashboard-comercial/utils";
 import { internalError } from "@/lib/api-error";
@@ -13,7 +12,12 @@ import { internalError } from "@/lib/api-error";
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  if (!isFullAccess(user.role)) {
+
+  const [perm] = await sql`
+    SELECT pode_ler FROM alissonerp.role_permissoes
+    WHERE role = ${user.role} AND modulo = 'dashboard_comercial'
+  `;
+  if (!perm?.pode_ler) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 

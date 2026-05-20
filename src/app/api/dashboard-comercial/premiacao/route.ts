@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
-import { isFullAccess } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
 
 const PremiacaoPatchSchema = z.object({
@@ -25,7 +24,12 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  if (!isFullAccess(user.role)) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+
+  const [perm] = await sql`
+    SELECT pode_ler FROM alissonerp.role_permissoes
+    WHERE role = ${user.role} AND modulo = 'dashboard_comercial'
+  `;
+  if (!perm?.pode_ler) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   const raw = await req.json().catch(() => ({}));
   const parsed = PremiacaoPatchSchema.safeParse(raw);
