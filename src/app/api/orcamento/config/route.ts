@@ -25,6 +25,7 @@ const OrcamentoConfigPostSchema = z.object({
   promocao_inicio: z.string().nullable().optional(),
   promocao_fim: z.string().nullable().optional(),
   dome_percentage: z.coerce.number().optional(),
+  teor_ouro_default: z.coerce.number().int().min(67).max(75).optional(),
 }).passthrough();
 
 // GET /api/orcamento/config — busca config ativa
@@ -71,6 +72,7 @@ export async function POST(req: NextRequest) {
     promocao_inicio,
     promocao_fim,
     dome_percentage,
+    teor_ouro_default,
   } = body;
 
   // IMPORTANTE: usar sql.json() em vez de JSON.stringify+::jsonb.
@@ -96,6 +98,7 @@ export async function POST(req: NextRequest) {
       promocao_inicio = ${promocao_inicio !== undefined ? promocao_inicio : sql`promocao_inicio`},
       promocao_fim = ${promocao_fim !== undefined ? promocao_fim : sql`promocao_fim`},
       dome_percentage = COALESCE(${dome_percentage ?? null}::numeric, dome_percentage),
+      teor_ouro_default = COALESCE(${teor_ouro_default ?? null}::integer, teor_ouro_default),
       updated_at = now(),
       updated_by = ${user.id}::uuid
     WHERE name = 'default'

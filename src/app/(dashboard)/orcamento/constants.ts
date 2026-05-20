@@ -120,6 +120,41 @@ export const METAL_COLORS = [
   { label: "Ouro Rose", value: "#E8A090", density: 14.69 },
 ];
 
+// ── Densidade por teor (migration 263) ──────────────────────────────────────
+// Calcula densidade da liga a partir do % de ouro puro + cor.
+// Fórmula física: mistura ponderada por massa (média harmônica).
+// 75% (18k) calibrado pra bater com padrão de literatura:
+//   amarelo 15,58 / branco 15,80 / rose 15,30 g/cm³
+
+export const D_OURO_PURO = 19.32; // g/cm³
+export const D_LIGAS_POR_COR = {
+  amarelo: 9.4,  // Cu + Ag
+  branco:  10.7, // Pd/Ni + Cu
+  rose:    8.9,  // mais Cu
+} as const;
+
+export type CorMetal = keyof typeof D_LIGAS_POR_COR;
+
+export function corDoMetal(label: string): CorMetal {
+  const l = label.toLowerCase();
+  if (l.includes("branco")) return "branco";
+  if (l.includes("rose"))   return "rose";
+  return "amarelo";
+}
+
+/** Calcula densidade (g/cm³) a partir do teor de ouro (%) e cor.
+ *  Aceita o label do METAL_COLORS (ex: "Ouro Amarelo") ou a chave. */
+export function densidadePorTeor(teorPct: number, labelOuCor: string): number {
+  const cor = (labelOuCor in D_LIGAS_POR_COR)
+    ? (labelOuCor as CorMetal)
+    : corDoMetal(labelOuCor);
+  const fOuro = teorPct / 100;
+  const fLiga = 1 - fOuro;
+  const dLiga = D_LIGAS_POR_COR[cor];
+  const d = 1 / (fOuro / D_OURO_PURO + fLiga / dLiga);
+  return Math.round(d * 100) / 100;
+}
+
 // ── Helpers de cálculo ──────────────────────────────────────────────────────
 
 export function findGrooveRule(width: number, rules: GrooveRule[]): GrooveRule {

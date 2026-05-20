@@ -105,6 +105,9 @@ export interface ConfigOrcamento {
   calibracao?: CalibracaoDefaults | null;
   /** Curvatura padrão (%) aplicada a alianças novas (migration 255). */
   dome_percentage?: number;
+  /** Migration 263: teor de ouro padrão (67–75%). Usado pra calcular
+   *  densidade dinamicamente no frontend. Default 75 (18k). */
+  teor_ouro_default?: number;
   risco_width?: number;
   risco_depth?: number;
   preco_gravacao?: number;

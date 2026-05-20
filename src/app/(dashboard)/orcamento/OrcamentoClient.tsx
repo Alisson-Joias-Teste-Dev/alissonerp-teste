@@ -23,6 +23,7 @@ import {
   STONE_TYPES, STONE_CUTS, STONE_SIZES_MM, STONE_CT_TABLE, GROOVE_TYPE_OPTIONS,
   findGrooveRule, computeWeight, computeStoneCapacity, computePricing,
   computeCalculatedCategories, computeStoneEntryPrice, computeStonesTotalRS,
+  densidadePorTeor,
 } from "./constants";
 import {
   CALIBRACAO_DEFAULTS, computeMinThickness, computeMinWidth,
@@ -508,6 +509,35 @@ export default function OrcamentoClient({
   });
   const [currentMesh2, setCurrentMesh2] = useState<THREE.Mesh | null>(null);
   const [stoneEntries2, setStoneEntries2] = useState<StoneEntry[]>([]);
+
+  // ── Teor de ouro (migration 263) ────────────────────────────────────────
+  // % de ouro puro (67-75). Define a densidade usada nos cálculos.
+  // Default 75 (18k). Quando muda → recalcula goldDensity de params/params2.
+  const [teorOuro, setTeorOuro] = useState<number>(
+    Number(config?.teor_ouro_default ?? 75)
+  );
+
+  // Recalcula goldDensity dos 2 anéis quando teor ou cor muda.
+  // Mantém compat com orçamentos antigos: a goldDensity salva no rascunho
+  // é sobrescrita aqui durante hidratação, então usamos isHydratingRef
+  // (definido mais abaixo) — porém só após a hidratação inicial.
+  useEffect(() => {
+    const m1 = METAL_COLORS.find(m => m.value === params.metalColor);
+    if (m1) {
+      const d = densidadePorTeor(teorOuro, m1.label);
+      if (params.goldDensity !== d) {
+        setParams(p => ({ ...p, goldDensity: d }));
+      }
+    }
+    const m2 = METAL_COLORS.find(m => m.value === params2.metalColor);
+    if (m2) {
+      const d2 = densidadePorTeor(teorOuro, m2.label);
+      if (params2.goldDensity !== d2) {
+        setParams2(p => ({ ...p, goldDensity: d2 }));
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teorOuro, params.metalColor, params2.metalColor]);
 
   // Modal de Ficha Técnica
   const [showFichaTecnica, setShowFichaTecnica] = useState(false);
@@ -1596,6 +1626,7 @@ export default function OrcamentoClient({
           nomes_modelos: nomesModelos,
           promocao_inicio: promocaoInicio || null,
           promocao_fim: promocaoFim || null,
+          teor_ouro_default: teorOuro,
         }),
       });
       if (!res.ok) {
@@ -2387,7 +2418,7 @@ export default function OrcamentoClient({
         {/* Markup e Desconto */}
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
           <h3 className="text-sm font-bold text-gray-800">Markup e Desconto</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Markup base (multiplicador)</label>
               <input type="number" min={1} step={0.1} value={params.startMkp}
@@ -2409,6 +2440,23 @@ export default function OrcamentoClient({
                 onChange={e => setDefaultDomePercentage(parseInt(e.target.value) || 100)}
                 className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none" style={{ borderColor: C.cremeBorder }} />
               <p className="text-[10px] text-gray-400 mt-1">Curvatura padrão dos perfis Anatomica, Boleada e Boleada Dupla em alianças novas</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Teor do ouro (%)</label>
+              <select
+                value={teorOuro}
+                onChange={e => setTeorOuro(parseInt(e.target.value))}
+                className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none"
+                style={{ borderColor: C.cremeBorder }}>
+                {[67, 68, 69, 70, 71, 72, 73, 74, 75].map(t => (
+                  <option key={t} value={t}>{t}%</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-gray-400 mt-1">
+                Densidades: Amarelo {densidadePorTeor(teorOuro, "Amarelo")} ·
+                Branco {densidadePorTeor(teorOuro, "Branco")} ·
+                Rose {densidadePorTeor(teorOuro, "Rose")} g/cm³
+              </p>
             </div>
           </div>
         </div>
