@@ -2,6 +2,7 @@ export const SITUACAO_LABEL: Record<string, string> = {
   rascunho:  "Rascunho",
   aprovado:  "Aprovado",
   enviado:   "Enviado",
+  entregue:  "Entregue",
   concluido: "Concluído",
   cancelado: "Cancelado",
 };

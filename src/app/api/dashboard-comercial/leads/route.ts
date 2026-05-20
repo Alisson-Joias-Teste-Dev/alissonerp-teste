@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
       SELECT vendedor_id, COUNT(*)::int AS qtd
       FROM alissonerp.vw_dash_vendas_todas
       WHERE data_venda BETWEEN ${from}::date AND ${to}::date
-        AND status = 2
+        AND status IS NOT NULL AND status != 4
         AND vendedor_id IS NOT NULL
       GROUP BY vendedor_id
     `;

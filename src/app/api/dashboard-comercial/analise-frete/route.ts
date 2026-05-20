@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = v.vendedor_id
       LEFT JOIN alissonerp.vw_dash_forma_envio fe ON fe.id = v.forma_envio_id
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
-        AND v.status = 2
+        AND v.status IS NOT NULL AND v.status != 4
       ORDER BY v.data_venda DESC
     `;
 

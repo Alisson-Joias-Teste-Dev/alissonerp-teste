@@ -26,6 +26,7 @@ const SITUACAO: Record<string, { label: string; bg: string; color: string }> = {
   rascunho:  { label: "Rascunho",  bg: "#F3F4F6", color: "#6B7280" },
   aprovado:  { label: "Aprovado",  bg: "#ECFDF5", color: "#059669" },
   enviado:   { label: "Enviado",   bg: "#EFF6FF", color: "#2563EB" },
+  entregue:  { label: "Entregue",  bg: "#EDE9FE", color: "#5B21B6" },
   cancelado: { label: "Cancelado", bg: "#FEF2F2", color: "#DC2626" },
   concluido: { label: "Concluído", bg: "#F0FDF4", color: "#16A34A" },
 };
@@ -35,6 +36,7 @@ const TABS = [
   { key: "rascunho",  label: "Rascunho"  },
   { key: "aprovado",  label: "Aprovado"  },
   { key: "enviado",   label: "Enviado"   },
+  { key: "entregue",  label: "Entregue"  },
   { key: "concluido", label: "Concluído" },
   { key: "cancelado", label: "Cancelado" },
 ];

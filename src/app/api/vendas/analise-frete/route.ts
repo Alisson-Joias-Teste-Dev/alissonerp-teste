@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN public.vendedores vd ON vd.id_vendedor = v.vendedor_id
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <= ${fim}::date
-      AND v.situacao IN ('aprovado', 'enviado', 'confirmado')
+      AND v.situacao IN ('aprovado', 'enviado', 'entregue', 'concluido')
     ORDER BY v.data_entrega ASC NULLS LAST, v.data_venda DESC
     LIMIT 200
   `;

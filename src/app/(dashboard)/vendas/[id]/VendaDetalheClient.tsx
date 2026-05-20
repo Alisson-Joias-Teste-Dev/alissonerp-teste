@@ -146,7 +146,7 @@ interface ParcelaRow { num: number; dias: number; data: string; valor: number; }
 
 const SITUACAO_LABEL: Record<string, string> = {
   rascunho: "Rascunho", aprovado: "Aprovado", enviado: "Enviado",
-  cancelado: "Cancelado", concluido: "Concluído",
+  entregue: "Entregue", cancelado: "Cancelado", concluido: "Concluído",
 };
 const SITUACAO_COLOR: Record<string, { bg: string; text: string }> = {
   rascunho:  { bg: "#F3F4F6", text: "#6B7280" },

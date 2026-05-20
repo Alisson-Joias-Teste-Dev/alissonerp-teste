@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.vw_dash_vendas_todas v
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = v.vendedor_id
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
-        AND v.status = 2 AND v.vendedor_id IS NOT NULL
+        AND v.status IS NOT NULL AND v.status != 4 AND v.vendedor_id IS NOT NULL
       GROUP BY v.vendedor_id, vd.nome, vd.foto
     `;
 
@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
              SUM(v.total_venda - v.valor_vale_troca)::text AS total
       FROM alissonerp.vw_dash_vendas_todas v
       WHERE v.data_venda = ${refDate}::date
-        AND v.status = 2 AND v.vendedor_id IS NOT NULL
+        AND v.status IS NOT NULL AND v.status != 4 AND v.vendedor_id IS NOT NULL
       GROUP BY v.vendedor_id
     `;
     const vendasHojeMap = new Map<number, number>();

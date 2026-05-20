@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
         COUNT(*)::text AS qtd
       FROM alissonerp.vw_dash_vendas_todas v
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
-        AND v.status = 2
+        AND v.status IS NOT NULL AND v.status != 4
     `;
 
     // Ano anterior: usa pedidos_parcelas_detalhado (histórico)

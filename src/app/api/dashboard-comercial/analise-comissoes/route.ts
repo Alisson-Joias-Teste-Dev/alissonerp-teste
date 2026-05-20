@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
       JOIN alissonerp.vw_dash_vendas_todas v ON v.id = i.venda_id AND v.fonte = 'legado'
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = v.vendedor_id
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
-        AND v.status = 2
+        AND v.status IS NOT NULL AND v.status != 4
         AND v.vendedor_id IS NOT NULL
 
       UNION ALL
@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
         vd.comissao AS comissao_tabela_id
       FROM alissonerp.itens_venda_erp ie
       JOIN alissonerp.vendas_erp ve ON ve.id = ie.venda_id
-        AND ve.situacao IN ('aprovado', 'enviado', 'concluido')
+        AND ve.situacao IN ('aprovado', 'enviado', 'entregue', 'concluido')
         AND ve.data_venda >= '2026-04-23'
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = ve.vendedor_id
       WHERE ve.data_venda BETWEEN ${from}::date AND ${to}::date
@@ -121,7 +121,7 @@ export async function GET(req: NextRequest) {
         SUM(v.valor_vale_troca)::text     AS vale_troca
       FROM alissonerp.vw_dash_vendas_todas v
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
-        AND v.status = 2
+        AND v.status IS NOT NULL AND v.status != 4
         AND v.vendedor_id IS NOT NULL
       GROUP BY v.vendedor_id
     `;

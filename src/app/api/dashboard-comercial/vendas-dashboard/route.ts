@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = v.vendedor_id
       LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
-        AND v.status = 2
+        AND v.status IS NOT NULL AND v.status != 4
     `;
 
     // ---------------- 2. Metas do período (tanto meta_acumulada quanto valor_meta total) ----------------
