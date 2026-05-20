@@ -50,7 +50,8 @@ interface ProdutoDetalhe {
   sub_categoria: string | null;
   markup: string | null;
   fator: string | null;
-  tipo_item: "joia" | "insumo" | null;
+  tipo_item: "joia" | "insumo" | "servico" | null;
+  preco_servico: number | null;
   // erp_produtos
   erp_id?: number | null;
   eh_pai?: boolean | null;
@@ -502,7 +503,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   const [fatorEdit, setFatorEdit] = useState("");
   const [catPrecEdit, setCatPrecEdit] = useState("");
   const [precoTinyEdit, setPrecoTinyEdit] = useState("");
-  const [tipoItemEdit, setTipoItemEdit] = useState<"" | "joia" | "insumo">("");
+  const [tipoItemEdit, setTipoItemEdit] = useState<"" | "joia" | "insumo" | "servico">("");
+  const [precoServicoEdit, setPrecoServicoEdit] = useState("");
   const [saving, setSaving] = useState(false);
   const [syncingTiny, setSyncingTiny] = useState(false);
   const [tinySyncMsg, setTinySyncMsg] = useState<{ ok: boolean; texto: string } | null>(null);
@@ -674,6 +676,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       setCatPrecEdit(toStr(data.produto.categoria));
       setPrecoTinyEdit(toStr(data.produto.preco_tiny));
       setTipoItemEdit(data.produto.tipo_item ?? "");
+      setPrecoServicoEdit(data.produto.preco_servico != null ? String(data.produto.preco_servico) : "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro desconhecido");
     } finally {
@@ -851,6 +854,14 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
         }
       }
       if (tipoItemEdit !== (produto.tipo_item ?? "")) body.tipo_item = tipoItemEdit || null;
+
+      // Preço de serviço: salva se tipo_item for servico, limpa se nao for
+      if (tipoItemEdit === "servico") {
+        const n = parseFloat(precoServicoEdit.replace(",", "."));
+        body.preco_servico = !isNaN(n) && n > 0 ? n : null;
+      } else if (produto.preco_servico != null) {
+        body.preco_servico = null;
+      }
 
       // Persiste rota/reposição mesmo quando body do PATCH principal está vazio.
       // (Esses dois endpoints são separados — UPSERT idempotente, sem dirty-check.)
@@ -1046,6 +1057,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
             (quantidadePedraEdit || "") !== (produto.quantidade_pedra != null ? String(produto.quantidade_pedra) : ""))
          : false)) ||
       tipoItemEdit           !== (produto.tipo_item ?? "") ||
+      (precoServicoEdit || "") !== (produto.preco_servico != null ? String(produto.preco_servico) : "") ||
       extrasDirty);
 
   return (
@@ -1483,12 +1495,13 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                       <p className={labelCls}>Tipo de item</p>
                       <select
                         value={tipoItemEdit}
-                        onChange={(e) => setTipoItemEdit(e.target.value as "" | "joia" | "insumo")}
+                        onChange={(e) => setTipoItemEdit(e.target.value as "" | "joia" | "insumo" | "servico")}
                         className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
                       >
                         <option value="">— Sem classificação —</option>
                         <option value="joia">Joia</option>
                         <option value="insumo">Insumo</option>
+                        <option value="servico">Serviço</option>
                       </select>
                     </div>
                     <div>
@@ -1506,6 +1519,19 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                       </datalist>
                     </div>
                   </div>
+                  {tipoItemEdit === "servico" && (
+                  <div className="mt-3">
+                    <p className={labelCls}>Preço do Serviço (R$)</p>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={precoServicoEdit}
+                      onChange={(e) => setPrecoServicoEdit(e.target.value)}
+                      placeholder="0,00"
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                    />
+                  </div>
+                  )}
                   {produto.referencia && (
                     <div>
                       <p className={labelCls}>Referência</p>
