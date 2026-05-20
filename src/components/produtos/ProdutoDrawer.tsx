@@ -862,7 +862,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
         if (pedrasComp.length > 0) {
           const subtotalPedrasSave = pedrasComp.reduce((s, p) => s + p.preco_unitario * p.quantidade, 0);
           body.preco_pedras = Math.round(subtotalPedrasSave * 100) / 100;
-          const precoOuroAtual = parseFloat(produto.preco_sync ?? String(produto.preco_curva ?? "") ?? produto.preco_tiny ?? "0") || 0;
+          const precoOuroAtual = parseFloat(String(produto.preco_curva ?? "") || produto.preco_sync || produto.preco_tiny || "0") || 0;
           if (precoOuroAtual > 0) {
             body.preco_tiny = Math.round((precoOuroAtual + subtotalPedrasSave) * 100) / 100;
           }
@@ -1884,19 +1884,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                           </>
                         );
                       }
-                      const precoOuroBase = parseNum(produto.preco_sync && parseFloat(produto.preco_sync) > 0 ? produto.preco_sync : produto.preco_curva);
-                      const precoTotalBase = precoOuroBase > 0 ? precoOuroBase + subtotalPedrasOficial : 0;
-                      if (produto.preco_sync && parseFloat(produto.preco_sync) > 0) {
-                        return (
-                          <>
-                            <p className="text-2xl font-mono font-bold" style={{ color: "#184036" }}>
-                              {formatPreco(String(precoTotalBase || produto.preco_sync))}
-                            </p>
-                            <p className="text-[11px] text-gray-500 mt-1">peso × cotação × markup × fator{subtotalPedrasOficial > 0 ? " + pedras" : ""}</p>
-                          </>
-                        );
-                      }
                       if (produto.preco_curva != null && produto.preco_curva > 0) {
+                        const precoTotalBase = Number(produto.preco_curva) + subtotalPedrasOficial;
                         return (
                           <>
                             <p className="text-2xl font-mono font-bold" style={{ color: "#184036" }}>
@@ -2017,7 +2006,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                           const n = parseFloat(t);
                           return isNaN(n) ? 0 : n;
                         };
-                        const precoOuro = parseNum(produto?.preco_sync ?? produto?.preco_curva ?? produto?.preco_tiny);
+                        const precoOuro = parseNum(produto?.preco_curva);
                         const subtotalPedras = pedrasComp.reduce((s, p) => s + p.preco_unitario * p.quantidade, 0);
                         const total = precoOuro + subtotalPedras;
                         const qtdTotal = pedrasComp.reduce((s, p) => s + p.quantidade, 0);
