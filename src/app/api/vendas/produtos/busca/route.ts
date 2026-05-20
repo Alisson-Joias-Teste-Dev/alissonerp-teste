@@ -29,7 +29,12 @@ export async function GET(req: NextRequest) {
       p.id_produto AS id,
       p.sku,
       p.nome,
-      -- Preço calculado pela view oficial vw_produto_preco (curva dinâmica).
+      -- ═══════════════════════════════════════════════════════════════════
+      -- REGRA DE NEGÓCIO (aprovada 20/05/2026):
+      --   Preço calculado exclusivamente pela view vw_produto_preco.
+      --   NÃO adicionar fallback para preco_tiny ou preco_sync aqui.
+      --   Se a view retorna NULL, o produto não tem preço — intencional.
+      -- ═══════════════════════════════════════════════════════════════════
       pp.preco_venda::int AS preco_venda,
       p.peso_precificado,
       p.unidade,
@@ -67,6 +72,12 @@ export async function GET(req: NextRequest) {
       p.situacao = 'A'
       AND (p.sku ILIKE ${'%' + q + '%'} OR ${termos.map(t => sql`p.nome ILIKE ${'%' + t + '%'}`).reduce((a, b) => sql`${a} AND ${b}`)})
       AND (ep.eh_pai IS NULL OR ep.eh_pai = false)
+      -- ═══════════════════════════════════════════════════════════════════
+      -- REGRA DE NEGÓCIO (aprovada 20/05/2026):
+      --   1. Só mostra produtos COM preço calculado (curva ou preco_servico)
+      --   2. controla_estoque=false → aparece mesmo sem saldo
+      --   3. controla_estoque=true  → aparece só se saldo > 0
+      -- ═══════════════════════════════════════════════════════════════════
       AND pp.preco_venda IS NOT NULL
       AND pp.preco_venda > 0
       AND (

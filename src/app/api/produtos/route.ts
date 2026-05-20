@@ -316,7 +316,13 @@ export async function GET(req: NextRequest) {
           vpv.em_promocao,
           vpv.nome_campanha,
           vpv.data_fim AS promo_data_fim,
-          -- Preço da curva — calculado pela view oficial vw_produto_preco.
+          -- ═══════════════════════════════════════════════════════════════════
+          -- REGRA DE NEGÓCIO (aprovada 20/05/2026):
+          --   preco_curva usa APENAS a curva dinâmica (vw_produto_preco).
+          --   NÃO adicionar fallback para preco_tiny ou preco_sync.
+          --   Produto sem peso → sem preço calculado (intencional).
+          --   Serviço (tipo_item='servico') → preço fixo via preco_servico.
+          -- ═══════════════════════════════════════════════════════════════════
           pp.preco_venda::int AS preco_curva,
           ti.tipo_item,
           ep.id               AS erp_id,
