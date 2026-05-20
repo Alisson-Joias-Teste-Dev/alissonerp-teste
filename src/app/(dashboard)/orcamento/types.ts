@@ -115,6 +115,10 @@ export interface ConfigOrcamento {
    *  Default 100 (sem ajuste). 120 = pedra remove 20% mais; 80 = 20% menos.
    *  Range 1-500. */
   ajuste_pedra_pct?: number;
+  /** Migration 266: rótulos customizados da Ficha Técnica.
+   *  Map chave → nome customizado. Ex: { "aro": "Tamanho do dedo" }.
+   *  Default {} = usa labels padrão do código. */
+  labels_ficha_tecnica?: Record<string, string> | null;
   risco_width?: number;
   risco_depth?: number;
   preco_gravacao?: number;

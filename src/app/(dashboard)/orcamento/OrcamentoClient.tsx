@@ -24,6 +24,7 @@ import {
   findGrooveRule, computeWeight, computeStoneCapacity, computePricing,
   computeCalculatedCategories, computeStoneEntryPrice, computeStonesTotalRS,
   densidadePorTeor, corDoMetal,
+  FICHA_LABELS_DEFAULT, getFichaLabel,
 } from "./constants";
 import {
   CALIBRACAO_DEFAULTS, computeMinThickness, computeMinWidth,
@@ -536,6 +537,13 @@ export default function OrcamentoClient({
     Number(config?.ajuste_pedra_pct ?? 100)
   );
   const ajustePedraMultiplier = ajustePedra / 100;
+
+  // ── Rótulos customizados da Ficha Técnica (migration 266) ────────────────
+  // Map chave → texto. Vazio cai no padrão (getFichaLabel cobre).
+  const [labelsFicha, setLabelsFicha] = useState<Record<string, string>>(() => {
+    const raw = (config as { labels_ficha_tecnica?: Record<string, string> | null } | null)?.labels_ficha_tecnica;
+    return (raw && typeof raw === "object") ? { ...raw } : {};
+  });
 
   // Helper: multiplier por cor (1.0 amarelo, 1+pct/100 branco/rose).
   // Resolvido aqui pra reuso nas 4 chamadas de computePricing das alianças.
@@ -1662,6 +1670,7 @@ export default function OrcamentoClient({
           teor_ouro_default: teorOuro,
           acrescimo_metal_premium: acrescimoMetal,
           ajuste_pedra_pct: ajustePedra,
+          labels_ficha_tecnica: labelsFicha,
         }),
       });
       if (!res.ok) {
@@ -2844,6 +2853,55 @@ export default function OrcamentoClient({
             </tbody>
           </table>
         </div>
+        {/* Rótulos da Ficha Técnica (migration 266) */}
+        <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
+          <div>
+            <h3 className="text-sm font-bold text-gray-800">Rótulos da Ficha Técnica</h3>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              Renomeie os campos que aparecem na ficha enviada pra fábrica. Deixe em branco pra usar o nome padrão.
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b" style={{ borderColor: C.cremeBorder }}>
+                <th className="text-left py-2 text-xs text-gray-500 w-1/3">Nome padrão</th>
+                <th className="text-left py-2 text-xs text-gray-500">Nome customizado (opcional)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(FICHA_LABELS_DEFAULT).map(([chave, padrao]) => (
+                <tr key={chave} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                  <td className="py-2 pr-2 text-sm" style={{ color: C.esmeralda }}>{padrao}</td>
+                  <td className="py-2">
+                    <input
+                      type="text"
+                      value={labelsFicha[chave] ?? ""}
+                      placeholder={padrao}
+                      maxLength={60}
+                      onChange={e => {
+                        const v = e.target.value;
+                        setLabelsFicha(prev => {
+                          const next = { ...prev };
+                          if (v.trim()) next[chave] = v;
+                          else delete next[chave];
+                          return next;
+                        });
+                      }}
+                      className="w-full px-3 py-2 text-sm rounded border outline-none"
+                      style={{ borderColor: C.cremeBorder }}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="rounded-lg p-3 text-[11px] text-gray-500" style={{ backgroundColor: C.cremeBg }}>
+            <strong style={{ color: C.esmeralda }}>Onde aparece:</strong> esses rótulos são usados na Ficha Técnica
+            (botão &quot;Ver Ficha Técnica&quot; do orçamento) e no PDF que vai pra fábrica.
+            Não afetam o orçamento do cliente.
+          </div>
+        </div>
+
         {/* Padrão Risco */}
         <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: C.cremeBorder }}>
           <h3 className="text-sm font-bold text-gray-800">Padrao do Risco</h3>
@@ -3764,6 +3822,7 @@ export default function OrcamentoClient({
                 stoneEntries={stoneEntries}
                 labelDoModelo={labelDoModelo}
                 metalLabel={METAL_COLORS.find((m) => m.value === params.metalColor)?.label ?? "—"}
+                labelsFicha={labelsFicha}
               />
               {allianceMode === "par" && (
                 <FichaAlianca
@@ -3775,6 +3834,7 @@ export default function OrcamentoClient({
                   stoneEntries={stoneEntries2}
                   labelDoModelo={labelDoModelo}
                   metalLabel={METAL_COLORS.find((m) => m.value === params2.metalColor)?.label ?? "—"}
+                  labelsFicha={labelsFicha}
                 />
               )}
               {/* Peso total (sem preço — só dados técnicos) */}
@@ -3782,7 +3842,7 @@ export default function OrcamentoClient({
                 <div className="rounded-lg border p-3 space-y-1" style={{ borderColor: C.cremeBorder, backgroundColor: "#F0F7F4" }}>
                   <div className="flex items-baseline justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: C.esmeralda }}>
-                      Peso total do par
+                      {getFichaLabel("peso_total_par", labelsFicha)}
                     </span>
                     <span className="font-mono font-bold" style={{ color: C.esmeralda }}>
                       {pricingTotal.weight.toFixed(2)} g
@@ -3810,7 +3870,7 @@ export default function OrcamentoClient({
 // ── Sub-componente: Ficha Técnica de uma aliança ─────────────────────────────
 function FichaAlianca({
   titulo, profile, ringSize, params, weight, stoneEntries,
-  labelDoModelo, metalLabel,
+  labelDoModelo, metalLabel, labelsFicha,
 }: {
   titulo: string;
   profile: ProfileType;
@@ -3820,43 +3880,47 @@ function FichaAlianca({
   stoneEntries: StoneEntry[];
   labelDoModelo: (p: string) => string;
   metalLabel: string;
+  /** Rótulos customizados via aba Configurações (migration 266). */
+  labelsFicha?: Record<string, string>;
 }) {
   const totalPedras = stoneEntries.reduce((acc, s) => acc + (s.qtd ?? 0), 0);
+  // Helper local — encurta as chamadas
+  const L = (k: string) => getFichaLabel(k, labelsFicha);
   return (
     <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: C.cremeBorder }}>
       <h4 className="text-[10px] font-bold uppercase tracking-wider" style={{ color: C.esmeralda }}>{titulo}</h4>
-      <Linha k="Modelo" v={labelDoModelo(profile)} />
-      <Linha k="Aro" v={`${ringSize.size} (Ø ${ringSize.diameter.toFixed(2)}mm)`} />
-      <Linha k="Largura" v={`${params.width.toFixed(2)} mm`} />
-      <Linha k="Espessura" v={`${params.height.toFixed(2)} mm`} />
-      {profile === ProfileType.Concava && <Linha k="Prof. côncava" v={`${params.concaveDepth.toFixed(2)} mm`} />}
-      {profile === ProfileType.Chanfrada && <Linha k="Chanfro" v={`${params.chamferSize.toFixed(2)} mm`} />}
+      <Linha k={L("modelo")}        v={labelDoModelo(profile)} />
+      <Linha k={L("aro")}           v={`${ringSize.size} (Ø ${ringSize.diameter.toFixed(2)}mm)`} />
+      <Linha k={L("largura")}       v={`${params.width.toFixed(2)} mm`} />
+      <Linha k={L("espessura")}     v={`${params.height.toFixed(2)} mm`} />
+      {profile === ProfileType.Concava && <Linha k={L("prof_concava")} v={`${params.concaveDepth.toFixed(2)} mm`} />}
+      {profile === ProfileType.Chanfrada && <Linha k={L("chanfro")} v={`${params.chamferSize.toFixed(2)} mm`} />}
       {profile === ProfileType.QuadradoCanal && (<>
-        <Linha k="Larg. canal" v={`${params.canalWidth.toFixed(2)} mm`} />
-        <Linha k="Alt. borda" v={`${params.canalBorderHeight.toFixed(2)} mm`} />
+        <Linha k={L("larg_canal")}  v={`${params.canalWidth.toFixed(2)} mm`} />
+        <Linha k={L("alt_borda")}   v={`${params.canalBorderHeight.toFixed(2)} mm`} />
       </>)}
-      <Linha k="Metal" v={metalLabel} />
+      <Linha k={L("metal")} v={metalLabel} />
       {params.hasGroove && (
-        <Linha k="Friso" v={`${params.grooveKind === "risco" ? "Risco" : "Friso"} ${params.grooveType} · ${params.grooveWidth.toFixed(2)}×${params.grooveDepth.toFixed(2)}mm`} />
+        <Linha k={L("friso")} v={`${params.grooveKind === "risco" ? "Risco" : "Friso"} ${params.grooveType} · ${params.grooveWidth.toFixed(2)}×${params.grooveDepth.toFixed(2)}mm`} />
       )}
       {totalPedras > 0 && (() => {
         const tipoPedra = stoneEntries[0]?.tipo ?? "";
         const tamanho = stoneEntries[0]?.tamanho_mm;
         return (
-          <Linha k="Pedras" v={`${totalPedras} un · ${tipoPedra}${tamanho ? ` · ${tamanho}mm` : ""}`} />
+          <Linha k={L("pedras")} v={`${totalPedras} un · ${tipoPedra}${tamanho ? ` · ${tamanho}mm` : ""}`} />
         );
       })()}
       {params.hasStones && profile === ProfileType.QuadradoCanal && params.stoneRows > 0 && (
-        <Linha k="Fileiras" v={`${params.stoneRows}`} />
+        <Linha k={L("fileiras")} v={`${params.stoneRows}`} />
       )}
       {params.hasStones && (
-        <Linha k="Furo passante" v={params.stoneDrill ? "Sim" : "Não"} />
+        <Linha k={L("furo_passante")} v={params.stoneDrill ? "Sim" : "Não"} />
       )}
       {params.textEnabled && params.textContent && (
-        <Linha k="Gravação" v={`"${params.textContent}"`} />
+        <Linha k={L("gravacao")} v={`"${params.textContent}"`} />
       )}
       <div className="border-t pt-1.5 mt-1.5" style={{ borderColor: C.cremeBorder }}>
-        <Linha k="Peso estimado" v={`${weight.toFixed(2)} g`} bold />
+        <Linha k={L("peso_estimado")} v={`${weight.toFixed(2)} g`} bold />
       </div>
     </div>
   );

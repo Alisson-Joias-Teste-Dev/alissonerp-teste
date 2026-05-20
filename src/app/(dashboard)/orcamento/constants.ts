@@ -160,6 +160,40 @@ export function densidadePorTeor(teorPct: number, labelOuCor: string): number {
 // multiplier (1.0 amarelo / 1+pct/100 branco|rose) é feito no
 // OrcamentoClient (acrescimoMultiplier callback) usando corDoMetal.
 
+// ── Rótulos da Ficha Técnica (migration 266) ────────────────────────────────
+// Chaves canônicas + labels padrão. Cada uma pode ser renomeada via config
+// (labels_ficha_tecnica em config_orcamento).
+
+export const FICHA_LABELS_DEFAULT: Record<string, string> = {
+  modelo:         "Modelo",
+  aro:            "Aro",
+  largura:        "Largura",
+  espessura:      "Espessura",
+  prof_concava:   "Prof. côncava",
+  chanfro:        "Chanfro",
+  larg_canal:     "Larg. canal",
+  alt_borda:      "Alt. borda",
+  metal:          "Metal",
+  friso:          "Friso",
+  pedras:         "Pedras",
+  fileiras:       "Fileiras",
+  furo_passante:  "Furo passante",
+  gravacao:       "Gravação",
+  peso_estimado:  "Peso estimado",
+  peso_total_par: "Peso total do par",
+};
+
+/** Retorna o rótulo customizado se existir, senão o padrão.
+ *  Strings vazias/null caem no padrão (evita ficha sem texto). */
+export function getFichaLabel(
+  chave: keyof typeof FICHA_LABELS_DEFAULT | string,
+  customs?: Record<string, string> | null,
+): string {
+  const c = customs?.[chave]?.trim();
+  if (c) return c;
+  return FICHA_LABELS_DEFAULT[chave] ?? chave;
+}
+
 // ── Helpers de cálculo ──────────────────────────────────────────────────────
 
 export function findGrooveRule(width: number, rules: GrooveRule[]): GrooveRule {
