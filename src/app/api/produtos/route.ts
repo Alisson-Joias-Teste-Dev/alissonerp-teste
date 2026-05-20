@@ -374,7 +374,7 @@ export async function GET(req: NextRequest) {
             SELECT COALESCE(SUM(
               ppc.quantidade::numeric *
               CASE ROUND(CAST(REPLACE(COALESCE(
-                (REGEXP_MATCH(COALESCE(pp2.nome,''), '(\d+(?:[.,]\d+)?)\s*mm'))[1],
+                (REGEXP_MATCH(COALESCE(pp2.nome,''), '([0-9]+[,.][0-9]+)mm'))[1],
                 '0'), ',', '.') AS numeric), 1)
                 WHEN 1.0 THEN 0.005 WHEN 1.1 THEN 0.006 WHEN 1.2 THEN 0.007
                 WHEN 1.3 THEN 0.009 WHEN 1.4 THEN 0.012 WHEN 1.5 THEN 0.015
@@ -497,7 +497,7 @@ export async function GET(req: NextRequest) {
           SELECT COALESCE(SUM(
             ppc.quantidade::numeric *
             CASE ROUND(CAST(REPLACE(COALESCE(
-              (REGEXP_MATCH(COALESCE(pp2.nome,''), '(\d+(?:[.,]\d+)?)\s*mm'))[1],
+              (REGEXP_MATCH(COALESCE(pp2.nome,''), '([0-9]+[,.][0-9]+)mm'))[1],
               '0'), ',', '.') AS numeric), 1)
               WHEN 1.0 THEN 0.005 WHEN 1.1 THEN 0.006 WHEN 1.2 THEN 0.007
               WHEN 1.3 THEN 0.009 WHEN 1.4 THEN 0.012 WHEN 1.5 THEN 0.015
