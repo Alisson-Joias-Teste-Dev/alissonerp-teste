@@ -780,7 +780,7 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
                               {(() => {
                                 const precoPedrasComp = parseFloat(p.preco_pedras ?? "0") || 0;
                                 const precoLista = p.preco_curva != null
-                                  ? String(p.preco_curva + precoPedrasComp)
+                                  ? String(Number(p.preco_curva) + precoPedrasComp)
                                   : null;
                                 const emPromo = !!p.em_promocao;
                                 const precoPromo = p.preco_vigente != null ? String(p.preco_vigente) : null;

@@ -317,7 +317,7 @@ export async function GET(req: NextRequest) {
           vpv.nome_campanha,
           vpv.data_fim AS promo_data_fim,
           -- Preço da curva — calculado pela view oficial vw_produto_preco.
-          pp.preco_venda AS preco_curva,
+          pp.preco_venda::int AS preco_curva,
           ti.tipo_item,
           ep.id               AS erp_id,
           ep.eh_pai,

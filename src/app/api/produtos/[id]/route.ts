@@ -96,7 +96,7 @@ export async function GET(
             p.markup,
             p.fator,
             -- Preço calculado pela view oficial vw_produto_preco (curva dinâmica).
-            pp.preco_venda AS preco_curva,
+            pp.preco_venda::int AS preco_curva,
             (SELECT tipo_item FROM alissonerp.produto_tipo_item WHERE produto_id = p.id_produto) AS tipo_item,
             NULL::text   AS sub_categoria,
             ppe.preco_compra_usd  AS preco_compra_usd,

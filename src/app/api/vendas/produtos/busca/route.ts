@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
       p.sku,
       p.nome,
       -- Preço calculado pela view oficial vw_produto_preco (curva dinâmica).
-      pp.preco_venda,
+      pp.preco_venda::int AS preco_venda,
       p.peso_precificado,
       p.unidade,
       ep.sufixo_variacao,
