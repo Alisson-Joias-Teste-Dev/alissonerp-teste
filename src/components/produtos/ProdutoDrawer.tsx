@@ -1693,9 +1693,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                         type="text"
                         inputMode="decimal"
                         value={pesoEdit}
-                        onChange={(e) => setPesoEdit(e.target.value)}
+                        onChange={(e) => podeEditar && setPesoEdit(e.target.value)}
+                        readOnly={!podeEditar}
                         placeholder="—"
-                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                        className={`w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono focus:outline-none ${!podeEditar ? "bg-gray-100 text-gray-500 cursor-not-allowed" : "text-gray-800 bg-white focus:border-[#184036]"}`}
                       />
                     </div>
                   )}
