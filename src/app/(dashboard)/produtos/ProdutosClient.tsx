@@ -717,14 +717,9 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
                       {/* Coluna Pedras */}
                       <td className="px-3 py-2.5">
                         {Number(p.pedras_ct_total ?? 0) > 0 && p.pedras_nome_principal ? (
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-[11px] font-medium" style={{ color: "#184036" }}>
-                              {p.pedras_qtd_total}× {p.pedras_nome_principal}
-                            </span>
-                            <span className="font-mono text-[10px] text-gray-400">
-                              {(Number(p.pedras_ct_total ?? 0) * 100).toFixed(1).replace(".", ",")} pt · {Number(p.pedras_ct_total ?? 0).toFixed(3).replace(".", ",")} ct
-                            </span>
-                          </div>
+                          <span className="text-[11px] font-medium" style={{ color: "#184036" }}>
+                            {p.pedras_qtd_total}× {p.pedras_nome_principal}
+                          </span>
                         ) : (
                           <span className="text-gray-300 text-xs">—</span>
                         )}
