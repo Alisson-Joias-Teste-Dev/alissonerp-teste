@@ -346,12 +346,12 @@ export async function GET(req: NextRequest) {
           CASE
             WHEN p.categoria ILIKE 'Pedras%' THEN NULL
             WHEN p.peso_precificado > 0
-             AND (cpa.markup_aplicado > 0 OR p.markup > 0)
+             AND cpa.markup_aplicado > 0
              AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
             THEN ROUND(
               p.peso_precificado::numeric
               * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-              * COALESCE(cpa.markup_aplicado::numeric, p.markup::numeric)
+              * cpa.markup_aplicado::numeric
               * COALESCE(p.fator::numeric, 1)
               / 10
             )::int * 10
@@ -474,12 +474,12 @@ export async function GET(req: NextRequest) {
         CASE
           WHEN p.categoria ILIKE 'Pedras%' THEN NULL
           WHEN p.peso_precificado > 0
-           AND (cpa.markup_aplicado > 0 OR p.markup > 0)
+           AND cpa.markup_aplicado > 0
            AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
           THEN ROUND(
             p.peso_precificado::numeric
             * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-            * COALESCE(cpa.markup_aplicado::numeric, p.markup::numeric)
+            * cpa.markup_aplicado::numeric
             * COALESCE(p.fator::numeric, 1)
             / 10
           )::int * 10

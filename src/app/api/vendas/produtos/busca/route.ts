@@ -4,11 +4,11 @@ import { authOr401 } from "@/lib/auth-server";
 
 // ─── GET /api/vendas/produtos/busca?q=&limit= ─────────────────────────────────
 // Busca produtos em public.produtos (READONLY)
-// Retorna id, sku, nome, preco_venda, peso_precificado e estoque agregado
+// Retorna id, sku, nome, preco_venda (curva dinâmica), peso_precificado e estoque agregado
 //
 // Promocao: se o produto tem promo ativa (migration 248), preco_promo vem
 // preenchido + em_promocao=true. O preco_venda continua sendo o de lista
-// (curva atual ou preco_tiny) - o POS aplica o desconto no calcItem.
+// (curva dinâmica) - o POS aplica o desconto no calcItem.
 export async function GET(req: NextRequest) {
   const [, errRes] = await authOr401(req);
   if (errRes) return errRes;
@@ -29,21 +29,21 @@ export async function GET(req: NextRequest) {
       p.id_produto AS id,
       p.sku,
       p.nome,
-      -- Joias: preco_curva (cotação atual × peso × markup) | Pedras: preco_tiny (manual)
+      -- Preço calculado exclusivamente pela curva dinâmica.
+      -- Só calcula se tem peso + markup_aplicado da curva + cotação do ouro.
+      -- Produtos sem peso ou sem curva retornam NULL (sem preço calculado).
       CASE
-        WHEN p.categoria ILIKE 'Pedras%'
-          THEN COALESCE(p.preco_tiny::numeric, 0)
         WHEN p.peso_precificado > 0
-         AND COALESCE(p.markup::numeric, 0) > 0
+         AND cpa.markup_aplicado > 0
          AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
           THEN ROUND(
             p.peso_precificado::numeric
             * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-            * p.markup::numeric
+            * cpa.markup_aplicado::numeric
             * COALESCE(p.fator::numeric, 1)
             / 10
           )::int * 10
-        ELSE COALESCE(p.preco_sync::numeric, p.preco_tiny::numeric, 0)
+        ELSE NULL
       END AS preco_venda,
       p.peso_precificado,
       p.unidade,
@@ -60,6 +60,7 @@ export async function GET(req: NextRequest) {
       CASE WHEN vpv.em_promocao THEN vpv.max_parcelas_cartao ELSE NULL END AS max_parcelas_promo
     FROM public.produtos p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+    LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
     LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
     LEFT JOIN (
       SELECT produto_id, SUM(disponivel) AS saldo
@@ -79,7 +80,7 @@ export async function GET(req: NextRequest) {
       AND (ep.eh_pai IS NULL OR ep.eh_pai = false)
     ORDER BY
       (p.situacao = 'A')                     DESC,
-      (p.preco_sync IS NOT NULL AND p.preco_sync > 0) DESC,
+      (cpa.markup_aplicado IS NOT NULL AND cpa.markup_aplicado > 0) DESC,
       (p.tipo = 'S')                          DESC,
       (LOWER(p.sku)  = LOWER(${q}))           DESC,
       (LOWER(p.nome) LIKE LOWER(${q + '%'}))  DESC,

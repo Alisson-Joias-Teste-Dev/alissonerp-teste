@@ -10,11 +10,10 @@ import {
  * Aplica curva de precificacao a UM produto especifico.
  *
  * Le peso_precificado do produto, calcula markup/comissao/max_desconto via
- * getPricingFactors, faz UPDATE em public.produtos.markup e UPSERT em
- * alissonerp.produto_curva_aplicada.
+ * getPricingFactors e faz UPSERT em alissonerp.produto_curva_aplicada.
  *
- * NAO sobrescreve preco_sync direto — o trigger legado trigger_atualizar_preco_produto
- * recalcula automaticamente quando markup muda.
+ * NAO escreve mais em public.produtos.markup — a precificacao foi unificada
+ * na curva dinâmica (produto_curva_aplicada.markup_aplicado).
  *
  * Se peso for null/0, retorna { applied: false, motivo: "peso_ausente" } sem fazer
  * nada (comportamento esperado para produtos sem peso definido).
@@ -66,12 +65,6 @@ export async function aplicarCurvaProduto(
   const maxDesconto = Number(factors.maxDiscount.toFixed(2));
 
   await db`
-    UPDATE public.produtos
-    SET markup = ${markup}
-    WHERE id_produto = ${produtoId}
-  `;
-
-  await db`
     INSERT INTO alissonerp.produto_curva_aplicada
       (produto_id, comissao_pct, max_desconto_pct, markup_aplicado, updated_at)
     VALUES
@@ -101,12 +94,6 @@ export async function aplicarCurvaProduto(
     const markupFilho = Number(factorsFilho.mkp.toFixed(4));
     const comissaoFilho = Number(factorsFilho.commission.toFixed(3));
     const maxDescontoFilho = Number(factorsFilho.maxDiscount.toFixed(2));
-
-    await db`
-      UPDATE public.produtos
-      SET markup = ${markupFilho}
-      WHERE id_produto = ${filho.produto_id}
-    `;
 
     await db`
       INSERT INTO alissonerp.produto_curva_aplicada
