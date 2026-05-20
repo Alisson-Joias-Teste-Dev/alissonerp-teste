@@ -43,6 +43,7 @@ const ProdutosPatchSchema = z.object({
   fornecedor: z.string().max(200).nullable().optional(),
   foto_base64: z.string().max(LIMITS.IMAGE_BASE64_MAX).optional(),
   aplicar_rota_padrao: z.boolean().optional(),
+  preco_servico: z.number().nullable().optional(),
   controla_estoque: z.boolean().optional(),
 }).passthrough();
 
@@ -120,6 +121,7 @@ export async function GET(
             p.id_api_produto,
             ts.status AS tiny_sync_status,
             ts.erro   AS tiny_sync_erro,
+            ep.preco_servico,
             COALESCE(ecc.controla_estoque, true) AS controla_estoque
           FROM public.produtos p
           LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
@@ -172,6 +174,7 @@ export async function GET(
             NULL::numeric AS base,
             NULL::text    AS observacao_erp,
             NULL::text    AS fornecedor,
+            NULL::numeric AS preco_servico,
             0::integer    AS qtd_variacoes,
             p.id_api_produto,
             ts.status AS tiny_sync_status,
@@ -225,11 +228,11 @@ export async function GET(
           ep.altura_aro,
           ep.base,
           p.peso_precificado,
-          p.preco_sync,
-          p.preco_tiny,
+          pp.preco_venda AS preco,
           p.situacao
         FROM alissonerp.erp_produtos ep
         JOIN public.produtos p ON p.id_produto = ep.produto_id
+        LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
         WHERE ep.parent_id = ${produto.erp_id as number}
         ORDER BY
           NULLIF(regexp_replace(ep.sufixo_variacao, '[^0-9]', '', 'g'), '')::integer NULLS LAST,
@@ -408,7 +411,7 @@ export async function PATCH(
     !fotoBase64 &&
     precoCompraUsd === undefined &&
     quantidadePedra === undefined &&
-    body.controla_estoque === undefined
+    body.controla_estoque === undefined && body.preco_servico === undefined
   ) {
     return NextResponse.json({ error: "Nenhum campo editável informado" }, { status: 400 });
   }
@@ -586,6 +589,21 @@ export async function PATCH(
         await aplicarRotaPadrao(produtoId, { sobrescrever: true });
       } catch (err) {
         console.warn("[PATCH /api/produtos/[id]] falha ao aplicar rota padrão:", err);
+      }
+    }
+
+    // ── Preço de serviço (alissonerp.erp_produtos) ────────────────────────────
+    if (body.preco_servico !== undefined) {
+      const [tblCheck] = await sql`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'alissonerp' AND table_name = 'erp_produtos') AS exists`;
+      if (tblCheck?.exists) {
+        await sql`
+          INSERT INTO alissonerp.erp_produtos (produto_id, sku, nome, preco_servico)
+          SELECT id_produto, sku, nome, ${body.preco_servico == null ? null : Number(body.preco_servico)}
+          FROM public.produtos WHERE id_produto = ${produtoId}
+          ON CONFLICT (produto_id) DO UPDATE SET
+            preco_servico = EXCLUDED.preco_servico,
+            date_updated = NOW()
+        `;
       }
     }
 
