@@ -36,6 +36,8 @@ export interface Produto {
   diferenca_percentual: string | null;
   tem_pedra_preciosa: boolean;
   pedras_ct_total: number | null;
+  pedras_qtd_total: number | null;
+  pedras_nome_principal: string | null;
   situacao: string | null;
   categoria: string | null;
   foto_produto: string | null;
@@ -580,6 +582,7 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
                 <th className="w-8" />
                 <SortHeader field="sku"                  label="SKU"         current={order} dir={dir} onSort={handleSort} />
                 <SortHeader field="nome"                 label="Nome"        current={order} dir={dir} onSort={handleSort} />
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap" style={{ color: "#9CA3AF" }}>Pedras</th>
                 <SortHeader field="tipo_metal"           label="Metal"       current={order} dir={dir} onSort={handleSort} />
                 <SortHeader field="peso_precificado"     label="Peso"        current={order} dir={dir} onSort={handleSort} />
                 <SortHeader field="situacao"             label="Situação"    current={order} dir={dir} onSort={handleSort} />
@@ -590,13 +593,13 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={10} className="px-3 py-12 text-center text-gray-400 text-sm">
                     Carregando...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={10} className="px-3 py-12 text-center text-gray-400 text-sm">
                     Nenhum produto encontrado.
                   </td>
                 </tr>
@@ -709,6 +712,22 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
                             </span>
                           )}
                         </div>
+                      </td>
+
+                      {/* Coluna Pedras */}
+                      <td className="px-3 py-2.5">
+                        {(p.pedras_ct_total ?? 0) > 0 && p.pedras_nome_principal ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[11px] font-medium" style={{ color: "#184036" }}>
+                              {p.pedras_qtd_total}× {p.pedras_nome_principal}
+                            </span>
+                            <span className="font-mono text-[10px] text-gray-400">
+                              {((p.pedras_ct_total ?? 0) * 100).toFixed(1).replace(".", ",")} pt · {(p.pedras_ct_total ?? 0).toFixed(3).replace(".", ",")} ct
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-gray-300 text-xs">—</span>
+                        )}
                       </td>
 
                       {(() => {

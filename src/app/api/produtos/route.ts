@@ -389,7 +389,24 @@ export async function GET(req: NextRequest) {
             LEFT JOIN public.produtos pp2 ON pp2.id_produto = ppc.pedra_produto_id
             WHERE ppc.produto_id = p.id_produto
               AND pp2.nome NOT ILIKE '%zirconia%'
-          ) AS pedras_ct_total
+          ) AS pedras_ct_total,
+          -- Quantidade total e nome principal das pedras (para coluna na lista)
+          (
+            SELECT COALESCE(SUM(ppc2.quantidade), 0)::int
+            FROM alissonerp.produto_pedras_componente ppc2
+            LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+            WHERE ppc2.produto_id = p.id_produto
+              AND pp3.nome NOT ILIKE '%zirconia%'
+          ) AS pedras_qtd_total,
+          (
+            SELECT pp3.nome
+            FROM alissonerp.produto_pedras_componente ppc2
+            LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+            WHERE ppc2.produto_id = p.id_produto
+              AND pp3.nome NOT ILIKE '%zirconia%'
+            ORDER BY ppc2.quantidade DESC
+            LIMIT 1
+          ) AS pedras_nome_principal
         FROM public.produtos p
         LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
         LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
@@ -495,7 +512,23 @@ export async function GET(req: NextRequest) {
           LEFT JOIN public.produtos pp2 ON pp2.id_produto = ppc.pedra_produto_id
           WHERE ppc.produto_id = p.id_produto
             AND pp2.nome NOT ILIKE '%zirconia%'
-        ) AS pedras_ct_total
+        ) AS pedras_ct_total,
+        (
+          SELECT COALESCE(SUM(ppc2.quantidade), 0)::int
+          FROM alissonerp.produto_pedras_componente ppc2
+          LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+          WHERE ppc2.produto_id = p.id_produto
+            AND pp3.nome NOT ILIKE '%zirconia%'
+        ) AS pedras_qtd_total,
+        (
+          SELECT pp3.nome
+          FROM alissonerp.produto_pedras_componente ppc2
+          LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+          WHERE ppc2.produto_id = p.id_produto
+            AND pp3.nome NOT ILIKE '%zirconia%'
+          ORDER BY ppc2.quantidade DESC
+          LIMIT 1
+        ) AS pedras_nome_principal
       FROM public.produtos p
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
