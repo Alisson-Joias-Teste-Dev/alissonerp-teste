@@ -1066,7 +1066,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
         </div>
 
         {/* Content */}
-        <div className={`flex-1 overflow-y-auto px-5 py-5 space-y-6 pb-28 ${!podeEditar ? "pointer-events-none select-none" : ""}`}>
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6 pb-28">
           {loading && (
             <div className="flex items-center justify-center py-16">
               <Loader2 size={24} className="animate-spin text-gray-300" />
@@ -1080,12 +1080,6 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
             </div>
           )}
 
-          {produto && !podeEditar && (
-            <div className="mx-5 mt-3 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2"
-              style={{ backgroundColor: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" }}>
-              <span>🔒</span> Acesso somente leitura — você não pode editar produtos.
-            </div>
-          )}
 
           {produto && !loading && (() => {
             // Pedras têm uma ficha própria: mostra só mm, ct, pontos e valor.
