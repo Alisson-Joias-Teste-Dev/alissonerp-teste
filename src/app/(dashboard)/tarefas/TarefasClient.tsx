@@ -377,27 +377,41 @@ export default function TarefasClient() {
             <h1 className="text-lg font-bold flex-shrink-0" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
               Tarefas
             </h1>
-            {/* Tabs: scroll horizontal no mobile, inline no desktop */}
-            <div className="flex-1 md:flex-initial -mx-4 md:mx-0 px-4 md:px-0 overflow-x-auto md:overflow-visible scrollbar-hide">
-              <div className="flex rounded-lg border overflow-hidden w-max md:w-auto" style={{ borderColor: C.cremeBorder }}>
+            {/* Tabs: grid 3-colunas no mobile (sem rolagem), inline no desktop */}
+            <div className="w-full md:w-auto">
+              <div className="grid grid-cols-3 gap-1.5 md:flex md:rounded-lg md:border md:overflow-hidden" style={{ borderColor: C.cremeBorder }}>
                 {VIEW_TABS.filter(t => t.key !== "time" || podeGerenciar).map(({ key, label, icon: Icon }) => (
                   <button key={key} onClick={() => setAba(key)}
-                    className="px-3 py-2 md:py-1.5 text-xs font-semibold transition-colors flex items-center gap-1 whitespace-nowrap flex-shrink-0"
-                    style={{ backgroundColor: aba === key ? C.esmeralda : C.cremeBg, color: aba === key ? C.creme : "#6B7280" }}>
-                    <Icon size={12} />
-                    {label}
+                    className="px-2 py-2 md:px-3 md:py-1.5 text-[11px] md:text-xs font-semibold transition-colors flex items-center justify-center md:justify-start gap-1 rounded-lg md:rounded-none border md:border-0"
+                    style={{
+                      backgroundColor: aba === key ? C.esmeralda : C.cremeBg,
+                      color: aba === key ? C.creme : "#6B7280",
+                      borderColor: aba === key ? C.esmeralda : C.cremeBorder,
+                    }}>
+                    <Icon size={12} className="flex-shrink-0" />
+                    <span className="truncate">{label}</span>
                   </button>
                 ))}
                 <button onClick={() => setAba("automacoes")}
-                  className="px-3 py-2 md:py-1.5 text-xs font-semibold transition-colors flex items-center gap-1 whitespace-nowrap flex-shrink-0"
-                  style={{ backgroundColor: aba === "automacoes" ? C.esmeralda : C.cremeBg, color: aba === "automacoes" ? C.creme : "#6B7280" }}>
-                  <Zap size={12} />Automações
+                  className="px-2 py-2 md:px-3 md:py-1.5 text-[11px] md:text-xs font-semibold transition-colors flex items-center justify-center md:justify-start gap-1 rounded-lg md:rounded-none border md:border-0"
+                  style={{
+                    backgroundColor: aba === "automacoes" ? C.esmeralda : C.cremeBg,
+                    color: aba === "automacoes" ? C.creme : "#6B7280",
+                    borderColor: aba === "automacoes" ? C.esmeralda : C.cremeBorder,
+                  }}>
+                  <Zap size={12} className="flex-shrink-0" />
+                  <span className="truncate">Automações</span>
                 </button>
                 {podeGerenciar && (
                   <button onClick={() => setAba("config")}
-                    className="px-3 py-2 md:py-1.5 text-xs font-semibold transition-colors flex items-center gap-1 whitespace-nowrap flex-shrink-0"
-                    style={{ backgroundColor: aba === "config" ? C.esmeralda : C.cremeBg, color: aba === "config" ? C.creme : "#6B7280" }}>
-                    <Settings size={12} />Config
+                    className="px-2 py-2 md:px-3 md:py-1.5 text-[11px] md:text-xs font-semibold transition-colors flex items-center justify-center md:justify-start gap-1 rounded-lg md:rounded-none border md:border-0"
+                    style={{
+                      backgroundColor: aba === "config" ? C.esmeralda : C.cremeBg,
+                      color: aba === "config" ? C.creme : "#6B7280",
+                      borderColor: aba === "config" ? C.esmeralda : C.cremeBorder,
+                    }}>
+                    <Settings size={12} className="flex-shrink-0" />
+                    <span className="truncate">Config</span>
                   </button>
                 )}
               </div>
@@ -441,10 +455,10 @@ export default function TarefasClient() {
           </div>
         </div>
 
-        {/* Dashboard Stats — scroll horizontal claro no mobile */}
+        {/* Dashboard Stats — quebra em linhas no mobile (sem rolagem lateral) */}
         {stats && (
-          <div className="-mx-4 md:mx-0 px-4 md:px-0 overflow-x-auto md:overflow-visible scrollbar-hide">
-            <div className="flex gap-2 md:gap-3 md:flex-wrap w-max md:w-auto">
+          <div>
+            <div className="flex gap-2 md:gap-3 flex-wrap">
               {[
                 { label: "Pendentes", value: stats.minhas_pendentes, color: "#6B7280", icon: Circle },
                 { label: "Em andamento", value: stats.em_andamento, color: "#D97706", icon: Clock },
@@ -472,7 +486,7 @@ export default function TarefasClient() {
                       setAba("minhas");
                     }
                   }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 md:px-2.5 md:py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors hover:opacity-80 whitespace-nowrap flex-shrink-0"
+                  className="flex items-center gap-1.5 px-3 py-1.5 md:px-2.5 md:py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors hover:opacity-80 whitespace-nowrap"
                   style={{ backgroundColor: stat.color + "15", color: stat.color }}>
                   <stat.icon size={12} />
                   {stat.label}: {stat.value}
@@ -596,10 +610,17 @@ export default function TarefasClient() {
           onUpdated={(updated) => {
             setTarefas(prev => prev.map(t => t.id === updated.id ? { ...t, ...updated } : t));
             setDrawerTarefa(prev => prev ? { ...prev, ...updated } : null);
+            // Se status virou terminal (aprovada/rejeitada/concluida/cancelada),
+            // recarregar pra tarefa sair da aba atual e ir pra Concluídas
+            if (updated.status && ["aprovada", "rejeitada", "concluida", "cancelada"].includes(updated.status)) {
+              carregar();
+              carregarStats();
+            }
           }}
           onDeleted={(id) => {
             setTarefas(prev => prev.filter(t => t.id !== id));
             setDrawerTarefa(null);
+            carregarStats();
           }}
         />
       )}
