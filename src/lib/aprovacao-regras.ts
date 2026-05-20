@@ -205,7 +205,7 @@ async function getDescontoThreshold(vendaId: number): Promise<number> {
         END
       )::numeric AS threshold
     FROM alissonerp.vendas_erp ve
-    JOIN alissonerp.usuarios u ON u.vendedor_id = ve.vendedor_id
+    JOIN alissonerp.usuarios u ON u.id = ve.vendedor_id
     WHERE ve.id = ${vendaId}
   `;
   return Number(row?.threshold ?? 15);
