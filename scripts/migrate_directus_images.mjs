@@ -49,7 +49,7 @@ if (existsSync(envPath)) {
 }
 
 // ─── Config ─────────────────────────────────────────────────────────────────
-const DB_URL  = process.env.DATABASE_URL  ?? 'postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres';
+const DB_URL  = process.env.DATABASE_URL  ?? 'postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres';
 const SB_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://api.alisson.api.br';
 const SB_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const DIRECTUS_BASE = process.env.DIRECTUS_BASE_URL ?? 'https://base.alissonranyel.com.br';

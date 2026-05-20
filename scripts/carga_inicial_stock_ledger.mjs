@@ -6,7 +6,7 @@
 import postgres from 'postgres';
 import { fileURLToPath } from 'node:url';
 
-const DB = process.env.DATABASE_URL ?? 'postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres';
+const DB = process.env.DATABASE_URL ?? 'postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres';
 const sql = postgres(DB, { ssl: false, max: 1 });
 
 const WAREHOUSE_ID = parseInt(process.argv.find(a => a.startsWith('--warehouse='))?.split('=')[1] ?? '2', 10);

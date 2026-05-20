@@ -1,7 +1,7 @@
 import postgres from 'postgres';
 import { readFileSync } from 'fs';
 
-const DB = process.argv[2] || 'postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres';
+const DB = process.argv[2] || 'postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres';
 const FILE = process.argv[3] || 'supabase/migrations/230_schema_agentes_inicial.sql';
 
 async function main() {

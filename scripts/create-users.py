@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 sys.stdout.reconfigure(encoding='utf-8')
 
 DATABASE_URL = os.environ.get("DATABASE_URL",
-    "postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres")
+    "postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres")
 
 def hash_pw(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=10)).decode()

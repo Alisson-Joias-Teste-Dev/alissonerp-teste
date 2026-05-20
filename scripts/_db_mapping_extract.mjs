@@ -17,7 +17,7 @@ const OUT = path.join(ROOT, "docs", "db-mapping", "_raw");
 fs.mkdirSync(OUT, { recursive: true });
 
 const CONN =
-  "postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres";
+  "postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres";
 
 const TARGET_SCHEMAS = [
   "alissonerp",

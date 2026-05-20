@@ -2,7 +2,7 @@
 // Mapeamento baseado no código REAL de fn_ponte_directus_para_alissonerp
 import postgres from 'postgres';
 
-const DB_URL = 'postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres';
+const DB_URL = 'postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres';
 const sql = postgres(DB_URL, { ssl: false });
 
 console.log('=== MIGRAÇÃO ORDENS LEGADO — Alisson ERP Go-Live ===\n');

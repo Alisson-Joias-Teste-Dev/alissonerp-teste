@@ -15,7 +15,7 @@ const ROOT = path.join(__dirname, '..');
 const OUTPUT_DIR = path.join(ROOT, 'docs', 'schema');
 
 const CONNECTION_STRING =
-  'postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres';
+  'postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres';
 
 const NOW = new Date().toISOString().slice(0, 10);
 

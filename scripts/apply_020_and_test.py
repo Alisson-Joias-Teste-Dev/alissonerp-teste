@@ -5,7 +5,7 @@ import psycopg2, sys, os
 sys.stdout.reconfigure(encoding='utf-8')
 
 DB = os.environ.get("DATABASE_URL",
-    "postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres")
+    "postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres")
 
 MIGRATION = os.path.join(os.path.dirname(__file__),
     "..", "supabase", "migrations", "020_triggers_distribuicao.sql")

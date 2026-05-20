@@ -1,5 +1,5 @@
 import postgres from './scripts/tsl-bridge/node_modules/postgres/src/index.js';
-const sql = postgres('postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres', {ssl:false, max:2, idle_timeout:20, connection:{search_path:'alissonerp,public'}});
+const sql = postgres('postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres', {ssl:false, max:2, idle_timeout:20, connection:{search_path:'alissonerp,public'}});
 
 const cols = await sql`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='alissonerp' AND table_name='vw_estoque_comercial_alerta_v2'`;
 console.log('Colunas:', JSON.stringify(cols, null, 2));

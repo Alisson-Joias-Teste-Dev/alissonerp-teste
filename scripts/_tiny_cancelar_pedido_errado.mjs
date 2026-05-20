@@ -1,6 +1,6 @@
 import postgres from 'postgres';
 
-const sql = postgres('postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres', { ssl: false });
+const sql = postgres('postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres', { ssl: false });
 
 const PEDIDO_TINY_ID = 752499604;
 const VENDA_LOCAL_ID = 15051; // (numero_venda=4155, criada por engano)

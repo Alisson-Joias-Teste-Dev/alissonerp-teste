@@ -5,7 +5,7 @@
 // - DELETE
 // Objetivo: confirmar que schema + trigger + grants estão íntegros antes do go-live.
 import postgres from 'postgres';
-const sql = postgres('postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres', { ssl: false, max: 1 });
+const sql = postgres('postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres', { ssl: false, max: 1 });
 
 console.log('=== SMOKE TEST 135 ===\n');
 

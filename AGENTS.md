@@ -1,3 +1,7 @@
+# House Rules
+
+⚠️ **NUNCA alterar nada no código, banco ou arquivos sem aprovação explícita do usuário.** Mesmo em modo build, qualquer modificação precisa de autorização verbal prévia.
+
 # Database Access Rules
 
 O banco de dados da Alisson Joias (schema `alissonerp`) é **PROTEGIDO**.

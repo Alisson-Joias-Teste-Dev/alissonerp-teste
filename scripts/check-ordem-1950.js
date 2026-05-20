@@ -1,5 +1,5 @@
 const postgres = require('postgres');
-const PROD_URL = 'postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres';
+const PROD_URL = 'postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres';
 const sql = postgres(PROD_URL, { ssl: false, max: 2, connection: { search_path: 'alissonerp,public' } });
 
 (async () => {

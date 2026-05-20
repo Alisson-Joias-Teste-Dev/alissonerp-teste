@@ -229,7 +229,7 @@ export async function PATCH(
 
   // Gate financeiro por campo — vendedora/gerente abre solicitação ao tentar
   // alterar campos protegidos. Frontend usa flag `solicitar` pra abrir modal.
-  const CAMPOS_ADMIN_ONLY = ["situacao", "total_frete", "cliente_id", "vendedor_id", "data_venda"];
+  const CAMPOS_ADMIN_ONLY = ["total_frete", "cliente_id", "vendedor_id", "data_venda"];
   const ROLES_FINANCEIRO = ["admin", "desenvolvedor", "diretor"];
   if (!ROLES_FINANCEIRO.includes(usuario.role)) {
     for (const campo of CAMPOS_ADMIN_ONLY) {

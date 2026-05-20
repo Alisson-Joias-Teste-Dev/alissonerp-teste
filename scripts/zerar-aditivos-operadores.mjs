@@ -1,7 +1,7 @@
 // Script one-shot: zera saldo de aditivos dos operadores (deposito_id != 1)
 import postgres from "postgres";
 
-const DATABASE_URL = "postgresql://postgres:V9qT1Zx3mL7Nf5Rg8Kc2Wb4Jp6Hy0DsA@72.60.55.140:5543/postgres";
+const DATABASE_URL = "postgresql://postgres:k6M9b2Xd5Ff1Wp8Rj7Zt4Lc3Ns0VqY@72.60.55.140:5543/postgres";
 const sql = postgres(DATABASE_URL, { ssl: false, max: 1 });
 
 async function main() {
