@@ -39,10 +39,12 @@ const BUCKETS_PRIVADOS = new Set([
   "insumo-fotos",
 ]);
 
-// Buckets que exigem full access (admin/dev/diretor) — fotos com dados financeiros sensíveis
+// Buckets que exigem full access (admin/dev/diretor).
+// ATUALMENTE VAZIO — 'pagamento-fotos' foi removido em 21/05/2026 para
+// permitir que qualquer usuário autenticado veja fotos da balança de ouro.
+// Ver AGENTS.md — Módulo Crediário, Regra de Ouro #4.
 const BUCKETS_FULL_ACCESS = new Set<string>([
-  // PII financeiro: comprovante de pagamento em ouro — restrito a admin/desenvolvedor/diretor
-  "pagamento-fotos",
+
 ]);
 
 export async function GET(
@@ -67,7 +69,11 @@ export async function GET(
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  // ⚠️ Usamos ANON_KEY (não SUPABASE_SERVICE_ROLE_KEY).
+  // A service key tem problema de assinatura JWT que causa 400 do Supabase.
+  // A anon key funciona para leitura de objetos autenticados.
+  // Ver AGENTS.md — Módulo Crediário, Regra de Ouro #4.
+  const serviceKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !serviceKey) {
     return NextResponse.json({ error: "Storage não configurado" }, { status: 500 });
   }

@@ -20,6 +20,7 @@ import PagamentoForm, { type PagamentoEntry, fmt as fmtPagamento } from "@/compo
 import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 import { useErrorStore } from "@/stores/errorStore";
+import { getPublicUrl } from "@/lib/storage-url";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -60,6 +61,9 @@ interface PagamentoServer {
   parcelas: number; status: string; data_confirmacao: string | null;
   valor_liquido?: number | null;  // valor que cai na conta MP (bruto - taxas)
   taxas_mp?: number | null;        // total deduzido (MP fee + adquirência)
+  ouro_peso?: number | null;
+  ouro_valor_grama?: number | null;
+  ouro_foto_path?: string | null;
 }
 interface Vendedor { id_vendedor: number; nome: string; }
 interface FormaEnvio { id: number; nome: string; id_api: string; }
@@ -470,10 +474,19 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
   // ── Registrar Recebimento A Receber ─────────────────────────────────────────
   const [recebimentoPagId, setRecebimentoPagId] = useState<number | null>(null);
-  const [recebimentoTipo, setRecebimentoTipo] = useState<"dinheiro" | "mp" | null>(null);
+  const [recebimentoTipo, setRecebimentoTipo] = useState<
+    "Dinheiro" | "Cartão de Crédito" | "Pix" | "Ouro" | "Vale-Troca" | "Manual (MP)" | null
+  >(null);
   const [recebimentoMpId, setRecebimentoMpId] = useState("");
+  const [recebimentoValor, setRecebimentoValor] = useState("");
   const [recebimentoLoading, setRecebimentoLoading] = useState(false);
   const [recebimentoMsg, setRecebimentoMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  // Ouro no recebimento
+  const [recOuroPeso, setRecOuroPeso] = useState("");
+  const [recOuroValorGrama, setRecOuroValorGrama] = useState("");
+  const [recOuroFotoFile, setRecOuroFotoFile] = useState<File | null>(null);
+  const [recOuroFotoPreview, setRecOuroFotoPreview] = useState<string | null>(null);
+  const [recOuroUploading, setRecOuroUploading] = useState(false);
 
   // ── Ouro ────────────────────────────────────────────────────────────────────
   const [ouroPeso, setOuroPeso] = useState("");
@@ -1085,20 +1098,27 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     }
   }
 
+  /**
+   * handleRegistrarRecebimento — Confirma o recebimento inline de um "A Receber".
+   *
+   * Três caminhos:
+   *   1. Manual (MP): verifica pagamento na API do Mercado Pago (verificar-manual)
+   *   2. Ouro: faz upload da foto da balança → confirma com ouro_peso/grama/foto
+   *   3. Demais (Dinheiro, Cartão, Pix, VT): confirmação direta via /confirmar
+   *
+   * Para Ouro: o valor pago = peso * valor_grama (calculado, não digitado).
+   * Para os demais: aceita valor_pago do campo recebimentoValor (split se parcial).
+   *
+   * ⚠️ REGRA DE OURO #6: se valor_pago < valor_total → split de crédito.
+   *    O endpoint /confirmar cuida do resto (criar nova conta, novo pagamento, etc).
+   */
   async function handleRegistrarRecebimento() {
-    if (!venda || !recebimentoPagId) return;
+    if (!venda || !recebimentoPagId || !recebimentoTipo) return;
     setRecebimentoLoading(true);
     setRecebimentoMsg(null);
     try {
-      if (recebimentoTipo === "dinheiro") {
-        const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${recebimentoPagId}/confirmar`, { method: "POST" });
-        const d = await res.json();
-        if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
-        setRecebimentoPagId(null);
-        setRecebimentoTipo(null);
-        await load();
-      } else if (recebimentoTipo === "mp") {
-        if (!recebimentoMpId.trim()) { setRecebimentoMsg({ text: "Informe o ID do pagamento", ok: false }); return; }
+      if (recebimentoTipo === "Manual (MP)") {
+        if (!recebimentoMpId.trim()) { setRecebimentoMsg({ text: "Informe o ID do pagamento", ok: false }); setRecebimentoLoading(false); return; }
         const res = await fetch(`/api/vendas/${venda.id}/mercado-pago/verificar-manual`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1111,11 +1131,65 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         setRecebimentoTipo(null);
         setRecebimentoMpId("");
         await load();
+      } else if (recebimentoTipo === "Ouro") {
+        // Ouro: upload foto + confirmar
+        const p = parseFloat(recOuroPeso.replace(",", "."));
+        const vg = parseFloat(recOuroValorGrama.replace(",", "."));
+        if (!p || p <= 0) { setRecebimentoMsg({ text: "Informe o peso do ouro", ok: false }); setRecebimentoLoading(false); return; }
+        if (!vg || vg <= 0) { setRecebimentoMsg({ text: "Informe o valor da grama", ok: false }); setRecebimentoLoading(false); return; }
+        if (!recOuroFotoFile) { setRecebimentoMsg({ text: "Foto da balança obrigatória", ok: false }); setRecebimentoLoading(false); return; }
+
+        setRecOuroUploading(true);
+        const supabase = createClient();
+        const ext = recOuroFotoFile.name.split(".").pop() ?? "jpg";
+        const fotoPath = `pagamentos/${venda.id}/recebimento-${Date.now()}.${ext}`;
+        const { error: uploadErr } = await supabase.storage.from("pagamento-fotos").upload(fotoPath, recOuroFotoFile, { contentType: recOuroFotoFile.type });
+        if (uploadErr) throw new Error("Erro ao enviar foto: " + uploadErr.message);
+
+        const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${recebimentoPagId}/confirmar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            forma_recebimento: recebimentoTipo,
+            valor_pago: p * vg,
+            ouro_peso: p,
+            ouro_valor_grama: vg,
+            ouro_foto_path: fotoPath,
+          }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+        setRecebimentoMsg({ text: `Confirmado! R$ ${(p * vg).toFixed(2).replace(".", ",")}`, ok: true });
+        setRecebimentoPagId(null);
+        setRecebimentoTipo(null);
+        setRecOuroPeso(""); setRecOuroValorGrama(""); setRecOuroFotoFile(null); setRecOuroFotoPreview(null);
+        await load();
+      } else {
+        // Demais formas: Dinheiro, Cartão, Pix, Vale-Troca
+        const valor = parseFloat(recebimentoValor.replace(",", "."));
+        const body: Record<string, unknown> = { forma_recebimento: recebimentoTipo };
+        if (valor > 0) body.valor_pago = valor;
+
+        const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${recebimentoPagId}/confirmar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+        if (d.pagamento_parcial) {
+          setRecebimentoMsg({ text: `Parcial de R$ ${Number(d.valor_pago).toFixed(2).replace(".", ",")} confirmado. Restante: R$ ${Number(d.valor_restante).toFixed(2).replace(".", ",")} — novo crédito gerado.`, ok: true });
+        }
+        setRecebimentoPagId(null);
+        setRecebimentoTipo(null);
+        setRecebimentoValor("");
+        await load();
       }
     } catch (e) {
       setRecebimentoMsg({ text: e instanceof Error ? e.message : "Erro ao confirmar recebimento", ok: false });
     } finally {
       setRecebimentoLoading(false);
+      setRecOuroUploading(false);
     }
   }
 
@@ -2583,6 +2657,27 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                             )}
                           </p>
                         )}
+                        {/* Ouro: peso + grama + foto */}
+                        {pag.ouro_foto_path && (
+                          <div className="mt-1.5 flex items-start gap-2">
+                            <a
+                              href={getPublicUrl("pagamento-fotos", pag.ouro_foto_path)}
+                              target="_blank" rel="noreferrer"
+                              className="shrink-0"
+                            >
+                              <img
+                                src={getPublicUrl("pagamento-fotos", pag.ouro_foto_path)}
+                                alt="Balança ouro"
+                                className="h-12 rounded object-cover border"
+                                style={{ borderColor: C.cremeBorder, maxWidth: 80 }}
+                              />
+                            </a>
+                            <div className="text-[11px]" style={{ color: "#6B7280" }}>
+                              {pag.ouro_peso != null && <span>{Number(pag.ouro_peso).toFixed(3)}g</span>}
+                              {pag.ouro_valor_grama != null && <span> × R$ {Number(pag.ouro_valor_grama).toFixed(2)}/g</span>}
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
                         {/* Badge de status */}
@@ -2653,6 +2748,10 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                     </div>
 
                     {/* A Receber — fluxo de recebimento inline */}
+                    {/* REGRA DE OURO #3: o seletor de forma preenche o campo 'gateway'
+                       do pagamento_venda, que é renderizado como "via {gateway}" abaixo
+                       (linha ~2633). Sem isso, o card mostra só "A Receber" sem indicar
+                       como foi pago. Ver AGENTS.md. */}
                     {isAReceber && pag.status === "pendente" && recebimentoPagId === pag.id && (
                       <div className="px-3 pb-3 pt-2 border-t space-y-2" style={{ borderColor: C.cremeBorder }}>
                         {recebimentoMsg && (
@@ -2661,37 +2760,38 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           </p>
                         )}
                         {recebimentoTipo === null && (
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs text-gray-500 mr-1">Como foi pago?</p>
-                            <button
-                              onClick={() => setRecebimentoTipo("dinheiro")}
-                              className="text-xs px-3 py-1.5 rounded-lg font-medium border"
-                              style={{ borderColor: C.esmeralda, color: C.esmeralda }}>
-                              Dinheiro
+                          <div className="space-y-2">
+                            <p className="text-xs text-gray-500">Como foi pago?</p>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {(["Dinheiro", "Cartão de Crédito", "Pix", "Ouro", "Vale-Troca", "Manual (MP)"] as const).map(f => (
+                                <button
+                                  key={f}
+                              onClick={() => {
+                                setRecebimentoTipo(f);
+                                setRecebimentoMsg(null);
+                                if (f === "Manual (MP)") {
+                                  setRecebimentoMpId("");
+                                } else {
+                                  setRecebimentoValor(pag.valor.toFixed(2).replace(".", ","));
+                                }
+                              }}
+                                  className="text-xs px-3 py-1.5 rounded-lg font-medium border text-left"
+                                  style={{
+                                    borderColor: f === "Manual (MP)" ? "#0070E0" : C.cremeBorder,
+                                    color: f === "Manual (MP)" ? "#0070E0" : C.esmeralda,
+                                  }}>
+                                  {f}
+                                </button>
+                              ))}
+                            </div>
+                            <button onClick={() => setRecebimentoPagId(null)} className="text-gray-400 hover:text-gray-600">
+                              <X size={13} />
                             </button>
-                            <button
-                              onClick={() => setRecebimentoTipo("mp")}
-                              className="text-xs px-3 py-1.5 rounded-lg font-medium border"
-                              style={{ borderColor: "#0070E0", color: "#0070E0" }}>
-                              Mercado Pago (ID)
-                            </button>
-                            <button onClick={() => setRecebimentoPagId(null)} className="text-gray-400 hover:text-gray-600 ml-auto"><X size={13} /></button>
                           </div>
                         )}
-                        {recebimentoTipo === "dinheiro" && (
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs text-gray-500">Confirmar recebimento em dinheiro de <strong>R$ {pag.valor.toFixed(2).replace(".", ",")}</strong>?</p>
-                            <button
-                              onClick={handleRegistrarRecebimento}
-                              disabled={recebimentoLoading}
-                              className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
-                              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                              {recebimentoLoading ? <Loader2 size={12} className="animate-spin inline" /> : "Confirmar"}
-                            </button>
-                            <button onClick={() => setRecebimentoTipo(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
-                          </div>
-                        )}
-                        {recebimentoTipo === "mp" && (
+
+                        {/* Manual (MP) → ID + verificação */}
+                        {recebimentoTipo === "Manual (MP)" && (
                           <div className="flex items-center gap-2">
                             <input
                               type="text"
@@ -2709,6 +2809,98 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                               {recebimentoLoading ? <Loader2 size={12} className="animate-spin inline" /> : "Verificar"}
                             </button>
                             <button onClick={() => setRecebimentoTipo(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                          </div>
+                        )}
+
+                        {/* Demais formas → valor + confirmação (+ Ouro: peso/grama/foto) */}
+                        {recebimentoTipo && recebimentoTipo !== "Manual (MP)" && (
+                          <div className="space-y-2">
+                            {/* Valor */}
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-500">Valor pago:</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={recebimentoTipo === "Ouro"
+                                  ? ((() => {
+                                      const p = parseFloat(recOuroPeso.replace(",", "."));
+                                      const g = parseFloat(recOuroValorGrama.replace(",", "."));
+                                      return p > 0 && g > 0 ? (p * g).toFixed(2).replace(".", ",") : "";
+                                    })())
+                                  : recebimentoValor}
+                                onChange={e => setRecebimentoValor(e.target.value)}
+                                placeholder={pag.valor.toFixed(2).replace(".", ",")}
+                                readOnly={recebimentoTipo === "Ouro"}
+                                className="w-28 text-xs font-mono font-semibold border rounded-lg px-2 py-1 outline-none"
+                                style={{
+                                  borderColor: C.cremeBorder,
+                                  color: C.esmeralda,
+                                  background: recebimentoTipo === "Ouro" ? "#f5f5f5" : "#fff",
+                                }}
+                              />
+                              <span className="text-xs text-gray-400">de R$ {pag.valor.toFixed(2).replace(".", ",")}</span>
+                            </div>
+
+                        {/* Ouro: peso + grama + foto */}
+                        {/* REGRA DE OURO #4 e #5: foto do ouro com thumbnail clicável,
+                           usando getPublicUrl("pagamento-fotos", path) via proxy.
+                           Exibe peso (3 casas) e valor/grama (2 casas).
+                           Só aparece se ouro_foto_path não for nulo. */}
+                            {recebimentoTipo === "Ouro" && (
+                              <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: C.cremeBorder }}>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <div className="text-[11px] text-gray-500 mb-0.5">Peso (g)</div>
+                                    <input type="number" step="0.001" value={recOuroPeso}
+                                      onChange={e => setRecOuroPeso(e.target.value)}
+                                      placeholder="0.000"
+                                      className="w-full text-xs border rounded-lg px-2 py-1 outline-none"
+                                      style={{ borderColor: C.cremeBorder }} />
+                                  </div>
+                                  <div>
+                                    <div className="text-[11px] text-gray-500 mb-0.5">Valor grama (R$)</div>
+                                    <input type="number" step="0.01" value={recOuroValorGrama}
+                                      onChange={e => setRecOuroValorGrama(e.target.value)}
+                                      placeholder="0.00"
+                                      className="w-full text-xs border rounded-lg px-2 py-1 outline-none"
+                                      style={{ borderColor: C.cremeBorder }} />
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] text-gray-500 mb-0.5">Foto da balança</div>
+                                  <input type="file" accept="image/*" capture="environment"
+                                    onChange={e => {
+                                      const file = e.target.files?.[0];
+                                      if (!file) return;
+                                      setRecOuroFotoFile(file);
+                                      setRecOuroFotoPreview(URL.createObjectURL(file));
+                                    }}
+                                    className="w-full text-xs" />
+                                  {recOuroFotoPreview && (
+                                    <img src={recOuroFotoPreview} alt="Balança"
+                                      className="mt-1 h-16 rounded object-cover" />
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={handleRegistrarRecebimento}
+                                disabled={recebimentoLoading || recOuroUploading}
+                                className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
+                                style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                                {recebimentoLoading || recOuroUploading
+                                  ? <Loader2 size={12} className="animate-spin inline" />
+                                  : "Confirmar"}
+                              </button>
+                              <button onClick={() => {
+                                setRecebimentoTipo(null);
+                                setRecebimentoValor("");
+                                setRecOuroPeso(""); setRecOuroValorGrama("");
+                                setRecOuroFotoFile(null); setRecOuroFotoPreview(null);
+                              }} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                            </div>
                           </div>
                         )}
                       </div>
