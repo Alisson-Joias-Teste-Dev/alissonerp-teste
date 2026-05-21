@@ -157,7 +157,21 @@ export async function PATCH(
     }
 
     // Pós-commit: auto-aprovar / concluir / estornar (best-effort, fora da tx).
-    await posCommitPagamento(Number(sol.venda_id), pagId, novoStatus, user.id);
+    // Bug 6: se falhar, reverte solicitação para "pendente"
+    const posOk = await posCommitPagamento(Number(sol.venda_id), pagId, novoStatus, user.id);
+    if (!posOk) {
+      await sql`
+        UPDATE alissonerp.solicitacoes_alteracao
+        SET status = 'pendente', decidido_por_id = NULL, decidido_por_nome = NULL,
+            motivo_decisao = 'Falha ao processar pós-confirmação — solicitação reaberta',
+            decidido_em = NULL
+        WHERE id = ${solId}
+      `;
+      return NextResponse.json(
+        { error: "Pagamento aprovado mas houve falha ao concluir a venda. Solicitação reaberta." },
+        { status: 502 },
+      );
+    }
 
   } else if (sol.tipo === "venda_campo") {
     const campo = String(sol.campo);
@@ -292,7 +306,7 @@ async function posCommitPagamento(
   pagId: number,
   novoStatus: string,
   adminId: string,
-): Promise<void> {
+): Promise<boolean> {
   if (novoStatus === "confirmado") {
     try {
       const [pvenda] = await sql`
@@ -322,14 +336,17 @@ async function posCommitPagamento(
       }
     } catch (e) {
       console.error(`[posCommitPagamento] auto-aprovar/concluir venda=${vendaId}:`, e);
+      return false;
     }
   } else if (novoStatus === "estornado") {
     try {
       await estornarVenda(vendaId, pagId, { motivo: "Estorno via solicitação de alteração" });
     } catch (e) {
       console.error(`[posCommitPagamento] estornarVenda venda=${vendaId} pag=${pagId}:`, e);
+      return false;
     }
   }
+  return true;
 }
 
 // ─── Aplicação de campo da venda dentro de uma transação ─────────────────────

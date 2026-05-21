@@ -49,6 +49,7 @@ import { isFullAccess } from "@/lib/roles";
 import LocaisEstoqueTab from "@/components/LocaisEstoqueTab";
 import { useErrorStore } from "@/stores/errorStore";
 import TabProdutoVisibilidade from "@/components/configuracoes/TabProdutoVisibilidade";
+import TabAprovadores from "@/components/configuracoes/TabAprovadores";
 
 // ─── Paleta (tema claro — alinhado com aba Usuários) ─────────────────────────
 const P = {
@@ -139,7 +140,7 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas" | "fretes" | "gateways" | "produto_visibilidade";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas" | "fretes" | "gateways" | "produto_visibilidade" | "aprovadores";
 
 interface Gateway {
   id: number;
@@ -4763,7 +4764,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
     const u = params.get("user");
-    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes", "maquininhas", "fretes", "gateways", "produto_visibilidade"].includes(t)) {
+    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes", "maquininhas", "fretes", "gateways", "produto_visibilidade", "aprovadores"].includes(t)) {
       setTab(t as Tab);
     }
     if (u) setInitialUserId(u);
@@ -4784,6 +4785,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "credito_loja", label: "Crédito Loja",    icon: Wallet },
     { key: "fretes",       label: "Fretes",           icon: Truck },
     { key: "gateways",    label: "Gateways",          icon: CreditCard },
+    { key: "aprovadores", label: "Aprovadores",       icon: Shield },
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let tabs: { key: Tab; label: string; icon: any }[] = isSuperAdmin
@@ -4851,6 +4853,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "fretes"    && (isSuperAdmin || currentRole === "gerente_loja") && <TabFretes />}
       {tab === "gateways"            && isSuperAdmin && <TabGateways />}
       {tab === "produto_visibilidade" && isSuperAdmin && <TabProdutoVisibilidade />}
+      {tab === "aprovadores" && <TabAprovadores />}
     </div>
   );
 }

@@ -56,25 +56,9 @@ export async function submeterVendaParaAprovacaoCredito(
   if (!totais || Number(totais.a_receber_pendente) <= 0) {
     return { precisa_aprovacao: false };
   }
-  // Usar total_venda - confirmados como valor real do crédito solicitado
   const valorAReceber = Math.max(0, Number(totais.total_venda) - Number(totais.confirmados));
 
-  // 2. Verificar se já existe tarefa de aprovação pendente
-  const [jaExiste] = await sql`
-    SELECT id FROM alissonerp.tarefas
-    WHERE venda_id = ${vendaId} AND status = 'aguardando_aprovacao'
-    LIMIT 1
-  `;
-  if (jaExiste) {
-    return {
-      precisa_aprovacao: true,
-      tipo: undefined,
-      tarefa_id: jaExiste.id,
-      message: "Já existe uma aprovação pendente para esta venda",
-    };
-  }
-
-  // 3. Buscar dados da venda para a tarefa
+  // 2. Buscar dados da venda + determinar tipo
   const [venda] = await sql`
     SELECT v.id, v.numero_venda, v.total_venda, v.total_comissao,
            c.nome AS cliente_nome
@@ -84,34 +68,42 @@ export async function submeterVendaParaAprovacaoCredito(
   `;
   if (!venda) throw new Error(`Venda ${vendaId} não encontrada`);
 
-  // 4. Determinar tipo de aprovação
   const saldoAtual = await getSaldoAtual();
   const tipo: "gerente" | "diretor" = valorAReceber <= saldoAtual ? "gerente" : "diretor";
 
-  // 5. Encontrar aprovador
-    let aprovadorId = "";
-    if (tipo === "gerente") {
-      // Buscar aprovadora configurada (Germana); fallback para primeira gerente_loja
-      const [config] = await sql`
-        SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadora_credito_gerente'
+  // 3. Encontrar aprovador (fora da tx — só leitura)
+  let aprovadorId = "";
+  if (tipo === "gerente") {
+    const [config] = await sql`
+      SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadora_credito_gerente'
+    `;
+    if (config?.valor) {
+      const [gerenteConfig] = await sql`
+        SELECT id FROM alissonerp.usuarios WHERE id = ${config.valor}::uuid AND ativo = true
       `;
-      if (config?.valor) {
-        const [gerenteConfig] = await sql`
-          SELECT id FROM alissonerp.usuarios WHERE id = ${config.valor}::uuid AND ativo = true
-        `;
-        if (gerenteConfig?.id) aprovadorId = gerenteConfig.id;
-      }
-      if (!aprovadorId) {
-        const [gerente] = await sql`
-          SELECT id FROM alissonerp.usuarios
-          WHERE role = 'gerente_loja' AND ativo = true
-          ORDER BY id LIMIT 1
-        `;
-        if (!gerente) throw new Error("Nenhum gerente de loja ativo encontrado");
-        aprovadorId = gerente.id;
-      }
-    } else {
-      // Diretor, fallback para admin
+      if (gerenteConfig?.id) aprovadorId = gerenteConfig.id;
+    }
+    if (!aprovadorId) {
+      const [gerente] = await sql`
+        SELECT id FROM alissonerp.usuarios
+        WHERE role = 'gerente_loja' AND ativo = true
+        ORDER BY id LIMIT 1
+      `;
+      if (!gerente) throw new Error("Nenhum gerente de loja ativo encontrado");
+      aprovadorId = gerente.id;
+    }
+  } else {
+    // Buscar da config primeiro; fallback diretor→admin→dev
+    const [config] = await sql`
+      SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_credito_diretor'
+    `;
+    if (config?.valor) {
+      const [diretorConfig] = await sql`
+        SELECT id FROM alissonerp.usuarios WHERE id = ${config.valor}::uuid AND ativo = true
+      `;
+      if (diretorConfig?.id) aprovadorId = diretorConfig.id;
+    }
+    if (!aprovadorId) {
       const [diretor] = await sql`
         SELECT id FROM alissonerp.usuarios
         WHERE role IN ('diretor', 'admin', 'desenvolvedor') AND ativo = true
@@ -121,72 +113,105 @@ export async function submeterVendaParaAprovacaoCredito(
       if (!diretor) throw new Error("Nenhum diretor ou admin ativo encontrado");
       aprovadorId = diretor.id;
     }
+  }
 
-  // 6. Buscar nome do solicitante
+  // 4. Buscar nome do solicitante
   const [solicitante] = await sql`
     SELECT nome FROM alissonerp.usuarios WHERE id = ${userId}::uuid
   `;
 
-  // 7. Criar tarefa + aprovação + notificação
-  const descGerente = `Venda ${venda.numero_venda} — ${venda.cliente_nome ?? "sem cliente"}\n` +
-    `Valor total: R$ ${Number(venda.total_venda).toFixed(2)}\n` +
-    `A Receber: R$ ${valorAReceber.toFixed(2)}\n` +
-    `Saldo disponível: R$ ${saldoAtual.toFixed(2)}\n` +
-    `Solicitado por: ${solicitante?.nome ?? "desconhecido"}`;
+  // 5. Operação crítica com lock — dentro de UMA transação
+  return await sql.begin(async (tx: any) => {
+    // Lock na venda: só um request por vez cria tarefa de crédito
+    await tx`SELECT id FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE`;
 
-  const descDiretor = descGerente +
-    `\n\n⚠️ ACIMA DO SALDO — aprovação pelo diretor zera a comissão da consultora (R$ ${Number(venda.total_comissao).toFixed(2)})`;
+    // Re-verificar após lock (pode ter sido criada por outro request)
+    const [jaExiste] = await tx`
+      SELECT id FROM alissonerp.tarefas
+      WHERE venda_id = ${vendaId} AND status = 'aguardando_aprovacao'
+      LIMIT 1
+    `;
+    if (jaExiste) {
+      return {
+        precisa_aprovacao: true,
+        tipo: undefined,
+        tarefa_id: jaExiste.id,
+        message: "Já existe uma aprovação pendente para esta venda",
+      };
+    }
 
-  const tituloTarefa = tipo === "gerente"
-    ? `Aprovação crédito — ${venda.numero_venda} (R$ ${valorAReceber.toFixed(2)})`
-    : `⚠️ Crédito s/ saldo — ${venda.numero_venda} (R$ ${valorAReceber.toFixed(2)})`;
+    const descGerente = `Venda ${venda.numero_venda} — ${venda.cliente_nome ?? "sem cliente"}\n` +
+      `Valor total: R$ ${Number(venda.total_venda).toFixed(2)}\n` +
+      `A Receber: R$ ${valorAReceber.toFixed(2)}\n` +
+      `Saldo disponível: R$ ${saldoAtual.toFixed(2)}\n` +
+      `Solicitado por: ${solicitante?.nome ?? "desconhecido"}`;
 
-  const [tarefa] = await sql`
-    INSERT INTO alissonerp.tarefas
-      (titulo, descricao, responsavel_id, criado_por, prioridade, status, venda_id, tags)
-    VALUES
-      (${tituloTarefa}, ${tipo === "gerente" ? descGerente : descDiretor},
-       ${aprovadorId}::uuid, ${userId}::uuid,
-       ${tipo === "gerente" ? "alta" : "urgente"},
-       'aguardando_aprovacao', ${vendaId},
-       ${sql.array(["credito_loja", tipo])})
-    RETURNING id
-  `;
+    const descDiretor = descGerente +
+      `\n\n⚠️ ACIMA DO SALDO — aprovação pelo diretor zera a comissão da consultora (R$ ${Number(venda.total_comissao).toFixed(2)})`;
 
-  await sql`
-    INSERT INTO alissonerp.aprovacoes_tarefa (tarefa_id, solicitante_id, aprovador_id, status)
-    VALUES (${tarefa.id}, ${userId}::uuid, ${aprovadorId}::uuid, 'pendente')
-  `;
+    const tituloTarefa = tipo === "gerente"
+      ? `Aprovação crédito — ${venda.numero_venda} (R$ ${valorAReceber.toFixed(2)})`
+      : `⚠️ Crédito s/ saldo — ${venda.numero_venda} (R$ ${valorAReceber.toFixed(2)})`;
 
-  // 8. Atualizar venda com referência da tarefa
-  await sql`
-    UPDATE alissonerp.vendas_erp
-    SET aprovacao_credito_tipo = ${tipo},
-        aprovacao_credito_tarefa_id = ${tarefa.id},
-        updated_at = NOW()
-    WHERE id = ${vendaId}
-  `;
+    const [tarefa] = await tx`
+      INSERT INTO alissonerp.tarefas
+        (titulo, descricao, responsavel_id, criado_por, prioridade, status, venda_id, tags)
+      VALUES
+        (${tituloTarefa}, ${tipo === "gerente" ? descGerente : descDiretor},
+         ${aprovadorId}::uuid, ${userId}::uuid,
+         ${tipo === "gerente" ? "alta" : "urgente"},
+         'aguardando_aprovacao', ${vendaId},
+         ${tx.array(["credito_loja", tipo])})
+      RETURNING id
+    `;
 
-  // 9. Notificar aprovador
-  await sql`
-    INSERT INTO alissonerp.notificacoes
-      (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-    VALUES
-      (${aprovadorId}::uuid, 'aprovacao',
-       ${tituloTarefa},
-       ${tipo === "gerente" ? descGerente : descDiretor},
-       ${userId}::uuid,
-       ${`/tarefas/${tarefa.id}`})
-  `.catch(() => {});
+    await tx`
+      INSERT INTO alissonerp.aprovacoes_tarefa (tarefa_id, solicitante_id, aprovador_id, status)
+      VALUES (${tarefa.id}, ${userId}::uuid, ${aprovadorId}::uuid, 'pendente')
+    `;
 
-  return {
-    precisa_aprovacao: true,
-    tipo,
-    tarefa_id: tarefa.id,
-    message: tipo === "gerente"
-      ? "Venda enviada para aprovação do gerente de loja"
-      : "Venda excede saldo do gerente — enviada para aprovação do diretor",
-  };
+    await tx`
+      UPDATE alissonerp.vendas_erp
+      SET aprovacao_credito_tipo = ${tipo},
+          aprovacao_credito_tarefa_id = ${tarefa.id},
+          updated_at = NOW()
+      WHERE id = ${vendaId}
+    `;
+
+    // Notificação (fora da tx — falha não aborta a criação)
+    // (a notificação é criada após o commit, usando sql normal)
+    return {
+      tarefa_id: tarefa.id,
+      aprovadorId,
+      tituloTarefa,
+      descGerente,
+      descDiretor,
+    };
+  }).then(async (result) => {
+    if (!result) return { precisa_aprovacao: false };
+    const { tarefa_id, aprovadorId: apId, tituloTarefa, descGerente, descDiretor } = result as any;
+
+    // Notificar aprovador
+    await sql`
+      INSERT INTO alissonerp.notificacoes
+        (usuario_id, tipo, titulo, mensagem, remetente_id, link)
+      VALUES
+        (${apId}::uuid, 'aprovacao',
+         ${tituloTarefa},
+         ${tipo === "gerente" ? descGerente : descDiretor},
+         ${userId}::uuid,
+         ${`/tarefas/${tarefa_id}`})
+    `.catch(() => {});
+
+    return {
+      precisa_aprovacao: true,
+      tipo,
+      tarefa_id,
+      message: tipo === "gerente"
+        ? "Venda enviada para aprovação do gerente de loja"
+        : "Venda excede saldo do gerente — enviada para aprovação do diretor",
+    };
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -220,11 +245,12 @@ export async function processarAprovacaoCredito(
   const tipo = tarefa.aprovacao_credito_tipo as "gerente" | "diretor";
 
   // 1a. Aprovação para Cartão de Crédito (tipo cartao_desconto)
+  // Usa campo próprio aprovacao_cartao_desconto_tarefa_id — não mexe no campo de crédito
   if (tarefa.tipo_tarefa === "cartao_desconto") {
     if (decisao === "aprovado") {
       await sql`
         UPDATE alissonerp.vendas_erp
-        SET aprovacao_credito_tarefa_id = NULL,
+        SET aprovacao_cartao_desconto_tarefa_id = NULL,
             desconto_cartao_aprovado_por = ${aprovadorId}::uuid,
             desconto_cartao_aprovado_em  = NOW(),
             updated_at = NOW()
@@ -244,7 +270,7 @@ export async function processarAprovacaoCredito(
     } else {
       await sql`
         UPDATE alissonerp.vendas_erp
-        SET aprovacao_credito_tarefa_id = NULL, updated_at = NOW()
+        SET aprovacao_cartao_desconto_tarefa_id = NULL, updated_at = NOW()
         WHERE id = ${vendaId}
       `;
       if (tarefa.criado_por) {

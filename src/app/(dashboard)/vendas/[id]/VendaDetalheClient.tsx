@@ -90,6 +90,10 @@ interface Venda {
   aprovacao_credito_status?: string | null;
   aprovacao_credito_responsavel_nome?: string | null;
   aprovacao_tarefa_tags?: string[] | string | null;
+  aprovacao_desconto_tarefa_id?: number | null;
+  aprovacao_desconto_status?: string | null;
+  aprovacao_cartao_desconto_tarefa_id?: number | null;
+  aprovacao_cartao_desconto_status?: string | null;
   aprovacao_desconto_aprov_id?: number | null;
   desconto_aprovado_por_nome?: string | null;
   desconto_aprovado_em?: string | null;
@@ -1711,32 +1715,31 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     venda.pagamentos.length > 0
   );
 
-  // Crédito gerente
+  // Crédito A Receber — usa campo próprio (aprovacao_credito_tarefa_id)
   const temAReceber = venda.pagamentos.some(p => p.forma === "A Receber" && p.status === "pendente");
   const creditoTarefaConcluida = venda.aprovacao_credito_status === "concluida";
   const aguardandoAprovacaoCredito = !!venda.aprovacao_credito_tarefa_id && venda.aprovacao_credito_status === "aguardando_aprovacao";
   const creditoFoiAprovado = !!venda.aprovacao_credito_tipo && creditoTarefaConcluida;
-  const isDescontoApproval = aguardandoAprovacaoCredito && (() => {
-    const t = venda.aprovacao_tarefa_tags;
-    const tags = Array.isArray(t) ? t : (typeof t === "string" ? t.replace(/[{}]/g, "").split(",") : []);
-    return tags.includes("aprovacao_desconto");
-  })();
+
+  // Desconto acima do limite — usa campo próprio (aprovacao_desconto_tarefa_id)
+  const isDescontoApproval = !!venda.aprovacao_desconto_tarefa_id && venda.aprovacao_desconto_status === "aguardando_aprovacao";
+
+  // Cartão de crédito com desconto >20% — usa campo próprio (aprovacao_cartao_desconto_tarefa_id)
+  const isCartaoApproval = !!venda.aprovacao_cartao_desconto_tarefa_id && venda.aprovacao_cartao_desconto_status === "aguardando_aprovacao";
+
   const temPagamentoPendente = venda.pagamentos.some(p => p.status === "pendente");
   const temManualMpPendente = venda.pagamentos.some(p => p.forma === "Manual (MP)" && p.status === "pendente");
   const podeAprovarConcluir = venda.situacao === "aprovado" && temPagamentoPendente;
   const descontoThreshold = venda.descontoThreshold ?? 30;
   const temDescontoAlto = venda.itens.some(i => Number(i.pct_desconto) > descontoThreshold);
-  const precisaSolicitarDesconto = temDescontoAlto && !venda.desconto_aprovado_por_nome && !venda.aprovacao_credito_tarefa_id && venda.situacao === "rascunho";
+  // REGRA DE NEGÓCIO #1: verifica campo próprio de desconto, não de crédito
+  const precisaSolicitarDesconto = temDescontoAlto && !venda.desconto_aprovado_por_nome && !venda.aprovacao_desconto_tarefa_id && venda.situacao === "rascunho";
   const LIMITE_DESCONTO_CARTAO = 20;
   const temDescontoCartao = venda.itens.some(i => Number(i.pct_desconto) > LIMITE_DESCONTO_CARTAO);
   const descontoCartaoAprovado = !!venda.desconto_cartao_aprovado_por_nome;
   const cartaoBloqueado = temDescontoCartao && !descontoCartaoAprovado;
-  const isCartaoApproval = aguardandoAprovacaoCredito && (() => {
-    const t = venda.aprovacao_tarefa_tags;
-    const tags = Array.isArray(t) ? t : (typeof t === "string" ? t.replace(/[{}]/g, "").split(",") : []);
-    return tags.includes("aprov_cartao_desconto");
-  })();
-  const precisaSolicitarDescontoCartao = cartaoBloqueado && !venda.aprovacao_credito_tarefa_id && venda.situacao === "rascunho";
+  // REGRA DE NEGÓCIO #1: verifica campo próprio de cartão, não de crédito
+  const precisaSolicitarDescontoCartao = cartaoBloqueado && !venda.aprovacao_cartao_desconto_tarefa_id && venda.situacao === "rascunho";
 
   return (
     <>
@@ -1860,7 +1863,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       )}
 
       {/* ── Banner aprovação de crédito pendente ── */}
-      {aguardandoAprovacaoCredito && !isDescontoApproval && (
+      {aguardandoAprovacaoCredito && (
         <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-2"
           style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
           <div className="flex items-center gap-2">
@@ -1891,8 +1894,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
               Aguardando aprovação de desconto
             </p>
           </div>
-          {venda.aprovacao_desconto_aprov_id && (
-            <a href={`/tarefas/${venda.aprovacao_desconto_aprov_id}`}
+          {venda.aprovacao_desconto_tarefa_id && (
+            <a href={`/tarefas/${venda.aprovacao_desconto_tarefa_id}`}
               className="text-xs font-semibold px-3 py-1 rounded-lg shrink-0"
               style={{ backgroundColor: "#FDE68A", color: "#713F12" }}>
               Ver Tarefa →

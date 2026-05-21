@@ -79,6 +79,12 @@ export async function GET(
       ve.credito_gerente_usado, ve.aprovacao_credito_tipo, ve.aprovacao_credito_tarefa_id,
       (SELECT t.status FROM alissonerp.tarefas t WHERE t.id = ve.aprovacao_credito_tarefa_id) AS aprovacao_credito_status,
       (SELECT t.tags FROM alissonerp.tarefas t WHERE t.id = ve.aprovacao_credito_tarefa_id) AS aprovacao_tarefa_tags,
+      -- REGRA DE NEGÓCIO #1: cada tipo de aprovação tem seu próprio campo
+      -- Desconto, cartão e crédito usam campos separados para não se bloquear mutuamente
+      ve.aprovacao_desconto_tarefa_id,
+      (SELECT t.status FROM alissonerp.tarefas t WHERE t.id = ve.aprovacao_desconto_tarefa_id) AS aprovacao_desconto_status,
+      ve.aprovacao_cartao_desconto_tarefa_id,
+      (SELECT t.status FROM alissonerp.tarefas t WHERE t.id = ve.aprovacao_cartao_desconto_tarefa_id) AS aprovacao_cartao_desconto_status,
       (SELECT u.nome FROM alissonerp.tarefas t JOIN alissonerp.usuarios u ON u.id = t.responsavel_id WHERE t.id = ve.aprovacao_credito_tarefa_id) AS aprovacao_credito_responsavel_nome,
       (SELECT at.id FROM alissonerp.aprovacoes_tarefa at WHERE at.tarefa_id = ve.aprovacao_credito_tarefa_id AND at.status = 'pendente' LIMIT 1) AS aprovacao_desconto_aprov_id,
       ve.desconto_aprovado_por,
@@ -157,6 +163,12 @@ export async function GET(
     aprovacao_credito_status: venda.aprovacao_credito_status ?? null,
     aprovacao_tarefa_tags: venda.aprovacao_tarefa_tags ?? null,
     aprovacao_credito_responsavel_nome: venda.aprovacao_credito_responsavel_nome ?? null,
+    // REGRA DE NEGÓCIO #1: campos separados para cada tipo de aprovação
+    // O frontend usa estes campos para mostrar banners independentes
+    aprovacao_desconto_tarefa_id: venda.aprovacao_desconto_tarefa_id ?? null,
+    aprovacao_desconto_status: venda.aprovacao_desconto_status ?? null,
+    aprovacao_cartao_desconto_tarefa_id: venda.aprovacao_cartao_desconto_tarefa_id ?? null,
+    aprovacao_cartao_desconto_status: venda.aprovacao_cartao_desconto_status ?? null,
     aprovacao_desconto_aprov_id: venda.aprovacao_desconto_aprov_id ?? null,
     desconto_aprovado_por_nome: venda.desconto_aprovado_por_nome ?? null,
     desconto_aprovado_em: venda.desconto_aprovado_em ?? null,

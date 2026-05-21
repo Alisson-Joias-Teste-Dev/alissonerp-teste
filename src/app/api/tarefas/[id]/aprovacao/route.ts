@@ -1,3 +1,20 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// Resposta à Aprovação de Tarefa
+//
+// REGRA DE NEGÓCIO #1: cada handler (cartao_desconto, desconto, credito)
+//   limpa SEU próprio campo em vendas_erp. Nunca mexer no campo do outro.
+//   - cartao_desconto → limpa aprovacao_cartao_desconto_tarefa_id
+//   - desconto        → limpa aprovacao_desconto_tarefa_id
+//   - credito         → limpa aprovacao_credito_tarefa_id
+//   Se alterar: manter esta separação. Um campo não pode afetar o outro.
+//
+// REGRA DE NEGÓCIO #2 (Bug 3): toda aprovação passa SÓ pela página de tarefas.
+//   Removeu-se o botão "Aprovar" inline na notificação porque ele não
+//   reduzia a comissão (0,5%) como a aprovação via tarefa fazia.
+//   Se alterar: garantir que aprovação pela notificação tenha os MESMOS
+//   efeitos colaterais que aprovação pela tarefa.
+// ═══════════════════════════════════════════════════════════════════════════
+
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
@@ -126,7 +143,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (body.decisao === "aprovado") {
         await sql`
           UPDATE alissonerp.vendas_erp
-          SET aprovacao_credito_tarefa_id = NULL,
+          SET aprovacao_cartao_desconto_tarefa_id = NULL,
               desconto_cartao_aprovado_por = ${user.id}::uuid,
               desconto_cartao_aprovado_em  = NOW(),
               updated_at = NOW()
@@ -136,7 +153,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       } else {
         await sql`
           UPDATE alissonerp.vendas_erp
-          SET aprovacao_credito_tarefa_id = NULL,
+          SET aprovacao_cartao_desconto_tarefa_id = NULL,
               updated_at = NOW()
           WHERE id = ${tarefaInfo.venda_id}
         `;
@@ -168,7 +185,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (body.decisao === "aprovado") {
         await sql`
           UPDATE alissonerp.vendas_erp
-          SET aprovacao_credito_tarefa_id = NULL,
+          SET aprovacao_desconto_tarefa_id = NULL,
               desconto_aprovado_por = ${user.id}::uuid,
               desconto_aprovado_em  = NOW(),
               updated_at = NOW()
@@ -185,7 +202,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       } else {
         await sql`
           UPDATE alissonerp.vendas_erp
-          SET aprovacao_credito_tarefa_id = NULL,
+          SET aprovacao_desconto_tarefa_id = NULL,
               updated_at = NOW()
           WHERE id = ${tarefaInfo.venda_id}
         `;
