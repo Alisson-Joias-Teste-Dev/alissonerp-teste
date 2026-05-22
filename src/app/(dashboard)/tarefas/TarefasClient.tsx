@@ -863,59 +863,50 @@ export default function TarefasClient() {
                       {t.numero_ordem && <span className="ml-2">#{t.numero_ordem}</span>}
                     </p>
 
-                    {/* Rejeição inline */}
-                    {estaRejeitando ? (
-                      <div className="space-y-2">
-                        <textarea
-                          placeholder="Motivo da rejeição (opcional)"
-                          value={motivoRejeicao}
-                          onChange={e => setMotivoRejeicao(e.target.value)}
-                          rows={2}
-                          autoFocus
-                          className="w-full px-3 py-2 border rounded-xl text-sm outline-none resize-none"
-                          style={{ borderColor: "#E5E7EB" }}
-                        />
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => { setRejeitandoId(null); setMotivoRejeicao(""); }}
-                            className="flex-1 py-2 text-sm rounded-xl border font-medium"
-                            style={{ borderColor: "#E5E7EB", color: "#6B7280" }}>
-                            Cancelar
-                          </button>
-                          <button
-                            onClick={() => handleRejeitar(t.id)}
-                            disabled={salvandoAprov}
-                            className="flex-1 py-2 text-sm rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
-                            style={{ backgroundColor: "#DC2626", color: "#fff" }}>
-                            <span className="flex items-center gap-1.5">
-                              {salvandoAprov && <Loader2 size={13} className="animate-spin" />}
-                              Confirmar
-                            </span>
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      /* Botões Aprovar / Rejeitar */
+                    {/* Botões Aprovar / Rejeitar — sempre no DOM, visibilidade via CSS */}
+                    <div className={estaRejeitando ? "hidden" : "flex gap-2"}>
+                      <button
+                        onClick={() => handleAprovar(t.id)}
+                        disabled={salvandoAprov}
+                        className="flex-1 py-2.5 text-sm rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
+                        style={{ backgroundColor: "#059669", color: "#fff" }}>
+                        {estaAprovando ? "Aguarde..." : "✓ Aprovar"}
+                      </button>
+                      <button
+                        onClick={() => { setRejeitandoId(t.id); setMotivoRejeicao(""); }}
+                        disabled={salvandoAprov}
+                        className="flex-1 py-2.5 text-sm rounded-xl font-semibold border disabled:opacity-50"
+                        style={{ borderColor: "#DC2626", color: "#DC2626", backgroundColor: "#fff" }}>
+                        ✗ Rejeitar
+                      </button>
+                    </div>
+
+                    {/* Form de rejeição — sempre no DOM, visibilidade via CSS */}
+                    <div className={estaRejeitando ? "space-y-2" : "hidden"}>
+                      <textarea
+                        placeholder="Motivo da rejeição (opcional)"
+                        value={motivoRejeicao}
+                        onChange={e => setMotivoRejeicao(e.target.value)}
+                        rows={2}
+                        className="w-full px-3 py-2 border rounded-xl text-sm outline-none resize-none"
+                        style={{ borderColor: "#E5E7EB" }}
+                      />
                       <div className="flex gap-2">
                         <button
-                          onClick={() => handleAprovar(t.id)}
-                          disabled={salvandoAprov}
-                          className="flex-1 py-2.5 text-sm rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
-                          style={{ backgroundColor: "#059669", color: "#fff" }}>
-                          <span className="flex items-center gap-1.5">
-                            {estaAprovando && <Loader2 size={13} className="animate-spin" />}
-                            ✓ Aprovar
-                          </span>
+                          onClick={() => { setRejeitandoId(null); setMotivoRejeicao(""); }}
+                          className="flex-1 py-2 text-sm rounded-xl border font-medium"
+                          style={{ borderColor: "#E5E7EB", color: "#6B7280" }}>
+                          Cancelar
                         </button>
                         <button
-                          onClick={() => { setRejeitandoId(t.id); setMotivoRejeicao(""); }}
+                          onClick={() => handleRejeitar(t.id)}
                           disabled={salvandoAprov}
-                          className="flex-1 py-2.5 text-sm rounded-xl font-semibold border disabled:opacity-50"
-                          style={{ borderColor: "#DC2626", color: "#DC2626", backgroundColor: "#fff" }}>
-                          ✗ Rejeitar
+                          className="flex-1 py-2 text-sm rounded-xl font-semibold disabled:opacity-50"
+                          style={{ backgroundColor: "#DC2626", color: "#fff" }}>
+                          {salvandoAprov ? "Aguarde..." : "Confirmar"}
                         </button>
                       </div>
-                    )}
+                    </div>
                   </div>
                 );
               })
