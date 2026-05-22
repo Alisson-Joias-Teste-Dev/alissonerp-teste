@@ -902,8 +902,10 @@ export default function TarefasClient() {
                           disabled={salvandoAprov}
                           className="flex-1 py-2.5 text-sm rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
                           style={{ backgroundColor: "#059669", color: "#fff" }}>
-                          {estaAprovando ? <Loader2 size={13} className="animate-spin" /> : null}
-                          ✓ Aprovar
+                          <span className="flex items-center gap-1.5">
+                            {estaAprovando && <Loader2 size={13} className="animate-spin" />}
+                            ✓ Aprovar
+                          </span>
                         </button>
                         <button
                           onClick={() => { setRejeitandoId(t.id); setMotivoRejeicao(""); }}
