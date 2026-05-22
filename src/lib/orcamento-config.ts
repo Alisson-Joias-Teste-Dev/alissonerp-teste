@@ -15,7 +15,9 @@ export async function loadOrcamentoConfig(): Promise<ConfigOrcamento | null> {
              risco_width, risco_depth, preco_gravacao, stone_markups_table,
              calibracao, espessura_minima_por_modelo, nomes_modelos,
              promocao_inicio, promocao_fim, dome_percentage,
-             snapshot_lock_enabled
+             snapshot_lock_enabled,
+             teor_ouro_default, acrescimo_metal_premium,
+             ajuste_pedra_pct, labels_ficha_tecnica
       FROM alissonerp.config_orcamento
       WHERE name = 'default'
       LIMIT 1
@@ -51,5 +53,9 @@ export async function loadOrcamentoConfig(): Promise<ConfigOrcamento | null> {
     promocao_fim: r.promocao_fim ? String(r.promocao_fim) : null,
     dome_percentage: r.dome_percentage != null ? Number(r.dome_percentage) : 100,
     snapshot_lock_enabled: r.snapshot_lock_enabled !== false,
+    teor_ouro_default: r.teor_ouro_default != null ? Number(r.teor_ouro_default) : 75,
+    acrescimo_metal_premium: r.acrescimo_metal_premium != null ? Number(r.acrescimo_metal_premium) : 30,
+    ajuste_pedra_pct: r.ajuste_pedra_pct != null ? Number(r.ajuste_pedra_pct) : 100,
+    labels_ficha_tecnica: (typeof r.labels_ficha_tecnica === "object" && r.labels_ficha_tecnica) ? r.labels_ficha_tecnica as Record<string, string> : {},
   } as ConfigOrcamento;
 }

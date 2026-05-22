@@ -102,7 +102,7 @@ describe("Regra: produto sem controla_estoque aparece mesmo sem saldo", () => {
   });
 
   it("controla_estoque=true e saldo=0 → NAO aparece", () => {
-    const controlaEstoque = true;
+    const controlaEstoque = true as boolean;
     const saldoDisponivel = 0;
 
     const aparece = controlaEstoque === false || saldoDisponivel > 0;
@@ -110,7 +110,7 @@ describe("Regra: produto sem controla_estoque aparece mesmo sem saldo", () => {
   });
 
   it("controla_estoque=true e saldo>0 → aparece", () => {
-    const controlaEstoque = true;
+    const controlaEstoque = true as boolean;
     const saldoDisponivel = 5;
 
     const aparece = controlaEstoque === false || saldoDisponivel > 0;
