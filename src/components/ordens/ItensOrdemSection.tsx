@@ -23,6 +23,20 @@ interface ItemOrdem {
   personalizacao?: { valor?: string } | null;
 }
 
+// Itens criados antes do helper passar a usar o nome comercial podem ter
+// "Aliança 1 - Quadrado Canal" gravado. Normaliza pra exibir o nome do
+// orçamento (mesmo que ourives ve em "Bordas Elevadas").
+const NOME_ALIAS: Array<[RegExp, string]> = [
+  [/Quadrado Canal/g, "Bordas Elevadas"],
+  [/Boleada Dupla/g, "Boleada Dentro e Fora"],
+];
+function normalizeNomeProduto(nome: string | null): string | null {
+  if (!nome) return nome;
+  let out = nome;
+  for (const [re, sub] of NOME_ALIAS) out = out.replace(re, sub);
+  return out;
+}
+
 export default function ItensOrdemSection({ ordemId }: { ordemId: number }) {
   const [itens, setItens] = useState<ItemOrdem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,7 +123,7 @@ export default function ItensOrdemSection({ ordemId }: { ordemId: number }) {
                 }}
               >
                 <td className="px-4 py-2.5 text-[13px]" style={{ color: "#1A1A1A" }}>
-                  {item.produto_nome ?? (
+                  {normalizeNomeProduto(item.produto_nome) ?? (
                     <span style={{ color: "#9CA3AF" }}>ID {item.produto_id}</span>
                   )}
                 </td>

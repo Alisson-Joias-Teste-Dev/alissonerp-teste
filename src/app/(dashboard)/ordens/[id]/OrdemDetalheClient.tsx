@@ -71,7 +71,22 @@ const FICHA_LABELS: Record<string, string> = {
   tipo_aplicacao_pedra: "Aplicação da Pedra",
   pedra_fileiras: "Fileiras de Pedra",
   pedra_drill: "Furo Passante",
+  pedra_meia_lua: "Meia-Lua",
+  pedra_volta_completa: "Volta Completa",
 };
+
+// Nomes técnicos antigos que vazaram para o JSONB de fichas_tecnicas (antes
+// do helper passar a usar o nome comercial). Normaliza em runtime para que
+// ourives veja sempre o mesmo nome do orçamento.
+const MODELO_ALIAS: Record<string, string> = {
+  "Quadrado Canal": "Bordas Elevadas",
+  "QuadradoCanal": "Bordas Elevadas",
+  "Boleada Dupla": "Boleada Dentro e Fora",
+};
+function normalizeModelo(value: unknown): string {
+  const s = String(value ?? "");
+  return MODELO_ALIAS[s] ?? s;
+}
 const TIPO_ITEM_LABELS: Record<string, string> = {
   alianca: "Aliança", par_alianca: "Par de Alianças", corrente: "Corrente",
   anel: "Anel", pingente: "Pingente", bracelete: "Bracelete",
@@ -109,6 +124,230 @@ function Badge({ label, size = "sm" }: { label: string; size?: "sm" | "lg" }) {
     >
       {label || "—"}
     </span>
+  );
+}
+
+// Labels comerciais das pedras/cortes — devem casar com STONE_TYPES e STONE_CUTS
+// de src/app/(dashboard)/orcamento/constants.ts. Producao mostra exatamente
+// o que a vendedora viu no orcamento (sem valores internos tipo "esmeralda_cut").
+const STONE_TIPO_LABELS: Record<string, string> = {
+  diamante: "Diamante Natural",
+  moissanita: "Moissanita",
+  rubi: "Rubi",
+  esmeralda: "Esmeralda",
+  safira: "Safira",
+  zirconia: "Zirconia",
+};
+const STONE_CORTE_LABELS: Record<string, string> = {
+  brilhante: "Brilhante",
+  gota: "Gota",
+  oval: "Oval",
+  princesa: "Princesa",
+  esmeralda_cut: "Esmeralda",
+  marques: "Marquês",
+};
+function labelTipoPedra(v: unknown): string {
+  const s = String(v ?? "").toLowerCase();
+  return STONE_TIPO_LABELS[s] ?? (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+}
+function labelCortePedra(v: unknown): string {
+  const s = String(v ?? "").toLowerCase();
+  return STONE_CORTE_LABELS[s] ?? s;
+}
+
+// Formatter compartilhado para os campos da ficha (par e single).
+function formatFichaValue(key: string, value: unknown): string {
+  if (key === "modelo") return normalizeModelo(value);
+  // tipo_pedra (string única do botão "Diamante/Zirconia/...") — normaliza
+  // pro mesmo label do orçamento. Aceita tanto "Diamante" (capital) quanto
+  // "diamante" (lowercase, vindo do pedras_detalhadas).
+  if (key === "tipo_pedra") return labelTipoPedra(value);
+  if (key === "pedras_detalhadas" && Array.isArray(value)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return value.map((p: any) => {
+      const tipo = labelTipoPedra(p.tipo);
+      const detalhes: string[] = [];
+      if (p.qtd) detalhes.push(`${p.qtd}x`);
+      if (p.tamanho_mm) detalhes.push(`${p.tamanho_mm}mm`);
+      if (p.corte) detalhes.push(labelCortePedra(p.corte));
+      return `${tipo}${detalhes.length ? ` (${detalhes.join(" · ")})` : ""}`;
+    }).filter(Boolean).join(", ") || "—";
+  }
+  if (key === "peso_estimado" && value != null) return `${Number(value).toFixed(2)}g`;
+  if (key === "texto_gravacao") return formatGravacao(value);
+  if (key === "has_friso" || key === "pedra_drill" || key === "pedra_meia_lua" || key === "pedra_volta_completa") {
+    return value ? "Sim" : "Não";
+  }
+  if (key === "friso_lado") return value === "LOWER" ? "Inferior" : "Superior";
+  if (key === "friso_kind") return value === "risco" ? "Risco" : "Friso";
+  if (key === "friso_tipo") {
+    const s = String(value ?? "").toLowerCase();
+    if (s === "centro") return "Centro";
+    if (s === "duplo") return "Duplo";
+    if (s === "lateral") return "Lateral";
+    return String(value);
+  }
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  return String(value);
+}
+
+// Ordem de exibição preferida — agrupa campos correlatos (identificação,
+// dimensões, perfil, friso, pedras, gravação). Chaves desconhecidas vão
+// pro final na ordem original.
+const FICHA_FIELD_ORDER: string[] = [
+  "modelo", "numeracao", "cor_metal",
+  "milimetragem", "espessura", "diametro", "peso_estimado", "densidade_ouro",
+  "profundidade_concava", "dome_porcentagem",
+  "canal_largura", "canal_borda_altura", "chanfro_tamanho",
+  "has_friso", "friso_kind", "friso_tipo", "friso_lado", "friso_largura", "friso_profundidade", "friso_offset",
+  "tipo_pedra", "qtd_pedras", "tamanho_pedra", "tipo_aplicacao_pedra",
+  "pedra_fileiras", "pedra_drill", "pedra_meia_lua", "pedra_volta_completa",
+  "pedras_detalhadas",
+  "texto_gravacao", "tipo_fonte",
+];
+function sortFichaEntries(entries: [string, unknown][]): [string, unknown][] {
+  const idx = new Map(FICHA_FIELD_ORDER.map((k, i) => [k, i]));
+  return [...entries].sort((a, b) => {
+    const ia = idx.has(a[0]) ? idx.get(a[0])! : 999;
+    const ib = idx.has(b[0]) ? idx.get(b[0])! : 999;
+    return ia - ib;
+  });
+}
+
+// Defaults dos labels da ficha — mesma fonte de verdade do orçamento.
+// Customizações vêm via config_orcamento.labels_ficha_tecnica (passadas no
+// prop labelsFicha).
+const FICHA_LABELS_PADRAO: Record<string, string> = {
+  modelo:         "Modelo",
+  aro:            "Aro",
+  largura:        "Largura",
+  espessura:      "Espessura",
+  prof_concava:   "Prof. côncava",
+  chanfro:        "Chanfro",
+  larg_canal:     "Larg. canal",
+  alt_borda:      "Alt. borda",
+  metal:          "Metal",
+  friso:          "Friso",
+  pedras:         "Pedras",
+  fileiras:       "Fileiras",
+  furo_passante:  "Furo passante",
+  gravacao:       "Gravação",
+  peso_estimado:  "Peso estimado",
+  peso_total_par: "Peso total do par",
+};
+function getLabelFicha(chave: string, custom?: Record<string, string>): string {
+  const c = custom?.[chave]?.trim();
+  return c || FICHA_LABELS_PADRAO[chave] || chave;
+}
+
+// Linha "k: v" no formato do modal de ficha do orçamento. Replicada aqui
+// pra produção ficar pixel-by-pixel igual ao que a vendedora ve.
+function LinhaFichaCompacta({ k, v, bold = false, esmeralda = false }: { k: string; v: string; bold?: boolean; esmeralda?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between text-xs">
+      <span className="text-gray-500">{k}</span>
+      <span className={`font-mono ${bold ? "font-bold" : ""}`} style={{ color: esmeralda ? C.esmeralda : "#374151" }}>{v}</span>
+    </div>
+  );
+}
+
+// Ficha técnica compacta — formato idêntico ao modal "Ficha Técnica do par"
+// no orçamento. Usado quando a ordem veio de orçamento de aliança.
+// Recebe os DADOS JSONB ja enriquecidos (page.tsx faz merge com orcamento_fichas_tecnicas).
+function FichaAliancaCompacta({
+  titulo, dados, labelsFicha,
+}: {
+  titulo: string;
+  dados: Record<string, unknown>;
+  labelsFicha?: Record<string, string>;
+}) {
+  const L = (k: string) => getLabelFicha(k, labelsFicha);
+  const perfil = String(dados.perfil ?? ""); // pode vir vazio se nao foi salvo
+  const modelo = normalizeModelo(dados.modelo);
+  const aro = dados.numeracao;
+  const diametro = dados.diametro;
+  const largura = Number(dados.milimetragem ?? 0);
+  const espessura = Number(dados.espessura ?? 0);
+  const profCon = dados.profundidade_concava != null ? Number(dados.profundidade_concava) : null;
+  const chanfro = dados.chanfro_tamanho != null ? Number(dados.chanfro_tamanho) : null;
+  const canalL = dados.canal_largura != null ? Number(dados.canal_largura) : null;
+  const canalB = dados.canal_borda_altura != null ? Number(dados.canal_borda_altura) : null;
+  const metal = String(dados.cor_metal ?? "—");
+  const hasFriso = dados.has_friso === true;
+  const friso_kind = String(dados.friso_kind ?? "friso");
+  const friso_tipo = String(dados.friso_tipo ?? "lateral");
+  const friso_largura = Number(dados.friso_largura ?? 0);
+  const friso_profundidade = Number(dados.friso_profundidade ?? 0);
+  const qtdPedras = Number(dados.qtd_pedras ?? 0);
+  // Pedra: usa o tipo/tamanho do primeiro item em pedras_detalhadas (formato
+  // raw como o orçamento usa). Fallback pra tipo_pedra/tamanho_pedra escalares.
+  const pedrasArr = Array.isArray(dados.pedras_detalhadas) ? (dados.pedras_detalhadas as Array<Record<string, unknown>>) : [];
+  const tipoPedraRaw = String(pedrasArr[0]?.tipo ?? dados.tipo_pedra ?? "").toLowerCase();
+  const tamRaw = pedrasArr[0]?.tamanho_mm ?? dados.tamanho_pedra;
+  // Remove zeros à direita: "1.50" -> "1.5"
+  const tamPedraFmt = tamRaw != null ? String(Number(tamRaw)) : null;
+  const fileiras = dados.pedra_fileiras;
+  const drill = dados.pedra_drill === true;
+  const peso = dados.peso_estimado != null ? Number(dados.peso_estimado) : null;
+  // Detecta perfil — usa modelo string como fallback se perfil enum não tá no dados
+  const isQuadradoCanal = perfil === "QuadradoCanal" || modelo === "Bordas Elevadas";
+  const isConcava = perfil === "Concava" || modelo === "Côncava";
+  const isChanfrada = perfil === "Chanfrada";
+
+  return (
+    <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: C.cremeBorder }}>
+      <h4 className="text-[10px] font-bold uppercase tracking-wider" style={{ color: C.esmeralda }}>{titulo}</h4>
+      <LinhaFichaCompacta k={L("modelo")}   v={modelo} />
+      {aro != null && (
+        <LinhaFichaCompacta
+          k={L("aro")}
+          v={diametro != null ? `${aro} (Ø ${Number(diametro).toFixed(2)}mm)` : String(aro)}
+        />
+      )}
+      <LinhaFichaCompacta k={L("largura")}   v={`${largura.toFixed(2)} mm`} />
+      <LinhaFichaCompacta k={L("espessura")} v={`${espessura.toFixed(2)} mm`} />
+      {isConcava && profCon != null && (
+        <LinhaFichaCompacta k={L("prof_concava")} v={`${profCon.toFixed(2)} mm`} />
+      )}
+      {isChanfrada && chanfro != null && (
+        <LinhaFichaCompacta k={L("chanfro")} v={`${chanfro.toFixed(2)} mm`} />
+      )}
+      {isQuadradoCanal && (
+        <>
+          {canalL != null && <LinhaFichaCompacta k={L("larg_canal")} v={`${canalL.toFixed(2)} mm`} />}
+          {canalB != null && <LinhaFichaCompacta k={L("alt_borda")}  v={`${canalB.toFixed(2)} mm`} />}
+        </>
+      )}
+      <LinhaFichaCompacta k={L("metal")} v={metal} />
+      {hasFriso && (friso_largura > 0 || friso_profundidade > 0) && (
+        <LinhaFichaCompacta
+          k={L("friso")}
+          v={`${friso_kind === "risco" ? "Risco" : "Friso"} ${friso_tipo} · ${friso_largura.toFixed(2)}×${friso_profundidade.toFixed(2)}mm`}
+        />
+      )}
+      {qtdPedras > 0 && (
+        <LinhaFichaCompacta
+          k={L("pedras")}
+          v={`${qtdPedras} un · ${tipoPedraRaw}${tamPedraFmt ? ` · ${tamPedraFmt}mm` : ""}`}
+        />
+      )}
+      {qtdPedras > 0 && isQuadradoCanal && fileiras != null && Number(fileiras) > 0 && (
+        <LinhaFichaCompacta k={L("fileiras")} v={String(fileiras)} />
+      )}
+      {qtdPedras > 0 && (
+        <LinhaFichaCompacta k={L("furo_passante")} v={drill ? "Sim" : "Não"} />
+      )}
+      {(() => {
+        const grav = formatGravacao(dados.texto_gravacao);
+        if (!grav) return null;
+        return <LinhaFichaCompacta k={L("gravacao")} v={grav} />;
+      })()}
+      {peso != null && (
+        <div className="border-t pt-1.5 mt-1.5" style={{ borderColor: C.cremeBorder }}>
+          <LinhaFichaCompacta k={L("peso_estimado")} v={`${peso.toFixed(2)} g`} bold esmeralda />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -220,7 +459,7 @@ function PecaClienteCard({ fotoPeca, fotoPeca2, fotoPecaSignedUrl, fotoPeca2Sign
   );
 }
 
-type Tab = "producao" | "apontamentos" | "estoque" | "transferencias" | "ficha";
+type Tab = "ficha" | "apontamentos" | "estoque" | "transferencias";
 
 interface Props {
   ordem: any;
@@ -233,6 +472,8 @@ interface Props {
   conversaoSku?: any | null;
   fotoPecaSignedUrl?: string | null;
   fotoPeca2SignedUrl?: string | null;
+  /** Labels custom da ficha — mesma fonte do modal de orçamento. */
+  labelsFicha?: Record<string, string>;
 }
 
 // Roles "operacionais" — colaboradores de execução que só precisam ver a
@@ -240,10 +481,14 @@ interface Props {
 // Transferências). Gestão (admin, gerente, pcp, consultora) vê tudo.
 const ROLES_SO_FICHA = ["ourives", "motoboy", "estoquista_fabrica", "estoquista_loja"];
 
-export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline, userRole, conversaoSku = null, fotoPecaSignedUrl = null, fotoPeca2SignedUrl = null }: Props) {
+export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline, userRole, conversaoSku = null, fotoPecaSignedUrl = null, fotoPeca2SignedUrl = null, labelsFicha = {} }: Props) {
   const router = useRouter();
   const soFicha = userRole != null && ROLES_SO_FICHA.includes(userRole);
-  const [tab, setTab] = useState<Tab>(soFicha ? "ficha" : "producao");
+  // Ficha Técnica eh o conteudo principal — ourives/gestão precisa ver
+  // as especificacoes do orcamento como primeira coisa ao abrir a ordem.
+  // Aba "Producao" (PCP zeros) foi removida — ja existe um card "Resultado
+  // de Producao" no header quando a ordem esta concluida.
+  const [tab, setTab] = useState<Tab>("ficha");
   const [comentariosCount, setComentariosCount] = useState(0);
 
   // ── Modal de edição (apenas desenvolvedor) ───────────────────────────────
@@ -347,11 +592,10 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
         { key: "ficha", label: "Ficha Técnica", count: fichaCount },
       ]
     : [
-        { key: "producao",       label: "Produção" },
+        { key: "ficha",          label: "Ficha Técnica",  count: fichaCount },
         { key: "apontamentos",   label: "Apontamentos",   count: apontamentos.length },
         { key: "estoque",        label: "Mov. Estoque",   count: movEstoque.length },
         { key: "transferencias", label: "Transferências", count: transferencias.length },
-        { key: "ficha",          label: "Ficha Técnica",  count: fichaCount },
       ];
 
   return (
@@ -628,38 +872,10 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
             ))}
           </div>
 
-          {/* Tab: Produção */}
-          {tab === "producao" && (
-            <div className="bg-white rounded-xl border p-5" style={{ borderColor: C.cremeBorder }}>
-              <p className="text-sm font-semibold mb-4" style={{ color: "#1A1A1A" }}>
-                Dados de Produção (PCP)
-              </p>
-              {!temPcp ? (
-                <p className="text-sm py-4 text-center" style={{ color: "#9CA3AF" }}>
-                  Nenhum PCP vinculado a esta ordem.
-                </p>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 md:gap-x-8 gap-y-1">
-                  {[
-                    { label: "Total Metal",    value: `${Number(ordem.pcp_total_metal || 0).toFixed(2)}g` },
-                    { label: "Retorno Metal",  value: `${Number(ordem.pcp_retorno_metal || 0).toFixed(2)}g` },
-                    { label: "Metal Externo",  value: `${Number(ordem.pcp_metal_externo || 0).toFixed(2)}g` },
-                    { label: "Pedras (un)",    value: `${ordem.pcp_total_pedras_un || 0}` },
-                    { label: "Pedras (g)",     value: `${Number(ordem.pcp_total_pedras_g || 0).toFixed(2)}g` },
-                    { label: "Outros Pesos",   value: `${Number(ordem.pcp_total_outros || 0).toFixed(2)}g` },
-                    { label: "Peso Final",     value: `${Number(ordem.pcp_peso_final || 0).toFixed(2)}g` },
-                    { label: "PMC",            value: `${Number(ordem.pcp_pmc || 0).toFixed(2)}g` },
-                    { label: "Quebra",         value: `${Number(ordem.pcp_quebra || 0).toFixed(2)}g (${Number(ordem.pcp_quebra_pct || 0).toFixed(1)}%)` },
-                  ].map((item) => (
-                    <div key={item.label} className="py-2.5 border-b" style={{ borderColor: C.cremeBorder }}>
-                      <p className="text-[10px] uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{item.label}</p>
-                      <p className="font-mono text-sm mt-0.5" style={{ color: "#1A1A1A" }}>{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Aba "Produção" removida — os dados de PCP (peso final, PMC,
+              quebra) ja aparecem no card "Resultado de Produção" no topo
+              quando a ordem fica concluida. Ourives precisa ver a ficha
+              tecnica primeiro ao abrir uma ordem nova. */}
 
           {/* Tab: Apontamentos */}
           {tab === "apontamentos" && (
@@ -778,53 +994,89 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                   <p className="text-[11px] mt-1" style={{ color: "#C4B5A0" }}>A ficha é criada pelo PDV no Directus ao lançar a ordem.</p>
                 </div>
               ) : fichaTecnica._origem === "erp_multi" ? (
-                /* ── Múltiplas fichas ERP (par de alianças) ── */
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {(fichaTecnica.fichas as Array<{ ficha_id: number; dados: unknown; _label: string }>).map((f, idx) => {
-                    const dados = typeof f.dados === "string" ? JSON.parse(f.dados) : f.dados;
-                    const formatFichaValue = (key: string, value: unknown): string => {
-                      if (key === "pedras_detalhadas" && Array.isArray(value)) {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        return value.map((p: any) => `${p.tipo ?? ""}${p.qtd ? ` (${p.qtd}x)` : ""}`).filter(Boolean).join(", ") || "—";
-                      }
-                      if (key === "peso_estimado" && value != null) {
-                        return `${Number(value).toFixed(2)}g`;
-                      }
-                      // Gravacao: array (novo) ou string com separador legado.
-                      if (key === "texto_gravacao") return formatGravacao(value);
-                      if (key === "has_friso") return value ? "Sim" : "Não";
-                      if (key === "pedra_drill") return value ? "Sim" : "Não";
-                      if (typeof value === "number") {
-                        return Number.isInteger(value) ? String(value) : value.toFixed(2);
-                      }
-                      return String(value);
-                    };
-                    const entries = Object.entries(dados ?? {}).filter(
-                      ([k, v]) => k !== "tipo_item" && v != null && v !== "" && (!Array.isArray(v) || v.length > 0)
-                    ) as [string, unknown][];
+                /* ── Par de alianças — formato igual ao modal do orçamento ── */
+                (() => {
+                  const fichas = fichaTecnica.fichas as Array<{ ficha_id: number; dados: unknown; _label: string; tipo_item?: string }>;
+                  const dadosArr = fichas.map(f => (typeof f.dados === "string" ? JSON.parse(f.dados) : f.dados) as Record<string, unknown>);
+                  const ehAlianca = fichas.every(f => f.tipo_item === "alianca" || f.tipo_item === "par_alianca");
+                  if (ehAlianca) {
+                    const pesoTotal = dadosArr.reduce((acc, d) => acc + Number(d?.peso_estimado ?? 0), 0);
                     return (
-                      <div key={idx} className="bg-white rounded-xl border p-4" style={{ borderColor: C.cremeBorder }}>
-                        <p className="text-[10px] font-semibold uppercase tracking-wider mb-3" style={{ color: C.esmeralda }}>
-                          {f._label}
-                        </p>
-                        <div>
-                          {entries.map(([key, value]) => (
-                            <InfoRow key={key} label={fichaErpLabel(key)} value={formatFichaValue(key, value)} />
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {fichas.map((f, idx) => (
+                            <FichaAliancaCompacta
+                              key={f.ficha_id}
+                              titulo={f._label}
+                              dados={dadosArr[idx]}
+                              labelsFicha={labelsFicha}
+                            />
                           ))}
                         </div>
-                        <p className="text-[10px] text-right mt-2" style={{ color: "#C4B5A0" }}>Ficha #{f.ficha_id}</p>
+                        <div className="rounded-lg border p-3" style={{ borderColor: C.cremeBorder, backgroundColor: "#F0F7F4" }}>
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: C.esmeralda }}>
+                              {getLabelFicha("peso_total_par", labelsFicha)}
+                            </span>
+                            <span className="font-mono font-bold" style={{ color: C.esmeralda }}>
+                              {pesoTotal.toFixed(2)} g
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-right" style={{ color: "#C4B5A0" }}>
+                          Fichas {fichas.map(f => "#" + f.ficha_id).join(" · ")}
+                        </p>
                       </div>
                     );
-                  })}
-                </div>
+                  }
+                  // Fallback genérico (peças não-aliança)
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {fichas.map((f, idx) => {
+                        const entries = sortFichaEntries(
+                          Object.entries(dadosArr[idx] ?? {}).filter(
+                            ([k, v]) => k !== "tipo_item" && v != null && v !== "" && (!Array.isArray(v) || v.length > 0)
+                          ) as [string, unknown][]
+                        );
+                        return (
+                          <div key={idx} className="bg-white rounded-xl border p-4" style={{ borderColor: C.cremeBorder }}>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider mb-3" style={{ color: C.esmeralda }}>
+                              {f._label}
+                            </p>
+                            <div>
+                              {entries.map(([key, value]) => (
+                                <InfoRow key={key} label={fichaErpLabel(key)} value={formatFichaValue(key, value)} />
+                              ))}
+                            </div>
+                            <p className="text-[10px] text-right mt-2" style={{ color: "#C4B5A0" }}>Ficha #{f.ficha_id}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()
               ) : fichaTecnica._origem === "erp" ? (
-                /* ── Ficha ERP (JSONB dinâmico) ── */
+                /* ── Ficha ERP única — formato compacto p/ aliança, genérico p/ outros ── */
                 (() => {
-                  const dados = typeof fichaTecnica.dados === "string" ? JSON.parse(fichaTecnica.dados) : fichaTecnica.dados;
-                  const tipoItem = dados?.tipo_item;
-                  const entries = Object.entries(dados ?? {}).filter(
-                    ([k, v]) => k !== "tipo_item" && v != null && v !== ""
-                  ) as [string, string][];
+                  const dados = (typeof fichaTecnica.dados === "string" ? JSON.parse(fichaTecnica.dados) : fichaTecnica.dados) as Record<string, unknown>;
+                  const tipoItem = String(dados?.tipo_item ?? fichaTecnica.tipo_item ?? "");
+                  if (tipoItem === "alianca" || tipoItem === "par_alianca") {
+                    return (
+                      <div className="space-y-3">
+                        <FichaAliancaCompacta
+                          titulo="Especificações"
+                          dados={dados}
+                          labelsFicha={labelsFicha}
+                        />
+                        <p className="text-[10px] text-right" style={{ color: "#C4B5A0" }}>Ficha #{fichaTecnica.ficha_id}</p>
+                      </div>
+                    );
+                  }
+                  const entries = sortFichaEntries(
+                    Object.entries(dados ?? {}).filter(
+                      ([k, v]) => k !== "tipo_item" && v != null && v !== "" && (!Array.isArray(v) || v.length > 0)
+                    ) as [string, unknown][]
+                  );
                   return (
                     <div className="space-y-5">
                       <div>
@@ -833,8 +1085,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                         </p>
                         <div className="grid grid-cols-2 gap-x-8">
                           {entries.map(([key, value]) => (
-                            <InfoRow key={key} label={fichaErpLabel(key)}
-                              value={key === "peso_estimado" ? `${Number(value).toFixed(2)}g` : String(value)} />
+                            <InfoRow key={key} label={fichaErpLabel(key)} value={formatFichaValue(key, value)} />
                           ))}
                         </div>
                       </div>

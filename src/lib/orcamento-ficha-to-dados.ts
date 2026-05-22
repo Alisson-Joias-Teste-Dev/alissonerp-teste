@@ -20,15 +20,18 @@
 
 import { splitGravacao } from "./gravacao";
 
+// Nomes COMERCIAIS dos perfis (mesmos que aparecem no orçamento).
+// Devem casar com PROFILE_OPTIONS de src/app/(dashboard)/orcamento/constants.ts
+// — alterar aqui SEM atualizar lá quebra o vínculo orçamento ↔ ordem.
 const PERFIL_NOMES: Record<string, string> = {
   Anatomica: "Anatômica",
   Boleada: "Boleada",
-  BoleadaDouble: "Boleada Dupla",
+  BoleadaDouble: "Boleada Dentro e Fora",
   Chanfrada: "Chanfrada",
   Concava: "Côncava",
   FrisoUnico: "Friso Único",
   FrisoLateral: "Friso Lateral",
-  QuadradoCanal: "Quadrado Canal",
+  QuadradoCanal: "Bordas Elevadas",
   Simples: "Reta",
 };
 
@@ -62,11 +65,11 @@ export function orcamentoFichaToDados(ft: FichaRow): Record<string, unknown> {
   if (ft.diametro != null) d.diametro = ft.diametro;
   if (ft.densidade_ouro != null) d.densidade_ouro = ft.densidade_ouro;
 
-  const profCon = num(ft.profundidade_concava);
-  if (profCon != null && profCon > 0) d.profundidade_concava = ft.profundidade_concava;
-
-  const dome = num(ft.dome_porcentagem);
-  if (dome != null && dome !== 100) d.dome_porcentagem = ft.dome_porcentagem;
+  // v2.61: nao filtra mais defaults — ourives precisa ver TUDO que a
+  // vendedora configurou, mesmo valores "padrao" (100% curvatura, 0.4mm
+  // profundidade). Antes, dome=100 e profundidade=0 sumiam, confundindo.
+  if (ft.profundidade_concava != null) d.profundidade_concava = ft.profundidade_concava;
+  if (ft.dome_porcentagem != null) d.dome_porcentagem = ft.dome_porcentagem;
 
   // Gravacao — armazenada como array (formato novo, sem caractere de controle).
   // splitGravacao normaliza tanto string nova (U+001F) quanto antiga (" | ").
@@ -96,16 +99,23 @@ export function orcamentoFichaToDados(ft: FichaRow): Record<string, unknown> {
   const chanfro = num(ft.chanfro_tamanho);
   if (chanfro != null && chanfro > 0) d.chanfro_tamanho = ft.chanfro_tamanho;
 
-  // Pedras
-  if (ft.qtd_pedras) d.qtd_pedras = ft.qtd_pedras;
-  if (ft.tamanho_pedra) d.tamanho_pedra = ft.tamanho_pedra;
-  if (ft.tipo_aplicacao_pedra) d.tipo_aplicacao_pedra = ft.tipo_aplicacao_pedra;
-  const fileiras = num(ft.pedra_fileiras);
-  if (fileiras != null && fileiras > 1) d.pedra_fileiras = ft.pedra_fileiras;
-  if (ft.pedra_drill) d.pedra_drill = true;
-  if (ft.tipo_pedra) d.tipo_pedra = ft.tipo_pedra;
-  if (Array.isArray(ft.pedras_detalhadas) && ft.pedras_detalhadas.length > 0) {
-    d.pedras_detalhadas = ft.pedras_detalhadas;
+  // Pedras — entra TUDO quando ha pedras (mesmo flags "Nao" para ourives
+  // saber que NAO faz furo passante, NAO eh meia lua, etc).
+  const temPedras = !!ft.qtd_pedras && Number(ft.qtd_pedras) > 0;
+  if (temPedras) {
+    d.qtd_pedras = ft.qtd_pedras;
+    if (ft.tamanho_pedra) d.tamanho_pedra = ft.tamanho_pedra;
+    if (ft.tipo_aplicacao_pedra) d.tipo_aplicacao_pedra = ft.tipo_aplicacao_pedra;
+    // Fileiras: sempre que ha pedras (1 fileira = informacao valida, nao default)
+    if (ft.pedra_fileiras != null) d.pedra_fileiras = ft.pedra_fileiras;
+    // Booleans: explicitos (Sim/Nao) — ourives precisa saber dos "Nao" tambem
+    d.pedra_drill = ft.pedra_drill === true;
+    d.pedra_meia_lua = ft.pedra_meia_lua === true;
+    d.pedra_volta_completa = ft.pedra_volta_completa === true;
+    if (ft.tipo_pedra) d.tipo_pedra = ft.tipo_pedra;
+    if (Array.isArray(ft.pedras_detalhadas) && ft.pedras_detalhadas.length > 0) {
+      d.pedras_detalhadas = ft.pedras_detalhadas;
+    }
   }
 
   return d;

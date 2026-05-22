@@ -1408,15 +1408,41 @@ export default function OrcamentoClient({
   const pedrasCost = params.hasStones ? stoneTotalRS : 0;
   const pedrasCost2 = params2.hasStones ? stoneTotalRS2 : 0;
 
-  // Totais do par — arredonda a 2 casas pra evitar lixo de centavos vindos
-  // dos somatórios em float (R$ 6199.9999996 etc).
+  // Totais do par.
+  //
+  // Bug v2.61: o desconto manual da vendedora (slider "DESCONTO X%") era
+  // aplicado SÓ no ouro pela computePricing. Quando metade do valor é pedras
+  // fixas, o efeito sentido era ~metade do %. Ex.: "20% off" virava ~10%
+  // visivelmente. Cliente reclamava que a conta não fechava.
+  //
+  // Correção: o desconto manual passa a incidir sobre o TOTAL (ouro com
+  // promo + pedras + gravação). A promoção por faixa continua só no ouro
+  // (é uma regra de precificação, não desconto comercial).
   const pricingTotal = useMemo(() => {
     const rawWeight = allianceMode === "par" ? pricing.weight + pricing2.weight : pricing.weight;
-    const rawPrice = allianceMode === "par"
-      ? pricing.discountPrice + pricing2.discountPrice + pedrasCost + pedrasCost2 + gravacaoCost + gravacaoCost2
-      : pricing.discountPrice + pedrasCost + gravacaoCost;
-    return { weight: rawWeight, price: Math.round(rawPrice * 100) / 100 };
-  }, [allianceMode, pricing.weight, pricing.discountPrice, pricing2.weight, pricing2.discountPrice, pedrasCost, pedrasCost2, gravacaoCost, gravacaoCost2]);
+    const isPar = allianceMode === "par";
+    // Ouro com promo aplicada, SEM desconto manual ainda. pricing.price é
+    // priceBase (sem promo, sem desconto); aplicamos a promo aqui.
+    const ouroComPromo1 = pricing.price * (1 - descPromo1 / 100);
+    const ouroComPromo2 = isPar ? pricing2.price * (1 - descPromo2 / 100) : 0;
+    // Base sobre a qual o desconto manual incide
+    const baseDesconto = ouroComPromo1 + ouroComPromo2
+      + (isPar ? pedrasCost + pedrasCost2 : pedrasCost)
+      + (isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost);
+    // Desconto manual = max entre anel 1 e anel 2 (slider único na UI, mas
+    // params separados podem ter valores diferentes em estados intermediários)
+    const descManual = Math.max(params.discountPercent, isPar ? params2.discountPercent : 0);
+    const comDesc = baseDesconto * (1 - descManual / 100);
+    // Arredonda pra múltiplo de 10 (regra histórica, mantém preço "redondo")
+    const rounded = Math.round(comDesc / 10) * 10;
+    return { weight: rawWeight, price: rounded };
+  }, [
+    allianceMode,
+    pricing.weight, pricing.price, pricing2.weight, pricing2.price,
+    descPromo1, descPromo2,
+    params.discountPercent, params2.discountPercent,
+    pedrasCost, pedrasCost2, gravacaoCost, gravacaoCost2,
+  ]);
 
   // Quando o valor recalculado da ficha diverge do snapshot travado, marca
   // dirty automaticamente. isHydratingRef evita marcar durante a carga inicial.
@@ -1574,9 +1600,21 @@ export default function OrcamentoClient({
       // combinado com o cliente.
       const usaSnapshotNoSave = !dirty && lockEnabled && !!savedSnapshot;
 
-      const valorOuroCalc = isPar ? pricing.discountPrice + pricing2.discountPrice : pricing.discountPrice;
-      const valorPedrasCalc = isPar ? pedrasCost + pedrasCost2 : pedrasCost;
-      const valorTotalCalc = Math.round((valorOuroCalc + valorPedrasCalc + (isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost)) * 100) / 100;
+      // v2.61: desconto manual agora aplica sobre o TOTAL (ouro+pedras+gravação),
+      // não só sobre o ouro. Pra manter valor_ouro + valor_pedras = valor_total,
+      // distribuímos o desconto efetivo proporcionalmente.
+      const ouroBrutoPromo1 = pricing.price * (1 - descPromo1 / 100);
+      const ouroBrutoPromo2 = isPar ? pricing2.price * (1 - descPromo2 / 100) : 0;
+      const ouroBrutoTotal = ouroBrutoPromo1 + ouroBrutoPromo2;
+      const pedrasBruto = isPar ? pedrasCost + pedrasCost2 : pedrasCost;
+      const gravacaoBruto = isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost;
+      const brutoTotal = ouroBrutoTotal + pedrasBruto + gravacaoBruto;
+      // pricingTotal.price já aplicou desconto manual sobre o total + arredondamento
+      const valorTotalCalc = pricingTotal.price;
+      // Fator efetivo (inclui o arredondamento de 10 em 10 da pricingTotal)
+      const fatorEfetivo = brutoTotal > 0 ? valorTotalCalc / brutoTotal : 1;
+      const valorOuroCalc = Math.round(ouroBrutoTotal * fatorEfetivo * 100) / 100;
+      const valorPedrasCalc = Math.round(pedrasBruto * fatorEfetivo * 100) / 100;
 
       const valorTotal = usaSnapshotNoSave ? savedSnapshot!.valor : valorTotalCalc;
       const pesoTotal = usaSnapshotNoSave ? savedSnapshot!.peso : pricingTotal.weight;
@@ -2966,7 +3004,15 @@ export default function OrcamentoClient({
   // DESIGN — layout principal
   // ═══════════════════════════════════════════════════════════════════════════
   return (
-    <div className="p-4 md:p-5 space-y-4" style={{ backgroundColor: C.cremeBg, minHeight: "100vh" }}>
+    // translate="no" + class notranslate: bloqueia Google Translate / extensoes
+    // que envolvem nos de texto em <font>, quebrando a reconciliacao do React
+    // ("Failed to execute 'removeChild' on 'Node'"). O orcamento muda muito
+    // texto dinamico (preco, %, qtd, fileiras) — area sensivel.
+    <div
+      translate="no"
+      className="notranslate p-4 md:p-5 space-y-4"
+      style={{ backgroundColor: C.cremeBg, minHeight: "100vh" }}
+    >
 
       {/* ── Topo: Cliente + titulo + acoes ─────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
@@ -3382,7 +3428,10 @@ export default function OrcamentoClient({
                     min={1} max={2.5} step={0.1}
                   />
                 </div>
-                {activeProfile === ProfileType.QuadradoCanal && (
+                {/* Fileiras só fazem sentido em Volta Completa (cravação corre
+                    toda a circunferência em N fileiras). Em Pontual/Meia, é 1
+                    fileira fixa — exibir o select confunde a vendedora. */}
+                {activeProfile === ProfileType.QuadradoCanal && activeParams.stoneFull && (
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-gray-500 w-[90px] shrink-0">Fileiras</span>
                     <select
@@ -3404,23 +3453,26 @@ export default function OrcamentoClient({
                     return (
                       <button key={tipo} onClick={() => {
                         if (i === 2) {
+                          // Volta Completa: auto-seleciona max fileiras (cravacao
+                          // se distribui em toda a circunferencia em N linhas)
                           updateParam("stoneFull", true); updateParam("stoneHalfMoon", false);
-                          // Auto max fileiras ao ativar volta completa
-                          // Usa activeProfile pra respeitar qual anel está sendo editado (1 ou 2)
                           if (activeProfile === ProfileType.QuadradoCanal) {
                             const mr = computeMaxStoneRows(activeParams.canalWidth, activeParams.stoneSize, calibracao);
                             updateParam("stoneRows", mr);
                           }
                         }
                         else if (i === 1) {
+                          // Meia Alianca: fileiras fixa em 1 (UI esconde o select).
+                          // Antes setava maxRows mesmo escondido — gerava preco/peso
+                          // calculado com N fileiras que a vendedora nao via.
                           updateParam("stoneFull", false); updateParam("stoneHalfMoon", true);
-                          // Usa activeProfile pra respeitar qual anel está sendo editado (1 ou 2)
-                          if (activeProfile === ProfileType.QuadradoCanal) {
-                            const mr = computeMaxStoneRows(activeParams.canalWidth, activeParams.stoneSize, calibracao);
-                            updateParam("stoneRows", mr);
-                          }
+                          updateParam("stoneRows", 1);
                         }
-                        else { updateParam("stoneFull", false); updateParam("stoneHalfMoon", false); }
+                        else {
+                          // Pontual: idem — uma fileira so.
+                          updateParam("stoneFull", false); updateParam("stoneHalfMoon", false);
+                          updateParam("stoneRows", 1);
+                        }
                       }}
                         className="flex-1 py-1.5 text-[9px] font-semibold rounded-lg border transition-all text-center"
                         style={active
@@ -3628,9 +3680,20 @@ export default function OrcamentoClient({
                   Admin ainda pode ver via double-click no preço final (toggle). */}
               {/* Pills de ouro e pedras (só quando há pedras preciosas) */}
               {(() => {
-                const ouroTotal = allianceMode === "par" ? pricing.discountPrice + pricing2.discountPrice : pricing.discountPrice;
-                const pedrasTotal = allianceMode === "par" ? pedrasCost + pedrasCost2 : pedrasCost;
-                const gravTotal = allianceMode === "par" ? gravacaoCost + gravacaoCost2 : gravacaoCost;
+                // v2.61: a Pill mostra a fatia do TOTAL final que vai pra cada
+                // categoria (ouro/pedras/gravação). Antes mostrava ouro com
+                // desconto manual aplicado e pedras sem — não batia com o total.
+                const isPar = allianceMode === "par";
+                const ouroBrutoPill = isPar
+                  ? pricing.price * (1 - descPromo1 / 100) + pricing2.price * (1 - descPromo2 / 100)
+                  : pricing.price * (1 - descPromo1 / 100);
+                const pedrasBrutoPill = isPar ? pedrasCost + pedrasCost2 : pedrasCost;
+                const gravBrutoPill = isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost;
+                const brutoPill = ouroBrutoPill + pedrasBrutoPill + gravBrutoPill;
+                const fatorPill = brutoPill > 0 ? pricingTotal.price / brutoPill : 1;
+                const ouroTotal = ouroBrutoPill * fatorPill;
+                const pedrasTotal = pedrasBrutoPill * fatorPill;
+                const gravTotal = gravBrutoPill * fatorPill;
                 const hasExtras = pedrasTotal > 0 || gravTotal > 0;
                 if (!hasExtras) return null;
                 // Calcula unitário das pedras: R$ total / soma de qtds (de ambos os anéis se par)
@@ -3722,11 +3785,15 @@ export default function OrcamentoClient({
                   // displayPrice/Weight respeitam o snapshot travado (lock). Enquanto
                   // !dirty, exibe o valor combinado com o cliente; após Recalcular ou
                   // qualquer mudança, mostra o recalculado + badge de aviso.
-                  const usaSnapshot = !dirty && lockEnabled && !!savedSnapshot;
+                  // Em modo readOnly (orçamento já aprovado/convertido/rejeitado),
+                  // a UI mostra SEMPRE o valor congelado — nunca o recalculado.
+                  // Evita ourives/consultora abrir orçamento já fechado e ver
+                  // preço diferente do que foi cobrado do cliente.
+                  const usaSnapshot = (readOnly || !dirty) && lockEnabled && !!savedSnapshot;
                   const displayPrice = usaSnapshot ? savedSnapshot!.valor : pricingTotal.price;
                   const displayWeight = usaSnapshot ? savedSnapshot!.peso : pricingTotal.weight;
                   const showLockedBadge = usaSnapshot;
-                  const showRecalcBadge = !!savedSnapshot && lockEnabled && dirty && Math.abs(pricingTotal.price - savedSnapshot.valor) > 0.01;
+                  const showRecalcBadge = !readOnly && !!savedSnapshot && lockEnabled && dirty && Math.abs(pricingTotal.price - savedSnapshot.valor) > 0.01;
                   const pesoMostrado = allianceMode === "par"
                     ? `${pricing.weight.toFixed(1)}g + ${pricing2.weight.toFixed(1)}g = ${displayWeight.toFixed(1)}g`
                     : `${displayWeight.toFixed(1)}g`;
@@ -3756,11 +3823,21 @@ export default function OrcamentoClient({
                       <p className="text-2xl font-black tracking-tight" style={{ color: C.esmeralda }}>
                         R$ {displayPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
-                      {allianceMode === "par" && !usaSnapshot && (
-                        <p className="text-[9px] text-gray-400">
-                          A1: R$ {pricing.discountPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | A2: R$ {pricing2.discountPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
-                      )}
+                      {allianceMode === "par" && !usaSnapshot && (() => {
+                        // Quebra A1 | A2 proporcional ao bruto (ouro com promo + pedras
+                        // + gravação de cada anel). O desconto manual já foi aplicado
+                        // no displayPrice — distribui por fatia equivalente.
+                        const a1Bruto = pricing.price * (1 - descPromo1 / 100) + pedrasCost + gravacaoCost;
+                        const a2Bruto = pricing2.price * (1 - descPromo2 / 100) + pedrasCost2 + gravacaoCost2;
+                        const totalBruto = a1Bruto + a2Bruto;
+                        const a1Final = totalBruto > 0 ? displayPrice * (a1Bruto / totalBruto) : 0;
+                        const a2Final = totalBruto > 0 ? displayPrice * (a2Bruto / totalBruto) : 0;
+                        return (
+                          <p className="text-[9px] text-gray-400">
+                            A1: R$ {a1Final.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | A2: R$ {a2Final.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                        );
+                      })()}
                       {showLockedBadge && (
                         <div className="mt-1.5 flex items-center justify-end gap-1.5">
                           <span
