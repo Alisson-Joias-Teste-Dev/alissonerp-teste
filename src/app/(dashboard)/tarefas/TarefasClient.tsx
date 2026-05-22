@@ -420,10 +420,14 @@ export default function TarefasClient() {
     setSalvandoAprov(true);
     setAprovandoId(tarefaId);
     try {
+      // Busca o id da aprovação pendente antes de enviar a decisão
+      const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);
+      const pendente = aprovacoes.find(a => a.status === "pendente") ?? aprovacoes[0];
+      if (!pendente) throw new Error("Aprovação não encontrada");
       await apiFetch(`/api/tarefas/${tarefaId}/aprovacao`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decisao: "aprovar" }),
+        body: JSON.stringify({ aprovacao_id: pendente.id, decisao: "aprovado" }),
       });
       carregar();
       carregarStats();
@@ -438,10 +442,14 @@ export default function TarefasClient() {
     if (!motivoRejeicao.trim()) return;
     setSalvandoAprov(true);
     try {
+      // Busca o id da aprovação pendente antes de enviar a decisão
+      const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);
+      const pendente = aprovacoes.find(a => a.status === "pendente") ?? aprovacoes[0];
+      if (!pendente) throw new Error("Aprovação não encontrada");
       await apiFetch(`/api/tarefas/${tarefaId}/aprovacao`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decisao: "rejeitar", motivo: motivoRejeicao }),
+        body: JSON.stringify({ aprovacao_id: pendente.id, decisao: "rejeitado", motivo: motivoRejeicao }),
       });
       setRejeitandoId(null);
       setMotivoRejeicao("");
