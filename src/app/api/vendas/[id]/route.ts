@@ -9,6 +9,7 @@ import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payloa
 import { zodError, IdSchema } from "@/lib/schemas/common";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { orcamentoFichaToDados, nomeItemOrdem } from "@/lib/orcamento-ficha-to-dados";
+import { isMasterAdmin } from "@/lib/master-admin";
 
 const toNum = (v: unknown) => (v === null || v === undefined ? v : Number(v));
 
@@ -295,6 +296,71 @@ export async function PATCH(
   const SITUACOES_VALIDAS = ["rascunho", "aprovado", "enviado", "entregue", "cancelado", "concluido"];
   if (body.situacao && !SITUACOES_VALIDAS.includes(body.situacao)) {
     return NextResponse.json({ error: "Situação inválida" }, { status: 400 });
+  }
+
+  // ── Cancelar venda: precisa cancelar ordem(s) associada(s) em cascata ────────
+  // Regra (migration 269): se ordem tem apontamento da fabrica (ourives mexeu,
+  // ouro saiu), so master pode cancelar. Outros usuarios sao bloqueados com
+  // mensagem clara. Sem cascade, venda canceladada deixava ordem ativa e a
+  // fabrica continuava produzindo uma peca que nao seria entregue.
+  if (body.situacao === "cancelado") {
+    // Busca ordens associadas a venda (pode ter mais de uma, ex: par alianca + reposicao)
+    const ordensAssoc = await sql<{ id: number; numero_ordem: string; situacao: string; tem_apontamento: boolean; ouro_movido: boolean }[]>`
+      SELECT
+        o.id, o.numero_ordem, o.situacao,
+        EXISTS(
+          SELECT 1 FROM alissonerp.apontamentos_pcp ap
+          JOIN alissonerp.pcp p ON p.id = ap.pcp_id
+          WHERE p.ordem_id = o.id
+        ) AS tem_apontamento,
+        EXISTS(
+          SELECT 1 FROM alissonerp.apontamentos_pcp ap
+          JOIN alissonerp.pcp p ON p.id = ap.pcp_id
+          WHERE p.ordem_id = o.id AND ap.peso_metal > 0
+        ) AS ouro_movido
+      FROM alissonerp.ordens o
+      WHERE o.venda_id = ${vendaId} AND o.situacao != 'cancelado'
+    `;
+
+    const ehMaster = await isMasterAdmin(user.id);
+    const ordensComApontamento = ordensAssoc.filter((o) => o.tem_apontamento);
+
+    if (ordensComApontamento.length > 0 && !ehMaster) {
+      return NextResponse.json(
+        {
+          error: "Esta venda tem ordem(s) na fábrica com apontamentos. Apenas o administrador master pode cancelar.",
+          ordens_bloqueadas: ordensComApontamento.map((o) => ({
+            numero_ordem: o.numero_ordem,
+            ouro_movimentado: o.ouro_movido,
+          })),
+          requer_master: true,
+        },
+        { status: 409 },
+      );
+    }
+
+    // Master pode cancelar com apontamento, mas precisa informar motivo.
+    const motivo = (rawBody as { motivo?: string })?.motivo?.toString().trim() ?? "";
+    if (ordensComApontamento.length > 0 && !motivo) {
+      return NextResponse.json(
+        { error: "Master deve informar motivo ao cancelar venda com ordem em produção." },
+        { status: 400 },
+      );
+    }
+
+    // Cancela ordens em cascata (audit fica em cancelado_por/em/motivo)
+    if (ordensAssoc.length > 0) {
+      await sql`
+        UPDATE alissonerp.ordens
+        SET situacao = 'cancelado',
+            status = 'concluido',
+            cancelado_por = ${user.id}::uuid,
+            cancelado_em = NOW(),
+            cancelado_motivo = ${motivo || `Venda cancelada (venda_id=${vendaId})`},
+            updated_at = NOW()
+        WHERE venda_id = ${vendaId} AND situacao != 'cancelado'
+      `;
+    }
   }
 
   // ── Guard de versão (lost-update prevention) ────────────────────────────────
