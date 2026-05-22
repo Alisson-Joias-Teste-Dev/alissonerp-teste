@@ -90,13 +90,19 @@ export async function PATCH(
     );
   }
 
+  // Motivo (quando informado) eh concatenado em detalhes_ordem. Audit completo
+  // de quem/quando/antes/depois fica em alissonerp.audit_log via trg_audit_ordens.
+  const sufixoCancel = motivo
+    ? `\n[CANCELADO em ${new Date().toISOString().slice(0, 10)} por ${user.id}: ${motivo}]`
+    : null;
+
   await sql`
     UPDATE alissonerp.ordens
     SET situacao = 'cancelado',
         status = 'concluido',
         cancelado_por = ${user.id}::uuid,
         cancelado_em = NOW(),
-        cancelado_motivo = ${motivo},
+        detalhes_ordem = ${sufixoCancel ? sql`COALESCE(detalhes_ordem, '') || ${sufixoCancel}` : sql`detalhes_ordem`},
         updated_at = NOW()
     WHERE id = ${ordemId}
   `;

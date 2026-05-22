@@ -86,12 +86,10 @@ BEFORE UPDATE OR DELETE ON alissonerp.parametros_sistema
 FOR EACH ROW
 EXECUTE FUNCTION alissonerp.fn_proteger_master_admin();
 
--- 4) Coluna cancelado_motivo em alissonerp.ordens
--- Quando master cancela ordem com apontamentos da fabrica, motivo eh
--- obrigatorio pra audit. Quando consultora cancela ordem sem apontamento,
--- motivo eh opcional (mas registrado se informado).
-ALTER TABLE alissonerp.ordens
-  ADD COLUMN IF NOT EXISTS cancelado_motivo TEXT;
+-- NOTA: nao criamos coluna `cancelado_motivo` em ordens — usamos `detalhes_ordem`
+-- existente (TEXT) concatenado com "[CANCELADO em ... por ...: motivo]". O
+-- audit completo (quem cancelou, antes/depois) ja eh capturado por trg_audit_ordens
+-- automaticamente em alissonerp.audit_log.
 
 -- Sanity check no final
 DO $$

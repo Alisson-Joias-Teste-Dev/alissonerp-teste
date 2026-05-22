@@ -348,15 +348,18 @@ export async function PATCH(
       );
     }
 
-    // Cancela ordens em cascata (audit fica em cancelado_por/em/motivo)
+    // Cancela ordens em cascata. Motivo (quando informado) concatena em
+    // detalhes_ordem. Audit completo fica em alissonerp.audit_log via trigger
+    // trg_audit_ordens.
     if (ordensAssoc.length > 0) {
+      const sufixoCancel = `\n[CANCELADO em ${new Date().toISOString().slice(0, 10)} por venda_id=${vendaId}${motivo ? `: ${motivo}` : ""}]`;
       await sql`
         UPDATE alissonerp.ordens
         SET situacao = 'cancelado',
             status = 'concluido',
             cancelado_por = ${user.id}::uuid,
             cancelado_em = NOW(),
-            cancelado_motivo = ${motivo || `Venda cancelada (venda_id=${vendaId})`},
+            detalhes_ordem = COALESCE(detalhes_ordem, '') || ${sufixoCancel},
             updated_at = NOW()
         WHERE venda_id = ${vendaId} AND situacao != 'cancelado'
       `;
