@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   type DragStartEvent, type DragEndEvent, type DragOverEvent,
@@ -13,6 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Plus, Circle, Clock, CheckCircle2, XCircle, ShieldCheck,
   Search, Loader2, Zap, ListTodo, Users, AlertTriangle, Settings,
+  SlidersHorizontal, ChevronRight, LayoutGrid,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { apiFetch } from "@/lib/apiFetch";
@@ -78,6 +79,28 @@ function safeFmtDateTime(d: string | null | undefined): string {
   if (isNaN(date.getTime())) return "";
   return date.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
+
+function tempoRelativo(d: string | null | undefined): string {
+  if (!d) return "";
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return "";
+  const diffMs = Date.now() - date.getTime();
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  const dias = Math.floor(h / 24);
+  if (dias < 30) return `há ${dias}d`;
+  return safeFmtDate(d);
+}
+
+const TIPO_LABEL: Record<string, string> = {
+  geral: "Geral",
+  desconto_acima: "Desconto acima do limite",
+  sangria: "Sangria",
+  protocolo_metal: "Protocolo de metal",
+};
 
 function isVencidaFn(t: { data_limite: string | null; status: string }): boolean {
   if (!t.data_limite) return false;
@@ -201,13 +224,28 @@ function DroppableColumn({
   );
 }
 
-const VIEW_TABS = [
-  { key: "minhas", label: "Minhas Tarefas", icon: ListTodo },
-  { key: "time", label: "Tarefas do Time", icon: Users },
-  { key: "aguardando", label: "Aguard. Aprovação", icon: ShieldCheck },
-  { key: "concluidas", label: "Concluídas", icon: CheckCircle2 },
-  { key: "kanban", label: "Kanban", icon: ListTodo },
-] as const;
+type ViewOption = {
+  key: string;
+  label: string;
+  icon: typeof ShieldCheck;
+  requireGerente?: boolean;
+};
+
+const VIEW_OPTIONS: ViewOption[] = [
+  { key: "aguardando", label: "Aprovações pendentes", icon: ShieldCheck },
+  { key: "minhas",     label: "Minhas tarefas",       icon: ListTodo },
+  { key: "time",       label: "Tarefas do time",      icon: Users, requireGerente: true },
+  { key: "concluidas", label: "Concluídas",           icon: CheckCircle2 },
+];
+
+function labelDaAba(aba: string): string {
+  const v = VIEW_OPTIONS.find(o => o.key === aba);
+  if (v) return v.label;
+  if (aba === "kanban")     return "Kanban";
+  if (aba === "automacoes") return "Automações";
+  if (aba === "config")     return "Configurações";
+  return "Tarefas";
+}
 
 export default function TarefasClient() {
   const { user, role } = useAuth();
@@ -218,6 +256,18 @@ export default function TarefasClient() {
   const [filtroTipo, setFiltroTipo] = useState("");
   const [filtroVisao, setFiltroVisao] = useState<string>("");
   const [aba, setAba] = useState<string>("minhas");
+  const abaJaAjustada = useRef(false);
+  // Visão default depende do papel: aprovadores caem direto nas pendentes.
+  // Roda só uma vez assim que o role chega do useAuth.
+  useEffect(() => {
+    if (abaJaAjustada.current) return;
+    if (!role) return;
+    abaJaAjustada.current = true;
+    if (["admin", "desenvolvedor", "gerente_loja"].includes(role)) {
+      setAba("aguardando");
+    }
+  }, [role]);
+  const [filtrosOpen, setFiltrosOpen] = useState(false);
   const [stats, setStats] = useState<Estatisticas | null>(null);
 
   const [drawerTarefa, setDrawerTarefa] = useState<Tarefa | null>(null);
@@ -371,128 +421,192 @@ export default function TarefasClient() {
       {/* Header */}
       <div className="px-4 md:px-6 pt-4 pb-3 border-b space-y-3"
         style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}>
-        {/* Linha 1: Título + Tabs (desktop juntos / mobile separados) */}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex flex-col md:flex-row md:items-center gap-3 w-full md:w-auto">
-            <h1 className="text-lg font-bold flex-shrink-0" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
-              Tarefas
-            </h1>
-            {/* Tabs: grid 3-colunas no mobile (sem rolagem), inline no desktop */}
-            <div className="w-full md:w-auto">
-              <div className="grid grid-cols-3 gap-1.5 md:flex md:rounded-lg md:border md:overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-                {VIEW_TABS.filter(t => t.key !== "time" || podeGerenciar).map(({ key, label, icon: Icon }) => (
-                  <button key={key} onClick={() => setAba(key)}
-                    className="px-2 py-2 md:px-3 md:py-1.5 text-[11px] md:text-xs font-semibold transition-colors flex items-center justify-center md:justify-start gap-1 rounded-lg md:rounded-none border md:border-0"
-                    style={{
-                      backgroundColor: aba === key ? C.esmeralda : C.cremeBg,
-                      color: aba === key ? C.creme : "#6B7280",
-                      borderColor: aba === key ? C.esmeralda : C.cremeBorder,
-                    }}>
-                    <Icon size={12} className="flex-shrink-0" />
-                    <span className="truncate">{label}</span>
-                  </button>
-                ))}
-                <button onClick={() => setAba("automacoes")}
-                  className="px-2 py-2 md:px-3 md:py-1.5 text-[11px] md:text-xs font-semibold transition-colors flex items-center justify-center md:justify-start gap-1 rounded-lg md:rounded-none border md:border-0"
-                  style={{
-                    backgroundColor: aba === "automacoes" ? C.esmeralda : C.cremeBg,
-                    color: aba === "automacoes" ? C.creme : "#6B7280",
-                    borderColor: aba === "automacoes" ? C.esmeralda : C.cremeBorder,
-                  }}>
-                  <Zap size={12} className="flex-shrink-0" />
-                  <span className="truncate">Automações</span>
-                </button>
-                {podeGerenciar && (
-                  <button onClick={() => setAba("config")}
-                    className="px-2 py-2 md:px-3 md:py-1.5 text-[11px] md:text-xs font-semibold transition-colors flex items-center justify-center md:justify-start gap-1 rounded-lg md:rounded-none border md:border-0"
-                    style={{
-                      backgroundColor: aba === "config" ? C.esmeralda : C.cremeBg,
-                      color: aba === "config" ? C.creme : "#6B7280",
-                      borderColor: aba === "config" ? C.esmeralda : C.cremeBorder,
-                    }}>
-                    <Settings size={12} className="flex-shrink-0" />
-                    <span className="truncate">Config</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
+        {/* Linha 1: Título da visão (com badge) + ações à direita */}
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-lg md:text-xl font-bold truncate" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
+            {labelDaAba(aba)}
+            {aba === "aguardando" && stats && stats.aguardando_minha_aprovacao > 0 && (
+              <span className="ml-2 text-sm md:text-base font-bold" style={{ color: "#7C3AED" }}>
+                ({stats.aguardando_minha_aprovacao})
+              </span>
+            )}
+          </h1>
 
-          {/* Filtros: mobile vai pra linha de baixo (full-width); desktop mantém */}
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            <div className="relative flex-1 md:flex-initial">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input type="text" placeholder="Buscar..." value={filtro}
-                onChange={e => setFiltro(e.target.value)}
-                className="pl-8 pr-3 py-2 md:py-1.5 border rounded-lg text-sm md:text-xs w-full md:w-40 outline-none"
-                style={{ borderColor: C.cremeBorder }} />
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {/* Atalho Kanban (view muito diferente — não entra no dropdown) */}
+            <button onClick={() => setAba("kanban")}
+              aria-label="Kanban"
+              title="Kanban"
+              className="p-2 rounded-lg border transition-colors"
+              style={{
+                backgroundColor: aba === "kanban" ? C.esmeralda : C.cremeBg,
+                color: aba === "kanban" ? C.creme : "#6B7280",
+                borderColor: aba === "kanban" ? C.esmeralda : C.cremeBorder,
+              }}>
+              <LayoutGrid size={15} />
+            </button>
+
+            {/* Automações (atalho de ícone) */}
+            <button onClick={() => setAba("automacoes")}
+              aria-label="Automações"
+              title="Automações"
+              className="p-2 rounded-lg border transition-colors"
+              style={{
+                backgroundColor: aba === "automacoes" ? C.esmeralda : C.cremeBg,
+                color: aba === "automacoes" ? C.creme : "#6B7280",
+                borderColor: aba === "automacoes" ? C.esmeralda : C.cremeBorder,
+              }}>
+              <Zap size={15} />
+            </button>
+
+            {podeGerenciar && (
+              <button onClick={() => setAba("config")}
+                aria-label="Configurações"
+                title="Configurações"
+                className="p-2 rounded-lg border transition-colors"
+                style={{
+                  backgroundColor: aba === "config" ? C.esmeralda : C.cremeBg,
+                  color: aba === "config" ? C.creme : "#6B7280",
+                  borderColor: aba === "config" ? C.esmeralda : C.cremeBorder,
+                }}>
+                <Settings size={15} />
+              </button>
+            )}
+
+            {/* Botão Filtros (dropdown com visões + filtros refinados) */}
+            <div className="relative">
+              <button onClick={() => setFiltrosOpen(v => !v)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-colors"
+                style={{
+                  backgroundColor: filtrosOpen ? C.esmeralda : C.cremeBg,
+                  color: filtrosOpen ? C.creme : C.esmeralda,
+                  borderColor: filtrosOpen ? C.esmeralda : C.cremeBorder,
+                }}>
+                <SlidersHorizontal size={14} />
+                Filtros
+              </button>
+
+              {filtrosOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setFiltrosOpen(false)} />
+                  <div className="absolute right-0 top-full mt-2 z-40 w-72 bg-white rounded-xl shadow-xl border p-3 space-y-3"
+                    style={{ borderColor: C.cremeBorder }}>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: "#9CA3AF" }}>Visão</p>
+                      <div className="space-y-1">
+                        {VIEW_OPTIONS.filter(o => !o.requireGerente || podeGerenciar).map(({ key, label, icon: Icon }) => {
+                          const isAtiva = aba === key;
+                          const contagem = key === "aguardando" ? (stats?.aguardando_minha_aprovacao ?? 0) : null;
+                          return (
+                            <button key={key} onClick={() => { setAba(key); setFiltroVisao(""); setFiltrosOpen(false); }}
+                              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors"
+                              style={{
+                                backgroundColor: isAtiva ? C.esmeralda : "transparent",
+                                color: isAtiva ? C.creme : "#1A1A1A",
+                              }}>
+                              <Icon size={14} className="flex-shrink-0" />
+                              <span className="flex-1 text-left">{label}</span>
+                              {contagem !== null && contagem > 0 && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                                  style={{
+                                    backgroundColor: isAtiva ? "#ffffff30" : "#EDE9FE",
+                                    color: isAtiva ? C.creme : "#7C3AED",
+                                  }}>
+                                  {contagem}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t" style={{ borderColor: C.cremeBorder }}>
+                      <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: "#9CA3AF" }}>Refinar</p>
+                      <div className="relative mb-2">
+                        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input type="text" placeholder="Buscar..." value={filtro}
+                          onChange={e => setFiltro(e.target.value)}
+                          className="w-full pl-8 pr-3 py-2 border rounded-lg text-sm outline-none"
+                          style={{ borderColor: C.cremeBorder }} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <select value={filtroPrioridade} onChange={e => setFiltroPrioridade(e.target.value)}
+                          className="px-2 py-2 border rounded-lg text-xs outline-none"
+                          style={{ borderColor: C.cremeBorder }}>
+                          <option value="">Prioridade</option>
+                          <option value="urgente">Urgente</option>
+                          <option value="alta">Alta</option>
+                          <option value="media">Média</option>
+                          <option value="baixa">Baixa</option>
+                        </select>
+                        <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}
+                          className="px-2 py-2 border rounded-lg text-xs outline-none"
+                          style={{ borderColor: C.cremeBorder }}>
+                          <option value="">Tipo</option>
+                          <option value="geral">Geral</option>
+                          <option value="desconto_acima">Aprovação desconto</option>
+                          <option value="sangria">Sangria</option>
+                          <option value="protocolo_metal">Protocolo metal</option>
+                        </select>
+                      </div>
+                      {(filtro || filtroPrioridade || filtroTipo) && (
+                        <button onClick={() => { setFiltro(""); setFiltroPrioridade(""); setFiltroTipo(""); }}
+                          className="mt-2 text-[11px] font-semibold text-gray-500 hover:text-gray-700">
+                          Limpar refinos
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-            {/* Filtros adicionais */}
-            <select value={filtroPrioridade} onChange={e => setFiltroPrioridade(e.target.value)}
-              className="px-2 py-2 md:py-1.5 border rounded-lg text-sm md:text-xs outline-none flex-1 md:flex-initial min-w-0"
-              style={{ borderColor: C.cremeBorder }}>
-              <option value="">Prioridade</option>
-              <option value="urgente">Urgente</option>
-              <option value="alta">Alta</option>
-              <option value="media">Média</option>
-              <option value="baixa">Baixa</option>
-            </select>
-            <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}
-              className="px-2 py-2 md:py-1.5 border rounded-lg text-sm md:text-xs outline-none flex-1 md:flex-initial min-w-0"
-              style={{ borderColor: C.cremeBorder }}>
-              <option value="">Tipo</option>
-              <option value="geral">Geral</option>
-              <option value="desconto_acima">Aprovação desconto</option>
-              <option value="sangria">Sangria</option>
-              <option value="protocolo_metal">Protocolo metal</option>
-            </select>
+
             {/* Botão Nova: só desktop; mobile usa FAB */}
             <button onClick={() => setShowNova(true)}
-              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+              className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
               style={{ backgroundColor: C.esmeralda, color: C.creme }}>
               <Plus size={13} /> Nova
             </button>
           </div>
         </div>
 
-        {/* Dashboard Stats — quebra em linhas no mobile (sem rolagem lateral) */}
-        {stats && (
-          <div>
-            <div className="flex gap-2 md:gap-3 flex-wrap">
-              {[
-                { label: "Pendentes", value: stats.minhas_pendentes, color: "#6B7280", icon: Circle },
-                { label: "Em andamento", value: stats.em_andamento, color: "#D97706", icon: Clock },
-                { label: "Aguard. Aprovação", value: stats.aguardando_minha_aprovacao, color: "#7C3AED", icon: ShieldCheck },
-                { label: "Concluídas", value: stats.concluidas, color: "#059669", icon: CheckCircle2 },
-                { label: "Vencidas", value: stats.vencidas, color: "#DC2626", icon: AlertTriangle },
-              ].map(stat => (
-                <button key={stat.label}
-                  onClick={() => {
-                    setFiltroVisao("");
-                    if (stat.label === "Aguard. Aprovação") setAba("aguardando");
-                    else if (stat.label === "Concluídas") setAba("concluidas");
-                    else if (stat.label === "Pendentes") setAba("minhas");
-                    else if (stat.label === "Em andamento") {
-                      setFiltroPrioridade("");
-                      setFiltroTipo("");
-                      setFiltro("");
-                      setAba("minhas");
-                    }
-                    else if (stat.label === "Vencidas") {
-                      setFiltroPrioridade("");
-                      setFiltroTipo("");
-                      setFiltro("");
-                      setFiltroVisao("vencidas");
-                      setAba("minhas");
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 md:px-2.5 md:py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors hover:opacity-80 whitespace-nowrap"
-                  style={{ backgroundColor: stat.color + "15", color: stat.color }}>
-                  <stat.icon size={12} />
-                  {stat.label}: {stat.value}
-                </button>
-              ))}
-            </div>
+        {/* Dashboard Stats — escondidos na visão de aprovações (foco total nas pendentes) */}
+        {stats && aba !== "aguardando" && aba !== "automacoes" && aba !== "config" && (
+          <div className="flex gap-2 md:gap-3 flex-wrap">
+            {[
+              { label: "Pendentes", value: stats.minhas_pendentes, color: "#6B7280", icon: Circle },
+              { label: "Em andamento", value: stats.em_andamento, color: "#D97706", icon: Clock },
+              { label: "Aguard. Aprovação", value: stats.aguardando_minha_aprovacao, color: "#7C3AED", icon: ShieldCheck },
+              { label: "Concluídas", value: stats.concluidas, color: "#059669", icon: CheckCircle2 },
+              { label: "Vencidas", value: stats.vencidas, color: "#DC2626", icon: AlertTriangle },
+            ].map(stat => (
+              <button key={stat.label}
+                onClick={() => {
+                  setFiltroVisao("");
+                  if (stat.label === "Aguard. Aprovação") setAba("aguardando");
+                  else if (stat.label === "Concluídas") setAba("concluidas");
+                  else if (stat.label === "Pendentes") setAba("minhas");
+                  else if (stat.label === "Em andamento") {
+                    setFiltroPrioridade("");
+                    setFiltroTipo("");
+                    setFiltro("");
+                    setAba("minhas");
+                  }
+                  else if (stat.label === "Vencidas") {
+                    setFiltroPrioridade("");
+                    setFiltroTipo("");
+                    setFiltro("");
+                    setFiltroVisao("vencidas");
+                    setAba("minhas");
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 md:px-2.5 md:py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors hover:opacity-80 whitespace-nowrap"
+                style={{ backgroundColor: stat.color + "15", color: stat.color }}>
+                <stat.icon size={12} />
+                {stat.label}: {stat.value}
+              </button>
+            ))}
           </div>
         )}
       </div>
@@ -535,6 +649,75 @@ export default function TarefasClient() {
               )}
             </DragOverlay>
           </DndContext>
+        </div>
+      ) : aba === "aguardando" ? (
+        /* Cards mobile-first para aprovações pendentes */
+        <div className="flex-1 overflow-y-auto">
+          <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-2xl mx-auto w-full space-y-3">
+            {tarefasFiltradas.length === 0 ? (
+              <div className="text-center py-16">
+                <CheckCircle2 size={32} className="mx-auto mb-3" style={{ color: "#10B981" }} />
+                <p className="text-sm font-medium" style={{ color: "#6B7280" }}>
+                  Nenhuma aprovação pendente
+                </p>
+                <p className="text-xs mt-1" style={{ color: "#9CA3AF" }}>
+                  Tudo certo por aqui.
+                </p>
+              </div>
+            ) : (
+              tarefasFiltradas.map(t => {
+                const pri = PRIORIDADE_BADGE[t.prioridade] ?? PRIORIDADE_BADGE.media;
+                const tipoLabel = t.tipo ? (TIPO_LABEL[t.tipo] ?? t.tipo) : null;
+                return (
+                  <div key={t.id}
+                    onClick={() => setDrawerTarefa(t)}
+                    className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 cursor-pointer hover:shadow-md active:scale-[0.99] transition-all">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs" style={{ color: "#6B7280" }}>
+                          Solicitante
+                        </p>
+                        <p className="text-sm font-semibold truncate" style={{ color: "#1A1A1A" }}>
+                          {t.criador_nome ?? "—"}
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                        style={{ backgroundColor: pri.bg, color: pri.text }}>
+                        {pri.label}
+                      </span>
+                    </div>
+
+                    {tipoLabel && (
+                      <div className="mb-2">
+                        <p className="text-xs" style={{ color: "#6B7280" }}>Tipo</p>
+                        <p className="text-sm font-medium" style={{ color: "#1A1A1A" }}>{tipoLabel}</p>
+                      </div>
+                    )}
+
+                    <p className="text-sm leading-snug mb-2" style={{ color: "#1A1A1A" }}>
+                      {t.titulo}
+                    </p>
+                    {t.descricao && (
+                      <p className="text-xs leading-relaxed mb-3 line-clamp-2" style={{ color: "#6B7280" }}>
+                        {t.descricao}
+                      </p>
+                    )}
+
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t" style={{ borderColor: "#F3F4F6" }}>
+                      <span className="text-xs" style={{ color: "#9CA3AF" }}>
+                        {tempoRelativo(t.created_at)}
+                        {t.numero_ordem && <span className="ml-2">#{t.numero_ordem}</span>}
+                      </span>
+                      <span className="flex items-center gap-1 text-xs font-semibold" style={{ color: C.esmeralda }}>
+                        Ver
+                        <ChevronRight size={14} />
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       ) : (
         /* Lista simples para outras views */
