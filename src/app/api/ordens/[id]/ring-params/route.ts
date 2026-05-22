@@ -1,6 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { METAL_COLORS } from "@/app/(dashboard)/orcamento/constants";
+
+/**
+ * Normaliza cor_metal -> hex aceito pelo THREE.js.
+ * No banco hist a campo veio salvo de duas formas:
+ *  - como label ("Ouro Amarelo") em registros antigos
+ *  - como hex ("#FFD700") em registros recentes
+ * Mesma logica do applyRingParams no OrcamentoClient (linha ~356).
+ */
+function corToHex(raw: unknown): { hex: string; density: number } {
+  const v = typeof raw === "string" ? raw : "";
+  // Hex direto
+  if (v.startsWith("#")) {
+    const match = METAL_COLORS.find((m) => m.value === v);
+    return { hex: v, density: match?.density ?? 14.69 };
+  }
+  // Label -> lookup
+  const match = METAL_COLORS.find((m) => m.label === v || m.value === v);
+  if (match) return { hex: match.value, density: match.density };
+  // Default amarelo
+  return { hex: "#FFD700", density: 14.69 };
+}
 
 /**
  * GET /api/ordens/[id]/ring-params
@@ -74,6 +96,10 @@ export async function GET(
 
   // Converte uma linha da ficha tecnica do orcamento em { profile, params } no formato
   // consumido pelo AliancaViewport. Defaults conservadores quando coluna eh null.
+  // Conversao replica a mesma logica de applyRingParams em OrcamentoClient.tsx
+  // (linha ~351) — refatorar pra lib compartilhada exigiria desacoplar
+  // dependencias do frontend (aroSize, calibracao). Por ora, copia controlada
+  // com cores normalizadas via METAL_COLORS (mesma fonte do orcamento).
   function toViewerData(row: Record<string, unknown>) {
     const perfil = String(row.perfil ?? "Anatomica");
     const friso_largura = Number(row.friso_largura ?? 0);
@@ -83,8 +109,20 @@ export async function GET(
     const texto = String(row.texto ?? "");
     const fontType: 1 | 2 = fonte === "Cursiva" ? 2 : 1;
 
+    // FrisoUnico/FrisoLateral sao perfis legados — coerce pra Simples
+    // e ativa o friso conforme o tipo, igual ao OrcamentoClient.
+    let perfilNorm = perfil;
+    let grooveType: "lateral" | "centro" | "duplo" = "lateral";
+    if (perfil === "FrisoUnico") { perfilNorm = "Simples"; grooveType = "lateral"; }
+    else if (perfil === "FrisoLateral") { perfilNorm = "Simples"; grooveType = "duplo"; }
+    else if (row.friso_tipo === "centro" || row.friso_tipo === "duplo") grooveType = row.friso_tipo;
+
+    const hasGroove = perfil === "FrisoUnico" || perfil === "FrisoLateral" || has_friso;
+    const corNorm = corToHex(row.cor_metal);
+    const densidade = row.densidade_ouro != null ? Number(row.densidade_ouro) : corNorm.density;
+
     return {
-      profile: perfil,
+      profile: perfilNorm,
       params: {
         diameter: Number(row.diametro ?? 17),
         width: Number(row.largura ?? 5),
@@ -98,14 +136,14 @@ export async function GET(
         canalBorderHeight: Number(row.canal_borda_altura ?? 0),
         chamferSize: Number(row.chanfro_tamanho ?? 0),
         domePercentage: Number(row.dome_porcentagem ?? 100),
-        metalColor: String(row.cor_metal ?? "Amarelo"),
-        goldDensity: Number(row.densidade_ouro ?? 15.3),
+        metalColor: corNorm.hex,
+        goldDensity: densidade,
         goldPrice: 0,
         startMkp: 1,
         discountPercent: 0,
-        hasGroove: has_friso,
+        hasGroove,
         grooveKind: (row.friso_kind === "risco" ? "risco" : "friso") as "friso" | "risco",
-        grooveType: (row.friso_tipo === "centro" || row.friso_tipo === "duplo" ? row.friso_tipo : "lateral") as "lateral" | "centro" | "duplo",
+        grooveType,
         hasStones: Number(row.qtd_pedras ?? 0) > 0,
         stoneSize: Number(row.tamanho_pedra ?? 0),
         stoneRows: Number(row.pedra_fileiras ?? 1),
