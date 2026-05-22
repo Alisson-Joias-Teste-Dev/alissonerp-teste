@@ -498,7 +498,9 @@ export default function OrcamentoClient({
   // (orçamento novo). Edição de orçamento existente carrega os valores salvos via useEffect.
   const [params, setParams] = useState<RingParams>({
     ...DEFAULT_PARAMS, goldPrice: cotacaoOuro,
-    startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0,
+    // Desconto inicial sempre 0 — consultora ajusta caso a caso. config.discount_percent
+    // permanece como referencia historica/relatorios, mas nao mais pre-preenche o input.
+    startMkp: config?.start_mkp ?? 3.5, discountPercent: 0,
     domePercentage: Number(config?.dome_percentage ?? DEFAULT_PARAMS.domePercentage),
     width: 0, height: 0,
   });
@@ -516,7 +518,9 @@ export default function OrcamentoClient({
   const [ringSize2, setRingSize2] = useState<RingSize>(RING_SIZES[14]);
   const [params2, setParams2] = useState<RingParams>({
     ...DEFAULT_PARAMS, goldPrice: cotacaoOuro,
-    startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0,
+    // Desconto inicial sempre 0 — consultora ajusta caso a caso. config.discount_percent
+    // permanece como referencia historica/relatorios, mas nao mais pre-preenche o input.
+    startMkp: config?.start_mkp ?? 3.5, discountPercent: 0,
     domePercentage: Number(config?.dome_percentage ?? DEFAULT_PARAMS.domePercentage),
     width: 0, height: 0,
   });
@@ -1447,7 +1451,7 @@ export default function OrcamentoClient({
     setTextosExtras([]); setTextosExtras2([]);
 
     // Restaura últimos parâmetros do modelo usados (localStorage)
-    const baseParams = { ...DEFAULT_PARAMS, goldPrice: cotacaoOuro, startMkp: config?.start_mkp ?? 3.5, discountPercent: config?.discount_percent ?? 0, domePercentage: Number(config?.dome_percentage ?? DEFAULT_PARAMS.domePercentage) };
+    const baseParams = { ...DEFAULT_PARAMS, goldPrice: cotacaoOuro, startMkp: config?.start_mkp ?? 3.5, discountPercent: 0, domePercentage: Number(config?.dome_percentage ?? DEFAULT_PARAMS.domePercentage) };
     let savedProfile = (config?.profile as ProfileType) ?? ProfileType.Anatomica;
     let savedRingSize = RING_SIZES[14];
     let restoredParams = baseParams;
@@ -3727,8 +3731,13 @@ export default function OrcamentoClient({
                     ? `${pricing.weight.toFixed(1)}g + ${pricing2.weight.toFixed(1)}g = ${displayWeight.toFixed(1)}g`
                     : `${displayWeight.toFixed(1)}g`;
                   const mostraDePor = !usaSnapshot && cheioTotal > displayPrice + 0.005;
+                  // "(com pedras)" so quando ao menos um dos aneis realmente
+                  // tem pedras. Antes mostrava sempre, confundindo aliancas
+                  // lisas com texto enganoso.
+                  const algumComPedras = params.hasStones || (allianceMode === "par" && params2.hasStones);
+                  const sufixoPedras = algumComPedras ? " (com pedras)" : "";
                   const tooltip = mostraDePor
-                    ? `Peso: ${pesoMostrado}\nDe: R$ ${cheioTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nPor: R$ ${displayPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (com pedras)`
+                    ? `Peso: ${pesoMostrado}\nDe: R$ ${cheioTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nPor: R$ ${displayPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${sufixoPedras}`
                     : `Peso: ${pesoMostrado}`;
                   const congeladoFmt = savedSnapshot?.congelado_em
                     ? new Date(savedSnapshot.congelado_em).toLocaleDateString("pt-BR")

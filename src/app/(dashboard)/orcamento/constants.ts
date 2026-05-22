@@ -85,7 +85,7 @@ export const DEFAULT_PARAMS: RingParams = {
   stoneSize: 1.5,
   stoneCount: 1,
   stoneRows: 1,
-  stoneDrill: true,
+  stoneDrill: false,
   stoneHalfMoon: false,
   stoneFull: false,
   stoneType: "Zirconia", // sem acento — bate com os botões da UI
