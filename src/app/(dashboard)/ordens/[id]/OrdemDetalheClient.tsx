@@ -127,17 +127,49 @@ function Badge({ label, size = "sm" }: { label: string; size?: "sm" | "lg" }) {
   );
 }
 
+// Labels comerciais das pedras/cortes — devem casar com STONE_TYPES e STONE_CUTS
+// de src/app/(dashboard)/orcamento/constants.ts. Producao mostra exatamente
+// o que a vendedora viu no orcamento (sem valores internos tipo "esmeralda_cut").
+const STONE_TIPO_LABELS: Record<string, string> = {
+  diamante: "Diamante Natural",
+  moissanita: "Moissanita",
+  rubi: "Rubi",
+  esmeralda: "Esmeralda",
+  safira: "Safira",
+  zirconia: "Zirconia",
+};
+const STONE_CORTE_LABELS: Record<string, string> = {
+  brilhante: "Brilhante",
+  gota: "Gota",
+  oval: "Oval",
+  princesa: "Princesa",
+  esmeralda_cut: "Esmeralda",
+  marques: "Marquês",
+};
+function labelTipoPedra(v: unknown): string {
+  const s = String(v ?? "").toLowerCase();
+  return STONE_TIPO_LABELS[s] ?? (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+}
+function labelCortePedra(v: unknown): string {
+  const s = String(v ?? "").toLowerCase();
+  return STONE_CORTE_LABELS[s] ?? s;
+}
+
 // Formatter compartilhado para os campos da ficha (par e single).
 function formatFichaValue(key: string, value: unknown): string {
   if (key === "modelo") return normalizeModelo(value);
+  // tipo_pedra (string única do botão "Diamante/Zirconia/...") — normaliza
+  // pro mesmo label do orçamento. Aceita tanto "Diamante" (capital) quanto
+  // "diamante" (lowercase, vindo do pedras_detalhadas).
+  if (key === "tipo_pedra") return labelTipoPedra(value);
   if (key === "pedras_detalhadas" && Array.isArray(value)) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return value.map((p: any) => {
-      const tipo = p.tipo ? String(p.tipo).charAt(0).toUpperCase() + String(p.tipo).slice(1) : "";
+      const tipo = labelTipoPedra(p.tipo);
       const detalhes: string[] = [];
       if (p.qtd) detalhes.push(`${p.qtd}x`);
       if (p.tamanho_mm) detalhes.push(`${p.tamanho_mm}mm`);
-      if (p.corte) detalhes.push(String(p.corte));
+      if (p.corte) detalhes.push(labelCortePedra(p.corte));
       return `${tipo}${detalhes.length ? ` (${detalhes.join(" · ")})` : ""}`;
     }).filter(Boolean).join(", ") || "—";
   }
@@ -145,6 +177,15 @@ function formatFichaValue(key: string, value: unknown): string {
   if (key === "texto_gravacao") return formatGravacao(value);
   if (key === "has_friso" || key === "pedra_drill" || key === "pedra_meia_lua" || key === "pedra_volta_completa") {
     return value ? "Sim" : "Não";
+  }
+  if (key === "friso_lado") return value === "LOWER" ? "Inferior" : "Superior";
+  if (key === "friso_kind") return value === "risco" ? "Risco" : "Friso";
+  if (key === "friso_tipo") {
+    const s = String(value ?? "").toLowerCase();
+    if (s === "centro") return "Centro";
+    if (s === "duplo") return "Duplo";
+    if (s === "lateral") return "Lateral";
+    return String(value);
   }
   if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
   return String(value);
