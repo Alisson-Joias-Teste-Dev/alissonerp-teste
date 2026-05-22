@@ -337,10 +337,15 @@ export async function PATCH(
       const pesoTotal = Number(snap?.peso ?? orcValores?.peso ?? orc.peso_estimado ?? 0);
       const qtdRaw = Number(orcValores?.quantidade ?? 1);
       const qtdItem = Number.isFinite(qtdRaw) && qtdRaw >= 1 ? Math.floor(qtdRaw) : 1;
-      // Item da venda é gravado como "par" (1 linha, quantidade=2, valor TOTAL,
-      // peso TOTAL) — o vendedor edita na tela de venda se precisar separar.
-      const valorItem = valorTotal;
-      const pesoItem = pesoTotal;
+      // Bug duplicacao: ate v2.56 o item nascia com preco_unitario = valor TOTAL
+      // do par + quantidade=2, mas o display de venda calcula linha como
+      // preco_un × quantidade. Isso fazia a linha aparecer dobrada na tela
+      // (R$ 229k em vez de R$ 114k), enquanto o sumario usava total_item e
+      // ficava correto — gerando inconsistencia visivel.
+      // Fix: preco_unitario = valor por unidade (par => valor/2), total_item =
+      // valor TOTAL da linha, qtde mantida. Agora preco_un × qtde = total_item.
+      const valorUnitario = qtdItem > 1 ? valorTotal / qtdItem : valorTotal;
+      const pesoUnitario = qtdItem > 1 ? pesoTotal / qtdItem : pesoTotal;
       // Replica o desconto do orçamento no item da venda. Reconstrói o preço
       // cheio para manter coerência: lista × (1 − pct/100) = unitário.
       // Sem isso, lista ficava como o próprio valor já descontado, e qualquer
@@ -348,8 +353,8 @@ export async function PATCH(
       // (30% no orçamento + 30% na venda = 51% real, não 60% e não 30%).
       const descontoPctItem = Number(snap?.desconto_pct ?? orcValores?.desconto_pct ?? 0);
       const precoListaItem = descontoPctItem > 0 && descontoPctItem < 100
-        ? Math.round((valorItem / (1 - descontoPctItem / 100)) * 100) / 100
-        : valorItem;
+        ? Math.round((valorUnitario / (1 - descontoPctItem / 100)) * 100) / 100
+        : valorUnitario;
 
       // Comissão segue faixas_comissao pelo desconto efetivo do orçamento —
       // mesma regra que produto cadastrado usa no checkout. Aliança com 30%
@@ -374,7 +379,10 @@ export async function PATCH(
       }
       if (!Number.isFinite(pctComissao) || pctComissao < 0) pctComissao = 0;
       if (pctComissao > 100) pctComissao = 100;
-      const valorComissao = Math.round(valorItem * pctComissao) / 100;
+      // Comissao calculada sobre o TOTAL da linha (par inteiro), nao por unidade
+      // — totalComissao do venda detail soma valor_comissao sem multiplicar
+      // pela quantidade.
+      const valorComissao = Math.round(valorTotal * pctComissao) / 100;
 
       await tx`
         INSERT INTO alissonerp.itens_venda_erp (
@@ -383,7 +391,7 @@ export async function PATCH(
           pct_comissao, valor_comissao, observacao
         ) VALUES (
           ${venda.id}, ${nomeItem}, ${qtdItem}, ${precoListaItem},
-          ${descontoPctItem}, ${valorItem}, ${valorItem}, ${pesoItem},
+          ${descontoPctItem}, ${valorUnitario}, ${valorTotal}, ${pesoUnitario},
           ${pctComissao}, ${valorComissao},
           ${'Orçamento ' + orc.numero_orcamento}
         )
