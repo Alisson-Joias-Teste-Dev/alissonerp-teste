@@ -109,7 +109,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     WHERE id = ${body.aprovacao_id} AND tarefa_id = ${Number(id)}
   `;
   if (!aprovacao) return NextResponse.json({ error: "Aprovação não encontrada" }, { status: 404 });
-  if (String(aprovacao.aprovador_id) !== user.id) {
+
+  // Admin e desenvolvedor podem responder qualquer aprovação
+  const [usuarioLogado] = await sql`
+    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+  `;
+  const isAdminOuDev = ["admin", "desenvolvedor"].includes(usuarioLogado?.role ?? "");
+
+  if (String(aprovacao.aprovador_id) !== user.id && !isAdminOuDev) {
     return NextResponse.json({ error: "Somente o aprovador pode responder" }, { status: 403 });
   }
 
