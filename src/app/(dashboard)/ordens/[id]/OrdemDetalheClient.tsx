@@ -459,7 +459,7 @@ function PecaClienteCard({ fotoPeca, fotoPeca2, fotoPecaSignedUrl, fotoPeca2Sign
   );
 }
 
-type Tab = "producao" | "apontamentos" | "estoque" | "transferencias" | "ficha";
+type Tab = "ficha" | "apontamentos" | "estoque" | "transferencias";
 
 interface Props {
   ordem: any;
@@ -484,7 +484,11 @@ const ROLES_SO_FICHA = ["ourives", "motoboy", "estoquista_fabrica", "estoquista_
 export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, transferencias, fichaTecnica, timeline, userRole, conversaoSku = null, fotoPecaSignedUrl = null, fotoPeca2SignedUrl = null, labelsFicha = {} }: Props) {
   const router = useRouter();
   const soFicha = userRole != null && ROLES_SO_FICHA.includes(userRole);
-  const [tab, setTab] = useState<Tab>(soFicha ? "ficha" : "producao");
+  // Ficha Técnica eh o conteudo principal — ourives/gestão precisa ver
+  // as especificacoes do orcamento como primeira coisa ao abrir a ordem.
+  // Aba "Producao" (PCP zeros) foi removida — ja existe um card "Resultado
+  // de Producao" no header quando a ordem esta concluida.
+  const [tab, setTab] = useState<Tab>("ficha");
   const [comentariosCount, setComentariosCount] = useState(0);
 
   // ── Modal de edição (apenas desenvolvedor) ───────────────────────────────
@@ -588,11 +592,10 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
         { key: "ficha", label: "Ficha Técnica", count: fichaCount },
       ]
     : [
-        { key: "producao",       label: "Produção" },
+        { key: "ficha",          label: "Ficha Técnica",  count: fichaCount },
         { key: "apontamentos",   label: "Apontamentos",   count: apontamentos.length },
         { key: "estoque",        label: "Mov. Estoque",   count: movEstoque.length },
         { key: "transferencias", label: "Transferências", count: transferencias.length },
-        { key: "ficha",          label: "Ficha Técnica",  count: fichaCount },
       ];
 
   return (
@@ -869,38 +872,10 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
             ))}
           </div>
 
-          {/* Tab: Produção */}
-          {tab === "producao" && (
-            <div className="bg-white rounded-xl border p-5" style={{ borderColor: C.cremeBorder }}>
-              <p className="text-sm font-semibold mb-4" style={{ color: "#1A1A1A" }}>
-                Dados de Produção (PCP)
-              </p>
-              {!temPcp ? (
-                <p className="text-sm py-4 text-center" style={{ color: "#9CA3AF" }}>
-                  Nenhum PCP vinculado a esta ordem.
-                </p>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 md:gap-x-8 gap-y-1">
-                  {[
-                    { label: "Total Metal",    value: `${Number(ordem.pcp_total_metal || 0).toFixed(2)}g` },
-                    { label: "Retorno Metal",  value: `${Number(ordem.pcp_retorno_metal || 0).toFixed(2)}g` },
-                    { label: "Metal Externo",  value: `${Number(ordem.pcp_metal_externo || 0).toFixed(2)}g` },
-                    { label: "Pedras (un)",    value: `${ordem.pcp_total_pedras_un || 0}` },
-                    { label: "Pedras (g)",     value: `${Number(ordem.pcp_total_pedras_g || 0).toFixed(2)}g` },
-                    { label: "Outros Pesos",   value: `${Number(ordem.pcp_total_outros || 0).toFixed(2)}g` },
-                    { label: "Peso Final",     value: `${Number(ordem.pcp_peso_final || 0).toFixed(2)}g` },
-                    { label: "PMC",            value: `${Number(ordem.pcp_pmc || 0).toFixed(2)}g` },
-                    { label: "Quebra",         value: `${Number(ordem.pcp_quebra || 0).toFixed(2)}g (${Number(ordem.pcp_quebra_pct || 0).toFixed(1)}%)` },
-                  ].map((item) => (
-                    <div key={item.label} className="py-2.5 border-b" style={{ borderColor: C.cremeBorder }}>
-                      <p className="text-[10px] uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{item.label}</p>
-                      <p className="font-mono text-sm mt-0.5" style={{ color: "#1A1A1A" }}>{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Aba "Produção" removida — os dados de PCP (peso final, PMC,
+              quebra) ja aparecem no card "Resultado de Produção" no topo
+              quando a ordem fica concluida. Ourives precisa ver a ficha
+              tecnica primeiro ao abrir uma ordem nova. */}
 
           {/* Tab: Apontamentos */}
           {tab === "apontamentos" && (
