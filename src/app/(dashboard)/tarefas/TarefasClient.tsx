@@ -102,6 +102,86 @@ const TIPO_LABEL: Record<string, string> = {
   protocolo_metal: "Protocolo de metal",
 };
 
+type Chip = { label: string; icon: string; bg: string; color: string };
+
+function parsearCamposDescricao(descricao: string): {
+  valorTotal?: string;
+  aReceber?: string;
+  saldoDisponivel?: string;
+  cliente?: string;
+  desconto?: string;
+  descontoValor?: string;
+  produtoNome?: string;
+  pctDesconto?: string;
+} {
+  const out: ReturnType<typeof parsearCamposDescricao> = {};
+  const text = descricao.replace(/\\n/g, "\n");
+
+  const valorTotal = text.match(/Valor total:\s*(R\$\s*[\d.,]+)/i);
+  if (valorTotal) out.valorTotal = valorTotal[1].trim();
+
+  const aReceber = text.match(/A Receber:\s*(R\$\s*[\d.,]+)/i);
+  if (aReceber) out.aReceber = aReceber[1].trim();
+
+  const saldo = text.match(/Saldo dispon[ií]vel:\s*(R\$\s*[\d.,]+)/i);
+  if (saldo) out.saldoDisponivel = saldo[1].trim();
+
+  const cliente = text.match(/Venda\s+\d+\s*[—–-]\s*([^\n]+)/i);
+  if (cliente) out.cliente = cliente[1].trim();
+
+  const descPct = text.match(/Desconto(?: solicitado)?:\s*([\d.,]+%)/i);
+  if (descPct) out.desconto = descPct[1].trim();
+
+  const pctDesc = text.match(/(?:%\s*de\s*desconto|Desconto aplicado):\s*([\d.,]+%)/i);
+  if (pctDesc) out.pctDesconto = pctDesc[1].trim();
+  else if (out.desconto) out.pctDesconto = out.desconto;
+
+  const descValor = text.match(/Desconto em R\$:\s*(R\$\s*[\d.,]+)/i);
+  if (descValor) out.descontoValor = descValor[1].trim();
+
+  const produto = text.match(/(?:Produto|Item):\s*([^\n]+)/i);
+  if (produto) out.produtoNome = produto[1].trim();
+
+  return out;
+}
+
+function gerarChips(t: Tarefa): Chip[] {
+  const chips: Chip[] = [];
+  const desc = t.descricao ?? "";
+  const tags = Array.isArray(t.tags) ? t.tags : [];
+  const campos = parsearCamposDescricao(desc);
+
+  if (tags.includes("diretor") || tags.includes("credito_loja")) {
+    if (campos.aReceber)
+      chips.push({ label: `Crédito: ${campos.aReceber}`, icon: "💰", bg: "#FFF7ED", color: "#EA580C" });
+    if (campos.saldoDisponivel)
+      chips.push({ label: `Saldo: ${campos.saldoDisponivel}`, icon: "🏦", bg: "#FEE2E2", color: "#DC2626" });
+    if (campos.cliente)
+      chips.push({ label: campos.cliente, icon: "👤", bg: "#F3F4F6", color: "#6B7280" });
+    chips.push({ label: "Comissão zerada se aprovado", icon: "⚠️", bg: "#FEFCE8", color: "#CA8A04" });
+  }
+
+  if (tags.includes("aprovacao_desconto")) {
+    if (campos.pctDesconto)
+      chips.push({ label: `Desconto: ${campos.pctDesconto}`, icon: "🏷️", bg: "#FEE2E2", color: "#DC2626" });
+    if (campos.descontoValor)
+      chips.push({ label: `Economia: ${campos.descontoValor}`, icon: "💸", bg: "#F3F4F6", color: "#6B7280" });
+    if (campos.produtoNome)
+      chips.push({ label: campos.produtoNome, icon: "📦", bg: "#F3F4F6", color: "#6B7280" });
+  }
+
+  if (t.tipo === "cartao_desconto") {
+    chips.push({ label: "Cartão de Crédito", icon: "💳", bg: "#EFF6FF", color: "#2563EB" });
+    if (t.venda_id)
+      chips.push({ label: `Venda #${t.venda_id}`, icon: "🧾", bg: "#F3F4F6", color: "#6B7280" });
+    const pctMatch = (t.titulo ?? "").match(/(\d+)%/);
+    if (pctMatch)
+      chips.push({ label: `>${pctMatch[1]}% de desconto`, icon: "⚠️", bg: "#FEE2E2", color: "#DC2626" });
+  }
+
+  return chips;
+}
+
 function isVencidaFn(t: { data_limite: string | null; status: string }): boolean {
   if (!t.data_limite) return false;
   if (["concluida", "cancelada", "vencida", "aprovada"].includes(t.status)) return false;
@@ -749,6 +829,24 @@ export default function TarefasClient() {
                         {t.descricao.replace(/\\n/g, "\n").replace(/• null\s?—?\s?/g, "• ").replace(/• null/g, "•")}
                       </p>
                     )}
+
+                    {/* Chips estruturados por tipo de aprovação */}
+                    {(() => {
+                      const chips = gerarChips(t);
+                      return chips.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5 mt-1 mb-3">
+                          {chips.map((chip, i) => (
+                            <span
+                              key={i}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                              style={{ backgroundColor: chip.bg, color: chip.color }}
+                            >
+                              {chip.icon} {chip.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null;
+                    })()}
 
                     {/* Tempo */}
                     <p className="text-xs mb-3" style={{ color: "#9CA3AF" }}>
