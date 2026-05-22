@@ -722,18 +722,12 @@ export default function TarefasClient() {
                 const estaAprovando = salvandoAprov && aprovandoId === t.id;
                 return (
                   <div key={t.id} className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 transition-all">
-                    {/* Solicitante + prioridade */}
-                    <div className="flex items-start justify-between gap-3 mb-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs" style={{ color: "#6B7280" }}>Solicitante</p>
-                        <p className="text-sm font-semibold truncate" style={{ color: "#1A1A1A" }}>
-                          {t.criador_nome ?? "—"}
-                        </p>
-                      </div>
-                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
-                        style={{ backgroundColor: pri.bg, color: pri.text }}>
-                        {pri.label}
-                      </span>
+                    {/* Solicitante */}
+                    <div className="mb-2">
+                      <p className="text-xs" style={{ color: "#6B7280" }}>Solicitante</p>
+                      <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>
+                        {t.criador_nome ?? "—"}
+                      </p>
                     </div>
 
                     {/* Tipo */}
