@@ -145,7 +145,10 @@ export function NotificacoesDrawer({
                     </p>
                     {n.mensagem && (
                       <p className="text-[11px] mt-1 whitespace-pre-line leading-relaxed" style={{ color: "#6b7280" }}>
-                        {n.mensagem.length > 300 ? n.mensagem.slice(0, 300) + "…" : n.mensagem}
+                        {(() => {
+                          const txt = n.mensagem.replace(/\\n/g, "\n").replace(/• null\s?—?\s?/g, "• ");
+                          return txt.length > 300 ? txt.slice(0, 300) + "…" : txt;
+                        })()}
                       </p>
                     )}
 

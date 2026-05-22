@@ -8,6 +8,10 @@
 //
 // REGRA DE NEGÓCIO (Bug 3 — ver NotificacoesDrawer.tsx): qualquer aprovação
 // inline DEVE chamar este endpoint. Não duplicar lógica de aprovação.
+//
+// Busca dados via 2 endpoints existentes em paralelo:
+//   GET /api/tarefas/[id]           → tarefa + venda_id
+//   GET /api/tarefas/[id]/aprovacao → aprovacao com solicitante
 // ═══════════════════════════════════════════════════════════════════════════
 
 "use client";
@@ -15,16 +19,39 @@
 import { useEffect, useState } from "react";
 import { useErrorStore } from "@/stores/errorStore";
 
+interface TarefaData {
+  id: number;
+  titulo: string;
+  descricao: string | null;
+  tipo: string | null;
+  status: string;
+  tags: string[];
+  venda_id: number | null;
+  created_at: string;
+}
+
+interface AprovacaoData {
+  id: number;
+  tarefa_id: number;
+  status: string;
+  motivo: string | null;
+  solicitante_nome: string | null;
+  solicitante_id: string;
+  aprovador_id: string;
+}
+
+interface VendaData {
+  id: number;
+  numero_venda: string | null;
+  total_venda: number;
+  total_desconto: number | null;
+  situacao: string;
+  cliente_nome?: string | null;
+  pagamentos?: Array<{ forma: string; valor: number }>;
+}
+
 interface DetalhesAprovacao {
-  tarefa: {
-    id: number;
-    titulo: string;
-    descricao: string | null;
-    tipo: string | null;
-    status: string;
-    tags: string[];
-    created_at: string;
-  };
+  tarefa: TarefaData;
   aprovacao: {
     id: number;
     solicitante_nome: string;
@@ -67,6 +94,87 @@ function formatarBRL(v: number): string {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+async function carregarDetalhes(tarefaId: number): Promise<DetalhesAprovacao> {
+  // Busca paralela nos 2 endpoints existentes
+  const [rTarefa, rAprov] = await Promise.all([
+    fetch(`/api/tarefas/${tarefaId}`),
+    fetch(`/api/tarefas/${tarefaId}/aprovacao`),
+  ]);
+
+  if (!rTarefa.ok) throw new Error(`Tarefa HTTP ${rTarefa.status}`);
+  if (!rAprov.ok) throw new Error(`Aprovação HTTP ${rAprov.status}`);
+
+  const tarefa = (await rTarefa.json()) as TarefaData & { responsavel_nome?: string; criador_nome?: string };
+  const aprovacoes = (await rAprov.json()) as AprovacaoData[];
+
+  // Aprovação mais recente (pendente preferencialmente)
+  const aprovacao = aprovacoes.find((a) => a.status === "pendente") ?? aprovacoes[0] ?? null;
+
+  let venda: DetalhesAprovacao["venda"] = null;
+  if (tarefa.venda_id) {
+    try {
+      const rVenda = await fetch(`/api/vendas/${tarefa.venda_id}`);
+      if (rVenda.ok) {
+        const v = (await rVenda.json()) as VendaData & {
+          total_venda?: number;
+          total_desconto?: number;
+          situacao?: string;
+          numero_venda?: string;
+          cliente_nome?: string;
+          pagamentos?: Array<{ forma: string; valor: number }>;
+        };
+        const totalVenda = Number(v.total_venda ?? 0);
+        const totalDesconto = Number(v.total_desconto ?? 0);
+        const descontoPct =
+          totalVenda > 0 && totalDesconto > 0
+            ? Math.round((totalDesconto / (totalVenda + totalDesconto)) * 100)
+            : null;
+        // Forma de pagamento principal (maior valor ou primeira)
+        const pags = (v.pagamentos ?? []) as Array<{ forma: string; valor: number }>;
+        const formaPrincipal =
+          pags.length > 0
+            ? pags.sort((a, b) => Number(b.valor) - Number(a.valor))[0].forma
+            : null;
+        venda = {
+          id: Number(v.id),
+          numero_pedido: v.numero_venda ?? null,
+          valor_total: totalVenda,
+          valor_desconto: totalDesconto > 0 ? totalDesconto : null,
+          desconto_percentual: descontoPct,
+          forma_pagamento: formaPrincipal,
+          cliente_nome: v.cliente_nome ?? null,
+          status: v.situacao ?? "",
+        };
+      }
+    } catch {
+      // Venda não crítica — continuar sem ela
+    }
+  }
+
+  return {
+    tarefa: {
+      id: Number(tarefa.id),
+      titulo: tarefa.titulo,
+      descricao: tarefa.descricao ?? null,
+      tipo: tarefa.tipo ?? null,
+      status: tarefa.status,
+      tags: Array.isArray(tarefa.tags) ? tarefa.tags : [],
+      venda_id: tarefa.venda_id ?? null,
+      created_at: tarefa.created_at,
+    },
+    aprovacao: aprovacao
+      ? {
+          id: Number(aprovacao.id),
+          solicitante_nome: aprovacao.solicitante_nome ?? "",
+          solicitante_role: "",
+          status: aprovacao.status,
+          motivo: aprovacao.motivo ?? null,
+        }
+      : null,
+    venda,
+  };
+}
+
 export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
   const [detalhes, setDetalhes] = useState<DetalhesAprovacao | null>(null);
   const [carregando, setCarregando] = useState(false);
@@ -85,16 +193,13 @@ export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
     let cancelado = false;
     setCarregando(true);
     setDetalhes(null);
-    fetch(`/api/tarefas/${tarefaId}/detalhes-aprovacao`)
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data: DetalhesAprovacao) => {
+    carregarDetalhes(tarefaId)
+      .then((data) => {
         if (!cancelado) setDetalhes(data);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!cancelado) {
+          console.error("[AprovacaoBottomSheet]", err);
           pushToast("Não foi possível carregar os detalhes da aprovação", { level: "warning" });
           onClose();
         }
@@ -102,7 +207,9 @@ export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
       .finally(() => {
         if (!cancelado) setCarregando(false);
       });
-    return () => { cancelado = true; };
+    return () => {
+      cancelado = true;
+    };
   }, [tarefaId, pushToast, onClose]);
 
   async function enviarDecisao(decisao: "aprovado" | "rejeitado") {
@@ -120,7 +227,7 @@ export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
       });
       if (!r.ok) {
         const erro = await r.json().catch(() => ({}));
-        throw new Error(erro?.error ?? `Falha ${r.status}`);
+        throw new Error((erro as { error?: string })?.error ?? `Falha ${r.status}`);
       }
       pushToast(decisao === "aprovado" ? "Aprovado com sucesso" : "Rejeitado", { level: "success" });
       onDecisao();
@@ -153,6 +260,7 @@ export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
           paddingBottom: "env(safe-area-inset-bottom)",
         }}
       >
+        {/* Handle bar */}
         <button
           onClick={() => { if (!enviando) onClose(); }}
           className="flex items-center justify-center py-3"
@@ -214,7 +322,10 @@ export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
               </div>
 
               {venda && (
-                <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: "#e5e7eb", backgroundColor: "#f9fafb" }}>
+                <div
+                  className="rounded-lg border p-3 space-y-2"
+                  style={{ borderColor: "#e5e7eb", backgroundColor: "#f9fafb" }}
+                >
                   <div className="flex justify-between">
                     <span className="text-xs" style={{ color: "#6b7280" }}>Venda</span>
                     <span className="text-xs font-medium" style={{ color: "#111827" }}>
@@ -263,7 +374,7 @@ export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
                     Detalhes
                   </span>
                   <p className="text-xs whitespace-pre-line leading-relaxed" style={{ color: "#4b5563" }}>
-                    {detalhes.tarefa.descricao}
+                    {detalhes.tarefa.descricao.replace(/\\n/g, "\n").replace(/• null — /g, "• ").replace(/• null/g, "•")}
                   </p>
                 </div>
               )}
@@ -289,7 +400,10 @@ export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
         </div>
 
         {detalhes && aprov && (
-          <div className="px-5 py-4 border-t flex flex-col gap-2" style={{ borderColor: "#e5e7eb" }}>
+          <div
+            className="px-5 py-4 border-t flex flex-col gap-2"
+            style={{ borderColor: "#e5e7eb" }}
+          >
             {!modoRejeicao ? (
               <>
                 <button
@@ -320,7 +434,10 @@ export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
                   {enviando ? "Enviando..." : "Confirmar rejeição"}
                 </button>
                 <button
-                  onClick={() => { setModoRejeicao(false); setMotivo(""); }}
+                  onClick={() => {
+                    setModoRejeicao(false);
+                    setMotivo("");
+                  }}
                   disabled={enviando}
                   className="w-full rounded-lg font-medium text-sm transition-opacity active:opacity-80 disabled:opacity-50"
                   style={{ backgroundColor: "#f3f4f6", color: "#374151", minHeight: "48px" }}

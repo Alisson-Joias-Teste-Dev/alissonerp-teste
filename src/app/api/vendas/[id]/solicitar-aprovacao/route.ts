@@ -133,7 +133,7 @@ export async function POST(
     const linhasItens = itensDetalhe.map((it) => {
       const sem = Number(it.preco_lista).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
       const com = Number(it.preco_unitario).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-      return `• ${it.sku} — ${it.nome_produto}\n  Tabela: ${sem} | Desconto: ${Number(it.pct_desconto).toFixed(0)}% | Final: ${com}`;
+      return `• ${it.sku ?? "?"} — ${it.nome_produto ?? it.sku ?? "Produto"}\n  Tabela: ${sem} | Desconto: ${Number(it.pct_desconto).toFixed(0)}% | Final: ${com}`;
     }).join("\n");
 
     const tarefaId = await criarTarefaAprovacao(
@@ -206,7 +206,7 @@ export async function POST(
     const linhasItens = itensDetalhe.map((it) => {
       const sem = Number(it.preco_lista).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
       const com = Number(it.preco_unitario).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-      return `• ${it.sku} — ${it.nome_produto}\n  Tabela: ${sem} | Desconto: ${Number(it.pct_desconto).toFixed(0)}% | Final: ${com}`;
+      return `• ${it.sku ?? "?"} — ${it.nome_produto ?? it.sku ?? "Produto"}\n  Tabela: ${sem} | Desconto: ${Number(it.pct_desconto).toFixed(0)}% | Final: ${com}`;
     }).join("\n");
 
     const tarefaId = await criarTarefaAprovacao(
