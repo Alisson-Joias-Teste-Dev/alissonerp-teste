@@ -49,13 +49,16 @@ export async function PATCH(
   }
 
   // Checa apontamentos. Se ordem tem apontamento e usuario nao eh master, bloqueia.
+  // "ouro_saiu" detecta apontamentos cujo insumo eh da categoria METAL
+  // (parametros_sistema.METAL_CATEGORIA_ID = 1) com qtd > 0.
   const [apontInfo] = await sql<{ total: number; ouro_saiu: boolean }[]>`
     SELECT
       COUNT(ap.id)::int AS total,
       EXISTS(
         SELECT 1 FROM alissonerp.apontamentos_pcp ap2
         JOIN alissonerp.pcp p2 ON p2.id = ap2.pcp_id
-        WHERE p2.ordem_id = ${ordemId} AND ap2.peso_metal > 0
+        JOIN alissonerp.insumos i ON i.id = ap2.insumo_id
+        WHERE p2.ordem_id = ${ordemId} AND i.categoria_id = 1 AND ap2.qtd > 0
       ) AS ouro_saiu
     FROM alissonerp.apontamentos_pcp ap
     JOIN alissonerp.pcp p ON p.id = ap.pcp_id

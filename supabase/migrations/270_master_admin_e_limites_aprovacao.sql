@@ -23,11 +23,13 @@
 -- =============================================
 
 -- ─── 1) Master admin (UUID do Alisson Ranyel) ────────────────────────────────
+-- tipo='string' (constraint parametros_sistema_tipo_check so aceita
+-- number/string/boolean/json). Valor eh um UUID v4 como texto.
 INSERT INTO alissonerp.parametros_sistema (chave, valor, tipo, descricao)
 VALUES (
   'MASTER_ADMIN_USER_ID',
   '684b3b30-6a7e-476e-ad3b-529127393183',
-  'uuid',
+  'string',
   'UUID do administrador master (Alisson). Aprova qualquer coisa. Imutavel via trigger fn_proteger_master_admin.'
 )
 ON CONFLICT (chave) DO NOTHING;

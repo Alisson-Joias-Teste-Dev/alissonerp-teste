@@ -304,7 +304,9 @@ export async function PATCH(
   // mensagem clara. Sem cascade, venda canceladada deixava ordem ativa e a
   // fabrica continuava produzindo uma peca que nao seria entregue.
   if (body.situacao === "cancelado") {
-    // Busca ordens associadas a venda (pode ter mais de uma, ex: par alianca + reposicao)
+    // Busca ordens associadas a venda (pode ter mais de uma, ex: par alianca + reposicao).
+    // "ouro_movido" detecta apontamentos cujo insumo eh da categoria METAL
+    // (parametros_sistema.METAL_CATEGORIA_ID = 1) com qtd > 0.
     const ordensAssoc = await sql<{ id: number; numero_ordem: string; situacao: string; tem_apontamento: boolean; ouro_movido: boolean }[]>`
       SELECT
         o.id, o.numero_ordem, o.situacao,
@@ -316,7 +318,8 @@ export async function PATCH(
         EXISTS(
           SELECT 1 FROM alissonerp.apontamentos_pcp ap
           JOIN alissonerp.pcp p ON p.id = ap.pcp_id
-          WHERE p.ordem_id = o.id AND ap.peso_metal > 0
+          JOIN alissonerp.insumos i ON i.id = ap.insumo_id
+          WHERE p.ordem_id = o.id AND i.categoria_id = 1 AND ap.qtd > 0
         ) AS ouro_movido
       FROM alissonerp.ordens o
       WHERE o.venda_id = ${vendaId} AND o.situacao != 'cancelado'
