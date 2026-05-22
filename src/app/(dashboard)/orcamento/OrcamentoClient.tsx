@@ -3428,7 +3428,10 @@ export default function OrcamentoClient({
                     min={1} max={2.5} step={0.1}
                   />
                 </div>
-                {activeProfile === ProfileType.QuadradoCanal && (
+                {/* Fileiras só fazem sentido em Volta Completa (cravação corre
+                    toda a circunferência em N fileiras). Em Pontual/Meia, é 1
+                    fileira fixa — exibir o select confunde a vendedora. */}
+                {activeProfile === ProfileType.QuadradoCanal && activeParams.stoneFull && (
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-gray-500 w-[90px] shrink-0">Fileiras</span>
                     <select
@@ -3450,23 +3453,26 @@ export default function OrcamentoClient({
                     return (
                       <button key={tipo} onClick={() => {
                         if (i === 2) {
+                          // Volta Completa: auto-seleciona max fileiras (cravacao
+                          // se distribui em toda a circunferencia em N linhas)
                           updateParam("stoneFull", true); updateParam("stoneHalfMoon", false);
-                          // Auto max fileiras ao ativar volta completa
-                          // Usa activeProfile pra respeitar qual anel está sendo editado (1 ou 2)
                           if (activeProfile === ProfileType.QuadradoCanal) {
                             const mr = computeMaxStoneRows(activeParams.canalWidth, activeParams.stoneSize, calibracao);
                             updateParam("stoneRows", mr);
                           }
                         }
                         else if (i === 1) {
+                          // Meia Alianca: fileiras fixa em 1 (UI esconde o select).
+                          // Antes setava maxRows mesmo escondido — gerava preco/peso
+                          // calculado com N fileiras que a vendedora nao via.
                           updateParam("stoneFull", false); updateParam("stoneHalfMoon", true);
-                          // Usa activeProfile pra respeitar qual anel está sendo editado (1 ou 2)
-                          if (activeProfile === ProfileType.QuadradoCanal) {
-                            const mr = computeMaxStoneRows(activeParams.canalWidth, activeParams.stoneSize, calibracao);
-                            updateParam("stoneRows", mr);
-                          }
+                          updateParam("stoneRows", 1);
                         }
-                        else { updateParam("stoneFull", false); updateParam("stoneHalfMoon", false); }
+                        else {
+                          // Pontual: idem — uma fileira so.
+                          updateParam("stoneFull", false); updateParam("stoneHalfMoon", false);
+                          updateParam("stoneRows", 1);
+                        }
                       }}
                         className="flex-1 py-1.5 text-[9px] font-semibold rounded-lg border transition-all text-center"
                         style={active
