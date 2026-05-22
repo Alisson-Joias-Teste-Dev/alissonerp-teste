@@ -102,7 +102,7 @@ const TIPO_LABEL: Record<string, string> = {
   protocolo_metal: "Protocolo de metal",
 };
 
-type Chip = { label: string; icon: string; bg: string; color: string };
+type Chip = { label: string; icon: string; bg: string; color: string; href?: string };
 
 function parsearCamposDescricao(descricao: string): {
   valorTotal?: string;
@@ -183,10 +183,27 @@ function gerarChips(t: Tarefa): Chip[] {
   if (t.tipo === "cartao_desconto") {
     chips.push({ label: "Cartão de Crédito", icon: "💳", bg: "#EFF6FF", color: "#2563EB" });
     if (t.venda_id)
-      chips.push({ label: `Venda #${t.venda_id}`, icon: "🧾", bg: "#F3F4F6", color: "#6B7280" });
+      chips.push({
+        label: `Venda #${t.venda_id}`,
+        icon: "🧾",
+        bg: "#F3F4F6",
+        color: "#6B7280",
+        href: `/vendas/${t.venda_id}`,
+      });
     const pctMatch = (t.titulo ?? "").match(/(\d+)%/);
     if (pctMatch)
       chips.push({ label: `>${pctMatch[1]}% de desconto`, icon: "⚠️", bg: "#FEE2E2", color: "#DC2626" });
+  }
+
+  // Outros tipos que têm venda_id também ganham link pra auditar
+  if (t.venda_id && t.tipo !== "cartao_desconto" && !chips.some(c => c.label.startsWith("Venda #"))) {
+    chips.push({
+      label: `Venda #${t.venda_id}`,
+      icon: "🧾",
+      bg: "#F3F4F6",
+      color: "#6B7280",
+      href: `/vendas/${t.venda_id}`,
+    });
   }
 
   return chips;
@@ -884,13 +901,24 @@ export default function TarefasClient() {
                       return chips.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5 mt-1 mb-3">
                           {chips.map((chip, i) => (
-                            <span
-                              key={i}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                              style={{ backgroundColor: chip.bg, color: chip.color }}
-                            >
-                              {chip.icon} {chip.label}
-                            </span>
+                            chip.href ? (
+                              <a
+                                key={i}
+                                href={chip.href}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium hover:opacity-75 hover:underline transition-opacity"
+                                style={{ backgroundColor: chip.bg, color: chip.color }}
+                              >
+                                {chip.icon} {chip.label}
+                              </a>
+                            ) : (
+                              <span
+                                key={i}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                style={{ backgroundColor: chip.bg, color: chip.color }}
+                              >
+                                {chip.icon} {chip.label}
+                              </span>
+                            )
                           ))}
                         </div>
                       ) : null;
