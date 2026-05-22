@@ -369,10 +369,19 @@ export default function OrcamentoClient({
         stoneDrill: !!src.pedra_drill, stoneHalfMoon: !!src.pedra_meia_lua, stoneFull: !!src.pedra_volta_completa,
         stoneType: src.tipo_pedra ?? p.stoneType,
         stoneRows: src.pedra_fileiras ? Number(src.pedra_fileiras) : p.stoneRows,
-        textEnabled: !!src.texto, textContent: src.texto || "",
+        // texto pode vir como "Principal | Adicional1 | Adicional2" — primeira
+        // parte vai pro nome principal, resto fica como extras (carregado abaixo).
+        textEnabled: !!src.texto, textContent: src.texto ? String(src.texto).split(" | ")[0] : "",
         textFontType: src.tipo_fonte === "Cursiva" ? 2 : 1,
       });
       setParams(p => applyRingParams(p, ft));
+      // Restaura textos adicionais do anel 1 (apos o split de texto principal)
+      if (ft.texto && typeof ft.texto === "string" && ft.texto.includes(" | ")) {
+        const parts = String(ft.texto).split(" | ");
+        setTextosExtras(parts.slice(1));
+      } else {
+        setTextosExtras([]);
+      }
       if (orc.quantidade === 2 && orc.ficha2) {
         const ft2 = orc.ficha2 as Record<string, any>;
         const perfil2 = ft2.perfil as string | null;
@@ -387,6 +396,13 @@ export default function OrcamentoClient({
           ? Number(ft2.densidade_ouro)
           : (metalMatch2?.density ?? 14.69);
         setParams2(p => applyRingParams({ ...p, metalColor: metalHex2, goldDensity: metalDensity2 }, ft2));
+        // Restaura textos adicionais do anel 2
+        if (ft2.texto && typeof ft2.texto === "string" && ft2.texto.includes(" | ")) {
+          const parts = String(ft2.texto).split(" | ");
+          setTextosExtras2(parts.slice(1));
+        } else {
+          setTextosExtras2([]);
+        }
       }
 
       // Restaurar detalhamento de pedras.
@@ -1473,14 +1489,20 @@ export default function OrcamentoClient({
     setParams2(restoredParams);
   };
 
-  function buildFicha(p: RingParams, pf: ProfileType, rs: RingSize, w: number, sc: number, entries: StoneEntry[]) {
+  function buildFicha(p: RingParams, pf: ProfileType, rs: RingSize, w: number, sc: number, entries: StoneEntry[], extras: string[] = []) {
+    // Junta texto principal + textos adicionais (Bordas Elevadas permite varios)
+    // num unico campo separado por " | ". Sem isso so o nome principal vai pra
+    // ficha tecnica e a fabrica nao ve os adicionais.
+    const textoPrincipal = p.textEnabled && p.textContent.trim() ? p.textContent.trim() : "";
+    const textosLimpos = [textoPrincipal, ...extras.map(t => t.trim()).filter(t => t.length > 0)].filter(Boolean);
+    const textoFinal = textosLimpos.length > 0 ? textosLimpos.join(" | ") : null;
     return {
       modelo: (() => { const o = PROFILE_OPTIONS.find((o) => o.id === pf); return o?.fichaLabel ?? o?.label ?? pf; })(),
       aro_numeracao: `Aro ${rs.size}`, largura: p.width, espessura: p.height,
       peso_estimado: w, perfil: pf, diametro: p.diameter,
       densidade_ouro: p.goldDensity, cor_metal: METAL_COLORS.find(m => m.value === p.metalColor)?.label ?? p.metalColor,
-      tipo_fonte: p.textEnabled && p.textContent.trim() ? (p.textFontType === 2 ? "Cursiva" : "Forma") : null,
-      texto: p.textEnabled && p.textContent.trim() ? p.textContent.trim() : null,
+      tipo_fonte: textoFinal ? (p.textFontType === 2 ? "Cursiva" : "Forma") : null,
+      texto: textoFinal,
       qtd_pedras: p.hasStones ? sc : null, tamanho_pedra: p.hasStones ? p.stoneSize : null,
       tipo_pedra: p.hasStones ? p.stoneType : null,
       tipo_aplicacao_pedra: p.hasStones ? (p.stoneFull ? "Volta Completa" : p.stoneHalfMoon ? "Meia Alianca" : "Pontual") : null,
@@ -1596,7 +1618,7 @@ export default function OrcamentoClient({
         tipo: "alianca",
         quantidade: isPar ? 2 : 1,
         foto_3d_base64: foto3d,
-        ficha: buildFicha(params, profile, ringSize, pricing.weight, derivedStoneCount, stoneEntries),
+        ficha: buildFicha(params, profile, ringSize, pricing.weight, derivedStoneCount, stoneEntries, textosExtras),
         snapshot: novoSnapshot,
         valor_negociado_locked: true,
       };
@@ -1608,7 +1630,7 @@ export default function OrcamentoClient({
       if (isPar) {
         const sc2 = computeStoneCapacity(params2.diameter, params2.height, params2.canalBorderHeight, params2.stoneSize, params2.stoneRows, profile2);
         const derivedCount2 = params2.hasStones ? (params2.stoneFull ? sc2 : params2.stoneHalfMoon ? Math.floor(sc2 / 2) : params2.stoneCount) : 0;
-        body.ficha2 = buildFicha(params2, profile2, ringSize2, pricing2.weight, derivedCount2, stoneEntries2);
+        body.ficha2 = buildFicha(params2, profile2, ringSize2, pricing2.weight, derivedCount2, stoneEntries2, textosExtras2);
       }
 
       const url = editingOrcId ? `/api/orcamento/${editingOrcId}` : "/api/orcamento";
@@ -3823,6 +3845,7 @@ export default function OrcamentoClient({
                 labelDoModelo={labelDoModelo}
                 metalLabel={METAL_COLORS.find((m) => m.value === params.metalColor)?.label ?? "—"}
                 labelsFicha={labelsFicha}
+                textosExtras={textosExtras}
               />
               {allianceMode === "par" && (
                 <FichaAlianca
@@ -3835,6 +3858,7 @@ export default function OrcamentoClient({
                   labelDoModelo={labelDoModelo}
                   metalLabel={METAL_COLORS.find((m) => m.value === params2.metalColor)?.label ?? "—"}
                   labelsFicha={labelsFicha}
+                  textosExtras={textosExtras2}
                 />
               )}
               {/* Peso total (sem preço — só dados técnicos) */}
@@ -3870,7 +3894,7 @@ export default function OrcamentoClient({
 // ── Sub-componente: Ficha Técnica de uma aliança ─────────────────────────────
 function FichaAlianca({
   titulo, profile, ringSize, params, weight, stoneEntries,
-  labelDoModelo, metalLabel, labelsFicha,
+  labelDoModelo, metalLabel, labelsFicha, textosExtras = [],
 }: {
   titulo: string;
   profile: ProfileType;
@@ -3882,6 +3906,8 @@ function FichaAlianca({
   metalLabel: string;
   /** Rótulos customizados via aba Configurações (migration 266). */
   labelsFicha?: Record<string, string>;
+  /** Nomes/datas adicionais gravados (Bordas Elevadas permite varios). */
+  textosExtras?: string[];
 }) {
   const totalPedras = stoneEntries.reduce((acc, s) => acc + (s.qtd ?? 0), 0);
   // Helper local — encurta as chamadas
@@ -3916,9 +3942,15 @@ function FichaAlianca({
       {params.hasStones && (
         <Linha k={L("furo_passante")} v={params.stoneDrill ? "Sim" : "Não"} />
       )}
-      {params.textEnabled && params.textContent && (
-        <Linha k={L("gravacao")} v={`"${params.textContent}"`} />
-      )}
+      {params.textEnabled && params.textContent && (() => {
+        // Junta nome principal + adicionais (Bordas Elevadas permite varios)
+        const extrasLimpos = textosExtras.map(t => t.trim()).filter(Boolean);
+        const todos = [params.textContent, ...extrasLimpos];
+        const gravacaoStr = todos.length === 1
+          ? `"${todos[0]}"`
+          : todos.map(t => `"${t}"`).join(" · ");
+        return <Linha k={L("gravacao")} v={gravacaoStr} />;
+      })()}
       <div className="border-t pt-1.5 mt-1.5" style={{ borderColor: C.cremeBorder }}>
         <Linha k={L("peso_estimado")} v={`${weight.toFixed(2)} g`} bold />
       </div>
