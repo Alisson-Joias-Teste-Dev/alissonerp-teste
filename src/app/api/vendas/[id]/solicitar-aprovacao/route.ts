@@ -1,3 +1,15 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// Solicitação de Aprovação de Venda
+//
+// REGRA DE NEGÓCIO GERAL: cada tipo de aprovação (desconto, cartão, crédito)
+// usa seu próprio campo em vendas_erp para não se bloquearem mutuamente.
+// Antes da refatoração, UM campo (aprovacao_credito_tarefa_id) servia para
+// os 3 tipos — uma tarefa de desconto pendente impedia a solicitação de
+// crédito, e o gerente nunca recebia a aprovação.
+//
+// Se alterar: manter a separação dos campos. Mexer num não pode afetar o outro.
+// ═══════════════════════════════════════════════════════════════════════════
+
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
@@ -43,7 +55,10 @@ export async function POST(
   // Validar venda em rascunho
   const descontoThreshold = await getDescontoThreshold(vendaId);
   const [venda] = await sql`
-    SELECT v.id, v.situacao, v.bloqueado, v.aprovacao_credito_tarefa_id,
+    SELECT v.id, v.situacao, v.bloqueado,
+           v.aprovacao_credito_tarefa_id,
+           v.aprovacao_desconto_tarefa_id,
+           v.aprovacao_cartao_desconto_tarefa_id,
            v.desconto_aprovado_por,
            v.desconto_cartao_aprovado_por,
            EXISTS(
@@ -77,8 +92,9 @@ export async function POST(
   }
 
   // ── Aprovação de desconto (via engine de regras) ─────────────────────────
+  // Usa campo próprio aprovacao_desconto_tarefa_id — não conflita com crédito
   if (tipo === "desconto") {
-    if (venda.aprovacao_credito_tarefa_id) {
+    if (venda.aprovacao_desconto_tarefa_id) {
       return NextResponse.json({ ok: true, aguardando_aprovacao_desconto: true, message: "Já existe aprovação pendente" });
     }
 
@@ -136,7 +152,7 @@ export async function POST(
 
     await sql`
       UPDATE alissonerp.vendas_erp
-      SET aprovacao_credito_tarefa_id = ${tarefaId}, updated_at = NOW()
+      SET aprovacao_desconto_tarefa_id = ${tarefaId}, updated_at = NOW()
       WHERE id = ${vendaId}
     `;
 
@@ -144,11 +160,12 @@ export async function POST(
   }
 
   // ── Aprovação para Cartão de Crédito com desconto >20% ───────────────────
+  // Usa campo próprio aprovacao_cartao_desconto_tarefa_id — não conflita com crédito
   if (tipo === "cartao_desconto") {
     if (venda.desconto_cartao_aprovado_por) {
       return NextResponse.json({ ok: true, ja_aprovado: true, message: "Cartão de crédito já foi liberado para esta venda." });
     }
-    if (venda.aprovacao_credito_tarefa_id) {
+    if (venda.aprovacao_cartao_desconto_tarefa_id) {
       return NextResponse.json({ ok: true, aguardando_aprovacao_cartao: true, message: "Já existe aprovação pendente para cartão de crédito." });
     }
 
@@ -208,14 +225,14 @@ export async function POST(
 
     await sql`
       UPDATE alissonerp.vendas_erp
-      SET aprovacao_credito_tarefa_id = ${tarefaId}, updated_at = NOW()
+      SET aprovacao_cartao_desconto_tarefa_id = ${tarefaId}, updated_at = NOW()
       WHERE id = ${vendaId}
     `;
 
     return NextResponse.json({ ok: true, aguardando_aprovacao_cartao: true, tarefa_id: tarefaId });
   }
 
-  // Verificar se já tem aprovação pendente (para fluxos não-desconto)
+  // Verificar se já tem aprovação de crédito pendente (campo próprio, não afeta desconto/cartão)
   if (venda.aprovacao_credito_tarefa_id) {
     return NextResponse.json({
       ok: true,

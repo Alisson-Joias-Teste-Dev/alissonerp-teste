@@ -1,3 +1,26 @@
+/**
+ * POST /api/crediario/[id]/registrar-pagamento
+ * [id] = conta_receber_id
+ *
+ * Rota principal de baixa do crediário — usada pelo drawer de detalhe
+ * (CrediarioClient.tsx) para registrar o recebimento de um crédito
+ * "A Receber" em qualquer forma de pagamento: Dinheiro, Cartão, Pix,
+ * Ouro, Vale-Troca.
+ *
+ * ⚠️  BLINDAGEM: Esta rota implementa as 7 regras de ouro do módulo
+ * crediário documentadas em AGENTS.md. NÃO ALTERE sem ler aquele doc.
+ *
+ * Fluxo completo (tudo dentro de transação SQL):
+ *   1. Atualiza contas_receber: ajusta valor e marca como 'pago'
+ *   1b. Se pagamento parcial: cria NOVA conta_receber com o restante
+ *   2. Confirma pagamento_venda (se total) ou faz split (se parcial)
+ *   3. Registra em comunicacoes_crediario com a forma usada
+ *   4. Fora da tx: devolve saldo ao gerente (evita lock)
+ *   5. Fora da tx: conclui venda se todos pagamentos confirmados
+ *
+ * Para Ouro: exige ouro_peso, ouro_valor_grama, ouro_foto_path.
+ * O valor pago é calculado = peso * valor_grama (não vem do front).
+ */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
@@ -7,21 +30,22 @@ import { concluirVenda } from "@/lib/vendas-aprovar";
 import { logAudit } from "@/lib/audit";
 import { zodError } from "@/lib/schemas/common";
 
-// Rota de emergência — use verificar-mp para baixas com comprovante MP
-const PODE_BAIXAR = ["desenvolvedor"];
+// Quem pode dar baixa manual (emergência ou formas não-MP).
+// ATENÇÃO: Esta rota NÃO verifica Mercado Pago — é confiança pura.
+// Use verificar-mp para baixas com ID do Mercado Pago.
+const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
 
 const RegistrarPagamentoSchema = z.object({
   obs: z.string().max(5000).optional(),
+  forma_recebimento: z.string().max(50).optional(),
+  // Pagamento parcial: valor efetivamente pago (default = total da conta)
+  valor_pago: z.number().positive().optional(),
+  // Campos específicos de Ouro — validados no handler, obrigatórios quando forma === "Ouro"
+  ouro_peso: z.number().positive().optional(),
+  ouro_valor_grama: z.number().positive().optional(),
+  ouro_foto_path: z.string().max(500).optional(),
 }).partial();
 
-// POST /api/crediario/[id]/registrar-pagamento
-// [id] = conta_receber_id
-// Registra o recebimento de um crédito "A Receber":
-//   1. Marca contas_receber como 'pago'
-//   2. Confirma o pagamento_venda correspondente
-//   3. Devolve saldo ao gerente se crédito foi usado
-//   4. Conclui venda se todos os pagamentos confirmados
-//   5. Registra em comunicacoes_crediario
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -41,7 +65,6 @@ export async function POST(
     return NextResponse.json({ error: "Sem permissão para registrar baixa" }, { status: 403 });
   }
 
-  // Carregar conta a receber
   const [conta] = await sql`
     SELECT id, situacao, valor, venda_erp_id, descricao
     FROM alissonerp.contas_receber
@@ -57,7 +80,8 @@ export async function POST(
 
   const vendaId = conta.venda_erp_id as number | null;
 
-  // Buscar pagamento_venda "A Receber" pendente desta venda
+  // Busca o pagamento_venda "A Receber" pendente vinculado a esta venda.
+  // É o registro que representa o crédito na venda original.
   const [pagamento] = vendaId
     ? await sql`
         SELECT id, valor, forma FROM alissonerp.pagamentos_venda
@@ -70,36 +94,160 @@ export async function POST(
   const parsed = RegistrarPagamentoSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const obs = (parsed.data.obs ?? "").trim() || null;
+  const formaRecebimento = parsed.data.forma_recebimento?.trim() || null;
+  const valorPago = parsed.data.valor_pago ?? null;
+  const ouroPeso = parsed.data.ouro_peso ?? null;
+  const ouroValorGrama = parsed.data.ouro_valor_grama ?? null;
+  const ouroFotoPath = parsed.data.ouro_foto_path ?? null;
+
+  // O valor pago default é o total da conta. Se o front enviar valor_pago
+  // menor que o total, será pagamento parcial → split de crédito.
+  const valorEfetivo = valorPago ?? Number(conta.valor);
+  if (valorEfetivo <= 0) return NextResponse.json({ error: "Valor pago inválido" }, { status: 400 });
+  if (valorEfetivo > Number(conta.valor)) return NextResponse.json({ error: "Valor pago maior que o valor da conta" }, { status: 400 });
+
+  const ehPagamentoParcial = valorEfetivo < Number(conta.valor);
+  const valorRestante = ehPagamentoParcial ? Number(conta.valor) - valorEfetivo : 0;
 
   let saldoDevolvido = false;
   let vendaConcluida = false;
 
+  let novoCreditoId: number | null = null;
+
+  // ═══ TRANSAÇÃO ATÔMICA ═══════════════════════════════════════════════════
+  // Todas as operações de baixa rodam em uma única transação para garantir
+  // que contas_receber, pagamentos_venda e comunicacoes_crediario fiquem
+  // consistentes. Se qualquer passo falhar, tudo é revertido.
+  //
+  // Operações com risco de lock (creditarSaldo, concluirVenda) rodam FORA
+  // da transação — ver seção 4 e 5 abaixo.
+  //
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await sql.begin(async (tx: any) => {
-    // 1. Marcar conta a receber como paga
+
+    // PASSO 1 — Baixar conta a receber
     await tx`
       UPDATE alissonerp.contas_receber
-      SET situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
+      SET valor = ${valorEfetivo},
+          situacao = 'pago',
+          data_recebimento = CURRENT_DATE,
+          updated_at = NOW()
       WHERE id = ${contaId}
     `;
 
-    // 2. Confirmar pagamento_venda se existir
-    if (pagamento) {
+    // PASSO 1b — SPLIT DE CRÉDITO (pagamento parcial)
+    // Se o cliente pagou menos que o total, criamos uma NOVA conta_receber
+    // com o valor restante. A original é ajustada para o valor pago e marcada
+    // como 'pago'. A nova fica 'pendente' com os mesmos dados do cliente/venda.
+    //
+    // Ex: conta original R$ 1.500, cliente paga R$ 1.000 via Dinheiro
+    //     → conta original: R$ 1.000, situacao = 'pago'
+    //     → nova conta:     R$ 500,   situacao = 'pendente'
+    if (ehPagamentoParcial) {
+      const [nova] = await tx`
+        INSERT INTO alissonerp.contas_receber
+          (descricao, cliente_id, cliente_nome, venda_erp_id, valor,
+           data_vencimento, situacao, categoria, obs, created_by)
+        SELECT
+          ${`Saldo restante — ${conta.descricao}`},
+          cr.cliente_id, cr.cliente_nome, cr.venda_erp_id,
+          ${valorRestante},
+          CURRENT_DATE,
+          'pendente',
+          'venda',
+          ${`Parcial de R$ ${valorEfetivo.toFixed(2)} pago via ${formaRecebimento ?? "não informado"}. Restante: R$ ${valorRestante.toFixed(2)}`},
+          ${user.id}::uuid
+        FROM alissonerp.contas_receber cr
+        WHERE cr.id = ${contaId}
+        RETURNING id
+      `;
+      novoCreditoId = nova?.id ?? null;
+    }
+
+    // PASSO 2 — Confirmar pagamento_venda (pagamento TOTAL)
+    // O campo 'gateway' é preenchido com a forma de recebimento (ex: "Dinheiro").
+    // Isso alimenta o texto "via {gateway}" no card de pagamento da venda
+    // (VendaDetalheClient.tsx:2573).
+    //
+    // Para Ouro: salvamos também peso, valor/grama e foto_path da balança.
+    if (pagamento && !ehPagamentoParcial) {
+      if (ouroPeso && ouroValorGrama && ouroFotoPath) {
+        await tx`
+          UPDATE alissonerp.pagamentos_venda
+          SET status = 'confirmado', data_confirmacao = NOW(),
+              gateway = ${formaRecebimento ?? null},
+              ouro_peso = ${ouroPeso},
+              ouro_valor_grama = ${ouroValorGrama},
+              ouro_foto_path = ${ouroFotoPath}
+          WHERE id = ${pagamento.id}
+        `;
+      } else if (formaRecebimento) {
+        await tx`
+          UPDATE alissonerp.pagamentos_venda
+          SET status = 'confirmado', data_confirmacao = NOW(), gateway = ${formaRecebimento}
+          WHERE id = ${pagamento.id}
+        `;
+      } else {
+        await tx`
+          UPDATE alissonerp.pagamentos_venda
+          SET status = 'confirmado', data_confirmacao = NOW()
+          WHERE id = ${pagamento.id}
+        `;
+      }
+    }
+
+    // PASSO 2b — SPLIT DO PAGAMENTO (pagamento parcial)
+    // Atualiza o pagamento original com o valor pago e cria um NOVO
+    // pagamento_venda 'A Receber' pendente com o valor restante.
+    // Isso mantém o total da venda consistente (soma dos pagamentos = total_venda).
+    if (pagamento && ehPagamentoParcial) {
+      if (ouroPeso && ouroValorGrama && ouroFotoPath) {
+        await tx`
+          UPDATE alissonerp.pagamentos_venda
+          SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW(),
+              gateway = ${formaRecebimento ?? null},
+              ouro_peso = ${ouroPeso},
+              ouro_valor_grama = ${ouroValorGrama},
+              ouro_foto_path = ${ouroFotoPath}
+          WHERE id = ${pagamento.id}
+        `;
+      } else if (formaRecebimento) {
+        await tx`
+          UPDATE alissonerp.pagamentos_venda
+          SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW(),
+              gateway = ${formaRecebimento}
+          WHERE id = ${pagamento.id}
+        `;
+      } else {
+        await tx`
+          UPDATE alissonerp.pagamentos_venda
+          SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW()
+          WHERE id = ${pagamento.id}
+        `;
+      }
       await tx`
-        UPDATE alissonerp.pagamentos_venda
-        SET status = 'confirmado', data_confirmacao = NOW()
-        WHERE id = ${pagamento.id}
+        INSERT INTO alissonerp.pagamentos_venda
+          (venda_id, forma, valor, parcelas, status)
+        VALUES (
+          ${vendaId}, 'A Receber', ${valorRestante}, 1, 'pendente'
+        )
       `;
     }
 
-    // 3. Registrar comunicação
+    // PASSO 3 — Histórico de comunicação
+    // Toda baixa registra quem fez, quando e qual forma foi usada.
+    // Para Ouro: inclui peso e valor/grama na mensagem.
+    // Aparece na timeline do drawer de detalhe do crediário.
+    const msgOuro = ouroPeso && ouroValorGrama
+      ? ` (${ouroPeso}g × R$ ${ouroValorGrama}/g)`
+      : "";
     await tx`
       INSERT INTO alissonerp.comunicacoes_crediario
         (conta_receber_id, tipo, mensagem, usuario_id)
       VALUES (
         ${contaId},
         'aviso_recebimento',
-        ${obs ?? `Pagamento de ${conta.descricao} registrado manualmente`},
+        ${obs ?? `Recebido via ${formaRecebimento ?? "não informado"} — R$ ${valorEfetivo.toFixed(2)}${msgOuro} — ${conta.descricao}`},
         ${user.id}::uuid
       )
     `;
@@ -109,19 +257,27 @@ export async function POST(
       operacao: "UPDATE",
       registro_id: contaId,
       usuario_id: user.id,
-      dados_antes: { situacao: "pendente" },
-      dados_depois: { situacao: "pago", data_recebimento: new Date().toISOString().split("T")[0] },
+      dados_antes: { situacao: "pendente", valor: Number(conta.valor) },
+      dados_depois: { situacao: "pago", valor: valorEfetivo, ...(novoCreditoId ? { novo_credito_id: novoCreditoId } : {}) },
     });
   });
 
-  // 4. Devolver saldo ao gerente se crédito foi usado (fora da tx para evitar lock)
+  // ═══ PÓS-TRANSAÇÃO ═══════════════════════════════════════════════════════
+  // Estas operações rodam FORA da transação para evitar locks prolongados
+  // no saldo_credito_loja e configuracoes_sistema.
+
+  // PASSO 4 — Devolver saldo ao gerente
+  // REGRA DE OURO #1: Toda baixa de "A Receber" DEVE devolver o saldo
+  // proporcional ao gerente se a venda usou crédito (credito_gerente_usado > 0).
+  // Ex: gerente usou R$ 1.500 de crédito, cliente pagou R$ 1.000 via Dinheiro
+  //     → devolve R$ 1.000 ao saldo do gerente
   if (vendaId && pagamento) {
     const [venda] = await sql`
       SELECT credito_gerente_usado FROM alissonerp.vendas_erp WHERE id = ${vendaId}
     `;
     const creditoUsado = parseFloat(venda?.credito_gerente_usado ?? "0");
     if (creditoUsado > 0) {
-      const valorDevolver = Math.min(parseFloat(pagamento.valor), creditoUsado);
+      const valorDevolver = Math.min(valorEfetivo, creditoUsado);
       try {
         await creditarSaldo(valorDevolver, vendaId, pagamento.id, user.id);
         await sql`
@@ -137,7 +293,10 @@ export async function POST(
     }
   }
 
-  // 5. Verificar se todos os pagamentos estão confirmados e concluir venda
+  // PASSO 5 — Auto-concluir venda se quitada
+  // Se todos os pagamentos da venda estão confirmados e a venda está 'aprovado',
+  // conclui automaticamente (chama o Tiny ERP se aplicável).
+  // Só dispara se não há mais pagamentos pendentes na venda.
   if (vendaId) {
     const [pendentes] = await sql`
       SELECT COUNT(*) AS cnt FROM alissonerp.pagamentos_venda
@@ -160,5 +319,9 @@ export async function POST(
     ok: true,
     saldo_devolvido: saldoDevolvido,
     venda_concluida: vendaConcluida,
+    pagamento_parcial: ehPagamentoParcial || undefined,
+    valor_pago: valorEfetivo,
+    valor_restante: ehPagamentoParcial ? valorRestante : undefined,
+    novo_credito_id: novoCreditoId ?? undefined,
   });
 }

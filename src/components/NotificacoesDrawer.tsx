@@ -1,7 +1,21 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// Drawer de Notificações
+//
+// REGRA DE NEGÓCIO (Bug 3): removido o botão "Aprovar Desconto" inline.
+// Antes: a notificação tinha um botão que aprovava o desconto direto,
+//   mas SEM reduzir a comissão da vendedora para 0,5%.
+//   A aprovação via página de tarefas reduzia a comissão.
+//   Mesma ação, resultados diferentes → bug de inconsistência.
+// Agora: toda notificação de aprovação leva para a página de tarefas.
+//   Um único caminho, comportamento consistente.
+//
+// Se alterar: garantir que aprovação inline (se readicionada) tenha OS
+// MESMOS efeitos (comissão, notificação, etc.) que a aprovação via tarefa.
+// ═══════════════════════════════════════════════════════════════════════════
+
 "use client";
 
-import { X, Bell, Check } from "lucide-react";
-import { useState } from "react";
+import { X, Bell } from "lucide-react";
 
 interface Notificacao {
   id: string;
@@ -37,54 +51,6 @@ function tempoRelativo(data: string): string {
   return new Date(data).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
-function BotaoAprovarDesconto({ notifId, vendaId, onAprovado }: { notifId: string; vendaId: number; onAprovado: (id: string) => void }) {
-  const [loading, setLoading] = useState(false);
-  const [aprovado, setAprovado] = useState(false);
-  const [erro, setErro] = useState("");
-
-  async function aprovar(e: React.MouseEvent) {
-    e.stopPropagation();
-    setLoading(true);
-    setErro("");
-    try {
-      const res = await fetch(`/api/vendas/${vendaId}/aprovar-desconto`, { method: "POST" });
-      if (!res.ok) {
-        const d = await res.json();
-        setErro(d.error ?? "Erro");
-        return;
-      }
-      setAprovado(true);
-      onAprovado(notifId);
-    } catch {
-      setErro("Erro de rede");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  if (aprovado) {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-medium mt-2" style={{ color: "#184036" }}>
-        <Check size={12} /> Aprovado
-      </span>
-    );
-  }
-
-  return (
-    <div className="mt-2">
-      <button
-        onClick={aprovar}
-        disabled={loading}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-opacity disabled:opacity-50"
-        style={{ backgroundColor: "#184036", color: "#fff" }}
-      >
-        {loading ? "Aprovando..." : "✓ Aprovar Desconto"}
-      </button>
-      {erro && <p className="text-[10px] mt-1" style={{ color: "#dc2626" }}>{erro}</p>}
-    </div>
-  );
-}
-
 export function NotificacoesDrawer({
   aberto,
   onFechar,
@@ -93,8 +59,6 @@ export function NotificacoesDrawer({
   onMarcarTodas,
   carregando,
 }: Props) {
-  const [aprovadas, setAprovadas] = useState<Set<string>>(new Set());
-
   if (!aberto) return null;
 
   return (
@@ -105,7 +69,6 @@ export function NotificacoesDrawer({
         className="fixed left-0 md:left-56 top-0 h-full w-full md:w-[380px] z-50 flex flex-col shadow-2xl"
         style={{ backgroundColor: "#fff", borderLeft: "1px solid #e5e7eb" }}
       >
-        {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: "#e5e7eb" }}>
           <h2 className="font-semibold text-sm tracking-wide" style={{ color: "#184036" }}>
             Notificações
@@ -123,7 +86,6 @@ export function NotificacoesDrawer({
           </div>
         )}
 
-        {/* Lista */}
         <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
           {carregando ? (
             <div className="flex items-center justify-center h-32 text-xs" style={{ color: "#80A795" }}>
@@ -136,26 +98,23 @@ export function NotificacoesDrawer({
             </div>
           ) : (
             notificacoes.map((n) => {
-              const isAprovacaoDesconto = n.tipo === "aprovacao" && !!n.venda_id && !aprovadas.has(n.id);
               return (
                 <div
                   key={n.id}
-                  onClick={() => !isAprovacaoDesconto && onMarcarLida(n.id, n.link)}
+                  onClick={() => onMarcarLida(n.id, n.link)}
                   className="flex gap-3 px-4 py-3 border-b transition-colors"
                   style={{
                     borderColor: "#e5e7eb",
                     backgroundColor: n.lida ? "transparent" : "#f9fafb",
-                    cursor: isAprovacaoDesconto ? "default" : "pointer",
+                    cursor: "pointer",
                   }}
-                  onMouseEnter={(e) => { if (!isAprovacaoDesconto) (e.currentTarget as HTMLDivElement).style.backgroundColor = "#f3f4f6"; }}
-                  onMouseLeave={(e) => { if (!isAprovacaoDesconto) (e.currentTarget as HTMLDivElement).style.backgroundColor = n.lida ? "transparent" : "#f9fafb"; }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.backgroundColor = "#f3f4f6"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.backgroundColor = n.lida ? "transparent" : "#f9fafb"; }}
                 >
-                  {/* Bolinha */}
                   <div className="pt-1.5 flex-shrink-0 w-2">
                     {!n.lida && <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "#184036" }} />}
                   </div>
 
-                  {/* Conteúdo */}
                   <div className="flex-1 min-w-0">
                     <p className="text-xs leading-snug" style={{ color: n.lida ? "#6b7280" : "#111827", fontWeight: n.lida ? 400 : 600 }}>
                       {n.titulo}
@@ -166,26 +125,13 @@ export function NotificacoesDrawer({
                       </p>
                     )}
 
-                    {/* Botão aprovar desconto inline */}
-                    {isAprovacaoDesconto && n.venda_id && (
-                      <BotaoAprovarDesconto
-                        notifId={n.id}
-                        vendaId={n.venda_id}
-                        onAprovado={(id) => {
-                          setAprovadas((prev) => new Set(prev).add(id));
-                          onMarcarLida(id, null);
-                        }}
-                      />
-                    )}
-
-                    {/* Link para ver venda (notificações não-aprovação) */}
-                    {!isAprovacaoDesconto && n.link && (
+                    {n.link && (
                       <button
                         onClick={(e) => { e.stopPropagation(); onMarcarLida(n.id, n.link); }}
                         className="text-[10px] mt-1 hover:underline"
                         style={{ color: "#4A7568" }}
                       >
-                        Ver venda →
+                        Ver →
                       </button>
                     )}
 

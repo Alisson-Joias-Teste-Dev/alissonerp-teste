@@ -18,6 +18,8 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
+import { createClient } from "@/lib/supabase/client";
+import { getPublicUrl } from "@/lib/storage-url";
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 const C = {
@@ -75,6 +77,9 @@ interface Comunicacao {
 interface ContaDetalhe extends CrediarioItem {
   cliente_email: string | null;
   comunicacoes: Comunicacao[];
+  ouro_peso?: number | null;
+  ouro_valor_grama?: number | null;
+  ouro_foto_path?: string | null;
 }
 
 interface Contagens {
@@ -114,6 +119,19 @@ function agingLabel(status: string, dias: number) {
 }
 
 // ── Drawer de detalhe ─────────────────────────────────────────────────────────
+/**
+ * DetalheDrawer — Painel lateral que abre ao clicar em uma conta do crediário.
+ *
+ * Mostra:
+ *  - Status (aging), valor, datas, cliente, venda vinculada
+ *  - Seletor de forma de recebimento com 6 opções (REGRA DE OURO #3)
+ *  - Para Ouro: campos de peso, valor/grama e upload de foto da balança
+ *  - Para MP: campo ID + verificação na API do Mercado Pago
+ *  - Timeline de comunicações (histórico)
+ *
+ * A baixa chama registrar-pagamento/route.ts (formas não-MP) ou
+ * verificar-mp/route.ts (Mercado Pago). Ver AGENTS.md para o fluxo completo.
+ */
 function DetalheDrawer({
   contaId,
   isGerente,
@@ -128,11 +146,19 @@ function DetalheDrawer({
   const [detalhe, setDetalhe] = useState<ContaDetalhe | null>(null);
   const [loading, setLoading] = useState(true);
   const [mpPaymentId, setMpPaymentId] = useState("");
+  const [formaRecebimento, setFormaRecebimento] = useState<string | null>(null);
+  const [valorPago, setValorPago] = useState("");
   const [obs, setObs] = useState("");
   const [baixando, setBaixando] = useState(false);
   const [err, setErr] = useState("");
   const [novaMsg, setNovaMsg] = useState("");
   const [enviandoMsg, setEnviandoMsg] = useState(false);
+  // Ouro
+  const [ouroPeso, setOuroPeso] = useState("");
+  const [ouroValorGrama, setOuroValorGrama] = useState("");
+  const [ouroFotoFile, setOuroFotoFile] = useState<File | null>(null);
+  const [ouroFotoPreview, setOuroFotoPreview] = useState<string | null>(null);
+  const [ouroUploading, setOuroUploading] = useState(false);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -168,6 +194,76 @@ function DetalheDrawer({
       onClose();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Erro ao verificar pagamento");
+    } finally {
+      setBaixando(false);
+    }
+  }
+
+  async function uploadOuroFoto(file: File): Promise<string | null> {
+    const supabase = createClient();
+    const ext = file.name.split(".").pop() ?? "jpg";
+    const path = `crediario/${contaId}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from("pagamento-fotos").upload(path, file, { contentType: file.type });
+    if (error) { setErr("Erro ao enviar foto: " + error.message); return null; }
+    return path;
+  }
+
+  async function handleConfirmar() {
+    if (!formaRecebimento) return;
+    const valor = parseFloat(valorPago.replace(",", "."));
+    if (!valor || valor <= 0) { setErr("Informe o valor pago"); return; }
+    if (detalhe && valor > detalhe.valor) { setErr("Valor pago maior que o valor da conta"); return; }
+
+    if (formaRecebimento === "Ouro") {
+      const peso = parseFloat(ouroPeso.replace(",", "."));
+      const grama = parseFloat(ouroValorGrama.replace(",", "."));
+      if (!peso || peso <= 0) { setErr("Informe o peso do ouro"); return; }
+      if (!grama || grama <= 0) { setErr("Informe o valor da grama"); return; }
+      if (!ouroFotoFile) { setErr("Foto da balança obrigatória"); return; }
+
+      setOuroUploading(true);
+      setErr("");
+      try {
+        const fotoPath = await uploadOuroFoto(ouroFotoFile);
+        if (!fotoPath) { setOuroUploading(false); return; }
+        setBaixando(true);
+        await apiFetch(`/api/crediario/${contaId}/registrar-pagamento`, {
+          method: "POST",
+          body: JSON.stringify({
+            forma_recebimento: formaRecebimento,
+            valor_pago: peso * grama,
+            ouro_peso: peso,
+            ouro_valor_grama: grama,
+            ouro_foto_path: fotoPath,
+            obs: obs.trim() || undefined,
+          }),
+        });
+        onBaixa(contaId);
+        onClose();
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Erro ao registrar recebimento");
+      } finally {
+        setBaixando(false);
+        setOuroUploading(false);
+      }
+      return;
+    }
+
+    setBaixando(true);
+    setErr("");
+    try {
+      await apiFetch(`/api/crediario/${contaId}/registrar-pagamento`, {
+        method: "POST",
+        body: JSON.stringify({
+          forma_recebimento: formaRecebimento,
+          valor_pago: valor,
+          obs: obs.trim() || undefined,
+        }),
+      });
+      onBaixa(contaId);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Erro ao registrar recebimento");
     } finally {
       setBaixando(false);
     }
@@ -280,6 +376,31 @@ function DetalheDrawer({
               )}
             </div>
 
+            {/* Ouro — foto da balança */}
+            {/* REGRA DE OURO #4: foto do ouro visível no drawer, usa proxy /api/storage/pagamento-fotos/...
+               com getPublicUrl(). A foto é obrigatória no upload e fica acessível para qualquer autenticado. */}
+            {detalhe.ouro_foto_path && (
+              <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 8, background: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}>
+                <div style={{ fontSize: 11, color: C.cinza, marginBottom: 6 }}>Pagamento em Ouro</div>
+                <a
+                  href={getPublicUrl("pagamento-fotos", detalhe.ouro_foto_path)}
+                  target="_blank" rel="noreferrer"
+                >
+                  <img
+                    src={getPublicUrl("pagamento-fotos", detalhe.ouro_foto_path)}
+                    alt="Balança ouro"
+                    style={{ width: "100%", maxHeight: 160, borderRadius: 6, objectFit: "cover", border: `1px solid ${C.cremeBorder}` }}
+                  />
+                </a>
+                {(detalhe.ouro_peso != null || detalhe.ouro_valor_grama != null) && (
+                  <div style={{ fontSize: 12, color: C.cinza, marginTop: 4 }}>
+                    {detalhe.ouro_peso != null && <span>{Number(detalhe.ouro_peso).toFixed(3)}g</span>}
+                    {detalhe.ouro_valor_grama != null && <span> × R$ {Number(detalhe.ouro_valor_grama).toFixed(2)}/g</span>}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Venda */}
             {detalhe.venda_id && (
               <div style={{ marginBottom: 12 }}>
@@ -306,61 +427,253 @@ function DetalheDrawer({
               </div>
             )}
 
-            {/* Baixa com verificação Mercado Pago */}
+            {/* Registrar Recebimento */}
             {podeRegistrarBaixa && (
               <div style={{
                 marginBottom: 16, padding: "14px", borderRadius: 10,
-                border: `1px solid #0070E040`, background: "#EBF5FB",
+                border: `1px solid ${formaRecebimento === "Manual (MP)" ? "#0070E040" : C.verde}40`,
+                background: formaRecebimento === "Manual (MP)" ? "#EBF5FB" : C.cremeBg,
               }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#0070E0", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.esmeralda, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
                   <CreditCard size={14} />
-                  Confirmar via Mercado Pago
+                  {formaRecebimento ? `Receber via ${formaRecebimento}` : "Registrar Recebimento"}
                 </div>
-                <div style={{ fontSize: 11, color: "#4A6FA5", marginBottom: 10, lineHeight: 1.5 }}>
-                  Informe o ID do pagamento MP recebido do cliente. O sistema consulta a API do Mercado Pago e só confirma se o status for <b>approved</b>.
-                </div>
-                <input
-                  value={mpPaymentId}
-                  onChange={e => setMpPaymentId(e.target.value.replace(/\D/g, ""))}
-                  placeholder="ID do pagamento MP (ex: 123456789)"
-                  type="text"
-                  inputMode="numeric"
-                  style={{
-                    width: "100%", fontSize: 13, padding: "8px 10px",
-                    border: `1px solid #0070E040`, borderRadius: 6,
-                    outline: "none", background: "#fff", boxSizing: "border-box",
-                    fontFamily: "monospace",
-                  }}
-                />
-                <textarea
-                  value={obs}
-                  onChange={e => setObs(e.target.value)}
-                  placeholder="Observação adicional (opcional)..."
-                  rows={2}
-                  style={{
-                    marginTop: 6, width: "100%", fontSize: 12, padding: "7px 10px",
-                    border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
-                    resize: "none", outline: "none", background: "#fff",
-                    boxSizing: "border-box",
-                  }}
-                />
-                <button
-                  onClick={handleVerificarMp}
-                  disabled={baixando || !mpPaymentId.trim()}
-                  style={{
-                    marginTop: 8, width: "100%", padding: "10px",
-                    background: mpPaymentId.trim() ? "#0070E0" : "#B0C4DE",
-                    color: "#fff", border: "none",
-                    borderRadius: 8, fontSize: 13, fontWeight: 700,
-                    cursor: baixando || !mpPaymentId.trim() ? "not-allowed" : "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                  }}
-                >
-                  {baixando
-                    ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Verificando no MP...</>
-                    : <><CheckCircle size={14} /> Verificar e Confirmar</>
-                  }
-                </button>
+
+                {/* Seletor de forma */}
+                {!formaRecebimento && (
+                  <>
+                    <div style={{ fontSize: 11, color: C.cinza, marginBottom: 8 }}>Como o cliente pagou?</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      {(["Dinheiro", "Cartão de Crédito", "Pix", "Ouro", "Vale-Troca", "Manual (MP)"] as const).map(f => (
+                        <button
+                          key={f}
+                          onClick={() => {
+                            setFormaRecebimento(f);
+                            setErr("");
+                            if (f !== "Manual (MP)") {
+                              setValorPago(detalhe ? detalhe.valor.toFixed(2).replace(".", ",") : "");
+                            }
+                          }}
+                          style={{
+                            padding: "8px 6px", fontSize: 11, fontWeight: 600,
+                            border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
+                            background: "#fff", cursor: "pointer", textAlign: "center",
+                            color: C.esmeralda,
+                          }}>
+                          {f}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* Manual (MP) → campo ID + verificação */}
+                {formaRecebimento === "Manual (MP)" && (
+                  <>
+                    <div style={{ fontSize: 11, color: "#4A6FA5", marginBottom: 10, lineHeight: 1.5 }}>
+                      Informe o ID do pagamento MP recebido do cliente. O sistema consulta a API do Mercado Pago e só confirma se o status for <b>approved</b>.
+                    </div>
+                    <input
+                      value={mpPaymentId}
+                      onChange={e => setMpPaymentId(e.target.value.replace(/\D/g, ""))}
+                      placeholder="ID do pagamento MP (ex: 123456789)"
+                      type="text"
+                      inputMode="numeric"
+                      style={{
+                        width: "100%", fontSize: 13, padding: "8px 10px",
+                        border: `1px solid #0070E040`, borderRadius: 6,
+                        outline: "none", background: "#fff", boxSizing: "border-box",
+                        fontFamily: "monospace",
+                      }}
+                    />
+                    <textarea
+                      value={obs}
+                      onChange={e => setObs(e.target.value)}
+                      placeholder="Observação adicional (opcional)..."
+                      rows={2}
+                      style={{
+                        marginTop: 6, width: "100%", fontSize: 12, padding: "7px 10px",
+                        border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
+                        resize: "none", outline: "none", background: "#fff",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                      <button
+                        onClick={() => { setFormaRecebimento(null); setMpPaymentId(""); setErr(""); }}
+                        style={{
+                          padding: "10px 14px", background: "none", border: `1px solid ${C.cremeBorder}`,
+                          borderRadius: 8, fontSize: 12, color: C.cinza, cursor: "pointer",
+                        }}>
+                        Voltar
+                      </button>
+                      <button
+                        onClick={handleVerificarMp}
+                        disabled={baixando || !mpPaymentId.trim()}
+                        style={{
+                          flex: 1, padding: "10px",
+                          background: mpPaymentId.trim() ? "#0070E0" : "#B0C4DE",
+                          color: "#fff", border: "none",
+                          borderRadius: 8, fontSize: 13, fontWeight: 700,
+                          cursor: baixando || !mpPaymentId.trim() ? "not-allowed" : "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                        }}
+                      >
+                        {baixando
+                          ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Verificando no MP...</>
+                          : <><CheckCircle size={14} /> Verificar e Confirmar</>
+                        }
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {/* Demais formas → valor + (Ouro: peso/grama/foto) */}
+                {formaRecebimento && formaRecebimento !== "Manual (MP)" && (
+                  <>
+                    {/* Valor pago */}
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>
+                        Valor pago{formaRecebimento === "Ouro" ? " (calculado do ouro)" : ""}
+                      </div>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={formaRecebimento === "Ouro"
+                          ? ((() => {
+                              const p = parseFloat(ouroPeso.replace(",", "."));
+                              const g = parseFloat(ouroValorGrama.replace(",", "."));
+                              return p > 0 && g > 0 ? (p * g).toFixed(2).replace(".", ",") : "";
+                            })())
+                          : valorPago}
+                        onChange={e => setValorPago(e.target.value)}
+                        placeholder={detalhe ? detalhe.valor.toFixed(2).replace(".", ",") : "0,00"}
+                        readOnly={formaRecebimento === "Ouro"}
+                        style={{
+                          width: "100%", fontSize: 15, fontWeight: 700, padding: "8px 10px",
+                          border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
+                          outline: "none", background: formaRecebimento === "Ouro" ? "#f5f5f5" : "#fff",
+                          boxSizing: "border-box", fontFamily: "monospace",
+                          color: C.esmeralda,
+                        }}
+                      />
+                      {detalhe && formaRecebimento !== "Ouro" && (
+                        <div style={{ fontSize: 10, color: C.cinza, marginTop: 2 }}>
+                          Valor total da conta: {fmtBRL(detalhe.valor)}
+                          {parseFloat(valorPago.replace(",", ".")) > 0 && parseFloat(valorPago.replace(",", ".")) < detalhe.valor && (
+                            <span style={{ color: C.ambar, fontWeight: 600 }}>
+                              {" "}— restante: {fmtBRL(detalhe.valor - parseFloat(valorPago.replace(",", ".")))} será novo crédito
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Ouro: peso + grama + foto */}
+                    {formaRecebimento === "Ouro" && (
+                      <div style={{ marginBottom: 8, padding: "10px", borderRadius: 6, border: `1px solid ${C.cremeBorder}`, background: "#fff" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: C.cinza, marginBottom: 2 }}>Peso (g)</div>
+                            <input
+                              type="number" step="0.001"
+                              value={ouroPeso}
+                              onChange={e => setOuroPeso(e.target.value)}
+                              placeholder="0.000"
+                              style={{
+                                width: "100%", fontSize: 13, padding: "7px 8px",
+                                border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
+                                outline: "none", boxSizing: "border-box",
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: C.cinza, marginBottom: 2 }}>Valor grama (R$)</div>
+                            <input
+                              type="number" step="0.01"
+                              value={ouroValorGrama}
+                              onChange={e => setOuroValorGrama(e.target.value)}
+                              placeholder="0.00"
+                              style={{
+                                width: "100%", fontSize: 13, padding: "7px 8px",
+                                border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
+                                outline: "none", boxSizing: "border-box",
+                              }}
+                            />
+                          </div>
+                        </div>
+                        {(() => {
+                          const p = parseFloat(ouroPeso.replace(",", "."));
+                          const g = parseFloat(ouroValorGrama.replace(",", "."));
+                          if (p > 0 && g > 0) return (
+                            <div style={{ fontSize: 13, fontWeight: 700, color: C.esmeralda, marginBottom: 8 }}>
+                              Total: {fmtBRL(p * g)}
+                            </div>
+                          );
+                          return null;
+                        })()}
+                        <div>
+                          <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Foto da balança (obrigatória)</div>
+                          <input
+                            type="file" accept="image/*" capture="environment"
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              setOuroFotoFile(file);
+                              setOuroFotoPreview(URL.createObjectURL(file));
+                            }}
+                            style={{ width: "100%", fontSize: 12 }}
+                          />
+                          {ouroFotoPreview && (
+                            <img src={ouroFotoPreview} alt="Balança"
+                              style={{ marginTop: 6, height: 80, borderRadius: 6, objectFit: "cover" }} />
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <textarea
+                      value={obs}
+                      onChange={e => setObs(e.target.value)}
+                      placeholder="Observação adicional (opcional)..."
+                      rows={2}
+                      style={{
+                        marginTop: 6, width: "100%", fontSize: 12, padding: "7px 10px",
+                        border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
+                        resize: "none", outline: "none", background: "#fff",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                      <button
+                        onClick={() => { setFormaRecebimento(null); setValorPago(""); setOuroPeso(""); setOuroValorGrama(""); setOuroFotoFile(null); setOuroFotoPreview(null); setErr(""); }}
+                        style={{
+                          padding: "10px 14px", background: "none", border: `1px solid ${C.cremeBorder}`,
+                          borderRadius: 8, fontSize: 12, color: C.cinza, cursor: "pointer",
+                        }}>
+                        Voltar
+                      </button>
+                      <button
+                        onClick={handleConfirmar}
+                        disabled={baixando || ouroUploading}
+                        style={{
+                          flex: 1, padding: "10px",
+                          background: C.esmeralda, color: C.creme, border: "none",
+                          borderRadius: 8, fontSize: 13, fontWeight: 700,
+                          cursor: baixando || ouroUploading ? "not-allowed" : "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                        }}
+                      >
+                        {ouroUploading
+                          ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Enviando foto...</>
+                          : baixando
+                          ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Confirmando...</>
+                          : <><CheckCircle size={14} /> Confirmar Recebimento</>
+                        }
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
