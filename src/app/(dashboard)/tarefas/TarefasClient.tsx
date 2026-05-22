@@ -529,7 +529,6 @@ export default function TarefasClient() {
   }
 
   async function handleRejeitar(tarefaId: number) {
-    if (!motivoRejeicao.trim()) return;
     setSalvandoAprov(true);
     try {
       // Busca o id da aprovação pendente antes de enviar a decisão
@@ -868,7 +867,7 @@ export default function TarefasClient() {
                     {estaRejeitando ? (
                       <div className="space-y-2">
                         <textarea
-                          placeholder="Motivo da rejeição *"
+                          placeholder="Motivo da rejeição (opcional)"
                           value={motivoRejeicao}
                           onChange={e => setMotivoRejeicao(e.target.value)}
                           rows={2}
@@ -885,7 +884,7 @@ export default function TarefasClient() {
                           </button>
                           <button
                             onClick={() => handleRejeitar(t.id)}
-                            disabled={!motivoRejeicao.trim() || salvandoAprov}
+                            disabled={salvandoAprov}
                             className="flex-1 py-2 text-sm rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
                             style={{ backgroundColor: "#DC2626", color: "#fff" }}>
                             {salvandoAprov ? <Loader2 size={13} className="animate-spin" /> : null}
