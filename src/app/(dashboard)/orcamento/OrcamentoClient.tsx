@@ -369,16 +369,19 @@ export default function OrcamentoClient({
         stoneDrill: !!src.pedra_drill, stoneHalfMoon: !!src.pedra_meia_lua, stoneFull: !!src.pedra_volta_completa,
         stoneType: src.tipo_pedra ?? p.stoneType,
         stoneRows: src.pedra_fileiras ? Number(src.pedra_fileiras) : p.stoneRows,
-        // texto pode vir como "Principal | Adicional1 | Adicional2" — primeira
-        // parte vai pro nome principal, resto fica como extras (carregado abaixo).
-        textEnabled: !!src.texto, textContent: src.texto ? String(src.texto).split(" | ")[0] : "",
+        // texto pode vir como "PrincipalAdic1Adic2" (novo) ou
+        // "Principal | Adic1 | Adic2" (legado). Primeira parte vai pro nome
+        // principal, resto fica como extras (carregado abaixo).
+        textEnabled: !!src.texto,
+        textContent: src.texto ? String(src.texto).split(new RegExp("\\u001F| \\| "))[0] : "",
         textFontType: src.tipo_fonte === "Cursiva" ? 2 : 1,
       });
       setParams(p => applyRingParams(p, ft));
       // Restaura textos adicionais do anel 1 (apos o split de texto principal)
-      if (ft.texto && typeof ft.texto === "string" && ft.texto.includes(" | ")) {
-        const parts = String(ft.texto).split(" | ");
-        setTextosExtras(parts.slice(1));
+      if (ft.texto && typeof ft.texto === "string") {
+        const splitRe = new RegExp("\\u001F| \\| ");
+        const parts = String(ft.texto).split(splitRe);
+        setTextosExtras(parts.length > 1 ? parts.slice(1) : []);
       } else {
         setTextosExtras([]);
       }
@@ -396,10 +399,11 @@ export default function OrcamentoClient({
           ? Number(ft2.densidade_ouro)
           : (metalMatch2?.density ?? 14.69);
         setParams2(p => applyRingParams({ ...p, metalColor: metalHex2, goldDensity: metalDensity2 }, ft2));
-        // Restaura textos adicionais do anel 2
-        if (ft2.texto && typeof ft2.texto === "string" && ft2.texto.includes(" | ")) {
-          const parts = String(ft2.texto).split(" | ");
-          setTextosExtras2(parts.slice(1));
+        // Restaura textos adicionais do anel 2 (aceita ambos separadores)
+        if (ft2.texto && typeof ft2.texto === "string") {
+          const splitRe2 = new RegExp("\\u001F| \\| ");
+          const parts2 = String(ft2.texto).split(splitRe2);
+          setTextosExtras2(parts2.length > 1 ? parts2.slice(1) : []);
         } else {
           setTextosExtras2([]);
         }
@@ -1029,7 +1033,11 @@ export default function OrcamentoClient({
       params.concaveDepth, params.domePercentage, params.chamferSize, params.canalWidth, params.canalBorderHeight]);
 
   // Auto-carrega config quando largura muda (friso usa grooveRules, risco usa defaults)
+  // GATE isHydratingRef: durante carga de rascunho/orcamento antigo, NAO recalcular —
+  // preserva valores customizados do friso salvos no banco. Mesmo padrao dos outros
+  // 6 useEffects ja protegidos (CLAUDE.md lista esse como bug recorrente).
   useEffect(() => {
+    if (isHydratingRef.current) return;
     if (!params.hasGroove) return;
     if (params.grooveKind === "risco") {
       setParams((prev) => ({ ...prev, grooveWidth: riscoWidth, grooveDepth: riscoDepth }));
@@ -1037,7 +1045,7 @@ export default function OrcamentoClient({
       const rule = findGrooveRule(params.width, grooveRules);
       setParams((prev) => ({ ...prev, grooveWidth: rule.grooveWidth, grooveDepth: rule.grooveDepth, grooveOffset: rule.grooveOffset }));
     }
-  }, [params.width, params.hasGroove, params.grooveKind, grooveRules, riscoWidth, riscoDepth]);  
+  }, [params.width, params.hasGroove, params.grooveKind, grooveRules, riscoWidth, riscoDepth]);
 
   // Calibracao vinda do config (com fallback para defaults conservadores)
   // Calibracao pode vir como objeto ou como string (caso legado do bug JSONB
@@ -1491,11 +1499,13 @@ export default function OrcamentoClient({
 
   function buildFicha(p: RingParams, pf: ProfileType, rs: RingSize, w: number, sc: number, entries: StoneEntry[], extras: string[] = []) {
     // Junta texto principal + textos adicionais (Bordas Elevadas permite varios)
-    // num unico campo separado por " | ". Sem isso so o nome principal vai pra
-    // ficha tecnica e a fabrica nao ve os adicionais.
+    // separados por U+001F (Unit Separator) — caractere de controle nao-tipavel
+    // pelo usuario. Antes era " | " literal, que quebrava quando alguem digitava
+    // um nome contendo " | ".
     const textoPrincipal = p.textEnabled && p.textContent.trim() ? p.textContent.trim() : "";
     const textosLimpos = [textoPrincipal, ...extras.map(t => t.trim()).filter(t => t.length > 0)].filter(Boolean);
-    const textoFinal = textosLimpos.length > 0 ? textosLimpos.join(" | ") : null;
+    const SEP = "\u001F";
+    const textoFinal = textosLimpos.length > 0 ? textosLimpos.join(SEP) : null;
     return {
       modelo: (() => { const o = PROFILE_OPTIONS.find((o) => o.id === pf); return o?.fichaLabel ?? o?.label ?? pf; })(),
       aro_numeracao: `Aro ${rs.size}`, largura: p.width, espessura: p.height,
@@ -3943,12 +3953,13 @@ function FichaAlianca({
         <Linha k={L("furo_passante")} v={params.stoneDrill ? "Sim" : "Não"} />
       )}
       {params.textEnabled && params.textContent && (() => {
-        // Junta nome principal + adicionais (Bordas Elevadas permite varios)
+        // Junta nome principal + adicionais (Bordas Elevadas permite varios).
+        // Numerados para a fabrica entender qual eh principal e quais sao adicionais.
         const extrasLimpos = textosExtras.map(t => t.trim()).filter(Boolean);
         const todos = [params.textContent, ...extrasLimpos];
         const gravacaoStr = todos.length === 1
           ? `"${todos[0]}"`
-          : todos.map(t => `"${t}"`).join(" · ");
+          : todos.map((t, i) => `${i + 1}) "${t}"`).join("   ");
         return <Linha k={L("gravacao")} v={gravacaoStr} />;
       })()}
       <div className="border-t pt-1.5 mt-1.5" style={{ borderColor: C.cremeBorder }}>

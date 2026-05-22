@@ -26,8 +26,8 @@ const C = {
 // Labels legíveis para campos JSONB de fichas técnicas ERP
 const FICHA_LABELS: Record<string, string> = {
   tipo_item: "Tipo de Item",
-  milimetragem: "Milimetragem",
-  numeracao: "Numeração",
+  milimetragem: "Largura (mm)",
+  numeracao: "Numeração (Aro)",
   modelo: "Modelo",
   modelo_interno: "Modelo Interno",
   modelo_externo: "Modelo Externo",
@@ -48,6 +48,28 @@ const FICHA_LABELS: Record<string, string> = {
   tipo_tarraxa: "Tipo Tarraxa",
   tipo_pedra: "Tipo de Pedra",
   pedras_detalhadas: "Pedras",
+  cor_metal: "Cor do Metal",
+  peso_estimado: "Peso Estimado",
+  espessura: "Espessura (mm)",
+  diametro: "Diâmetro Interno (mm)",
+  densidade_ouro: "Densidade Ouro (g/cm³)",
+  profundidade_concava: "Profundidade Côncava (mm)",
+  dome_porcentagem: "Curvatura (%)",
+  has_friso: "Tem Friso",
+  friso_kind: "Tipo (Friso/Risco)",
+  friso_tipo: "Posição do Friso",
+  friso_lado: "Lado do Friso",
+  friso_largura: "Largura do Friso (mm)",
+  friso_profundidade: "Profundidade do Friso (mm)",
+  friso_offset: "Offset do Friso (mm)",
+  canal_largura: "Largura do Canal (mm)",
+  canal_borda_altura: "Altura da Borda (mm)",
+  chanfro_tamanho: "Chanfro (mm)",
+  qtd_pedras: "Qtd. Pedras",
+  tamanho_pedra: "Tamanho da Pedra (mm)",
+  tipo_aplicacao_pedra: "Aplicação da Pedra",
+  pedra_fileiras: "Fileiras de Pedra",
+  pedra_drill: "Furo Passante",
 };
 const TIPO_ITEM_LABELS: Record<string, string> = {
   alianca: "Aliança", par_alianca: "Par de Alianças", corrente: "Corrente",
@@ -766,6 +788,19 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                       }
                       if (key === "peso_estimado" && value != null) {
                         return `${Number(value).toFixed(2)}g`;
+                      }
+                      // Gravacao pode ter varios nomes salvos como "Principal\u001FAdic1\u001FAdic2"
+                      // (formato novo) ou "Principal | Adic1 | Adic2" (formato antigo). Exibe
+                      // numerado e separado por linha para a fabrica ler com clareza.
+                      if (key === "texto_gravacao" && typeof value === "string") {
+                        const partes = value.split(new RegExp("\u001F| \| ")).map(t => t.trim()).filter(Boolean);
+                        if (partes.length <= 1) return `"${partes[0] ?? ""}"`;
+                        return partes.map((t, i) => `${i + 1}) "${t}"`).join("   ");
+                      }
+                      if (key === "has_friso") return value ? "Sim" : "Não";
+                      if (key === "pedra_drill") return value ? "Sim" : "Não";
+                      if (typeof value === "number") {
+                        return Number.isInteger(value) ? String(value) : value.toFixed(2);
                       }
                       return String(value);
                     };

@@ -106,7 +106,10 @@ export async function GET(
     const friso_profundidade = Number(row.friso_profundidade ?? 0);
     const has_friso = row.has_friso === true || (friso_largura > 0 && friso_profundidade > 0);
     const fonte = String(row.tipo_fonte ?? "");
-    const texto = String(row.texto ?? "");
+    // Texto pode ter varios nomes separados por U+001F (novo) ou " | " (legado).
+    // No 3D, mostramos apenas o nome principal — adicionais aparecem na ficha.
+    const textoRaw = String(row.texto ?? "");
+    const texto = textoRaw.split(new RegExp("\\u001F| \\| "))[0] ?? "";
     const fontType: 1 | 2 = fonte === "Cursiva" ? 2 : 1;
 
     // FrisoUnico/FrisoLateral sao perfis legados — coerce pra Simples
