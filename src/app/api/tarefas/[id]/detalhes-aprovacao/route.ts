@@ -49,27 +49,36 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   let venda = null;
   if (tarefa.venda_id) {
+    // Fix: vendas_erp tem `cliente_id` (nao contato_id), `total_venda`/`total_desconto`
+    // (nao valor_total/valor_desconto), `situacao` (nao status), `numero_venda`
+    // (nao numero_pedido). Tambem nao tem `forma_pagamento_principal` nem
+    // `desconto_percentual`. Esses sao derivados:
+    //   - desconto_percentual = total_desconto / (total_produtos) * 100
+    //   - forma_pagamento_principal = primeira forma em pagamentos_venda
     const [v] = await sql`
       SELECT
         v.id,
-        v.numero_pedido,
-        v.valor_total,
-        v.valor_desconto,
-        v.desconto_percentual,
-        v.forma_pagamento_principal AS forma_pagamento,
-        v.status,
+        v.numero_venda AS numero_pedido,
+        v.total_venda AS valor_total,
+        v.total_desconto AS valor_desconto,
+        v.total_produtos,
+        v.situacao AS status,
+        (SELECT forma FROM alissonerp.pagamentos_venda WHERE venda_id = v.id ORDER BY id LIMIT 1) AS forma_pagamento,
         c.nome AS cliente_nome
       FROM alissonerp.vendas_erp v
-      LEFT JOIN public.contatos c ON c.id_contato = v.contato_id
+      LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
       WHERE v.id = ${tarefa.venda_id}
     `;
     if (v) {
+      const totalProd = v.total_produtos != null ? Number(v.total_produtos) : 0;
+      const totalDesc = v.valor_desconto != null ? Number(v.valor_desconto) : 0;
+      const descPct = totalProd > 0 ? Math.round((totalDesc / totalProd) * 10000) / 100 : null;
       venda = {
         id: Number(v.id),
         numero_pedido: v.numero_pedido,
         valor_total: v.valor_total != null ? Number(v.valor_total) : 0,
-        valor_desconto: v.valor_desconto != null ? Number(v.valor_desconto) : null,
-        desconto_percentual: v.desconto_percentual != null ? Number(v.desconto_percentual) : null,
+        valor_desconto: totalDesc || null,
+        desconto_percentual: descPct,
         forma_pagamento: v.forma_pagamento ?? null,
         cliente_nome: v.cliente_nome ?? null,
         status: v.status,
