@@ -50,11 +50,18 @@
 }
 
 /* Base */
+html {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
 body {
   background-color: #FAFAF7;
   color: #1A1A1A;
   font-family: var(--font-dm-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  max-width: 100%;
 }
 
 /* Esconde scrollbar mas mantém scroll funcional (mobile UX) */
