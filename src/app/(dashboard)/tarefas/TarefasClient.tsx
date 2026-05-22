@@ -152,10 +152,20 @@ function gerarChips(t: Tarefa): Chip[] {
   const campos = parsearCamposDescricao(desc);
 
   if (tags.includes("diretor") || tags.includes("credito_loja")) {
+    const parseBRL = (v: string) => parseFloat(v.replace(/[R$\s.]/g, "").replace(",", ".")) || 0;
+    const creditoNum = campos.aReceber ? parseBRL(campos.aReceber) : 0;
+    const saldoNum = campos.saldoDisponivel ? parseBRL(campos.saldoDisponivel) : 0;
+    const saldoOk = saldoNum >= creditoNum && creditoNum > 0;
+
     if (campos.aReceber)
       chips.push({ label: `Crédito: ${campos.aReceber}`, icon: "💰", bg: "#FFF7ED", color: "#EA580C" });
     if (campos.saldoDisponivel)
-      chips.push({ label: `Saldo: ${campos.saldoDisponivel}`, icon: "🏦", bg: "#FEE2E2", color: "#DC2626" });
+      chips.push({
+        label: `Saldo: ${campos.saldoDisponivel}`,
+        icon: "🏦",
+        bg: saldoOk ? "#F0FDF4" : "#FEE2E2",
+        color: saldoOk ? "#16A34A" : "#DC2626",
+      });
     if (campos.cliente)
       chips.push({ label: campos.cliente, icon: "👤", bg: "#F3F4F6", color: "#6B7280" });
     chips.push({ label: "Comissão zerada se aprovado", icon: "⚠️", bg: "#FEFCE8", color: "#CA8A04" });
@@ -826,7 +836,7 @@ export default function TarefasClient() {
                     {/* Descrição completa */}
                     {t.descricao && (
                       <p className="text-xs leading-relaxed mb-3 whitespace-pre-line" style={{ color: "#6B7280" }}>
-                        {t.descricao.replace(/\\n/g, "\n").replace(/• null\s?—?\s?/g, "• ").replace(/• null/g, "•")}
+                        {t.descricao.replace(/\\n/g, "\n").replace(/• null\s?—?\s?/g, "• ").replace(/• null/g, "•").replace(/\*\*([^*]+)\*\*/g, "$1")}
                       </p>
                     )}
 
