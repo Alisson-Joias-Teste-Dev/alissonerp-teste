@@ -506,19 +506,35 @@ export default function TarefasClient() {
     setSalvando(false);
   }
 
-  async function handleAprovar(tarefaId: number) {
+  async function handleAprovar(tarefaId: number, tipo: string | null) {
     setSalvandoAprov(true);
     setAprovandoId(tarefaId);
     try {
-      // Busca o id da aprovação pendente antes de enviar a decisão
-      const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);
-      const pendente = aprovacoes.find(a => a.status === "pendente") ?? aprovacoes[0];
-      if (!pendente) throw new Error("Aprovação não encontrada");
-      await apiFetch(`/api/tarefas/${tarefaId}/aprovacao`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ aprovacao_id: pendente.id, decisao: "aprovado" }),
-      });
+      // Tarefas de conversão de estoque/SKU usam endpoints próprios — não
+      // gravam em aprovacoes_tarefa, então o fluxo genérico falha com "Aprovação não encontrada".
+      if (tipo === "conversao_sku") {
+        await apiFetch(`/api/conversao-sku/aprovar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tarefa_id: tarefaId }),
+        });
+      } else if (tipo === "conversao") {
+        await apiFetch(`/api/conversao/aprovar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tarefa_id: tarefaId }),
+        });
+      } else {
+        // Fluxo genérico (aprovacoes_tarefa)
+        const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);
+        const pendente = aprovacoes.find(a => a.status === "pendente") ?? aprovacoes[0];
+        if (!pendente) throw new Error("Aprovação não encontrada");
+        await apiFetch(`/api/tarefas/${tarefaId}/aprovacao`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ aprovacao_id: pendente.id, decisao: "aprovado" }),
+        });
+      }
       carregar();
       carregarStats();
     } catch (err) {
@@ -529,18 +545,33 @@ export default function TarefasClient() {
     setAprovandoId(null);
   }
 
-  async function handleRejeitar(tarefaId: number) {
+  async function handleRejeitar(tarefaId: number, tipo: string | null) {
     setSalvandoAprov(true);
     try {
-      // Busca o id da aprovação pendente antes de enviar a decisão
-      const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);
-      const pendente = aprovacoes.find(a => a.status === "pendente") ?? aprovacoes[0];
-      if (!pendente) throw new Error("Aprovação não encontrada");
-      await apiFetch(`/api/tarefas/${tarefaId}/aprovacao`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ aprovacao_id: pendente.id, decisao: "rejeitado", motivo: motivoRejeicao }),
-      });
+      // Tarefas de conversão de estoque/SKU usam endpoints próprios — não
+      // gravam em aprovacoes_tarefa, então o fluxo genérico falha com "Aprovação não encontrada".
+      if (tipo === "conversao_sku") {
+        await apiFetch(`/api/conversao-sku/recusar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tarefa_id: tarefaId, motivo: motivoRejeicao }),
+        });
+      } else if (tipo === "conversao") {
+        await apiFetch(`/api/conversao/recusar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tarefa_id: tarefaId, motivo: motivoRejeicao }),
+        });
+      } else {
+        const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);
+        const pendente = aprovacoes.find(a => a.status === "pendente") ?? aprovacoes[0];
+        if (!pendente) throw new Error("Aprovação não encontrada");
+        await apiFetch(`/api/tarefas/${tarefaId}/aprovacao`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ aprovacao_id: pendente.id, decisao: "rejeitado", motivo: motivoRejeicao }),
+        });
+      }
       setRejeitandoId(null);
       setMotivoRejeicao("");
       carregar();
@@ -868,7 +899,7 @@ export default function TarefasClient() {
                     {/* Botões Aprovar / Rejeitar — sempre no DOM, visibilidade via CSS */}
                     <div className={estaRejeitando ? "hidden" : "flex gap-2"}>
                       <button
-                        onClick={() => handleAprovar(t.id)}
+                        onClick={() => handleAprovar(t.id, t.tipo)}
                         disabled={salvandoAprov}
                         className="flex-1 py-2.5 text-sm rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
                         style={{ backgroundColor: "#059669", color: "#fff" }}>
@@ -901,7 +932,7 @@ export default function TarefasClient() {
                           Cancelar
                         </button>
                         <button
-                          onClick={() => handleRejeitar(t.id)}
+                          onClick={() => handleRejeitar(t.id, t.tipo)}
                           disabled={salvandoAprov}
                           className="flex-1 py-2 text-sm rounded-xl font-semibold disabled:opacity-50"
                           style={{ backgroundColor: "#DC2626", color: "#fff" }}>
