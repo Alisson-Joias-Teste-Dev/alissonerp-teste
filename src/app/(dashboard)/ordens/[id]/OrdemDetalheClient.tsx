@@ -71,7 +71,22 @@ const FICHA_LABELS: Record<string, string> = {
   tipo_aplicacao_pedra: "Aplicação da Pedra",
   pedra_fileiras: "Fileiras de Pedra",
   pedra_drill: "Furo Passante",
+  pedra_meia_lua: "Meia-Lua",
+  pedra_volta_completa: "Volta Completa",
 };
+
+// Nomes técnicos antigos que vazaram para o JSONB de fichas_tecnicas (antes
+// do helper passar a usar o nome comercial). Normaliza em runtime para que
+// ourives veja sempre o mesmo nome do orçamento.
+const MODELO_ALIAS: Record<string, string> = {
+  "Quadrado Canal": "Bordas Elevadas",
+  "QuadradoCanal": "Bordas Elevadas",
+  "Boleada Dupla": "Boleada Dentro e Fora",
+};
+function normalizeModelo(value: unknown): string {
+  const s = String(value ?? "");
+  return MODELO_ALIAS[s] ?? s;
+}
 const TIPO_ITEM_LABELS: Record<string, string> = {
   alianca: "Aliança", par_alianca: "Par de Alianças", corrente: "Corrente",
   anel: "Anel", pingente: "Pingente", bracelete: "Bracelete",
@@ -110,6 +125,52 @@ function Badge({ label, size = "sm" }: { label: string; size?: "sm" | "lg" }) {
       {label || "—"}
     </span>
   );
+}
+
+// Formatter compartilhado para os campos da ficha (par e single).
+function formatFichaValue(key: string, value: unknown): string {
+  if (key === "modelo") return normalizeModelo(value);
+  if (key === "pedras_detalhadas" && Array.isArray(value)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return value.map((p: any) => {
+      const tipo = p.tipo ? String(p.tipo).charAt(0).toUpperCase() + String(p.tipo).slice(1) : "";
+      const detalhes: string[] = [];
+      if (p.qtd) detalhes.push(`${p.qtd}x`);
+      if (p.tamanho_mm) detalhes.push(`${p.tamanho_mm}mm`);
+      if (p.corte) detalhes.push(String(p.corte));
+      return `${tipo}${detalhes.length ? ` (${detalhes.join(" · ")})` : ""}`;
+    }).filter(Boolean).join(", ") || "—";
+  }
+  if (key === "peso_estimado" && value != null) return `${Number(value).toFixed(2)}g`;
+  if (key === "texto_gravacao") return formatGravacao(value);
+  if (key === "has_friso" || key === "pedra_drill" || key === "pedra_meia_lua" || key === "pedra_volta_completa") {
+    return value ? "Sim" : "Não";
+  }
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  return String(value);
+}
+
+// Ordem de exibição preferida — agrupa campos correlatos (identificação,
+// dimensões, perfil, friso, pedras, gravação). Chaves desconhecidas vão
+// pro final na ordem original.
+const FICHA_FIELD_ORDER: string[] = [
+  "modelo", "numeracao", "cor_metal",
+  "milimetragem", "espessura", "diametro", "peso_estimado", "densidade_ouro",
+  "profundidade_concava", "dome_porcentagem",
+  "canal_largura", "canal_borda_altura", "chanfro_tamanho",
+  "has_friso", "friso_kind", "friso_tipo", "friso_lado", "friso_largura", "friso_profundidade", "friso_offset",
+  "tipo_pedra", "qtd_pedras", "tamanho_pedra", "tipo_aplicacao_pedra",
+  "pedra_fileiras", "pedra_drill", "pedra_meia_lua", "pedra_volta_completa",
+  "pedras_detalhadas",
+  "texto_gravacao", "tipo_fonte",
+];
+function sortFichaEntries(entries: [string, unknown][]): [string, unknown][] {
+  const idx = new Map(FICHA_FIELD_ORDER.map((k, i) => [k, i]));
+  return [...entries].sort((a, b) => {
+    const ia = idx.has(a[0]) ? idx.get(a[0])! : 999;
+    const ib = idx.has(b[0]) ? idx.get(b[0])! : 999;
+    return ia - ib;
+  });
 }
 
 function InfoRow({ label, value, mono = false }: { label: string; value?: string | number | null; mono?: boolean }) {
@@ -782,26 +843,11 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {(fichaTecnica.fichas as Array<{ ficha_id: number; dados: unknown; _label: string }>).map((f, idx) => {
                     const dados = typeof f.dados === "string" ? JSON.parse(f.dados) : f.dados;
-                    const formatFichaValue = (key: string, value: unknown): string => {
-                      if (key === "pedras_detalhadas" && Array.isArray(value)) {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        return value.map((p: any) => `${p.tipo ?? ""}${p.qtd ? ` (${p.qtd}x)` : ""}`).filter(Boolean).join(", ") || "—";
-                      }
-                      if (key === "peso_estimado" && value != null) {
-                        return `${Number(value).toFixed(2)}g`;
-                      }
-                      // Gravacao: array (novo) ou string com separador legado.
-                      if (key === "texto_gravacao") return formatGravacao(value);
-                      if (key === "has_friso") return value ? "Sim" : "Não";
-                      if (key === "pedra_drill") return value ? "Sim" : "Não";
-                      if (typeof value === "number") {
-                        return Number.isInteger(value) ? String(value) : value.toFixed(2);
-                      }
-                      return String(value);
-                    };
-                    const entries = Object.entries(dados ?? {}).filter(
-                      ([k, v]) => k !== "tipo_item" && v != null && v !== "" && (!Array.isArray(v) || v.length > 0)
-                    ) as [string, unknown][];
+                    const entries = sortFichaEntries(
+                      Object.entries(dados ?? {}).filter(
+                        ([k, v]) => k !== "tipo_item" && v != null && v !== "" && (!Array.isArray(v) || v.length > 0)
+                      ) as [string, unknown][]
+                    );
                     return (
                       <div key={idx} className="bg-white rounded-xl border p-4" style={{ borderColor: C.cremeBorder }}>
                         <p className="text-[10px] font-semibold uppercase tracking-wider mb-3" style={{ color: C.esmeralda }}>
@@ -822,9 +868,11 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                 (() => {
                   const dados = typeof fichaTecnica.dados === "string" ? JSON.parse(fichaTecnica.dados) : fichaTecnica.dados;
                   const tipoItem = dados?.tipo_item;
-                  const entries = Object.entries(dados ?? {}).filter(
-                    ([k, v]) => k !== "tipo_item" && v != null && v !== ""
-                  ) as [string, string][];
+                  const entries = sortFichaEntries(
+                    Object.entries(dados ?? {}).filter(
+                      ([k, v]) => k !== "tipo_item" && v != null && v !== "" && (!Array.isArray(v) || v.length > 0)
+                    ) as [string, unknown][]
+                  );
                   return (
                     <div className="space-y-5">
                       <div>
@@ -833,8 +881,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                         </p>
                         <div className="grid grid-cols-2 gap-x-8">
                           {entries.map(([key, value]) => (
-                            <InfoRow key={key} label={fichaErpLabel(key)}
-                              value={key === "peso_estimado" ? `${Number(value).toFixed(2)}g` : String(value)} />
+                            <InfoRow key={key} label={fichaErpLabel(key)} value={formatFichaValue(key, value)} />
                           ))}
                         </div>
                       </div>

@@ -20,15 +20,18 @@
 
 import { splitGravacao } from "./gravacao";
 
+// Nomes COMERCIAIS dos perfis (mesmos que aparecem no orçamento).
+// Devem casar com PROFILE_OPTIONS de src/app/(dashboard)/orcamento/constants.ts
+// — alterar aqui SEM atualizar lá quebra o vínculo orçamento ↔ ordem.
 const PERFIL_NOMES: Record<string, string> = {
   Anatomica: "Anatômica",
   Boleada: "Boleada",
-  BoleadaDouble: "Boleada Dupla",
+  BoleadaDouble: "Boleada Dentro e Fora",
   Chanfrada: "Chanfrada",
   Concava: "Côncava",
   FrisoUnico: "Friso Único",
   FrisoLateral: "Friso Lateral",
-  QuadradoCanal: "Quadrado Canal",
+  QuadradoCanal: "Bordas Elevadas",
   Simples: "Reta",
 };
 
@@ -103,6 +106,8 @@ export function orcamentoFichaToDados(ft: FichaRow): Record<string, unknown> {
   const fileiras = num(ft.pedra_fileiras);
   if (fileiras != null && fileiras > 1) d.pedra_fileiras = ft.pedra_fileiras;
   if (ft.pedra_drill) d.pedra_drill = true;
+  if (ft.pedra_meia_lua) d.pedra_meia_lua = true;
+  if (ft.pedra_volta_completa) d.pedra_volta_completa = true;
   if (ft.tipo_pedra) d.tipo_pedra = ft.tipo_pedra;
   if (Array.isArray(ft.pedras_detalhadas) && ft.pedras_detalhadas.length > 0) {
     d.pedras_detalhadas = ft.pedras_detalhadas;

@@ -2,6 +2,7 @@ import sql from "@/lib/db";
 import { notFound, redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import OrdemDetalheClient from "./OrdemDetalheClient";
+import { orcamentoFichaToDados } from "@/lib/orcamento-ficha-to-dados";
 
 export const dynamic = 'force-dynamic';
 
@@ -112,11 +113,46 @@ export default async function OrdemDetalhePage({
       WHERE ordem_id = ${ordemId}
       ORDER BY id
     `;
+
+    // Enriquecimento: se a ordem veio de um orçamento de aliança, busca a
+    // ficha original (orcamento_fichas_tecnicas) — que tem ~25 campos vs
+    // ~10 no dados gravado — e preenche os campos faltantes. Dados editados
+    // manualmente na ficha vencem (merge respeita o que já está salvo).
+    const vendaId = (ordens[0] as any).venda_id as number | null;
+    let orcFichas: Array<Record<string, unknown>> = [];
+    if (vendaId && fichasErp.length > 0) {
+      orcFichas = await sql`
+        SELECT ft.*
+        FROM alissonerp.vendas_erp v
+        JOIN alissonerp.orcamentos o ON o.id = v.orcamento_id
+        JOIN alissonerp.orcamento_fichas_tecnicas ft
+          ON ft.id = o.ficha_tecnica_id OR ft.id = o.ficha_tecnica_2_id
+        WHERE v.id = ${vendaId}
+        ORDER BY ft.id
+      `;
+    }
+    const enriquecer = (existing: Record<string, unknown>, idx: number): Record<string, unknown> => {
+      const orcRow = orcFichas[idx];
+      if (!orcRow) return existing;
+      const fromOrc = orcamentoFichaToDados(orcRow);
+      // existing vence — manual edits preservados; campos só do orçamento entram
+      return { ...fromOrc, ...existing };
+    };
+
     if (fichasErp.length === 1) {
-      fichaTecnica = { ...fichasErp[0], _origem: "erp" };
+      const f = fichasErp[0] as any;
+      const dadosObj = typeof f.dados === "string" ? JSON.parse(f.dados) : f.dados;
+      f.dados = enriquecer(dadosObj ?? {}, 0);
+      fichaTecnica = { ...f, _origem: "erp" };
     } else if (fichasErp.length > 1) {
       // Par de alianças — múltiplas fichas
-      fichaTecnica = { _origem: "erp_multi", fichas: fichasErp.map((f, i) => ({ ...f, _origem: "erp", _label: `Aliança ${i + 1}` })) };
+      fichaTecnica = {
+        _origem: "erp_multi",
+        fichas: fichasErp.map((f: any, i) => {
+          const dadosObj = typeof f.dados === "string" ? JSON.parse(f.dados) : f.dados;
+          return { ...f, dados: enriquecer(dadosObj ?? {}, i), _origem: "erp", _label: `Aliança ${i + 1}` };
+        }),
+      };
     }
   }
 

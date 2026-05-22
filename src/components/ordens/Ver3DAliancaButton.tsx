@@ -131,6 +131,17 @@ function Modal3D({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Bug fix: o Canvas do react-three-fiber é montado via dynamic({ssr:false})
+  // dentro de createPortal. No primeiro paint o ResizeObserver do r3f mede o
+  // container ANTES do layout flex resolver, e o canvas trava em 300×150
+  // (default). Sem este nudge, ourives clica "Ver 3D" e vê retângulo vazio.
+  // Disparar `resize` faz o r3f recalcular gl.setSize com a área real.
+  useEffect(() => {
+    const t1 = setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
+    const t2 = setTimeout(() => window.dispatchEvent(new Event("resize")), 250);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, []);
+
   return (
     <div
       className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4"
