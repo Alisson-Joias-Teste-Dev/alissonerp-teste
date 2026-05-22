@@ -31,11 +31,12 @@ export async function GET(req: NextRequest) {
       p.nome,
       -- ═══════════════════════════════════════════════════════════════════
       -- REGRA DE NEGÓCIO (aprovada 20/05/2026):
-      --   Preço calculado exclusivamente pela view vw_produto_preco.
-      --   NÃO adicionar fallback para preco_tiny ou preco_sync aqui.
-      --   Se a view retorna NULL, o produto não tem preço — intencional.
+      --   Preço de venda = preço efetivo (promocional se ativo, curva se não).
+      --   O preço original da curva fica disponível como preco_lista_puro
+      --   para exibir o desconto da promoção no frontend.
       -- ═══════════════════════════════════════════════════════════════════
-      pp.preco_venda::int AS preco_venda,
+      CASE WHEN vpv.em_promocao THEN vpv.preco_vigente::int ELSE pp.preco_venda::int END AS preco_venda,
+      pp.preco_venda::int AS preco_lista_original,
       p.peso_precificado,
       p.unidade,
       ep.sufixo_variacao,
@@ -104,6 +105,7 @@ export async function GET(req: NextRequest) {
       saldo_disponivel:  Number(p.saldo_disponivel ?? 0),
       tem_ficha_tecnica: Boolean(p.tem_ficha_tecnica),
       rfid_disponivel:   Number(p.rfid_disponivel ?? 0),
+      preco_lista_original: p.preco_lista_original != null ? Number(p.preco_lista_original) : null,
       preco_promo:        p.preco_promo        != null ? Number(p.preco_promo)        : null,
       em_promocao:        Boolean(p.em_promocao),
       promocao_nome:      p.promocao_nome ?? null,
