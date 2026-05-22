@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useEffect, useCallback } from "react";
+import React, { Suspense, useMemo, useRef, useEffect, useCallback } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera, ContactShadows, Text } from "@react-three/drei";
 import * as THREE from "three";
@@ -703,15 +703,21 @@ function AliancaViewportInner({
         <spotLight position={[-30, 20, 10]} angle={0.3} penumbra={1} intensity={1.5} color="#ffffff" />
         <Ring params={params} profileType={profile} onSetMesh={handleMesh} />
         {/* Pedras 3D desabilitadas — renderização simplificada */}
-        {params.textEnabled && params.textContent.trim() && (
-          <EngravingText
-            text={params.textContent.trim()}
-            fontType={params.textFontType}
-            diameter={params.diameter}
-            width={params.width}
-            metalColor={params.metalColor}
-          />
-        )}
+        {/* Suspense interno: drei <Text> suspende ao carregar fonte. Sem este
+            boundary, a suspensao "vaza" pro dynamic() loader do componente,
+            fazendo o spinner aparecer cada vez que o usuario digita uma letra
+            na gravacao e o anel "some" da tela. */}
+        <Suspense fallback={null}>
+          {params.textEnabled && params.textContent.trim() && (
+            <EngravingText
+              text={params.textContent.trim()}
+              fontType={params.textFontType}
+              diameter={params.diameter}
+              width={params.width}
+              metalColor={params.metalColor}
+            />
+          )}
+        </Suspense>
         <OrbitControls enableDamping minDistance={10} maxDistance={60} rotateSpeed={0.6} />
       </Canvas>
     </div>
