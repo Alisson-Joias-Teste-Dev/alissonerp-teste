@@ -1,21 +1,20 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Drawer de Notificações
 //
-// REGRA DE NEGÓCIO (Bug 3): removido o botão "Aprovar Desconto" inline.
-// Antes: a notificação tinha um botão que aprovava o desconto direto,
-//   mas SEM reduzir a comissão da vendedora para 0,5%.
-//   A aprovação via página de tarefas reduzia a comissão.
-//   Mesma ação, resultados diferentes → bug de inconsistência.
-// Agora: toda notificação de aprovação leva para a página de tarefas.
-//   Um único caminho, comportamento consistente.
-//
-// Se alterar: garantir que aprovação inline (se readicionada) tenha OS
-// MESMOS efeitos (comissão, notificação, etc.) que a aprovação via tarefa.
+// REGRA DE NEGÓCIO (Bug 3): toda aprovação inline DEVE usar o mesmo endpoint
+// PATCH /api/tarefas/[id]/aprovacao da página de tarefas — garantindo MESMOS
+// efeitos colaterais (comissão 0,5%, liberação cartão, etc.).
+// Aprovação em 1 toque via AprovacaoBottomSheet (mobile-first): clicar em
+// "Aprovar →" abre o bottom-sheet, que chama o endpoint canônico.
+// Se readicionar outra forma de aprovação inline: usar o mesmo endpoint.
 // ═══════════════════════════════════════════════════════════════════════════
 
 "use client";
 
-import { X, Bell } from "lucide-react";
+import { useState } from "react";
+import { X, Bell, BellRing } from "lucide-react";
+import { AprovacaoBottomSheet } from "@/components/AprovacaoBottomSheet";
+import { usePushSubscription } from "@/hooks/usePushSubscription";
 
 interface Notificacao {
   id: string;
@@ -36,6 +35,7 @@ interface Props {
   onMarcarLida: (id: string, link: string | null) => void;
   onMarcarTodas: () => void;
   carregando: boolean;
+  onRecarregar?: () => void;
 }
 
 function tempoRelativo(data: string): string {
@@ -51,6 +51,12 @@ function tempoRelativo(data: string): string {
   return new Date(data).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
+function extrairTarefaId(link: string | null): number | null {
+  if (!link) return null;
+  const m = link.match(/[?&]abrir=(\d+)/) || link.match(/\/tarefas\/(\d+)/);
+  return m ? Number(m[1]) : null;
+}
+
 export function NotificacoesDrawer({
   aberto,
   onFechar,
@@ -58,7 +64,13 @@ export function NotificacoesDrawer({
   onMarcarLida,
   onMarcarTodas,
   carregando,
+  onRecarregar,
 }: Props) {
+  const [tarefaAprovId, setTarefaAprovId] = useState<number | null>(null);
+  const { suportado, inscrito, inscrever } = usePushSubscription();
+  const mostrarBannerPush = suportado && !inscrito &&
+    typeof Notification !== "undefined" && Notification.permission !== "denied";
+
   if (!aberto) return null;
 
   return (
@@ -77,6 +89,17 @@ export function NotificacoesDrawer({
             <X size={16} strokeWidth={1.75} />
           </button>
         </div>
+
+        {mostrarBannerPush && (
+          <button
+            onClick={inscrever}
+            className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b transition-colors hover:opacity-80"
+            style={{ backgroundColor: "#f0fdf4", borderColor: "#bbf7d0", color: "#15803d" }}
+          >
+            <BellRing size={14} />
+            Ativar notificações no celular
+          </button>
+        )}
 
         {notificacoes.some((n) => !n.lida) && (
           <div className="px-4 py-2 border-b" style={{ borderColor: "#e5e7eb" }}>
@@ -98,6 +121,7 @@ export function NotificacoesDrawer({
             </div>
           ) : (
             notificacoes.map((n) => {
+              const tarefaIdAprov = n.tipo === "aprovacao" ? extrairTarefaId(n.link) : null;
               return (
                 <div
                   key={n.id}
@@ -125,7 +149,15 @@ export function NotificacoesDrawer({
                       </p>
                     )}
 
-                    {n.link && (
+                    {tarefaIdAprov != null ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setTarefaAprovId(tarefaIdAprov); }}
+                        className="text-[11px] mt-1.5 font-semibold hover:underline"
+                        style={{ color: "#16a34a" }}
+                      >
+                        Aprovar →
+                      </button>
+                    ) : n.link ? (
                       <button
                         onClick={(e) => { e.stopPropagation(); onMarcarLida(n.id, n.link); }}
                         className="text-[10px] mt-1 hover:underline"
@@ -133,7 +165,7 @@ export function NotificacoesDrawer({
                       >
                         Ver →
                       </button>
-                    )}
+                    ) : null}
 
                     <p className="text-[10px] mt-1.5" style={{ color: "#9ca3af" }}>
                       {tempoRelativo(n.created_at)}
@@ -145,6 +177,12 @@ export function NotificacoesDrawer({
           )}
         </div>
       </div>
+
+      <AprovacaoBottomSheet
+        tarefaId={tarefaAprovId}
+        onClose={() => setTarefaAprovId(null)}
+        onDecisao={() => { onRecarregar?.(); }}
+      />
     </>
   );
 }

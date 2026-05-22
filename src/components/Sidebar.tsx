@@ -236,8 +236,7 @@ export default function Sidebar() {
     });
   }
 
-  async function abrirDrawer() {
-    setDrawerAberto(true);
+  async function recarregarNotifs() {
     setCarregandoNotifs(true);
     try {
       const res = await fetch("/api/notificacoes");
@@ -252,6 +251,12 @@ export default function Sidebar() {
     } finally {
       setCarregandoNotifs(false);
     }
+    queryClient.invalidateQueries({ queryKey: ["notificacoes", "contagem"] });
+  }
+
+  async function abrirDrawer() {
+    setDrawerAberto(true);
+    await recarregarNotifs();
   }
 
   async function marcarLida(id: string, link: string | null) {
@@ -526,6 +531,7 @@ export default function Sidebar() {
       onMarcarLida={marcarLida}
       onMarcarTodas={marcarTodas}
       carregando={carregandoNotifs}
+      onRecarregar={recarregarNotifs}
     />
     {perfilAberto && <PerfilDrawer onClose={() => setPerfilAberto(false)} />}
     </>

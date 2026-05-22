@@ -13,6 +13,7 @@ import sql from "@/lib/db";
 import { getSaldoAtual, debitarSaldo } from "@/lib/saldo-credito";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { enviarPushParaUsuario } from "@/lib/push";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -202,6 +203,12 @@ export async function submeterVendaParaAprovacaoCredito(
          ${userId}::uuid,
          ${`/tarefas/${tarefa_id}`})
     `.catch(() => {});
+
+    await enviarPushParaUsuario(apId, {
+      titulo: tituloTarefa,
+      mensagem: tipo === "gerente" ? descGerente : descDiretor,
+      url: `/tarefas?abrir=${tarefa_id}`,
+    }).catch(() => {});
 
     return {
       precisa_aprovacao: true,
