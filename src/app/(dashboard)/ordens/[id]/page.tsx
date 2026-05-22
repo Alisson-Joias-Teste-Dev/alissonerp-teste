@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import OrdemDetalheClient from "./OrdemDetalheClient";
 import { orcamentoFichaToDados } from "@/lib/orcamento-ficha-to-dados";
+import { loadOrcamentoConfig } from "@/lib/orcamento-config";
 
 export const dynamic = 'force-dynamic';
 
@@ -156,6 +157,12 @@ export default async function OrdemDetalhePage({
     }
   }
 
+  // Labels customizados da ficha (mesma fonte do modal de orçamento). Permite
+  // que ourives veja "Tamanho", "Altura da borda", etc — exatamente os nomes
+  // que a vendedora configurou na empresa.
+  const cfg = await loadOrcamentoConfig().catch(() => null);
+  const labelsFicha = cfg?.labels_ficha_tecnica ?? {};
+
   return (
     <OrdemDetalheClient
       ordem={ordens[0]}
@@ -168,6 +175,7 @@ export default async function OrdemDetalhePage({
       conversaoSku={conversaoSku[0] ?? null}
       fotoPecaSignedUrl={fotoPecaSignedUrl}
       fotoPeca2SignedUrl={fotoPeca2SignedUrl}
+      labelsFicha={labelsFicha}
     />
   );
 }
