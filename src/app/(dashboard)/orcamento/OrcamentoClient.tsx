@@ -3004,7 +3004,15 @@ export default function OrcamentoClient({
   // DESIGN — layout principal
   // ═══════════════════════════════════════════════════════════════════════════
   return (
-    <div className="p-4 md:p-5 space-y-4" style={{ backgroundColor: C.cremeBg, minHeight: "100vh" }}>
+    // translate="no" + class notranslate: bloqueia Google Translate / extensoes
+    // que envolvem nos de texto em <font>, quebrando a reconciliacao do React
+    // ("Failed to execute 'removeChild' on 'Node'"). O orcamento muda muito
+    // texto dinamico (preco, %, qtd, fileiras) — area sensivel.
+    <div
+      translate="no"
+      className="notranslate p-4 md:p-5 space-y-4"
+      style={{ backgroundColor: C.cremeBg, minHeight: "100vh" }}
+    >
 
       {/* ── Topo: Cliente + titulo + acoes ─────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
