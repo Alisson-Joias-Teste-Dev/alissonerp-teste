@@ -16,10 +16,17 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
+  const reason = searchParams.get("reason");
 
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
-  const [erro, setErro] = useState("");
+  // Mensagem inicial conforme motivo de chegada na tela (ex: usuario desativado
+  // foi expulso pelo useAuth quando API retornou 403). Vide src/hooks/useAuth.ts.
+  const [erro, setErro] = useState(
+    reason === "desativado"
+      ? "Sua conta está desativada. Entre em contato com o administrador."
+      : ""
+  );
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
