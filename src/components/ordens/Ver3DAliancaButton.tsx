@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
-import { Box, Loader2, X } from "lucide-react";
+import { Box, Loader2, X, AlertCircle, RefreshCw } from "lucide-react";
 import type { RingParams, ProfileType } from "@/app/(dashboard)/orcamento/types";
 
 const AliancaViewport = dynamic(() => import("@/app/(dashboard)/orcamento/AliancaViewport"), {
@@ -35,36 +35,61 @@ const C = {
   cremeBorder: "#E8DCC8",
 };
 
+// Estados possiveis da busca pelo 3D:
+//   - loading: fetch em andamento
+//   - ok: API respondeu com dados (botao verde)
+//   - no-data: ordem nao tem orcamento alianca (componente fica oculto, sem feedback)
+//   - error: falha de rede / erro 500 (botao amarelo com opcao de tentar novamente)
+type FetchState =
+  | { kind: "loading" }
+  | { kind: "ok"; data: ApiResp }
+  | { kind: "no-data" }
+  | { kind: "error" };
+
 export default function Ver3DAliancaButton({ ordemId }: { ordemId: number }) {
-  const [data, setData] = useState<ApiResp | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState<FetchState>({ kind: "loading" });
   const [open, setOpen] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
+    setState({ kind: "loading" });
+    (async () => {
       try {
         const res = await fetch(`/api/ordens/${ordemId}/ring-params`);
         if (cancelled) return;
         if (res.ok) {
-          const json = (await res.json()) as ApiResp;
-          setData(json);
+          const data = (await res.json()) as ApiResp;
+          setState({ kind: "ok", data });
+        } else if (res.status === 404) {
+          // 404 = ordem nao tem orcamento alianca associado (legitimo).
+          setState({ kind: "no-data" });
         } else {
-          setData(null);
+          setState({ kind: "error" });
         }
       } catch {
-        if (!cancelled) setData(null);
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setState({ kind: "error" });
       }
-    }
-    load();
+    })();
     return () => { cancelled = true; };
-  }, [ordemId]);
+  }, [ordemId, retryToken]);
 
-  if (loading || !data) return null;
+  if (state.kind === "loading" || state.kind === "no-data") return null;
 
-  const hasPar = data.ring2 != null;
+  if (state.kind === "error") {
+    return (
+      <button
+        onClick={() => setRetryToken(t => t + 1)}
+        className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border transition-colors"
+        style={{ borderColor: "#F59E0B", color: "#92400E", background: "#FEF3C7" }}
+        title="Falha ao carregar 3D — clique para tentar de novo"
+      >
+        <AlertCircle size={14} /> 3D indisponivel <RefreshCw size={12} />
+      </button>
+    );
+  }
+
+  const hasPar = state.data.ring2 != null;
 
   return (
     <>
@@ -80,8 +105,8 @@ export default function Ver3DAliancaButton({ ordemId }: { ordemId: number }) {
 
       {open && typeof document !== "undefined" && createPortal(
         <Modal3D
-          ring1={data.ring1}
-          ring2={data.ring2}
+          ring1={state.data.ring1}
+          ring2={state.data.ring2}
           onClose={() => setOpen(false)}
         />,
         document.body,

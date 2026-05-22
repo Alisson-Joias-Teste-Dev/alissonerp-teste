@@ -8,6 +8,7 @@ import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 import { zodError, IdSchema } from "@/lib/schemas/common";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { orcamentoFichaToDados, nomeItemOrdem } from "@/lib/orcamento-ficha-to-dados";
 
 const toNum = (v: unknown) => (v === null || v === undefined ? v : Number(v));
 
@@ -844,11 +845,8 @@ export async function PATCH(
           if (existenteTxPatch) { ordemCriada = { id: existenteTxPatch.id, numero_ordem: existenteTxPatch.numero_ordem }; return; }
         }
 
-        const perfilNomes: Record<string, string> = {
-          Anatomica: "Anatômica", Boleada: "Boleada", BoleadaDouble: "Boleada Dupla",
-          Chanfrada: "Chanfrada", Concava: "Côncava", FrisoUnico: "Friso Único",
-          FrisoLateral: "Friso Lateral", QuadradoCanal: "Quadrado Canal", Simples: "Reta",
-        };
+        // perfilNomes movido para src/lib/orcamento-ficha-to-dados.ts (PERFIL_NOMES)
+        // — fonte unica de verdade reusada por anel 1 e anel 2.
 
         const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
         const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
@@ -879,64 +877,23 @@ export async function PATCH(
 
         // Item 1 da ordem
         const nomeItem = vendaOrc.tipo === "alianca"
-          ? `${isPar ? "Aliança 1 - " : "Aliança "}${perfilNomes[vendaOrc.perfil as string] ?? vendaOrc.modelo ?? "Personalizada"}`
+          ? nomeItemOrdem(vendaOrc as unknown as Record<string, unknown>, isPar ? "Aliança 1 - " : "Aliança ")
           : `Peça Personalizada`;
         await tx`
           INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
           VALUES (${ordem.id}, ${nomeItem}, 1, ${pesoItem1})
         `;
 
-        // Ficha técnica
+        // Ficha técnica — montada via helper compartilhado (mesmo formato pra
+        // anel 1 e anel 2). Ver src/lib/orcamento-ficha-to-dados.ts.
         const tipoItem = vendaOrc.tipo === "alianca" ? "alianca" : "peca_personalizada";
-        const dadosFicha: Record<string, unknown> = {};
-        if (vendaOrc.tipo === "alianca") {
-          if (vendaOrc.largura) dadosFicha.milimetragem = String(vendaOrc.largura);
-          if (vendaOrc.aro_numeracao) dadosFicha.numeracao = String(vendaOrc.aro_numeracao).replace("Aro ", "");
-          const pf = perfilNomes[vendaOrc.perfil as string] ?? vendaOrc.modelo ?? vendaOrc.perfil;
-          if (pf) dadosFicha.modelo = pf;
-          if (vendaOrc.tipo_fonte) dadosFicha.tipo_fonte = vendaOrc.tipo_fonte;
-          if (vendaOrc.texto) dadosFicha.texto_gravacao = vendaOrc.texto;
-          if (vendaOrc.cor_metal) dadosFicha.cor_metal = vendaOrc.cor_metal;
-          if (vendaOrc.peso_estimado) dadosFicha.peso_estimado = vendaOrc.peso_estimado;
-          if (vendaOrc.espessura) dadosFicha.espessura = vendaOrc.espessura;
-          if (vendaOrc.diametro != null) dadosFicha.diametro = vendaOrc.diametro;
-          if (vendaOrc.densidade_ouro != null) dadosFicha.densidade_ouro = vendaOrc.densidade_ouro;
-          if (vendaOrc.profundidade_concava != null && Number(vendaOrc.profundidade_concava) > 0)
-            dadosFicha.profundidade_concava = vendaOrc.profundidade_concava;
-          if (vendaOrc.dome_porcentagem != null && Number(vendaOrc.dome_porcentagem) !== 100)
-            dadosFicha.dome_porcentagem = vendaOrc.dome_porcentagem;
-          if (vendaOrc.has_friso) {
-            dadosFicha.has_friso = true;
-            if (vendaOrc.friso_kind) dadosFicha.friso_kind = vendaOrc.friso_kind;
-            if (vendaOrc.friso_tipo) dadosFicha.friso_tipo = vendaOrc.friso_tipo;
-            if (vendaOrc.friso_lado) dadosFicha.friso_lado = vendaOrc.friso_lado;
-            if (vendaOrc.friso_largura != null) dadosFicha.friso_largura = vendaOrc.friso_largura;
-            if (vendaOrc.friso_profundidade != null) dadosFicha.friso_profundidade = vendaOrc.friso_profundidade;
-            if (vendaOrc.friso_offset != null && Number(vendaOrc.friso_offset) > 0)
-              dadosFicha.friso_offset = vendaOrc.friso_offset;
-          }
-          // QuadradoCanal (Bordas Elevadas): canal / borda do canal
-          if (vendaOrc.canal_largura != null && Number(vendaOrc.canal_largura) > 0)
-            dadosFicha.canal_largura = vendaOrc.canal_largura;
-          if (vendaOrc.canal_borda_altura != null && Number(vendaOrc.canal_borda_altura) > 0)
-            dadosFicha.canal_borda_altura = vendaOrc.canal_borda_altura;
-          if (vendaOrc.chanfro_tamanho != null && Number(vendaOrc.chanfro_tamanho) > 0)
-            dadosFicha.chanfro_tamanho = vendaOrc.chanfro_tamanho;
-          if (vendaOrc.qtd_pedras) dadosFicha.qtd_pedras = vendaOrc.qtd_pedras;
-          if (vendaOrc.tamanho_pedra) dadosFicha.tamanho_pedra = vendaOrc.tamanho_pedra;
-          if (vendaOrc.tipo_aplicacao_pedra) dadosFicha.tipo_aplicacao_pedra = vendaOrc.tipo_aplicacao_pedra;
-          if (vendaOrc.pedra_fileiras != null && Number(vendaOrc.pedra_fileiras) > 1)
-            dadosFicha.pedra_fileiras = vendaOrc.pedra_fileiras;
-          if (vendaOrc.pedra_drill) dadosFicha.pedra_drill = true;
-          if (vendaOrc.tipo_pedra) dadosFicha.tipo_pedra = vendaOrc.tipo_pedra;
-          if (Array.isArray(vendaOrc.pedras_detalhadas) && vendaOrc.pedras_detalhadas.length > 0) {
-            dadosFicha.pedras_detalhadas = vendaOrc.pedras_detalhadas;
-          }
-        } else {
-          if (vendaOrc.peso_estimado) dadosFicha.peso_estimado = vendaOrc.peso_estimado;
-          if (vendaOrc.cor_metal) dadosFicha.cor_metal = vendaOrc.cor_metal;
-          if (vendaOrc.pedras_detalhadas) dadosFicha.pedras_detalhadas = vendaOrc.pedras_detalhadas;
-        }
+        const dadosFicha: Record<string, unknown> = vendaOrc.tipo === "alianca"
+          ? orcamentoFichaToDados(vendaOrc as unknown as Record<string, unknown>)
+          : {
+              ...(vendaOrc.peso_estimado ? { peso_estimado: vendaOrc.peso_estimado } : {}),
+              ...(vendaOrc.cor_metal ? { cor_metal: vendaOrc.cor_metal } : {}),
+              ...(vendaOrc.pedras_detalhadas ? { pedras_detalhadas: vendaOrc.pedras_detalhadas } : {}),
+            };
         await tx`
           INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
           VALUES (${ordem.id}, ${tipoItem}, ${JSON.stringify(dadosFicha)}::jsonb, ${user.id}::uuid)
@@ -957,54 +914,14 @@ export async function PATCH(
             FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${vendaOrc.ficha_tecnica_2_id}
           `;
           if (ft2) {
-            const nomeItem2 = `Aliança 2 - ${perfilNomes[ft2.perfil as string] ?? ft2.modelo ?? "Personalizada"}`;
+            const ft2Row = ft2 as unknown as Record<string, unknown>;
+            const nomeItem2 = nomeItemOrdem(ft2Row, "Aliança 2 - ");
             const peso2 = Number(ft2.peso_estimado ?? 0);
             await tx`
               INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
               VALUES (${ordem.id}, ${nomeItem2}, 1, ${peso2})
             `;
-            const dadosFicha2: Record<string, unknown> = {};
-            if (ft2.largura) dadosFicha2.milimetragem = String(ft2.largura);
-            if (ft2.aro_numeracao) dadosFicha2.numeracao = String(ft2.aro_numeracao).replace("Aro ", "");
-            const pf2 = perfilNomes[ft2.perfil as string] ?? ft2.modelo ?? ft2.perfil;
-            if (pf2) dadosFicha2.modelo = pf2;
-            if (ft2.tipo_fonte) dadosFicha2.tipo_fonte = ft2.tipo_fonte;
-            if (ft2.texto) dadosFicha2.texto_gravacao = ft2.texto;
-            if (ft2.cor_metal) dadosFicha2.cor_metal = ft2.cor_metal;
-            if (ft2.peso_estimado) dadosFicha2.peso_estimado = ft2.peso_estimado;
-            if (ft2.espessura) dadosFicha2.espessura = ft2.espessura;
-            if (ft2.diametro != null) dadosFicha2.diametro = ft2.diametro;
-            if (ft2.densidade_ouro != null) dadosFicha2.densidade_ouro = ft2.densidade_ouro;
-            if (ft2.profundidade_concava != null && Number(ft2.profundidade_concava) > 0)
-              dadosFicha2.profundidade_concava = ft2.profundidade_concava;
-            if (ft2.dome_porcentagem != null && Number(ft2.dome_porcentagem) !== 100)
-              dadosFicha2.dome_porcentagem = ft2.dome_porcentagem;
-            if (ft2.has_friso) {
-              dadosFicha2.has_friso = true;
-              if (ft2.friso_kind) dadosFicha2.friso_kind = ft2.friso_kind;
-              if (ft2.friso_tipo) dadosFicha2.friso_tipo = ft2.friso_tipo;
-              if (ft2.friso_lado) dadosFicha2.friso_lado = ft2.friso_lado;
-              if (ft2.friso_largura != null) dadosFicha2.friso_largura = ft2.friso_largura;
-              if (ft2.friso_profundidade != null) dadosFicha2.friso_profundidade = ft2.friso_profundidade;
-              if (ft2.friso_offset != null && Number(ft2.friso_offset) > 0)
-                dadosFicha2.friso_offset = ft2.friso_offset;
-            }
-            if (ft2.canal_largura != null && Number(ft2.canal_largura) > 0)
-              dadosFicha2.canal_largura = ft2.canal_largura;
-            if (ft2.canal_borda_altura != null && Number(ft2.canal_borda_altura) > 0)
-              dadosFicha2.canal_borda_altura = ft2.canal_borda_altura;
-            if (ft2.chanfro_tamanho != null && Number(ft2.chanfro_tamanho) > 0)
-              dadosFicha2.chanfro_tamanho = ft2.chanfro_tamanho;
-            if (ft2.qtd_pedras) dadosFicha2.qtd_pedras = ft2.qtd_pedras;
-            if (ft2.tamanho_pedra) dadosFicha2.tamanho_pedra = ft2.tamanho_pedra;
-            if (ft2.tipo_aplicacao_pedra) dadosFicha2.tipo_aplicacao_pedra = ft2.tipo_aplicacao_pedra;
-            if (ft2.pedra_fileiras != null && Number(ft2.pedra_fileiras) > 1)
-              dadosFicha2.pedra_fileiras = ft2.pedra_fileiras;
-            if (ft2.pedra_drill) dadosFicha2.pedra_drill = true;
-            if (ft2.tipo_pedra) dadosFicha2.tipo_pedra = ft2.tipo_pedra;
-            if (Array.isArray(ft2.pedras_detalhadas) && ft2.pedras_detalhadas.length > 0) {
-              dadosFicha2.pedras_detalhadas = ft2.pedras_detalhadas;
-            }
+            const dadosFicha2 = orcamentoFichaToDados(ft2Row);
             await tx`
               INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
               VALUES (${ordem.id}, 'alianca', ${JSON.stringify(dadosFicha2)}::jsonb, ${user.id}::uuid)

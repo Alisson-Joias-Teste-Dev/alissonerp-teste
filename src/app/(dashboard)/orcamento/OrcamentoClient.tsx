@@ -13,6 +13,7 @@ import * as THREE from "three";
 import { ProfileType } from "./types";
 import { maskCpfCnpj } from "@/lib/formatters";
 import { calcularPrecoSync, getPricingFactors, type CurvaConfig, type CurvaCategoriaInput } from "@/lib/curva-precificacao";
+import { joinGravacao, nomePrincipal, nomesAdicionais, formatGravacao } from "@/lib/gravacao";
 import type {
   RingParams, RingSize, PricingCategory, GrooveRule, PricingResult, ConfigOrcamento,
   StoneEntry, StonePrice, StoneType, StoneCut, OrcamentoSnapshot,
@@ -369,22 +370,14 @@ export default function OrcamentoClient({
         stoneDrill: !!src.pedra_drill, stoneHalfMoon: !!src.pedra_meia_lua, stoneFull: !!src.pedra_volta_completa,
         stoneType: src.tipo_pedra ?? p.stoneType,
         stoneRows: src.pedra_fileiras ? Number(src.pedra_fileiras) : p.stoneRows,
-        // texto pode vir como "PrincipalAdic1Adic2" (novo) ou
-        // "Principal | Adic1 | Adic2" (legado). Primeira parte vai pro nome
-        // principal, resto fica como extras (carregado abaixo).
+        // Gravacao parseada via lib `gravacao` (so o nome principal aqui;
+        // adicionais sao carregados abaixo).
         textEnabled: !!src.texto,
-        textContent: src.texto ? String(src.texto).split(new RegExp("\\u001F| \\| "))[0] : "",
+        textContent: nomePrincipal(src.texto),
         textFontType: src.tipo_fonte === "Cursiva" ? 2 : 1,
       });
       setParams(p => applyRingParams(p, ft));
-      // Restaura textos adicionais do anel 1 (apos o split de texto principal)
-      if (ft.texto && typeof ft.texto === "string") {
-        const splitRe = new RegExp("\\u001F| \\| ");
-        const parts = String(ft.texto).split(splitRe);
-        setTextosExtras(parts.length > 1 ? parts.slice(1) : []);
-      } else {
-        setTextosExtras([]);
-      }
+      setTextosExtras(nomesAdicionais(ft.texto));
       if (orc.quantidade === 2 && orc.ficha2) {
         const ft2 = orc.ficha2 as Record<string, any>;
         const perfil2 = ft2.perfil as string | null;
@@ -399,14 +392,7 @@ export default function OrcamentoClient({
           ? Number(ft2.densidade_ouro)
           : (metalMatch2?.density ?? 14.69);
         setParams2(p => applyRingParams({ ...p, metalColor: metalHex2, goldDensity: metalDensity2 }, ft2));
-        // Restaura textos adicionais do anel 2 (aceita ambos separadores)
-        if (ft2.texto && typeof ft2.texto === "string") {
-          const splitRe2 = new RegExp("\\u001F| \\| ");
-          const parts2 = String(ft2.texto).split(splitRe2);
-          setTextosExtras2(parts2.length > 1 ? parts2.slice(1) : []);
-        } else {
-          setTextosExtras2([]);
-        }
+        setTextosExtras2(nomesAdicionais(ft2.texto));
       }
 
       // Restaurar detalhamento de pedras.
@@ -1498,14 +1484,8 @@ export default function OrcamentoClient({
   };
 
   function buildFicha(p: RingParams, pf: ProfileType, rs: RingSize, w: number, sc: number, entries: StoneEntry[], extras: string[] = []) {
-    // Junta texto principal + textos adicionais (Bordas Elevadas permite varios)
-    // separados por U+001F (Unit Separator) — caractere de controle nao-tipavel
-    // pelo usuario. Antes era " | " literal, que quebrava quando alguem digitava
-    // um nome contendo " | ".
-    const textoPrincipal = p.textEnabled && p.textContent.trim() ? p.textContent.trim() : "";
-    const textosLimpos = [textoPrincipal, ...extras.map(t => t.trim()).filter(t => t.length > 0)].filter(Boolean);
-    const SEP = "\u001F";
-    const textoFinal = textosLimpos.length > 0 ? textosLimpos.join(SEP) : null;
+    // Gravacao serializada via lib `gravacao` — UNICA fonte de verdade.
+    const textoFinal = p.textEnabled ? joinGravacao(p.textContent, extras) : null;
     return {
       modelo: (() => { const o = PROFILE_OPTIONS.find((o) => o.id === pf); return o?.fichaLabel ?? o?.label ?? pf; })(),
       aro_numeracao: `Aro ${rs.size}`, largura: p.width, espessura: p.height,
@@ -3952,16 +3932,9 @@ function FichaAlianca({
       {params.hasStones && (
         <Linha k={L("furo_passante")} v={params.stoneDrill ? "Sim" : "Não"} />
       )}
-      {params.textEnabled && params.textContent && (() => {
-        // Junta nome principal + adicionais (Bordas Elevadas permite varios).
-        // Numerados para a fabrica entender qual eh principal e quais sao adicionais.
-        const extrasLimpos = textosExtras.map(t => t.trim()).filter(Boolean);
-        const todos = [params.textContent, ...extrasLimpos];
-        const gravacaoStr = todos.length === 1
-          ? `"${todos[0]}"`
-          : todos.map((t, i) => `${i + 1}) "${t}"`).join("   ");
-        return <Linha k={L("gravacao")} v={gravacaoStr} />;
-      })()}
+      {params.textEnabled && params.textContent && (
+        <Linha k={L("gravacao")} v={formatGravacao([params.textContent, ...textosExtras])} />
+      )}
       <div className="border-t pt-1.5 mt-1.5" style={{ borderColor: C.cremeBorder }}>
         <Linha k={L("peso_estimado")} v={`${weight.toFixed(2)} g`} bold />
       </div>

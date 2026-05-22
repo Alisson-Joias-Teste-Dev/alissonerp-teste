@@ -310,6 +310,14 @@ function Ring({
     return geo;
   }, [params, profileType]);
 
+  // Memory leak fix: BufferGeometry mantida pelo useMemo nao eh liberada
+  // automaticamente pelo R3F quando a referencia muda. Sem este cleanup,
+  // sessoes longas de orcamento (consultora 30min+ editando) acumulam
+  // geometrias antigas na GPU.
+  useEffect(() => {
+    return () => { geometry.dispose(); };
+  }, [geometry]);
+
   useEffect(() => {
     if (meshRef.current) onSetMesh(meshRef.current);
   }, [geometry, onSetMesh]);
@@ -439,6 +447,11 @@ function StonesCravadas({
     if (!params.hasStones) return null;
     return createDiamondGeometry(params.stoneSize / 2);
   }, [params.hasStones, params.stoneSize]);
+
+  // Memory leak fix: libera a geometria da pedra ao trocar/desmontar.
+  useEffect(() => {
+    return () => { diamondGeo?.dispose(); };
+  }, [diamondGeo]);
 
   const stones = useMemo(() => {
     if (!params.hasStones) return [];

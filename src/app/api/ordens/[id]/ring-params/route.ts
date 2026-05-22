@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { METAL_COLORS } from "@/app/(dashboard)/orcamento/constants";
+import { nomePrincipal } from "@/lib/gravacao";
 
 /**
  * Normaliza cor_metal -> hex aceito pelo THREE.js.
@@ -106,10 +107,8 @@ export async function GET(
     const friso_profundidade = Number(row.friso_profundidade ?? 0);
     const has_friso = row.has_friso === true || (friso_largura > 0 && friso_profundidade > 0);
     const fonte = String(row.tipo_fonte ?? "");
-    // Texto pode ter varios nomes separados por U+001F (novo) ou " | " (legado).
-    // No 3D, mostramos apenas o nome principal — adicionais aparecem na ficha.
-    const textoRaw = String(row.texto ?? "");
-    const texto = textoRaw.split(new RegExp("\\u001F| \\| "))[0] ?? "";
+    // 3D so renderiza o nome principal — adicionais aparecem na ficha tecnica.
+    const texto = nomePrincipal(row.texto);
     const fontType: 1 | 2 = fonte === "Cursiva" ? 2 : 1;
 
     // FrisoUnico/FrisoLateral sao perfis legados — coerce pra Simples

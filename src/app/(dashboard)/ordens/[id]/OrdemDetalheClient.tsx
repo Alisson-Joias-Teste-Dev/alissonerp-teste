@@ -10,6 +10,7 @@ import FichaTecnicaForm, { TIPOS_ITEM, type TipoItem, type FichaTecnicaDados, va
 import Ver3DAliancaButton from "@/components/ordens/Ver3DAliancaButton";
 import { Pencil, X, Save, Loader2, AlertCircle, Ban } from "lucide-react";
 import { formatDateBR } from "@/lib/formatters";
+import { formatGravacao } from "@/lib/gravacao";
 
 const C = {
   esmeralda: "#184036",
@@ -789,14 +790,8 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                       if (key === "peso_estimado" && value != null) {
                         return `${Number(value).toFixed(2)}g`;
                       }
-                      // Gravacao pode ter varios nomes salvos como "Principal\u001FAdic1\u001FAdic2"
-                      // (formato novo) ou "Principal | Adic1 | Adic2" (formato antigo). Exibe
-                      // numerado e separado por linha para a fabrica ler com clareza.
-                      if (key === "texto_gravacao" && typeof value === "string") {
-                        const partes = value.split(new RegExp("\u001F| \| ")).map(t => t.trim()).filter(Boolean);
-                        if (partes.length <= 1) return `"${partes[0] ?? ""}"`;
-                        return partes.map((t, i) => `${i + 1}) "${t}"`).join("   ");
-                      }
+                      // Gravacao: array (novo) ou string com separador legado.
+                      if (key === "texto_gravacao") return formatGravacao(value);
                       if (key === "has_friso") return value ? "Sim" : "Não";
                       if (key === "pedra_drill") return value ? "Sim" : "Não";
                       if (typeof value === "number") {
