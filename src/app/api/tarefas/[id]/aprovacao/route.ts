@@ -136,7 +136,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   await processarDecisao(Number(id), body.decisao, user.id, body.motivo);
 
   const [tarefaInfo] = await sql`
-    SELECT venda_id, tags, tipo FROM alissonerp.tarefas WHERE id = ${Number(id)}
+    SELECT t.venda_id, t.tags, t.tipo,
+           ve.aprovacao_credito_tipo,
+           ve.situacao AS venda_situacao
+    FROM alissonerp.tarefas t
+    LEFT JOIN alissonerp.vendas_erp ve ON ve.id = t.venda_id
+    WHERE t.id = ${Number(id)}
   `;
   const tagsRaw = tarefaInfo?.tags;
   const tags: string[] = Array.isArray(tagsRaw)
@@ -242,7 +247,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  if (tarefaInfo?.venda_id && !tags.includes("aprovacao_desconto") && tarefaInfo?.tipo !== "cartao_desconto") {
+  // Handler crédito: só roda se a venda tem aprovacao_credito_tipo configurado
+  // (fluxo criado por submeterVendaParaAprovacaoCredito) E está em estado ativo.
+  // Exclui: aprovacao_venda (notificação genérica), venda cancelada/entregue.
+  const vendaAtiva = tarefaInfo?.venda_id &&
+    !["cancelado", "entregue", "aprovado"].includes(tarefaInfo?.venda_situacao ?? "");
+  const isCreditoReal = vendaAtiva && tarefaInfo?.aprovacao_credito_tipo;
+
+  if (isCreditoReal &&
+      !tags.includes("aprovacao_desconto") &&
+      !tags.includes("aprovacao_venda") &&
+      tarefaInfo?.tipo !== "cartao_desconto") {
     try {
       const { processarAprovacaoCredito } = await import("@/lib/vendas-credito-aprovar");
       const resultado = await processarAprovacaoCredito(
