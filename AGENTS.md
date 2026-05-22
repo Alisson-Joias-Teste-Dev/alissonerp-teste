@@ -119,3 +119,23 @@ Qualquer alteração em `contas_receber` ou `pagamentos_venda` que afete o credi
 - ❌ Mudar o formato do path de upload de fotos sem atualizar o proxy de storage
 - ❌ Alterar `gateway` do pagamento "A Receber" após confirmação — a UI depende dele
 - ❌ Usar `SUPABASE_SERVICE_ROLE_KEY` no proxy de storage — está quebrada, usar `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+# Pre-Push Hook Automático
+
+O repositório usa um **pre-push hook versionado** em `.githooks/pre-push`.
+
+## O que faz
+
+Antes de todo `git push`, executa automaticamente:
+1. `git fetch origin main`
+2. `git merge origin/main --ff-only`
+
+Se falhar (commits locais divergentes), o push aborta.
+
+## Setup para cada dev (necessário uma vez)
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Isso já está configurado neste ambiente. Em máquinas novas ou novos clones, precisa rodar esse comando.

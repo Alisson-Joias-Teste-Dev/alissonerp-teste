@@ -80,6 +80,8 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
   const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
   const { role } = useAuth();
   const podeTransferir = ["admin", "desenvolvedor", "gerente_fabrica"].includes(role ?? "");
+  // REGRA: apenas admin, desenvolvedor e diretor podem fazer lançamento avulso (proteção do estoque de produção)
+  const podeLancamentoAvulso = ["admin", "desenvolvedor", "diretor"].includes(role ?? "");
 
   const totalOuro = useMemo(
     () => saldos.filter((s) => s.categoria_id === 1 && s.deposito_id === 1).reduce((sum, s) => sum + Number(s.saldo || 0), 0),
@@ -215,13 +217,15 @@ export default function EstoqueClient({ saldos, insumos, movimentacoes, cotacaoO
               <ArrowLeftRight size={15} /> Transferir entre Locais
             </button>
           )}
-          <button
-            onClick={() => setModalAvulso(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
-            style={{ backgroundColor: C.esmeralda, color: C.creme }}
-          >
-            <Plus size={15} /> Lançamento Avulso
-          </button>
+          {podeLancamentoAvulso && (
+            <button
+              onClick={() => setModalAvulso(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
+              style={{ backgroundColor: C.esmeralda, color: C.creme }}
+            >
+              <Plus size={15} /> Lançamento Avulso
+            </button>
+          )}
         </div>
       </div>
 

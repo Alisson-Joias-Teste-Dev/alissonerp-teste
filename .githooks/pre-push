@@ -1,0 +1,10 @@
+#!/bin/bash
+# .githooks/pre-push
+# REGRA: antes de qualquer push, atualiza a branch atual com origin/main via fast-forward
+# Se houver divergência (commits locais que conflitam), o push é abortado
+# Isso garante que ninguém suba sem estar sync com a main remota
+echo "🔄 Buscando atualizações do origin/main..."
+git fetch origin main && git merge origin/main --ff-only || {
+    echo "❌ Falha ao sincronizar com origin/main. Resolva manualmente com 'git pull' e tente novamente."
+    exit 1
+}

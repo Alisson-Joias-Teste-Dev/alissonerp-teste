@@ -118,6 +118,15 @@ export async function POST(req: NextRequest) {
   const rows = ordem_ids.map((ordem_id) => ({ protocolo_id: prot.id, ordem_id }));
   await sql`INSERT INTO alissonerp.protocolo_ordens ${sql(rows)}`;
 
+  // Vincular protocolo a transferencias service pendentes (caso as ordens tenham)
+  await sql`
+    UPDATE alissonerp.transferencias_ordem
+    SET protocolo_id = ${prot.id}::integer
+    WHERE ordem_id = ANY(${ordem_ids}::int[])
+      AND tipo_transferencia = 'service'
+      AND protocolo_id IS NULL
+  `;
+
   // Criar movimentações para ordens conversao_sku
   const ordensSku = await sql`
     SELECT cs.id, cs.sku_origem_id, cs.sku_origem_quantidade,

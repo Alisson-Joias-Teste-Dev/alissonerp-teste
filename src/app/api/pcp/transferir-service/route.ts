@@ -11,12 +11,11 @@ const TransferirServiceSchema = z.object({
   deposito_destino_id: IdSchema,
   observacao: z.string().max(5000).nullable().optional(),
   user_id: UuidSchema.nullable().optional(),
-  motoboy_id: UuidSchema.nullable().optional(),
 });
 
 // POST /api/pcp/transferir-service
 // Move uma ordem do PCP de um depósito de ourives para um operador service.
-// Cria transferencias_ordem (tipo='service') + protocolo ida automático.
+// Cria transferencias_ordem (tipo='service'). O protocolo é criado separadamente pelo motoboy na tela de Protocolo.
 // NÃO altera /api/pcp/transferir existente.
 //
 // Auth: gerente_fabrica, pcp, admin, desenvolvedor
@@ -47,7 +46,7 @@ async function _handler(req: NextRequest) {
   const raw = await req.json().catch(() => ({}));
   const parsed = TransferirServiceSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
-  const { pcp_id, deposito_destino_id, observacao, user_id, motoboy_id } = parsed.data;
+  const { pcp_id, deposito_destino_id, observacao, user_id } = parsed.data;
 
   // 1. Buscar PCP + ordem
   const [pcp] = await sql`
@@ -90,6 +89,13 @@ async function _handler(req: NextRequest) {
   const origemDepositoId = Number(pcp.local_atual ?? pcp.deposito_id);
   const ordemId          = pcp.ordem_id as number;
   const numeroOrdem      = pcp.numero_ordem as string;
+
+  if (!origemDepositoId || origemDepositoId <= 0) {
+    return NextResponse.json(
+      { error: "Operador de origem não atribuído. Atribua um operador antes de transferir para service." },
+      { status: 400 }
+    );
+  }
 
   if (origemDepositoId === deposito_destino_id) {
     return NextResponse.json({ error: "Origem e destino são iguais" }, { status: 422 });
@@ -138,33 +144,7 @@ async function _handler(req: NextRequest) {
       `;
     }
 
-    // 6. Criar protocolo ida automático (com transportador se informado)
-    const [proto] = await tx`
-      INSERT INTO alissonerp.protocolos
-        (direcao, etapas, tipo_protocolo, created_by, motoboy_id)
-      VALUES
-        ('ida'::alissonerp.enum_direcao_protocolo,
-         'pendente'::alissonerp.enum_etapas_protocolo,
-         'fabrica', ${user_id ?? user.id}::uuid,
-         ${motoboy_id ?? null}::uuid)
-      RETURNING id
-    `;
-    const protocoloId = proto.id as number;
-
-    // 7. Vincular ordem ao protocolo
-    await tx`
-      INSERT INTO alissonerp.protocolo_ordens (protocolo_id, ordem_id)
-      VALUES (${protocoloId}::integer, ${ordemId}::integer)
-    `;
-
-    // 8. Atualizar transferencia com protocolo_id
-    await tx`
-      UPDATE alissonerp.transferencias_ordem
-      SET protocolo_id = ${protocoloId}::integer
-      WHERE id = ${transferId}::integer
-    `;
-
-    // 9. Atualizar PCP e ordens
+    // 6. Atualizar PCP e ordens
     await tx`
       UPDATE alissonerp.pcp
       SET deposito_id = ${deposito_destino_id}::integer,
@@ -179,13 +159,12 @@ async function _handler(req: NextRequest) {
       WHERE id = ${ordemId}::integer
     `;
 
-    return { transferencia_id: transferId, protocolo_id: protocoloId };
+    return { transferencia_id: transferId };
   });
 
   return NextResponse.json({
     success: true,
     transferencia_id: resultado.transferencia_id,
-    protocolo_id: resultado.protocolo_id,
     ouro_transferido: parseFloat(ouroSaldo.toFixed(2)),
     deposito_destino: depDestino.nome,
   });

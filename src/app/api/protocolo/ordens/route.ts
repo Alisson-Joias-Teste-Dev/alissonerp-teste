@@ -21,8 +21,15 @@ export async function GET(req: NextRequest) {
   }
 
   const rows = await sql`
-    SELECT id, numero_ordem, status::text as status
+    SELECT id, numero_ordem, status::text as status, 'regular' AS tipo
     FROM alissonerp.vw_ordens_prontas_ida
+    UNION ALL
+    SELECT DISTINCT ON (o.id) o.id, o.numero_ordem, 'transferencia_service' AS tipo
+    FROM alissonerp.transferencias_ordem t
+    JOIN alissonerp.ordens o ON o.id = t.ordem_id
+    WHERE t.tipo_transferencia = 'service'
+      AND t.protocolo_id IS NULL
+      AND o.status::text NOT IN ('cancelado', 'concluido', 'entregue')
     ORDER BY id DESC
   `;
 

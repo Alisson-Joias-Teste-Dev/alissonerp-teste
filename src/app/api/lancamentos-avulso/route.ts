@@ -3,6 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { requireAuth, AuthError } from "@/lib/auth-server";
+import { isFullAccess } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
 
 const LancamentoPostSchema = z.object({
@@ -28,6 +29,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: e.message }, { status: 401 });
     }
     throw e;
+  }
+
+  // REGRA: apenas admin, desenvolvedor e diretor podem fazer lançamento avulso.
+  // Isso protege o estoque de produção contra movimentações manuais não autorizadas.
+  // Se um dia precisar liberar para outros roles, basta adicionar no ROLES_FULL_ACCESS
+  // em src/lib/roles.ts.
+  if (!isFullAccess(user.role)) {
+    return NextResponse.json(
+      { error: "Sem permissão para lançamento avulso. Apenas admin, desenvolvedor e diretor podem executar esta ação." },
+      { status: 403 },
+    );
   }
 
   const raw = await req.json().catch(() => ({}));
