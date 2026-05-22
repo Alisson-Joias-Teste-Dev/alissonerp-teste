@@ -8,6 +8,17 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
+// Captura o evento assim que o browser dispara — antes do React montar o componente.
+// O Chrome pode disparar 'beforeinstallprompt' muito cedo (antes do useEffect rodar),
+// então guardamos numa variável de módulo para não perder o evento.
+let _deferredPrompt: BeforeInstallPromptEvent | null = null;
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    _deferredPrompt = e as BeforeInstallPromptEvent;
+  });
+}
+
 export default function InstallPrompt() {
   const [promptEvent, setPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [visivel, setVisivel] = useState(false);
@@ -22,9 +33,18 @@ export default function InstallPrompt() {
     const jaDispensado = sessionStorage.getItem("erp-install-dismissed");
     if (jaDispensado) return;
 
+    // Evento já capturado antes do componente montar?
+    if (_deferredPrompt) {
+      setPromptEvent(_deferredPrompt);
+      setVisivel(true);
+      return;
+    }
+
+    // Ainda não disparou — continua escutando
     const handler = (e: Event) => {
       e.preventDefault();
-      setPromptEvent(e as BeforeInstallPromptEvent);
+      _deferredPrompt = e as BeforeInstallPromptEvent;
+      setPromptEvent(_deferredPrompt);
       setVisivel(true);
     };
 
@@ -40,7 +60,10 @@ export default function InstallPrompt() {
     try {
       await promptEvent.prompt();
       const { outcome } = await promptEvent.userChoice;
-      if (outcome === "accepted") setVisivel(false);
+      if (outcome === "accepted") {
+        _deferredPrompt = null;
+        setVisivel(false);
+      }
     } finally {
       setInstalando(false);
     }
