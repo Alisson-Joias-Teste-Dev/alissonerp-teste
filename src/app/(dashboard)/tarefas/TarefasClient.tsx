@@ -585,6 +585,12 @@ export default function TarefasClient() {
 
   const tarefasFiltradas = tarefas;
 
+  // Filtro defensivo da aba "Aprovações pendentes": só renderiza o que está
+  // realmente aguardando — mesmo se a API mandar lixo (tarefa já aprovada/rejeitada),
+  // ela não vaza pra UI. Contador do header também usa este valor (vide linha ~600)
+  // pra ficar SEMPRE em sync com o número de cards visível.
+  const aprovacoesPendentes = tarefasFiltradas.filter(t => t.status === "aguardando_aprovacao");
+
   const porStatus = (s: string) => tarefasFiltradas.filter(t => t.status === s);
   const activeTarefa = activeId ? tarefaById(activeId) : null;
 
@@ -597,9 +603,9 @@ export default function TarefasClient() {
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-lg md:text-xl font-bold truncate" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
             {labelDaAba(aba)}
-            {aba === "aguardando" && stats && stats.aguardando_minha_aprovacao > 0 && (
+            {aba === "aguardando" && aprovacoesPendentes.length > 0 && (
               <span className="ml-2 text-sm md:text-base font-bold" style={{ color: "#7C3AED" }}>
-                ({stats.aguardando_minha_aprovacao})
+                ({aprovacoesPendentes.length})
               </span>
             )}
           </h1>
@@ -826,7 +832,7 @@ export default function TarefasClient() {
         /* Cards mobile-first para aprovações pendentes — ação em 1 toque */
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-2xl mx-auto w-full space-y-3">
-            {tarefasFiltradas.length === 0 ? (
+            {aprovacoesPendentes.length === 0 ? (
               <div className="text-center py-16">
                 <CheckCircle2 size={32} className="mx-auto mb-3" style={{ color: "#10B981" }} />
                 <p className="text-sm font-medium" style={{ color: "#6B7280" }}>
@@ -837,7 +843,7 @@ export default function TarefasClient() {
                 </p>
               </div>
             ) : (
-              tarefasFiltradas.map(t => {
+              aprovacoesPendentes.map(t => {
                 const pri = PRIORIDADE_BADGE[t.prioridade] ?? PRIORIDADE_BADGE.media;
                 const tipoLabel = t.tipo ? (TIPO_LABEL[t.tipo] ?? t.tipo) : null;
                 const estaRejeitando = rejeitandoId === t.id;
