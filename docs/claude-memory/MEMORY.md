@@ -368,14 +368,20 @@ Modelo externo anel (aguardando valores do Jonathan)
 
 ## 17. USUARIOS TESTE
 
-| Email | Senha | Role |
-|-------|-------|------|
-| admin@alisson.com | Admin@123 | desenvolvedor |
-| gerente@alisson.com | Gerente@123 | gerente_fabrica |
-| ourives1@alisson.com | Ourives@123 | ourives |
-| motoboy@alisson.com | Motoboy@123 | logistica |
-| consultora@alisson.com | Consultora@123 | consultora |
-| pcp@alisson.com | PCP@123 | pcp |
+Conferido contra o banco em 2026-05-22. Apenas estes existem e estao ativos:
+
+| Email | Senha | Role | Observacao |
+|-------|-------|------|------------|
+| gerente@alisson.com | Gerente@123 | gerente_fabrica | nome: Robson |
+| ourives1@alisson.com | Ourives@123 | ourives | — |
+| pcp@alisson.com | PCP@123 | pcp | — |
+
+**Inativos (nao logam mais — middleware bloqueia ativo=false):**
+- consultora@alisson.com (Camila Silva) — sem vendedor_id vinculado tambem
+
+**Nao existem mais (apesar de docs antiga):**
+- admin@alisson.com — apagado
+- motoboy@alisson.com — apagado
 
 ---
 

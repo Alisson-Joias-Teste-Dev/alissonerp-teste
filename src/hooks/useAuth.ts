@@ -37,6 +37,17 @@ async function fetchAuthData(): Promise<AuthState> {
     fetch(`/api/user/role?user_id=${user.id}`).catch(() => null),
     fetch(`/api/user/permissoes?user_id=${user.id}`).catch(() => null),
   ]);
+  // BLINDAGEM: backend retorna 403 quando usuario esta com ativo=false.
+  // Forca signOut imediato e manda pro login. Sem isso o ex-funcionario
+  // permanece com sessao Supabase valida e consegue carregar telas (ainda
+  // que sem dados).
+  if (profileRes?.status === 403 || permRes?.status === 403) {
+    try { await supabase.auth.signOut(); } catch { /* segue redirect mesmo se signOut falhar */ }
+    if (typeof window !== "undefined") {
+      window.location.href = "/login?reason=desativado";
+    }
+    return { user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false };
+  }
   const profile = profileRes?.ok ? await profileRes.json() : null;
   const perm    = permRes?.ok    ? await permRes.json()    : null;
   return {

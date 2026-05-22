@@ -34,10 +34,16 @@ export async function requireAuth(req?: NextRequest): Promise<AuthUser> {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new AuthError();
+  // BLINDAGEM: checa flag `ativo` em alissonerp.usuarios. Usuario desativado
+  // (ex: funcionario demitido) tinha sessao Supabase valida e conseguia operar
+  // o ERP normalmente — agora eh bloqueado com 401.
   const [row] = await sql`
-    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+    SELECT role, ativo FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
   if (!row) throw new AuthError("Usuário não encontrado");
+  if (row.ativo === false) {
+    throw new AuthError("Usuário desativado. Contate o administrador.");
+  }
   return { id: user.id, role: row.role as string, email: user.email ?? "" };
 }
 

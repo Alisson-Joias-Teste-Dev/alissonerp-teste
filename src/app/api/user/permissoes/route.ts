@@ -16,9 +16,13 @@ export async function GET(req: NextRequest) {
 
   // Buscar role + flag service na fonte de verdade (não user_metadata — pode estar desatualizado)
   const [usuario] = await sql`
-    SELECT role, is_operador_service FROM alissonerp.usuarios WHERE id = ${userId}::uuid
+    SELECT role, is_operador_service, ativo FROM alissonerp.usuarios WHERE id = ${userId}::uuid
   `;
   if (!usuario) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
+  // BLINDAGEM: usuario desativado nao pode acessar o ERP (useAuth detecta 403 e signOut).
+  if (usuario.ativo === false) {
+    return NextResponse.json({ error: "Usuário desativado. Contate o administrador." }, { status: 403 });
+  }
 
   const role = usuario.role as string;
 

@@ -8,19 +8,19 @@
  * como array — mais limpo, sem caracteres de controle, e o display fica trivial.
  *
  * Esta lib eh a UNICA fonte de verdade para parse/serialize/render de gravacao.
- * Nao reimplemente split " | " ou U+001F em outros arquivos — use estas funcoes.
+ * Nao reimplemente split de U+001F em outros arquivos — use estas funcoes.
  */
 
-// Separador novo (Unit Separator, U+001F) — caractere de controle nao-tipavel
-// pelo usuario. Usado quando precisamos serializar como string (coluna `texto`).
+// Separador (Unit Separator, U+001F) — caractere de controle nao-tipavel pelo
+// usuario. Usado quando precisamos serializar como string (coluna `texto`).
+//
+// IMPORTANTE: aceita SO U+001F. Uma versao anterior aceitava " | " tambem
+// como separador legado, mas isso quebrava nomes legitimos contendo " | "
+// (ex: usuario digita "Maria | Joao" como nome unico). Orcamentos antigos
+// com " | " ficam como nome unico — usuario edita depois pra separar nos
+// campos de adicional.
 export const GRAVACAO_SEPARATOR = "\u001F";
-
-// Regex que aceita ambos separadores:
-//   - U+001F (novo, nao-tipavel)
-//   - " | " (legado, ficaria visivel pro usuario)
-// Mantida no formato new RegExp(...) pra clareza visual em editores que escondem
-// caracteres de controle.
-const SPLIT_REGEX = new RegExp("\\u001F| \\| ");
+const SPLIT_REGEX = /\u001F/;
 
 /** Junta nome principal + adicionais numa unica string serializavel.
  *  Retorna null se nao ha nada pra gravar (todos vazios). */

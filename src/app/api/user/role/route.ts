@@ -14,11 +14,17 @@ export async function GET(req: NextRequest) {
   // Fonte de verdade: alissonerp.usuarios (id = auth.users.id)
   // JOIN por email (fallback seguro para usuários com id_user dessincronizado — ver migration 080)
   const rows = await sql`
-    SELECT u.role::text AS role, u.nome AS name, up.avatar_url
+    SELECT u.role::text AS role, u.nome AS name, u.ativo, up.avatar_url
     FROM alissonerp.usuarios u
     LEFT JOIN public.user_profiles up ON up.id_user = u.id
     WHERE u.id = ${userId}::uuid
   `;
+
+  // BLINDAGEM: usuario desativado nao deve ter acesso ao ERP.
+  // 403 sinaliza para o cliente forcar logout (useAuth → DashboardShell).
+  if (rows[0]?.ativo === false) {
+    return NextResponse.json({ error: "Usuário desativado. Contate o administrador." }, { status: 403 });
+  }
 
   return NextResponse.json({
     role:       rows[0]?.role       ?? "unknown",
