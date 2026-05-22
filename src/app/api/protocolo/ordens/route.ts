@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     SELECT id, numero_ordem, status::text as status, 'regular' AS tipo
     FROM alissonerp.vw_ordens_prontas_ida
     UNION ALL
-    SELECT DISTINCT ON (o.id) o.id, o.numero_ordem, 'transferencia_service' AS tipo
+    SELECT DISTINCT ON (o.id) o.id, o.numero_ordem, o.status::text as status, 'transferencia_service' AS tipo
     FROM alissonerp.transferencias_ordem t
     JOIN alissonerp.ordens o ON o.id = t.ordem_id
     WHERE t.tipo_transferencia = 'service'
