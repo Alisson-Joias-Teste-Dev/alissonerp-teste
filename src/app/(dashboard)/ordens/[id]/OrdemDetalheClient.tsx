@@ -7,6 +7,7 @@ import ComentariosOrdem from "@/components/ComentariosOrdem";
 import GaleriaFotosOrdem from "@/components/ordem/GaleriaFotosOrdem";
 import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
 import FichaTecnicaForm, { TIPOS_ITEM, type TipoItem, type FichaTecnicaDados, validarFichaTecnica } from "@/components/ordens/FichaTecnicaForm";
+import Ver3DAliancaButton from "@/components/ordens/Ver3DAliancaButton";
 import { Pencil, X, Save, Loader2, AlertCircle, Ban } from "lucide-react";
 import { formatDateBR } from "@/lib/formatters";
 
@@ -544,6 +545,12 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
               videoObs={ordem.video_observacao}
             />
           )}
+
+          {/* Visualizador 3D da alianca — aparece quando a ordem tem orcamento
+              de alianca associado (via venda). Componente faz fetch e se nao
+              ha orcamento, nao renderiza nada. */}
+          <Ver3DAliancaButton ordemId={Number(ordem.id)} />
+
 
           {/* Card PMC — só quando PCP concluído */}
           {pcpConcluido && (
