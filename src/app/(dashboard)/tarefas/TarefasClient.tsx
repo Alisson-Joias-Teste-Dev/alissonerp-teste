@@ -280,6 +280,11 @@ export default function TarefasClient() {
   const [ordensInput, setOrdensInput] = useState<{ numero: string; id: number | null; erro: string }[]>([{ numero: "", id: null, erro: "" }]);
   const [pesoMetal, setPesoMetal] = useState("");
 
+  const [aprovandoId, setAprovandoId] = useState<number | null>(null);
+  const [rejeitandoId, setRejeitandoId] = useState<number | null>(null);
+  const [motivoRejeicao, setMotivoRejeicao] = useState("");
+  const [salvandoAprov, setSalvandoAprov] = useState(false);
+
   const [activeId, setActiveId] = useState<number | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -409,6 +414,43 @@ export default function TarefasClient() {
       carregarStats();
     } catch { /* silencioso */ }
     setSalvando(false);
+  }
+
+  async function handleAprovar(tarefaId: number) {
+    setSalvandoAprov(true);
+    setAprovandoId(tarefaId);
+    try {
+      await apiFetch(`/api/tarefas/${tarefaId}/aprovacao`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decisao: "aprovar" }),
+      });
+      carregar();
+      carregarStats();
+    } catch {
+      useErrorStore.getState().push("Erro ao aprovar tarefa", { level: "critical" });
+    }
+    setSalvandoAprov(false);
+    setAprovandoId(null);
+  }
+
+  async function handleRejeitar(tarefaId: number) {
+    if (!motivoRejeicao.trim()) return;
+    setSalvandoAprov(true);
+    try {
+      await apiFetch(`/api/tarefas/${tarefaId}/aprovacao`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decisao: "rejeitar", motivo: motivoRejeicao }),
+      });
+      setRejeitandoId(null);
+      setMotivoRejeicao("");
+      carregar();
+      carregarStats();
+    } catch {
+      useErrorStore.getState().push("Erro ao rejeitar tarefa", { level: "critical" });
+    }
+    setSalvandoAprov(false);
   }
 
   const tarefasFiltradas = tarefas;
@@ -651,7 +693,7 @@ export default function TarefasClient() {
           </DndContext>
         </div>
       ) : aba === "aguardando" ? (
-        /* Cards mobile-first para aprovações pendentes */
+        /* Cards mobile-first para aprovações pendentes — ação em 1 toque */
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-2xl mx-auto w-full space-y-3">
             {tarefasFiltradas.length === 0 ? (
@@ -668,15 +710,14 @@ export default function TarefasClient() {
               tarefasFiltradas.map(t => {
                 const pri = PRIORIDADE_BADGE[t.prioridade] ?? PRIORIDADE_BADGE.media;
                 const tipoLabel = t.tipo ? (TIPO_LABEL[t.tipo] ?? t.tipo) : null;
+                const estaRejeitando = rejeitandoId === t.id;
+                const estaAprovando = salvandoAprov && aprovandoId === t.id;
                 return (
-                  <div key={t.id}
-                    onClick={() => setDrawerTarefa(t)}
-                    className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 cursor-pointer hover:shadow-md active:scale-[0.99] transition-all">
+                  <div key={t.id} className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 transition-all">
+                    {/* Solicitante + prioridade */}
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs" style={{ color: "#6B7280" }}>
-                          Solicitante
-                        </p>
+                        <p className="text-xs" style={{ color: "#6B7280" }}>Solicitante</p>
                         <p className="text-sm font-semibold truncate" style={{ color: "#1A1A1A" }}>
                           {t.criador_nome ?? "—"}
                         </p>
@@ -687,6 +728,7 @@ export default function TarefasClient() {
                       </span>
                     </div>
 
+                    {/* Tipo */}
                     {tipoLabel && (
                       <div className="mb-2">
                         <p className="text-xs" style={{ color: "#6B7280" }}>Tipo</p>
@@ -694,25 +736,73 @@ export default function TarefasClient() {
                       </div>
                     )}
 
-                    <p className="text-sm leading-snug mb-2" style={{ color: "#1A1A1A" }}>
+                    {/* Título */}
+                    <p className="text-sm font-semibold leading-snug mb-2" style={{ color: "#1A1A1A" }}>
                       {t.titulo}
                     </p>
+
+                    {/* Descrição completa */}
                     {t.descricao && (
-                      <p className="text-xs leading-relaxed mb-3 line-clamp-2" style={{ color: "#6B7280" }}>
-                        {t.descricao}
+                      <p className="text-xs leading-relaxed mb-3 whitespace-pre-line" style={{ color: "#6B7280" }}>
+                        {t.descricao.replace(/\\n/g, "\n").replace(/• null\s?—?\s?/g, "• ").replace(/• null/g, "•")}
                       </p>
                     )}
 
-                    <div className="flex items-center justify-between gap-2 pt-2 border-t" style={{ borderColor: "#F3F4F6" }}>
-                      <span className="text-xs" style={{ color: "#9CA3AF" }}>
-                        {tempoRelativo(t.created_at)}
-                        {t.numero_ordem && <span className="ml-2">#{t.numero_ordem}</span>}
-                      </span>
-                      <span className="flex items-center gap-1 text-xs font-semibold" style={{ color: C.esmeralda }}>
-                        Ver
-                        <ChevronRight size={14} />
-                      </span>
-                    </div>
+                    {/* Tempo */}
+                    <p className="text-xs mb-3" style={{ color: "#9CA3AF" }}>
+                      {tempoRelativo(t.created_at)}
+                      {t.numero_ordem && <span className="ml-2">#{t.numero_ordem}</span>}
+                    </p>
+
+                    {/* Rejeição inline */}
+                    {estaRejeitando ? (
+                      <div className="space-y-2">
+                        <textarea
+                          placeholder="Motivo da rejeição *"
+                          value={motivoRejeicao}
+                          onChange={e => setMotivoRejeicao(e.target.value)}
+                          rows={2}
+                          autoFocus
+                          className="w-full px-3 py-2 border rounded-xl text-sm outline-none resize-none"
+                          style={{ borderColor: "#E5E7EB" }}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => { setRejeitandoId(null); setMotivoRejeicao(""); }}
+                            className="flex-1 py-2 text-sm rounded-xl border font-medium"
+                            style={{ borderColor: "#E5E7EB", color: "#6B7280" }}>
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={() => handleRejeitar(t.id)}
+                            disabled={!motivoRejeicao.trim() || salvandoAprov}
+                            className="flex-1 py-2 text-sm rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
+                            style={{ backgroundColor: "#DC2626", color: "#fff" }}>
+                            {salvandoAprov ? <Loader2 size={13} className="animate-spin" /> : null}
+                            Confirmar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Botões Aprovar / Rejeitar */
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleAprovar(t.id)}
+                          disabled={salvandoAprov}
+                          className="flex-1 py-2.5 text-sm rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
+                          style={{ backgroundColor: "#059669", color: "#fff" }}>
+                          {estaAprovando ? <Loader2 size={13} className="animate-spin" /> : null}
+                          ✓ Aprovar
+                        </button>
+                        <button
+                          onClick={() => { setRejeitandoId(t.id); setMotivoRejeicao(""); }}
+                          disabled={salvandoAprov}
+                          className="flex-1 py-2.5 text-sm rounded-xl font-semibold border disabled:opacity-50"
+                          style={{ borderColor: "#DC2626", color: "#DC2626", backgroundColor: "#fff" }}>
+                          ✗ Rejeitar
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })
