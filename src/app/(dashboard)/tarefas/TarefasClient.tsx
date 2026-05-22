@@ -887,8 +887,10 @@ export default function TarefasClient() {
                             disabled={salvandoAprov}
                             className="flex-1 py-2 text-sm rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
                             style={{ backgroundColor: "#DC2626", color: "#fff" }}>
-                            {salvandoAprov ? <Loader2 size={13} className="animate-spin" /> : null}
-                            Confirmar
+                            <span className="flex items-center gap-1.5">
+                              {salvandoAprov && <Loader2 size={13} className="animate-spin" />}
+                              Confirmar
+                            </span>
                           </button>
                         </div>
                       </div>
