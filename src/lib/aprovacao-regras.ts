@@ -1,5 +1,5 @@
 import sql from "@/lib/db";
-import { encontrarAprovadorParaDesconto, getMasterAdminId } from "@/lib/master-admin";
+import { getMasterAdminId } from "@/lib/master-admin";
 
 export interface RegraAprovacao {
   id: number;
@@ -58,45 +58,36 @@ async function avaliarRegras(contexto: ContextoAprovacao): Promise<RegraAprovaca
 }
 
 /**
- * Encontra o aprovador para uma regra + contexto.
+ * Encontra o aprovador para uma regra.
  *
- * BLINDAGEM (migration 269):
- *   1. Solicitante NUNCA aparece como aprovador (exceto master).
- *   2. Para regras de desconto, escala automaticamente pro master quando o
- *      pct ultrapassa o limite do role (ver src/lib/master-admin.ts).
- *   3. Se nenhum candidato qualificado disponivel != solicitante, escala master.
+ * BLINDAGEM (migration 269): solicitante NUNCA aparece como aprovador
+ * (exceto master, que aprova proprias solicitacoes — dono).
  *
- * Contexto pode trazer `percentual_desconto` (regras de desconto) e
- * `solicitante_id` (sempre obrigatorio nas chamadas novas — opcional aqui pra
- * compat com chamadores legados que ainda nao passam).
+ * Sem hardcode de limites — as regras vem de alissonerp.tarefas_regras_aprovacao
+ * (consulta em avaliarRegras). A unica logica aqui eh "quem responde a essa
+ * regra, garantido != solicitante".
+ *
+ * Fallback final eh sempre o master (parametros_sistema.MASTER_ADMIN_USER_ID).
  */
 async function encontrarAprovador(
   regra: RegraAprovacao,
-  contexto?: ContextoAprovacao,
+  _contexto?: ContextoAprovacao,
   solicitanteId?: string,
 ): Promise<string> {
-  // Regras de DESCONTO usam a hierarquia master/limites por role.
-  if (regra.tipo_evento === "desconto_acima_limite" || regra.tipo_evento === "cartao_desconto") {
-    const pct = Number(contexto?.percentual_desconto ?? 0);
-    if (solicitanteId) {
-      const { aprovadorId } = await encontrarAprovadorParaDesconto({
-        pctDesconto: pct,
-        solicitanteId,
-      });
-      return aprovadorId;
+  // 1) aprovador_id explicito (ex: regra "Desconto >30%" aponta direto pro Alisson)
+  //    Aceita mesmo igual ao solicitante apenas se for o master.
+  if (regra.aprovador_id) {
+    const masterId = await getMasterAdminId();
+    const ehMasterNaRegra = regra.aprovador_id === masterId;
+    if (regra.aprovador_id !== solicitanteId || ehMasterNaRegra) {
+      const [u] = await sql`
+        SELECT id FROM alissonerp.usuarios WHERE id = ${regra.aprovador_id}::uuid AND ativo = true LIMIT 1
+      `;
+      if (u) return u.id;
     }
   }
 
-  // Regra com aprovador_id explicito (UUID fixo) — respeita, mas nunca aponta
-  // para o proprio solicitante.
-  if (regra.aprovador_id && regra.aprovador_id !== solicitanteId) {
-    const [u] = await sql`
-      SELECT id FROM alissonerp.usuarios WHERE id = ${regra.aprovador_id}::uuid AND ativo = true LIMIT 1
-    `;
-    if (u) return u.id;
-  }
-
-  // Regra com aprovador_role — busca usuario com role, excluindo solicitante.
+  // 2) aprovador_role — busca usuario com role, EXCLUINDO o solicitante.
   if (regra.aprovador_role) {
     const orderMap: Record<string, string> = {
       admin: "CASE WHEN role = 'admin' THEN 1 WHEN role = 'desenvolvedor' THEN 2 ELSE 3 END",
@@ -120,12 +111,10 @@ async function encontrarAprovador(
       ORDER BY ${orderExpr}
       LIMIT 1
     `;
-
     if (aprovador) return aprovador.id;
   }
 
-  // Fallback: busca admin/desenvolvedor != solicitante. Se nao houver, escala
-  // pro master (que pode ser o proprio solicitante se ele for master — aceito).
+  // 3) Fallback: admin/desenvolvedor != solicitante.
   const [admin] = await sql`
     SELECT id FROM alissonerp.usuarios
     WHERE role IN ('admin', 'desenvolvedor')
@@ -136,7 +125,7 @@ async function encontrarAprovador(
   `;
   if (admin) return admin.id;
 
-  // Nada disponivel != solicitante => master (autoaprovacao consciente do dono)
+  // 4) Ultimo recurso: master (autoaprovacao consciente do dono).
   return await getMasterAdminId();
 }
 
