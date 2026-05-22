@@ -521,8 +521,9 @@ export default function TarefasClient() {
       });
       carregar();
       carregarStats();
-    } catch {
-      useErrorStore.getState().push("Erro ao aprovar tarefa", { level: "critical" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro desconhecido";
+      useErrorStore.getState().push(`Erro ao aprovar: ${msg}`, { level: "critical" });
     }
     setSalvandoAprov(false);
     setAprovandoId(null);
@@ -544,8 +545,9 @@ export default function TarefasClient() {
       setMotivoRejeicao("");
       carregar();
       carregarStats();
-    } catch {
-      useErrorStore.getState().push("Erro ao rejeitar tarefa", { level: "critical" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro desconhecido";
+      useErrorStore.getState().push(`Erro ao rejeitar: ${msg}`, { level: "critical" });
     }
     setSalvandoAprov(false);
   }
