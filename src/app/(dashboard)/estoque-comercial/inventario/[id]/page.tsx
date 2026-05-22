@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Loader2, CheckCircle, XCircle, Search, X } from "lucide-react";
+import { ArrowLeft, Loader2, CheckCircle, XCircle, Search, X, FileDown } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
 
 interface InventarioHeader {
@@ -228,6 +228,51 @@ export default function InventarioDetalhePage() {
     }
   }
 
+  // REGRA DE NEGÓCIO: Exporta os itens do inventário para CSV (abre no Excel)
+  // O BOM (\uFEFF) garante que acentos e caracteres especiais sejam
+  // reconhecidos corretamente ao abrir o arquivo no Excel.
+  function exportarCSV() {
+    const header = [
+      "SKU",
+      "Nome do Produto",
+      "Qtd. Sistema",
+      "Qtd. Contada",
+      "Diferença",
+      "Status",
+      "Conferido",
+    ].join(",");
+
+    const linhas = itens
+      .map((item) => {
+        const status = STATUS_LABEL[getStatus(item)];
+        const conferido = conferidoIds.has(item.produto_id) ? "Sim" : "Não";
+        const qtdContada = item.quantidade_contada ?? "";
+        return [
+          item.sku ?? "",
+          `"${item.nome_produto.replace(/"/g, '""')}"`,
+          item.quantidade_sistema,
+          qtdContada,
+          item.diferenca,
+          status,
+          conferido,
+        ].join(",");
+      })
+      .join("\n");
+
+    const bom = "\uFEFF";
+    const blob = new Blob([bom + header + "\n" + linhas], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `inventario_${invId}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   if (loading) return (
     <div className="flex items-center justify-center min-h-screen">
       <Loader2 size={24} className="animate-spin" style={{ color: "#184036" }} />
@@ -289,24 +334,32 @@ export default function InventarioDetalhePage() {
               style={{ background: s.bg, color: s.txt }}>{s.label}</span>
           </div>
         </div>
-        {isAberto && (
-          <div className="flex gap-2 shrink-0">
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm hover:bg-red-50"
-              style={{ color: "#DC2626" }}
-              onClick={cancelarInventario} disabled={cancelando}>
-              {cancelando ? <Loader2 size={13} className="animate-spin" /> : <XCircle size={14} />}
-              Cancelar
-            </button>
-            <button className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-sm font-medium disabled:opacity-50"
-              style={{ background: "#059669", color: "#fff" }}
-              onClick={concluirInventario}
-              disabled={concluindo || pendentesL.length > 0}
-              title={pendentesL.length > 0 ? `${pendentesL.length} itens pendentes` : ""}>
-              {concluindo ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={14} />}
-              Concluir
-            </button>
-          </div>
-        )}
+        <div className="flex gap-2 shrink-0">
+          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm hover:bg-gray-50"
+            style={{ border: "1px solid #E8DCC8", color: "#6B7280" }}
+            onClick={exportarCSV}>
+            <FileDown size={14} />
+            Exportar
+          </button>
+          {isAberto && (
+            <>
+              <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm hover:bg-red-50"
+                style={{ color: "#DC2626" }}
+                onClick={cancelarInventario} disabled={cancelando}>
+                {cancelando ? <Loader2 size={13} className="animate-spin" /> : <XCircle size={14} />}
+                Cancelar
+              </button>
+              <button className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-sm font-medium disabled:opacity-50"
+                style={{ background: "#059669", color: "#fff" }}
+                onClick={concluirInventario}
+                disabled={concluindo || pendentesL.length > 0}
+                title={pendentesL.length > 0 ? `${pendentesL.length} itens pendentes` : ""}>
+                {concluindo ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={14} />}
+                Concluir
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {msg && (
