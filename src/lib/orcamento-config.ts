@@ -1,6 +1,20 @@
 import sql from "@/lib/db";
 import type { ConfigOrcamento } from "@/app/(dashboard)/orcamento/types";
 
+/** Normaliza Date | string | null para "YYYY-MM-DD" (ou null). Postgres
+ *  driver retorna DATE como Date object — usamos toISOString().slice(0,10)
+ *  pra extrair a data sem shift de timezone (DATE no banco eh UTC midnight). */
+function toISODate(v: unknown): string | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const s = String(v);
+  // Ja em "YYYY-MM-DD..."? mantem os 10 primeiros
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // Tenta parse generico (string formato Date.toString())
+  const d = new Date(s);
+  return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : null;
+}
+
 /**
  * Loader único da config de orçamento — listagem e detalhe leem o MESMO set
  * de colunas. Sem isso, o detalhe ficava sem promoção/nomes_modelos/dome/
@@ -49,8 +63,13 @@ export async function loadOrcamentoConfig(): Promise<ConfigOrcamento | null> {
     calibracao: (typeof r.calibracao === "object" && r.calibracao) ? r.calibracao : null,
     espessura_minima_por_modelo: (typeof r.espessura_minima_por_modelo === "object" && r.espessura_minima_por_modelo) ? r.espessura_minima_por_modelo as Record<string, number> : null,
     nomes_modelos: (typeof r.nomes_modelos === "object" && r.nomes_modelos) ? r.nomes_modelos as Record<string, string> : null,
-    promocao_inicio: r.promocao_inicio ? String(r.promocao_inicio) : null,
-    promocao_fim: r.promocao_fim ? String(r.promocao_fim) : null,
+    // postgres.js retorna DATE como objeto Date (UTC midnight). String(Date)
+    // vira "Tue May 12 2026 21:00:00 GMT-0300", e o client faz .slice(0,10)
+    // pegando "Tue May 12" — comparacao lexicografica com "YYYY-MM-DD" sempre
+    // falha, fazendo promocaoAtiva ser false mesmo dentro do periodo.
+    // Normaliza pra "YYYY-MM-DD" aqui.
+    promocao_inicio: toISODate(r.promocao_inicio),
+    promocao_fim: toISODate(r.promocao_fim),
     dome_percentage: r.dome_percentage != null ? Number(r.dome_percentage) : 100,
     snapshot_lock_enabled: r.snapshot_lock_enabled !== false,
     teor_ouro_default: r.teor_ouro_default != null ? Number(r.teor_ouro_default) : 75,
