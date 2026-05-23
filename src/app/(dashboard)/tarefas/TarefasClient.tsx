@@ -628,11 +628,11 @@ export default function TarefasClient() {
           </h1>
 
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            {/* Atalho Kanban (view muito diferente — não entra no dropdown) */}
+            {/* Atalhos de ícone — só desktop. No celular eles estão dentro de "Filtros" pra não estourar a header. */}
             <button onClick={() => setAba("kanban")}
               aria-label="Kanban"
               title="Kanban"
-              className="p-2 rounded-lg border transition-colors"
+              className="hidden md:inline-flex p-2 rounded-lg border transition-colors"
               style={{
                 backgroundColor: aba === "kanban" ? C.esmeralda : C.cremeBg,
                 color: aba === "kanban" ? C.creme : "#6B7280",
@@ -641,11 +641,10 @@ export default function TarefasClient() {
               <LayoutGrid size={15} />
             </button>
 
-            {/* Automações (atalho de ícone) */}
             <button onClick={() => setAba("automacoes")}
               aria-label="Automações"
               title="Automações"
-              className="p-2 rounded-lg border transition-colors"
+              className="hidden md:inline-flex p-2 rounded-lg border transition-colors"
               style={{
                 backgroundColor: aba === "automacoes" ? C.esmeralda : C.cremeBg,
                 color: aba === "automacoes" ? C.creme : "#6B7280",
@@ -658,7 +657,7 @@ export default function TarefasClient() {
               <button onClick={() => setAba("config")}
                 aria-label="Configurações"
                 title="Configurações"
-                className="p-2 rounded-lg border transition-colors"
+                className="hidden md:inline-flex p-2 rounded-lg border transition-colors"
                 style={{
                   backgroundColor: aba === "config" ? C.esmeralda : C.cremeBg,
                   color: aba === "config" ? C.creme : "#6B7280",
@@ -847,7 +846,7 @@ export default function TarefasClient() {
         </div>
       ) : aba === "aguardando" ? (
         /* Cards mobile-first para aprovações pendentes — ação em 1 toque */
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex-1 overflow-y-auto">
           <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-2xl mx-auto w-full space-y-3 min-w-0">
             {aprovacoesPendentes.length === 0 ? (
               <div className="text-center py-16">
