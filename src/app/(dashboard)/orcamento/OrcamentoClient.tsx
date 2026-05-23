@@ -1421,23 +1421,19 @@ export default function OrcamentoClient({
   const pricingTotal = useMemo(() => {
     const rawWeight = allianceMode === "par" ? pricing.weight + pricing2.weight : pricing.weight;
     const isPar = allianceMode === "par";
-    // Bruto = ouro com markup + pedras + gravacao (SEM nenhum desconto).
-    // pricing.price ja inclui markup e acrescimo metal premium, mas nao
-    // o desconto/promo (computePricing recebe discount=effDiscount, mas
-    // expomos `price` puro para podermos aplicar promo+manual unificado aqui).
-    const ouroBruto = isPar ? pricing.price + pricing2.price : pricing.price;
-    const pedrasBruto = isPar ? pedrasCost + pedrasCost2 : pedrasCost;
-    const gravBruto = isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost;
-    const bruto = ouroBruto + pedrasBruto + gravBruto;
-    // Desconto efetivo = max(promo da faixa, desconto manual da vendedora).
-    // Promo + manual NAO se somam: vendedora ou usa a promo (auto) ou da
-    // desconto proprio — o que for maior vale. Aplica sobre o TOTAL pra
-    // bater com o que ela ve no slider (effDiscount).
-    const eff1 = Math.max(params.discountPercent, descPromo1);
-    const eff2 = isPar ? Math.max(params2.discountPercent, descPromo2) : 0;
-    const descEff = Math.max(eff1, eff2);
-    const comDesc = bruto * (1 - descEff / 100);
-    // Arredonda pra multiplo de 10 (mantem preco "redondo")
+    // Ouro com promo aplicada, SEM desconto manual ainda. pricing.price é
+    // priceBase (sem promo, sem desconto); aplicamos a promo aqui.
+    const ouroComPromo1 = pricing.price * (1 - descPromo1 / 100);
+    const ouroComPromo2 = isPar ? pricing2.price * (1 - descPromo2 / 100) : 0;
+    // Base sobre a qual o desconto manual incide
+    const baseDesconto = ouroComPromo1 + ouroComPromo2
+      + (isPar ? pedrasCost + pedrasCost2 : pedrasCost)
+      + (isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost);
+    // Desconto manual = max entre anel 1 e anel 2 (slider único na UI, mas
+    // params separados podem ter valores diferentes em estados intermediários)
+    const descManual = Math.max(params.discountPercent, isPar ? params2.discountPercent : 0);
+    const comDesc = baseDesconto * (1 - descManual / 100);
+    // Arredonda pra múltiplo de 10 (regra histórica, mantém preço "redondo")
     const rounded = Math.round(comDesc / 10) * 10;
     return { weight: rawWeight, price: rounded };
   }, [
@@ -1604,34 +1600,26 @@ export default function OrcamentoClient({
       // combinado com o cliente.
       const usaSnapshotNoSave = !dirty && lockEnabled && !!savedSnapshot;
 
-      // v2.62: desconto (promo OU manual, o maior) aplica sobre o TOTAL.
-      // Mesma logica do pricingTotal — distribui proporcionalmente em
-      // valor_ouro/valor_pedras pra integridade do snapshot.
-      const ouroBruto = isPar ? pricing.price + pricing2.price : pricing.price;
+      // v2.61: desconto manual agora aplica sobre o TOTAL (ouro+pedras+gravação),
+      // não só sobre o ouro. Pra manter valor_ouro + valor_pedras = valor_total,
+      // distribuímos o desconto efetivo proporcionalmente.
+      const ouroBrutoPromo1 = pricing.price * (1 - descPromo1 / 100);
+      const ouroBrutoPromo2 = isPar ? pricing2.price * (1 - descPromo2 / 100) : 0;
+      const ouroBrutoTotal = ouroBrutoPromo1 + ouroBrutoPromo2;
       const pedrasBruto = isPar ? pedrasCost + pedrasCost2 : pedrasCost;
       const gravacaoBruto = isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost;
-      const brutoTotal = ouroBruto + pedrasBruto + gravacaoBruto;
-      // pricingTotal.price ja aplicou o desconto efetivo + arredondamento
+      const brutoTotal = ouroBrutoTotal + pedrasBruto + gravacaoBruto;
+      // pricingTotal.price já aplicou desconto manual sobre o total + arredondamento
       const valorTotalCalc = pricingTotal.price;
+      // Fator efetivo (inclui o arredondamento de 10 em 10 da pricingTotal)
       const fatorEfetivo = brutoTotal > 0 ? valorTotalCalc / brutoTotal : 1;
-      const valorOuroCalc = Math.round(ouroBruto * fatorEfetivo * 100) / 100;
+      const valorOuroCalc = Math.round(ouroBrutoTotal * fatorEfetivo * 100) / 100;
       const valorPedrasCalc = Math.round(pedrasBruto * fatorEfetivo * 100) / 100;
-
-      // Desconto efetivo salvo = max(manual, promo). Mesma logica do display:
-      // promo da campanha entra automatico, manual da vendedora soma so se for
-      // maior que a promo. Sem isso, salvar uma venda durante campanha 30%
-      // gravava desconto_pct=0 (o manual) — quebrando relatorios.
-      const descontoEfetivo = Math.max(
-        params.discountPercent,
-        isPar ? params2.discountPercent : 0,
-        descPromo1,
-        isPar ? descPromo2 : 0,
-      );
 
       const valorTotal = usaSnapshotNoSave ? savedSnapshot!.valor : valorTotalCalc;
       const pesoTotal = usaSnapshotNoSave ? savedSnapshot!.peso : pricingTotal.weight;
       const markupSalvar = usaSnapshotNoSave ? savedSnapshot!.markup : pricing.mkp;
-      const descontoPctSalvar = usaSnapshotNoSave ? savedSnapshot!.desconto_pct : descontoEfetivo;
+      const descontoPctSalvar = usaSnapshotNoSave ? savedSnapshot!.desconto_pct : params.discountPercent;
       const cotOuroSalvar = usaSnapshotNoSave ? savedSnapshot!.cotacao_ouro : params.goldPrice;
       const cotDolarSalvar = usaSnapshotNoSave ? savedSnapshot!.cotacao_dolar : cotacaoDolar;
       const valorOuroSalvar = usaSnapshotNoSave ? savedSnapshot!.valor_ouro : valorOuroCalc;
@@ -1643,7 +1631,7 @@ export default function OrcamentoClient({
       const novoSnapshot: OrcamentoSnapshot | null = usaSnapshotNoSave ? null : {
         valor: valorTotalCalc, peso: pricingTotal.weight,
         valor_ouro: valorOuroCalc, valor_pedras: valorPedrasCalc,
-        desconto_pct: descontoEfetivo, markup: pricing.mkp,
+        desconto_pct: params.discountPercent, markup: pricing.mkp,
         cotacao_ouro: params.goldPrice, cotacao_dolar: cotacaoDolar,
       };
 
