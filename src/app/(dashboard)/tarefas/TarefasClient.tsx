@@ -847,8 +847,8 @@ export default function TarefasClient() {
         </div>
       ) : aba === "aguardando" ? (
         /* Cards mobile-first para aprovações pendentes — ação em 1 toque */
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-2xl mx-auto w-full space-y-3">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-2xl mx-auto w-full space-y-3 min-w-0">
             {aprovacoesPendentes.length === 0 ? (
               <div className="text-center py-16">
                 <CheckCircle2 size={32} className="mx-auto mb-3" style={{ color: "#10B981" }} />
@@ -866,31 +866,31 @@ export default function TarefasClient() {
                 const estaRejeitando = rejeitandoId === t.id;
                 const estaAprovando = salvandoAprov && aprovandoId === t.id;
                 return (
-                  <div key={t.id} className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 transition-all">
+                  <div key={t.id} className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 transition-all overflow-hidden min-w-0">
                     {/* Solicitante */}
-                    <div className="mb-2">
+                    <div className="mb-2 min-w-0">
                       <p className="text-xs" style={{ color: "#6B7280" }}>Solicitante</p>
-                      <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>
+                      <p className="text-sm font-semibold break-words" style={{ color: "#1A1A1A" }}>
                         {t.criador_nome ?? "—"}
                       </p>
                     </div>
 
                     {/* Tipo */}
                     {tipoLabel && (
-                      <div className="mb-2">
+                      <div className="mb-2 min-w-0">
                         <p className="text-xs" style={{ color: "#6B7280" }}>Tipo</p>
-                        <p className="text-sm font-medium" style={{ color: "#1A1A1A" }}>{tipoLabel}</p>
+                        <p className="text-sm font-medium break-words" style={{ color: "#1A1A1A" }}>{tipoLabel}</p>
                       </div>
                     )}
 
                     {/* Título */}
-                    <p className="text-sm font-semibold leading-snug mb-2" style={{ color: "#1A1A1A" }}>
+                    <p className="text-sm font-semibold leading-snug mb-2 break-words" style={{ color: "#1A1A1A" }}>
                       {t.titulo}
                     </p>
 
                     {/* Descrição completa */}
                     {t.descricao && (
-                      <p className="text-xs leading-relaxed mb-3 whitespace-pre-line" style={{ color: "#6B7280" }}>
+                      <p className="text-xs leading-relaxed mb-3 whitespace-pre-line break-words" style={{ color: "#6B7280", overflowWrap: "anywhere" }}>
                         {t.descricao.replace(/\\n/g, "\n").replace(/• null\s?—?\s?/g, "• ").replace(/• null/g, "•").replace(/\*\*([^*]+)\*\*/g, "$1")}
                       </p>
                     )}
@@ -905,16 +905,16 @@ export default function TarefasClient() {
                               <a
                                 key={i}
                                 href={chip.href}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium hover:opacity-75 hover:underline transition-opacity"
-                                style={{ backgroundColor: chip.bg, color: chip.color }}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium hover:opacity-75 hover:underline transition-opacity max-w-full break-words"
+                                style={{ backgroundColor: chip.bg, color: chip.color, overflowWrap: "anywhere" }}
                               >
                                 {chip.icon} {chip.label}
                               </a>
                             ) : (
                               <span
                                 key={i}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                style={{ backgroundColor: chip.bg, color: chip.color }}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium max-w-full break-words"
+                                style={{ backgroundColor: chip.bg, color: chip.color, overflowWrap: "anywhere" }}
                               >
                                 {chip.icon} {chip.label}
                               </span>
