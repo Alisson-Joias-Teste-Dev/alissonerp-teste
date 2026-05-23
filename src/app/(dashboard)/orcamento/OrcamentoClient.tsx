@@ -799,16 +799,23 @@ export default function OrcamentoClient({
   // ── Promoção do orçamento ──
   // Datas no formato YYYY-MM-DD (input type="date"). Quando hoje ∈ [inicio, fim]
   // E a faixa de preço tem `desconto_promocao > 0`, o R$/g é reduzido.
-  const [promocaoInicio, setPromocaoInicio] = useState<string>(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const raw = (config as any)?.promocao_inicio;
-    return raw ? String(raw).slice(0, 10) : "";
-  });
-  const [promocaoFim, setPromocaoFim] = useState<string>(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const raw = (config as any)?.promocao_fim;
-    return raw ? String(raw).slice(0, 10) : "";
-  });
+  //
+  // Defesa em profundidade: o loader server-side ja deveria normalizar pra
+  // "YYYY-MM-DD", mas se vier "Tue May 12 2026..." (String(Date)) ou outro
+  // formato, normaliza aqui tambem. Bug recorrente: postgres.js v3 retorna
+  // DATE como objeto Date, String(Date) vira "Tue May 12 2026 ...", slice(0,10)
+  // = "Tue May 12" → comparacao lexicografica com hoje "2026-05-22" sempre
+  // falsifica `promocaoAtiva`.
+  function normalizaDataPromo(raw: unknown): string {
+    if (raw == null) return "";
+    const s = String(raw);
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    // Tenta parsear formato Date.toString() ("Tue May 12 2026...") ou ISO completo
+    const d = new Date(s);
+    return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : "";
+  }
+  const [promocaoInicio, setPromocaoInicio] = useState<string>(() => normalizaDataPromo((config as { promocao_inicio?: unknown })?.promocao_inicio));
+  const [promocaoFim, setPromocaoFim] = useState<string>(() => normalizaDataPromo((config as { promocao_fim?: unknown })?.promocao_fim));
   // Bug #31: usa "hoje" no fuso America/Sao_Paulo (não no fuso do browser do
   // cliente). Antes, cliente em Lisboa (UTC+1) via promo expirar 4h antes,
   // cliente no Acre via expirar 1h depois. Hoje a regra é uniforme: a promo
