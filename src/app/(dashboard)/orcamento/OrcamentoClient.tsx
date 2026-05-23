@@ -1357,13 +1357,15 @@ export default function OrcamentoClient({
     const { activeCategory } = computeCalculatedCategories(startMkp, pricingCategories, weight);
     return Number(activeCategory?.desconto_promocao ?? 0);
   }
-  // Desconto efetivo no orçamento = max(manual da vendedora, promoção da faixa).
-  // Promo entra direto no campo desconto — a faixa_comissao (DB) então
-  // aplica a tier mínima automaticamente quando esse % cair sobre a venda.
+  // Desconto efetivo = exatamente o que a vendedora digitou no slider.
+  // A promo da campanha NAO entra automatica no calculo — apenas LIBERA o
+  // teto da vendedora: durante campanha "30% no cartao", a vendedora pode
+  // chegar ate 30% (mesmo que seu mx_desconto_permitido pessoal seja 20).
+  // Slider comeca em 0 e ela escolhe quanto dar.
   const descPromo1 = descPromoParaPeso(weightEst.weight);
-  const effDiscount1 = Math.max(params.discountPercent, descPromo1);
-  // Vendedora (sem canManageConfig) não pode mexer no desconto quando promo ativa pra faixa
-  const lockDiscount1 = !canManageConfig && descPromo1 > 0;
+  const effDiscount1 = params.discountPercent;
+  // Sem lock — slider sempre destravado, vendedora decide o desconto.
+  const lockDiscount1 = false;
   // Multiplicador de acréscimo metal premium pra anel 1 (1.0 amarelo / 1+pct/100 branco|rose)
   const acrescimoMult1 = acrescimoMultiplier(params.metalColor);
   const pricing: PricingResult = useMemo(
@@ -1381,8 +1383,8 @@ export default function OrcamentoClient({
   // Pricing aliança 2 (par)
   const weightEst2 = useMemo(() => computeWeight(params2, profile2, ajustePedraMultiplier), [params2, profile2, ajustePedraMultiplier]);
   const descPromo2 = descPromoParaPeso(weightEst2.weight, params2.startMkp);
-  const effDiscount2 = Math.max(params2.discountPercent, descPromo2);
-  const lockDiscount2 = !canManageConfig && descPromo2 > 0;
+  const effDiscount2 = params2.discountPercent;
+  const lockDiscount2 = false;
   const acrescimoMult2 = acrescimoMultiplier(params2.metalColor);
   const pricing2: PricingResult = useMemo(
     () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories, 0, acrescimoMult2),
@@ -1410,36 +1412,24 @@ export default function OrcamentoClient({
 
   // Totais do par.
   //
-  // Bug v2.61: o desconto manual da vendedora (slider "DESCONTO X%") era
-  // aplicado SÓ no ouro pela computePricing. Quando metade do valor é pedras
-  // fixas, o efeito sentido era ~metade do %. Ex.: "20% off" virava ~10%
-  // visivelmente. Cliente reclamava que a conta não fechava.
-  //
-  // Correção: o desconto manual passa a incidir sobre o TOTAL (ouro com
-  // promo + pedras + gravação). A promoção por faixa continua só no ouro
-  // (é uma regra de precificação, não desconto comercial).
+  // Total = (ouro bruto + pedras + gravacao) × (1 − desconto manual).
+  // Promo NAO aplica automatica em lugar nenhum — ela so libera o teto
+  // do slider pra vendedora ir alem do seu mx_desconto pessoal enquanto
+  // a campanha esta ativa. O preco final reflete o que ela digitou.
   const pricingTotal = useMemo(() => {
     const rawWeight = allianceMode === "par" ? pricing.weight + pricing2.weight : pricing.weight;
     const isPar = allianceMode === "par";
-    // Ouro com promo aplicada, SEM desconto manual ainda. pricing.price é
-    // priceBase (sem promo, sem desconto); aplicamos a promo aqui.
-    const ouroComPromo1 = pricing.price * (1 - descPromo1 / 100);
-    const ouroComPromo2 = isPar ? pricing2.price * (1 - descPromo2 / 100) : 0;
-    // Base sobre a qual o desconto manual incide
-    const baseDesconto = ouroComPromo1 + ouroComPromo2
+    const baseDesconto = (isPar ? pricing.price + pricing2.price : pricing.price)
       + (isPar ? pedrasCost + pedrasCost2 : pedrasCost)
       + (isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost);
-    // Desconto manual = max entre anel 1 e anel 2 (slider único na UI, mas
-    // params separados podem ter valores diferentes em estados intermediários)
     const descManual = Math.max(params.discountPercent, isPar ? params2.discountPercent : 0);
     const comDesc = baseDesconto * (1 - descManual / 100);
-    // Arredonda pra múltiplo de 10 (regra histórica, mantém preço "redondo")
+    // Arredonda pra multiplo de 10 (mantem preco "redondo")
     const rounded = Math.round(comDesc / 10) * 10;
     return { weight: rawWeight, price: rounded };
   }, [
     allianceMode,
     pricing.weight, pricing.price, pricing2.weight, pricing2.price,
-    descPromo1, descPromo2,
     params.discountPercent, params2.discountPercent,
     pedrasCost, pedrasCost2, gravacaoCost, gravacaoCost2,
   ]);
@@ -1603,15 +1593,14 @@ export default function OrcamentoClient({
       // v2.61: desconto manual agora aplica sobre o TOTAL (ouro+pedras+gravação),
       // não só sobre o ouro. Pra manter valor_ouro + valor_pedras = valor_total,
       // distribuímos o desconto efetivo proporcionalmente.
-      const ouroBrutoPromo1 = pricing.price * (1 - descPromo1 / 100);
-      const ouroBrutoPromo2 = isPar ? pricing2.price * (1 - descPromo2 / 100) : 0;
-      const ouroBrutoTotal = ouroBrutoPromo1 + ouroBrutoPromo2;
+      // Snapshot: distribui o desconto manual proporcional entre ouro/pedras
+      // pra manter valor_ouro + valor_pedras = valor_total. Promo nao aplica
+      // automatica — so o que a vendedora digitou no slider.
+      const ouroBrutoTotal = isPar ? pricing.price + pricing2.price : pricing.price;
       const pedrasBruto = isPar ? pedrasCost + pedrasCost2 : pedrasCost;
       const gravacaoBruto = isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost;
       const brutoTotal = ouroBrutoTotal + pedrasBruto + gravacaoBruto;
-      // pricingTotal.price já aplicou desconto manual sobre o total + arredondamento
       const valorTotalCalc = pricingTotal.price;
-      // Fator efetivo (inclui o arredondamento de 10 em 10 da pricingTotal)
       const fatorEfetivo = brutoTotal > 0 ? valorTotalCalc / brutoTotal : 1;
       const valorOuroCalc = Math.round(ouroBrutoTotal * fatorEfetivo * 100) / 100;
       const valorPedrasCalc = Math.round(pedrasBruto * fatorEfetivo * 100) / 100;
@@ -3684,9 +3673,7 @@ export default function OrcamentoClient({
                 // categoria (ouro/pedras/gravação). Antes mostrava ouro com
                 // desconto manual aplicado e pedras sem — não batia com o total.
                 const isPar = allianceMode === "par";
-                const ouroBrutoPill = isPar
-                  ? pricing.price * (1 - descPromo1 / 100) + pricing2.price * (1 - descPromo2 / 100)
-                  : pricing.price * (1 - descPromo1 / 100);
+                const ouroBrutoPill = isPar ? pricing.price + pricing2.price : pricing.price;
                 const pedrasBrutoPill = isPar ? pedrasCost + pedrasCost2 : pedrasCost;
                 const gravBrutoPill = isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost;
                 const brutoPill = ouroBrutoPill + pedrasBrutoPill + gravBrutoPill;
@@ -3731,42 +3718,40 @@ export default function OrcamentoClient({
                       </p>
                       <div className="flex items-center gap-1">
                         <button
-                          disabled={lockActive}
                           onClick={() => {
-                            if (lockActive) return;
                             const curr = (activeRing === 1 ? params : params2).discountPercent;
-                            // Bug #32: admin/desenvolvedor (canManageConfig) pode
-                            // furar a regra da promo em casos especiais (negociação
-                            // custom). Vendedora segue presa no piso da promo.
-                            const minimo = canManageConfig ? 0 : descPromoActive;
-                            updateParam("discountPercent", Math.max(minimo, curr - 1));
+                            // Piso sempre 0 — vendedora pode tirar todo o desconto
+                            updateParam("discountPercent", Math.max(0, curr - 1));
                           }}
-                          className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs"
                         >-</button>
                         <span
                           className="text-sm font-bold w-8 text-center"
                           style={{ color: effActive > 0 ? (descPromoActive > 0 ? "#059669" : "#DC2626") : C.esmeralda }}
-                          title={lockActive ? "Campanha em vigor — desconto fixo" : undefined}
                         >
                           {effActive}%
                         </span>
                         <button
-                          disabled={lockActive}
                           onClick={() => {
-                            if (lockActive) return;
-                            const limit = canManageConfig ? 50 : (maxDesconto || 0);
+                            // Teto: admin sempre ate 50, vendedora ate
+                            // max(mx_desconto_permitido, descPromo). Promo nao
+                            // forca aplicar — apenas libera o limite enquanto
+                            // estiver ativa.
+                            const limit = canManageConfig
+                              ? 50
+                              : Math.max(maxDesconto || 0, descPromoActive);
                             const curr = (activeRing === 1 ? params : params2).discountPercent;
                             updateParam("discountPercent", Math.min(limit, curr + 1));
                           }}
-                          className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs"
                         >+</button>
                       </div>
-                      {lockActive && (
-                        <p className="text-[8px] text-emerald-600">campanha ativa</p>
-                      )}
-                      {!lockActive && !canManageConfig && maxDesconto > 0 && (
-                        <p className="text-[8px] text-gray-300">max {maxDesconto}%</p>
-                      )}
+                      {!canManageConfig && (() => {
+                        // Legenda "max X%" — durante campanha mostra o teto liberado
+                        const tetoMostrado = Math.max(maxDesconto || 0, descPromoActive);
+                        if (tetoMostrado === 0) return null;
+                        return <p className="text-[8px] text-gray-300">max {tetoMostrado}%</p>;
+                      })()}
                     </div>
                   );
                 })()}
