@@ -50,8 +50,15 @@
 }
 
 /* Base */
+/*
+ * IMPORTANTE: NÃO adicionar `overflow-x: hidden` em `html` ou `body`.
+ * Isso DESATIVA pinch-zoom no PWA Android/iOS (browser interpreta a página
+ * como "dimensão fixa, sem panning"). Se algum componente vazar pra direita,
+ * conserte no PRÓPRIO componente (use `overflow-hidden`, `break-words`,
+ * `overflow-wrap: anywhere`, etc.) — nunca aqui globalmente.
+ * Histórico: causava cortes silenciosos + impossibilidade de dar zoom no celular.
+ */
 html {
-  overflow-x: hidden;
   max-width: 100%;
 }
 
@@ -60,7 +67,6 @@ body {
   color: #1A1A1A;
   font-family: var(--font-dm-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
   max-width: 100%;
 }
 
