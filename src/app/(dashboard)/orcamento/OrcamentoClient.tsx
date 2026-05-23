@@ -1357,15 +1357,12 @@ export default function OrcamentoClient({
     const { activeCategory } = computeCalculatedCategories(startMkp, pricingCategories, weight);
     return Number(activeCategory?.desconto_promocao ?? 0);
   }
-  // Desconto efetivo = exatamente o que a vendedora digitou no slider.
-  // A promo da campanha NAO entra automatica no calculo — apenas LIBERA o
-  // teto da vendedora: durante campanha "30% no cartao", a vendedora pode
-  // chegar ate 30% (mesmo que seu mx_desconto_permitido pessoal seja 20).
-  // Slider comeca em 0 e ela escolhe quanto dar.
+  // Desconto = o que a vendedora digita no slider. O teto e o descPromo
+  // da faixa de peso ativa (definido na aba Promocoes). Sem campanha
+  // ativa, descPromo=0 e o slider trava em 0%. mx_desconto_permitido nao
+  // afeta orcamento de alianca — fonte unica de teto e a campanha.
   const descPromo1 = descPromoParaPeso(weightEst.weight);
   const effDiscount1 = params.discountPercent;
-  // Sem lock — slider sempre destravado, vendedora decide o desconto.
-  const lockDiscount1 = false;
   // Multiplicador de acréscimo metal premium pra anel 1 (1.0 amarelo / 1+pct/100 branco|rose)
   const acrescimoMult1 = acrescimoMultiplier(params.metalColor);
   const pricing: PricingResult = useMemo(
@@ -1384,7 +1381,6 @@ export default function OrcamentoClient({
   const weightEst2 = useMemo(() => computeWeight(params2, profile2, ajustePedraMultiplier), [params2, profile2, ajustePedraMultiplier]);
   const descPromo2 = descPromoParaPeso(weightEst2.weight, params2.startMkp);
   const effDiscount2 = params2.discountPercent;
-  const lockDiscount2 = false;
   const acrescimoMult2 = acrescimoMultiplier(params2.metalColor);
   const pricing2: PricingResult = useMemo(
     () => computePricing(weightEst2.weight, params2.goldPrice, params2.startMkp, effDiscount2, pricingCategories, 0, acrescimoMult2),
@@ -1590,12 +1586,8 @@ export default function OrcamentoClient({
       // combinado com o cliente.
       const usaSnapshotNoSave = !dirty && lockEnabled && !!savedSnapshot;
 
-      // v2.61: desconto manual agora aplica sobre o TOTAL (ouro+pedras+gravação),
-      // não só sobre o ouro. Pra manter valor_ouro + valor_pedras = valor_total,
-      // distribuímos o desconto efetivo proporcionalmente.
       // Snapshot: distribui o desconto manual proporcional entre ouro/pedras
-      // pra manter valor_ouro + valor_pedras = valor_total. Promo nao aplica
-      // automatica — so o que a vendedora digitou no slider.
+      // pra manter valor_ouro + valor_pedras = valor_total.
       const ouroBrutoTotal = isPar ? pricing.price + pricing2.price : pricing.price;
       const pedrasBruto = isPar ? pedrasCost + pedrasCost2 : pedrasCost;
       const gravacaoBruto = isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost;
@@ -3669,9 +3661,8 @@ export default function OrcamentoClient({
                   Admin ainda pode ver via double-click no preço final (toggle). */}
               {/* Pills de ouro e pedras (só quando há pedras preciosas) */}
               {(() => {
-                // v2.61: a Pill mostra a fatia do TOTAL final que vai pra cada
-                // categoria (ouro/pedras/gravação). Antes mostrava ouro com
-                // desconto manual aplicado e pedras sem — não batia com o total.
+                // Pill mostra a fatia do TOTAL final que vai pra cada categoria
+                // (ouro/pedras/gravação) — distribuido proporcional ao bruto.
                 const isPar = allianceMode === "par";
                 const ouroBrutoPill = isPar ? pricing.price + pricing2.price : pricing.price;
                 const pedrasBrutoPill = isPar ? pedrasCost + pedrasCost2 : pedrasCost;
@@ -3707,9 +3698,8 @@ export default function OrcamentoClient({
               })()}
               <div className="flex items-center gap-3">
                 {(() => {
-                  // Desconto exibido = efetivo do anel ativo (promo já consolidada).
+                  // Valor do slider do anel ativo + teto da campanha.
                   const effActive = activeRing === 1 ? effDiscount1 : effDiscount2;
-                  const lockActive = activeRing === 1 ? lockDiscount1 : lockDiscount2;
                   const descPromoActive = activeRing === 1 ? descPromo1 : descPromo2;
                   return (
                     <div className="text-center">
@@ -3733,25 +3723,21 @@ export default function OrcamentoClient({
                         </span>
                         <button
                           onClick={() => {
-                            // Teto: admin sempre ate 50, vendedora ate
-                            // max(mx_desconto_permitido, descPromo). Promo nao
-                            // forca aplicar — apenas libera o limite enquanto
-                            // estiver ativa.
-                            const limit = canManageConfig
-                              ? 50
-                              : Math.max(maxDesconto || 0, descPromoActive);
+                            // Alianças: teto vem EXCLUSIVAMENTE da aba Promocoes
+                            // (desconto_promocao da faixa de peso ativa). Sem
+                            // campanha = 0%. Vale pra todas as roles (vendedora,
+                            // gerente, admin) — quem decide o limite e a campanha,
+                            // nao o mx_desconto_permitido pessoal.
+                            const limit = descPromoActive;
                             const curr = (activeRing === 1 ? params : params2).discountPercent;
                             updateParam("discountPercent", Math.min(limit, curr + 1));
                           }}
                           className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 text-xs"
                         >+</button>
                       </div>
-                      {!canManageConfig && (() => {
-                        // Legenda "max X%" — durante campanha mostra o teto liberado
-                        const tetoMostrado = Math.max(maxDesconto || 0, descPromoActive);
-                        if (tetoMostrado === 0) return null;
-                        return <p className="text-[8px] text-gray-300">max {tetoMostrado}%</p>;
-                      })()}
+                      {descPromoActive > 0 && (
+                        <p className="text-[8px] text-gray-300">max {descPromoActive}%</p>
+                      )}
                     </div>
                   );
                 })()}
