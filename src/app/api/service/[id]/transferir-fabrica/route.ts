@@ -15,6 +15,9 @@ const TransferirFabricaSchema = z.object({
 // POST /api/service/[id]/transferir-fabrica
 // Transfere um serviço de volta para a fábrica (depósito de ourives).
 // Cria protocolo ida automático + move ouro + registra transferência.
+// REGRA DE NEGÓCIO (22/05/2026): tipo_transferencia='interna' no retorno
+// (não 'service'), pois a OF está voltando ao fluxo normal de produção.
+// Transferência 'service' é reservada para a IDA fábrica→service.
 // Body: { deposito_destino_id, motoboy_id?, observacao? }
 // Auth: is_operador_service = true OU fullAccess
 
@@ -80,7 +83,7 @@ export async function POST(
       VALUES
         (${pcpId}, ${ordemId}, ${deposito_destino_id}, ${null},
          ${observacao ?? `Transferência service→fábrica #${servicoId}`},
-         ${user.id}::uuid, 'service', ${origemDepositoId})
+          ${user.id}::uuid, 'interna', ${origemDepositoId})
       RETURNING id
     `;
 

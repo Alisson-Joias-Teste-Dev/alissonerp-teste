@@ -65,6 +65,10 @@ export default function RotaFabricacaoClient() {
   const [editandoNome, setEditandoNome] = useState("");
   const [setorBusy, setSetorBusy] = useState(false);
   const [setorErr, setSetorErr] = useState<string | null>(null);
+  const kanbanScrollRef = useRef<HTMLDivElement>(null);
+  const kanbanTopScrollRef = useRef<HTMLDivElement>(null);
+  const origemSyncScrollRef = useRef<"topo" | "kanban" | null>(null);
+  const [kanbanScrollWidth, setKanbanScrollWidth] = useState(0);
 
   // Filtros aplicados client-side nas OFs antes de agrupar por setor
   const [filtroVendedorId, setFiltroVendedorId] = useState<number | "">("");
@@ -90,7 +94,69 @@ export default function RotaFabricacaoClient() {
     }
   }, [filtroStatus]);
 
+  /**
+   * REGRA DE NEGOCIO (UX PCP): quando o sistema operacional/brower esconde
+   * a barra horizontal nativa, o operador precisa de uma navegacao visivel
+   * para alcancar todas as colunas do kanban sem zoom.
+   *
+   * IMPACTO: remover esse controle volta a dependencia da barra nativa,
+   * aumentando risco de o usuario achar que as colunas "sumiram".
+   */
+  function navegarKanban(delta: number) {
+    if (!kanbanScrollRef.current) return;
+    kanbanScrollRef.current.scrollBy({ left: delta, behavior: "smooth" });
+  }
+
+  /**
+   * REGRA DE NEGOCIO (UX PCP): a barra horizontal dedicada precisa ter a
+   * mesma largura total do conteudo real do kanban para sincronizar 1:1.
+   *
+   * IMPACTO: se essa medicao falhar, a barra horizontal fica "falsa"
+   * (scroll diferente do quadro real) e o operador perde navegacao.
+   */
+  const recalcularLarguraKanban = useCallback(() => {
+    const el = kanbanScrollRef.current;
+    if (!el) return;
+    setKanbanScrollWidth(el.scrollWidth);
+  }, []);
+
+  /**
+   * REGRA DE NEGOCIO (UX PCP): sincronizar scroll do quadro e da barra topo.
+   * O operador pode arrastar qualquer uma das barras e ambas precisam andar juntas.
+   */
+  function onScrollKanban() {
+    if (!kanbanTopScrollRef.current || !kanbanScrollRef.current) return;
+    if (origemSyncScrollRef.current === "topo") return;
+    origemSyncScrollRef.current = "kanban";
+    kanbanTopScrollRef.current.scrollLeft = kanbanScrollRef.current.scrollLeft;
+    requestAnimationFrame(() => { origemSyncScrollRef.current = null; });
+  }
+
+  function onScrollTopoKanban() {
+    if (!kanbanTopScrollRef.current || !kanbanScrollRef.current) return;
+    if (origemSyncScrollRef.current === "kanban") return;
+    origemSyncScrollRef.current = "topo";
+    kanbanScrollRef.current.scrollLeft = kanbanTopScrollRef.current.scrollLeft;
+    requestAnimationFrame(() => { origemSyncScrollRef.current = null; });
+  }
+
   useEffect(() => { carregar(); }, [carregar]);
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      recalcularLarguraKanban();
+      onScrollKanban();
+    });
+    function onResize() {
+      recalcularLarguraKanban();
+      onScrollKanban();
+    }
+    window.addEventListener("resize", onResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [data, loading, filtroStatus, filtroVendedorId, filtroReposicao, recalcularLarguraKanban]);
 
   // ─── CRUD de setores (reaproveita /api/setores) ────────────────────────
   async function criarSetor() {
@@ -463,6 +529,30 @@ export default function RotaFabricacaoClient() {
             <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
             Atualizar
           </button>
+          {/*
+            REGRA DE NEGOCIO (UX PCP): seta de navegacao horizontal explicita
+            para que o operador veja que existem mais colunas a direita/esquerda.
+          */}
+          <div className="flex items-center gap-1 rounded-lg border px-1 py-1" style={{ borderColor: C.cremeBorder }}>
+            <button
+              type="button"
+              onClick={() => navegarKanban(-360)}
+              className="px-2 py-1 rounded text-[12px] font-semibold"
+              style={{ color: C.esmeralda }}
+              title="Ir para a esquerda"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => navegarKanban(360)}
+              className="px-2 py-1 rounded text-[12px] font-semibold"
+              style={{ color: C.esmeralda }}
+              title="Ir para a direita"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -505,8 +595,40 @@ export default function RotaFabricacaoClient() {
           <Loader2 size={20} className="animate-spin mr-2" /> Carregando…
         </div>
       ) : (
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {colunas.map(({ setor, ofs }, idx) => {
+        <>
+          {/*
+            REGRA DE NEGOCIO (UX PCP): barra horizontal explicita no topo para
+            navegacao entre setores, independente de como o navegador renderiza
+            a scrollbar nativa (overlay/oculta).
+          */}
+          <div className="mb-2 rounded-lg border px-2 py-1" style={{ borderColor: C.cremeBorder, backgroundColor: "#fff" }}>
+            <div
+              ref={kanbanTopScrollRef}
+              onScroll={onScrollTopoKanban}
+              className="kanban-scrollbar"
+              style={{
+                overflowX: "scroll",
+                overflowY: "hidden",
+                scrollbarWidth: "thin",
+                scrollbarColor: `${C.esmeralda} ${C.cremeBg}`,
+              }}
+              aria-label="Barra horizontal do PCP"
+            >
+              <div style={{ width: Math.max(kanbanScrollWidth, 1), height: 1 }} />
+            </div>
+          </div>
+
+          <div
+            ref={kanbanScrollRef}
+            onScroll={onScrollKanban}
+            className="flex gap-4 pb-4 kanban-scrollbar"
+            style={{
+              overflowX: "scroll",
+              scrollbarWidth: "thin",
+              scrollbarColor: `${C.esmeralda} ${C.cremeBg}`,
+            }}
+          >
+            {colunas.map(({ setor, ofs }, idx) => {
             const setorIdAlvo: number | "sem-rota" = setor?.id ?? "sem-rota";
             const isOver = dragOverSetorId === setorIdAlvo;
             // posição entre os setores ativos (excluindo "Sem rota") pra
@@ -584,12 +706,13 @@ export default function RotaFabricacaoClient() {
             />
           )}
 
-          {colunas.length === 0 && !criandoSetor && (
-            <p className="text-sm py-12 px-4" style={{ color: "#9CA3AF" }}>
-              Nenhum setor ativo. Use o botão <strong>+ Novo setor</strong> ao lado.
-            </p>
-          )}
-        </div>
+            {colunas.length === 0 && !criandoSetor && (
+              <p className="text-sm py-12 px-4" style={{ color: "#9CA3AF" }}>
+                Nenhum setor ativo. Use o botão <strong>+ Novo setor</strong> ao lado.
+              </p>
+            )}
+          </div>
+        </>
       )}
 
       {/* Modais ─ reaproveitando os do PCP */}
@@ -732,7 +855,7 @@ function KanbanColuna({
 
   return (
     <div
-      className="flex-shrink-0 w-72 snap-start rounded-xl flex flex-col transition-all"
+      className="flex-shrink-0 w-64 snap-start rounded-xl flex flex-col transition-all"
       style={{
         backgroundColor: isSemRota ? "#F3F4F6" : C.cremeBg,
         minHeight: 240,
@@ -887,7 +1010,13 @@ function KanbanColuna({
       </div>
 
       {/* Cards */}
-      <div className="flex flex-col gap-2 p-2 flex-1 overflow-y-auto" style={{ maxHeight: "70vh" }}>
+      {/*
+        REGRA DE NEGOCIO (UX PCP): remover a barra vertical interna da coluna.
+        A leitura operacional deve rolar na pagina e a navegacao entre setores
+        deve ficar na horizontal do kanban, evitando "scroll dentro de scroll".
+        IMPACTO: se voltar overflow-y-auto aqui, reaparece barra vertical por coluna.
+      */}
+      <div className="flex flex-col gap-2 p-2 flex-1">
         {ofs.length === 0 && (
           <p className="text-center text-[11px] py-4" style={{ color: "#9CA3AF" }}>
             {isDragOver ? "Solte aqui" : "Vazio"}
@@ -971,7 +1100,7 @@ function NovoSetorColuna({
         type="button"
         onClick={onIniciar}
         disabled={busy}
-        className="flex-shrink-0 w-72 snap-start rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-colors disabled:opacity-50"
+        className="flex-shrink-0 w-64 snap-start rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-colors disabled:opacity-50"
         style={{
           minHeight: 240,
           borderColor: C.cremeBorder,
@@ -995,7 +1124,7 @@ function NovoSetorColuna({
 
   return (
     <div
-      className="flex-shrink-0 w-72 snap-start rounded-xl flex flex-col"
+      className="flex-shrink-0 w-64 snap-start rounded-xl flex flex-col"
       style={{ backgroundColor: C.cremeBg, minHeight: 240, border: `2px dashed ${C.esmeralda}` }}
     >
       <div className="px-3 py-2.5 rounded-t-xl border-b" style={{ backgroundColor: "#F0F7F4", borderColor: C.cremeBorder }}>
@@ -1202,7 +1331,7 @@ function ColunaFinalizada({
 
   return (
     <div
-      className="flex-shrink-0 w-72 snap-start rounded-xl flex flex-col"
+      className="flex-shrink-0 w-64 snap-start rounded-xl flex flex-col"
       style={{ backgroundColor: config.bg, minHeight: 240 }}
     >
       {/* Header */}
@@ -1227,7 +1356,12 @@ function ColunaFinalizada({
       </div>
 
       {/* Cards */}
-      <div className="flex flex-col gap-2 p-2 flex-1 overflow-y-auto" style={{ maxHeight: "70vh" }}>
+      {/*
+        REGRA DE NEGOCIO (UX PCP): colunas de historico seguem a mesma regra
+        sem barra vertical interna para manter consistencia visual/operacional.
+        IMPACTO: restaurar overflow-y-auto recria rolagem vertical local.
+      */}
+      <div className="flex flex-col gap-2 p-2 flex-1">
         {ofs.length === 0 && (
           <p className="text-center text-[11px] py-4" style={{ color: "#9CA3AF" }}>
             Vazio
@@ -1260,4 +1394,3 @@ function ColunaFinalizada({
     </div>
   );
 }
-

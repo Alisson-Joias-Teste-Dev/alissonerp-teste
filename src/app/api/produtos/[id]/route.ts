@@ -45,6 +45,7 @@ const ProdutosPatchSchema = z.object({
   aplicar_rota_padrao: z.boolean().optional(),
   preco_servico: z.number().nullable().optional(),
   controla_estoque: z.boolean().optional(),
+  replicar_filhos: z.boolean().optional(),
 }).passthrough();
 
 export async function GET(
@@ -291,6 +292,7 @@ export async function PATCH(
   if (!parsedBody.success) return zodError(parsedBody.error);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const body = parsedBody.data as any;
+  const replicarFilhos = body.replicar_filhos === true;
 
   const fotoBase64 = typeof body.foto_base64 === "string" && body.foto_base64.startsWith("data:")
     ? body.foto_base64
@@ -627,11 +629,15 @@ export async function PATCH(
     }
 
     // ── Propagar campos simples para variações (se for pai) ──────────────────
+    // REGRA DE NEGÓCIO: só propagar quando o usuário confirmou explicitamente
+    // no frontend (flag replicar_filhos=true).
+    // Impacto: sem esse gate, qualquer edição no pai pode atualizar filhos
+    // involuntariamente e causar divergência operacional.
     const camposAlterados = [
       ...Object.keys(pubUpdate),
       ...Object.keys(erpUpdate),
     ];
-    if (camposAlterados.length > 0) {
+    if (replicarFilhos && camposAlterados.length > 0) {
       try {
         const [tblOk] = await sql<{ exists: boolean }[]>`
           SELECT EXISTS (
@@ -653,6 +659,10 @@ export async function PATCH(
             if (filhos.length > 0) {
               const filhoIds = filhos.map(f => f.produto_id);
 
+              // REGRA DE NEGÓCIO: whitelist de campos replicáveis.
+              // Campos identitários de variação (sku, numeração, sufixo) NÃO
+              // podem ser tocados para preservar integridade pai/filho.
+              // Impacto: alterar esses identificadores quebra rastreabilidade.
               // public.produtos
               if (pubUpdate.situacao !== undefined) {
                 await sql`
@@ -694,17 +704,10 @@ export async function PATCH(
                 `;
               }
               if (pubUpdate.peso_precificado !== undefined) {
-                await sql`
-                  UPDATE public.produtos SET peso_precificado = ${pubUpdate.peso_precificado as number | null}
-                  WHERE id_produto = ANY(${filhoIds})
-                `;
-                for (const fid of filhoIds) {
-                  try {
-                    await aplicarCurvaProduto(fid);
-                  } catch (err) {
-                    console.warn("[PATCH /api/produtos/[id]] falha ao recalcular curva p/ filho", fid, err);
-                  }
-                }
+                // REGRA DE NEGÓCIO: v1 NÃO replica peso para filhos.
+                // Peso da variação costuma seguir grade (numeração/comprimento),
+                // então copiar peso do pai pode distorcer preço e custo.
+                // Impacto: preço incorreto em massa nas variações.
               }
 
               // erp_produtos (fornecedor / observacao_erp)

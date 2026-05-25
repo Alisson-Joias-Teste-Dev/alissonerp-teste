@@ -39,15 +39,12 @@ export const listarOrdensPcp: Tool = {
         v.bloqueado, v.data_entrega
       FROM alissonerp.vw_pcp_erp v
       WHERE v.deposito_id = ${depositoId}
+        -- REGRA DE NEGÓCIO (22/05/2026): OF em service ATIVA (aguardando/em_servico) NÃO aparece.
+        -- Service concluído e transferencias_ordem históricas NÃO bloqueiam mais.
         AND NOT EXISTS (
           SELECT 1 FROM alissonerp.servicos s
           WHERE s.pcp_id = v.id
-            AND s.status IN ('em_servico', 'aguardando', 'concluido')
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM alissonerp.transferencias_ordem t
-          WHERE t.pcp_id = v.id
-            AND t.tipo_transferencia = 'service'
+            AND s.status IN ('em_servico', 'aguardando')
         )
         ${filtroEtapa ? sql`AND v.etapas_cod = ${filtroEtapa}` : sql`AND v.etapas_cod <> 'concluido'`}
       ORDER BY v.id DESC

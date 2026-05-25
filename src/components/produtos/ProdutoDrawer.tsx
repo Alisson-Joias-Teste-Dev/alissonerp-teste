@@ -550,10 +550,25 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   // Variações (quando eh_pai)
   const [variacoes, setVariacoes] = useState<Variacao[]>([]);
 
-  // Propagação modal
-  const [showPropagar, setShowPropagar] = useState(false);
-  const [propagando, setPropagando] = useState(false);
   const [propagarMsg, setPropagarMsg] = useState<{ ok: boolean; texto: string } | null>(null);
+
+  // REGRA DE NEGÓCIO: no produto pai, qualquer alteração em campos replicáveis
+  // deve perguntar se replica para filhos ANTES de salvar.
+  // Impacto: sem essa confirmação prévia, o usuário pode alterar dezenas de
+  // variações sem perceber, ou deixar dados divergentes entre pai e filhos.
+  const CAMPOS_REPLICAVEIS_PAI = new Set([
+    "situacao",
+    "tipo_metal",
+    "categoria_geral",
+    "categoria_precificacao",
+    "tem_pedra_preciosa",
+    "fator",
+    "observacao_erp",
+    "fornecedor",
+    "largura_aro",
+    "altura_aro",
+    "base",
+  ]);
 
   // BOM editing
   const [showAddForm, setShowAddForm] = useState(false);
@@ -709,7 +724,6 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       setProduto(null);
       setComposicao([]);
       setVariacoes([]);
-      setShowPropagar(false);
       setPropagarMsg(null);
       setError(null);
       setPedrasComp([]);
@@ -863,6 +877,23 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
         body.preco_servico = null;
       }
 
+      // REGRA DE NEGÓCIO: decisão de replicação é pré-save e só vale para
+      // campos replicáveis do PATCH principal (pai -> filhos).
+      // Impacto: evita prompt desnecessário quando usuário alterou apenas dados
+      // não replicáveis, mantendo o fluxo rápido e previsível.
+      const camposBody = Object.keys(body);
+      const temCampoReplicavelAlterado = camposBody.some((k) => CAMPOS_REPLICAVEIS_PAI.has(k));
+      const devePerguntarReplicacao = Boolean(
+        produto.eh_pai && variacoes.length > 0 && temCampoReplicavelAlterado
+      );
+
+      let replicarFilhos = false;
+      if (devePerguntarReplicacao) {
+        replicarFilhos = confirm(
+          `Este produto pai tem ${variacoes.length} variação(ões). Deseja salvar e replicar TUDO nos filhos (campos, produção, rota, pedras e BOM)?`
+        );
+      }
+
       // Persiste rota/reposição mesmo quando body do PATCH principal está vazio.
       // (Esses dois endpoints são separados — UPSERT idempotente, sem dirty-check.)
       const extrasOk = await persistirReposicaoERota(produto.id_produto);
@@ -907,7 +938,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       const res = await fetch(`/api/produtos/${produto.id_produto}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        // REGRA DE NEGÓCIO: a escolha do usuário no prompt governa a
+        // replicação pai->filhos no backend.
+        // Impacto: retirar essa flag quebra a previsibilidade do fluxo.
+        body: JSON.stringify({ ...body, replicar_filhos: replicarFilhos }),
       });
       if (!res.ok) {
         const b = await res.json().catch(() => ({})) as { error?: string };
@@ -918,10 +952,13 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       setSaveMsg({ ok: true, texto: "Alterações salvas com sucesso." });
       onSaved?.();
       setTimeout(() => setSaveMsg(null), 3000);
-      // Oferecer propagação manual para medidas/BOM (campos simples já foram
-      // propagados automaticamente pelo backend).
-      if (produto.eh_pai && variacoes.length > 0 && Object.keys(body).length > 0) {
-        setShowPropagar(true);
+      // REGRA DE NEGÓCIO: no modo "replicar tudo", o usuário espera que todas
+      // as configurações operacionais do pai sejam copiadas para filhos, sem
+      // confirmação extra de BOM. O BOM é replicado automaticamente aqui.
+      // Impacto: se não replicar nesta etapa, pai/filhos ficam divergentes em
+      // reposição, rota e composição, causando falhas de produção.
+      if (replicarFilhos && produto.eh_pai && variacoes.length > 0) {
+        await replicarTudoNosFilhos(produto.id_produto, variacoes.map((v) => v.produto_id));
       }
     } catch (e) {
       setSaveMsg({ ok: false, texto: e instanceof Error ? e.message : "Erro ao salvar" });
@@ -930,28 +967,85 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
     }
   }
 
-  async function handlePropagar(campos: string[]) {
-    if (!produto) return;
-    setPropagando(true);
+  async function replicarTudoNosFilhos(paiId: number, filhoIds: number[]) {
+    if (filhoIds.length === 0) return;
     setPropagarMsg(null);
     try {
-      const res = await fetch(`/api/produtos/${produto.id_produto}/propagar`, {
+      const falhas: string[] = [];
+
+      const resBom = await fetch(`/api/produtos/${paiId}/propagar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campos }),
+        body: JSON.stringify({ campos: ["bom"] }),
       });
-      const b = await res.json() as { propagado?: number; error?: string };
-      if (!res.ok) throw new Error(b.error ?? "Erro ao propagar");
-      setPropagarMsg({ ok: true, texto: `Propagado para ${b.propagado ?? variacoes.length} variação(ões).` });
-      setShowPropagar(false);
-      // Fechar drawer após propagar
-      setTimeout(() => {
-        onClose();
-      }, 1000);
+      if (!resBom.ok) {
+        const b = await resBom.json().catch(() => ({})) as { error?: string };
+        falhas.push(`BOM: ${b.error ?? "erro ao propagar composição"}`);
+      }
+
+      const tempoNum = tempoFabricacaoDias.trim() ? parseInt(tempoFabricacaoDias, 10) : null;
+      const minimoNum = parseInt(estoqueMinimoEdit || "0", 10);
+      const pedrasPayload = {
+        pedras: pedrasComp.map((p) => ({
+          pedra_produto_id: p.pedra_produto_id,
+          quantidade: p.quantidade,
+        })),
+      };
+
+      for (const fid of filhoIds) {
+        const patchFilho: Record<string, unknown> = {
+          controla_estoque: produto?.controla_estoque ?? true,
+          tipo_item: tipoItemEdit || null,
+        };
+        if (tipoItemEdit === "servico") {
+          const n = parseFloat(precoServicoEdit.replace(",", "."));
+          patchFilho.preco_servico = !isNaN(n) && n > 0 ? n : null;
+        } else {
+          patchFilho.preco_servico = null;
+        }
+
+        const [rReposicao, rRota, rPedras, rPatchFilho] = await Promise.all([
+          fetch(`/api/produtos/${fid}/reposicao`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              estoque_minimo: Number.isFinite(minimoNum) ? minimoNum : 0,
+              ativo: reposicaoAtiva,
+              tempo_fabricacao_dias: tempoNum,
+            }),
+          }),
+          fetch(`/api/produtos/${fid}/rota`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ etapas: rotaEtapas.map((setor_id) => ({ setor_id })) }),
+          }),
+          fetch(`/api/produtos/${fid}/pedras-componente`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(pedrasPayload),
+          }),
+          fetch(`/api/produtos/${fid}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patchFilho),
+          }),
+        ]);
+
+        if (!rReposicao.ok) falhas.push(`Filho ${fid}: reposição`);
+        if (!rRota.ok) falhas.push(`Filho ${fid}: rota`);
+        if (!rPedras.ok) falhas.push(`Filho ${fid}: pedras`);
+        if (!rPatchFilho.ok) falhas.push(`Filho ${fid}: tipo_item/serviço/controle_estoque`);
+      }
+
+      if (falhas.length > 0) {
+        setPropagarMsg({ ok: false, texto: `Replicação parcial. Falhas: ${falhas.join(" | ")}` });
+      } else {
+        setPropagarMsg({ ok: true, texto: `Replicação completa aplicada em ${filhoIds.length} variação(ões).` });
+      }
     } catch (e) {
-      setPropagarMsg({ ok: false, texto: e instanceof Error ? e.message : "Erro ao propagar" });
+      setPropagarMsg({ ok: false, texto: e instanceof Error ? e.message : "Erro ao replicar tudo" });
     } finally {
-      setPropagando(false);
+      // noop
     }
   }
 
@@ -2317,47 +2411,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
             className="shrink-0 px-5 py-4 border-t bg-white"
             style={{ borderColor: C.cremeBorder }}
           >
-            {/* Propagação — aparece após salvar um pai */}
-            {showPropagar && (
-              <div className="mb-3 p-3 rounded-lg border border-blue-100 bg-blue-50">
-                <p className="text-xs font-medium text-blue-800 mb-2">
-                  Propagar para as {variacoes.length} variações?
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => handlePropagar(["medidas"])}
-                    disabled={propagando}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-white transition-colors disabled:opacity-60"
-                    style={{ backgroundColor: C.esmeralda }}
-                  >
-                    {propagando ? <Loader2 size={11} className="animate-spin" /> : <GitFork size={11} />}
-                    Medidas
-                  </button>
-                  <button
-                    onClick={() => handlePropagar(["bom"])}
-                    disabled={propagando}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-white transition-colors disabled:opacity-60"
-                    style={{ backgroundColor: "#4B5563" }}
-                  >
-                    {propagando ? <Loader2 size={11} className="animate-spin" /> : <GitFork size={11} />}
-                    BOM
-                  </button>
-                  <button
-                    onClick={() => handlePropagar(["medidas", "bom"])}
-                    disabled={propagando}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors disabled:opacity-60 border border-blue-300 text-blue-700 bg-white hover:bg-blue-50"
-                  >
-                    Ambos
-                  </button>
-                  <button
-                    onClick={() => { setShowPropagar(false); onClose(); }}
-                    className="px-2.5 py-1.5 rounded-md text-xs text-gray-500 hover:text-gray-700 transition-colors"
-                  >
-                    Só no pai
-                  </button>
-                </div>
-              </div>
-            )}
+            {/* REGRA DE NEGÓCIO: no modo "replicar tudo", o BOM já é propagado
+                automaticamente no próprio save do pai. */}
             {propagarMsg && (
               <div
                 className={`mb-3 flex items-center gap-2 text-xs rounded-lg px-3 py-2 border ${

@@ -88,8 +88,11 @@ export async function GET(req: NextRequest) {
     }));
 
     // 2. OFs ativas — mesma shape do vw_pcp_erp + campos da rota.
-    //    Só etapas ativas (sem concluido/cancelado) e exclui OFs que já
-    //    foram pra service (mesmo filtro do kanban PCP).
+    //    REGRA DE NEGÓCIO (22/05/2026):
+    //    - OF em service ATIVA (aguardando/em_servico): NÃO aparece no PCP.
+    //    - OF que voltou da service (servico.concluido) ou nunca foi service: APARECE.
+    //    - Bloqueio por transferencias_ordem tipo_service REMOVIDO — era histórico,
+    //      impedia OF de reaparecer após retorno da service para fábrica.
     const ofsRows = await sql`
       SELECT
         v.id, v.ordem_id, v.etapas, v.etapas_cod, v.numero_ordem,
@@ -148,22 +151,16 @@ export async function GET(req: NextRequest) {
               OR v.data_conclusao >= NOW() - (${JANELA_FINALIZADAS_DIAS} || ' days')::interval
           ))
         )
-        -- Exclui OFs em service SOMENTE quando status=ativas. Pra histórico
-        -- (concluidas/canceladas/todas) mostrar tudo, mesmo se a OF passou
-        -- por service em algum momento — afinal a fabricação terminou.
+        -- REGRA DE NEGÓCIO: exclui OFs em service ATIVA (aguardando/em_servico).
+        -- Service concluído NÃO bloqueia — OF já voltou para fábrica normal.
+        -- Transferencias_ordem histórico REMOVIDO como bloqueio (era permanente,
+        -- impedia OF de reaparecer no PCP mesmo após retorno da service).
         AND (
           ${status}::text <> 'ativas'
-          OR (
-            NOT EXISTS (
-              SELECT 1 FROM alissonerp.servicos s3
-              WHERE s3.pcp_id = v.id
-                AND s3.status IN ('em_servico', 'aguardando', 'concluido')
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM alissonerp.transferencias_ordem t
-              WHERE t.pcp_id = v.id
-                AND t.tipo_transferencia = 'service'
-            )
+          OR NOT EXISTS (
+            SELECT 1 FROM alissonerp.servicos s3
+            WHERE s3.pcp_id = v.id
+              AND s3.status IN ('em_servico', 'aguardando')
           )
         )
         AND (
