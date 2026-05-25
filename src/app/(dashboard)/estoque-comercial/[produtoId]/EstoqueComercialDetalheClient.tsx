@@ -54,8 +54,13 @@ interface Movimento {
 interface Reserva {
   id:           number;
   quantidade:   number;
-  venda_id:     number;
-  numero_venda: string;
+  venda_id:     number | null;
+  numero_venda: string | null;
+  ordem_id:     number | null;
+  numero_ordem: string | null;
+  tipo_ordem:   string | null;
+  tipo_reserva: "venda" | "conversao_sku" | "conversao_estoque" | "ordem" | "indefinida";
+  origem_label: string;
   created_at:   string;
 }
 
@@ -116,6 +121,17 @@ const MOTIVO_LABEL: Record<string, string> = {
 };
 
 type TabId = "movimentos" | "reservas" | "transferencias" | "rfid";
+
+// Regra de negocio: cada reserva precisa mostrar a origem explicita para evitar confusao
+// entre bloqueio comercial (venda) e bloqueio operacional (conversao/ordem).
+// Impacto: sem esse mapeamento visual por tipo, a operacao pode interpretar saldo reservado incorretamente.
+const RESERVA_TIPO_VISUAL: Record<Reserva["tipo_reserva"], { label: string; bg: string; color: string }> = {
+  venda: { label: "Venda", bg: "#DBEAFE", color: "#1D4ED8" },
+  conversao_sku: { label: "Conversao SKU", bg: "#F3E8FF", color: "#7E22CE" },
+  conversao_estoque: { label: "Conversao Estoque", bg: "#DCFCE7", color: "#166534" },
+  ordem: { label: "Ordem", bg: "#FEF3C7", color: "#92400E" },
+  indefinida: { label: "Indefinida", bg: "#F3F4F6", color: "#4B5563" },
+};
 
 // ─── TransferirModal ──────────────────────────────────────────────────────────
 function TransferirModal({
@@ -694,11 +710,24 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
               >
                 <Bookmark size={16} style={{ color: "#2563EB" }} />
                 <div className="flex-1">
-                  <span className="text-sm font-medium" style={{ color: "#2563EB" }}>
-                    {r.quantidade} un
-                  </span>
-                  <span className="text-sm text-gray-500 ml-2">
-                    Venda {r.numero_venda}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium" style={{ color: "#2563EB" }}>
+                      {r.quantidade} un
+                    </span>
+                    <span
+                      className="text-xs px-1.5 py-0.5 rounded"
+                      style={{
+                        background: RESERVA_TIPO_VISUAL[r.tipo_reserva]?.bg ?? RESERVA_TIPO_VISUAL.indefinida.bg,
+                        color: RESERVA_TIPO_VISUAL[r.tipo_reserva]?.color ?? RESERVA_TIPO_VISUAL.indefinida.color,
+                      }}
+                    >
+                      {RESERVA_TIPO_VISUAL[r.tipo_reserva]?.label ?? RESERVA_TIPO_VISUAL.indefinida.label}
+                    </span>
+                  </div>
+                  <span className="text-sm text-gray-500 mt-0.5 inline-block">
+                    {/* Regra de negocio: a origem da reserva precisa ser explicita (venda x conversao/ordem).
+                        Impacto: se remover este label dinamico, a conversao volta a aparecer como venda e confunde a operacao. */}
+                    {r.origem_label}
                   </span>
                 </div>
                 <p className="text-xs text-gray-400">{fmtDate(r.created_at)}</p>

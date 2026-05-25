@@ -62,11 +62,31 @@ export async function GET(
     const reservas = await sql`
       SELECT
         r.id, r.quantidade, r.local_estoque_id, r.status,
-        r.venda_id, r.item_venda_id,
+        r.venda_id, r.item_venda_id, r.ordem_id,
         v.numero_venda,
+        o.numero_ordem,
+        o.tipo_ordem::text AS tipo_ordem,
+        -- Regra de negocio: reserva com venda_id pertence ao fluxo comercial (PDV).
+        -- Se nao houver venda_id e existir ordem_id, a reserva pertence ao fluxo operacional (conversao/ordem).
+        -- Impacto: sem essa classificacao explicita a UI confunde conversao com venda e induz leitura operacional errada.
+        CASE
+          WHEN r.venda_id IS NOT NULL THEN 'venda'
+          WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao_sku' THEN 'conversao_sku'
+          WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao' THEN 'conversao_estoque'
+          WHEN r.ordem_id IS NOT NULL THEN 'ordem'
+          ELSE 'indefinida'
+        END AS tipo_reserva,
+        CASE
+          WHEN r.venda_id IS NOT NULL THEN 'Venda ' || COALESCE(v.numero_venda::text, '#' || r.venda_id::text)
+          WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao_sku' THEN 'Conversao SKU ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
+          WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao' THEN 'Conversao Estoque ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
+          WHEN r.ordem_id IS NOT NULL THEN 'Ordem ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
+          ELSE 'Origem indefinida'
+        END AS origem_label,
         r.created_at
       FROM alissonerp.reservas_estoque_comercial r
       LEFT JOIN alissonerp.vendas_erp v ON v.id = r.venda_id
+      LEFT JOIN alissonerp.ordens o ON o.id = r.ordem_id
       WHERE r.produto_id = ${id} AND r.status = 'ativo'
       ORDER BY r.created_at DESC
     `;
