@@ -78,21 +78,3 @@ body {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
-
-/* Barra de rolagem visível do kanban PCP (sempre à mostra) */
-.kanban-scrollbar::-webkit-scrollbar {
-  height: 12px;
-}
-.kanban-scrollbar::-webkit-scrollbar-track {
-  background: #E8DCC8;
-  border-radius: 6px;
-  border: 1px solid #D4C8B0;
-}
-.kanban-scrollbar::-webkit-scrollbar-thumb {
-  background: #184036;
-  border-radius: 6px;
-  border: 2px solid #E8DCC8;
-}
-.kanban-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #0F2922;
-}
