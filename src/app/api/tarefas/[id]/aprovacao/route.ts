@@ -33,6 +33,137 @@ const AprovacaoTarefaPatchSchema = z.object({
   motivo: z.string().optional(),
 }).passthrough();
 
+async function processarAprovacaoCompraComercial(
+  tarefaId: number,
+  decisao: "aprovado" | "rejeitado",
+  aprovadorId: string,
+  motivo?: string,
+) {
+  // REGRA DE NEGOCIO:
+  // - O que faz: ao aprovar compra comercial, executa entrada no estoque e gera contas a pagar.
+  // - Por que: pagamento operacional ocorre via contas a pagar e só após aprovação formal.
+  // - Impacto se alterado/removido: compra pode ficar aprovada sem reflexo em estoque/financeiro.
+  const [compra] = await sql`
+    SELECT id, fornecedor_id, local_estoque_id, qtd_parcelas, primeiro_vencimento, created_by, situacao, bloqueado, tarefa_aprovacao_id
+    FROM alissonerp.compras_comercial
+    WHERE tarefa_aprovacao_id = ${tarefaId}
+    LIMIT 1
+  `;
+
+  if (!compra) return { ok: false, motivo: "compra_nao_encontrada" };
+
+  if (decisao === "rejeitado") {
+    await sql`
+      UPDATE alissonerp.compras_comercial
+      SET
+        situacao = 'rejeitado',
+        bloqueado = false,
+        aprovado_por = ${aprovadorId}::uuid,
+        data_decisao = NOW(),
+        motivo_rejeicao = ${motivo ?? 'Rejeitada na aprovação'}
+      WHERE id = ${compra.id}
+    `;
+    return { ok: true, decisao };
+  }
+
+  const itens = await sql`
+    SELECT produto_id, qtd, valor_total
+    FROM alissonerp.itens_compra_comercial
+    WHERE compra_comercial_id = ${compra.id}
+    ORDER BY id
+  `;
+
+  if (!Array.isArray(itens) || itens.length === 0) {
+    throw new Error("Compra comercial sem itens para aprovação");
+  }
+
+  // REGRA DE NEGOCIO:
+  // - O que faz: executa aprovacao em transacao unica para manter estoque, financeiro e status consistentes.
+  // - Por que: se qualquer etapa falhar, nenhuma parte da aprovacao pode ficar aplicada parcialmente.
+  // - Impacto se alterado/removido: risco de compra aprovada sem contas a pagar ou sem entrada de estoque.
+  await sql.begin(async (tx: any) => {
+    const [tot] = await tx`
+      SELECT COALESCE(SUM(valor_total), 0) AS total
+      FROM alissonerp.itens_compra_comercial
+      WHERE compra_comercial_id = ${compra.id}
+    `;
+    const totalCompra = Number(tot?.total ?? 0);
+
+    for (const item of itens) {
+      // REGRA DE NEGOCIO:
+      // - O que faz: normaliza qtd para inteiro antes do insert no estoque.
+      // - Por que: a coluna quantidade e INTEGER no banco e compras comerciais usam pecas inteiras.
+      // - Impacto se alterado/removido: valores decimais quebram o insert com erro 22P02.
+      const qtdNum = Number(item.qtd);
+      if (!Number.isFinite(qtdNum) || qtdNum <= 0 || !Number.isInteger(qtdNum)) {
+        throw new Error(
+          `Quantidade invalida na compra comercial #${compra.id}: produto ${item.produto_id}, qtd=${JSON.stringify(item.qtd)}. Apenas inteiros positivos sao aceitos.`
+        );
+      }
+      await tx`
+        INSERT INTO alissonerp.movimentacoes_estoque_comercial
+          (produto_id, tipo, quantidade, motivo, local_estoque_id, status, observacao, created_by)
+        VALUES
+          (
+            ${item.produto_id},
+            'entrada',
+            ${qtdNum},
+            'compra_comercial_aprovada',
+            ${compra.local_estoque_id},
+            'efetivado',
+            ${`Entrada via compra comercial #${compra.id} aprovada`},
+            ${compra.created_by ?? aprovadorId}::uuid
+          )
+      `;
+    }
+
+    const parcelas = Math.max(Number(compra.qtd_parcelas ?? 1), 1);
+    const base = Math.round((totalCompra / parcelas) * 100) / 100;
+    const somaBase = Math.round(base * parcelas * 100) / 100;
+    const diff = Math.round((totalCompra - somaBase) * 100) / 100;
+
+    const [forn] = await tx`
+      SELECT nome FROM public.contatos WHERE id_contato = ${compra.fornecedor_id} LIMIT 1
+    `;
+    const fornecedorNome = String(forn?.nome ?? "Fornecedor");
+
+    for (let i = 1; i <= parcelas; i++) {
+      const valorParcela = i === parcelas ? Math.round((base + diff) * 100) / 100 : base;
+      await tx`
+        INSERT INTO alissonerp.contas_pagar
+          (descricao, fornecedor_id, fornecedor_nome, compra_comercial_id, valor, data_vencimento, situacao, categoria, created_by, obs)
+        VALUES
+          (
+            ${`Compra Comercial #${compra.id} - Parcela ${i}/${parcelas}`},
+            ${compra.fornecedor_id},
+            ${fornecedorNome},
+            ${compra.id},
+            ${valorParcela},
+            ${(sql`${compra.primeiro_vencimento}::date + ${`${i - 1} month`}::interval`)},
+            'pendente',
+            'compra_comercial',
+            ${compra.created_by ?? aprovadorId}::uuid,
+            ${`Gerado automaticamente na aprovação da compra comercial #${compra.id}`}
+          )
+      `;
+    }
+
+    await tx`
+      UPDATE alissonerp.compras_comercial
+      SET
+        situacao = 'aprovado',
+        bloqueado = true,
+        total = ${totalCompra},
+        aprovado_por = ${aprovadorId}::uuid,
+        data_decisao = NOW(),
+        motivo_rejeicao = NULL
+      WHERE id = ${compra.id}
+    `;
+  });
+
+  return { ok: true, decisao };
+}
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -281,6 +412,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ ok: true, devolucao: resultado });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] devolucao`, err);
+    }
+  }
+
+  if (tarefaInfo?.tipo === "compra_comercial" || tags.includes("aprovacao_compra_comercial")) {
+    try {
+      const resultado = await processarAprovacaoCompraComercial(Number(id), body.decisao, user.id, body.motivo);
+      return NextResponse.json({ ok: true, compra_comercial: resultado });
+    } catch (err) {
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] compra_comercial`, err);
     }
   }
 

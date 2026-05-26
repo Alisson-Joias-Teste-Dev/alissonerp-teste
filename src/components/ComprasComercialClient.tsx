@@ -1,0 +1,670 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Loader2, Plus, Search, ShoppingCart } from "lucide-react";
+import { formatMoeda } from "@/lib/formatters";
+
+// REGRA DE NEGOCIO:
+// - O que faz: orquestra o fluxo de compra comercial (criar, receber, concluir, itens).
+// - Por que: conclusao da compra dispara automacoes criticas de estoque comercial e contas a pagar.
+// - Impacto se alterado/removido: operacao pode perder automacao e voltar para processos manuais com risco financeiro.
+
+const C = {
+  verde: "#1A3C34",
+  dourado: "#C59B6D",
+  creme: "#F2E8D5",
+  borda: "#E8DCC8",
+};
+
+type Situacao = "rascunho" | "recebida" | "concluido" | "pendente";
+
+interface CompraComercial {
+  id: number;
+  situacao: Situacao | "aguardando_aprovacao" | "aprovado" | "rejeitado";
+  total: number;
+  bloqueado: boolean;
+  local_estoque_id: number;
+  numero_nf?: string;
+  data_compra?: string;
+  data_recebimento?: string;
+  created_at: string;
+  fornecedor_id?: number;
+  fornecedor_nome?: string;
+  local_nome?: string;
+  total_itens: number;
+  qtd_parcelas: number;
+  primeiro_vencimento: string;
+}
+
+interface ItemCompraComercial {
+  id: number;
+  produto_id: number;
+  produto_nome: string;
+  produto_sku?: string;
+  qtd: number;
+  cotacao_referencial?: number;
+  fator_ouro?: number;
+  valor_grama: number;
+  peso_total: number;
+  valor_unitario: number;
+  valor_total: number;
+}
+
+interface Local { id: number; nome: string }
+interface Fornecedor { id_contato: number; nome: string }
+interface ProdutoBusca { id_produto: number; nome: string; sku?: string; fator?: number; peso_precificado?: number }
+
+function fmtDate(d?: string | null): string {
+  if (!d) return "-";
+  return new Date(d).toLocaleDateString("pt-BR");
+}
+
+function SituacaoTag({ s }: { s: string }) {
+  const style =
+    s === "aprovado" || s === "concluido"
+      ? "bg-emerald-100 text-emerald-700"
+      : s === "aguardando_aprovacao"
+      ? "bg-violet-100 text-violet-700"
+      : s === "rejeitado"
+      ? "bg-red-100 text-red-700"
+      : s === "recebida"
+      ? "bg-blue-100 text-blue-700"
+      : "bg-amber-100 text-amber-700";
+  return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${style}`}>{s}</span>;
+}
+
+function NovaCompraModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [buscaFornecedor, setBuscaFornecedor] = useState("");
+  const [showSugestoesFornecedor, setShowSugestoesFornecedor] = useState(false);
+  const [locais, setLocais] = useState<Local[]>([]);
+  const [fornecedorId, setFornecedorId] = useState("");
+  const [localId, setLocalId] = useState("");
+  const [numeroNf, setNumeroNf] = useState("");
+  const [dataCompra, setDataCompra] = useState(new Date().toISOString().slice(0, 10));
+  const [qtdParcelas, setQtdParcelas] = useState("1");
+  const [primeiroVencimento, setPrimeiroVencimento] = useState(new Date().toISOString().slice(0, 10));
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    fetch("/api/locais-estoque").then((r) => r.json()).then((d: Local[]) => {
+      setLocais(d ?? []);
+      if (d?.[0]) setLocalId(String(d[0].id));
+    });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    // REGRA DE NEGOCIO:
+    // - O que faz: busca fornecedor na tabela de contatos conforme digitacao do usuario.
+    // - Por que: acelera cadastro e evita erro de selecao em listas longas.
+    // - Impacto se alterado/removido: operador volta a depender de lista extensa, aumentando chance de erro.
+    const handle = setTimeout(() => {
+      fetch(`/api/compras-comercial/fornecedores?q=${encodeURIComponent(buscaFornecedor.trim())}`)
+        .then((r) => r.json())
+        .then((d) => setFornecedores(d ?? []));
+    }, 180);
+    return () => clearTimeout(handle);
+  }, [open, buscaFornecedor]);
+
+  async function submit() {
+    setErr("");
+    if (!localId) {
+      setErr("Selecione o local de estoque.");
+      return;
+    }
+
+    setLoading(true);
+    const res = await fetch("/api/compras-comercial", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fornecedor_id: fornecedorId ? Number(fornecedorId) : null,
+        local_estoque_id: Number(localId),
+        numero_nf: numeroNf || null,
+        data_compra: dataCompra,
+        qtd_parcelas: Number(qtdParcelas),
+        primeiro_vencimento: primeiroVencimento,
+      }),
+    });
+    const data = await res.json();
+    setLoading(false);
+    if (!res.ok) {
+      setErr(data.error ?? "Erro ao criar compra comercial");
+      return;
+    }
+    onCreated();
+    onClose();
+  }
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden" style={{ border: `2px solid ${C.borda}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b" style={{ background: `linear-gradient(90deg, ${C.creme} 0%, #ffffff 100%)`, borderColor: C.borda }}>
+          <h3 className="font-semibold text-lg" style={{ color: C.verde }}>Nova Compra Comercial</h3>
+          <p className="text-xs mt-0.5" style={{ color: "#5B6B67" }}>Preencha os dados da compra e defina o plano financeiro.</p>
+        </div>
+        <div className="p-5 space-y-4">
+        <div className="space-y-1">
+          <p className="text-[11px] font-bold" style={{ color: "#7D8A86" }}>Fornecedor</p>
+          <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#5B6B67" }}>Fornecedor</label>
+          <div className="relative">
+            <input
+              className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none"
+              style={{ borderColor: C.borda, color: C.verde }}
+              placeholder="Buscar fornecedor..."
+              value={buscaFornecedor}
+              onFocus={() => setShowSugestoesFornecedor(true)}
+              onChange={(e) => {
+                setBuscaFornecedor(e.target.value);
+                setFornecedorId("");
+                setShowSugestoesFornecedor(true);
+              }}
+            />
+            {showSugestoesFornecedor && buscaFornecedor.trim().length > 0 && (
+              <div className="absolute z-20 mt-1 w-full rounded-lg border bg-white shadow-lg max-h-56 overflow-y-auto" style={{ borderColor: C.borda }}>
+                {fornecedores.length === 0 && (
+                  <p className="px-3 py-2 text-xs text-gray-500">Nenhum fornecedor encontrado.</p>
+                )}
+                {fornecedores.map((f) => (
+                  <button
+                    key={f.id_contato}
+                    type="button"
+                    className="w-full text-left px-3 py-2.5 text-sm transition-colors"
+                    style={{ color: C.verde }}
+                    onClick={() => {
+                      setFornecedorId(String(f.id_contato));
+                      setBuscaFornecedor(f.nome);
+                      setShowSugestoesFornecedor(false);
+                    }}
+                  >
+                    {f.nome}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {!!fornecedorId && <p className="text-xs" style={{ color: C.verde }}>Fornecedor selecionado.</p>}
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <p className="text-[11px] font-bold" style={{ color: "#7D8A86" }}>Local de estoque</p>
+            <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#5B6B67" }}>Local de estoque</label>
+            <select className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none" style={{ borderColor: C.borda, color: C.verde }} value={localId} onChange={(e) => setLocalId(e.target.value)}>
+              <option value="">Selecione local de estoque</option>
+              {locais.map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <p className="text-[11px] font-bold" style={{ color: "#7D8A86" }}>Numero da NF</p>
+            <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#5B6B67" }}>Numero da NF</label>
+            <input className="border rounded-lg px-3 py-2.5 w-full text-sm focus:outline-none" style={{ borderColor: C.borda, color: C.verde }} placeholder="Ex: 001234" value={numeroNf} onChange={(e) => setNumeroNf(e.target.value)} />
+          </div>
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <p className="text-[11px] font-bold" style={{ color: "#7D8A86" }}>Data da compra</p>
+            <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#5B6B67" }}>Data da compra</label>
+            <input type="date" className="border rounded-lg px-3 py-2.5 w-full text-sm focus:outline-none" style={{ borderColor: C.borda, color: C.verde }} value={dataCompra} onChange={(e) => setDataCompra(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <p className="text-[11px] font-bold" style={{ color: "#7D8A86" }}>Quantidade de parcelas</p>
+            <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#5B6B67" }}>Quantidade de parcelas</label>
+            <input type="number" min={1} className="border rounded-lg px-3 py-2.5 w-full text-sm focus:outline-none" style={{ borderColor: C.borda, color: C.verde }} value={qtdParcelas} onChange={(e) => setQtdParcelas(e.target.value)} placeholder="Ex: 1" />
+          </div>
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <p className="text-[11px] font-bold" style={{ color: "#7D8A86" }}>Primeiro vencimento</p>
+            <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#5B6B67" }}>Primeiro vencimento</label>
+            <input type="date" className="border rounded-lg px-3 py-2.5 w-full text-sm focus:outline-none" style={{ borderColor: C.borda, color: C.verde }} value={primeiroVencimento} onChange={(e) => setPrimeiroVencimento(e.target.value)} />
+          </div>
+          <div className="rounded-2xl px-4 py-3 self-end shadow-sm" style={{ backgroundColor: C.verde, color: C.creme }}>
+            <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: C.dourado }}>Resumo financeiro</p>
+            <p className="text-xs mt-1">Serao geradas <strong>{Number(qtdParcelas || 1)}</strong> parcela(s) mensal(is) a partir de <strong>{fmtDate(primeiroVencimento)}</strong>.</p>
+          </div>
+        </div>
+        {err && <p className="text-sm text-red-600">{err}</p>}
+        </div>
+        <div className="px-5 py-3 border-t bg-gray-50 flex justify-end gap-2" style={{ borderColor: C.borda }}>
+          <button className="px-3 py-2 border rounded-lg text-sm" style={{ borderColor: `${C.verde}40`, color: C.verde }} onClick={onClose}>Cancelar</button>
+          <button className="px-3 py-2 rounded-lg text-sm font-semibold" style={{ backgroundColor: C.verde, color: C.dourado }} onClick={submit} disabled={loading}>
+            {loading ? "Salvando..." : "Criar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdated: () => void }) {
+  const [itens, setItens] = useState<ItemCompraComercial[]>([]);
+  const [buscaProduto, setBuscaProduto] = useState("");
+  const [produtos, setProdutos] = useState<ProdutoBusca[]>([]);
+  const [showSugestoesProduto, setShowSugestoesProduto] = useState(false);
+  const [produtoId, setProdutoId] = useState("");
+  const [qtd, setQtd] = useState("");
+  const [cotacaoReferencial, setCotacaoReferencial] = useState("");
+  const [fatorOuro, setFatorOuro] = useState("1");
+  const [valorGrama, setValorGrama] = useState("");
+  const [pesoTotal, setPesoTotal] = useState("");
+  const [msg, setMsg] = useState("");
+  const [loadingAction, setLoadingAction] = useState(false);
+  const [showSolicitarAprovacao, setShowSolicitarAprovacao] = useState(false);
+  const [aprovadores, setAprovadores] = useState<Array<{ id: string; nome: string; role?: string }>>([]);
+  const [aprovadorSelecionado, setAprovadorSelecionado] = useState("");
+
+  const bloqueada = compra.bloqueado || compra.situacao === "concluido";
+
+  const loadItens = useCallback(async () => {
+    const data = await fetch(`/api/compras-comercial/${compra.id}/itens`).then((r) => r.json());
+    setItens(data ?? []);
+  }, [compra.id]);
+
+  useEffect(() => { loadItens(); }, [loadItens]);
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      fetch(`/api/compras-comercial/produtos?q=${encodeURIComponent(buscaProduto)}`)
+        .then((r) => r.json())
+        .then((d) => setProdutos(d ?? []));
+    }, 200);
+    return () => clearTimeout(id);
+  }, [buscaProduto]);
+
+  useEffect(() => {
+    if (cotacaoReferencial && fatorOuro) {
+      const c = Number(cotacaoReferencial);
+      const f = Number(fatorOuro);
+      if (!Number.isNaN(c) && !Number.isNaN(f) && c > 0 && f > 0) {
+        setValorGrama((c * f).toFixed(2));
+      }
+    }
+  }, [cotacaoReferencial, fatorOuro]);
+
+  async function addItem() {
+    setMsg("");
+    // REGRA DE NEGOCIO: valida quantidade inteira antes de enviar para evitar erro no estoque.
+    const qtdNum = Number(qtd);
+    if (!Number.isFinite(qtdNum) || qtdNum < 1 || !Number.isInteger(qtdNum)) {
+      setMsg("Quantidade deve ser um numero inteiro positivo.");
+      return;
+    }
+    const res = await fetch(`/api/compras-comercial/${compra.id}/itens`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        produto_id: Number(produtoId),
+        qtd: qtdNum,
+        cotacao_referencial: cotacaoReferencial ? Number(cotacaoReferencial) : undefined,
+        fator_ouro: fatorOuro ? Number(fatorOuro) : undefined,
+        valor_grama: Number(valorGrama),
+        peso_total: Number(pesoTotal),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setMsg(data.error ?? "Erro ao adicionar item");
+      return;
+    }
+    setProdutoId("");
+    setQtd("");
+    setCotacaoReferencial("");
+    setFatorOuro("1");
+    setValorGrama("");
+    setPesoTotal("");
+    setMsg("Item adicionado.");
+    loadItens();
+    onUpdated();
+  }
+
+  async function removerItem(itemId: number) {
+    await fetch(`/api/compras-comercial/${compra.id}/itens/${itemId}`, { method: "DELETE" });
+    loadItens();
+    onUpdated();
+  }
+
+  async function acao(path: "receber" | "concluir" | "reverter-rascunho") {
+    setLoadingAction(true);
+    setMsg("");
+    const res = await fetch(`/api/compras-comercial/${compra.id}/${path}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: path === "receber" ? JSON.stringify({}) : undefined,
+    });
+    const data = await res.json();
+    setLoadingAction(false);
+    if (!res.ok) {
+      setMsg(data.error ?? "Falha na operação");
+      return;
+    }
+    setMsg(path === "concluir" ? "Compra concluída: estoque e contas a pagar gerados." : "Operação realizada.");
+    onUpdated();
+  }
+
+  async function abrirSolicitarAprovacao() {
+    setShowSolicitarAprovacao(true);
+    if (aprovadores.length > 0) return;
+    const data = await fetch("/api/configuracoes/aprovadores").then((r) => r.json()).catch(() => null);
+    const lista = [
+      ...(data?.usuarios?.admins_devs ?? []),
+      ...(data?.usuarios?.diretores_admins ?? []),
+      ...(data?.usuarios?.gerentes ?? []),
+    ];
+    const uniq = Array.from(new Map(lista.map((u: { id: string; nome: string; role?: string }) => [u.id, u])).values());
+    setAprovadores(uniq);
+    if (data?.aprovador_compra_comercial) setAprovadorSelecionado(String(data.aprovador_compra_comercial));
+  }
+
+  async function solicitarAprovacao() {
+    setMsg("");
+    setLoadingAction(true);
+    const res = await fetch(`/api/compras-comercial/${compra.id}/solicitar-aprovacao`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ aprovador_id: aprovadorSelecionado || undefined }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setLoadingAction(false);
+    if (!res.ok) {
+      setMsg(data.error ?? "Erro ao solicitar aprovação");
+      return;
+    }
+    setShowSolicitarAprovacao(false);
+    setMsg("Aprovação solicitada. A ordem foi bloqueada para edição.");
+    onUpdated();
+  }
+
+  return (
+    <div className="border rounded-2xl p-4 md:p-5 space-y-4 bg-white shadow-sm" style={{ borderColor: C.borda }}>
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold">Compra #{compra.id} {compra.fornecedor_nome ? `- ${compra.fornecedor_nome}` : ""}</h3>
+        <SituacaoTag s={compra.situacao} />
+      </div>
+      <div className="text-sm grid md:grid-cols-3 gap-2 border rounded-xl p-3" style={{ backgroundColor: `${C.creme}55`, borderColor: C.borda, color: "#5B6B67" }}>
+        <p>Local: {compra.local_nome ?? "-"}</p>
+        <p>Parcelas: {compra.qtd_parcelas}x</p>
+        <p>1o venc.: {fmtDate(compra.primeiro_vencimento)}</p>
+      </div>
+
+        <div className="border rounded-xl overflow-hidden" style={{ borderColor: C.borda }}>
+        <table className="w-full text-sm">
+          <thead style={{ backgroundColor: `${C.creme}80` }}>
+            <tr>
+              <th className="p-2 text-left">Produto</th>
+              <th className="p-2 text-left">SKU</th>
+                <th className="p-2 text-right">Qtd</th>
+                <th className="p-2 text-right">Peso Total (g)</th>
+                <th className="p-2 text-right">Peso Unitário (g)</th>
+                <th className="p-2 text-right">Valor/g</th>
+                <th className="p-2 text-right">Total</th>
+                <th className="p-2" />
+              </tr>
+          </thead>
+          <tbody>
+            {itens.map((i) => (
+              <tr key={i.id} className="border-t">
+                <td className="p-2">{i.produto_nome}</td>
+                <td className="p-2">{i.produto_sku ?? "-"}</td>
+                <td className="p-2 text-right">{Number(i.qtd).toFixed(2)}</td>
+                <td className="p-2 text-right">
+                  {(() => {
+                    const valorGrama = Number(i.valor_grama ?? i.valor_unitario ?? 0);
+                    const pesoTotalRaw = Number(i.peso_total ?? 0);
+                    const pesoTotal = pesoTotalRaw > 0
+                      ? pesoTotalRaw
+                      : (valorGrama > 0 ? Number(i.valor_total ?? 0) / valorGrama : 0);
+                    return pesoTotal > 0 ? pesoTotal.toFixed(3) : "0.000";
+                  })()}
+                </td>
+                <td className="p-2 text-right">
+                  {(() => {
+                    const valorGrama = Number(i.valor_grama ?? i.valor_unitario ?? 0);
+                    const pesoTotalRaw = Number(i.peso_total ?? 0);
+                    const pesoTotal = pesoTotalRaw > 0
+                      ? pesoTotalRaw
+                      : (valorGrama > 0 ? Number(i.valor_total ?? 0) / valorGrama : 0);
+                    return Number(i.qtd) > 0 ? (pesoTotal / Number(i.qtd)).toFixed(3) : "-";
+                  })()}
+                </td>
+                <td className="p-2 text-right">{formatMoeda(i.valor_grama ?? i.valor_unitario)}</td>
+                <td className="p-2 text-right font-semibold">{formatMoeda(i.valor_total)}</td>
+                <td className="p-2 text-right">
+                  {!bloqueada && <button className="text-red-600 text-xs" onClick={() => removerItem(i.id)}>Remover</button>}
+                </td>
+              </tr>
+            ))}
+            {itens.length === 0 && <tr><td className="p-4 text-center text-gray-500" colSpan={8}>Sem itens</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      {!bloqueada && (
+        <div className="border rounded-xl p-3 space-y-2" style={{ borderColor: C.borda, backgroundColor: `${C.creme}50` }}>
+          <p className="text-sm font-medium">Adicionar item</p>
+          <div className="grid md:grid-cols-3 gap-2">
+            <div className="md:col-span-2">
+              <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Produto</p>
+              <div className="relative">
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  style={{ borderColor: C.borda }}
+                  placeholder="Buscar produto por nome/sku"
+                  value={buscaProduto}
+                  onFocus={() => setShowSugestoesProduto(true)}
+                  onChange={(e) => {
+                    setBuscaProduto(e.target.value);
+                    setProdutoId("");
+                    setShowSugestoesProduto(true);
+                  }}
+                />
+                {showSugestoesProduto && buscaProduto.trim().length > 0 && (
+                  <div className="absolute z-20 mt-1 w-full rounded-lg border bg-white shadow-lg max-h-56 overflow-y-auto" style={{ borderColor: C.borda }}>
+                    {produtos.length === 0 && (
+                      <p className="px-3 py-2 text-xs text-gray-500">Nenhum produto encontrado.</p>
+                    )}
+                    {produtos.map((p) => (
+                      <button
+                        key={p.id_produto}
+                        type="button"
+                        className="w-full text-left px-3 py-2.5 text-sm transition-colors hover:bg-amber-50"
+                        style={{ color: C.verde }}
+                        onClick={() => {
+                          setProdutoId(String(p.id_produto));
+                          setBuscaProduto(`${p.nome}${p.sku ? ` (${p.sku})` : ""}`);
+                          // REGRA DE NEGOCIO:
+                          // - O que faz: usa dados do cadastro como base (fator/peso) e deixa operador ajustar conforme compra real.
+                          // - Por que: compra por lote pode ter variacao e exige ajuste manual no fechamento.
+                          // - Impacto se alterado/removido: operador perde agilidade e risco de erro de digitacao aumenta.
+                          if (p.fator != null) {
+                            setFatorOuro(String(p.fator));
+                          }
+                          setShowSugestoesProduto(false);
+                        }}
+                      >
+                        {p.nome} {p.sku ? `(${p.sku})` : ""}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {!!produtoId && <p className="text-xs mt-1" style={{ color: C.verde }}>Produto selecionado.</p>}
+            </div>
+            <div>
+              <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Quantidade</p>
+              {/* REGRA DE NEGOCIO: apenas inteiros — estoque comercial usa pecas inteiras */}
+              <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="1" min="1" placeholder="Quantidade" value={qtd} onChange={(e) => setQtd(e.target.value)} />
+            </div>
+            <div>
+              <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Peso total</p>
+              <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.001" placeholder="Peso total (g)" value={pesoTotal} onChange={(e) => setPesoTotal(e.target.value)} />
+            </div>
+            <div>
+              <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Cotação</p>
+              <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.01" placeholder="Cotação referencial" value={cotacaoReferencial} onChange={(e) => setCotacaoReferencial(e.target.value)} />
+            </div>
+            <div>
+              <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Fator</p>
+              <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.0001" placeholder="Fator" value={fatorOuro} onChange={(e) => setFatorOuro(e.target.value)} />
+              <p className="text-[11px] mt-1" style={{ color: "#7D8A86" }}>Ex.: 0,750</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Valor da grama</p>
+              <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.01" placeholder="Valor da grama" value={valorGrama} onChange={(e) => setValorGrama(e.target.value)} />
+            </div>
+            <button className="px-3 py-2 rounded-lg text-sm font-semibold" style={{ backgroundColor: C.verde, color: C.dourado }} onClick={addItem}>Adicionar</button>
+          </div>
+          <div className="text-xs" style={{ color: "#5B6B67" }}>
+            <strong>Peso unitario:</strong> {Number(qtd) > 0 && Number(pesoTotal) > 0 ? `${(Number(pesoTotal) / Number(qtd)).toFixed(3)} g` : "-"}
+            {Number(pesoTotal) > 0 && Number(valorGrama) > 0 ? ` • Total estimado: ${formatMoeda(Number(pesoTotal) * Number(valorGrama))}` : ""}
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-2 flex-wrap">
+        {!bloqueada && (compra.situacao === "rascunho" || compra.situacao === "pendente" || compra.situacao === "rejeitado") && (
+          <button
+            className="px-3 py-2 rounded"
+            style={{ backgroundColor: C.verde, color: C.dourado }}
+            onClick={abrirSolicitarAprovacao}
+            disabled={loadingAction || itens.length === 0}
+          >
+            {loadingAction ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} className="inline mr-1" />} Solicitar Aprovação
+          </button>
+        )}
+      </div>
+
+      {showSolicitarAprovacao && (
+        <div className="border rounded-xl p-3" style={{ borderColor: C.borda, backgroundColor: "#fff" }}>
+          <p className="text-sm font-semibold" style={{ color: C.verde }}>Escolher aprovador</p>
+          <p className="text-xs mt-1" style={{ color: "#6b7280" }}>Ao solicitar, a ordem será bloqueada até aprovação/rejeição.</p>
+          <select
+            className="w-full mt-2 border rounded-lg px-3 py-2 text-sm"
+            style={{ borderColor: C.borda }}
+            value={aprovadorSelecionado}
+            onChange={(e) => setAprovadorSelecionado(e.target.value)}
+          >
+            <option value="">Selecione quem vai aprovar</option>
+            {aprovadores.map((u) => (
+              <option key={u.id} value={u.id}>{u.nome}{u.role ? ` (${u.role})` : ""}</option>
+            ))}
+          </select>
+          <div className="flex gap-2 mt-3">
+            <button className="px-3 py-2 rounded border text-sm" style={{ borderColor: C.borda }} onClick={() => setShowSolicitarAprovacao(false)}>Cancelar</button>
+            <button
+              className="px-3 py-2 rounded text-sm font-semibold"
+              style={{ backgroundColor: C.verde, color: C.dourado }}
+              disabled={!aprovadorSelecionado || loadingAction}
+              onClick={solicitarAprovacao}
+            >
+              Confirmar Solicitação
+            </button>
+          </div>
+        </div>
+      )}
+
+      {msg && <p className="text-sm text-gray-700">{msg}</p>}
+    </div>
+  );
+}
+
+export default function ComprasComercialClient({ compras: initialCompras }: { compras: CompraComercial[] }) {
+  const [compras, setCompras] = useState<CompraComercial[]>(initialCompras);
+  const [selectedId, setSelectedId] = useState<number | null>(initialCompras[0]?.id ?? null);
+  const [busca, setBusca] = useState("");
+  const [situacao, setSituacao] = useState("");
+  const [showNova, setShowNova] = useState(false);
+
+  const reload = useCallback(async () => {
+    const params = new URLSearchParams();
+    if (situacao) params.set("situacao", situacao);
+    const data = await fetch(`/api/compras-comercial${params.toString() ? `?${params.toString()}` : ""}`).then((r) => r.json());
+    setCompras(data ?? []);
+  }, [situacao]);
+
+  useEffect(() => {
+    // REGRA DE NEGOCIO:
+    // - O que faz: abre automaticamente a ordem quando a tela recebe `?id={compra}` via link de aprovacao.
+    // - Por que: reduz friccao na auditoria e acelera a decisao do aprovador.
+    // - Impacto se alterado/removido: aprovador cai na lista geral sem foco da ordem referenciada.
+    const params = new URLSearchParams(window.location.search);
+    const idParam = Number(params.get("id") ?? "");
+    if (Number.isFinite(idParam) && idParam > 0) {
+      setSelectedId(idParam);
+    }
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const filtradas = useMemo(() => {
+    if (!busca.trim()) return compras;
+    const b = busca.toLowerCase();
+    return compras.filter((c) => `${c.id}`.includes(b) || (c.fornecedor_nome ?? "").toLowerCase().includes(b));
+  }, [busca, compras]);
+
+  const selected = selectedId != null ? compras.find((c) => c.id === selectedId) ?? null : null;
+
+  return (
+    <div className="p-4 md:p-6 space-y-4 min-h-[calc(100vh-64px)] animate-[fadeIn_0.3s_ease-out]" style={{ background: `linear-gradient(180deg, ${C.creme}55 0%, #ffffff 35%)` }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="p-2 rounded-lg" style={{ backgroundColor: C.verde }}><ShoppingCart size={16} color={C.dourado} /></div>
+          <div>
+            <h1 className="text-xl font-bold" style={{ color: C.verde }}>Compras Comercial</h1>
+            <p className="text-xs" style={{ color: "#5B6B67" }}>Entrada automatica no estoque comercial e contas a pagar parceladas.</p>
+          </div>
+        </div>
+        <button className="px-3 py-2 rounded-xl text-sm font-semibold" style={{ backgroundColor: C.verde, color: C.dourado }} onClick={() => setShowNova(true)}><Plus size={14} className="inline mr-1" />Nova Compra</button>
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-2">
+        <div className="relative md:col-span-2">
+          <Search size={14} className="absolute left-2 top-2.5 text-gray-400" />
+          <input className="w-full border rounded-lg pl-7 pr-3 py-2" style={{ borderColor: C.borda }} placeholder="Buscar por fornecedor ou id" value={busca} onChange={(e) => setBusca(e.target.value)} />
+        </div>
+        <select className="border rounded-lg px-3 py-2" style={{ borderColor: C.borda }} value={situacao} onChange={(e) => setSituacao(e.target.value)}>
+          <option value="">Todas situações</option>
+          <option value="rascunho">Rascunho</option>
+          <option value="recebida">Recebida</option>
+          <option value="aguardando_aprovacao">Aguardando Aprovação</option>
+          <option value="aprovado">Aprovada</option>
+          <option value="rejeitado">Rejeitada</option>
+        </select>
+      </div>
+
+      <div className="grid md:grid-cols-5 gap-4 items-start">
+        <div className="md:col-span-2 border rounded-2xl overflow-hidden bg-white shadow-sm" style={{ borderColor: C.borda }}>
+          <table className="w-full text-sm">
+            <thead style={{ backgroundColor: `${C.creme}80` }}>
+              <tr>
+                <th className="p-2 text-left">#</th>
+                <th className="p-2 text-left">Fornecedor</th>
+                <th className="p-2 text-left">Status</th>
+                <th className="p-2 text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtradas.map((c) => (
+                <tr key={c.id} className="border-t cursor-pointer" style={{ backgroundColor: selectedId === c.id ? `${C.creme}` : "transparent" }} onClick={() => setSelectedId(c.id)}>
+                  <td className="p-2">#{c.id}</td>
+                  <td className="p-2">{c.fornecedor_nome ?? "-"}</td>
+                  <td className="p-2"><SituacaoTag s={c.situacao} /></td>
+                  <td className="p-2 text-right">{c.total ? formatMoeda(c.total) : "-"}</td>
+                </tr>
+              ))}
+              {filtradas.length === 0 && <tr><td className="p-4 text-center text-gray-500" colSpan={4}>Sem compras</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <div className="md:col-span-3">
+          {selected ? <CompraDetalhe compra={selected} onUpdated={reload} /> : <div className="border rounded-xl p-6 text-gray-500">Selecione uma compra</div>}
+        </div>
+      </div>
+
+      <NovaCompraModal open={showNova} onClose={() => setShowNova(false)} onCreated={reload} />
+    </div>
+  );
+}

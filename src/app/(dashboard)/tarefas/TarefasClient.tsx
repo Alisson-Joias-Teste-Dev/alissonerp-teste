@@ -100,6 +100,7 @@ const TIPO_LABEL: Record<string, string> = {
   desconto_acima: "Desconto acima do limite",
   sangria: "Sangria",
   protocolo_metal: "Protocolo de metal",
+  compra_comercial: "Compra Comercial",
 };
 
 type Chip = { label: string; icon: string; bg: string; color: string; href?: string };
@@ -109,6 +110,7 @@ function parsearCamposDescricao(descricao: string): {
   aReceber?: string;
   saldoDisponivel?: string;
   cliente?: string;
+  fornecedor?: string;
   desconto?: string;
   descontoValor?: string;
   produtoNome?: string;
@@ -128,6 +130,9 @@ function parsearCamposDescricao(descricao: string): {
 
   const cliente = text.match(/Venda\s+\d+\s*[—–-]\s*([^\n]+)/i);
   if (cliente) out.cliente = cliente[1].trim();
+
+  const fornecedor = text.match(/Fornecedor:\s*([^\n]+)/i);
+  if (fornecedor) out.fornecedor = fornecedor[1].trim();
 
   const descPct = text.match(/Desconto(?: solicitado)?:\s*([\d.,]+%)/i);
   if (descPct) out.desconto = descPct[1].trim();
@@ -193,6 +198,31 @@ function gerarChips(t: Tarefa): Chip[] {
     const pctMatch = (t.titulo ?? "").match(/(\d+)%/);
     if (pctMatch)
       chips.push({ label: `>${pctMatch[1]}% de desconto`, icon: "⚠️", bg: "#FEE2E2", color: "#DC2626" });
+  }
+
+  // REGRA DE NEGOCIO:
+  // - O que faz: exibe resumo e link direto da compra comercial no card de aprovacao.
+  // - Por que: aprovador precisa contexto da ordem e atalho para auditoria antes da decisao.
+  // - Impacto se alterado/removido: aprovacao fica cega e aumenta risco operacional.
+  if (t.tipo === "compra_comercial" || tags.includes("aprovacao_compra_comercial")) {
+    const tagCompra = tags.find((tag) => tag.startsWith("compra_comercial:"));
+    const compraId = tagCompra ? Number(tagCompra.split(":")[1]) : NaN;
+
+    if (campos.fornecedor) {
+      chips.push({ label: `Fornecedor: ${campos.fornecedor}`, icon: "🏢", bg: "#F3F4F6", color: "#6B7280" });
+    }
+    if (campos.valorTotal) {
+      chips.push({ label: `Total: ${campos.valorTotal}`, icon: "💰", bg: "#F0FDF4", color: "#16A34A" });
+    }
+    if (Number.isFinite(compraId) && compraId > 0) {
+      chips.push({
+        label: `Compra #${compraId}`,
+        icon: "🧾",
+        bg: "#EFF6FF",
+        color: "#2563EB",
+        href: `/compras-comercial?id=${compraId}`,
+      });
+    }
   }
 
   // Outros tipos que têm venda_id também ganham link pra auditar
@@ -742,6 +772,7 @@ export default function TarefasClient() {
                           <option value="desconto_acima">Aprovação desconto</option>
                           <option value="sangria">Sangria</option>
                           <option value="protocolo_metal">Protocolo metal</option>
+                          <option value="compra_comercial">Compra comercial</option>
                         </select>
                       </div>
                       {(filtro || filtroPrioridade || filtroTipo) && (

@@ -25,6 +25,7 @@ interface AprovadorConfig {
   aprovador_desconto_padrao: string;
   aprovador_cartao_desconto_padrao: string;
   aprovadora_credito_gerente?: string;
+  aprovador_compra_comercial?: string;
 }
 
 interface Usuario {
@@ -77,6 +78,13 @@ const CONFIG_ITENS = [
     usuariosKey: "admins_devs" as const,
     icone: "💳",
   },
+  {
+    chave: "aprovador_compra_comercial" as const,
+    titulo: "Compra Comercial",
+    descricao: "Aprova ordens de compra comercial antes de gerar estoque e contas a pagar",
+    usuariosKey: "admins_devs" as const,
+    icone: "🧾",
+  },
 ];
 
 export default function TabAprovadores() {
@@ -106,6 +114,7 @@ export default function TabAprovadores() {
           aprovador_desconto_padrao: d.aprovador_desconto_padrao ?? "",
           aprovador_cartao_desconto_padrao: d.aprovador_cartao_desconto_padrao ?? "",
           aprovadora_credito_gerente: d.aprovadora_credito_gerente ?? "",
+          aprovador_compra_comercial: d.aprovador_compra_comercial ?? "",
         });
         setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [] });
       })

@@ -25,6 +25,7 @@ const CHAVES = [
   "aprovador_desconto_padrao",
   "aprovador_cartao_desconto_padrao",
   "aprovadora_credito_gerente",
+  "aprovador_compra_comercial",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -58,6 +59,7 @@ export async function GET() {
       aprovador_desconto_padrao: configMap.get("aprovador_desconto_padrao") ?? "",
       aprovador_cartao_desconto_padrao: configMap.get("aprovador_cartao_desconto_padrao") ?? "",
       aprovadora_credito_gerente: configMap.get("aprovadora_credito_gerente") ?? "",
+      aprovador_compra_comercial: configMap.get("aprovador_compra_comercial") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -91,6 +93,9 @@ export async function PUT(req: NextRequest) {
     }
     if (body.aprovadora_credito_gerente !== undefined) {
       updates.push({ chave: "aprovadora_credito_gerente", valor: body.aprovadora_credito_gerente });
+    }
+    if (body.aprovador_compra_comercial !== undefined) {
+      updates.push({ chave: "aprovador_compra_comercial", valor: body.aprovador_compra_comercial });
     }
 
     for (const u of updates) {
