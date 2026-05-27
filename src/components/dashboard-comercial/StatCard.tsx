@@ -10,6 +10,8 @@ export interface StatCardProps {
   trend?: { value: number; label?: string };
   color?: "esmeralda" | "dourado" | "creme" | "prata" | "diamante";
   subtitle?: string;
+  /** Ao informar onClick, o card fica clicável com cursor-pointer */
+  onClick?: () => void;
 }
 
 export default function StatCard({
@@ -19,6 +21,7 @@ export default function StatCard({
   trend,
   color = "esmeralda",
   subtitle,
+  onClick,
 }: StatCardProps) {
   const palette = {
     esmeralda: { bg: P.esmeraldaLight, border: P.esmeraldaMid, fg: P.creme, accent: P.dourado },
@@ -33,7 +36,8 @@ export default function StatCard({
   return (
     <div
       className="flex flex-col rounded-xl p-4 shadow-sm"
-      style={{ backgroundColor: palette.bg, border: `1px solid ${palette.border}` }}
+      style={{ backgroundColor: palette.bg, border: `1px solid ${palette.border}`, cursor: onClick ? "pointer" : undefined, transition: "box-shadow 0.15s" }}
+      onClick={onClick}
     >
       <div className="mb-2 flex items-center gap-2">
         {Icon && <Icon size={15} strokeWidth={1.75} style={{ color: palette.accent }} />}

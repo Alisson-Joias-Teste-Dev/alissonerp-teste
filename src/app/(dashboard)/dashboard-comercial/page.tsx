@@ -1,12 +1,13 @@
 "use client";
 
-import { TrendingUp, DollarSign, ShoppingCart, Target, Users, CheckCircle2 } from "lucide-react";
+import { useState } from "react";
+import { TrendingUp, DollarSign, ShoppingCart, Target, Users, CheckCircle2, X } from "lucide-react";
 import DashboardHeader from "@/components/dashboard-comercial/DashboardHeader";
 import StatCard from "@/components/dashboard-comercial/StatCard";
 import ConsultoraAvatar from "@/components/dashboard-comercial/ConsultoraAvatar";
 import { LoadingBlock, ErrorBlock } from "@/components/dashboard-comercial/LoadingBlock";
 import { P, METAS_COR } from "@/components/dashboard-comercial/theme";
-import { formatBRL, formatNumber, formatPercent, safeDiv } from "@/lib/dashboard-comercial/utils";
+import { formatBRL, formatNumber, formatPercent, safeDiv, formatDateBR } from "@/lib/dashboard-comercial/utils";
 import {
   useDateRange,
   useVendasDashboard,
@@ -19,6 +20,12 @@ export default function DashboardComercialPage() {
   const vendas = useVendasDashboard(from, to);
   const leads = useLeadsDashboard(from, to);
   const comparativo = useComparativoAnual(from, to);
+
+  /** Estado para controlar o modal de auditoria de vale-troca */
+  const [showValeTrocaModal, setShowValeTrocaModal] = useState(false);
+
+  /** Estado para controlar o modal de auditoria de faturamento */
+  const [showFaturamentoModal, setShowFaturamentoModal] = useState(false);
 
   return (
     <div className="p-6">
@@ -90,6 +97,7 @@ export default function DashboardComercialPage() {
               icon={DollarSign}
               subtitle={`Bruto: ${formatBRL(vendas.data.visaoGeral.alcancado_bruto)}`}
               color="esmeralda"
+              onClick={() => setShowFaturamentoModal(true)}
               trend={
                 comparativo.data
                   ? {
@@ -132,7 +140,8 @@ export default function DashboardComercialPage() {
               value={formatBRL(vendas.data.visaoGeral.valor_vale_troca)}
               icon={CheckCircle2}
               color="diamante"
-              subtitle="Desconto aplicado"
+              subtitle="Clique para auditar"
+              onClick={() => setShowValeTrocaModal(true)}
             />
           </div>
 
@@ -263,7 +272,275 @@ export default function DashboardComercialPage() {
           </div>
         )}
       </div>
+
+      {/* Modal de auditoria de vale-troca */}
+      {showValeTrocaModal && vendas.data && (
+        <ValeTrocaAuditoriaModal
+          vendas={vendas.data.vendasBrutas.filter((v) => v.valor_vale_troca > 0).sort((a, b) => (b.data_venda ?? "").localeCompare(a.data_venda ?? ""))}
+          onClose={() => setShowValeTrocaModal(false)}
+        />
+      )}
+
+      {/* Modal de auditoria de faturamento */}
+      {showFaturamentoModal && vendas.data && (
+        <FaturamentoAuditoriaModal
+          vendas={vendas.data.vendasBrutas.sort((a, b) => (b.data_venda ?? "").localeCompare(a.data_venda ?? ""))}
+          onClose={() => setShowFaturamentoModal(false)}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Modal de auditoria do faturamento — exibe todas as vendas do período que compõem o faturamento,
+ * ordenadas por valor líquido decrescente (maiores vendas primeiro).
+ * Mostra bruto, vale-troca e líquido de cada venda.
+ *
+ * Impacto se remover: perde-se a capacidade de auditar quais vendas compõem o faturamento da dashboard.
+ */
+function FaturamentoAuditoriaModal({
+  vendas,
+  onClose,
+}: {
+  vendas: Array<{
+    id: number;
+    data_venda: string | null;
+    vendedor_nome: string | null;
+    vendedor_foto: string | null;
+    cliente_nome: string | null;
+    total_venda: number | null;
+    valor_vale_troca: number;
+    valor_liquido: number;
+  }>;
+  onClose: () => void;
+}) {
+  const totalBruto = vendas.reduce((s, v) => s + (v.total_venda ?? 0), 0);
+  const totalValeTroca = vendas.reduce((s, v) => s + v.valor_vale_troca, 0);
+  const totalLiquido = vendas.reduce((s, v) => s + v.valor_liquido, 0);
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 40,
+        }}
+      />
+      <div style={{
+        position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+        zIndex: 50, width: "min(90vw, 820px)", maxHeight: "80vh",
+        background: "#fff", borderRadius: 12, boxShadow: "0 8px 40px rgba(0,0,0,0.15)",
+        display: "flex", flexDirection: "column",
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 20px", borderBottom: `1px solid ${P.cremeMuted}`,
+          background: P.cremeSoft,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <DollarSign size={18} color={P.esmeralda} />
+            <span style={{ fontWeight: 700, fontSize: 15, color: P.esmeralda }}>
+              Vendas do Período — {vendas.length} {vendas.length === 1 ? "venda" : "vendas"}
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+            <X size={18} color={P.esmeraldaMid} />
+          </button>
+        </div>
+
+        <div style={{ flex: 1, overflow: "auto", padding: "0 20px 16px" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: `2px solid ${P.cremeMuted}` }}>
+                <th style={{ textAlign: "center", padding: "10px 4px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase", width: 32 }}>#</th>
+                <th style={{ textAlign: "left", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Consultora</th>
+                <th style={{ textAlign: "left", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Data</th>
+                <th style={{ textAlign: "left", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Cliente</th>
+                <th style={{ textAlign: "right", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Bruto</th>
+                <th style={{ textAlign: "right", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Vale-Troca</th>
+                <th style={{ textAlign: "right", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Líquido</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vendas.map((v, i) => (
+                <tr key={v.id} style={{ borderBottom: `1px solid ${P.cremeMuted}` }}>
+                  <td style={{ padding: "10px 4px", color: P.esmeraldaMid, fontSize: 12, textAlign: "center" }}>
+                    {i + 1}
+                  </td>
+                  <td style={{ padding: "10px 6px", color: P.esmeralda }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <ConsultoraAvatar nome={v.vendedor_nome ?? "—"} foto={v.vendedor_foto} size={24} />
+                      {v.vendedor_nome ?? "—"}
+                    </div>
+                  </td>
+                  <td style={{ padding: "10px 6px", color: P.esmeraldaMid, whiteSpace: "nowrap" }}>
+                    {formatDateBR(v.data_venda)}
+                  </td>
+                  <td style={{ padding: "10px 6px", color: P.esmeralda }}>
+                    {v.cliente_nome ?? "—"}
+                  </td>
+                  <td style={{ padding: "10px 6px", textAlign: "right", color: P.esmeralda, fontWeight: 500 }}>
+                    {formatBRL(v.total_venda ?? 0)}
+                  </td>
+                  <td style={{ padding: "10px 6px", textAlign: "right", color: P.diamante, fontWeight: 600 }}>
+                    {formatBRL(v.valor_vale_troca)}
+                  </td>
+                  <td style={{ padding: "10px 6px", textAlign: "right", color: P.dourado, fontWeight: 600 }}>
+                    {formatBRL(v.valor_liquido)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop: `2px solid ${P.esmeraldaMid}`, background: P.cremeSoft }}>
+                <td style={{ padding: "10px 4px" }} />
+                <td style={{ padding: "10px 6px", color: P.esmeralda, fontWeight: 700, fontSize: 13 }} colSpan={3}>
+                  TOTAL — {vendas.length} {vendas.length === 1 ? "venda" : "vendas"}
+                </td>
+                <td style={{ padding: "10px 6px", textAlign: "right", color: P.esmeralda, fontWeight: 700, fontSize: 13 }}>
+                  {formatBRL(totalBruto)}
+                </td>
+                <td style={{ padding: "10px 6px", textAlign: "right", color: P.diamante, fontWeight: 700, fontSize: 13 }}>
+                  {formatBRL(totalValeTroca)}
+                </td>
+                <td style={{ padding: "10px 6px", textAlign: "right", color: P.dourado, fontWeight: 700, fontSize: 13 }}>
+                  {formatBRL(totalLiquido)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Modal de auditoria — exibe todas as vendas do período que usaram vale-troca.
+ * Permite auditar: qual consultora, qual cliente, quanto foi o vale-troca e quanto foi o líquido.
+ * Os dados já vêm carregados em vendasBrutas — não há chamada extra à API.
+ *
+ * Impacto se remover: perde-se a capacidade de auditar o uso de vale-troca na dashboard.
+ */
+function ValeTrocaAuditoriaModal({
+  vendas,
+  onClose,
+}: {
+  vendas: Array<{
+    id: number;
+    data_venda: string | null;
+    vendedor_nome: string | null;
+    vendedor_foto: string | null;
+    cliente_nome: string | null;
+    total_venda: number | null;
+    valor_vale_troca: number;
+    valor_liquido: number;
+  }>;
+  onClose: () => void;
+}) {
+  const totalBruto = vendas.reduce((s, v) => s + (v.total_venda ?? 0), 0);
+  const totalValeTroca = vendas.reduce((s, v) => s + v.valor_vale_troca, 0);
+  const totalLiquido = vendas.reduce((s, v) => s + v.valor_liquido, 0);
+
+  return (
+    <>
+      {/* Overlay */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 40,
+        }}
+      />
+      {/* Modal */}
+      <div style={{
+        position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+        zIndex: 50, width: "min(90vw, 820px)", maxHeight: "80vh",
+        background: "#fff", borderRadius: 12, boxShadow: "0 8px 40px rgba(0,0,0,0.15)",
+        display: "flex", flexDirection: "column",
+      }}>
+        {/* Header */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 20px", borderBottom: `1px solid ${P.cremeMuted}`,
+          background: P.cremeSoft,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <CheckCircle2 size={18} color={P.esmeralda} />
+            <span style={{ fontWeight: 700, fontSize: 15, color: P.esmeralda }}>
+              Vendas com Vale-Troca — {vendas.length} {vendas.length === 1 ? "venda" : "vendas"}
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+            <X size={18} color={P.esmeraldaMid} />
+          </button>
+        </div>
+
+        {/* Tabela */}
+        <div style={{ flex: 1, overflow: "auto", padding: "0 20px 16px" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: `2px solid ${P.cremeMuted}` }}>
+                <th style={{ textAlign: "center", padding: "10px 4px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase", width: 32 }}>#</th>
+                <th style={{ textAlign: "left", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Consultora</th>
+                <th style={{ textAlign: "left", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Data</th>
+                <th style={{ textAlign: "left", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Cliente</th>
+                <th style={{ textAlign: "right", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Total Venda</th>
+                <th style={{ textAlign: "right", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Vale-Troca</th>
+                <th style={{ textAlign: "right", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Líquido</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vendas.map((v, i) => (
+                <tr key={v.id} style={{ borderBottom: `1px solid ${P.cremeMuted}` }}>
+                  <td style={{ padding: "10px 4px", color: P.esmeraldaMid, fontSize: 12, textAlign: "center" }}>
+                    {i + 1}
+                  </td>
+                  <td style={{ padding: "10px 6px", color: P.esmeralda }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <ConsultoraAvatar nome={v.vendedor_nome ?? "—"} foto={v.vendedor_foto} size={24} />
+                      {v.vendedor_nome ?? "—"}
+                    </div>
+                  </td>
+                  <td style={{ padding: "10px 6px", color: P.esmeraldaMid, whiteSpace: "nowrap" }}>
+                    {formatDateBR(v.data_venda)}
+                  </td>
+                  <td style={{ padding: "10px 6px", color: P.esmeralda }}>
+                    {v.cliente_nome ?? "—"}
+                  </td>
+                  <td style={{ padding: "10px 6px", textAlign: "right", color: P.esmeralda, fontWeight: 500 }}>
+                    {formatBRL(v.total_venda ?? 0)}
+                  </td>
+                  <td style={{ padding: "10px 6px", textAlign: "right", color: P.diamante, fontWeight: 600 }}>
+                    {formatBRL(v.valor_vale_troca)}
+                  </td>
+                  <td style={{ padding: "10px 6px", textAlign: "right", color: P.dourado, fontWeight: 600 }}>
+                    {formatBRL(v.valor_liquido)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop: `2px solid ${P.esmeraldaMid}`, background: P.cremeSoft }}>
+                <td style={{ padding: "10px 4px" }} />
+                <td style={{ padding: "10px 6px", color: P.esmeralda, fontWeight: 700, fontSize: 13 }} colSpan={3}>
+                  TOTAL — {vendas.length} {vendas.length === 1 ? "venda" : "vendas"}
+                </td>
+                <td style={{ padding: "10px 6px", textAlign: "right", color: P.esmeralda, fontWeight: 700, fontSize: 13 }}>
+                  {formatBRL(totalBruto)}
+                </td>
+                <td style={{ padding: "10px 6px", textAlign: "right", color: P.diamante, fontWeight: 700, fontSize: 13 }}>
+                  {formatBRL(totalValeTroca)}
+                </td>
+                <td style={{ padding: "10px 6px", textAlign: "right", color: P.dourado, fontWeight: 700, fontSize: 13 }}>
+                  {formatBRL(totalLiquido)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </>
   );
 }
 
