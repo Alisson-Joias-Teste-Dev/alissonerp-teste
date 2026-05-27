@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { P } from "./theme";
 
 export interface ConsultoraAvatarProps {
@@ -9,6 +10,8 @@ export interface ConsultoraAvatarProps {
 }
 
 export default function ConsultoraAvatar({ nome, foto, size = 36 }: ConsultoraAvatarProps) {
+  const [imgErro, setImgErro] = useState(false);
+
   const iniciais = nome
     .split(" ")
     .filter(Boolean)
@@ -17,7 +20,7 @@ export default function ConsultoraAvatar({ nome, foto, size = 36 }: ConsultoraAv
     .join("")
     .toUpperCase();
 
-  const validSrc = foto && (foto.startsWith("http") || foto.startsWith("/")) ? foto : null;
+  const validSrc = !imgErro && foto && (foto.startsWith("http") || foto.startsWith("/")) ? foto : null;
 
   if (validSrc) {
     return (
@@ -29,10 +32,7 @@ export default function ConsultoraAvatar({ nome, foto, size = 36 }: ConsultoraAv
         height={size}
         className="rounded-full object-cover"
         style={{ width: size, height: size, border: `1px solid ${P.esmeraldaMid}` }}
-        onError={(e) => {
-          // Esconde se falhar e mostra iniciais no lugar
-          (e.currentTarget as HTMLImageElement).style.display = "none";
-        }}
+        onError={() => setImgErro(true)}
       />
     );
   }

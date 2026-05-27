@@ -137,15 +137,18 @@ export async function GET(req: NextRequest) {
     const valesMap = new Map<number, number>();
     totaisPedido.forEach((v) => valesMap.set(Number(v.vendedor_id), Number(v.vale_troca)));
 
-    // 4. Meta Prata por consultora — valor total do mês (não proporcional ao período)
+    // 4. Meta Prata por consultora — valor total do mês usando a view padronizada (mesma do ranking/performance)
+    // REGRA DE NEGÓCIO: usa vw_dash_metas_por_hora (calculada proporcionalmente) em vez de metas_vendedoras (fixa mensal).
+    // Motivo: metas_vendedoras depende de cadastro manual por mês — se o mês não foi cadastrado, meta = 0.
+    // Impacto se alterar: consistência com as outras telas da dashboard (geral, ranking, performance).
     const metasPrata = await sql<Array<{ consultora: string; total: string }>>`
-      SELECT vendedor_id::text AS consultora, COALESCE(SUM(meta_prata), 0)::text AS total
-      FROM alissonerp.metas_vendedoras
-      WHERE (ano * 100 + mes) BETWEEN
-        (EXTRACT(YEAR FROM ${from}::date)::int * 100 + EXTRACT(MONTH FROM ${from}::date)::int)
-        AND
-        (EXTRACT(YEAR FROM ${to}::date)::int * 100 + EXTRACT(MONTH FROM ${to}::date)::int)
-      GROUP BY vendedor_id
+      SELECT consultora::text,
+             COALESCE(SUM(valor_meta), 0)::text AS total
+      FROM alissonerp.vw_dash_metas_por_hora
+      WHERE data_hora BETWEEN ${from}::timestamp AND (${to}::date + INTERVAL '1 day - 1 second')::timestamp
+        AND valor_meta > 0
+        AND tipo_meta = 'Prata'
+      GROUP BY consultora
     `;
     const metaPrataMap = new Map<number, number>();
     metasPrata.forEach((m) => metaPrataMap.set(Number(m.consultora), Number(m.total)));

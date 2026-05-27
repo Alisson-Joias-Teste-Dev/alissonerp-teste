@@ -86,8 +86,11 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [uploadando, setUploadando] = useState(false);
+  const [fotoVendedorUrl, setFotoVendedorUrl] = useState<string | null>(null);
+  const [fotoVendedorUploadando, setFotoVendedorUploadando] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
+  const vendedorFotoRef = useRef<HTMLInputElement>(null);
 
   // Carregar roles do banco
   useEffect(() => {
@@ -118,6 +121,15 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
       setDepositoId(usuario.deposito_id ? String(usuario.deposito_id) : "");
       setFotoUrl(usuario.avatar_url);
       setVendedorId(usuario.vendedor_id ?? null);
+      // Carregar foto atual da consultora vinculada ao vendedor
+      if (usuario.vendedor_id) {
+        fetch(`/api/vendedores/${usuario.vendedor_id}/foto`)
+          .then(r => r.ok ? r.json() : null)
+          .then((d: { foto_url: string | null } | null) => setFotoVendedorUrl(d?.foto_url ?? null))
+          .catch(() => setFotoVendedorUrl(null));
+      } else {
+        setFotoVendedorUrl(null);
+      }
       setNovaSenha("");
       setConfirmar("");
       setMsg(null);
@@ -210,6 +222,53 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
     } else {
       const b = await res.json().catch(() => ({})) as { error?: string };
       setMsg({ ok: false, texto: b.error ?? "Erro no upload da foto" });
+      setTimeout(() => setMsg(null), 3000);
+    }
+  }
+
+  /**
+   * Upload de foto da consultora vinculada ao vendedor.
+   * Faz upload para o bucket pagamento-fotos e atualiza public.vendedores.foto.
+   * A foto aparece automaticamente na dashboard comercial.
+   */
+  async function handleVendedorFotoUpload(file: File) {
+    if (!vendedorId) return;
+    setFotoVendedorUploadando(true);
+    const blob = await comprimirImagem(file);
+    const fd = new FormData();
+    fd.append("file", blob, "consultora.jpg");
+    const res = await fetch(`/api/vendedores/${vendedorId}/foto`, { method: "POST", body: fd });
+    setFotoVendedorUploadando(false);
+    if (res.ok) {
+      const { foto_url } = await res.json() as { foto_url: string };
+      setFotoVendedorUrl(foto_url);
+      setMsg({ ok: true, texto: "Foto da consultora atualizada!" });
+      setTimeout(() => setMsg(null), 2500);
+    } else {
+      const b = await res.json().catch(() => ({})) as { error?: string };
+      setMsg({ ok: false, texto: b.error ?? "Erro no upload da foto" });
+      setTimeout(() => setMsg(null), 3000);
+    }
+  }
+
+  /**
+   * Atualiza a foto da consultora via URL colada (sem upload de arquivo).
+   */
+  async function handleVendedorFotoUrl(url: string) {
+    if (!vendedorId || !url.trim()) return;
+    setFotoVendedorUploadando(true);
+    const fd = new FormData();
+    fd.append("foto_url", url.trim());
+    const res = await fetch(`/api/vendedores/${vendedorId}/foto`, { method: "POST", body: fd });
+    setFotoVendedorUploadando(false);
+    if (res.ok) {
+      const { foto_url } = await res.json() as { foto_url: string };
+      setFotoVendedorUrl(foto_url);
+      setMsg({ ok: true, texto: "Foto atualizada!" });
+      setTimeout(() => setMsg(null), 2500);
+    } else {
+      const b = await res.json().catch(() => ({})) as { error?: string };
+      setMsg({ ok: false, texto: b.error ?? "URL inválida" });
       setTimeout(() => setMsg(null), 3000);
     }
   }
@@ -337,6 +396,67 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
               />
             </label>
           </div>
+
+          {/* Foto da Consultora (vinculada ao vendedor_id — aparece na dashboard) */}
+          {vendedorId && (
+            <div className="flex flex-col items-center gap-2 p-3 rounded-lg border border-dashed border-gray-200">
+              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">
+                Foto da Consultora
+              </span>
+              <div className="relative">
+                {fotoVendedorUrl ? (
+                  <img
+                    src={fotoVendedorUrl}
+                    alt="Foto consultora"
+                    className="rounded-full object-cover border-2 border-[#DB9864]"
+                    style={{ width: 56, height: 56 }}
+                  />
+                ) : (
+                  <div
+                    className="rounded-full flex items-center justify-center border-2 border-dashed border-gray-300"
+                    style={{ width: 56, height: 56 }}
+                  >
+                    <Camera size={18} className="text-gray-300" />
+                  </div>
+                )}
+                {fotoVendedorUploadando && (
+                  <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/40">
+                    <Loader2 size={16} className="animate-spin text-white" />
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1 text-xs text-[#DB9864] cursor-pointer hover:underline select-none">
+                  <Camera size={11} />
+                  {fotoVendedorUrl ? "Trocar" : "Enviar foto"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
+                    className="hidden"
+                    ref={vendedorFotoRef}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleVendedorFotoUpload(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="w-full flex items-center gap-1">
+                <input
+                  type="text"
+                  placeholder="Ou cole uma URL (https://...)"
+                  className="flex-1 text-[11px] border border-gray-200 rounded px-2 py-1 text-gray-500 focus:outline-none focus:border-[#184036]"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleVendedorFotoUrl((e.target as HTMLInputElement).value);
+                      (e.target as HTMLInputElement).value = "";
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Nome */}
           <div>
