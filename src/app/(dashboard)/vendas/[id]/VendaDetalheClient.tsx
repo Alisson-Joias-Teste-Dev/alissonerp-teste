@@ -1496,8 +1496,13 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ situacao: s, client_updated_at: venda.updated_at }),
       });
-      const d = await res.json();
-      if (res.status === 409 && d.error?.includes("Conflito")) {
+      // Lê como texto primeiro para evitar crash se resposta não for JSON
+      // (ex.: erro de trigger do banco que vira HTML 500).
+      const _text = await res.text();
+      let d: Record<string, unknown> = {};
+      try { d = JSON.parse(_text); } catch { /* corpo não-JSON — usa texto como fallback no throw abaixo */ }
+
+      if (res.status === 409 && typeof d.error === "string" && d.error.includes("Conflito")) {
         setSaveErr("Esta venda foi modificada por outro usuário. Recarregue a página.");
         return;
       }
@@ -1532,7 +1537,12 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     setUpdating(true);
     try {
       const res = await fetch(`/api/vendas/${venda.id}/cancelar`, { method: "POST" });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+      if (!res.ok) {
+        const _errText = await res.text();
+        let _errData: Record<string, unknown> = {};
+        try { _errData = JSON.parse(_errText); } catch { /* ignora */ }
+        throw new Error((_errData.error as string) ?? _errText.slice(0, 300) || `HTTP ${res.status}`);
+      }
       await load();
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao cancelar"); }
     finally { setUpdating(false); }
@@ -1928,7 +1938,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                   body: JSON.stringify({ tipo: "desconto" }),
                 });
                 const d = await res.json();
-                if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      if (!res.ok) throw new Error((d.error as string) ?? _text.slice(0, 300) || `HTTP ${res.status}`);
                 await load();
               } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao solicitar aprovação"); }
               finally { setUpdating(false); }
@@ -3233,7 +3243,12 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                           const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
                             method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
                           });
-                          if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+      if (!res.ok) {
+        const _errText = await res.text();
+        let _errData: Record<string, unknown> = {};
+        try { _errData = JSON.parse(_errText); } catch { /* ignora */ }
+        throw new Error((_errData.error as string) ?? _errText.slice(0, 300) || `HTTP ${res.status}`);
+      }
                           await load();
                           setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null);
                         } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao registrar pagamento em ouro"); }

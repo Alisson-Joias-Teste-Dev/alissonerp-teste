@@ -808,214 +808,225 @@ export async function PATCH(
     }
   }
 
-  await sql`
-    UPDATE alissonerp.vendas_erp SET
-      situacao             = COALESCE(${body.situacao ?? null},             situacao),
-      cliente_id           = COALESCE(${body.cliente_id ?? null},           cliente_id),
-      vendedor_id          = COALESCE(${body.vendedor_id ?? null},          vendedor_id),
-      data_venda           = COALESCE(${body.data_venda ?? null},           data_venda),
-      data_entrega         = COALESCE(${body.data_entrega ?? null},         data_entrega),
-      total_frete          = COALESCE(${body.total_frete ?? null},          total_frete),
-      forma_envio          = COALESCE(${body.forma_envio ?? null},          forma_envio),
-      forma_frete          = COALESCE(${body.forma_frete ?? null},          forma_frete),
-      observacoes          = COALESCE(${body.observacoes ?? null},          observacoes),
-      observacoes_internas = COALESCE(${body.observacoes_internas ?? null}, observacoes_internas),
-      video_obs_interna    = COALESCE(${body.video_obs_interna ?? null},    video_obs_interna),
-      endereco_entrega             = COALESCE(${body.endereco_entrega ?? null},             endereco_entrega),
-      endereco_entrega_numero      = COALESCE(${body.endereco_entrega_numero ?? null},      endereco_entrega_numero),
-      endereco_entrega_complemento = COALESCE(${body.endereco_entrega_complemento ?? null}, endereco_entrega_complemento),
-      endereco_entrega_bairro      = COALESCE(${body.endereco_entrega_bairro ?? null},      endereco_entrega_bairro),
-      endereco_entrega_cidade      = COALESCE(${body.endereco_entrega_cidade ?? null},      endereco_entrega_cidade),
-      endereco_entrega_cep         = COALESCE(${body.endereco_entrega_cep ?? null},         endereco_entrega_cep),
-      endereco_entrega_uf          = COALESCE(${body.endereco_entrega_uf ?? null},          endereco_entrega_uf),
-      tipo_venda           = COALESCE(${body.tipo_venda ?? null},           tipo_venda),
-      numero_rastreio      = COALESCE(${body.numero_rastreio ?? null},      numero_rastreio),
-      venda_garantia_id    = COALESCE(${body.venda_garantia_id ?? null},    venda_garantia_id)
-    WHERE id = ${vendaId}
-  `;
-
-  // Recalcular total_venda se frete mudou
-  if (body.total_frete !== undefined) {
+  // ── Persistir alterações com captura de erros do banco ──────────────────────
+  // try/catch generalista para capturar exceções lançadas por triggers do banco
+  // (STOCK_NEGATIVE, ENTREGA_BLOCKED, etc.) e devolver como JSON em vez de
+  // deixar o Next.js retornar HTML 500 — o que quebra o frontend em res.json().
+  try {
     await sql`
-      UPDATE alissonerp.vendas_erp
-      SET total_venda = total_produtos + ${body.total_frete}
+      UPDATE alissonerp.vendas_erp SET
+        situacao             = COALESCE(${body.situacao ?? null},             situacao),
+        cliente_id           = COALESCE(${body.cliente_id ?? null},           cliente_id),
+        vendedor_id          = COALESCE(${body.vendedor_id ?? null},          vendedor_id),
+        data_venda           = COALESCE(${body.data_venda ?? null},           data_venda),
+        data_entrega         = COALESCE(${body.data_entrega ?? null},         data_entrega),
+        total_frete          = COALESCE(${body.total_frete ?? null},          total_frete),
+        forma_envio          = COALESCE(${body.forma_envio ?? null},          forma_envio),
+        forma_frete          = COALESCE(${body.forma_frete ?? null},          forma_frete),
+        observacoes          = COALESCE(${body.observacoes ?? null},          observacoes),
+        observacoes_internas = COALESCE(${body.observacoes_internas ?? null}, observacoes_internas),
+        video_obs_interna    = COALESCE(${body.video_obs_interna ?? null},    video_obs_interna),
+        endereco_entrega             = COALESCE(${body.endereco_entrega ?? null},             endereco_entrega),
+        endereco_entrega_numero      = COALESCE(${body.endereco_entrega_numero ?? null},      endereco_entrega_numero),
+        endereco_entrega_complemento = COALESCE(${body.endereco_entrega_complemento ?? null}, endereco_entrega_complemento),
+        endereco_entrega_bairro      = COALESCE(${body.endereco_entrega_bairro ?? null},      endereco_entrega_bairro),
+        endereco_entrega_cidade      = COALESCE(${body.endereco_entrega_cidade ?? null},      endereco_entrega_cidade),
+        endereco_entrega_cep         = COALESCE(${body.endereco_entrega_cep ?? null},         endereco_entrega_cep),
+        endereco_entrega_uf          = COALESCE(${body.endereco_entrega_uf ?? null},          endereco_entrega_uf),
+        tipo_venda           = COALESCE(${body.tipo_venda ?? null},           tipo_venda),
+        numero_rastreio      = COALESCE(${body.numero_rastreio ?? null},      numero_rastreio),
+        venda_garantia_id    = COALESCE(${body.venda_garantia_id ?? null},    venda_garantia_id)
       WHERE id = ${vendaId}
     `;
-  }
 
-  // ── Sync alterações com Tiny se venda já aprovada e tem pedido Tiny ─────────
-  if (!body.situacao && venda.situacao === "aprovado") {
-    const [vendaSync] = await sql`
-      SELECT v.tiny_pedido_id, v.numero_venda, v.total_desconto, v.total_frete,
-        v.observacoes, v.observacoes_internas,
-        c.id_api_contato AS cliente_id_tiny,
-        vd.id_api_vendedor AS vendedor_id_tiny
-      FROM alissonerp.vendas_erp v
-      LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
-      LEFT JOIN public.vendedores vd ON vd.id_vendedor = v.vendedor_id
-      WHERE v.id = ${vendaId}
-    `;
-    if (vendaSync?.tiny_pedido_id) {
-      try {
-        const [tokenRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_bearer_token'`;
-        const rawToken = tokenRow?.valor_encrypted;
-        if (rawToken) {
-          let tinyToken: string;
-          try { tinyToken = JSON.parse(rawToken); } catch { tinyToken = String(rawToken); }
-          tinyToken = tinyToken.replace(/"/g, "").trim();
-          const updatePayload: Record<string, unknown> = {};
-          if (body.total_frete !== undefined) updatePayload.valorFrete = Number(body.total_frete);
-          if (body.observacoes !== undefined) updatePayload.observacoes = body.observacoes ?? "";
-          if (body.observacoes_internas !== undefined) updatePayload.observacoesInternas = body.observacoes_internas ?? "";
-          if (Object.keys(updatePayload).length > 0) {
-            await fetch(`https://api.tiny.com.br/public-api/v3/pedidos/${vendaSync.tiny_pedido_id}`, {
-              method: "PUT",
-              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tinyToken}` },
-              body: JSON.stringify(updatePayload),
-              signal: AbortSignal.timeout(15000),
-            });
-          }
-        }
-      } catch { /* sync Tiny não bloqueia edição local */ }
+    // Recalcular total_venda se frete mudou
+    if (body.total_frete !== undefined) {
+      await sql`
+        UPDATE alissonerp.vendas_erp
+        SET total_venda = total_produtos + ${body.total_frete}
+        WHERE id = ${vendaId}
+      `;
     }
-  }
 
-  // Auto-baixa estoque comercial removida — trigger 111 (trg_estoque_comercial_baixa_venda) já cuida disso.
+    // ── Sync alterações com Tiny se venda já aprovada e tem pedido Tiny ─────────
+    if (!body.situacao && venda.situacao === "aprovado") {
+      const [vendaSync] = await sql`
+        SELECT v.tiny_pedido_id, v.numero_venda, v.total_desconto, v.total_frete,
+          v.observacoes, v.observacoes_internas,
+          c.id_api_contato AS cliente_id_tiny,
+          vd.id_api_vendedor AS vendedor_id_tiny
+        FROM alissonerp.vendas_erp v
+        LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
+        LEFT JOIN public.vendedores vd ON vd.id_vendedor = v.vendedor_id
+        WHERE v.id = ${vendaId}
+      `;
+      if (vendaSync?.tiny_pedido_id) {
+        try {
+          const [tokenRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_bearer_token'`;
+          const rawToken = tokenRow?.valor_encrypted;
+          if (rawToken) {
+            let tinyToken: string;
+            try { tinyToken = JSON.parse(rawToken); } catch { tinyToken = String(rawToken); }
+            tinyToken = tinyToken.replace(/"/g, "").trim();
+            const updatePayload: Record<string, unknown> = {};
+            if (body.total_frete !== undefined) updatePayload.valorFrete = Number(body.total_frete);
+            if (body.observacoes !== undefined) updatePayload.observacoes = body.observacoes ?? "";
+            if (body.observacoes_internas !== undefined) updatePayload.observacoesInternas = body.observacoes_internas ?? "";
+            if (Object.keys(updatePayload).length > 0) {
+              await fetch(`https://api.tiny.com.br/public-api/v3/pedidos/${vendaSync.tiny_pedido_id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tinyToken}` },
+                body: JSON.stringify(updatePayload),
+                signal: AbortSignal.timeout(15000),
+              });
+            }
+          }
+        } catch { /* sync Tiny não bloqueia edição local */ }
+      }
+    }
 
-  // ── Auto-criar ordem de fabricação se venda veio de orçamento (ao aprovar ou concluir) ──
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let ordemCriada: any = null;
-  if (body.situacao === "aprovado" || body.situacao === "concluido") {
-    const [vendaOrc] = await sql`
-      SELECT v.orcamento_id, v.cliente_id, v.vendedor_id, v.data_entrega,
-             v.numero_venda,
-             o.id AS orc_id, o.tipo, o.peso, o.numero_orcamento, o.nome_modelo,
-             o.foto_3d, o.ficha_tecnica_id, o.ficha_tecnica_2_id, o.quantidade,
-             ft.perfil, ft.modelo, ft.aro_numeracao, ft.largura, ft.espessura,
-             ft.peso_estimado, ft.densidade_ouro, ft.cor_metal,
-             ft.tipo_fonte, ft.texto, ft.qtd_pedras, ft.tamanho_pedra,
-             ft.tipo_aplicacao_pedra, ft.pedras_detalhadas,
-             ft.diametro, ft.profundidade_concava, ft.dome_porcentagem,
-             ft.has_friso, ft.friso_kind, ft.friso_tipo, ft.friso_lado,
-             ft.friso_largura, ft.friso_profundidade, ft.friso_offset,
-             ft.canal_largura, ft.canal_borda_altura, ft.chanfro_tamanho,
-             ft.pedra_fileiras, ft.pedra_drill, ft.pedra_meia_lua,
-             ft.pedra_volta_completa, ft.tipo_pedra
-      FROM alissonerp.vendas_erp v
-      LEFT JOIN alissonerp.orcamentos o ON o.id = v.orcamento_id
-      LEFT JOIN alissonerp.orcamento_fichas_tecnicas ft ON ft.id = o.ficha_tecnica_id
-      WHERE v.id = ${vendaId} AND v.orcamento_id IS NOT NULL
-    `;
+    // Auto-baixa estoque comercial removida — trigger 111 (trg_estoque_comercial_baixa_venda) já cuida disso.
 
-    if (vendaOrc?.orc_id) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (sql as any).begin(async (tx: typeof sql) => {
-        // C3: Lock no orçamento para evitar criação de ordens duplicadas em requests simultâneos
-        const [orcLockPatch] = await tx`SELECT id, ordem_gerada_id FROM alissonerp.orcamentos WHERE id = ${vendaOrc.orc_id} FOR UPDATE`;
-        if (orcLockPatch?.ordem_gerada_id) {
-          const [existenteTxPatch] = await tx`SELECT id, numero_ordem FROM alissonerp.ordens WHERE id = ${orcLockPatch.ordem_gerada_id}`;
-          if (existenteTxPatch) { ordemCriada = { id: existenteTxPatch.id, numero_ordem: existenteTxPatch.numero_ordem }; return; }
-        }
+    // ── Auto-criar ordem de fabricação se venda veio de orçamento (ao aprovar ou concluir) ──
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let ordemCriada: any = null;
+    if (body.situacao === "aprovado" || body.situacao === "concluido") {
+      const [vendaOrc] = await sql`
+        SELECT v.orcamento_id, v.cliente_id, v.vendedor_id, v.data_entrega,
+               v.numero_venda,
+               o.id AS orc_id, o.tipo, o.peso, o.numero_orcamento, o.nome_modelo,
+               o.foto_3d, o.ficha_tecnica_id, o.ficha_tecnica_2_id, o.quantidade,
+               ft.perfil, ft.modelo, ft.aro_numeracao, ft.largura, ft.espessura,
+               ft.peso_estimado, ft.densidade_ouro, ft.cor_metal,
+               ft.tipo_fonte, ft.texto, ft.qtd_pedras, ft.tamanho_pedra,
+               ft.tipo_aplicacao_pedra, ft.pedras_detalhadas,
+               ft.diametro, ft.profundidade_concava, ft.dome_porcentagem,
+               ft.has_friso, ft.friso_kind, ft.friso_tipo, ft.friso_lado,
+               ft.friso_largura, ft.friso_profundidade, ft.friso_offset,
+               ft.canal_largura, ft.canal_borda_altura, ft.chanfro_tamanho,
+               ft.pedra_fileiras, ft.pedra_drill, ft.pedra_meia_lua,
+               ft.pedra_volta_completa, ft.tipo_pedra
+        FROM alissonerp.vendas_erp v
+        LEFT JOIN alissonerp.orcamentos o ON o.id = v.orcamento_id
+        LEFT JOIN alissonerp.orcamento_fichas_tecnicas ft ON ft.id = o.ficha_tecnica_id
+        WHERE v.id = ${vendaId} AND v.orcamento_id IS NOT NULL
+      `;
 
-        // perfilNomes movido para src/lib/orcamento-ficha-to-dados.ts (PERFIL_NOMES)
-        // — fonte unica de verdade reusada por anel 1 e anel 2.
+      if (vendaOrc?.orc_id) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (sql as any).begin(async (tx: typeof sql) => {
+          // C3: Lock no orçamento para evitar criação de ordens duplicadas em requests simultâneos
+          const [orcLockPatch] = await tx`SELECT id, ordem_gerada_id FROM alissonerp.orcamentos WHERE id = ${vendaOrc.orc_id} FOR UPDATE`;
+          if (orcLockPatch?.ordem_gerada_id) {
+            const [existenteTxPatch] = await tx`SELECT id, numero_ordem FROM alissonerp.ordens WHERE id = ${orcLockPatch.ordem_gerada_id}`;
+            if (existenteTxPatch) { ordemCriada = { id: existenteTxPatch.id, numero_ordem: existenteTxPatch.numero_ordem }; return; }
+          }
 
-        const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
-        const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
-        const nextNum = Math.max(Number(max_id_ali), Number(max_id_dir)) + 1;
-        const numeroOrdem = "C-" + String(nextNum).padStart(4, "0");
-        const isPar = Number(vendaOrc.quantidade) === 2;
-        const pesoItem1 = Number(vendaOrc.peso_estimado ?? vendaOrc.peso ?? 0);
-        const pesoNeg = Number(vendaOrc.peso ?? vendaOrc.peso_estimado ?? 0);
+          // perfilNomes movido para src/lib/orcamento-ficha-to-dados.ts (PERFIL_NOMES)
+          // — fonte unica de verdade reusada por anel 1 e anel 2.
 
-        // Criar ordem — inclui numero_pedido pra aparecer na coluna "PEDIDO PDV"
-        const [ordem] = await tx`
-          INSERT INTO alissonerp.ordens (
-            numero_ordem, tipo_ordem, situacao, status, rota,
-            cliente_id, vendedor_id, peso_metal_negociado,
-            data_entrega, detalhes_ordem, foto_peca_servico, venda_id,
-            numero_pedido, created_at
-          ) VALUES (
-            ${numeroOrdem}, 'fabricacao'::alissonerp.enum_tipo_ordem,
-            'criado', 'aguardando', 'pcp',
-            ${vendaOrc.cliente_id}, ${vendaOrc.vendedor_id},
-            ${pesoNeg}, ${vendaOrc.data_entrega},
-            ${'Venda #' + vendaOrc.numero_venda + ' / Orçamento ' + vendaOrc.numero_orcamento + (isPar ? ' (Par)' : '')},
-            ${vendaOrc.foto_3d ?? null}, ${vendaId},
-            ${vendaOrc.numero_venda ?? null}, NOW()
-          ) RETURNING id, numero_ordem
-        `;
-        ordemCriada = { id: ordem.id, numero_ordem: ordem.numero_ordem };
+          const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
+          const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
+          const nextNum = Math.max(Number(max_id_ali), Number(max_id_dir)) + 1;
+          const numeroOrdem = "C-" + String(nextNum).padStart(4, "0");
+          const isPar = Number(vendaOrc.quantidade) === 2;
+          const pesoItem1 = Number(vendaOrc.peso_estimado ?? vendaOrc.peso ?? 0);
+          const pesoNeg = Number(vendaOrc.peso ?? vendaOrc.peso_estimado ?? 0);
 
-        // Item 1 da ordem
-        const nomeItem = vendaOrc.tipo === "alianca"
-          ? nomeItemOrdem(vendaOrc as unknown as Record<string, unknown>, isPar ? "Aliança 1 - " : "Aliança ")
-          : `Peça Personalizada`;
-        await tx`
-          INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
-          VALUES (${ordem.id}, ${nomeItem}, 1, ${pesoItem1})
-        `;
-
-        // Ficha técnica — montada via helper compartilhado (mesmo formato pra
-        // anel 1 e anel 2). Ver src/lib/orcamento-ficha-to-dados.ts.
-        const tipoItem = vendaOrc.tipo === "alianca" ? "alianca" : "peca_personalizada";
-        const dadosFicha: Record<string, unknown> = vendaOrc.tipo === "alianca"
-          ? orcamentoFichaToDados(vendaOrc as unknown as Record<string, unknown>)
-          : {
-              ...(vendaOrc.peso_estimado ? { peso_estimado: vendaOrc.peso_estimado } : {}),
-              ...(vendaOrc.cor_metal ? { cor_metal: vendaOrc.cor_metal } : {}),
-              ...(vendaOrc.pedras_detalhadas ? { pedras_detalhadas: vendaOrc.pedras_detalhadas } : {}),
-            };
-        await tx`
-          INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
-          VALUES (${ordem.id}, ${tipoItem}, ${JSON.stringify(dadosFicha)}::jsonb, ${user.id}::uuid)
-        `;
-
-        // Aliança 2 (se par)
-        if (Number(vendaOrc.quantidade) === 2 && vendaOrc.ficha_tecnica_2_id) {
-          const [ft2] = await tx`
-            SELECT perfil, modelo, aro_numeracao, largura, espessura, peso_estimado,
-                   densidade_ouro, cor_metal, tipo_fonte, texto, qtd_pedras, tamanho_pedra,
-                   tipo_aplicacao_pedra, pedras_detalhadas,
-                   diametro, profundidade_concava, dome_porcentagem,
-                   has_friso, friso_kind, friso_tipo, friso_lado,
-                   friso_largura, friso_profundidade, friso_offset,
-                   canal_largura, canal_borda_altura, chanfro_tamanho,
-                   pedra_fileiras, pedra_drill, pedra_meia_lua,
-                   pedra_volta_completa, tipo_pedra
-            FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${vendaOrc.ficha_tecnica_2_id}
+          // Criar ordem — inclui numero_pedido pra aparecer na coluna "PEDIDO PDV"
+          const [ordem] = await tx`
+            INSERT INTO alissonerp.ordens (
+              numero_ordem, tipo_ordem, situacao, status, rota,
+              cliente_id, vendedor_id, peso_metal_negociado,
+              data_entrega, detalhes_ordem, foto_peca_servico, venda_id,
+              numero_pedido, created_at
+            ) VALUES (
+              ${numeroOrdem}, 'fabricacao'::alissonerp.enum_tipo_ordem,
+              'criado', 'aguardando', 'pcp',
+              ${vendaOrc.cliente_id}, ${vendaOrc.vendedor_id},
+              ${pesoNeg}, ${vendaOrc.data_entrega},
+              ${'Venda #' + vendaOrc.numero_venda + ' / Orçamento ' + vendaOrc.numero_orcamento + (isPar ? ' (Par)' : '')},
+              ${vendaOrc.foto_3d ?? null}, ${vendaId},
+              ${vendaOrc.numero_venda ?? null}, NOW()
+            ) RETURNING id, numero_ordem
           `;
-          if (ft2) {
-            const ft2Row = ft2 as unknown as Record<string, unknown>;
-            const nomeItem2 = nomeItemOrdem(ft2Row, "Aliança 2 - ");
-            const peso2 = Number(ft2.peso_estimado ?? 0);
-            await tx`
-              INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
-              VALUES (${ordem.id}, ${nomeItem2}, 1, ${peso2})
+          ordemCriada = { id: ordem.id, numero_ordem: ordem.numero_ordem };
+
+          // Item 1 da ordem
+          const nomeItem = vendaOrc.tipo === "alianca"
+            ? nomeItemOrdem(vendaOrc as unknown as Record<string, unknown>, isPar ? "Aliança 1 - " : "Aliança ")
+            : `Peça Personalizada`;
+          await tx`
+            INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
+            VALUES (${ordem.id}, ${nomeItem}, 1, ${pesoItem1})
+          `;
+
+          // Ficha técnica — montada via helper compartilhado (mesmo formato pra
+          // anel 1 e anel 2). Ver src/lib/orcamento-ficha-to-dados.ts.
+          const tipoItem = vendaOrc.tipo === "alianca" ? "alianca" : "peca_personalizada";
+          const dadosFicha: Record<string, unknown> = vendaOrc.tipo === "alianca"
+            ? orcamentoFichaToDados(vendaOrc as unknown as Record<string, unknown>)
+            : {
+                ...(vendaOrc.peso_estimado ? { peso_estimado: vendaOrc.peso_estimado } : {}),
+                ...(vendaOrc.cor_metal ? { cor_metal: vendaOrc.cor_metal } : {}),
+                ...(vendaOrc.pedras_detalhadas ? { pedras_detalhadas: vendaOrc.pedras_detalhadas } : {}),
+              };
+          await tx`
+            INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
+            VALUES (${ordem.id}, ${tipoItem}, ${JSON.stringify(dadosFicha)}::jsonb, ${user.id}::uuid)
+          `;
+
+          // Aliança 2 (se par)
+          if (Number(vendaOrc.quantidade) === 2 && vendaOrc.ficha_tecnica_2_id) {
+            const [ft2] = await tx`
+              SELECT perfil, modelo, aro_numeracao, largura, espessura, peso_estimado,
+                     densidade_ouro, cor_metal, tipo_fonte, texto, qtd_pedras, tamanho_pedra,
+                     tipo_aplicacao_pedra, pedras_detalhadas,
+                     diametro, profundidade_concava, dome_porcentagem,
+                     has_friso, friso_kind, friso_tipo, friso_lado,
+                     friso_largura, friso_profundidade, friso_offset,
+                     canal_largura, canal_borda_altura, chanfro_tamanho,
+                     pedra_fileiras, pedra_drill, pedra_meia_lua,
+                     pedra_volta_completa, tipo_pedra
+              FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${vendaOrc.ficha_tecnica_2_id}
             `;
-            const dadosFicha2 = orcamentoFichaToDados(ft2Row);
-            await tx`
-              INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
-              VALUES (${ordem.id}, 'alianca', ${JSON.stringify(dadosFicha2)}::jsonb, ${user.id}::uuid)
-            `;
+            if (ft2) {
+              const ft2Row = ft2 as unknown as Record<string, unknown>;
+              const nomeItem2 = nomeItemOrdem(ft2Row, "Aliança 2 - ");
+              const peso2 = Number(ft2.peso_estimado ?? 0);
+              await tx`
+                INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
+                VALUES (${ordem.id}, ${nomeItem2}, 1, ${peso2})
+              `;
+              const dadosFicha2 = orcamentoFichaToDados(ft2Row);
+              await tx`
+                INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
+                VALUES (${ordem.id}, 'alianca', ${JSON.stringify(dadosFicha2)}::jsonb, ${user.id}::uuid)
+              `;
+            }
           }
-        }
 
-        // Auditoria criada e aprovada automaticamente pelo trigger trg_auto_auditoria_loja
+          // Auditoria criada e aprovada automaticamente pelo trigger trg_auto_auditoria_loja
 
-        // Atualizar orçamento com ordem gerada
-        await tx`
-          UPDATE alissonerp.orcamentos
-          SET ordem_gerada_id = ${ordem.id}, updated_at = NOW()
-          WHERE id = ${vendaOrc.orc_id}
-        `;
-      });
+          // Atualizar orçamento com ordem gerada
+          await tx`
+            UPDATE alissonerp.orcamentos
+            SET ordem_gerada_id = ${ordem.id}, updated_at = NOW()
+            WHERE id = ${vendaOrc.orc_id}
+          `;
+        });
+      }
     }
-  }
 
-  return NextResponse.json({
-    ok: true,
-    ...(ordemCriada ? { ordem_criada: ordemCriada.numero_ordem } : {}),
-    ...(tinyErroWarning ? { tiny_warning: tinyErroWarning } : {}),
-  });
+    return NextResponse.json({
+      ok: true,
+      ...(ordemCriada ? { ordem_criada: ordemCriada.numero_ordem } : {}),
+      ...(tinyErroWarning ? { tiny_warning: tinyErroWarning } : {}),
+    });
+  } catch (e) {
+    // Captura erros de triggers do banco (STOCK_NEGATIVE, ENTREGA_BLOCKED, etc.)
+    // e devolve como JSON para o frontend não quebrar com Unexpected end of JSON input.
+    const msg = e instanceof Error ? e.message : "Erro interno ao salvar venda";
+    return NextResponse.json({ error: msg }, { status: 409 });
+  }
 }
