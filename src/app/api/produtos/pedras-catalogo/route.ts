@@ -5,7 +5,7 @@ import { authOr401 } from "@/lib/auth-server";
 /**
  * GET /api/produtos/pedras-catalogo
  *
- * Lista pedras cadastradas no catálogo (categoria='Pedras') com preço unitário
+ * Lista pedras do catálogo com preço unitário dinâmico da vw_pedras_preco
  * pra uso como "pedra-componente" no cadastro de produtos novos.
  *
  * Filtros:
@@ -32,31 +32,29 @@ export async function GET(req: NextRequest) {
   const rows = q.length >= 2
     ? await sql`
         SELECT
-          id_produto      AS id,
-          nome,
-          preco_tiny      AS preco_unitario,
-          peso_precificado AS peso_g
-        FROM public.produtos
-        WHERE LOWER(categoria) = 'pedras'
-          AND situacao = 'A'
-          AND preco_tiny IS NOT NULL
-          AND preco_tiny > 0
-          AND nome ILIKE ${"%" + q + "%"}
-        ORDER BY nome
+          vp.id_produto     AS id,
+          vp.nome,
+          vp.preco_venda    AS preco_unitario,
+          p.peso_precificado AS peso_g
+        FROM alissonerp.vw_pedras_preco vp
+        JOIN public.produtos p ON p.id_produto = vp.id_produto
+        WHERE vp.preco_venda IS NOT NULL
+          AND vp.preco_venda > 0
+          AND vp.nome ILIKE ${"%" + q + "%"}
+        ORDER BY vp.nome
         LIMIT ${limit}
       `
     : await sql`
         SELECT
-          id_produto      AS id,
-          nome,
-          preco_tiny      AS preco_unitario,
-          peso_precificado AS peso_g
-        FROM public.produtos
-        WHERE LOWER(categoria) = 'pedras'
-          AND situacao = 'A'
-          AND preco_tiny IS NOT NULL
-          AND preco_tiny > 0
-        ORDER BY nome
+          vp.id_produto     AS id,
+          vp.nome,
+          vp.preco_venda    AS preco_unitario,
+          p.peso_precificado AS peso_g
+        FROM alissonerp.vw_pedras_preco vp
+        JOIN public.produtos p ON p.id_produto = vp.id_produto
+        WHERE vp.preco_venda IS NOT NULL
+          AND vp.preco_venda > 0
+        ORDER BY vp.nome
         LIMIT ${limit}
       `;
 

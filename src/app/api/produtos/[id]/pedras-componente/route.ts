@@ -13,12 +13,15 @@ import { zodError } from "@/lib/schemas/common";
  * Body: { pedras: Array<{ pedra_produto_id: number, quantidade: number }> }
  *
  * Regras de segurança:
- * - preco_unitario_snapshot é lido DIRETO do banco (preco_tiny da pedra)
+ * - preco_unitario_snapshot é lido da vw_pedras_preco (preço dinâmico)
  *   — nunca aceita do cliente. Evita vendedora forjar preço errado.
- * - Pedra precisa ser categoria='Pedras', situacao='A', preco_tiny > 0.
+ * - Pedra precisa constar na vw_pedras_preco com preco_venda > 0.
  * - Quantidade >= 1, inteira.
  *
  * Tabela: alissonerp.produto_pedras_componente
+ *
+ * GET /api/produtos/[id]/pedras-componente
+ * Lista as pedras-componente atuais do produto com preço dinâmico da vw_pedras_preco.
  */
 
 const Schema = z.object({
@@ -63,13 +66,11 @@ export async function PUT(
   if (pedras.length > 0) {
     const ids = pedras.map((p) => p.pedra_produto_id);
     const validas = await sql<{ id_produto: number; preco_tiny: number }[]>`
-      SELECT id_produto, preco_tiny
-      FROM public.produtos
-      WHERE id_produto = ANY(${ids}::bigint[])
-        AND LOWER(categoria) = 'pedras'
-        AND situacao = 'A'
-        AND preco_tiny IS NOT NULL
-        AND preco_tiny > 0
+      SELECT vp.id_produto, vp.preco_venda AS preco_tiny
+      FROM alissonerp.vw_pedras_preco vp
+      WHERE vp.id_produto = ANY(${ids}::bigint[])
+        AND vp.preco_venda IS NOT NULL
+        AND vp.preco_venda > 0
     `;
     if (validas.length !== ids.length) {
       const validasIds = new Set(validas.map((v) => Number(v.id_produto)));
@@ -111,10 +112,6 @@ export async function PUT(
   return NextResponse.json({ ok: true, count: pedras.length });
 }
 
-/**
- * GET /api/produtos/[id]/pedras-componente
- * Lista as pedras-componente atuais do produto.
- */
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -133,10 +130,11 @@ export async function GET(
       pc.id,
       pc.pedra_produto_id,
       pc.quantidade::int       AS quantidade,
-      pc.preco_unitario_snapshot::numeric AS preco_unitario,
+      COALESCE(vp.preco_venda, 0)::numeric AS preco_unitario,
       pe.nome                  AS pedra_nome
     FROM alissonerp.produto_pedras_componente pc
     JOIN public.produtos pe ON pe.id_produto = pc.pedra_produto_id
+    LEFT JOIN alissonerp.vw_pedras_preco vp ON vp.id_produto = pc.pedra_produto_id
     WHERE pc.produto_id = ${produtoId}
     ORDER BY pe.nome
   `;

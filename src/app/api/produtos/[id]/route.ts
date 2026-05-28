@@ -97,12 +97,20 @@ export async function GET(
             p.markup,
             p.fator,
             -- Preço calculado pela view oficial vw_produto_preco (curva dinâmica).
-            pp.preco_venda::int AS preco_curva,
+            -- preco_venda = ouro + pedras. preco_ouro_curva = apenas ouro.
+            pp.preco_venda::int     AS preco_venda_calculado,
+            pp.preco_ouro_curva::int AS preco_ouro_calculado,
             (SELECT tipo_item FROM alissonerp.produto_tipo_item WHERE produto_id = p.id_produto) AS tipo_item,
             NULL::text   AS sub_categoria,
             ppe.preco_compra_usd  AS preco_compra_usd,
             ppe.quantidade        AS quantidade_pedra,
             ppe.peso_ct           AS peso_ct,
+            -- Precificação de pedra pela nova view (regras de precificação)
+            vpd.categoria_pedra   AS pedra_regra_categoria,
+            vpd.nome_tabela       AS pedra_regra_nome,
+            vpd.custo_usd_ct      AS pedra_regra_custo_usd,
+            vpd.markup_calculado  AS pedra_regra_markup,
+            vpd.preco_venda       AS pedra_preco_venda,
             ep.id        AS erp_id,
             ep.eh_pai,
             ep.eh_variacao,
@@ -123,16 +131,17 @@ export async function GET(
             ts.status AS tiny_sync_status,
             ts.erro   AS tiny_sync_erro,
             ep.preco_servico,
-            COALESCE(ecc.controla_estoque, true) AS controla_estoque
-          FROM public.produtos p
-          LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
-          LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
-          LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
-          LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
-          LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
-          LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
-          LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
-          WHERE p.id_produto = ${produtoId}
+             COALESCE(ecc.controla_estoque, true) AS controla_estoque
+           FROM public.produtos p
+           LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
+           LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
+           LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
+           LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
+           LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+           LEFT JOIN alissonerp.vw_pedras_preco vpd ON vpd.id_produto = p.id_produto
+           LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
+           WHERE p.id_produto = ${produtoId}
         `
       : await sql`
           SELECT

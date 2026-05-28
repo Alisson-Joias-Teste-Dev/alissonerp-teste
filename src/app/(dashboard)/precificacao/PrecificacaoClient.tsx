@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import type { FaixaPedra } from "./page";
 import GerenciarPedrasModal from "@/components/produtos/GerenciarPedrasModal";
+import RegrasPedrasTab from "./RegrasPedrasTab";
 import { useErrorStore } from "@/stores/errorStore";
 import {
   getPricingFactors,
@@ -2280,11 +2281,7 @@ export default function PrecificacaoClient({ faixasPedrasInicial, configInicial,
           />
         )}
         {tab === "markup-pedras" && (
-          <GerenciarPedrasModal
-            open
-            inline
-            onClose={() => { /* inline: não fecha */ }}
-          />
+          <RegrasPedrasTab />
         )}
         {tab === "cotacoes"      && <TabCotacoes cotacao={cotacaoInicial} />}
         {tab === "regras"        && <TabRegras configInicial={configInicial} />}

@@ -778,9 +778,9 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
                                 Promo: preco_vigente sobrescreve quando em_promocao=true */}
                             <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
                               {(() => {
-                                const precoPedrasComp = parseFloat(p.preco_pedras ?? "0") || 0;
+                                // preco_curva já vem da view com ouro + pedras — não somar novamente
                                 const precoLista = p.preco_curva != null
-                                  ? String(Number(p.preco_curva) + precoPedrasComp)
+                                  ? String(Number(p.preco_curva))
                                   : null;
                                 const emPromo = !!p.em_promocao;
                                 const precoPromo = p.preco_vigente != null ? String(p.preco_vigente) : null;

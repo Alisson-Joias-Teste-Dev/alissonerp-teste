@@ -37,6 +37,8 @@ interface ProdutoDetalhe {
   preco_tiny: string | null;
   preco_sync: string | null;
   preco_curva: number | null;
+  preco_venda_calculado: number | null;
+  preco_ouro_calculado: number | null;
   preco_pedras: string | null;
   preco_total_sync: string | null;
   diferenca_percentual: string | null;
@@ -69,6 +71,12 @@ interface ProdutoDetalhe {
   preco_compra_usd?: string | number | null;
   quantidade_pedra?: number | null;
   peso_ct?: string | number | null;
+  // Precificação pela nova view vw_pedras_preco (regras de precificação)
+  pedra_regra_categoria?: string | null;
+  pedra_regra_nome?: string | null;
+  pedra_regra_custo_usd?: number | string | null;
+  pedra_regra_markup?: number | string | null;
+  pedra_preco_venda?: number | null;
   // Tiny sync
   id_api_produto?: number | null;
   tiny_sync_status?: string | null;
@@ -904,12 +912,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
         if (pedrasComp.length > 0) {
           const subtotalPedrasSave = pedrasComp.reduce((s, p) => s + p.preco_unitario * p.quantidade, 0);
           body.preco_pedras = Math.round(subtotalPedrasSave * 100) / 100;
-          const precoOuroAtual = parseFloat(String(produto.preco_curva ?? "") || produto.preco_sync || produto.preco_tiny || "0") || 0;
-          if (precoOuroAtual > 0) {
-            body.preco_tiny = Math.round((precoOuroAtual + subtotalPedrasSave) * 100) / 100;
-          }
         } else {
-          // Sem pedras: zera preco_pedras para limpar valor antigo
           body.preco_pedras = 0;
         }
       }
@@ -1404,45 +1407,74 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                     </div>
                   </section>
 
-                  {/* ── VALOR DA PEDRA (calculado pelo markup) ── */}
+                  {/* ── PRODUÇÃO: REPOSIÇÃO + TEMPO DE FABRICAÇÃO ── */}
+                  <section>
+                    <p className={sectionTitleCls}>Produção</p>
+                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className={labelCls}>Tempo fabricação (dias)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={tempoFabricacaoDias}
+                            onChange={(e) => { setTempoFabricacaoDias(e.target.value); setExtrasDirty(true); }}
+                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm tabular-nums bg-white focus:outline-none focus:border-[#184036]"
+                            placeholder="—"
+                          />
+                        </div>
+                        <div className="flex flex-col">
+                          <label className={labelCls}>Reposição ativa</label>
+                          <button
+                            type="button"
+                            onClick={() => { setReposicaoAtiva((v) => !v); setExtrasDirty(true); }}
+                            className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none mt-2"
+                            style={{ backgroundColor: reposicaoAtiva ? "#184036" : "#D1D5DB" }}
+                            role="switch"
+                            aria-checked={reposicaoAtiva}
+                          >
+                            <span
+                              className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+                              style={{ transform: reposicaoAtiva ? "translateX(18px)" : "translateX(2px)" }}
+                            />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* ── VALOR DA PEDRA (calculado pela view) ── */}
                   <section>
                     <p className={sectionTitleCls}>Valor</p>
                     <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 space-y-3">
-                      <div>
-                        <p className={labelCls}>Preço de Compra (USD)</p>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={precoCompraUsdEdit}
-                          onChange={(e) => setPrecoCompraUsdEdit(e.target.value)}
-                          placeholder="0,00"
-                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
-                        />
-                      </div>
-
-                      <div>
-                        <p className={labelCls}>Preço de Venda (R$) <span className="text-gray-400 normal-case tracking-normal">(calculado)</span></p>
-                        <div
-                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm font-mono font-semibold bg-gray-100 cursor-not-allowed"
-                          style={{ color: "#184036" }}
-                          title="Travado: calculado por preço USD × dólar × markup por tamanho"
-                        >
-                          {precoPedra > 0
-                            ? `R$ ${precoPedra.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : "—"}
+                      {produto.pedra_preco_venda != null && produto.pedra_preco_venda > 0 && pontos > 0 && (
+                        <div className="text-[11px] text-gray-500 font-mono">
+                          R$ {(produto.pedra_preco_venda / pontos).toFixed(2).replace('.',',')}/pt · R$ {(produto.pedra_preco_venda / ct).toFixed(2).replace('.',',')}/ct
                         </div>
-                        <p className="text-[10px] text-gray-400 mt-1">
-                          {precoCompraUsdLive > 0 && cotacaoDolar > 0 && markupLive > 0 ? (
-                            <>USD {precoCompraUsdLive.toFixed(2)} × R$ {cotacaoDolar.toFixed(2)} × {markupLive.toFixed(2)} (markup {ct.toFixed(2).replace(".", ",")}ct)</>
-                          ) : (
-                            "Preencha preço USD acima. Peso da pedra define a faixa de markup."
-                          )}
-                        </p>
-                      </div>
+                      )}
 
-                      {precoPedra > 0 && pontos > 0 && (
-                        <div className="text-[11px] text-gray-500 font-mono pt-2 border-t border-gray-200">
-                          R$ {(precoPedra / pontos).toFixed(2)}/pt · R$ {(precoPedra / ct).toFixed(2)}/ct
+                      {/* ── Precificação pela view (regras de precificação) ── */}
+                      {produto.pedra_regra_nome && (
+                        <div className="pt-3 mt-3 border-t border-gray-200 space-y-1.5">
+                          <p className="text-[10px] uppercase tracking-wide text-gray-400 font-bold">
+                            Precificação pela Regra
+                          </p>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                            <span className="text-gray-500">Regra:</span>
+                            <span className="text-gray-800 font-medium capitalize">{produto.pedra_regra_categoria} — {produto.pedra_regra_nome}</span>
+                            <span className="text-gray-500">Custo Base:</span>
+                            <span className="text-gray-800 font-medium">$ {Number(produto.pedra_regra_custo_usd ?? 0)} / ct</span>
+                            <span className="text-gray-500">Markup Aplicado:</span>
+                            <span className="text-gray-800 font-medium">{Number(produto.pedra_regra_markup ?? 0).toFixed(2).replace('.',',')}×</span>
+                          </div>
+                          {produto.pedra_preco_venda != null && (
+                            <div className="flex items-center justify-between pt-2 mt-2 border-t border-gray-200">
+                              <span className="text-sm font-medium text-gray-800">Preço Final (View)</span>
+                              <span className="text-lg font-mono font-bold" style={{ color: "#184036" }}>
+                                {formatPreco(String(produto.pedra_preco_venda))}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2004,12 +2036,12 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                           </>
                         );
                       }
-                      if (produto.preco_curva != null && produto.preco_curva > 0) {
-                        const precoTotalBase = Number(produto.preco_curva) + subtotalPedrasOficial;
+                      if (produto.preco_ouro_calculado != null && produto.preco_ouro_calculado > 0) {
+                        const precoTotalBase = Number(produto.preco_ouro_calculado) + subtotalPedrasOficial;
                         return (
                           <>
                             <p className="text-2xl font-mono font-bold" style={{ color: "#184036" }}>
-                              {formatPreco(String(precoTotalBase || produto.preco_curva))}
+                              {formatPreco(String(precoTotalBase || produto.preco_ouro_calculado))}
                               <sup className="ml-1 text-[10px] font-bold" style={{ color: "#059669" }}>C</sup>
                             </p>
                             <p className="text-[11px] text-gray-500 mt-1">peso × cotação × markup × fator (curva){subtotalPedrasOficial > 0 ? " + pedras" : ""}</p>
@@ -2126,7 +2158,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                           const n = parseFloat(t);
                           return isNaN(n) ? 0 : n;
                         };
-                        const precoOuro = parseNum(produto?.preco_curva);
+                        const precoOuro = parseNum(produto?.preco_ouro_calculado);
                         const subtotalPedras = pedrasComp.reduce((s, p) => s + p.preco_unitario * p.quantidade, 0);
                         const total = precoOuro + subtotalPedras;
                         const qtdTotal = pedrasComp.reduce((s, p) => s + p.quantidade, 0);

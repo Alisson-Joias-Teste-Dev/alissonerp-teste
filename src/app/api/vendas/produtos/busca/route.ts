@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
       CASE WHEN vpv.em_promocao THEN vpv.max_parcelas_cartao ELSE NULL END AS max_parcelas_promo
     FROM public.produtos p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
-    LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+    LEFT JOIN alissonerp.vw_produtos_geral_preco pp ON pp.id_produto = p.id_produto
     LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
     LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
     LEFT JOIN (

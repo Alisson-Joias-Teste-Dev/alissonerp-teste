@@ -24,6 +24,7 @@ import {
   STONE_TYPES, STONE_CUTS, STONE_SIZES_MM, STONE_CT_TABLE, GROOVE_TYPE_OPTIONS,
   findGrooveRule, computeWeight, computeStoneCapacity, computePricing,
   computeCalculatedCategories, computeStoneEntryPrice, computeStonesTotalRS,
+  stoneMmToCt,
   densidadePorTeor, corDoMetal,
   FICHA_LABELS_DEFAULT, getFichaLabel,
 } from "./constants";
@@ -127,6 +128,46 @@ export default function OrcamentoClient({
 
   // Pedras (compartilhado aliança + peça)
   const [stoneEntries, setStoneEntries] = useState<StoneEntry[]>([]);
+  // Catálogo de preços de pedras carregado da API (fonte: vw_pedras_preco)
+  // Mapa: tipo_pedra → mm → preco_unitario
+  const [catalogoPedras, setCatalogoPedras] = useState<Map<string, Map<number, number>>>(new Map());
+
+  // Carrega catálogo de pedras da API (preços dinâmicos da vw_pedras_preco)
+  useEffect(() => {
+    fetch("/api/produtos/pedras-catalogo")
+      .then((r) => r.json())
+      .then((data: Array<{ nome: string; preco_unitario: number }>) => {
+        const map = new Map<string, Map<number, number>>();
+        for (const item of data) {
+          const mmMatch = item.nome.match(/([\d.,]+)\s*mm/i);
+          if (!mmMatch) continue;
+          const mmRaw = parseFloat(mmMatch[1].replace(",", "."));
+          const mm = Math.round(mmRaw * 10) / 10; // arredonda pra 1 decimal (ex: 1.5)
+          for (const st of STONE_TYPES) {
+            if (item.nome.toLowerCase().includes(st.label.toLowerCase()) ||
+                (st.value === "zirconia" && item.nome.toLowerCase().includes("zirc"))) {
+              if (!map.has(st.value)) map.set(st.value, new Map());
+              map.get(st.value)!.set(mm, item.preco_unitario);
+              break;
+            }
+          }
+        }
+        setCatalogoPedras(map);
+      })
+      .catch(() => { /* non-critical */ });
+  }, []);
+
+  /** Busca preço de uma pedra no catálogo carregado da vw_pedras_preco.
+   *  Substitui computeStoneEntryPrice — uma única fonte de verdade para preços. */
+  const getStonePrice = useCallback((tipo: StoneType, mm: number, qtd: number) => {
+    const ct_unitario = stoneMmToCt(mm);
+    const ct_total = ct_unitario * qtd;
+    const pt_total = ct_total * 0.2;
+    const tipoMap = catalogoPedras.get(tipo);
+    const preco_unitario_rs = tipoMap?.get(mm) ?? 0;
+    const preco_total_rs = preco_unitario_rs * qtd;
+    return { ct_unitario, ct_total, pt_total, preco_unitario_rs, preco_total_rs };
+  }, [catalogoPedras]);
   // Preços de pedras editáveis na tela de config (USD/ct por tipo).
   // Mescla defaults com valores persistidos em config_orcamento.stone_prices
   // pra garantir que todos os tipos (incluindo zircônia nova) apareçam no editor.
@@ -162,7 +203,7 @@ export default function OrcamentoClient({
       tamanho_mm: 2.0, qtd: 1, ct_unitario: 0, ct_total: 0, pt_total: 0,
       preco_unitario_rs: 0, preco_total_rs: 0,
     };
-    const calc = computeStoneEntryPrice(entry, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
+    const calc = getStonePrice(entry.tipo, entry.tamanho_mm, entry.qtd);
     setStoneEntries((prev) => [...prev, { ...entry, ...calc }]);
   };
   const removeStone = (id: number) => setStoneEntries((prev) => prev.filter((e) => e.id !== id));
@@ -170,7 +211,7 @@ export default function OrcamentoClient({
     setStoneEntries((prev) => prev.map((e) => {
       if (e.id !== id) return e;
       const updated = { ...e, [field]: value };
-      const calc = computeStoneEntryPrice(updated, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
+      const calc = getStonePrice(updated.tipo, updated.tamanho_mm, updated.qtd);
       return { ...updated, ...calc };
     }));
   };
@@ -183,7 +224,7 @@ export default function OrcamentoClient({
       tamanho_mm: stoneSize, qtd: 1, ct_unitario: 0, ct_total: 0, pt_total: 0,
       preco_unitario_rs: 0, preco_total_rs: 0,
     };
-    const calc = computeStoneEntryPrice(entry, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
+    const calc = getStonePrice(entry.tipo, entry.tamanho_mm, entry.qtd);
     // Bug #16: alerta quando zircônia adicionada custa R$ 0 (config sem
     // preço cadastrado). Antes, peça saía subprecificada em silêncio.
     if (calc.preco_total_rs === 0) {
@@ -204,7 +245,7 @@ export default function OrcamentoClient({
     setter((prev) => prev.map((e) => {
       if (e.id !== id) return e;
       const updated = { ...e, [field]: value };
-      const calc = computeStoneEntryPrice(updated, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
+      const calc = getStonePrice(updated.tipo, updated.tamanho_mm, updated.qtd);
       return { ...updated, ...calc };
     }));
   };
@@ -1229,7 +1270,7 @@ export default function OrcamentoClient({
       preco_unitario_rs: 0, preco_total_rs: 0,
       ct_unitario: 0, ct_total: 0, pt_total: 0,
     };
-    const calc = computeStoneEntryPrice(baseEntry, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups);
+    const calc = getStonePrice(baseEntry.tipo, baseEntry.tamanho_mm, baseEntry.qtd);
     return { ...baseEntry, ...calc };
   }
   // Anel 1

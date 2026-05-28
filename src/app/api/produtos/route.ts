@@ -300,7 +300,7 @@ export async function GET(req: NextRequest) {
             SELECT MIN(pp_f.preco_venda::numeric)::int
             FROM alissonerp.erp_produtos pai_e2
             INNER JOIN alissonerp.erp_produtos filho_e2 ON filho_e2.parent_id = pai_e2.id
-            LEFT JOIN alissonerp.vw_produto_preco pp_f ON pp_f.id_produto = filho_e2.produto_id
+            LEFT JOIN alissonerp.vw_produtos_geral_preco pp_f ON pp_f.id_produto = filho_e2.produto_id
             WHERE pai_e2.produto_id = p.id_produto
               AND pp_f.preco_venda IS NOT NULL
               AND pp_f.preco_venda::numeric > 0
@@ -317,11 +317,13 @@ export async function GET(req: NextRequest) {
           vpv.nome_campanha,
           vpv.data_fim AS promo_data_fim,
           -- ═══════════════════════════════════════════════════════════════════
-          -- REGRA DE NEGÓCIO (aprovada 20/05/2026):
-          --   preco_curva usa APENAS a curva dinâmica (vw_produto_preco).
+          -- REGRA DE NEGÓCIO (atualizada 28/05/2026):
+          --   preco_curva usa a view unificada vw_produtos_geral_preco.
+          --   Joias → curva dinâmica (ouro + BOM).
+          --   Pedras/Insumos → regras de precificação (vw_pedras_preco).
+          --   Serviço (tipo_item='servico') → preço fixo via preco_servico.
           --   NÃO adicionar fallback para preco_tiny ou preco_sync.
           --   Produto sem peso → sem preço calculado (intencional).
-          --   Serviço (tipo_item='servico') → preço fixo via preco_servico.
           -- ═══════════════════════════════════════════════════════════════════
           pp.preco_venda::int AS preco_curva,
           ti.tipo_item,
@@ -383,7 +385,7 @@ export async function GET(req: NextRequest) {
         LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
         LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
         LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
-        LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+        LEFT JOIN alissonerp.vw_produtos_geral_preco pp ON pp.id_produto = p.id_produto
         LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
         WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wAgrupamento} ${wVariacoes} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
         ORDER BY ${orderVariacoes}
@@ -440,7 +442,7 @@ export async function GET(req: NextRequest) {
         vpv.em_promocao,
         vpv.nome_campanha,
         vpv.data_fim AS promo_data_fim,
-        -- Preço da curva — calculado pela view oficial vw_produto_preco.
+        -- Preço da curva — calculado pela view unificada vw_produtos_geral_preco.
         pp.preco_venda AS preco_curva,
         ti.tipo_item,
         NULL::integer AS erp_id,
@@ -494,7 +496,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
       LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
-      LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+      LEFT JOIN alissonerp.vw_produtos_geral_preco pp ON pp.id_produto = p.id_produto
       LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
       WHERE TRUE ${wBusca} ${wSkuPrefix} ${wPedra} ${wTipoMetal} ${wSituacao} ${wCategoria} ${wEstoque} ${wPendencia} ${wEsconderInsumos} ${wTipoItem}
       ORDER BY ${orderFieldIdent} ${orderDir} NULLS LAST

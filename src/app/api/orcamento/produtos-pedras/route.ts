@@ -20,9 +20,10 @@ export async function GET(req: NextRequest) {
       p.nome,
       p.categoria,
       p.tipo_de_pedra,
-      COALESCE(p.preco_total_sync, p.preco_sync, p.preco_tiny, 0)::numeric AS preco,
+      COALESCE(vp.preco_venda, 0)::numeric AS preco,
       p.peso_precificado
     FROM public.produtos p
+    LEFT JOIN alissonerp.vw_pedras_preco vp ON vp.id_produto = p.id_produto
     WHERE p.situacao = 'A'
       AND (
         p.categoria ILIKE '%pedra%'
