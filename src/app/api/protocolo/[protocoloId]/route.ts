@@ -48,7 +48,7 @@ export async function GET(
 //
 // Auth: admin/desenvolvedor/gerente_fabrica/motoboy. Conclusao em si exige role
 // em ROLES_CONCLUIR_PROTOCOLO (validado no recebedor abaixo).
-const ROLES_PROTOCOLO_PATCH = ["admin", "desenvolvedor", "gerente_fabrica", "motoboy"];
+const ROLES_PROTOCOLO_PATCH = ["admin", "desenvolvedor", "gerente_fabrica", "gerente_loja", "motoboy"];
 
 export async function PATCH(
   req: NextRequest,
