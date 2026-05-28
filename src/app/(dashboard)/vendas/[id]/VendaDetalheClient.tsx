@@ -1938,7 +1938,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                   body: JSON.stringify({ tipo: "desconto" }),
                 });
                 const d = await res.json();
-        if (!res.ok) throw new Error(((d.error as string) ?? _text.slice(0, 300)) || `HTTP ${res.status}`);
+        if (!res.ok) throw new Error((d.error as string | undefined) ?? `HTTP ${res.status}`);
                 await load();
               } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao solicitar aprovação"); }
               finally { setUpdating(false); }
