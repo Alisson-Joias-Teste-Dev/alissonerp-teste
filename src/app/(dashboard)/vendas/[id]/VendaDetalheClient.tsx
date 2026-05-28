@@ -1454,7 +1454,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                 tipo: "venda_campo",
                 campo: campoBloqueado,
                 valor_solicitado: patch[campoBloqueado],
-                mensagemBloqueio: d.error ?? "Esta alteração precisa de aprovação.",
+mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa de aprovação.",
               });
               setSolicitarMotivo("");
               setSolicitarErro("");
@@ -1512,14 +1512,14 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
           tipo: "venda_campo",
           campo: "situacao",
           valor_solicitado: s,
-          mensagemBloqueio: d.error ?? "Esta alteração precisa de aprovação.",
+          mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa de aprovação.",
         });
         setSolicitarMotivo("");
         setSolicitarErro("");
         setSolicitarSucesso(false);
         return;
       }
-      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      if (!res.ok) throw new Error((d.error as string | undefined) ?? `HTTP ${res.status}`);
       if (d.ordem_criada && d.tiny_warning) {
         alert(`Ordem ${d.ordem_criada} criada!\n\nAtenção: falha ao sincronizar com Tiny — ${d.tiny_warning}\nA venda ficará pendente de sync no Tiny.`);
       } else if (d.ordem_criada) {
