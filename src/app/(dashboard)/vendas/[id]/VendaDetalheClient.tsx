@@ -1541,7 +1541,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         const _errText = await res.text();
         let _errData: Record<string, unknown> = {};
         try { _errData = JSON.parse(_errText); } catch { /* ignora */ }
-        throw new Error((_errData.error as string) ?? _errText.slice(0, 300) || `HTTP ${res.status}`);
+        throw new Error(((_errData.error as string) ?? _errText.slice(0, 300)) || `HTTP ${res.status}`);
       }
       await load();
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao cancelar"); }
@@ -1938,7 +1938,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
                   body: JSON.stringify({ tipo: "desconto" }),
                 });
                 const d = await res.json();
-      if (!res.ok) throw new Error((d.error as string) ?? _text.slice(0, 300) || `HTTP ${res.status}`);
+        if (!res.ok) throw new Error(((d.error as string) ?? _text.slice(0, 300)) || `HTTP ${res.status}`);
                 await load();
               } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao solicitar aprovação"); }
               finally { setUpdating(false); }
@@ -3247,7 +3247,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         const _errText = await res.text();
         let _errData: Record<string, unknown> = {};
         try { _errData = JSON.parse(_errText); } catch { /* ignora */ }
-        throw new Error((_errData.error as string) ?? _errText.slice(0, 300) || `HTTP ${res.status}`);
+        throw new Error(((_errData.error as string) ?? _errText.slice(0, 300)) || `HTTP ${res.status}`);
       }
                           await load();
                           setMultOuroPeso(""); setMultOuroValorGrama(""); setMultOuroFotoFile(null); setMultOuroFotoPreview(null); setMultOuroValidacaoIA(null);
