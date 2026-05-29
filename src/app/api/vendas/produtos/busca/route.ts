@@ -74,13 +74,27 @@ export async function GET(req: NextRequest) {
       AND (p.sku ILIKE ${'%' + q + '%'} OR ${termos.map(t => sql`p.nome ILIKE ${'%' + t + '%'}`).reduce((a, b) => sql`${a} AND ${b}`)})
       AND (ep.eh_pai IS NULL OR ep.eh_pai = false)
       -- ═══════════════════════════════════════════════════════════════════
-      -- REGRA DE NEGÓCIO (aprovada 20/05/2026):
-      --   1. Só mostra produtos COM preço calculado (curva ou preco_servico)
-      --   2. controla_estoque=false → aparece mesmo sem saldo
-      --   3. controla_estoque=true  → aparece só se saldo > 0
+      -- REGRA DE NEGÓCIO (aprovada 20/05/2026 + exceção 29/05/2026):
+      --   1. Regra geral: só mostra produtos COM preço calculado
+      --      (curva ou preco_servico) e maior que zero.
+      --   2. Exceção controlada: produto com personalização ativa e
+      --      preco_por_letra > 0 também pode aparecer sem preço fixo
+      --      (caso PZxxxx), pois o valor final é dinâmico por letras.
+      --   3. Impacto se remover a exceção: SKU personalizado dinâmico
+      --      some da busca de venda, bloqueando o fluxo da consultora.
+      --   4. controla_estoque=false → aparece mesmo sem saldo
+      --   5. controla_estoque=true  → aparece só se saldo > 0
       -- ═══════════════════════════════════════════════════════════════════
-      AND pp.preco_venda IS NOT NULL
-      AND pp.preco_venda > 0
+      AND (
+        (pp.preco_venda IS NOT NULL AND pp.preco_venda > 0)
+        OR EXISTS (
+          SELECT 1
+          FROM alissonerp.produto_personalizacao pz
+          WHERE pz.produto_id = p.id_produto
+            AND pz.ativo = true
+            AND COALESCE(pz.preco_por_letra, 0) > 0
+        )
+      )
       AND (
         COALESCE(ecc.controla_estoque, true) = false
         OR COALESCE(est.saldo, 0) > 0
