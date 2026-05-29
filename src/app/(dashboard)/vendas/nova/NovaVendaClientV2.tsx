@@ -1243,7 +1243,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     // abaixo atualiza o cache e o render do form detecta automaticamente.
     const cachedCfg = personalizacoesCache[produtoSel.id];
     const precoPorLetra = cachedCfg?.preco_por_letra;
-    let novoItem: ItemVenda = (precoPorLetra != null && precoPorLetra > 0)
+    let novoItem: Omit<ItemVenda, "_key"> = (precoPorLetra != null && precoPorLetra > 0)
       ? { ...novoItemBase, preco_lista: 0, preco_unitario: 0, total_item: 0, valor_comissao: 0 }
       : novoItemBase;
 

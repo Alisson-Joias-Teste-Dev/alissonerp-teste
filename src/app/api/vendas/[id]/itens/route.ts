@@ -232,7 +232,7 @@ export async function POST(
         LIMIT 1
       `;
       const precoBase = baseRow?.preco_venda != null ? Number(baseRow.preco_venda) : null;
-      if (!baseRow || !Number.isFinite(precoBase) || precoBase <= 0) {
+      if (!baseRow || precoBase == null || !Number.isFinite(precoBase) || precoBase <= 0) {
         return NextResponse.json(
           { error: `SKU base \"${skuBase}\" inválido para serviço de ródio (sem preço vigente)` },
           { status: 400 },

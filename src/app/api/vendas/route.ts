@@ -406,7 +406,7 @@ export async function POST(req: NextRequest) {
         // Legado: item.personalizagem = { valor: "JOAO" }
         // Multi:  item.personalizagem = { campos: [{ label: "Nome 1", valor: "Maria" }, ...] }
         // Se config tem preco_por_letra/ peso_por_letra, recalcula server-side.
-        let personalizacaoJson: PersonalizacaoQualquer | null = null;
+        let personalizacaoJson: PersonalizacaoQualquer | { valor: string } | null = null;
         let observacaoItem = item.observacao ?? null;
         let precoListaFinal    = item.preco_lista;
         let precoUnitarioFinal = item.preco_unitario;
@@ -448,7 +448,7 @@ export async function POST(req: NextRequest) {
               LIMIT 1
             `;
             const precoBase = baseRow?.preco_venda != null ? Number(baseRow.preco_venda) : null;
-            if (!baseRow || !Number.isFinite(precoBase) || precoBase <= 0) {
+            if (!baseRow || precoBase == null || !Number.isFinite(precoBase) || precoBase <= 0) {
               throw new Error(`SKU base "${skuBase}" inválido para serviço de ródio (sem preço vigente)`);
             }
 
