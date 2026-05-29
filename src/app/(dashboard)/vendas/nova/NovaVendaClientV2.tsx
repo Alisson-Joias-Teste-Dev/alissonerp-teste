@@ -179,6 +179,39 @@ function getPersCampo(item: ItemVenda, idx: number): string {
   if ("valor" in item.personalizacao) return idx === 0 ? (item.personalizacao.valor ?? "") : "";
   return item.personalizacao.campos[idx]?.valor ?? "";
 }
+
+function normalizarTextoBusca(valor: string | null | undefined): string {
+  return (valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function isServicoRodioProduto(produto: Produto | null): boolean {
+  if (!produto) return false;
+  const skuNorm = normalizarTextoBusca(produto.sku ?? "");
+  const nomeNorm = normalizarTextoBusca(produto.nome);
+  return skuNorm.includes("rodio") || skuNorm.includes("rhodio") || nomeNorm.includes("rodio") || nomeNorm.includes("rhodio");
+}
+
+/**
+ * REGRA DE NEGOCIO:
+ * O que: exibe no nome do item de ródio o SKU base informado pela consultora.
+ * Por que: a equipe precisa visualizar imediatamente qual joia será rodinada,
+ * sem depender de abrir detalhes/observação do item.
+ * Impacto: remover essa composição reduz rastreabilidade operacional e aumenta
+ * risco de executar serviço no SKU errado.
+ */
+function descricaoItemComBaseRodio(item: ItemVenda): string {
+  const skuBase = item.personalizacao && "valor" in item.personalizacao
+    ? (item.personalizacao.valor ?? "").trim().toUpperCase()
+    : "";
+  if (!skuBase) return item.nome_produto;
+  const nomeNorm = normalizarTextoBusca(item.nome_produto);
+  const ehRodio = nomeNorm.includes("rodio") || nomeNorm.includes("rhodio");
+  if (!ehRodio) return item.nome_produto;
+  return `${item.nome_produto} - Base: ${skuBase}`;
+}
 function isPersMulti(item: ItemVenda): boolean {
   return !!item.personalizacao && "campos" in item.personalizacao;
 }
@@ -586,6 +619,10 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [pctDesconto, setPctDesconto] = useState(0);
   const [descontoErr, setDescontoErr] = useState("");
   const [addingItem, setAddingItem] = useState(false);
+  const [rodioSkuBase, setRodioSkuBase] = useState("");
+  const [rodioPreviewValor, setRodioPreviewValor] = useState<number | null>(null);
+  const [rodioValidando, setRodioValidando] = useState(false);
+  const [rodioErro, setRodioErro] = useState("");
   const [pendingAuths, setPendingAuths] = useState<Record<string, PendingAuth>>({});
   // Cache de configs de personalização por produto_id.
   //   null  → ja consultado, produto NAO tem config
@@ -1160,21 +1197,73 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     );
   }
 
-  function handleAddItem() {
+  async function calcularPreviewRodioPorSkuBase(skuBase: string): Promise<number | null> {
+    const sku = skuBase.trim();
+    if (!sku) return null;
+    const res = await fetch(`/api/vendas/produtos/busca?q=${encodeURIComponent(sku)}&limit=20`);
+    if (!res.ok) return null;
+    const lista = (await res.json()) as Produto[];
+    const exato = lista.find((p) => (p.sku ?? "").toLowerCase() === sku.toLowerCase());
+    if (!exato || exato.preco_venda == null || Number(exato.preco_venda) <= 0) return null;
+    return Math.round(Number(exato.preco_venda) * 0.3 * 100) / 100;
+  }
+
+  async function handleAddItem() {
     if (!produtoSel) return;
+
+    // REGRA DE NEGOCIO (Ródio automático):
+    // O que: quando o serviço selecionado é ródio, exigimos SKU base e calculamos preview em 30% do preço da joia.
+    // Por que: evita erro humano no cálculo manual e alinha o valor que a consultora vê com a regra oficial.
+    // Impacto: sem este bloco, o item pode ser adicionado com valor incorreto e gerar divergência financeira.
+    const ehRodio = isServicoRodioProduto(produtoSel);
+    let precoRodio: number | null = null;
+    if (ehRodio) {
+      const skuBase = rodioSkuBase.trim();
+      if (!skuBase) {
+        setRodioErro("Informe o SKU base da joia para calcular o ródio automaticamente.");
+        return;
+      }
+      setRodioValidando(true);
+      setRodioErro("");
+      try {
+        precoRodio = await calcularPreviewRodioPorSkuBase(skuBase);
+      } finally {
+        setRodioValidando(false);
+      }
+      if (precoRodio == null) {
+        setRodioErro(`Não foi possível calcular o ródio para SKU ${skuBase}. Verifique se o SKU existe e tem preço.`);
+        return;
+      }
+      setRodioPreviewValor(precoRodio);
+    }
+
     const novoItemBase = calcItem(produtoSel, qtd, pctDesconto);
     // Se o produto ja tem config com preco_por_letra no cache, zera precos iniciais
     // (serao calculados ao digitar o nome). Se ainda nao esta no cache, o fetch
     // abaixo atualiza o cache e o render do form detecta automaticamente.
     const cachedCfg = personalizacoesCache[produtoSel.id];
     const precoPorLetra = cachedCfg?.preco_por_letra;
-    const novoItem = (precoPorLetra != null && precoPorLetra > 0)
+    let novoItem: ItemVenda = (precoPorLetra != null && precoPorLetra > 0)
       ? { ...novoItemBase, preco_lista: 0, preco_unitario: 0, total_item: 0, valor_comissao: 0 }
       : novoItemBase;
+
+    if (ehRodio && precoRodio != null) {
+      const totalRodio = Math.round(precoRodio * qtd * 100) / 100;
+      novoItem = {
+        ...novoItem,
+        preco_lista: precoRodio,
+        preco_unitario: precoRodio,
+        total_item: totalRodio,
+        valor_comissao: Math.round(totalRodio * (novoItem.pct_comissao / 100) * 100) / 100,
+        personalizacao: { valor: rodioSkuBase.trim().toUpperCase() },
+      };
+    }
+
     setItens(prev => [...prev, { _key: uid(), ...novoItem }]);
     // Busca config de personalizacao do produto (async, nao bloqueia o add)
     void fetchPersonalizacaoConfig(produtoSel.id);
     setProdutoSel(null); setQtd(1); setPctDesconto(0); setDescontoErr(""); setAddingItem(false);
+    setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro("");
   }
 
   function handleAddServico() {
@@ -2030,7 +2119,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                     <tbody>
                       {itens.map(item => (
                         <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
-                          <td className="px-3 py-2 font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
+                          <td className="px-3 py-2 font-medium" style={{ color: "#1A1A1A" }}>{descricaoItemComBaseRodio(item)}</td>
                           <td className="px-3 py-2 text-center">
                             <input type="number" min={1} value={item.quantidade}
                               onChange={e => updateItem(item._key, "quantidade", e.target.value)}
@@ -2067,6 +2156,25 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                 />
                 {produtoSel && (
                   <div className="mt-3 flex items-end gap-3 flex-wrap">
+                    {isServicoRodioProduto(produtoSel) && (
+                      <div className="min-w-[260px]">
+                        <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>SKU da joia base</label>
+                        <input
+                          type="text"
+                          value={rodioSkuBase}
+                          onChange={(e) => { setRodioSkuBase(e.target.value.toUpperCase()); setRodioErro(""); }}
+                          placeholder="Ex: AJ1519"
+                          className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none"
+                          style={{ borderColor: rodioErro ? "#DC2626" : C.cremeBorder }}
+                        />
+                        {rodioErro && <p className="text-[11px] mt-0.5" style={{ color: "#DC2626" }}>{rodioErro}</p>}
+                        {rodioPreviewValor != null && !rodioErro && (
+                          <p className="text-[11px] mt-0.5" style={{ color: "#065F46" }}>
+                            Valor automático do ródio (30%): {fmt(rodioPreviewValor)}
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div>
                       <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Qtd</label>
                       <input type="number" min={1} value={qtd} onChange={e => setQtd(Math.max(1, Number(e.target.value)))}
@@ -2081,12 +2189,14 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                       {pctDesconto > maxDesconto && <p className="text-[11px] mt-0.5" style={{ color: "#EA580C" }}>Precisa aprovação</p>}
                     </div>
                     <div className="text-xs" style={{ color: "#6B7280" }}>
-                      = {produtoSel ? fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario) : "—"}
+                      = {produtoSel && isServicoRodioProduto(produtoSel) && rodioPreviewValor != null
+                        ? fmt(rodioPreviewValor)
+                        : produtoSel ? fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario) : "—"}
                     </div>
-                    <button onClick={handleAddItem} disabled={false}
+                    <button onClick={() => void handleAddItem()} disabled={rodioValidando}
                       className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50"
                       style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                      <Plus size={14} /> Adicionar
+                      <Plus size={14} /> {rodioValidando ? "Validando..." : "Adicionar"}
                     </button>
                   </div>
                 )}
@@ -2685,7 +2795,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                             {produtoSel ? fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario) : "—"}
                           </div>
                         </div>
-                        <button onClick={handleAddItem} disabled={false}
+                        <button onClick={() => void handleAddItem()} disabled={false}
                           className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium disabled:opacity-40"
                           style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                           <Plus size={14} /> Confirmar

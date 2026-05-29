@@ -2517,7 +2517,15 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                         <tr key={`${item._key}-pers`} style={{ backgroundColor: "#FFFCF5" }}>
                           <td colSpan={20} className="px-4 py-2 border-t" style={{ borderColor: C.cremeBorder }}>
                             <div className="flex items-center gap-2 flex-wrap pl-3 border-l-2" style={{ borderColor: "#D4A843" }}>
-                              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.esmeralda }}>🏷️ Nome a gravar</span>
+                              {/*
+                                REGRA DE NEGOCIO:
+                                - O que: para o item SRV-RODIO, o rótulo da personalização deve ser "SKU base".
+                                - Por que: no fluxo de ródio, o valor salvo em personalizacao.valor representa o SKU da joia base, não um nome gravado.
+                                - Impacto: sem essa distinção, a tela induz erro operacional ao mostrar "Nome a gravar" para um dado técnico de rastreabilidade.
+                              */}
+                              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.esmeralda }}>
+                                🏷️ {((item.sku ?? "").toUpperCase() === "SRV-RODIO" || /rodio|rhodio/i.test(item.nome_produto)) ? "SKU base" : "Nome a gravar"}
+                              </span>
                               <span className="text-xs font-mono font-bold px-2 py-0.5 rounded" style={{ backgroundColor: "#FFF8E6", color: "#92400E", letterSpacing: "0.08em" }}>
                                 {item.personalizacao.valor.toUpperCase()}
                               </span>

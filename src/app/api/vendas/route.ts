@@ -85,6 +85,23 @@ import {
   type CampoPersonalizacao,
 } from "@/lib/personalizacao-validacao";
 
+function normalizarTextoBusca(valor: string | null | undefined): string {
+  return (valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function isServicoRodio(sku: string | null | undefined, nome: string | null | undefined): boolean {
+  const skuNorm = normalizarTextoBusca(sku);
+  const nomeNorm = normalizarTextoBusca(nome);
+  return skuNorm === "srv-rodio" || skuNorm.includes("rodio") || skuNorm.includes("rhodio") || nomeNorm.includes("rodio") || nomeNorm.includes("rhodio");
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 // ─── GET /api/vendas ───────────────────────────────────────────────────────────
 // Query params: inicio, fim, situacao, vendedor_id, q (busca)
 export async function GET(req: NextRequest) {
@@ -398,6 +415,61 @@ export async function POST(req: NextRequest) {
         let pesoEstimadoFinal: number | null = item.peso_estimado ?? null;
 
         if (item.produto_id) {
+          // REGRA DE NEGOCIO (Ródio automático):
+          // O que: quando o item é serviço de ródio, o preço NÃO vem digitado; ele é recalculado no backend
+          // com base no SKU da joia informada em personalizacao.valor.
+          // Por que: evita erro operacional e impede manipulação manual do valor do serviço.
+          // Impacto: remover este bloco volta a depender de cálculo manual da consultora e reabre risco financeiro.
+          const [metaProduto] = await tx`
+            SELECT p.sku, p.nome, ti.tipo_item
+            FROM public.produtos p
+            LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
+            WHERE p.id_produto = ${item.produto_id}
+            LIMIT 1
+          `;
+          const ehServicoRodio =
+            (metaProduto?.tipo_item === "servico" || normalizarTextoBusca(typeof metaProduto?.sku === "string" ? metaProduto.sku : null) === "srv-rodio") &&
+            isServicoRodio(
+              typeof metaProduto?.sku === "string" ? metaProduto.sku : null,
+              typeof metaProduto?.nome === "string" ? metaProduto.nome : null,
+            );
+          if (ehServicoRodio) {
+            const skuBase = item.personalizacao?.valor?.trim();
+            if (!skuBase) {
+              throw new Error(`Servico de rodio exige SKU base da joia no item "${item.sku ?? item.nome_produto}"`);
+            }
+
+            const [baseRow] = await tx`
+              SELECT p.id_produto, p.sku, p.nome, v.preco_venda
+              FROM public.produtos p
+              LEFT JOIN alissonerp.vw_produtos_geral_preco v ON v.id_produto = p.id_produto
+              WHERE LOWER(p.sku) = LOWER(${skuBase})
+                AND p.situacao = 'A'
+              LIMIT 1
+            `;
+            const precoBase = baseRow?.preco_venda != null ? Number(baseRow.preco_venda) : null;
+            if (!baseRow || !Number.isFinite(precoBase) || precoBase <= 0) {
+              throw new Error(`SKU base "${skuBase}" inválido para serviço de ródio (sem preço vigente)`);
+            }
+
+            const precoRodio = round2(precoBase * 0.3);
+            const qtdRodio = Math.max(1, Number(item.quantidade) || 1);
+            const totalRodio = round2(precoRodio * qtdRodio);
+            const pctComissaoRodio = Number(item.pct_comissao ?? 0);
+            const valorComissaoRodio = round2(totalRodio * (pctComissaoRodio / 100));
+
+            precoListaFinal = precoRodio;
+            precoUnitarioFinal = precoRodio;
+            totalItemFinal = totalRodio;
+            valorComissaoFinal = valorComissaoRodio;
+            const linhaRodio = `Ródio 30% - Base: ${String(baseRow.sku).toUpperCase()} - Preço base: R$ ${precoBase.toFixed(2)}`;
+            observacaoItem = [
+              observacaoItem?.trim() || "",
+              observacaoItem?.includes(linhaRodio) ? "" : linhaRodio,
+            ].filter(Boolean).join("\n");
+            personalizacaoJson = { valor: String(baseRow.sku) };
+          }
+
           const [cfg] = await tx`
             SELECT
               pp.id,

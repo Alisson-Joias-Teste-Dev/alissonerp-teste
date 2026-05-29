@@ -18,6 +18,23 @@ import { zodError, IdSchema } from "@/lib/schemas/common";
 import { LIMITS } from "@/lib/payload-limits";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 
+function normalizarTextoBusca(valor: string | null | undefined): string {
+  return (valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function isServicoRodio(sku: string | null | undefined, nome: string | null | undefined): boolean {
+  const skuNorm = normalizarTextoBusca(sku);
+  const nomeNorm = normalizarTextoBusca(nome);
+  return skuNorm === "srv-rodio" || skuNorm.includes("rodio") || skuNorm.includes("rhodio") || nomeNorm.includes("rodio") || nomeNorm.includes("rhodio");
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 const VendaItemPostSchema = z.object({
   produto_id: IdSchema.nullable().optional(),
   nome_produto: z.string().min(1, "nome_produto obrigatório").max(LIMITS.NOME_MAX),
@@ -178,6 +195,68 @@ export async function POST(
   let totalItemFinal     = body.total_item;
   let valorComissaoFinal = body.valor_comissao ?? 0;
   let pesoEstimadoFinal: number | null = body.peso_estimado ?? null;
+
+  // REGRA DE NEGOCIO (Ródio automático):
+  // O que: serviço de ródio sempre calcula no backend como 30% do preço da joia base.
+  // Por que: elimina cálculo manual e garante consistência entre consultoras.
+  // Impacto: sem este bloco, o preço do ródio volta a depender do valor digitado no frontend.
+  if (body.produto_id) {
+    const [metaProduto] = await sql`
+      SELECT p.sku, p.nome, ti.tipo_item
+      FROM public.produtos p
+      LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
+      WHERE p.id_produto = ${body.produto_id}
+      LIMIT 1
+    `;
+    const ehServicoRodio =
+      (metaProduto?.tipo_item === "servico" || normalizarTextoBusca(typeof metaProduto?.sku === "string" ? metaProduto.sku : null) === "srv-rodio") &&
+      isServicoRodio(
+        typeof metaProduto?.sku === "string" ? metaProduto.sku : null,
+        typeof metaProduto?.nome === "string" ? metaProduto.nome : null,
+      );
+    if (ehServicoRodio) {
+      const skuBase = typeof body.personalizacao?.valor === "string" ? body.personalizacao.valor.trim() : "";
+      if (!skuBase) {
+        return NextResponse.json(
+          { error: "Servico de rodio exige SKU base da joia" },
+          { status: 400 },
+        );
+      }
+
+      const [baseRow] = await sql`
+        SELECT p.id_produto, p.sku, p.nome, v.preco_venda
+        FROM public.produtos p
+        LEFT JOIN alissonerp.vw_produtos_geral_preco v ON v.id_produto = p.id_produto
+        WHERE LOWER(p.sku) = LOWER(${skuBase})
+          AND p.situacao = 'A'
+        LIMIT 1
+      `;
+      const precoBase = baseRow?.preco_venda != null ? Number(baseRow.preco_venda) : null;
+      if (!baseRow || !Number.isFinite(precoBase) || precoBase <= 0) {
+        return NextResponse.json(
+          { error: `SKU base \"${skuBase}\" inválido para serviço de ródio (sem preço vigente)` },
+          { status: 400 },
+        );
+      }
+
+      const precoRodio = round2(precoBase * 0.3);
+      const qtdRodio = Math.max(1, Number(body.quantidade) || 1);
+      const totalRodio = round2(precoRodio * qtdRodio);
+      const pctComissaoRodio = Number(body.pct_comissao ?? 0);
+      const valorComissaoRodio = round2(totalRodio * (pctComissaoRodio / 100));
+
+      precoListaFinal = precoRodio;
+      precoUnitarioFinal = precoRodio;
+      totalItemFinal = totalRodio;
+      valorComissaoFinal = valorComissaoRodio;
+      personalizacaoJson = { valor: String(baseRow.sku) };
+      const linhaRodio = `Ródio 30% - Base: ${String(baseRow.sku).toUpperCase()} - Preço base: R$ ${precoBase.toFixed(2)}`;
+      observacaoFinal = [
+        observacaoFinal?.trim() || "",
+        observacaoFinal?.includes(linhaRodio) ? "" : linhaRodio,
+      ].filter(Boolean).join("\n");
+    }
+  }
 
   if (body.produto_id) {
     const [cfg] = await sql`
