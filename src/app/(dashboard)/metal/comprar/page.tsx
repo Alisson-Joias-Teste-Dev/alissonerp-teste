@@ -22,8 +22,13 @@ export default async function ComprarMetalPage() {
   try {
     cotacaoOuro = await getCotacaoOuro();
     configs = await getModuloConfig();
-  } catch {
-    // fallback silencioso — o formulário vai mostrar erro nos cálculos
+  } catch (err) {
+    // REGRA DE NEGÓCIO:
+    // O QUE: registra falha de leitura da cotação/config do módulo metal no servidor.
+    // POR QUE: fallback silencioso escondia incidente de produção e exibia 0,00/g sem diagnóstico.
+    // IMPACTO: sem log, time não identifica rapidamente quebra de acesso/configuração do módulo.
+    console.error("[METAL][comprar/page] Falha ao carregar cotação/configuração", err);
+    // Mantém fallback visual seguro; o formulário exibe validações de cálculo.
   }
 
   return (

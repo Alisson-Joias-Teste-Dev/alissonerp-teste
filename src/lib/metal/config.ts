@@ -75,23 +75,33 @@ export async function updateModuloConfig(
  * para auditoria. Variações futuras da cotação não alteram registros passados.
  */
 export async function getCotacaoOuro(): Promise<number> {
-  // Tenta primeiro a tabela public.parametros (fonte principal)
-  let [row] = await sql`
-    SELECT ouro FROM public.parametros LIMIT 1
-  `;
-  if (row) {
-    const val = parseFloat(String(row.ouro));
-    if (!isNaN(val) && val > 0) return val;
+  // REGRA DE NEGÓCIO:
+  // O QUE: prioriza public.parametros.ouro e usa fallback em alissonerp.parametros.cotacao_ouro.
+  // POR QUE: em produção pode haver restrição de acesso/contexto na fonte principal; o módulo
+  //          não pode exibir cotação zerada se existe valor válido em fonte secundária oficial.
+  // IMPACTO: sem esse fallback, falha pontual de leitura vira 0,00/g na UI e bloqueia operação.
+
+  // Fonte principal do módulo metal.
+  try {
+    const [row] = await sql<{ ouro: string | number | null }[]>`
+      SELECT ouro FROM public.parametros LIMIT 1
+    `;
+    const val = Number(row?.ouro ?? 0);
+    if (Number.isFinite(val) && val > 0) return val;
+  } catch {
+    // Não interrompe aqui: tenta fallback oficial no schema alissonerp.
   }
 
-  // Fallback: tenta alissonerp.curva_config (campo auxiliar)
-  [row] = await sql`
-    SELECT start_mkp FROM alissonerp.curva_config WHERE id = 1
-  `;
-  if (row) {
-    // Usa gold_cost_percentage como referência (não é cotação, é fallback)
-    throw new Error("Cotação do ouro não configurada em public.parametros.ouro");
+  // Fallback oficial de cotação no ERP.
+  try {
+    const [row] = await sql<{ cotacao_ouro: string | number | null }[]>`
+      SELECT cotacao_ouro FROM alissonerp.parametros WHERE id = 1
+    `;
+    const val = Number(row?.cotacao_ouro ?? 0);
+    if (Number.isFinite(val) && val > 0) return val;
+  } catch {
+    // Deixa o erro final padronizado abaixo.
   }
 
-  throw new Error("Cotação do ouro não configurada. Configure em Configurações > Integrações.");
+  throw new Error("Cotação do ouro indisponível em public.parametros.ouro e alissonerp.parametros.cotacao_ouro.");
 }
