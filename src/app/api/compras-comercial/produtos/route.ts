@@ -14,8 +14,18 @@ export async function GET(req: NextRequest) {
   const q = (req.nextUrl.searchParams.get("q") ?? "").trim();
 
   const rows = await sql`
-    SELECT p.id_produto, p.nome, p.sku, p.fator, p.peso_precificado
+    SELECT
+      p.id_produto,
+      p.nome,
+      p.sku,
+      p.fator,
+      p.peso_precificado,
+      p.categoria,
+      p.categoria_precificacao,
+      p.tem_pedra_preciosa,
+      ppe.peso_ct AS peso_pedra_ct
     FROM public.produtos p
+    LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
     WHERE p.nome IS NOT NULL
       AND (${q}::text = '' OR p.nome ILIKE ${`%${q}%`} OR p.sku ILIKE ${`%${q}%`})
     ORDER BY p.nome

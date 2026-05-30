@@ -1,14 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
-import { zodError } from "@/lib/schemas/common";
 
 type Params = Promise<{ id: string }>;
-
-const SolicitarAprovacaoSchema = z.object({
-  aprovador_id: z.string().uuid().optional(),
-}).passthrough();
 
 function formatarMoedaBR(valor: number): string {
   return `R$ ${Number(valor || 0).toLocaleString("pt-BR", {
@@ -31,9 +25,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const raw = await req.json().catch(() => ({}));
-  const parsed = SolicitarAprovacaoSchema.safeParse(raw);
-  if (!parsed.success) return zodError(parsed.error);
+  void req;
 
   const [compra] = await sql`
     SELECT c.id, c.situacao, c.bloqueado, c.fornecedor_id, c.local_estoque_id, c.qtd_parcelas, c.primeiro_vencimento,
@@ -62,16 +54,17 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
     return NextResponse.json({ error: "Adicione pelo menos um item antes de solicitar aprovação" }, { status: 409 });
   }
 
-  let aprovadorId = parsed.data.aprovador_id ?? "";
-  if (!aprovadorId) {
-    const [cfg] = await sql`
-      SELECT valor
-      FROM alissonerp.configuracoes_sistema
-      WHERE chave = 'aprovador_compra_comercial'
-      LIMIT 1
-    `;
-    aprovadorId = String(cfg?.valor ?? "");
-  }
+  // REGRA DE NEGOCIO:
+  // - O que faz: resolve o aprovador exclusivamente pela configuracao central do sistema.
+  // - Por que: evita override manual pelo operador e garante governanca de aprovacao.
+  // - Impacto se alterado/removido: usuario pode escolher aprovador indevido e quebrar compliance.
+  const [cfg] = await sql`
+    SELECT valor
+    FROM alissonerp.configuracoes_sistema
+    WHERE chave = 'aprovador_compra_comercial'
+    LIMIT 1
+  `;
+  const aprovadorId = String(cfg?.valor ?? "");
 
   if (!aprovadorId) {
     return NextResponse.json({ error: "Nenhum aprovador configurado para compra comercial" }, { status: 409 });

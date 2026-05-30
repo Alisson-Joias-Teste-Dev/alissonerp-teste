@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Loader2, Plus, Search, ShoppingCart } from "lucide-react";
 import { formatMoeda } from "@/lib/formatters";
+import { calcularCustoPorCtPedra, calcularQtdPecasPedra } from "@/lib/compras-pedras";
 
 // REGRA DE NEGOCIO:
 // - O que faz: orquestra o fluxo de compra comercial (criar, receber, concluir, itens).
@@ -48,11 +49,34 @@ interface ItemCompraComercial {
   peso_total: number;
   valor_unitario: number;
   valor_total: number;
+  qtd_exata?: number | null;
+  produto_categoria?: string;
+  tem_pedra_preciosa?: boolean;
 }
 
 interface Local { id: number; nome: string }
 interface Fornecedor { id_contato: number; nome: string }
-interface ProdutoBusca { id_produto: number; nome: string; sku?: string; fator?: number; peso_precificado?: number }
+interface ProdutoBusca {
+  id_produto: number;
+  nome: string;
+  sku?: string;
+  fator?: number;
+  peso_precificado?: number;
+  categoria?: string;
+  categoria_precificacao?: string;
+  tem_pedra_preciosa?: boolean;
+  peso_pedra_ct?: number;
+}
+
+interface ProdutoSelecionadoMeta {
+  id_produto: number;
+  nome: string;
+  sku?: string;
+  categoria?: string;
+  categoria_precificacao?: string;
+  tem_pedra_preciosa?: boolean;
+  peso_pedra_ct?: number;
+}
 
 function fmtDate(d?: string | null): string {
   if (!d) return "-";
@@ -246,18 +270,34 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
   const [produtos, setProdutos] = useState<ProdutoBusca[]>([]);
   const [showSugestoesProduto, setShowSugestoesProduto] = useState(false);
   const [produtoId, setProdutoId] = useState("");
+  const [produtoSelecionadoMeta, setProdutoSelecionadoMeta] = useState<ProdutoSelecionadoMeta | null>(null);
   const [qtd, setQtd] = useState("");
   const [cotacaoReferencial, setCotacaoReferencial] = useState("");
   const [fatorOuro, setFatorOuro] = useState("1");
   const [valorGrama, setValorGrama] = useState("");
+  const [custoTotalPedra, setCustoTotalPedra] = useState("");
   const [pesoTotal, setPesoTotal] = useState("");
   const [msg, setMsg] = useState("");
   const [loadingAction, setLoadingAction] = useState(false);
-  const [showSolicitarAprovacao, setShowSolicitarAprovacao] = useState(false);
-  const [aprovadores, setAprovadores] = useState<Array<{ id: string; nome: string; role?: string }>>([]);
-  const [aprovadorSelecionado, setAprovadorSelecionado] = useState("");
 
   const bloqueada = compra.bloqueado || compra.situacao === "concluido";
+  const ehProdutoPedra = useMemo(() => {
+    const categoria = String(produtoSelecionadoMeta?.categoria ?? "").toLowerCase();
+    const categoriaPrecificacao = String(produtoSelecionadoMeta?.categoria_precificacao ?? "").toLowerCase();
+    const nome = String(produtoSelecionadoMeta?.nome ?? "").toLowerCase();
+    const pesoCt = Number(produtoSelecionadoMeta?.peso_pedra_ct ?? 0);
+    return (
+      categoria.startsWith("pedras") ||
+      categoriaPrecificacao.startsWith("pedras") ||
+      Boolean(produtoSelecionadoMeta?.tem_pedra_preciosa) ||
+      pesoCt > 0 ||
+      nome.includes("diamante") ||
+      nome.includes("zirc") ||
+      nome.includes("rubi") ||
+      nome.includes("esmeralda") ||
+      nome.includes("safira")
+    );
+  }, [produtoSelecionadoMeta]);
 
   const loadItens = useCallback(async () => {
     const data = await fetch(`/api/compras-comercial/${compra.id}/itens`).then((r) => r.json());
@@ -285,12 +325,37 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
     }
   }, [cotacaoReferencial, fatorOuro]);
 
+  const custoPorCtPedraCalc = useMemo(
+    () => calcularCustoPorCtPedra(Number(pesoTotal || 0), Number(custoTotalPedra || 0)),
+    [pesoTotal, custoTotalPedra]
+  );
+
+  const qtdPecasPedraCalc = useMemo(
+    () => calcularQtdPecasPedra(Number(pesoTotal || 0), Number(produtoSelecionadoMeta?.peso_pedra_ct ?? 0)),
+    [pesoTotal, produtoSelecionadoMeta?.peso_pedra_ct]
+  );
+
   async function addItem() {
     setMsg("");
-    // REGRA DE NEGOCIO: valida quantidade inteira antes de enviar para evitar erro no estoque.
+    // REGRA DE NEGOCIO:
+    // - O que faz: pedras usam ct total + custo total com quantidade estimada automatica; joias mantem quantidade manual.
+    // - Por que: evita contagem manual imprecisa em pedras pequenas e preserva fluxo atual para os demais produtos.
+    // - Impacto se alterado/removido: pode quebrar compras atuais ou voltar erro operacional de contagem.
     const qtdNum = Number(qtd);
-    if (!Number.isFinite(qtdNum) || qtdNum < 1 || !Number.isInteger(qtdNum)) {
+    if (!ehProdutoPedra && (!Number.isFinite(qtdNum) || qtdNum < 1 || !Number.isInteger(qtdNum))) {
       setMsg("Quantidade deve ser um numero inteiro positivo.");
+      return;
+    }
+    if (ehProdutoPedra && (!custoTotalPedra || Number(custoTotalPedra) <= 0)) {
+      setMsg("Para pedras, informe o custo total.");
+      return;
+    }
+    if (!ehProdutoPedra && (!valorGrama || Number(valorGrama) <= 0)) {
+      setMsg("Para joia, informe o valor por grama.");
+      return;
+    }
+    if (!pesoTotal || Number(pesoTotal) <= 0) {
+      setMsg(ehProdutoPedra ? "Para pedras, informe o ct total." : "Informe o peso total.");
       return;
     }
     const res = await fetch(`/api/compras-comercial/${compra.id}/itens`, {
@@ -298,10 +363,11 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         produto_id: Number(produtoId),
-        qtd: qtdNum,
+        qtd: ehProdutoPedra ? undefined : qtdNum,
         cotacao_referencial: cotacaoReferencial ? Number(cotacaoReferencial) : undefined,
         fator_ouro: fatorOuro ? Number(fatorOuro) : undefined,
-        valor_grama: Number(valorGrama),
+        custo_total: ehProdutoPedra ? Number(custoTotalPedra) : undefined,
+        valor_grama: ehProdutoPedra ? undefined : Number(valorGrama),
         peso_total: Number(pesoTotal),
       }),
     });
@@ -311,10 +377,12 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
       return;
     }
     setProdutoId("");
+    setProdutoSelecionadoMeta(null);
     setQtd("");
     setCotacaoReferencial("");
     setFatorOuro("1");
     setValorGrama("");
+    setCustoTotalPedra("");
     setPesoTotal("");
     setMsg("Item adicionado.");
     loadItens();
@@ -345,35 +413,28 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
     onUpdated();
   }
 
-  async function abrirSolicitarAprovacao() {
-    setShowSolicitarAprovacao(true);
-    if (aprovadores.length > 0) return;
-    const data = await fetch("/api/configuracoes/aprovadores").then((r) => r.json()).catch(() => null);
-    const lista = [
-      ...(data?.usuarios?.admins_devs ?? []),
-      ...(data?.usuarios?.diretores_admins ?? []),
-      ...(data?.usuarios?.gerentes ?? []),
-    ];
-    const uniq = Array.from(new Map(lista.map((u: { id: string; nome: string; role?: string }) => [u.id, u])).values());
-    setAprovadores(uniq);
-    if (data?.aprovador_compra_comercial) setAprovadorSelecionado(String(data.aprovador_compra_comercial));
-  }
-
   async function solicitarAprovacao() {
     setMsg("");
     setLoadingAction(true);
+    // REGRA DE NEGOCIO:
+    // - O que faz: dispara solicitacao sem permitir escolha manual de aprovador no front.
+    // - Por que: o aprovador oficial vem da configuracao central e deve ser aplicado no backend.
+    // - Impacto se alterado/removido: operador pode direcionar aprovacao para usuario indevido.
     const res = await fetch(`/api/compras-comercial/${compra.id}/solicitar-aprovacao`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ aprovador_id: aprovadorSelecionado || undefined }),
+      body: JSON.stringify({}),
     });
     const data = await res.json().catch(() => ({}));
     setLoadingAction(false);
     if (!res.ok) {
+      if (res.status === 409 && String(data?.error ?? "").includes("Nenhum aprovador configurado")) {
+        setMsg("Aprovador de compra comercial não configurado em Configurações > Aprovadores.");
+        return;
+      }
       setMsg(data.error ?? "Erro ao solicitar aprovação");
       return;
     }
-    setShowSolicitarAprovacao(false);
     setMsg("Aprovação solicitada. A ordem foi bloqueada para edição.");
     onUpdated();
   }
@@ -409,7 +470,16 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
               <tr key={i.id} className="border-t">
                 <td className="p-2">{i.produto_nome}</td>
                 <td className="p-2">{i.produto_sku ?? "-"}</td>
-                <td className="p-2 text-right">{Number(i.qtd).toFixed(2)}</td>
+                <td className="p-2 text-right">
+                  {(() => {
+                    const categoria = String(i.produto_categoria ?? "").toLowerCase();
+                    const ehPedra = categoria.startsWith("pedras") || Boolean(i.tem_pedra_preciosa);
+                    if (!ehPedra) return Number(i.qtd).toFixed(2);
+                    const qtdEst = Number(i.qtd ?? 0);
+                    const qtdExata = Number(i.qtd_exata ?? 0);
+                    return `${Number.isFinite(qtdEst) ? qtdEst.toFixed(0) : "0"} est.${Number.isFinite(qtdExata) && qtdExata > 0 ? ` (${qtdExata.toFixed(4)} exata)` : ""}`;
+                  })()}
+                </td>
                 <td className="p-2 text-right">
                   {(() => {
                     const valorGrama = Number(i.valor_grama ?? i.valor_unitario ?? 0);
@@ -458,6 +528,7 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
                   onChange={(e) => {
                     setBuscaProduto(e.target.value);
                     setProdutoId("");
+                    setProdutoSelecionadoMeta(null);
                     setShowSugestoesProduto(true);
                   }}
                 />
@@ -474,6 +545,19 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
                         style={{ color: C.verde }}
                         onClick={() => {
                           setProdutoId(String(p.id_produto));
+                          // REGRA DE NEGOCIO:
+                          // - O que faz: fixa metadados do produto selecionado para renderizar o formulario correto (pedra x joia).
+                          // - Por que: o operador precisa ver campos coerentes com o tipo do item sem perder contexto ao alterar busca.
+                          // - Impacto se alterado/removido: formulario pode alternar campos errados e gerar cadastro inconsistente.
+                          setProdutoSelecionadoMeta({
+                            id_produto: p.id_produto,
+                            nome: p.nome,
+                            sku: p.sku,
+                            categoria: p.categoria,
+                            categoria_precificacao: p.categoria_precificacao,
+                            tem_pedra_preciosa: p.tem_pedra_preciosa,
+                            peso_pedra_ct: p.peso_pedra_ct,
+                          });
                           setBuscaProduto(`${p.nome}${p.sku ? ` (${p.sku})` : ""}`);
                           // REGRA DE NEGOCIO:
                           // - O que faz: usa dados do cadastro como base (fator/peso) e deixa operador ajustar conforme compra real.
@@ -482,6 +566,11 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
                           if (p.fator != null) {
                             setFatorOuro(String(p.fator));
                           }
+                          setCustoTotalPedra("");
+                          setPesoTotal("");
+                          setQtd("");
+                          setCotacaoReferencial("");
+                          setValorGrama("");
                           setShowSugestoesProduto(false);
                         }}
                       >
@@ -496,30 +585,64 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
             <div>
               <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Quantidade</p>
               {/* REGRA DE NEGOCIO: apenas inteiros — estoque comercial usa pecas inteiras */}
-              <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="1" min="1" placeholder="Quantidade" value={qtd} onChange={(e) => setQtd(e.target.value)} />
+              <input
+                className="border rounded-lg px-3 py-2 text-sm w-full"
+                style={{ borderColor: C.borda }}
+                type="number"
+                step="1"
+                min="1"
+                placeholder={ehProdutoPedra ? "Calculada automaticamente" : "Quantidade"}
+                value={ehProdutoPedra ? (qtdPecasPedraCalc?.qtdEstimada ?? "") : qtd}
+                onChange={(e) => setQtd(e.target.value)}
+                disabled={ehProdutoPedra}
+              />
             </div>
             <div>
-              <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Peso total</p>
-              <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.001" placeholder="Peso total (g)" value={pesoTotal} onChange={(e) => setPesoTotal(e.target.value)} />
+              <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>{ehProdutoPedra ? "Ct total" : "Peso total"}</p>
+              <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.001" placeholder={ehProdutoPedra ? "Ct total" : "Peso total (g)"} value={pesoTotal} onChange={(e) => setPesoTotal(e.target.value)} />
             </div>
-            <div>
-              <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Cotação</p>
-              <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.01" placeholder="Cotação referencial" value={cotacaoReferencial} onChange={(e) => setCotacaoReferencial(e.target.value)} />
-            </div>
-            <div>
-              <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Fator</p>
-              <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.0001" placeholder="Fator" value={fatorOuro} onChange={(e) => setFatorOuro(e.target.value)} />
-              <p className="text-[11px] mt-1" style={{ color: "#7D8A86" }}>Ex.: 0,750</p>
-            </div>
-            <div>
-              <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Valor da grama</p>
-              <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.01" placeholder="Valor da grama" value={valorGrama} onChange={(e) => setValorGrama(e.target.value)} />
-            </div>
+            {ehProdutoPedra ? (
+              <>
+                <div>
+                  <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Custo total</p>
+                  <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.01" placeholder="Custo total (R$)" value={custoTotalPedra} onChange={(e) => setCustoTotalPedra(e.target.value)} />
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Custo/ct</p>
+                  <input className="border rounded-lg px-3 py-2 text-sm w-full bg-gray-50" style={{ borderColor: C.borda }} type="text" value={custoPorCtPedraCalc != null ? custoPorCtPedraCalc.toFixed(4) : ""} placeholder="Calculado automaticamente" readOnly />
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Cotação</p>
+                  <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.01" placeholder="Cotação referencial" value={cotacaoReferencial} onChange={(e) => setCotacaoReferencial(e.target.value)} />
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Fator</p>
+                  <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.0001" placeholder="Fator" value={fatorOuro} onChange={(e) => setFatorOuro(e.target.value)} />
+                  <p className="text-[11px] mt-1" style={{ color: "#7D8A86" }}>Ex.: 0,750</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold mb-1" style={{ color: "#7D8A86" }}>Valor da grama</p>
+                  <input className="border rounded-lg px-3 py-2 text-sm w-full" style={{ borderColor: C.borda }} type="number" step="0.01" placeholder="Valor da grama" value={valorGrama} onChange={(e) => setValorGrama(e.target.value)} />
+                </div>
+              </>
+            )}
             <button className="px-3 py-2 rounded-lg text-sm font-semibold" style={{ backgroundColor: C.verde, color: C.dourado }} onClick={addItem}>Adicionar</button>
           </div>
           <div className="text-xs" style={{ color: "#5B6B67" }}>
-            <strong>Peso unitario:</strong> {Number(qtd) > 0 && Number(pesoTotal) > 0 ? `${(Number(pesoTotal) / Number(qtd)).toFixed(3)} g` : "-"}
-            {Number(pesoTotal) > 0 && Number(valorGrama) > 0 ? ` • Total estimado: ${formatMoeda(Number(pesoTotal) * Number(valorGrama))}` : ""}
+            {ehProdutoPedra ? (
+              <>
+                <strong>Qtd exata (referência):</strong> {qtdPecasPedraCalc ? `${qtdPecasPedraCalc.qtdExata.toFixed(4)} pç` : "-"}
+                {custoPorCtPedraCalc != null && Number(pesoTotal) > 0 ? ` • Total estimado: ${formatMoeda(Number(pesoTotal) * custoPorCtPedraCalc)}` : ""}
+              </>
+            ) : (
+              <>
+                <strong>Peso unitario:</strong> {Number(qtd) > 0 && Number(pesoTotal) > 0 ? `${(Number(pesoTotal) / Number(qtd)).toFixed(3)} g` : "-"}
+                {Number(pesoTotal) > 0 && Number(valorGrama) > 0 ? ` • Total estimado: ${formatMoeda(Number(pesoTotal) * Number(valorGrama))}` : ""}
+              </>
+            )}
           </div>
         </div>
       )}
@@ -529,7 +652,7 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
           <button
             className="px-3 py-2 rounded"
             style={{ backgroundColor: C.verde, color: C.dourado }}
-            onClick={abrirSolicitarAprovacao}
+            onClick={solicitarAprovacao}
             disabled={loadingAction || itens.length === 0}
           >
             {loadingAction ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} className="inline mr-1" />} Solicitar Aprovação
@@ -537,34 +660,9 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
         )}
       </div>
 
-      {showSolicitarAprovacao && (
-        <div className="border rounded-xl p-3" style={{ borderColor: C.borda, backgroundColor: "#fff" }}>
-          <p className="text-sm font-semibold" style={{ color: C.verde }}>Escolher aprovador</p>
-          <p className="text-xs mt-1" style={{ color: "#6b7280" }}>Ao solicitar, a ordem será bloqueada até aprovação/rejeição.</p>
-          <select
-            className="w-full mt-2 border rounded-lg px-3 py-2 text-sm"
-            style={{ borderColor: C.borda }}
-            value={aprovadorSelecionado}
-            onChange={(e) => setAprovadorSelecionado(e.target.value)}
-          >
-            <option value="">Selecione quem vai aprovar</option>
-            {aprovadores.map((u) => (
-              <option key={u.id} value={u.id}>{u.nome}{u.role ? ` (${u.role})` : ""}</option>
-            ))}
-          </select>
-          <div className="flex gap-2 mt-3">
-            <button className="px-3 py-2 rounded border text-sm" style={{ borderColor: C.borda }} onClick={() => setShowSolicitarAprovacao(false)}>Cancelar</button>
-            <button
-              className="px-3 py-2 rounded text-sm font-semibold"
-              style={{ backgroundColor: C.verde, color: C.dourado }}
-              disabled={!aprovadorSelecionado || loadingAction}
-              onClick={solicitarAprovacao}
-            >
-              Confirmar Solicitação
-            </button>
-          </div>
-        </div>
-      )}
+      <p className="text-xs" style={{ color: "#6b7280" }}>
+        O aprovador da compra comercial é definido em Configurações &gt; Aprovadores.
+      </p>
 
       {msg && <p className="text-sm text-gray-700">{msg}</p>}
     </div>
