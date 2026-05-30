@@ -2,7 +2,8 @@
 // Aba "Aprovadores" na página de Configurações
 //
 // REGRA DE NEGÓCIO: permite que admin/desenvolvedor escolha quem aprova
-// cada tipo de solicitação (crédito, desconto, cartão).
+// cada tipo de solicitação (crédito, desconto, cartão, compra comercial,
+// compra de metal acima do teto).
 // Só exibe dropdowns editáveis para admin/desenvolvedor.
 // Os demais usuários só visualizam o nome do aprovador configurado.
 //
@@ -26,6 +27,7 @@ interface AprovadorConfig {
   aprovador_cartao_desconto_padrao: string;
   aprovadora_credito_gerente?: string;
   aprovador_compra_comercial?: string;
+  metal_aprovador_id?: string;
 }
 
 interface Usuario {
@@ -38,6 +40,7 @@ interface UsuariosPorRole {
   gerentes: Usuario[];
   diretores_admins: Usuario[];
   admins_devs: Usuario[];
+  metal_aprovadores: Usuario[];
 }
 
 const P = {
@@ -85,6 +88,13 @@ const CONFIG_ITENS = [
     usuariosKey: "admins_devs" as const,
     icone: "🧾",
   },
+  {
+    chave: "metal_aprovador_id" as const,
+    titulo: "Compra de Metal acima do teto",
+    descricao: "Aprova compras de metal quando o valor por grama ultrapassa o teto configurado",
+    usuariosKey: "metal_aprovadores" as const,
+    icone: "⚖️",
+  },
 ];
 
 export default function TabAprovadores() {
@@ -100,6 +110,7 @@ export default function TabAprovadores() {
     gerentes: [],
     diretores_admins: [],
     admins_devs: [],
+    metal_aprovadores: [],
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -115,8 +126,9 @@ export default function TabAprovadores() {
           aprovador_cartao_desconto_padrao: d.aprovador_cartao_desconto_padrao ?? "",
           aprovadora_credito_gerente: d.aprovadora_credito_gerente ?? "",
           aprovador_compra_comercial: d.aprovador_compra_comercial ?? "",
+          metal_aprovador_id: d.metal_aprovador_id ?? "",
         });
-        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [] });
+        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [] });
       })
       .finally(() => setLoading(false));
   }, []);
@@ -129,7 +141,7 @@ export default function TabAprovadores() {
   function getUserName(chave: string): string {
     const id = (config as any)[chave];
     if (!id) return "";
-    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs];
+    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores];
     const u = all.find((x) => x.id === id);
     return u?.nome ?? "";
   }

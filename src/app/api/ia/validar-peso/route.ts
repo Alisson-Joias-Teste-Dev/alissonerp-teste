@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       diferenca: parseFloat(diff.toFixed(3)),
       confianca: resultado.confianca,
       mensagem: match
-        ? `Peso confirmado: ${resultado.peso_balanca}g (diferença ${diff.toFixed(3)}g ≤ ${tolerancia}g)`
+        ? `Peso confirmado: ${resultado.peso_balanca}g`
         : `Peso não confere. Digitado: ${peso_referencia}g | Balança: ${resultado.peso_balanca}g | Diferença: ${diff.toFixed(3)}g > ${tolerancia}g`,
       provedor: resultado.provedor,
     });

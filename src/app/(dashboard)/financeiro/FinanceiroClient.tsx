@@ -71,6 +71,15 @@ interface CaixaBaixa {
   created_at: string;
 }
 
+interface CompraMetalResumo {
+  id: number;
+  numero: string;
+  peso_gramas: number;
+  valor_total: number;
+  created_at: string;
+  fornecedor_nome?: string | null;
+}
+
 interface ContaPagar {
   id: number;
   descricao: string;
@@ -1817,6 +1826,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   const [showConfirm, setShowConfirm] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [viewTab, setViewTab] = useState<"pendentes" | "historico">("pendentes");
+  const [viewTabOuro, setViewTabOuro] = useState<"pendentes" | "historico">("pendentes");
   const [formaFiltro, setFormaFiltro] = useState<string>("Todos");
   const [gatewaysFiltro, setGatewaysFiltro] = useState<string[]>([]);
   const [estornoTarget, setEstornoTarget] = useState<CaixaDinheiro | null>(null);
@@ -1833,15 +1843,42 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
     created_at: string;
     obs: string | null;
   }
+  interface BaixaOuroItem {
+    id: number;
+    baixa_id: number | null;
+    origem_tipo: "venda_ouro" | "compra_metal" | "recebimento_metal";
+    origem_id: number;
+    referencia: string;
+    pessoa_nome: string | null;
+    data_origem: string | null;
+    gramas: number;
+    valor_brl: number;
+    created_at: string;
+  }
+  interface RastreioOuroLegado {
+    id: number;
+    baixa_id: number | null;
+    evento: string;
+    gramas: number | null;
+    origem_nome: string | null;
+    destino_nome: string | null;
+    observacao: string | null;
+    created_at: string;
+  }
   const [baixasOuro, setBaixasOuro] = useState<BaixaOuro[]>([]);
   const [saldoOuroDisp, setSaldoOuroDisp] = useState<number>(0);
   const [loadingOuro, setLoadingOuro] = useState(false);
   const [showBaixaOuro, setShowBaixaOuro] = useState(false);
-  const [baixaOuroGrams, setBaixaOuroGrams] = useState("");
   const [baixaOuroDestino, setBaixaOuroDestino] = useState<"alisson" | "fabrica" | "service">("alisson");
   const [baixaOuroObs, setBaixaOuroObs] = useState("");
   const [baixaOuroErro, setBaixaOuroErro] = useState<string | null>(null);
   const [baixandoOuro, setBaixandoOuro] = useState(false);
+  const [itensByBaixa, setItensByBaixa] = useState<Record<number, BaixaOuroItem[]>>({});
+  const [itensLoadingByBaixa, setItensLoadingByBaixa] = useState<Record<number, boolean>>({});
+  const [rastreiosLegacyByBaixa, setRastreiosLegacyByBaixa] = useState<Record<number, RastreioOuroLegado[]>>({});
+  const [ouroSelecionadosIds, setOuroSelecionadosIds] = useState<string[]>([]);
+  const [itensBaixadosAtivos, setItensBaixadosAtivos] = useState<BaixaOuroItem[]>([]);
+  const [comprasMetal, setComprasMetal] = useState<CompraMetalResumo[]>([]);
 
   useEffect(() => {
     fetch("/api/configuracoes/gateways")
@@ -1862,10 +1899,18 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
     Promise.all([
       fetch("/api/financeiro/cofre-ouro/disponivel").then(r => r.ok ? r.json() : null),
       fetch("/api/financeiro/cofre-ouro/baixas").then(r => r.ok ? r.json() : null),
+      fetch("/api/metal/compras?status=confirmado&limit=200").then(r => r.ok ? r.json() : null),
+      fetch("/api/financeiro/cofre-ouro/baixas-itens").then(r => r.ok ? r.json() : []),
     ])
-      .then(([disp, bx]) => {
+      .then(([disp, bx, comprasResp, itensAtivos]) => {
         if (disp) setSaldoOuroDisp(Number(disp.disponivel_gramas ?? 0));
         if (Array.isArray(bx)) setBaixasOuro(bx);
+        if (comprasResp && Array.isArray(comprasResp.data)) {
+          setComprasMetal(comprasResp.data as CompraMetalResumo[]);
+        }
+        if (Array.isArray(itensAtivos)) {
+          setItensBaixadosAtivos(itensAtivos as BaixaOuroItem[]);
+        }
       })
       .catch(() => useErrorStore.getState().push("Erro ao carregar baixas de ouro", { level: "warning" }))
       .finally(() => setLoadingOuro(false));
@@ -1874,6 +1919,10 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   useEffect(() => {
     if (caixaOuroTrigger > 0) setFormaFiltro("Ouro");
   }, [caixaOuroTrigger]);
+
+  useEffect(() => {
+    if (formaFiltro === "Ouro") setViewTabOuro("pendentes");
+  }, [formaFiltro]);
 
   // Mapeia formas legadas para o gateway correspondente
   const MP_FORMAS = ["Cartão de Crédito", "Pix", "PIX", "Manual (MP)", "Mercado Pago"];
@@ -1888,6 +1937,10 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   const [dataFimC, setDataFimC] = useState(hojeStr);
   const [mesC, setMesC] = useState(hojeStr.slice(0, 7));
   const { ini: cIni, fim: cFim } = calcPeriodo(periodoC, { dataInicio: dataInicioC, dataFim: dataFimC, mes: mesC });
+
+  useEffect(() => {
+    setOuroSelecionadosIds([]);
+  }, [formaFiltro, cIni, cFim, mesC]);
 
   const inPeriod = (d: string | null) => !!d && d.slice(0, 10) >= cIni && d.slice(0, 10) <= cFim;
   const sumList  = (list: CaixaDinheiro[]) => list.reduce((s, r) => s + Number(r.valor), 0);
@@ -1912,6 +1965,56 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
 
   const listaFiltrada = (formaFiltro === "Todos" ? caixaList : caixaList.filter(r => gatewayEfetivo(r.forma) === formaFiltro))
     .filter(r => inPeriod(r.data_confirmacao));
+  const comprasMetalPeriodo = comprasMetal.filter((c) => inPeriod(c.created_at));
+
+  type OuroMov = {
+    id: string;
+    origem: "Venda" | "Compra Metal";
+    origem_tipo: "venda_ouro" | "compra_metal";
+    origem_id: number;
+    referencia: string;
+    pessoa: string;
+    data: string | null;
+    ouro_gramas: number;
+    valor: number;
+    venda?: CaixaDinheiro;
+  };
+  const ouroMovimentos: OuroMov[] = [
+    ...listaFiltrada
+      .filter((r) => gatewayEfetivo(r.forma) === "Ouro")
+      .map((r) => ({
+        id: `venda-${r.id}`,
+        origem: "Venda" as const,
+        origem_tipo: "venda_ouro" as const,
+        origem_id: r.id,
+        referencia: `#${r.numero_venda}`,
+        pessoa: r.vendedor_nome ?? "—",
+        data: r.data_confirmacao,
+        ouro_gramas: Number(r.ouro_gramas ?? 0),
+        valor: Number(r.valor ?? 0),
+        venda: r,
+      })),
+    ...comprasMetalPeriodo.map((c) => ({
+      id: `compra-${c.id}`,
+      origem: "Compra Metal" as const,
+      origem_tipo: "compra_metal" as const,
+      origem_id: c.id,
+      referencia: c.numero,
+      pessoa: c.fornecedor_nome ?? "—",
+      data: c.created_at,
+      ouro_gramas: Number(c.peso_gramas ?? 0),
+      valor: Number(c.valor_total ?? 0),
+    })),
+  ].sort((a, b) => {
+    const at = a.data ? new Date(a.data).getTime() : 0;
+    const bt = b.data ? new Date(b.data).getTime() : 0;
+    return bt - at;
+  });
+  const baixadoKeys = new Set(itensBaixadosAtivos.map((it) => `${it.origem_tipo}:${it.origem_id}`));
+  const ouroMovimentosPendentes = ouroMovimentos.filter((m) => !baixadoKeys.has(`${m.origem_tipo}:${m.origem_id}`));
+  const ouroSelecionados = ouroMovimentosPendentes.filter((m) => ouroSelecionadosIds.includes(m.id));
+  const ouroSelecionadoTotalG = ouroSelecionados.reduce((s, m) => s + Number(m.ouro_gramas), 0);
+  const ouroSelecionadoTotalValor = ouroSelecionados.reduce((s, m) => s + Number(m.valor), 0);
 
   const showBaixa = formaFiltro === "Todos" || formaFiltro === "Dinheiro";
 
@@ -1967,8 +2070,8 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   }
 
   async function darBaixaOuro() {
-    const g = parseFloat(baixaOuroGrams.replace(",", "."));
-    if (!g || g <= 0) { setBaixaOuroErro("Informe um peso válido"); return; }
+    const g = Number(ouroSelecionadoTotalG);
+    if (!g || g <= 0) { setBaixaOuroErro("Selecione ao menos uma linha para dar baixa"); return; }
     if (g > saldoOuroDisp) { setBaixaOuroErro(`Saldo insuficiente. Disponível: ${saldoOuroDisp.toFixed(3)}g`); return; }
     setBaixandoOuro(true);
     setBaixaOuroErro(null);
@@ -1980,18 +2083,77 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
           gramas: g,
           destino: baixaOuroDestino,
           obs: baixaOuroObs.trim() || undefined,
+          itens: ouroSelecionados.map((m) => ({
+            origem_tipo: m.origem_tipo,
+            origem_id: m.origem_id,
+            referencia: m.referencia,
+            pessoa_nome: m.pessoa,
+            data_origem: m.data,
+            gramas: Number(m.ouro_gramas),
+            valor_brl: Number(m.valor),
+          })),
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) { setBaixaOuroErro(json.error || "Erro ao dar baixa"); setBaixandoOuro(false); return; }
       setBaixasOuro(prev => [json, ...prev]);
       setSaldoOuroDisp(prev => prev - g);
-      setBaixaOuroGrams("");
+      setOuroSelecionadosIds([]);
       setBaixaOuroObs("");
       setBaixaOuroDestino("alisson");
       setShowBaixaOuro(false);
+      setViewTabOuro("historico");
+
+      // REGRA DE NEGÓCIO: após registrar baixa, os itens devem sair dos pendentes.
+      // Recarrega itens já vinculados a baixas ativas para filtrar a lista.
+      const [bxResp, itensResp, dispResp] = await Promise.all([
+        fetch("/api/financeiro/cofre-ouro/baixas").then((r) => r.ok ? r.json() : null),
+        fetch("/api/financeiro/cofre-ouro/baixas-itens").then((r) => r.ok ? r.json() : []),
+        fetch("/api/financeiro/cofre-ouro/disponivel").then((r) => r.ok ? r.json() : null),
+      ]);
+      if (Array.isArray(bxResp)) setBaixasOuro(bxResp);
+      if (Array.isArray(itensResp)) setItensBaixadosAtivos(itensResp as BaixaOuroItem[]);
+      if (dispResp) setSaldoOuroDisp(Number(dispResp.disponivel_gramas ?? 0));
     } catch { setBaixaOuroErro("Erro de rede"); }
     setBaixandoOuro(false);
+  }
+
+  /**
+   * REGRA DE NEGÓCIO: no histórico do ouro, cada baixa deve exibir suas linhas
+   * de rastreio quando expandida (mesmo padrão do histórico de dinheiro).
+   *
+   * IMPACTO: sem este carregamento por baixa, o usuário não enxerga o detalhe
+   * operacional do que compõe aquela baixa.
+   */
+  async function carregarItensBaixa(baixaId: number) {
+    if (itensByBaixa[baixaId]) return;
+    setItensLoadingByBaixa((prev) => ({ ...prev, [baixaId]: true }));
+    try {
+      const res = await fetch(`/api/financeiro/cofre-ouro/baixas-itens?baixa_id=${baixaId}`);
+      const json = await res.json().catch(() => []);
+      if (res.ok && Array.isArray(json)) {
+        setItensByBaixa((prev) => ({ ...prev, [baixaId]: json as BaixaOuroItem[] }));
+        // REGRA DE NEGÓCIO: baixas antigas não tinham itens; usar rastreio legado
+        // para manter histórico visível sem inventar origem inexistente.
+        if ((json as BaixaOuroItem[]).length === 0) {
+          const legRes = await fetch(`/api/financeiro/cofre-ouro/rastreios?baixa_id=${baixaId}`);
+          const legJson = await legRes.json().catch(() => []);
+          if (legRes.ok && Array.isArray(legJson)) {
+            setRastreiosLegacyByBaixa((prev) => ({ ...prev, [baixaId]: legJson as RastreioOuroLegado[] }));
+          } else {
+            setRastreiosLegacyByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
+          }
+        }
+      } else {
+        setItensByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
+        setRastreiosLegacyByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
+      }
+    } catch {
+      setItensByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
+      setRastreiosLegacyByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
+    } finally {
+      setItensLoadingByBaixa((prev) => ({ ...prev, [baixaId]: false }));
+    }
   }
 
   const PagamentosTable = ({ lista, showForma, showEstornar }: { lista: CaixaDinheiro[]; showForma?: boolean; showEstornar?: boolean }) => {
@@ -2135,7 +2297,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard label="Total no Período" value={fmt(sumList(listaFiltrada))}                                     valueColor={C.esmeralda} icon={ArrowDownCircle} accent={C.esmeralda} />
           <KpiCard label="Ouro no Período"  value={`${ouroGramsPeriodo.toFixed(3)}g`}                               valueColor="#92400E"     icon={TrendingUp}      accent="#92400E" />
-          <KpiCard label="Qtd. Transações"  value={String(listaFiltrada.length)}                                   valueColor={C.cinza}     icon={Landmark}        accent={C.cinza} />
+          <KpiCard label="Qtd. Transações"  value={String(ouroMovimentosPendentes.length)}                        valueColor={C.cinza}     icon={Landmark}        accent={C.cinza} />
           <KpiCard label="Total Histórico"  value={fmt(sumList(caixaList.filter(r => gatewayEfetivo(r.forma) === formaFiltro)))}   valueColor={C.cinza}     icon={TrendingUp}      accent={C.cinza} sub={ouroTotalG > 0 ? `${ouroTotalG.toFixed(3)}g acumulado` : undefined} />
         </div>
       ) : (
@@ -2268,49 +2430,18 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
             </div>
           </div>
 
-          {/* Histórico de baixas */}
-          {baixasOuro.length > 0 ? (
-            <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
-                      <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Usuário</th>
-                      <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: "#92400E" }}>Ouro (g)</th>
-                      <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Destino</th>
-                      <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Data / Hora</th>
-                      <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Status</th>
-                      <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Obs</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {baixasOuro.map(b => {
-                      const statusColor = b.status === "concluido" ? C.verde : b.status === "cancelado" ? C.vermelho : C.ambar;
-                      const statusLabel = b.status === "concluido" ? "Concluído" : b.status === "cancelado" ? "Cancelado" : b.status === "em_trafego" ? "Em Tráfego" : "Pendente";
-                      const destinoLabel = b.destino === "alisson" ? "Alisson (direta)" : b.destino === "fabrica" ? "Fábrica" : "Service";
-                      return (
-                        <tr key={b.id} className="border-t hover:bg-gray-50 transition-colors" style={{ borderColor: C.cremeBorder }}>
-                          <td className="px-4 py-3 text-sm" style={{ color: "#374151" }}>{b.realizado_nome || "—"}</td>
-                          <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: "#92400E" }}>{Number(b.gramas).toFixed(3)}g</td>
-                          <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{destinoLabel}</td>
-                          <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{fmtDatetime(b.created_at)}</td>
-                          <td className="px-4 py-3">
-                            <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                              style={{ backgroundColor: statusColor + "20", color: statusColor }}>{statusLabel}</span>
-                          </td>
-                          <td className="px-4 py-3 text-xs max-w-[160px] truncate" style={{ color: C.cinza }}>{b.obs || "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-xl border p-6 text-center" style={{ borderColor: C.cremeBorder }}>
-              <p className="text-sm" style={{ color: C.cinza }}>Nenhuma baixa de ouro registrada ainda.</p>
-            </div>
-          )}
+          <div className="flex gap-1 rounded-xl p-1 border" style={{ backgroundColor: C.cremeBg, borderColor: C.cremeBorder }}>
+                {([
+                  { key: "pendentes", label: `Pendentes de Baixa (${ouroMovimentosPendentes.length})` },
+                  { key: "historico", label: `Histórico de Baixas (${baixasOuro.length})` },
+                ] as const).map(t => (
+              <button key={t.key} onClick={() => setViewTabOuro(t.key)}
+                className="flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors"
+                style={{ backgroundColor: viewTabOuro === t.key ? "#92400E" : "transparent", color: viewTabOuro === t.key ? "white" : C.cinza }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -2323,13 +2454,11 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
               <p className="text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Saldo disponível</p>
               <p className="text-2xl font-bold tabular-nums" style={{ color: "#92400E" }}>{saldoOuroDisp.toFixed(3)}g</p>
             </div>
-            <div>
-              <label className="text-xs font-medium block mb-1" style={{ color: "#374151" }}>Gramas a retirar</label>
-              <input type="number" step="0.001" min="0.001" value={baixaOuroGrams}
-                onChange={e => { setBaixaOuroGrams(e.target.value); setBaixaOuroErro(null); }}
-                placeholder={`Máx: ${saldoOuroDisp.toFixed(3)}g`}
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+            <div className="rounded-xl p-3 border" style={{ borderColor: C.cremeBorder, backgroundColor: "white" }}>
+              <p className="text-xs" style={{ color: C.cinza }}>Linhas selecionadas para baixa</p>
+              <p className="text-sm font-semibold mt-1" style={{ color: "#1A1A1A" }}>
+                {ouroSelecionadosIds.length} item(ns) · {ouroSelecionadoTotalG.toFixed(3)}g · {fmt(ouroSelecionadoTotalValor)}
+              </p>
             </div>
             <div>
               <label className="text-xs font-medium block mb-1" style={{ color: "#374151" }}>Destino</label>
@@ -2361,7 +2490,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
               <button onClick={() => setShowBaixaOuro(false)} disabled={baixandoOuro}
                 className="px-4 py-2 rounded-lg text-sm border font-medium disabled:opacity-40"
                 style={{ borderColor: C.cremeBorder, color: C.cinza }}>Cancelar</button>
-              <button onClick={darBaixaOuro} disabled={baixandoOuro}
+              <button onClick={darBaixaOuro} disabled={baixandoOuro || ouroSelecionadosIds.length === 0}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
                 style={{ backgroundColor: "#D97706", color: "white" }}>
                 {baixandoOuro ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
@@ -2416,6 +2545,204 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
             </div>
           )}
         </>
+      ) : formaFiltro === "Ouro" && viewTabOuro === "pendentes" ? (
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
+                  <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Sel.</th>
+                  <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Origem</th>
+                  <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Referência</th>
+                  <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Pessoa</th>
+                  <th className="px-4 py-3 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Data</th>
+                  <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: "#92400E" }}>Ouro (g)</th>
+                  <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Valor</th>
+                  <th className="px-4 py-3 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ouroMovimentosPendentes.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-8 text-center text-sm" style={{ color: C.cinza }}>Nenhum registro.</td>
+                  </tr>
+                )}
+                {ouroMovimentosPendentes.map((r) => (
+                  <tr key={r.id} className="border-t hover:bg-gray-50 transition-colors" style={{ borderColor: C.cremeBorder }}>
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={ouroSelecionadosIds.includes(r.id)}
+                        onChange={(e) => {
+                          setOuroSelecionadosIds((prev) => e.target.checked ? [...prev, r.id] : prev.filter((id) => id !== r.id));
+                        }}
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                        style={{
+                          backgroundColor: r.origem === "Compra Metal" ? "#FEF3C7" : C.esmeraldaLt,
+                          color: r.origem === "Compra Metal" ? "#92400E" : C.esmeralda,
+                        }}>
+                        {r.origem}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm font-medium" style={{ color: C.esmeralda }}>{r.referencia}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: "#374151" }}>{r.pessoa}</td>
+                    <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{fmtDatetime(r.data)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: "#92400E" }}>{r.ouro_gramas.toFixed(3)}g</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: C.verde }}>{fmt(r.valor)}</td>
+                    <td className="px-4 py-3 text-right">
+                      {r.venda && podeBaixar ? (
+                        <button
+                          onClick={() => { setEstornoErro(null); setEstornoTarget(r.venda!); }}
+                          className="text-xs px-2.5 py-1 rounded-lg border font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-1"
+                          style={{ borderColor: C.vermelho, color: C.vermelho, backgroundColor: "white" }}
+                        >
+                          <RefreshCw size={11} /> Estornar
+                        </button>
+                      ) : (
+                        <span className="text-xs" style={{ color: C.cinza }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {ouroMovimentosPendentes.length > 0 && (
+            <div className="px-4 py-3 border-t flex justify-end gap-4" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+              <p className="text-xs tabular-nums font-medium" style={{ color: C.cinza }}>
+                Selecionado: {ouroSelecionadosIds.length} linha(s)
+              </p>
+              <p className="text-xs tabular-nums font-medium" style={{ color: "#92400E" }}>
+                Ouro selecionado: {ouroSelecionadoTotalG.toFixed(3)}g
+              </p>
+              <p className="text-xs tabular-nums font-medium" style={{ color: C.verde }}>
+                Total selecionado: {fmt(ouroSelecionadoTotalValor)}
+              </p>
+            </div>
+          )}
+        </div>
+      ) : formaFiltro === "Ouro" && viewTabOuro === "historico" ? (
+        baixasOuro.length > 0 ? (
+          <div className="space-y-3">
+            {baixasOuro.map((b) => {
+              const statusColor = b.status === "concluido" ? C.verde : b.status === "cancelado" ? C.vermelho : C.ambar;
+              const statusLabel = b.status === "concluido" ? "Concluído" : b.status === "cancelado" ? "Cancelado" : b.status === "em_trafego" ? "Em Tráfego" : "Pendente";
+              const itens = itensByBaixa[b.id] ?? [];
+              const legacy = rastreiosLegacyByBaixa[b.id] ?? [];
+              const loadingItens = !!itensLoadingByBaixa[b.id];
+              const totalItensG = itens.reduce((s, it) => s + Number(it.gramas ?? 0), 0);
+              const totalItensValor = itens.reduce((s, it) => s + Number(it.valor_brl ?? 0), 0);
+              return (
+                <details
+                  key={b.id}
+                  className="rounded-xl border overflow-hidden"
+                  style={{ borderColor: C.cremeBorder }}
+                  onToggle={(e) => {
+                    const el = e.currentTarget as HTMLDetailsElement;
+                    if (el.open) carregarItensBaixa(b.id);
+                  }}
+                >
+                  <summary className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer select-none list-none" style={{ backgroundColor: C.cremeBg }}>
+                    <div className="flex items-center gap-3">
+                      <CheckCircle size={14} style={{ color: "#92400E" }} />
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>
+                          Baixa Ouro #{b.id} · {Number(b.gramas).toFixed(3)}g
+                        </p>
+                        <p className="text-[11px]" style={{ color: C.cinza }}>
+                          {loadingItens ? "carregando linhas..." : `${itens.length > 0 ? itens.length : legacy.length} item(ns)`} · por {b.realizado_nome ?? "—"} · {fmtDatetime(b.created_at)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: statusColor + "20", color: statusColor }}>{statusLabel}</span>
+                      {b.obs && <span className="text-xs italic" style={{ color: C.cinza }}>{b.obs}</span>}
+                    </div>
+                  </summary>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ backgroundColor: "white", borderTop: `1px solid ${C.cremeBorder}`, borderBottom: `1px solid ${C.cremeBorder}` }}>
+                          <th className="px-4 py-2.5 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Movimento</th>
+                          <th className="px-4 py-2.5 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Referência</th>
+                          <th className="px-4 py-2.5 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Pessoa</th>
+                          <th className="px-4 py-2.5 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Data</th>
+                          <th className="px-4 py-2.5 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: "#92400E" }}>Ouro (g)</th>
+                          <th className="px-4 py-2.5 text-right font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Valor</th>
+                          <th className="px-4 py-2.5 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: C.cinza }}>Obs</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loadingItens && (
+                          <tr>
+                            <td colSpan={7} className="px-4 py-6 text-center">
+                              <Loader2 size={16} className="animate-spin mx-auto" style={{ color: C.cinza }} />
+                            </td>
+                          </tr>
+                        )}
+                        {!loadingItens && itens.length === 0 && legacy.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="px-4 py-6 text-center text-xs" style={{ color: C.cinza }}>
+                              Esta baixa foi criada antes do detalhamento por linhas.
+                            </td>
+                          </tr>
+                        )}
+                        {!loadingItens && itens.length === 0 && legacy.length > 0 && legacy.map((rt) => (
+                          <tr key={`legacy-${rt.id}`} className="border-t" style={{ borderColor: C.cremeBorder }}>
+                            <td className="px-4 py-2.5 text-xs" style={{ color: "#374151" }}>
+                              {rt.evento === "baixa_direta_alisson" ? "Retirada para o Alisson" : rt.evento === "baixa_iniciada" ? "Baixa iniciada" : rt.evento === "recebido_confirmado" ? "Recebimento confirmado" : (rt.evento || "Movimento")}
+                            </td>
+                            <td className="px-4 py-2.5 text-xs" style={{ color: C.esmeralda }}>—</td>
+                            <td className="px-4 py-2.5 text-xs" style={{ color: C.cinza }}>{rt.origem_nome || b.realizado_nome || "—"}</td>
+                            <td className="px-4 py-2.5 text-xs" style={{ color: C.cinza }}>{fmtDatetime(rt.created_at)}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums" style={{ color: "#92400E" }}>
+                              {rt.gramas != null ? `${Number(rt.gramas).toFixed(3)}g` : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums font-semibold" style={{ color: C.verde }}>—</td>
+                            <td className="px-4 py-2.5 text-xs max-w-[220px] truncate" style={{ color: C.cinza }}>{rt.observacao || b.obs || "—"}</td>
+                          </tr>
+                        ))}
+                        {!loadingItens && itens.map((it) => (
+                          <tr key={it.id} className="border-t" style={{ borderColor: C.cremeBorder }}>
+                            <td className="px-4 py-2.5 text-xs" style={{ color: "#374151" }}>
+                              {it.origem_tipo === "venda_ouro" ? "Venda" : it.origem_tipo === "compra_metal" ? "Compra Metal" : "Recebimento Metal"}
+                            </td>
+                            <td className="px-4 py-2.5 text-xs" style={{ color: C.esmeralda }}>{it.referencia}</td>
+                            <td className="px-4 py-2.5 text-xs" style={{ color: C.cinza }}>{it.pessoa_nome || "—"}</td>
+                            <td className="px-4 py-2.5 text-xs" style={{ color: C.cinza }}>{fmtDatetime(it.data_origem)}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums" style={{ color: "#92400E" }}>
+                              {`${Number(it.gramas).toFixed(3)}g`}
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums font-semibold" style={{ color: C.verde }}>{fmt(Number(it.valor_brl ?? 0))}</td>
+                            <td className="px-4 py-2.5 text-xs max-w-[220px] truncate" style={{ color: C.cinza }}>{b.obs || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {!loadingItens && itens.length > 0 && (
+                    <div className="px-4 py-3 border-t flex justify-end gap-4" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                      <p className="text-xs tabular-nums font-medium" style={{ color: "#92400E" }}>
+                        Ouro: {totalItensG.toFixed(3)}g
+                      </p>
+                      <p className="text-xs tabular-nums font-medium" style={{ color: C.verde }}>
+                        Total: {fmt(totalItensValor)}
+                      </p>
+                    </div>
+                  )}
+                </details>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-xl border p-6 text-center" style={{ borderColor: C.cremeBorder }}>
+            <p className="text-sm" style={{ color: C.cinza }}>Nenhuma baixa de ouro registrada ainda.</p>
+          </div>
+        )
       ) : (
         <PagamentosTable lista={listaFiltrada} showForma={formaFiltro !== "Dinheiro"} showEstornar={podeBaixar} />
       )}

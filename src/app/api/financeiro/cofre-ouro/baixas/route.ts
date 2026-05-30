@@ -11,6 +11,15 @@ const CofreBaixaPostSchema = z.object({
   transportador_id: z.string().optional(),
   transportador_nome: z.string().optional(),
   obs: z.string().optional(),
+  itens: z.array(z.object({
+    origem_tipo: z.enum(["venda_ouro", "compra_metal", "recebimento_metal"]),
+    origem_id: z.coerce.number().int().positive(),
+    referencia: z.string().min(1),
+    pessoa_nome: z.string().optional(),
+    data_origem: z.string().optional(),
+    gramas: z.coerce.number().positive(),
+    valor_brl: z.coerce.number().nonnegative().optional(),
+  })).optional(),
 }).passthrough();
 
 const CofreBaixaPatchSchema = z.object({
@@ -56,6 +65,17 @@ export async function POST(req: NextRequest) {
   if (!parsedPost.success) return zodError(parsedPost.error);
   const body = parsedPost.data;
 
+  // REGRA DE NEGÓCIO: se vierem itens, a soma deve bater com a baixa.
+  // IMPACTO: sem essa validação, histórico pode ficar inconsistente.
+  const itens = body.itens ?? [];
+  const somaItens = itens.reduce((s, it) => s + Number(it.gramas), 0);
+  if (itens.length > 0 && Math.abs(Number(body.gramas) - somaItens) > 0.001) {
+    return NextResponse.json(
+      { error: `Soma dos itens (${somaItens.toFixed(3)}g) difere da baixa (${Number(body.gramas).toFixed(3)}g)` },
+      { status: 400 }
+    );
+  }
+
   // Validar saldo disponível
   const [disp] = await sql`SELECT * FROM alissonerp.vw_cofre_ouro_disponivel`;
   const disponivel = disp ? Number(disp.disponivel_gramas) : 0;
@@ -74,20 +94,39 @@ export async function POST(req: NextRequest) {
   // Alisson = baixa direta concluída
   const statusInicial = body.destino === "alisson" ? "concluido" : "pendente";
 
-  const [baixa] = await sql`
-    INSERT INTO alissonerp.cofre_ouro_baixas
-      (gramas, destino, status, realizado_por, realizado_nome,
-       transportador_id, transportador_nome, obs,
-       confirmado_em)
-    VALUES
-      (${body.gramas}, ${body.destino}, ${statusInicial},
-       ${user.id}::uuid, ${realizadoNome},
-       ${body.transportador_id ?? null}::uuid,
-       ${body.transportador_nome ?? null},
-       ${body.obs ?? null},
-       ${statusInicial === 'concluido' ? sql`now()` : null})
-    RETURNING id, gramas, destino, status, protocolo_id, created_at
-  `;
+  const baixa = await sql.begin(async (tx: any) => {
+    const [nova] = await tx`
+      INSERT INTO alissonerp.cofre_ouro_baixas
+        (gramas, destino, status, realizado_por, realizado_nome,
+         transportador_id, transportador_nome, obs,
+         confirmado_em)
+      VALUES
+        (${body.gramas}, ${body.destino}, ${statusInicial},
+         ${user.id}::uuid, ${realizadoNome},
+         ${body.transportador_id ?? null}::uuid,
+         ${body.transportador_nome ?? null},
+         ${body.obs ?? null},
+         ${statusInicial === 'concluido' ? sql`now()` : null})
+      RETURNING id, gramas, destino, status, protocolo_id, created_at
+    `;
+
+    // REGRA DE NEGÓCIO: persistir itens da baixa para rastrear origem.
+    // IMPACTO: sem isso não dá para abrir a baixa e ver de onde saiu.
+    if (itens.length > 0) {
+      for (const item of itens) {
+        await tx`
+          INSERT INTO alissonerp.cofre_ouro_baixa_itens
+            (baixa_id, origem_tipo, origem_id, referencia, pessoa_nome, data_origem, gramas, valor_brl)
+          VALUES
+            (${nova.id}, ${item.origem_tipo}, ${item.origem_id}, ${item.referencia},
+             ${item.pessoa_nome ?? null}, ${item.data_origem ?? null}::timestamptz,
+             ${item.gramas}, ${item.valor_brl ?? 0})
+        `;
+      }
+    }
+
+    return nova;
+  });
 
   await logAudit(sql, {
     tabela: "cofre_ouro_baixas",

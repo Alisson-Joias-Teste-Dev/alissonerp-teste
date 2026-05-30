@@ -71,14 +71,15 @@ const ALL_MENUS: MenuItem[] = [
   { label: "Emitentes",          href: "/fiscal/emitentes",   icon: "Building2"       },
   { label: "Regras Fiscais",     href: "/fiscal/regras",      icon: "FileCheck2"      },
   { label: "Site",               href: "/site",               icon: "Globe"           },
+  { label: "Metal",              href: "/metal",              icon: "Scale"           },
   { label: "Editor IA",          href: "/editor-ia",          icon: "Sparkles"        },
 ];
 
 const ROLE_MENUS: Record<Role, string[]> = {
-  desenvolvedor:      ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/vendas/solicitacoes-alteracao", "/estoque-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/crediario", "/produtos", "/comercial/promocoes", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/site", "/editor-ia"],
-  admin:              ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/vendas/solicitacoes-alteracao", "/estoque-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/crediario", "/produtos", "/comercial/promocoes", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/site", "/editor-ia"],
-  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/estoque-comercial", "/conversoes", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/editor-ia"],
-  gerente_loja:       ["/dashboard-comercial", "/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/estoque-comercial", "/compras-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/editor-ia", "/crediario"],
+  desenvolvedor:      ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/vendas/solicitacoes-alteracao", "/estoque-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/crediario", "/produtos", "/comercial/promocoes", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/site", "/metal", "/editor-ia"],
+  admin:              ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/vendas/solicitacoes-alteracao", "/estoque-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/crediario", "/produtos", "/comercial/promocoes", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/site", "/metal", "/editor-ia"],
+  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/estoque-comercial", "/conversoes", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/conciliacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/metal", "/editor-ia"],
+  gerente_loja:       ["/dashboard-comercial", "/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/estoque-comercial", "/compras-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/metal", "/editor-ia", "/crediario"],
   ourives:            ["/ordens", "/pcp", "/editor-ia"],
   motoboy:            ["/protocolo", "/editor-ia"],
   consultora:         ["/dashboard-comercial", "/ordens", "/estoque", "/conferencia", "/orcamento", "/editor-ia", "/crediario"],
@@ -94,7 +95,7 @@ const ROLE_MENUS: Record<Role, string[]> = {
 // Agrupamento do menu lateral
 const MENU_GROUPS: MenuGroup[] = [
   { type: "group", label: "Produção",    icon: "Factory",     items: ["/dashboard-fabrica", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/service-painel"].map(h => ALL_MENUS.find(m => m.href === h)!) },
-  { type: "group", label: "Suprimentos", icon: "Package",     items: ["/estoque", "/quebra", "/insumos", "/compras", "/compras-comercial", "/rfid/cadastro"].map(h => ALL_MENUS.find(m => m.href === h)!) },
+  { type: "group", label: "Suprimentos", icon: "Package",     items: ["/estoque", "/quebra", "/insumos", "/compras", "/compras-comercial", "/rfid/cadastro", "/metal"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Logística",   icon: "Truck",       items: ["/protocolo", "/conferencia", "/entrega"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Qualidade",   icon: "ShieldCheck", items: ["/auditoria"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Gestão",     icon: "ListTodo",    items: ["/tarefas", "/relatorios", "/gestao-estoque"].map(h => ALL_MENUS.find(m => m.href === h)!) },
@@ -175,6 +176,7 @@ const HREF_TO_MODULO: Record<string, string> = {
   "/fiscal/emitentes":  "fiscal",
   "/fiscal/regras":     "fiscal",
   "/site":              "site",
+  "/metal":             "metal",
   "/editor-ia":         "editor_ia",
 };
 

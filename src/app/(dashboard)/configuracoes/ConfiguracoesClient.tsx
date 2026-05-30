@@ -40,6 +40,7 @@ import {
   Smartphone,
   Truck,
   Search,
+  Scale,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
@@ -140,7 +141,7 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas" | "fretes" | "gateways" | "produto_visibilidade" | "aprovadores";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas" | "fretes" | "gateways" | "metal" | "produto_visibilidade" | "aprovadores";
 
 interface Gateway {
   id: number;
@@ -4785,6 +4786,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "credito_loja", label: "Crédito Loja",    icon: Wallet },
     { key: "fretes",       label: "Fretes",           icon: Truck },
     { key: "gateways",    label: "Gateways",          icon: CreditCard },
+    { key: "metal",       label: "Metal",             icon: Scale },
     { key: "aprovadores", label: "Aprovadores",       icon: Shield },
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -4854,6 +4856,8 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "gateways"            && isSuperAdmin && <TabGateways />}
       {tab === "produto_visibilidade" && isSuperAdmin && <TabProdutoVisibilidade />}
       {tab === "aprovadores" && <TabAprovadores />}
+
+      {tab === "metal" && <TabMetal />}
     </div>
   );
 }
@@ -5636,6 +5640,120 @@ function TabGateways() {
       <p className="text-[11px]" style={{ color: P.muted }}>
         Gateways em uso por pagamentos serão desativados (não excluídos) ao remover.
       </p>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab Metal — Configurações do módulo de compra e recebimento de metal
+//
+// REGRA DE NEGÓCIO: Configura os percentuais da cotação do ouro que definem
+// as faixas de preço para compra e recebimento de metal. Impacta diretamente
+// o valor pago ao fornecedor e o crédito dado ao cliente.
+// IMPACTO SE REMOVIDO: Não é possível ajustar as faixas de preço do metal.
+// ═══════════════════════════════════════════════════════════════════════════════
+function TabMetal() {
+  const [config, setConfig] = useState({
+    compra_metal_min_pct: 80,
+    compra_metal_max_pct: 85,
+    compra_metal_comm_pct: 50,
+    receb_metal_min_pct: 95,
+    receb_metal_max_pct: 100,
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/metal/configuracoes")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && typeof d === "object") setConfig((c) => ({ ...c, ...d }));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function salvar() {
+    setSaving(true);
+    setSaved(false);
+    try {
+      const res = await fetch("/api/metal/configuracoes", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      });
+      if (!res.ok) throw new Error("Erro ao salvar");
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      // erro silencioso
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return <div className="text-center py-8 text-sm text-muted-foreground">Carregando...</div>;
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      {/* Compra de Metal */}
+      <div className="bg-white rounded-2xl border border-[#C59B6D]/20 p-5 space-y-4">
+        <h3 className="text-sm font-bold text-[#1A3C34]">Compra de Metal (Fornecedor)</h3>
+        <p className="text-xs text-[#1A3C34]/60">
+          A empresa paga ao fornecedor um percentual da cotação do ouro. Comissão do funcionário é calculada sobre o spread.
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[10px] font-bold text-[#1A3C34]/60 mb-1">% Mínimo da Cotação</label>
+            <input type="number" min={0} max={100} className="w-full bg-[#F2E8D5]/30 border border-[#C59B6D]/20 rounded-xl px-3 py-2 text-sm font-mono" value={config.compra_metal_min_pct} onChange={(e) => setConfig((c) => ({ ...c, compra_metal_min_pct: Number(e.target.value) }))} />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-[#1A3C34]/60 mb-1">% Máximo da Cotação</label>
+            <input type="number" min={0} max={100} className="w-full bg-[#F2E8D5]/30 border border-[#C59B6D]/20 rounded-xl px-3 py-2 text-sm font-mono" value={config.compra_metal_max_pct} onChange={(e) => setConfig((c) => ({ ...c, compra_metal_max_pct: Number(e.target.value) }))} />
+            <div className="mt-2 bg-[#1A3C34]/10 rounded-full h-2 overflow-hidden">
+              <div className="h-full rounded-full bg-[#1A3C34]" style={{ width: `${Math.min(100, config.compra_metal_max_pct - config.compra_metal_min_pct)}%` }} />
+            </div>
+            <p className="text-[10px] text-[#1A3C34]/40 mt-1">Faixa: {config.compra_metal_min_pct}% – {config.compra_metal_max_pct}%</p>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-[#1A3C34]/60 mb-1">% Comissão sobre Spread</label>
+            <input type="number" min={0} max={100} className="w-full bg-[#F2E8D5]/30 border border-[#C59B6D]/20 rounded-xl px-3 py-2 text-sm font-mono" value={config.compra_metal_comm_pct} onChange={(e) => setConfig((c) => ({ ...c, compra_metal_comm_pct: Number(e.target.value) }))} />
+          </div>
+        </div>
+      </div>
+
+      {/* Recebimento de Metal */}
+      <div className="bg-white rounded-2xl border border-[#C59B6D]/20 p-5 space-y-4">
+        <h3 className="text-sm font-bold text-[#1A3C34]">Recebimento de Metal (Cliente)</h3>
+        <p className="text-xs text-[#1A3C34]/60">
+          Cliente entrega metal como parte do pagamento de uma joia. Percentual define o crédito concedido por grama.
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[10px] font-bold text-[#1A3C34]/60 mb-1">% Mínimo da Cotação</label>
+            <input type="number" min={0} max={100} className="w-full bg-[#F2E8D5]/30 border border-[#C59B6D]/20 rounded-xl px-3 py-2 text-sm font-mono" value={config.receb_metal_min_pct} onChange={(e) => setConfig((c) => ({ ...c, receb_metal_min_pct: Number(e.target.value) }))} />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-[#1A3C34]/60 mb-1">% Máximo da Cotação</label>
+            <input type="number" min={0} max={100} className="w-full bg-[#F2E8D5]/30 border border-[#C59B6D]/20 rounded-xl px-3 py-2 text-sm font-mono" value={config.receb_metal_max_pct} onChange={(e) => setConfig((c) => ({ ...c, receb_metal_max_pct: Number(e.target.value) }))} />
+            <div className="mt-2 bg-[#1A3C34]/10 rounded-full h-2 overflow-hidden">
+              <div className="h-full rounded-full bg-[#1A3C34]" style={{ width: `${Math.min(100, config.receb_metal_max_pct - config.receb_metal_min_pct)}%` }} />
+            </div>
+            <p className="text-[10px] text-[#1A3C34]/40 mt-1">Faixa: {config.receb_metal_min_pct}% – {config.receb_metal_max_pct}%</p>
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={salvar}
+        disabled={saving}
+        className="w-full bg-[#1A3C34] text-white py-3 rounded-xl text-sm font-bold hover:bg-[#1A3C34]/90 disabled:opacity-50 transition-colors"
+      >
+        {saving ? "Salvando..." : saved ? "Salvo!" : "Salvar Configurações"}
+      </button>
     </div>
   );
 }

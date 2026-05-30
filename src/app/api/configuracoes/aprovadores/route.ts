@@ -26,6 +26,7 @@ const CHAVES = [
   "aprovador_cartao_desconto_padrao",
   "aprovadora_credito_gerente",
   "aprovador_compra_comercial",
+  "metal_aprovador_id",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -53,6 +54,20 @@ export async function GET() {
       SELECT id, nome FROM alissonerp.usuarios
       WHERE role IN ('admin', 'desenvolvedor') AND ativo = true ORDER BY nome
     `;
+    const aprovadoresMetal = await sql`
+      SELECT id, nome, role FROM alissonerp.usuarios
+      WHERE role IN ('admin', 'desenvolvedor', 'gerente_fabrica', 'gerente_loja')
+        AND ativo = true
+      ORDER BY
+        CASE role
+          WHEN 'admin' THEN 1
+          WHEN 'desenvolvedor' THEN 2
+          WHEN 'gerente_fabrica' THEN 3
+          WHEN 'gerente_loja' THEN 4
+          ELSE 9
+        END,
+        nome
+    `;
 
     return NextResponse.json({
       aprovador_credito_diretor: configMap.get("aprovador_credito_diretor") ?? "",
@@ -60,10 +75,12 @@ export async function GET() {
       aprovador_cartao_desconto_padrao: configMap.get("aprovador_cartao_desconto_padrao") ?? "",
       aprovadora_credito_gerente: configMap.get("aprovadora_credito_gerente") ?? "",
       aprovador_compra_comercial: configMap.get("aprovador_compra_comercial") ?? "",
+      metal_aprovador_id: configMap.get("metal_aprovador_id") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
         admins_devs: adminsDevs,
+        metal_aprovadores: aprovadoresMetal,
       },
     });
   } catch {
@@ -96,6 +113,9 @@ export async function PUT(req: NextRequest) {
     }
     if (body.aprovador_compra_comercial !== undefined) {
       updates.push({ chave: "aprovador_compra_comercial", valor: body.aprovador_compra_comercial });
+    }
+    if (body.metal_aprovador_id !== undefined) {
+      updates.push({ chave: "metal_aprovador_id", valor: body.metal_aprovador_id });
     }
 
     for (const u of updates) {

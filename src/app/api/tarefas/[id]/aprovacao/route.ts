@@ -164,6 +164,54 @@ async function processarAprovacaoCompraComercial(
   return { ok: true, decisao };
 }
 
+// ─── Handler específico para Compra de Metal ──────────────────────────────
+async function processarAprovacaoCompraMetal(
+  tarefaId: number,
+  decisao: "aprovado" | "rejeitado",
+  aprovadorId: string,
+  motivo?: string,
+) {
+  const [compra] = await sql`
+    SELECT * FROM alissonerp.compras_metal
+    WHERE tarefa_aprovacao_id = ${tarefaId}
+    LIMIT 1
+  `;
+  if (!compra) throw new Error("Compra de metal não encontrada para esta tarefa");
+
+  if (decisao === "aprovado") {
+    await sql`
+      UPDATE alissonerp.compras_metal
+      SET status = 'pendente_pagamento',
+          updated_at = now()
+      WHERE id = ${compra.id}
+    `;
+    await sql`
+      UPDATE alissonerp.compras_metal_aprovacoes
+      SET status = 'aprovado',
+          aprovador_id = ${aprovadorId}::uuid,
+          updated_at = now()
+      WHERE compra_id = ${compra.id} AND status = 'pendente'
+    `;
+  } else {
+    await sql`
+      UPDATE alissonerp.compras_metal
+      SET status = 'cancelado',
+          updated_at = now()
+      WHERE id = ${compra.id}
+    `;
+    await sql`
+      UPDATE alissonerp.compras_metal_aprovacoes
+      SET status = 'rejeitado',
+          aprovador_id = ${aprovadorId}::uuid,
+          motivo = ${motivo ?? "Rejeitado pelo aprovador"},
+          updated_at = now()
+      WHERE compra_id = ${compra.id} AND status = 'pendente'
+    `;
+  }
+
+  return { ok: true, decisao };
+}
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -421,6 +469,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ ok: true, compra_comercial: resultado });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] compra_comercial`, err);
+    }
+  }
+
+  if (tarefaInfo?.tipo === "compra_metal" || tags.includes("aprovacao_compra_metal")) {
+    try {
+      const resultado = await processarAprovacaoCompraMetal(Number(id), body.decisao, user.id, body.motivo);
+      return NextResponse.json({ ok: true, compra_metal: resultado });
+    } catch (err) {
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] compra_metal`, err);
     }
   }
 
