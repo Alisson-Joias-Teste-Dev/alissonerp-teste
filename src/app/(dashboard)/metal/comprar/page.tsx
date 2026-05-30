@@ -9,6 +9,13 @@
 import { getCotacaoOuro, getModuloConfig } from "@/lib/metal/config";
 import CompraForm from "@/components/metal/CompraForm";
 
+// REGRA DE NEGÓCIO:
+// O QUE: força renderização dinâmica em toda requisição da página de compra.
+// POR QUE: em produção, render estático pode congelar cotação em 0,00/g quando há falha transitória.
+// IMPACTO: sem isso, a cotação pode ficar desatualizada/zerada até novo deploy.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function ComprarMetalPage() {
   let cotacaoOuro = 0;
   let configs = {
@@ -21,14 +28,22 @@ export default async function ComprarMetalPage() {
 
   try {
     cotacaoOuro = await getCotacaoOuro();
+  } catch (err) {
+    // REGRA DE NEGÓCIO:
+    // O QUE: registra falha exclusiva da leitura de cotação do ouro.
+    // POR QUE: isola incidente de cotação sem bloquear carregamento de configurações.
+    // IMPACTO: sem isolamento, uma falha de cotação derruba também as faixas de configuração.
+    console.error("[METAL][comprar/page] Falha ao carregar cotação", err);
+  }
+
+  try {
     configs = await getModuloConfig();
   } catch (err) {
     // REGRA DE NEGÓCIO:
-    // O QUE: registra falha de leitura da cotação/config do módulo metal no servidor.
-    // POR QUE: fallback silencioso escondia incidente de produção e exibia 0,00/g sem diagnóstico.
-    // IMPACTO: sem log, time não identifica rapidamente quebra de acesso/configuração do módulo.
-    console.error("[METAL][comprar/page] Falha ao carregar cotação/configuração", err);
-    // Mantém fallback visual seguro; o formulário exibe validações de cálculo.
+    // O QUE: registra falha exclusiva da leitura de configurações do módulo metal.
+    // POR QUE: permite diagnóstico sem mascarar o tipo de erro no servidor.
+    // IMPACTO: sem isso, o módulo opera com defaults sem rastreabilidade do motivo.
+    console.error("[METAL][comprar/page] Falha ao carregar configuração", err);
   }
 
   return (

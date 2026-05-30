@@ -9,6 +9,13 @@
 import { getCotacaoOuro, getModuloConfig } from "@/lib/metal/config";
 import RecebimentoForm from "@/components/metal/RecebimentoForm";
 
+// REGRA DE NEGÓCIO:
+// O QUE: força renderização dinâmica em toda requisição da página de recebimento.
+// POR QUE: evita congelar cotação/config em build estático quando há falha transitória.
+// IMPACTO: sem isso, a cotação pode permanecer zerada/desatualizada em produção.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function ReceberMetalPage() {
   let cotacaoOuro = 0;
   let configs = {
@@ -21,9 +28,22 @@ export default async function ReceberMetalPage() {
 
   try {
     cotacaoOuro = await getCotacaoOuro();
+  } catch (err) {
+    // REGRA DE NEGÓCIO:
+    // O QUE: registra falha da leitura da cotação de recebimento.
+    // POR QUE: evita ocultar incidente operacional em produção.
+    // IMPACTO: sem log, a tela pode cair em 0,00/g sem diagnóstico rápido.
+    console.error("[METAL][receber/page] Falha ao carregar cotação", err);
+  }
+
+  try {
     configs = await getModuloConfig();
-  } catch {
-    // fallback silencioso
+  } catch (err) {
+    // REGRA DE NEGÓCIO:
+    // O QUE: registra falha de leitura das configurações do módulo metal.
+    // POR QUE: mantém rastreabilidade ao usar defaults de segurança.
+    // IMPACTO: sem rastreio, operação segue com defaults sem visibilidade da falha.
+    console.error("[METAL][receber/page] Falha ao carregar configuração", err);
   }
 
   return (
