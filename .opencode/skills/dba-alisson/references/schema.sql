@@ -2,10 +2,10 @@
 -- PostgreSQL database dump
 --
 
-\restrict po8NiyvYdz2IjgCleCGA5lIdjmtmKrAHRFsUYB7eTbHfjioeU8vezWYYNgkDODD
+\restrict VXs9Mooprx0LxrjvmpQ4NfNqxIg0tC2tgD4wvCybWUbOGOssbXQyeLYJDO4RRvF
 
 -- Dumped from database version 15.8
--- Dumped by pg_dump version 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)
+-- Dumped by pg_dump version 15.18 (Ubuntu 15.18-1.pgdg24.04+1)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -273,6 +273,18 @@ CREATE TYPE alissonerp.enum_tipo_ordem AS ENUM (
 --
 
 COMMENT ON TYPE alissonerp.enum_tipo_ordem IS 'Tipos de ordem conforme PDV: servico(1), fabricacao(2), reposicao_venda(3), reposicao_loja(4), compra_fornecedor(5), garantia(6), servico_interno(7)';
+
+
+--
+-- Name: situcao_venda; Type: TYPE; Schema: alissonerp; Owner: -
+--
+
+CREATE TYPE alissonerp.situcao_venda AS ENUM (
+    'rascunho',
+    'aprovado',
+    'cancelado',
+    'entregue'
+);
 
 
 --
@@ -594,6 +606,25 @@ $$;
 
 
 --
+-- Name: fn_bloquear_compra_comercial(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_bloquear_compra_comercial() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF OLD.bloqueado = true AND NEW.situacao IS DISTINCT FROM OLD.situacao THEN
+    IF NEW.situacao IN ('aprovado', 'rejeitado') THEN
+      RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'Compra comercial #% está bloqueada para edição', OLD.id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: fn_bloquear_venda(); Type: FUNCTION; Schema: alissonerp; Owner: -
 --
 
@@ -661,6 +692,20 @@ BEGIN
     );
   END IF;
 
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: fn_calcular_item_compra_comercial(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_calcular_item_compra_comercial() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.valor_total := ROUND((COALESCE(NEW.peso_total, 0) * COALESCE(NEW.valor_grama, 0))::numeric, 2);
   RETURN NEW;
 END;
 $$;
@@ -803,6 +848,34 @@ $$;
 
 
 --
+-- Name: fn_compras_comercial_updated_at(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_compras_comercial_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: fn_compras_metal_updated_at(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_compras_metal_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: fn_concluir_compra(); Type: FUNCTION; Schema: alissonerp; Owner: -
 --
 
@@ -868,6 +941,56 @@ $$;
 --
 
 COMMENT ON FUNCTION alissonerp.fn_concluir_compra() IS 'Concluir compra → CE entrada por item + bloquear edição.';
+
+
+--
+-- Name: fn_concluir_compra_comercial(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_concluir_compra_comercial() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+DECLARE
+  v_item RECORD;
+BEGIN
+  IF NEW.situacao != 'concluido' THEN RETURN NEW; END IF;
+  IF TG_OP = 'UPDATE' AND OLD.situacao = 'concluido' THEN RETURN NEW; END IF;
+
+  IF TG_OP = 'UPDATE' AND OLD.situacao NOT IN ('rascunho', 'recebida') THEN
+    RAISE EXCEPTION 'Compra comercial #% precisa estar em rascunho ou recebida para concluir (status atual: %)',
+      OLD.id, OLD.situacao;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM alissonerp.itens_compra_comercial ic
+    WHERE ic.compra_comercial_id = NEW.id
+  ) THEN
+    RAISE EXCEPTION 'Compra comercial #% não possui itens para concluir', NEW.id;
+  END IF;
+
+  FOR v_item IN
+    SELECT ic.*
+    FROM alissonerp.itens_compra_comercial ic
+    WHERE ic.compra_comercial_id = NEW.id
+  LOOP
+    INSERT INTO alissonerp.movimentacoes_estoque_comercial
+      (produto_id, tipo, quantidade, motivo, local_estoque_id, status, observacao, created_by)
+    VALUES
+      (v_item.produto_id, 'entrada', v_item.qtd, 'compra_comercial', NEW.local_estoque_id, 'efetivado',
+       'Entrada via compra comercial #' || NEW.id,
+       COALESCE(NEW.created_by, auth.uid()));
+  END LOOP;
+
+  NEW.bloqueado := true;
+
+  SELECT COALESCE(SUM(valor_total), 0) INTO NEW.total
+  FROM alissonerp.itens_compra_comercial
+  WHERE compra_comercial_id = NEW.id;
+
+  RETURN NEW;
+END;
+$$;
 
 
 --
@@ -1192,6 +1315,20 @@ CREATE FUNCTION alissonerp.fn_cr_marcar_pago_mp(p_venda_id integer) RETURNS inte
       RETURN v_count;
     END;
     $$;
+
+
+--
+-- Name: fn_creditos_cliente_updated_at(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_creditos_cliente_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
 
 
 --
@@ -1740,6 +1877,82 @@ $$;
 
 
 --
+-- Name: fn_gerar_conta_pagar_compra_comercial(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_gerar_conta_pagar_compra_comercial() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+DECLARE
+  v_fornecedor_nome TEXT;
+  v_parcelas INTEGER;
+  v_total NUMERIC(12,2);
+  v_base NUMERIC(12,2);
+  v_soma NUMERIC(12,2);
+  v_diff NUMERIC(12,2);
+  v_valor_parcela NUMERIC(12,2);
+  i INTEGER;
+BEGIN
+  IF NEW.situacao != 'concluido' OR OLD.situacao = 'concluido' THEN
+    RETURN NEW;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM alissonerp.contas_pagar cp
+    WHERE cp.compra_comercial_id = NEW.id
+  ) THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT nome INTO v_fornecedor_nome
+  FROM public.contatos
+  WHERE id_contato = NEW.fornecedor_id;
+
+  v_parcelas := GREATEST(COALESCE(NEW.qtd_parcelas, 1), 1);
+  v_total := COALESCE(NEW.total, 0);
+
+  v_base := ROUND((v_total / v_parcelas)::numeric, 2);
+  v_soma := ROUND((v_base * v_parcelas)::numeric, 2);
+  v_diff := ROUND((v_total - v_soma)::numeric, 2);
+
+  FOR i IN 1..v_parcelas LOOP
+    v_valor_parcela := v_base;
+    IF i = v_parcelas THEN
+      -- Ajuste de centavos apenas na última parcela para manter a soma idêntica ao total.
+      v_valor_parcela := ROUND((v_base + v_diff)::numeric, 2);
+    END IF;
+
+    INSERT INTO alissonerp.contas_pagar (
+      descricao,
+      fornecedor_id,
+      fornecedor_nome,
+      compra_comercial_id,
+      valor,
+      data_vencimento,
+      situacao,
+      categoria,
+      created_by,
+      obs
+    ) VALUES (
+      'Compra Comercial #' || NEW.id || ' - Parcela ' || i || '/' || v_parcelas,
+      NEW.fornecedor_id,
+      v_fornecedor_nome,
+      NEW.id,
+      v_valor_parcela,
+      ((NEW.primeiro_vencimento::date + ((i - 1) || ' month')::interval))::date,
+      'pendente',
+      'compra_comercial',
+      NEW.created_by,
+      'Gerado automaticamente na conclusão da compra comercial #' || NEW.id
+    );
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: fn_handle_new_user(); Type: FUNCTION; Schema: alissonerp; Owner: -
 --
 
@@ -1759,6 +1972,20 @@ BEGIN
     COALESCE(NEW.raw_user_meta_data->>'role', 'ourives')
   )
   ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: fn_itens_compra_comercial_updated_at(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_itens_compra_comercial_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at := now();
   RETURN NEW;
 END;
 $$;
@@ -3138,6 +3365,30 @@ $$;
 
 
 --
+-- Name: fn_rastreio_compra_metal(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_rastreio_compra_metal() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  -- Só registra no cofre quando status muda para 'confirmado'
+  -- (evita duplicação em re-processamento)
+  IF NEW.status = 'confirmado' AND (OLD.status IS NULL OR OLD.status != 'confirmado') THEN
+    INSERT INTO alissonerp.cofre_ouro_rastreios
+      (evento, gramas, origem_nome, observacao)
+    VALUES
+      ('entrada_compra_metal', NEW.peso_gramas, 'Compra Metal',
+       'Compra #' || NEW.numero ||
+       ' — Fornecedor ID ' || COALESCE(NEW.fornecedor_id::text, 'N/A') ||
+       ' — MP Payment: ' || COALESCE(NEW.mp_payment_id, 'N/A'));
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: fn_rastreio_concluir_baixa(); Type: FUNCTION; Schema: alissonerp; Owner: -
 --
 
@@ -3175,6 +3426,29 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+
+--
+-- Name: fn_rastreio_recebimento_metal(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_rastreio_recebimento_metal() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $_$
+BEGIN
+  INSERT INTO alissonerp.cofre_ouro_rastreios
+    (evento, gramas, origem_nome, observacao)
+  VALUES
+    ('entrada_recebimento_metal', NEW.peso_gramas, 'Recebimento Metal',
+     'Recebimento #' || NEW.numero ||
+     ' — Venda #' || COALESCE(NEW.venda_id::text, 'N/A') ||
+     CASE WHEN NEW.credito_excedente > 0
+          THEN ' — Excedente: R$ ' || NEW.credito_excedente::text || ' → saldo cliente'
+          ELSE ''
+     END);
+  RETURN NEW;
+END;
+$_$;
 
 
 --
@@ -3232,6 +3506,20 @@ BEGIN
   ELSE
     RETURN NEW;
   END IF;
+END;
+$$;
+
+
+--
+-- Name: fn_recebimentos_metal_updated_at(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_recebimentos_metal_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
 END;
 $$;
 
@@ -7002,6 +7290,56 @@ CREATE TABLE alissonerp.compras (
 
 
 --
+-- Name: compras_comercial; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.compras_comercial (
+    id integer NOT NULL,
+    fornecedor_id bigint,
+    situacao character varying(20) DEFAULT 'rascunho'::character varying NOT NULL,
+    total numeric(12,2) DEFAULT 0 NOT NULL,
+    obs text,
+    bloqueado boolean DEFAULT false NOT NULL,
+    local_estoque_id integer NOT NULL,
+    numero_nf character varying(50),
+    data_compra date,
+    data_recebimento date,
+    recebido_por uuid,
+    qtd_parcelas integer DEFAULT 1 NOT NULL,
+    primeiro_vencimento date NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by uuid,
+    aprovador_id uuid,
+    aprovado_por uuid,
+    data_decisao timestamp with time zone,
+    motivo_rejeicao text,
+    tarefa_aprovacao_id integer,
+    CONSTRAINT compras_comercial_qtd_parcelas_check CHECK ((qtd_parcelas >= 1))
+);
+
+
+--
+-- Name: compras_comercial_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.compras_comercial_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: compras_comercial_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.compras_comercial_id_seq OWNED BY alissonerp.compras_comercial.id;
+
+
+--
 -- Name: compras_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
 --
 
@@ -7019,6 +7357,156 @@ CREATE SEQUENCE alissonerp.compras_id_seq
 --
 
 ALTER SEQUENCE alissonerp.compras_id_seq OWNED BY alissonerp.compras.id;
+
+
+--
+-- Name: compras_metal; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.compras_metal (
+    id integer NOT NULL,
+    numero character varying(20) NOT NULL,
+    fornecedor_id bigint,
+    peso_gramas numeric(10,3) NOT NULL,
+    cotacao_ouro numeric(12,2) NOT NULL,
+    valor_pago_grama numeric(12,2) NOT NULL,
+    min_limit numeric(12,2) NOT NULL,
+    max_limit numeric(12,2) NOT NULL,
+    spread_grama numeric(12,2) DEFAULT 0 NOT NULL,
+    valor_total numeric(12,2) NOT NULL,
+    economia_total numeric(12,2) DEFAULT 0 NOT NULL,
+    comissao_pct numeric(5,2) DEFAULT 50 NOT NULL,
+    comissao_valor numeric(12,2) DEFAULT 0 NOT NULL,
+    foto_path text,
+    foto_peso_ia numeric(10,3),
+    ia_confianca character varying(20),
+    ia_match boolean,
+    status character varying(20) DEFAULT 'pendente_pagamento'::character varying NOT NULL,
+    mp_preference_id character varying(100),
+    mp_payment_id character varying(100),
+    mp_payment_status character varying(50),
+    mp_valor_pago numeric(12,2),
+    mp_data_pagamento timestamp with time zone,
+    mp_diferenca_valor numeric(12,2),
+    cofre_registrado boolean DEFAULT false NOT NULL,
+    observacao text,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT compras_metal_peso_gramas_check CHECK ((peso_gramas > (0)::numeric)),
+    CONSTRAINT compras_metal_status_check CHECK (((status)::text = ANY ((ARRAY['pendente_pagamento'::character varying, 'confirmado'::character varying, 'cancelado'::character varying])::text[]))),
+    CONSTRAINT compras_metal_valor_pago_grama_check CHECK ((valor_pago_grama > (0)::numeric))
+);
+
+
+--
+-- Name: TABLE compras_metal; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON TABLE alissonerp.compras_metal IS 'Registra compras de metal (sucata/ouro) que a EMPRESA adquire de fornecedores.
+   Pagamento via Mercado Pago. Metal entra no cofre_ouro após confirmação.';
+
+
+--
+-- Name: COLUMN compras_metal.numero; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.compras_metal.numero IS 'Formato: CM-AAAA-NNNN (Compra Metal + ano + sequencial)';
+
+
+--
+-- Name: COLUMN compras_metal.fornecedor_id; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.compras_metal.fornecedor_id IS 'A pessoa/fornecedor que vendeu o metal para a empresa. FK para public.contatos';
+
+
+--
+-- Name: COLUMN compras_metal.spread_grama; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.compras_metal.spread_grama IS 'Economia por grama: maxLimit - valor_pago_grama. Se 0, comissão = 0';
+
+
+--
+-- Name: COLUMN compras_metal.economia_total; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.compras_metal.economia_total IS 'Economia total: spread_grama × peso_gramas';
+
+
+--
+-- Name: COLUMN compras_metal.comissao_valor; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.compras_metal.comissao_valor IS 'Comissão do funcionário: economia_total × comissao_pct / 100';
+
+
+--
+-- Name: COLUMN compras_metal.mp_preference_id; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.compras_metal.mp_preference_id IS 'ID da preference criada no MP para o link de pagamento';
+
+
+--
+-- Name: COLUMN compras_metal.mp_payment_id; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.compras_metal.mp_payment_id IS 'ID do pagamento no MP. Usado para fetchPayment() na verificação';
+
+
+--
+-- Name: COLUMN compras_metal.mp_diferenca_valor; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.compras_metal.mp_diferenca_valor IS 'Se > 0, o valor pago no MP diferiu do valor_total esperado. Mantém pendente';
+
+
+--
+-- Name: COLUMN compras_metal.cofre_registrado; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.compras_metal.cofre_registrado IS 'Flag que impede duplicação no cofre_ouro_rastreios em caso de re-processamento';
+
+
+--
+-- Name: compras_metal_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.compras_metal_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: compras_metal_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.compras_metal_id_seq OWNED BY alissonerp.compras_metal.id;
+
+
+--
+-- Name: compras_metal_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.compras_metal_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: SEQUENCE compras_metal_seq; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON SEQUENCE alissonerp.compras_metal_seq IS 'Usada para gerar números sequenciais de compra de metal. Formato CM-AAAA-NNNN';
 
 
 --
@@ -7304,6 +7792,7 @@ CREATE TABLE alissonerp.contas_pagar (
     inter_enviado_em timestamp with time zone,
     inter_atualizado_em timestamp with time zone,
     inter_erro text,
+    compra_comercial_id integer,
     CONSTRAINT ck_contas_pagar_inter_tipo CHECK (((inter_tipo IS NULL) OR ((inter_tipo)::text = ANY ((ARRAY['pix'::character varying, 'boleto'::character varying, 'ted'::character varying])::text[]))))
 );
 
@@ -7575,6 +8064,79 @@ CREATE SEQUENCE alissonerp.conversoes_sku_id_seq
 --
 
 ALTER SEQUENCE alissonerp.conversoes_sku_id_seq OWNED BY alissonerp.conversoes_sku.id;
+
+
+--
+-- Name: creditos_cliente; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.creditos_cliente (
+    id integer NOT NULL,
+    cliente_id bigint,
+    saldo_disponivel numeric(12,2) DEFAULT 0 NOT NULL,
+    recebimento_id integer,
+    venda_origem_id integer,
+    status character varying(20) DEFAULT 'ativo'::character varying NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT creditos_cliente_saldo_disponivel_check CHECK ((saldo_disponivel >= (0)::numeric)),
+    CONSTRAINT creditos_cliente_status_check CHECK (((status)::text = ANY ((ARRAY['ativo'::character varying, 'usado'::character varying, 'cancelado'::character varying])::text[])))
+);
+
+
+--
+-- Name: TABLE creditos_cliente; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON TABLE alissonerp.creditos_cliente IS 'Saldo de crédito dos clientes gerado a partir do excedente de recebimentos de metal.';
+
+
+--
+-- Name: COLUMN creditos_cliente.saldo_disponivel; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.creditos_cliente.saldo_disponivel IS 'Valor disponível para uso em compras futuras. Sempre >= 0';
+
+
+--
+-- Name: COLUMN creditos_cliente.recebimento_id; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.creditos_cliente.recebimento_id IS 'Recebimento que originou este crédito';
+
+
+--
+-- Name: COLUMN creditos_cliente.venda_origem_id; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.creditos_cliente.venda_origem_id IS 'Venda original onde o crédito foi gerado (excedente)';
+
+
+--
+-- Name: COLUMN creditos_cliente.status; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.creditos_cliente.status IS 'ativo = disponível para uso, usado = já aplicado em venda, cancelado = recebimento cancelado';
+
+
+--
+-- Name: creditos_cliente_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.creditos_cliente_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: creditos_cliente_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.creditos_cliente_id_seq OWNED BY alissonerp.creditos_cliente.id;
 
 
 --
@@ -9105,6 +9667,51 @@ CREATE TABLE alissonerp.itens_compra (
     lote_referencia character varying(100),
     observacao text
 );
+
+
+--
+-- Name: itens_compra_comercial; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.itens_compra_comercial (
+    id integer NOT NULL,
+    compra_comercial_id integer NOT NULL,
+    produto_id integer NOT NULL,
+    qtd numeric(12,3) NOT NULL,
+    valor_unitario numeric(12,2) DEFAULT 0 NOT NULL,
+    valor_total numeric(12,2) DEFAULT 0 NOT NULL,
+    obs text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    cotacao_referencial numeric(12,2),
+    fator_ouro numeric(6,4),
+    valor_grama numeric(12,2) NOT NULL,
+    peso_total numeric(10,3) NOT NULL,
+    CONSTRAINT ck_itens_compra_comercial_peso_total_pos CHECK ((peso_total > (0)::numeric)),
+    CONSTRAINT ck_itens_compra_comercial_valor_grama_pos CHECK ((valor_grama > (0)::numeric)),
+    CONSTRAINT itens_compra_comercial_qtd_check CHECK ((qtd > (0)::numeric)),
+    CONSTRAINT itens_compra_comercial_valor_unitario_check CHECK ((valor_unitario >= (0)::numeric))
+);
+
+
+--
+-- Name: itens_compra_comercial_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.itens_compra_comercial_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: itens_compra_comercial_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.itens_compra_comercial_id_seq OWNED BY alissonerp.itens_compra_comercial.id;
 
 
 --
@@ -10933,6 +11540,57 @@ ALTER SEQUENCE alissonerp.pedras_ordens_id_seq OWNED BY alissonerp.pedras_ordens
 
 
 --
+-- Name: pedras_precificacao_regras; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.pedras_precificacao_regras (
+    id integer NOT NULL,
+    nome_tabela character varying(100) NOT NULL,
+    categoria_pedra character varying(100) NOT NULL,
+    custo_usd_ct numeric(10,2),
+    preco_rs_un numeric(10,2),
+    tamanho_inicial_mm numeric(5,2) NOT NULL,
+    tamanho_final_mm numeric(5,2) NOT NULL,
+    markup_inicial numeric(10,4) NOT NULL,
+    markup_final numeric(10,4) NOT NULL,
+    ativa boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by uuid,
+    CONSTRAINT chk_markup_positivo CHECK (((markup_inicial > (0)::numeric) AND (markup_final > (0)::numeric))),
+    CONSTRAINT chk_range CHECK ((tamanho_final_mm > tamanho_inicial_mm)),
+    CONSTRAINT chk_tem_preco CHECK (((custo_usd_ct IS NOT NULL) OR (preco_rs_un IS NOT NULL)))
+);
+
+
+--
+-- Name: TABLE pedras_precificacao_regras; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON TABLE alissonerp.pedras_precificacao_regras IS 'Regras de precificação de pedras. Cada linha = uma tabela de precificação com range de tamanho + markups. Apenas 1 regra ativa por categoria_pedra.';
+
+
+--
+-- Name: pedras_precificacao_regras_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.pedras_precificacao_regras_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: pedras_precificacao_regras_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.pedras_precificacao_regras_id_seq OWNED BY alissonerp.pedras_precificacao_regras.id;
+
+
+--
 -- Name: permissoes_usuario; Type: TABLE; Schema: alissonerp; Owner: -
 --
 
@@ -12146,6 +12804,129 @@ CREATE SEQUENCE alissonerp.quebra_operador_id_seq
 --
 
 ALTER SEQUENCE alissonerp.quebra_operador_id_seq OWNED BY alissonerp.quebra_operador.id;
+
+
+--
+-- Name: recebimentos_metal; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.recebimentos_metal (
+    id integer NOT NULL,
+    numero character varying(20) NOT NULL,
+    cliente_id bigint,
+    peso_gramas numeric(10,3) NOT NULL,
+    cotacao_ouro numeric(12,2) NOT NULL,
+    valor_credito_grama numeric(12,2) NOT NULL,
+    min_limit numeric(12,2) NOT NULL,
+    max_limit numeric(12,2) NOT NULL,
+    excedeu_teto boolean DEFAULT false NOT NULL,
+    valor_total numeric(12,2) NOT NULL,
+    venda_id integer,
+    credito_excedente numeric(12,2),
+    credito_excedente_id integer,
+    foto_path text,
+    foto_peso_ia numeric(10,3),
+    ia_confianca character varying(20),
+    ia_match boolean,
+    status character varying(20) DEFAULT 'ativo'::character varying NOT NULL,
+    cofre_registrado boolean DEFAULT false NOT NULL,
+    observacao text,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT recebimentos_metal_peso_gramas_check CHECK ((peso_gramas > (0)::numeric)),
+    CONSTRAINT recebimentos_metal_status_check CHECK (((status)::text = ANY ((ARRAY['ativo'::character varying, 'cancelado'::character varying])::text[]))),
+    CONSTRAINT recebimentos_metal_valor_credito_grama_check CHECK ((valor_credito_grama > (0)::numeric))
+);
+
+
+--
+-- Name: TABLE recebimentos_metal; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON TABLE alissonerp.recebimentos_metal IS 'Registra recebimento de metal como parte de pagamento de venda.
+   Gera crédito vinculado à venda. Excedente vira saldo do cliente.';
+
+
+--
+-- Name: COLUMN recebimentos_metal.numero; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.recebimentos_metal.numero IS 'Formato: RM-AAAA-NNNN (Recebimento Metal + ano + sequencial)';
+
+
+--
+-- Name: COLUMN recebimentos_metal.cliente_id; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.recebimentos_metal.cliente_id IS 'O cliente que entregou o metal. FK para public.contatos';
+
+
+--
+-- Name: COLUMN recebimentos_metal.excedeu_teto; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.recebimentos_metal.excedeu_teto IS 'True se valor_credito_grama > maxLimit (alerta, não bloquear)';
+
+
+--
+-- Name: COLUMN recebimentos_metal.venda_id; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.recebimentos_metal.venda_id IS 'Venda à qual este recebimento está vinculado. O crédito abate esta venda';
+
+
+--
+-- Name: COLUMN recebimentos_metal.credito_excedente; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.recebimentos_metal.credito_excedente IS 'Se valor_total > valor da venda, este é o excedente que virou saldo do cliente';
+
+
+--
+-- Name: COLUMN recebimentos_metal.credito_excedente_id; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.recebimentos_metal.credito_excedente_id IS 'FK para o registro em creditos_cliente gerado a partir do excedente';
+
+
+--
+-- Name: recebimentos_metal_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.recebimentos_metal_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: recebimentos_metal_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.recebimentos_metal_id_seq OWNED BY alissonerp.recebimentos_metal.id;
+
+
+--
+-- Name: recebimentos_metal_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.recebimentos_metal_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: SEQUENCE recebimentos_metal_seq; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON SEQUENCE alissonerp.recebimentos_metal_seq IS 'Usada para gerar números sequenciais de recebimento de metal. Formato RM-AAAA-NNNN';
 
 
 --
@@ -14789,11 +15570,11 @@ CREATE VIEW alissonerp.vw_dash_vendas_todas AS
    FROM public.vendas v
   WHERE ((NOT (EXISTS ( SELECT 1
            FROM alissonerp.vendas_erp ve
-          WHERE (((ve.situacao)::text = ANY ((ARRAY['aprovado'::character varying, 'enviado'::character varying, 'entregue'::character varying, 'concluido'::character varying])::text[])) AND (ve.tiny_pedido_id IS NOT NULL) AND (ve.tiny_pedido_id = v.id_api_tiny) AND (ve.data_venda >= '2026-04-23'::date))))) AND (NOT (EXISTS ( SELECT 1
+          WHERE (((ve.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND (ve.tiny_pedido_id IS NOT NULL) AND (ve.tiny_pedido_id = v.id_api_tiny) AND (ve.data_venda >= '2026-04-23'::date))))) AND (NOT (EXISTS ( SELECT 1
            FROM alissonerp.vendas_erp ve2
-          WHERE (((ve2.situacao)::text = ANY ((ARRAY['aprovado'::character varying, 'enviado'::character varying, 'entregue'::character varying, 'concluido'::character varying])::text[])) AND (ve2.tiny_pedido_id IS NULL) AND (ve2.numero_venda = (v.numero_pedido)::text) AND (ve2.data_venda < '2026-04-23'::date) AND (v.status <> 2))))) AND (NOT (EXISTS ( SELECT 1
+          WHERE (((ve2.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND (ve2.tiny_pedido_id IS NULL) AND (ve2.numero_venda = (v.numero_pedido)::text) AND (ve2.data_venda < '2026-04-23'::date) AND (v.status <> 2))))) AND (NOT (EXISTS ( SELECT 1
            FROM alissonerp.vendas_erp ve3
-          WHERE (((ve3.situacao)::text = ANY ((ARRAY['aprovado'::character varying, 'enviado'::character varying, 'entregue'::character varying, 'concluido'::character varying])::text[])) AND (ve3.tiny_pedido_id IS NOT NULL) AND (ve3.tiny_pedido_id = v.id_api_tiny) AND (ve3.data_venda < '2026-04-23'::date) AND (v.status IS DISTINCT FROM 2))))))
+          WHERE (((ve3.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND (ve3.tiny_pedido_id IS NOT NULL) AND (ve3.tiny_pedido_id = v.id_api_tiny) AND (ve3.data_venda < '2026-04-23'::date) AND (v.status IS DISTINCT FROM 2))))))
 UNION ALL
  SELECT 'erp'::text AS fonte,
     (ve.id)::bigint AS id,
@@ -14811,9 +15592,9 @@ UNION ALL
     ve.forma_envio AS forma_envio_texto,
     COALESCE(( SELECT sum(pv.valor) AS sum
            FROM alissonerp.pagamentos_venda pv
-          WHERE ((pv.venda_id = ve.id) AND ((pv.forma)::text = 'Vale-troca'::text) AND ((pv.status)::text = 'confirmado'::text))), (0)::numeric) AS valor_vale_troca
+          WHERE ((pv.venda_id = ve.id) AND ((pv.forma)::text = 'Vale-Troca'::text) AND ((pv.status)::text = 'confirmado'::text))), (0)::numeric) AS valor_vale_troca
    FROM alissonerp.vendas_erp ve
-  WHERE (((ve.situacao)::text = ANY ((ARRAY['aprovado'::character varying, 'enviado'::character varying, 'entregue'::character varying, 'concluido'::character varying])::text[])) AND ((ve.data_venda >= '2026-04-23'::date) OR ((ve.data_venda < '2026-04-23'::date) AND (ve.tiny_pedido_id IS NULL) AND (ve.total_venda > (0)::numeric) AND (EXISTS ( SELECT 1
+  WHERE (((ve.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND ((ve.data_venda >= '2026-04-23'::date) OR ((ve.data_venda < '2026-04-23'::date) AND (ve.tiny_pedido_id IS NULL) AND (ve.total_venda > (0)::numeric) AND (EXISTS ( SELECT 1
            FROM public.vendas v2
           WHERE (((v2.numero_pedido)::text = ve.numero_venda) AND (v2.status <> 2))))) OR ((ve.data_venda < '2026-04-23'::date) AND (ve.tiny_pedido_id IS NOT NULL) AND (ve.total_venda > (0)::numeric) AND (EXISTS ( SELECT 1
            FROM public.vendas v3
@@ -14832,18 +15613,19 @@ COMMENT ON VIEW alissonerp.vw_dash_vendas_todas IS 'Dashboard Comercial: vendas 
 --
 
 CREATE VIEW alissonerp.vw_dash_vendedores AS
- SELECT vendedores.id_vendedor,
-    vendedores.nome,
-    vendedores.id_api_vendedor,
-    vendedores.foto,
-    vendedores.situacao,
-    vendedores.id_api_kommo,
-    vendedores.cpf,
-    vendedores.email,
-    vendedores.user_id,
-    vendedores.comissao,
-    vendedores.gerente_orcamento
-   FROM public.vendedores;
+ SELECT v.id_vendedor,
+    v.nome,
+    v.id_api_vendedor,
+    COALESCE(up.avatar_url, v.foto) AS foto,
+    v.situacao,
+    v.id_api_kommo,
+    v.cpf,
+    v.email,
+    v.user_id,
+    v.comissao,
+    v.gerente_orcamento
+   FROM (public.vendedores v
+     LEFT JOIN public.user_profiles up ON ((up.id_user = v.user_id)));
 
 
 --
@@ -15857,6 +16639,79 @@ CREATE VIEW alissonerp.vw_pcp_erp AS
 
 
 --
+-- Name: parametros; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parametros (
+    id bigint NOT NULL,
+    ouro real,
+    dollar double precision,
+    euro double precision,
+    prata_api real,
+    prata_manual double precision
+);
+
+
+--
+-- Name: vw_pedras_preco; Type: VIEW; Schema: alissonerp; Owner: -
+--
+
+CREATE VIEW alissonerp.vw_pedras_preco AS
+ SELECT p.id_produto,
+    p.nome,
+    p.sku,
+    ppe.peso_ct,
+    r.categoria_pedra,
+    r.nome_tabela,
+    r.custo_usd_ct,
+    r.preco_rs_un,
+        CASE
+            WHEN ((r.tamanho_final_mm > r.tamanho_inicial_mm) AND (r.preco_rs_un IS NULL)) THEN round((r.markup_inicial - (((r.markup_inicial - r.markup_final) * ((COALESCE("substring"((p.nome)::text, '([0-9]+[,.][0-9]+)\s*mm'::text), '0'::text))::numeric - r.tamanho_inicial_mm)) / NULLIF((r.tamanho_final_mm - r.tamanho_inicial_mm), (0)::numeric))), 4)
+            WHEN (r.preco_rs_un IS NOT NULL) THEN NULL::numeric
+            ELSE r.markup_inicial
+        END AS markup_calculado,
+        CASE
+            WHEN ((r.preco_rs_un IS NOT NULL) AND (r.preco_rs_un > (0)::numeric)) THEN (r.preco_rs_un)::integer
+            WHEN ((r.custo_usd_ct IS NOT NULL) AND (r.custo_usd_ct > (0)::numeric) AND (ppe.peso_ct IS NOT NULL)) THEN (round(((((ppe.peso_ct * r.custo_usd_ct))::double precision * ( SELECT parametros.dollar
+               FROM public.parametros
+             LIMIT 1)) * (
+            CASE
+                WHEN (r.tamanho_final_mm > r.tamanho_inicial_mm) THEN (r.markup_inicial - (((r.markup_inicial - r.markup_final) * ((COALESCE("substring"((p.nome)::text, '([0-9]+[,.][0-9]+)\s*mm'::text), '0'::text))::numeric - r.tamanho_inicial_mm)) / NULLIF((r.tamanho_final_mm - r.tamanho_inicial_mm), (0)::numeric)))
+                ELSE r.markup_inicial
+            END)::double precision)))::integer
+            ELSE NULL::integer
+        END AS preco_venda
+   FROM (((public.produtos p
+     JOIN alissonerp.produto_tipo_item ti ON ((ti.produto_id = p.id_produto)))
+     LEFT JOIN alissonerp.produto_pedra_extras ppe ON ((ppe.produto_id = p.id_produto)))
+     LEFT JOIN LATERAL ( SELECT r2.id,
+            r2.nome_tabela,
+            r2.categoria_pedra,
+            r2.custo_usd_ct,
+            r2.preco_rs_un,
+            r2.tamanho_inicial_mm,
+            r2.tamanho_final_mm,
+            r2.markup_inicial,
+            r2.markup_final,
+            r2.ativa,
+            r2.created_at,
+            r2.updated_at,
+            r2.created_by
+           FROM alissonerp.pedras_precificacao_regras r2
+          WHERE (((lower((p.nome)::text) ~~* (('%'::text || lower((r2.categoria_pedra)::text)) || '%'::text)) OR (((r2.categoria_pedra)::text = 'zirconia'::text) AND (lower((p.nome)::text) ~~* '%zirc%'::text))) AND ((((COALESCE("substring"((p.nome)::text, '([0-9]+[,.][0-9]+)\s*mm'::text), '0'::text))::numeric >= r2.tamanho_inicial_mm) AND ((COALESCE("substring"((p.nome)::text, '([0-9]+[,.][0-9]+)\s*mm'::text), '0'::text))::numeric <= r2.tamanho_final_mm)) OR ((r2.categoria_pedra)::text = 'zirconia'::text)))
+          ORDER BY r2.tamanho_inicial_mm
+         LIMIT 1) r ON (true))
+  WHERE ((ti.tipo_item = 'insumo'::text) AND ((p.situacao)::text = 'A'::text) AND ((p.categoria)::text = 'Pedras'::text));
+
+
+--
+-- Name: VIEW vw_pedras_preco; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON VIEW alissonerp.vw_pedras_preco IS 'Precificação dinâmica de pedras (LEFT JOIN). Mostra TODAS as pedras classificadas como insumo. Para pedras sem regra de precificação, preco_venda = NULL. Fórmula: peso_ct × custo_usd_ct × dolar × markup_interpolado. Para zircônia, retorna preco_rs_un.';
+
+
+--
 -- Name: vw_producao_mensal; Type: VIEW; Schema: alissonerp; Owner: -
 --
 
@@ -15962,20 +16817,6 @@ COMMENT ON VIEW alissonerp.vw_produto_imagens IS 'Galeria completa por produto e
 
 
 --
--- Name: parametros; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.parametros (
-    id bigint NOT NULL,
-    ouro real,
-    dollar double precision,
-    euro double precision,
-    prata_api real,
-    prata_manual double precision
-);
-
-
---
 -- Name: vw_produto_preco; Type: VIEW; Schema: alissonerp; Owner: -
 --
 
@@ -15985,15 +16826,26 @@ CREATE VIEW alissonerp.vw_produto_preco AS
             WHEN (ti.tipo_item = 'servico'::text) THEN ep.preco_servico
             WHEN ((p.peso_precificado > (0)::double precision) AND (cpa.markup_aplicado > (0)::numeric) AND (( SELECT parametros.ouro
                FROM public.parametros
+             LIMIT 1) > (0)::double precision)) THEN ((((round((((((p.peso_precificado)::numeric * (( SELECT parametros.ouro
+               FROM public.parametros
+             LIMIT 1))::numeric) * (cpa.markup_aplicado)::numeric) * COALESCE((p.fator)::numeric, (1)::numeric)) / (10)::numeric)))::integer * 10))::numeric + COALESCE(p.preco_pedras, (0)::numeric))
+            ELSE NULL::numeric
+        END AS preco_venda,
+        CASE
+            WHEN (ti.tipo_item = 'servico'::text) THEN NULL::numeric
+            WHEN ((p.peso_precificado > (0)::double precision) AND (cpa.markup_aplicado > (0)::numeric) AND (( SELECT parametros.ouro
+               FROM public.parametros
              LIMIT 1) > (0)::double precision)) THEN (((round((((((p.peso_precificado)::numeric * (( SELECT parametros.ouro
                FROM public.parametros
              LIMIT 1))::numeric) * (cpa.markup_aplicado)::numeric) * COALESCE((p.fator)::numeric, (1)::numeric)) / (10)::numeric)))::integer * 10))::numeric
             ELSE NULL::numeric
-        END AS preco_venda
+        END AS preco_ouro_curva,
+    COALESCE(p.preco_pedras, (0)::numeric) AS preco_pedras
    FROM (((public.produtos p
      LEFT JOIN alissonerp.erp_produtos ep ON ((ep.produto_id = p.id_produto)))
      LEFT JOIN alissonerp.produto_curva_aplicada cpa ON ((cpa.produto_id = p.id_produto)))
-     LEFT JOIN alissonerp.produto_tipo_item ti ON ((ti.produto_id = p.id_produto)));
+     LEFT JOIN alissonerp.produto_tipo_item ti ON ((ti.produto_id = p.id_produto)))
+  WHERE ((p.categoria IS NULL) OR ((p.categoria)::text <> 'Pedras'::text));
 
 
 --
@@ -16001,9 +16853,9 @@ CREATE VIEW alissonerp.vw_produto_preco AS
 --
 
 CREATE VIEW alissonerp.vw_produto_preco_vigente AS
- SELECT p.id_produto,
-    p.preco_tiny AS preco_lista,
-    COALESCE(promo.preco_promo, p.preco_tiny) AS preco_vigente,
+ SELECT pp.id_produto,
+    pp.preco_venda AS preco_lista,
+    COALESCE(promo.preco_promo, pp.preco_venda) AS preco_vigente,
     promo.preco_original AS preco_promo_original,
     (promo.promocao_id IS NOT NULL) AS em_promocao,
     promo.promocao_id,
@@ -16014,19 +16866,21 @@ CREATE VIEW alissonerp.vw_produto_preco_vigente AS
             WHEN (promo.promocao_id IS NULL) THEN NULL::text
             ELSE 'ativa'::text
         END AS situacao_efetiva,
-    promo.max_parcelas_cartao
-   FROM (public.produtos p
+    promo.max_parcelas_cartao,
+    pp.preco_ouro_curva,
+    pp.preco_pedras
+   FROM (alissonerp.vw_produto_preco pp
      LEFT JOIN LATERAL ( SELECT pi.preco_promo,
             pi.preco_original,
-            pp.id AS promocao_id,
-            pp.nome_campanha,
-            pp.data_inicio,
-            pp.data_fim,
-            pp.max_parcelas_cartao
+            pp2.id AS promocao_id,
+            pp2.nome_campanha,
+            pp2.data_inicio,
+            pp2.data_fim,
+            pp2.max_parcelas_cartao
            FROM (alissonerp.promocao_itens pi
-             JOIN alissonerp.promocoes_produtos pp ON ((pp.id = pi.promocao_id)))
-          WHERE ((pi.produto_id = p.id_produto) AND ((pp.situacao_manual)::text = 'agendada'::text) AND ((CURRENT_DATE >= pp.data_inicio) AND (CURRENT_DATE <= pp.data_fim)))
-          ORDER BY pp.data_inicio DESC, pp.id DESC
+             JOIN alissonerp.promocoes_produtos pp2 ON ((pp2.id = pi.promocao_id)))
+          WHERE ((pi.produto_id = pp.id_produto) AND ((pp2.situacao_manual)::text = 'agendada'::text) AND ((CURRENT_DATE >= pp2.data_inicio) AND (CURRENT_DATE <= pp2.data_fim)))
+          ORDER BY pp2.data_inicio DESC, pp2.id DESC
          LIMIT 1) promo ON (true));
 
 
@@ -16119,6 +16973,29 @@ CREATE VIEW alissonerp.vw_produtos_erp AS
            FROM alissonerp.erp_produtos
           WHERE (erp_produtos.parent_id IS NOT NULL)
           GROUP BY erp_produtos.parent_id) cnt ON ((cnt.parent_id = ep.id)));
+
+
+--
+-- Name: vw_produtos_geral_preco; Type: VIEW; Schema: alissonerp; Owner: -
+--
+
+CREATE VIEW alissonerp.vw_produtos_geral_preco AS
+ SELECT vw_produto_preco.id_produto,
+    vw_produto_preco.preco_venda
+   FROM alissonerp.vw_produto_preco
+  WHERE (vw_produto_preco.preco_venda IS NOT NULL)
+UNION
+ SELECT vw_pedras_preco.id_produto,
+    vw_pedras_preco.preco_venda
+   FROM alissonerp.vw_pedras_preco
+  WHERE (vw_pedras_preco.preco_venda IS NOT NULL);
+
+
+--
+-- Name: VIEW vw_produtos_geral_preco; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON VIEW alissonerp.vw_produtos_geral_preco IS 'View unificada de precificação: vw_produto_preco (joias, excluindo Pedras) + vw_pedras_preco (pedras/insumos). Fonte única de preço de venda para a API de listagem.';
 
 
 --
@@ -19399,6 +20276,18 @@ ALTER TABLE public.produtos ALTER COLUMN id_produto ADD GENERATED BY DEFAULT AS 
 
 
 --
+-- Name: produtos_servico_config; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.produtos_servico_config (
+    id_produto bigint NOT NULL,
+    pct_calculo_servico numeric(5,4) NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text
+);
+
+
+--
 -- Name: produtos_views; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -20009,6 +20898,20 @@ ALTER TABLE ONLY alissonerp.compras ALTER COLUMN id SET DEFAULT nextval('alisson
 
 
 --
+-- Name: compras_comercial id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_comercial ALTER COLUMN id SET DEFAULT nextval('alissonerp.compras_comercial_id_seq'::regclass);
+
+
+--
+-- Name: compras_metal id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_metal ALTER COLUMN id SET DEFAULT nextval('alissonerp.compras_metal_id_seq'::regclass);
+
+
+--
 -- Name: comunicacoes_crediario id; Type: DEFAULT; Schema: alissonerp; Owner: -
 --
 
@@ -20076,6 +20979,13 @@ ALTER TABLE ONLY alissonerp.conversoes_estoque ALTER COLUMN id SET DEFAULT nextv
 --
 
 ALTER TABLE ONLY alissonerp.conversoes_sku ALTER COLUMN id SET DEFAULT nextval('alissonerp.conversoes_sku_id_seq'::regclass);
+
+
+--
+-- Name: creditos_cliente id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.creditos_cliente ALTER COLUMN id SET DEFAULT nextval('alissonerp.creditos_cliente_id_seq'::regclass);
 
 
 --
@@ -20293,6 +21203,13 @@ ALTER TABLE ONLY alissonerp.inventarios_comercial ALTER COLUMN id SET DEFAULT ne
 --
 
 ALTER TABLE ONLY alissonerp.itens_compra ALTER COLUMN id SET DEFAULT nextval('alissonerp.itens_compra_id_seq'::regclass);
+
+
+--
+-- Name: itens_compra_comercial id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.itens_compra_comercial ALTER COLUMN id SET DEFAULT nextval('alissonerp.itens_compra_comercial_id_seq'::regclass);
 
 
 --
@@ -20520,6 +21437,13 @@ ALTER TABLE ONLY alissonerp.pedras_ordens ALTER COLUMN id SET DEFAULT nextval('a
 
 
 --
+-- Name: pedras_precificacao_regras id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pedras_precificacao_regras ALTER COLUMN id SET DEFAULT nextval('alissonerp.pedras_precificacao_regras_id_seq'::regclass);
+
+
+--
 -- Name: permissoes_usuario id; Type: DEFAULT; Schema: alissonerp; Owner: -
 --
 
@@ -20643,6 +21567,13 @@ ALTER TABLE ONLY alissonerp.push_subscriptions ALTER COLUMN id SET DEFAULT nextv
 --
 
 ALTER TABLE ONLY alissonerp.quebra_operador ALTER COLUMN id SET DEFAULT nextval('alissonerp.quebra_operador_id_seq'::regclass);
+
+
+--
+-- Name: recebimentos_metal id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.recebimentos_metal ALTER COLUMN id SET DEFAULT nextval('alissonerp.recebimentos_metal_id_seq'::regclass);
 
 
 --
@@ -21116,6 +22047,30 @@ ALTER TABLE ONLY alissonerp.comentarios_tarefa
 
 
 --
+-- Name: compras_comercial compras_comercial_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_comercial
+    ADD CONSTRAINT compras_comercial_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: compras_metal compras_metal_numero_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_metal
+    ADD CONSTRAINT compras_metal_numero_key UNIQUE (numero);
+
+
+--
+-- Name: compras_metal compras_metal_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_metal
+    ADD CONSTRAINT compras_metal_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: compras compras_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -21249,6 +22204,14 @@ ALTER TABLE ONLY alissonerp.conversoes_estoque
 
 ALTER TABLE ONLY alissonerp.conversoes_sku
     ADD CONSTRAINT conversoes_sku_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: creditos_cliente creditos_cliente_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.creditos_cliente
+    ADD CONSTRAINT creditos_cliente_pkey PRIMARY KEY (id);
 
 
 --
@@ -21604,6 +22567,14 @@ ALTER TABLE ONLY alissonerp.inventarios_comercial
 
 
 --
+-- Name: itens_compra_comercial itens_compra_comercial_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.itens_compra_comercial
+    ADD CONSTRAINT itens_compra_comercial_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: itens_compra itens_compra_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -21956,6 +22927,14 @@ ALTER TABLE ONLY alissonerp.pedras_ordens
 
 
 --
+-- Name: pedras_precificacao_regras pedras_precificacao_regras_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pedras_precificacao_regras
+    ADD CONSTRAINT pedras_precificacao_regras_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: permissoes_usuario permissoes_usuario_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -22225,6 +23204,22 @@ ALTER TABLE ONLY alissonerp.push_subscriptions
 
 ALTER TABLE ONLY alissonerp.quebra_operador
     ADD CONSTRAINT quebra_operador_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: recebimentos_metal recebimentos_metal_numero_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.recebimentos_metal
+    ADD CONSTRAINT recebimentos_metal_numero_key UNIQUE (numero);
+
+
+--
+-- Name: recebimentos_metal recebimentos_metal_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.recebimentos_metal
+    ADD CONSTRAINT recebimentos_metal_pkey PRIMARY KEY (id);
 
 
 --
@@ -23236,6 +24231,14 @@ ALTER TABLE ONLY public.produtos
 
 
 --
+-- Name: produtos_servico_config produtos_servico_config_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produtos_servico_config
+    ADD CONSTRAINT produtos_servico_config_pkey PRIMARY KEY (id_produto);
+
+
+--
 -- Name: public_links public_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -23552,6 +24555,41 @@ CREATE INDEX idx_comentarios_tarefa ON alissonerp.comentarios_tarefa USING btree
 
 
 --
+-- Name: idx_compras_comercial_aprovador; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_compras_comercial_aprovador ON alissonerp.compras_comercial USING btree (aprovador_id) WHERE (aprovador_id IS NOT NULL);
+
+
+--
+-- Name: idx_compras_comercial_fornecedor; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_compras_comercial_fornecedor ON alissonerp.compras_comercial USING btree (fornecedor_id, created_at DESC);
+
+
+--
+-- Name: idx_compras_comercial_local; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_compras_comercial_local ON alissonerp.compras_comercial USING btree (local_estoque_id);
+
+
+--
+-- Name: idx_compras_comercial_situacao; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_compras_comercial_situacao ON alissonerp.compras_comercial USING btree (situacao);
+
+
+--
+-- Name: idx_compras_comercial_tarefa_aprovacao; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_compras_comercial_tarefa_aprovacao ON alissonerp.compras_comercial USING btree (tarefa_aprovacao_id) WHERE (tarefa_aprovacao_id IS NOT NULL);
+
+
+--
 -- Name: idx_compras_data_compra; Type: INDEX; Schema: alissonerp; Owner: -
 --
 
@@ -23563,6 +24601,55 @@ CREATE INDEX idx_compras_data_compra ON alissonerp.compras USING btree (data_com
 --
 
 CREATE INDEX idx_compras_local_destino ON alissonerp.compras USING btree (local_destino_id);
+
+
+--
+-- Name: idx_compras_metal_created; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_compras_metal_created ON alissonerp.compras_metal USING btree (created_at DESC);
+
+
+--
+-- Name: idx_compras_metal_fornecedor; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_compras_metal_fornecedor ON alissonerp.compras_metal USING btree (fornecedor_id, created_at DESC) WHERE (fornecedor_id IS NOT NULL);
+
+
+--
+-- Name: idx_compras_metal_mp_payment; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_compras_metal_mp_payment ON alissonerp.compras_metal USING btree (mp_payment_id) WHERE (mp_payment_id IS NOT NULL);
+
+
+--
+-- Name: idx_compras_metal_mp_preference; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_compras_metal_mp_preference ON alissonerp.compras_metal USING btree (mp_preference_id) WHERE (mp_preference_id IS NOT NULL);
+
+
+--
+-- Name: idx_compras_metal_numero; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_compras_metal_numero ON alissonerp.compras_metal USING btree (numero);
+
+
+--
+-- Name: idx_compras_metal_status; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_compras_metal_status ON alissonerp.compras_metal USING btree (status);
+
+
+--
+-- Name: idx_contas_pagar_compra_comercial; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_contas_pagar_compra_comercial ON alissonerp.contas_pagar USING btree (compra_comercial_id) WHERE (compra_comercial_id IS NOT NULL);
 
 
 --
@@ -23668,6 +24755,13 @@ CREATE INDEX idx_cr_vencimento ON alissonerp.contas_receber USING btree (data_ve
 --
 
 CREATE INDEX idx_cr_venda_erp_id ON alissonerp.contas_receber USING btree (venda_erp_id) WHERE ((categoria)::text = 'venda'::text);
+
+
+--
+-- Name: idx_creditos_cliente_cliente; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_creditos_cliente_cliente ON alissonerp.creditos_cliente USING btree (cliente_id, status) WHERE ((status)::text = 'ativo'::text);
 
 
 --
@@ -23976,6 +25070,20 @@ CREATE INDEX idx_inv_ec_status ON alissonerp.inventarios_comercial USING btree (
 --
 
 CREATE INDEX idx_inventarios_comercial_categoria ON alissonerp.inventarios_comercial USING btree (categoria);
+
+
+--
+-- Name: idx_itens_compra_comercial_compra; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_itens_compra_comercial_compra ON alissonerp.itens_compra_comercial USING btree (compra_comercial_id);
+
+
+--
+-- Name: idx_itens_compra_comercial_produto; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_itens_compra_comercial_produto ON alissonerp.itens_compra_comercial USING btree (produto_id);
 
 
 --
@@ -24504,6 +25612,13 @@ CREATE INDEX idx_pcp_ordem ON alissonerp.pcp USING btree (ordem_id);
 
 
 --
+-- Name: idx_pedras_regras_ativa_categoria; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_pedras_regras_ativa_categoria ON alissonerp.pedras_precificacao_regras USING btree (categoria_pedra) WHERE (ativa = true);
+
+
+--
 -- Name: idx_permissoes_usuario_acao; Type: INDEX; Schema: alissonerp; Owner: -
 --
 
@@ -24697,6 +25812,34 @@ CREATE INDEX idx_quebra_op_setor_periodo ON alissonerp.quebra_operador USING btr
 --
 
 CREATE INDEX idx_quebra_op_tipo ON alissonerp.quebra_operador USING btree (tipo, data_registro);
+
+
+--
+-- Name: idx_recebimentos_metal_cliente; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_recebimentos_metal_cliente ON alissonerp.recebimentos_metal USING btree (cliente_id, created_at DESC) WHERE (cliente_id IS NOT NULL);
+
+
+--
+-- Name: idx_recebimentos_metal_created; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_recebimentos_metal_created ON alissonerp.recebimentos_metal USING btree (created_at DESC);
+
+
+--
+-- Name: idx_recebimentos_metal_numero; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_recebimentos_metal_numero ON alissonerp.recebimentos_metal USING btree (numero);
+
+
+--
+-- Name: idx_recebimentos_metal_venda; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_recebimentos_metal_venda ON alissonerp.recebimentos_metal USING btree (venda_id, created_at DESC) WHERE (venda_id IS NOT NULL);
 
 
 --
@@ -25477,6 +26620,13 @@ CREATE TRIGGER trg_aa_bloquear_compra BEFORE UPDATE ON alissonerp.compras FOR EA
 
 
 --
+-- Name: compras_comercial trg_aa_bloquear_compra_comercial; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_aa_bloquear_compra_comercial BEFORE UPDATE ON alissonerp.compras_comercial FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_bloquear_compra_comercial();
+
+
+--
 -- Name: vendas_erp trg_aa_proteger_venda_fechada; Type: TRIGGER; Schema: alissonerp; Owner: -
 --
 
@@ -25631,6 +26781,13 @@ CREATE TRIGGER trg_calcular_item_compra BEFORE INSERT OR UPDATE ON alissonerp.it
 
 
 --
+-- Name: itens_compra_comercial trg_calcular_item_compra_comercial; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_calcular_item_compra_comercial BEFORE INSERT OR UPDATE ON alissonerp.itens_compra_comercial FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_calcular_item_compra_comercial();
+
+
+--
 -- Name: insumos trg_calcular_peso_pedra; Type: TRIGGER; Schema: alissonerp; Owner: -
 --
 
@@ -25652,6 +26809,13 @@ CREATE TRIGGER trg_cofre_baixa_updated_at BEFORE UPDATE ON alissonerp.cofre_ouro
 
 
 --
+-- Name: compras_comercial trg_compra_comercial_gerar_conta_pagar; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_compra_comercial_gerar_conta_pagar AFTER UPDATE ON alissonerp.compras_comercial FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_gerar_conta_pagar_compra_comercial();
+
+
+--
 -- Name: compras trg_compra_gerar_conta_pagar; Type: TRIGGER; Schema: alissonerp; Owner: -
 --
 
@@ -25659,10 +26823,31 @@ CREATE TRIGGER trg_compra_gerar_conta_pagar AFTER UPDATE ON alissonerp.compras F
 
 
 --
+-- Name: compras_comercial trg_compras_comercial_updated_at; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_compras_comercial_updated_at BEFORE UPDATE ON alissonerp.compras_comercial FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_compras_comercial_updated_at();
+
+
+--
+-- Name: compras_metal trg_compras_metal_updated_at; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_compras_metal_updated_at BEFORE UPDATE ON alissonerp.compras_metal FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_compras_metal_updated_at();
+
+
+--
 -- Name: compras trg_concluir_compra; Type: TRIGGER; Schema: alissonerp; Owner: -
 --
 
 CREATE TRIGGER trg_concluir_compra BEFORE UPDATE ON alissonerp.compras FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_concluir_compra();
+
+
+--
+-- Name: compras_comercial trg_concluir_compra_comercial; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_concluir_compra_comercial BEFORE UPDATE ON alissonerp.compras_comercial FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_concluir_compra_comercial();
 
 
 --
@@ -25691,6 +26876,13 @@ CREATE TRIGGER trg_concluir_distribuicao BEFORE UPDATE ON alissonerp.distribuico
 --
 
 CREATE TRIGGER trg_concluir_protocolo BEFORE UPDATE ON alissonerp.protocolos FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_concluir_protocolo();
+
+
+--
+-- Name: creditos_cliente trg_creditos_cliente_updated_at; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_creditos_cliente_updated_at BEFORE UPDATE ON alissonerp.creditos_cliente FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_creditos_cliente_updated_at();
 
 
 --
@@ -25782,6 +26974,13 @@ CREATE TRIGGER trg_fechamento_distribuicao AFTER INSERT OR UPDATE ON alissonerp.
 --
 
 CREATE TRIGGER trg_fornecedores_updated_at BEFORE UPDATE ON alissonerp.fornecedores FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_touch_updated_at();
+
+
+--
+-- Name: itens_compra_comercial trg_itens_compra_comercial_updated_at; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_itens_compra_comercial_updated_at BEFORE UPDATE ON alissonerp.itens_compra_comercial FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_itens_compra_comercial_updated_at();
 
 
 --
@@ -25890,6 +27089,13 @@ CREATE TRIGGER trg_rastreio_baixa_ouro AFTER INSERT ON alissonerp.cofre_ouro_bai
 
 
 --
+-- Name: compras_metal trg_rastreio_compra_metal; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_rastreio_compra_metal AFTER UPDATE ON alissonerp.compras_metal FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_rastreio_compra_metal();
+
+
+--
 -- Name: cofre_ouro_baixas trg_rastreio_concluir_baixa; Type: TRIGGER; Schema: alissonerp; Owner: -
 --
 
@@ -25904,10 +27110,24 @@ CREATE TRIGGER trg_rastreio_pagamento_ouro AFTER INSERT ON alissonerp.pagamentos
 
 
 --
+-- Name: recebimentos_metal trg_rastreio_recebimento_metal; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_rastreio_recebimento_metal AFTER INSERT ON alissonerp.recebimentos_metal FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_rastreio_recebimento_metal();
+
+
+--
 -- Name: itens_venda_erp trg_recalcular_totais_venda; Type: TRIGGER; Schema: alissonerp; Owner: -
 --
 
 CREATE TRIGGER trg_recalcular_totais_venda AFTER INSERT OR DELETE OR UPDATE ON alissonerp.itens_venda_erp FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_recalcular_totais_venda();
+
+
+--
+-- Name: recebimentos_metal trg_recebimentos_metal_updated_at; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_recebimentos_metal_updated_at BEFORE UPDATE ON alissonerp.recebimentos_metal FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_recebimentos_metal_updated_at();
 
 
 --
@@ -26619,6 +27839,62 @@ ALTER TABLE ONLY alissonerp.comentarios_tarefa
 
 
 --
+-- Name: compras_comercial compras_comercial_aprovado_por_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_comercial
+    ADD CONSTRAINT compras_comercial_aprovado_por_fkey FOREIGN KEY (aprovado_por) REFERENCES auth.users(id);
+
+
+--
+-- Name: compras_comercial compras_comercial_aprovador_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_comercial
+    ADD CONSTRAINT compras_comercial_aprovador_id_fkey FOREIGN KEY (aprovador_id) REFERENCES auth.users(id);
+
+
+--
+-- Name: compras_comercial compras_comercial_created_by_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_comercial
+    ADD CONSTRAINT compras_comercial_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
+
+
+--
+-- Name: compras_comercial compras_comercial_fornecedor_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_comercial
+    ADD CONSTRAINT compras_comercial_fornecedor_id_fkey FOREIGN KEY (fornecedor_id) REFERENCES public.contatos(id_contato);
+
+
+--
+-- Name: compras_comercial compras_comercial_local_estoque_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_comercial
+    ADD CONSTRAINT compras_comercial_local_estoque_id_fkey FOREIGN KEY (local_estoque_id) REFERENCES alissonerp.locais_estoque(id);
+
+
+--
+-- Name: compras_comercial compras_comercial_recebido_por_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_comercial
+    ADD CONSTRAINT compras_comercial_recebido_por_fkey FOREIGN KEY (recebido_por) REFERENCES auth.users(id);
+
+
+--
+-- Name: compras_comercial compras_comercial_tarefa_aprovacao_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_comercial
+    ADD CONSTRAINT compras_comercial_tarefa_aprovacao_id_fkey FOREIGN KEY (tarefa_aprovacao_id) REFERENCES alissonerp.tarefas(id);
+
+
+--
 -- Name: compras compras_created_by_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -26640,6 +27916,22 @@ ALTER TABLE ONLY alissonerp.compras
 
 ALTER TABLE ONLY alissonerp.compras
     ADD CONSTRAINT compras_local_destino_id_fkey FOREIGN KEY (local_destino_id) REFERENCES alissonerp.locais_estoque(id);
+
+
+--
+-- Name: compras_metal compras_metal_created_by_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_metal
+    ADD CONSTRAINT compras_metal_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
+
+
+--
+-- Name: compras_metal compras_metal_fornecedor_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.compras_metal
+    ADD CONSTRAINT compras_metal_fornecedor_id_fkey FOREIGN KEY (fornecedor_id) REFERENCES public.contatos(id_contato);
 
 
 --
@@ -26680,6 +27972,14 @@ ALTER TABLE ONLY alissonerp.config_orcamento_promocoes
 
 ALTER TABLE ONLY alissonerp.config_orcamento
     ADD CONSTRAINT config_orcamento_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES auth.users(id);
+
+
+--
+-- Name: contas_pagar contas_pagar_compra_comercial_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.contas_pagar
+    ADD CONSTRAINT contas_pagar_compra_comercial_id_fkey FOREIGN KEY (compra_comercial_id) REFERENCES alissonerp.compras_comercial(id);
 
 
 --
@@ -26912,6 +28212,30 @@ ALTER TABLE ONLY alissonerp.conversoes_sku
 
 ALTER TABLE ONLY alissonerp.conversoes_sku
     ADD CONSTRAINT conversoes_sku_tarefa_aprovacao_id_fkey FOREIGN KEY (tarefa_aprovacao_id) REFERENCES alissonerp.tarefas(id);
+
+
+--
+-- Name: creditos_cliente creditos_cliente_cliente_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.creditos_cliente
+    ADD CONSTRAINT creditos_cliente_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.contatos(id_contato);
+
+
+--
+-- Name: creditos_cliente creditos_cliente_recebimento_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.creditos_cliente
+    ADD CONSTRAINT creditos_cliente_recebimento_id_fkey FOREIGN KEY (recebimento_id) REFERENCES alissonerp.recebimentos_metal(id);
+
+
+--
+-- Name: creditos_cliente creditos_cliente_venda_origem_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.creditos_cliente
+    ADD CONSTRAINT creditos_cliente_venda_origem_id_fkey FOREIGN KEY (venda_origem_id) REFERENCES alissonerp.vendas_erp(id);
 
 
 --
@@ -27235,6 +28559,14 @@ ALTER TABLE ONLY alissonerp.ordens
 
 
 --
+-- Name: recebimentos_metal fk_recebimentos_credito_excedente; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.recebimentos_metal
+    ADD CONSTRAINT fk_recebimentos_credito_excedente FOREIGN KEY (credito_excedente_id) REFERENCES alissonerp.creditos_cliente(id);
+
+
+--
 -- Name: vendas_erp fk_vendas_erp_nota_fiscal; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -27288,6 +28620,22 @@ ALTER TABLE ONLY alissonerp.inventarios_comercial
 
 ALTER TABLE ONLY alissonerp.inventarios_comercial
     ADD CONSTRAINT inventarios_comercial_local_estoque_id_fkey FOREIGN KEY (local_estoque_id) REFERENCES alissonerp.locais_estoque(id);
+
+
+--
+-- Name: itens_compra_comercial itens_compra_comercial_compra_comercial_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.itens_compra_comercial
+    ADD CONSTRAINT itens_compra_comercial_compra_comercial_id_fkey FOREIGN KEY (compra_comercial_id) REFERENCES alissonerp.compras_comercial(id) ON DELETE CASCADE;
+
+
+--
+-- Name: itens_compra_comercial itens_compra_comercial_produto_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.itens_compra_comercial
+    ADD CONSTRAINT itens_compra_comercial_produto_id_fkey FOREIGN KEY (produto_id) REFERENCES public.produtos(id_produto);
 
 
 --
@@ -28248,6 +29596,30 @@ ALTER TABLE ONLY alissonerp.protocolos
 
 ALTER TABLE ONLY alissonerp.push_subscriptions
     ADD CONSTRAINT push_subscriptions_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: recebimentos_metal recebimentos_metal_cliente_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.recebimentos_metal
+    ADD CONSTRAINT recebimentos_metal_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.contatos(id_contato);
+
+
+--
+-- Name: recebimentos_metal recebimentos_metal_created_by_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.recebimentos_metal
+    ADD CONSTRAINT recebimentos_metal_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
+
+
+--
+-- Name: recebimentos_metal recebimentos_metal_venda_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.recebimentos_metal
+    ADD CONSTRAINT recebimentos_metal_venda_id_fkey FOREIGN KEY (venda_id) REFERENCES alissonerp.vendas_erp(id);
 
 
 --
@@ -29291,6 +30663,14 @@ ALTER TABLE ONLY public.produtos
 
 
 --
+-- Name: produtos_servico_config produtos_servico_config_id_produto_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produtos_servico_config
+    ADD CONSTRAINT produtos_servico_config_id_produto_fkey FOREIGN KEY (id_produto) REFERENCES public.produtos(id_produto);
+
+
+--
 -- Name: recebimentos recebimentos_conta_id_api_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -29590,10 +30970,64 @@ CREATE POLICY comentarios_update ON alissonerp.comentarios_ordem FOR UPDATE TO a
 
 
 --
+-- Name: compras_metal; Type: ROW SECURITY; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE alissonerp.compras_metal ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: compras_metal compras_metal_insert; Type: POLICY; Schema: alissonerp; Owner: -
+--
+
+CREATE POLICY compras_metal_insert ON alissonerp.compras_metal FOR INSERT TO authenticated WITH CHECK (true);
+
+
+--
+-- Name: compras_metal compras_metal_select; Type: POLICY; Schema: alissonerp; Owner: -
+--
+
+CREATE POLICY compras_metal_select ON alissonerp.compras_metal FOR SELECT TO authenticated USING (true);
+
+
+--
+-- Name: compras_metal compras_metal_update; Type: POLICY; Schema: alissonerp; Owner: -
+--
+
+CREATE POLICY compras_metal_update ON alissonerp.compras_metal FOR UPDATE TO authenticated USING (true);
+
+
+--
 -- Name: aprovacoes_consultora consultora_aprovacoes; Type: POLICY; Schema: alissonerp; Owner: -
 --
 
 CREATE POLICY consultora_aprovacoes ON alissonerp.aprovacoes_consultora TO authenticated USING (((alissonerp.fn_user_role())::text = 'consultora'::text));
+
+
+--
+-- Name: creditos_cliente; Type: ROW SECURITY; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE alissonerp.creditos_cliente ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: creditos_cliente creditos_cliente_insert; Type: POLICY; Schema: alissonerp; Owner: -
+--
+
+CREATE POLICY creditos_cliente_insert ON alissonerp.creditos_cliente FOR INSERT TO authenticated WITH CHECK (true);
+
+
+--
+-- Name: creditos_cliente creditos_cliente_select; Type: POLICY; Schema: alissonerp; Owner: -
+--
+
+CREATE POLICY creditos_cliente_select ON alissonerp.creditos_cliente FOR SELECT TO authenticated USING (true);
+
+
+--
+-- Name: creditos_cliente creditos_cliente_update; Type: POLICY; Schema: alissonerp; Owner: -
+--
+
+CREATE POLICY creditos_cliente_update ON alissonerp.creditos_cliente FOR UPDATE TO authenticated USING (true);
 
 
 --
@@ -29760,6 +31194,33 @@ ALTER TABLE alissonerp.protocolos ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY read_auditorias ON alissonerp.auditorias FOR SELECT TO authenticated USING (((alissonerp.fn_user_role())::text = ANY (ARRAY['pcp'::text, 'ourives'::text, 'consultora'::text])));
+
+
+--
+-- Name: recebimentos_metal; Type: ROW SECURITY; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE alissonerp.recebimentos_metal ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: recebimentos_metal recebimentos_metal_insert; Type: POLICY; Schema: alissonerp; Owner: -
+--
+
+CREATE POLICY recebimentos_metal_insert ON alissonerp.recebimentos_metal FOR INSERT TO authenticated WITH CHECK (true);
+
+
+--
+-- Name: recebimentos_metal recebimentos_metal_select; Type: POLICY; Schema: alissonerp; Owner: -
+--
+
+CREATE POLICY recebimentos_metal_select ON alissonerp.recebimentos_metal FOR SELECT TO authenticated USING (true);
+
+
+--
+-- Name: recebimentos_metal recebimentos_metal_update; Type: POLICY; Schema: alissonerp; Owner: -
+--
+
+CREATE POLICY recebimentos_metal_update ON alissonerp.recebimentos_metal FOR UPDATE TO authenticated USING (true);
 
 
 --
@@ -30926,5 +32387,5 @@ ALTER TABLE public.vendedores ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict po8NiyvYdz2IjgCleCGA5lIdjmtmKrAHRFsUYB7eTbHfjioeU8vezWYYNgkDODD
+\unrestrict VXs9Mooprx0LxrjvmpQ4NfNqxIg0tC2tgD4wvCybWUbOGOssbXQyeLYJDO4RRvF
 

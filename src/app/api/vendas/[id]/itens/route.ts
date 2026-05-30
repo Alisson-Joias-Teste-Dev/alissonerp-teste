@@ -18,22 +18,9 @@ import { zodError, IdSchema } from "@/lib/schemas/common";
 import { LIMITS } from "@/lib/payload-limits";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 
-function normalizarTextoBusca(valor: string | null | undefined): string {
-  return (valor ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
-function isServicoRodio(sku: string | null | undefined, nome: string | null | undefined): boolean {
-  const skuNorm = normalizarTextoBusca(sku);
-  const nomeNorm = normalizarTextoBusca(nome);
-  return skuNorm === "srv-rodio" || skuNorm.includes("rodio") || skuNorm.includes("rhodio") || nomeNorm.includes("rodio") || nomeNorm.includes("rhodio");
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+// REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
+// Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos endpoints.
+import { normalizarTextoBusca, isServicoRodio, round2, getPctRodio } from "@/lib/servico-rodio";
 
 const VendaItemPostSchema = z.object({
   produto_id: IdSchema.nullable().optional(),
@@ -202,9 +189,10 @@ export async function POST(
   // Impacto: sem este bloco, o preço do ródio volta a depender do valor digitado no frontend.
   if (body.produto_id) {
     const [metaProduto] = await sql`
-      SELECT p.sku, p.nome, ti.tipo_item
+      SELECT p.sku, p.nome, ti.tipo_item, psc.pct_calculo_servico
       FROM public.produtos p
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
+      LEFT JOIN public.produtos_servico_config psc ON psc.id_produto = p.id_produto
       WHERE p.id_produto = ${body.produto_id}
       LIMIT 1
     `;
@@ -239,7 +227,8 @@ export async function POST(
         );
       }
 
-      const precoRodio = round2(precoBase * 0.3);
+      const pctRodio = getPctRodio({ pct_calculo_servico: metaProduto?.pct_calculo_servico });
+      const precoRodio = round2(precoBase * pctRodio);
       const qtdRodio = Math.max(1, Number(body.quantidade) || 1);
       const totalRodio = round2(precoRodio * qtdRodio);
       const pctComissaoRodio = Number(body.pct_comissao ?? 0);
@@ -250,7 +239,8 @@ export async function POST(
       totalItemFinal = totalRodio;
       valorComissaoFinal = valorComissaoRodio;
       personalizacaoJson = { valor: String(baseRow.sku) };
-      const linhaRodio = `Ródio 30% - Base: ${String(baseRow.sku).toUpperCase()} - Preço base: R$ ${precoBase.toFixed(2)}`;
+      const pctExibicao = Math.round(pctRodio * 100);
+      const linhaRodio = `Ródio ${pctExibicao}% - Base: ${String(baseRow.sku).toUpperCase()} - Preço base: R$ ${precoBase.toFixed(2)}`;
       observacaoFinal = [
         observacaoFinal?.trim() || "",
         observacaoFinal?.includes(linhaRodio) ? "" : linhaRodio,

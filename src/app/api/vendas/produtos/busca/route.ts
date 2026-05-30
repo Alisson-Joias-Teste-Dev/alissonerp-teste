@@ -50,7 +50,9 @@ export async function GET(req: NextRequest) {
       CASE WHEN vpv.em_promocao THEN vpv.preco_vigente ELSE NULL END AS preco_promo,
       COALESCE(vpv.em_promocao, false) AS em_promocao,
       vpv.nome_campanha AS promocao_nome,
-      CASE WHEN vpv.em_promocao THEN vpv.max_parcelas_cartao ELSE NULL END AS max_parcelas_promo
+      CASE WHEN vpv.em_promocao THEN vpv.max_parcelas_cartao ELSE NULL END AS max_parcelas_promo,
+      -- Percentual de calculo automatico de servico (Frente C — 30/05/2026)
+      COALESCE(psc.pct_calculo_servico, NULL) AS pct_calculo_servico
     FROM public.produtos p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
     LEFT JOIN alissonerp.vw_produtos_geral_preco pp ON pp.id_produto = p.id_produto
@@ -69,6 +71,7 @@ export async function GET(req: NextRequest) {
       WHERE status = 'ativo'
       GROUP BY produto_id
     ) rfid ON rfid.produto_id = p.id_produto
+    LEFT JOIN public.produtos_servico_config psc ON psc.id_produto = p.id_produto
     WHERE
       p.situacao = 'A'
       AND (p.sku ILIKE ${'%' + q + '%'} OR ${termos.map(t => sql`p.nome ILIKE ${'%' + t + '%'}`).reduce((a, b) => sql`${a} AND ${b}`)})
@@ -124,6 +127,7 @@ export async function GET(req: NextRequest) {
       em_promocao:        Boolean(p.em_promocao),
       promocao_nome:      p.promocao_nome ?? null,
       max_parcelas_promo: p.max_parcelas_promo != null ? Number(p.max_parcelas_promo) : null,
+      pct_calculo_servico: p.pct_calculo_servico != null ? Number(p.pct_calculo_servico) : null,
     }))
   );
 }
