@@ -21,6 +21,8 @@ import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 import { useErrorStore } from "@/stores/errorStore";
 import { getPublicUrl } from "@/lib/storage-url";
+// REGRA DE NEGOCIO: helpers de rodio (Frente A — 30/05/2026)
+import { isServicoRodioProduto, calcularPreviewRodioPorSkuBase, getPctRodio, round2, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -42,6 +44,9 @@ interface Produto {
   id: number; sku: string; nome: string;
   preco_venda: number | null; peso_precificado: number | null;
   unidade: string | null; sufixo_variacao: string | null; numeracao: string | null;
+  /** Percentual do servico automatico sobre joia base (ex: 0.30 = 30% para rodio).
+   *  NULL = usa PCT_RODIO_DEFAULT. Frente C do Plano de Acao (30/05/2026). */
+  pct_calculo_servico?: number | null;
 }
 interface FaixaComissao { desconto_pct: number; comissao_pct: number; }
 interface ItemVenda {
@@ -445,6 +450,14 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [qtd, setQtd] = useState(1);
   const [pctDesconto, setPctDesconto] = useState(0);
   const [descontoErr, setDescontoErr] = useState("");
+  // REGRA DE NEGOCIO (Ródio automatico — Frente A, 30/05/2026):
+  // O que: campos para coletar SKU base e exibir preview quando o produto selecionado e rodio.
+  // Por que: espelha comportamento do NovaVendaClientV2 — sem isso, o backend rejeita
+  //   a adicao de servico de rodio exigindo personalizacao.valor com SKU base.
+  const [rodioSkuBase, setRodioSkuBase] = useState("");
+  const [rodioPreviewValor, setRodioPreviewValor] = useState<number | null>(null);
+  const [rodioValidando, setRodioValidando] = useState(false);
+  const [rodioErro, setRodioErro] = useState("");
   const [addingItem, setAddingItem] = useState(false);
   const [prodTab, setProdTab] = useState<"produtos" | "comissoes">("produtos");
   const [pendingAuths, setPendingAuths] = useState<Record<number, PendingAuth>>({});
@@ -764,10 +777,59 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   }
 
   // ── Item actions (immediate save) ───────────────────────────────────────────
+  // REGRA DE NEGOCIO (Ródio automatico — Frente A, 30/05/2026):
+  // O que: quando o produto selecionado e servico de rodio, exige SKU base da joia,
+  //   calcula preview em pct_calculo_servico % do preco da joia no frontend,
+  //   e envia personalizacao.valor para o backend recalcular server-side.
+  // Por que: sem este bloco, o backend rejeita o item com erro 400
+  //   "Servico de rodio exige SKU base da joia". O detalhe da venda nunca
+  //   teve este tratamento — foi esquecido quando a regra foi implementada.
+  // Impacto: remover este bloco REABRE o bug original — servico de rodio
+  //   nao funciona na tela de detalhe da venda.
   async function handleAddItem() {
     if (!produtoSel || !venda) return;
     if (pctDesconto > maxDesconto) { setDescontoErr(`Máximo: ${maxDesconto}%`); return; }
-    const item = calcItem(produtoSel, qtd, pctDesconto);
+
+    let item: Record<string, unknown> = calcItem(produtoSel, qtd, pctDesconto);
+
+    // ── Ródio: valida SKU base e recalcula preços ─────────────────────────────
+    if (isServicoRodioProduto(produtoSel)) {
+      if (!rodioSkuBase.trim()) {
+        setRodioErro("Informe o SKU base da joia para calcular o rodio automaticamente.");
+        return;
+      }
+      setRodioValidando(true);
+      setRodioErro("");
+      let precoRodio: number | null = null;
+      try {
+        precoRodio = await calcularPreviewRodioPorSkuBase(
+          rodioSkuBase.trim(),
+          getPctRodio(produtoSel),
+        );
+      } finally {
+        setRodioValidando(false);
+      }
+      if (precoRodio == null) {
+        setRodioErro(`Nao foi possivel calcular o rodio para SKU ${rodioSkuBase}. Verifique se o SKU existe e tem preco.`);
+        return;
+      }
+      setRodioPreviewValor(precoRodio);
+
+      const totalRodio = round2(precoRodio * qtd);
+      const skuBaseUpper = rodioSkuBase.trim().toUpperCase();
+      item = {
+        ...item,
+        // SKU composto evita violar a constraint de unicidade (venda_id, produto_id, sku)
+        // no banco — cada joia base gera um SKU unico (ex: SRV-RODIO-AJ1519)
+        sku: `${item.sku ?? SKU_RODIO_CANONICO}-${skuBaseUpper}`,
+        preco_lista: precoRodio,
+        preco_unitario: precoRodio,
+        total_item: totalRodio,
+        valor_comissao: round2(totalRodio * (Number(item.pct_comissao ?? 0) / 100)),
+        personalizacao: { valor: skuBaseUpper },
+      };
+    }
+
     setUpdating(true);
     try {
       const res = await fetch(`/api/vendas/${venda.id}/itens`, {
@@ -777,6 +839,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
       await load();
       setProdutoSel(null); setQtd(1); setPctDesconto(0); setDescontoErr(""); setAddingItem(false);
+      // Limpa estado do rodio apos sucesso
+      setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro("");
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao adicionar item"); }
     finally { setUpdating(false); }
   }
@@ -2543,7 +2607,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                 <div className="mb-3 p-4 rounded-xl border" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-medium" style={{ color: "#374151" }}>Adicionar produto</p>
-                    <button onClick={() => { setAddingItem(false); setProdutoSel(null); setDescontoErr(""); }} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+                    <button onClick={() => { setAddingItem(false); setProdutoSel(null); setDescontoErr(""); setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro(""); }} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
                   </div>
                   <Autocomplete<Produto>
                     placeholder="Buscar por nome ou SKU..."
@@ -2554,38 +2618,89 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                         <p className="text-xs" style={{ color: "#9CA3AF" }}>{p.sku} · {p.preco_venda != null ? fmt(p.preco_venda) : "sem preço"}</p>
                       </div>
                     )}
-                    onSelect={p => { setProdutoSel(p); setPctDesconto(0); setDescontoErr(""); }}
+                    onSelect={p => { setProdutoSel(p); setPctDesconto(0); setDescontoErr(""); setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro(""); }}
                     selectedLabel={produtoSel ? `${produtoSel.nome} · ${fmt(produtoSel.preco_venda ?? 0)}` : null}
-                    onClear={() => { setProdutoSel(null); setDescontoErr(""); }}
+                    onClear={() => { setProdutoSel(null); setDescontoErr(""); setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro(""); }}
                   />
                   {produtoSel && (
-                    <div className="mt-3 grid grid-cols-4 gap-2 items-end">
-                      <div>
-                        <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Qtd</label>
-                        <input type="number" min={1} value={qtd} onChange={e => setQtd(Math.max(1, Number(e.target.value)))}
-                          className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center" style={{ borderColor: C.cremeBorder }} />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>% Desconto <span style={{ color: "#9CA3AF" }}>(máx {maxDesconto}%)</span></label>
-                        <input type="number" min={0} max={maxDesconto} step={1} value={pctDesconto}
-                          onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(v > maxDesconto ? `Máximo: ${maxDesconto}%` : ""); }}
-                          onBlur={e => { if (e.target.value === "") setPctDesconto(0); }}
-                          className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
-                          style={{ borderColor: descontoErr ? "#EF4444" : C.cremeBorder }} />
-                        {descontoErr && <p className="text-[11px] text-red-500 mt-0.5">{descontoErr}</p>}
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Preço un</label>
-                        <div className="border rounded-lg px-2 py-1.5 text-sm text-center tabular-nums" style={{ borderColor: C.cremeBorder, backgroundColor: "#fff", color: C.esmeralda }}>
-                          {fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario)}
+                    isServicoRodioProduto(produtoSel) ? (
+                      /* Layout inline 5 colunas para servico de rodio (Frente A — 30/05/2026) */
+                      <div className="mt-3 space-y-2">
+                        {/* Linha 1: SKU base (full width) */}
+                        <div>
+                          <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>SKU da joia base</label>
+                          <input
+                            type="text"
+                            value={rodioSkuBase}
+                            onChange={(e) => { setRodioSkuBase(e.target.value.toUpperCase()); setRodioErro(""); }}
+                            placeholder="Ex: AJ1519"
+                            className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none"
+                            style={{ borderColor: rodioErro ? "#DC2626" : C.cremeBorder }}
+                          />
+                          {rodioErro && <p className="text-[11px] mt-0.5" style={{ color: "#DC2626" }}>{rodioErro}</p>}
+                        </div>
+                        {/* Linha 2: Qtd | Desconto | Preview valor automatico | Confirmar */}
+                        <div className="grid grid-cols-4 gap-2 items-end">
+                          <div>
+                            <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Qtd</label>
+                            <input type="number" min={1} value={qtd} onChange={e => setQtd(Math.max(1, Number(e.target.value)))}
+                              className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center" style={{ borderColor: C.cremeBorder }} />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>% Desconto <span style={{ color: "#9CA3AF" }}>(máx {maxDesconto}%)</span></label>
+                            <input type="number" min={0} max={maxDesconto} step={1} value={pctDesconto}
+                              onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(v > maxDesconto ? `Máximo: ${maxDesconto}%` : ""); }}
+                              onBlur={e => { if (e.target.value === "") setPctDesconto(0); }}
+                              className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
+                              style={{ borderColor: descontoErr ? "#EF4444" : C.cremeBorder }} />
+                            {descontoErr && <p className="text-[11px] text-red-500 mt-0.5">{descontoErr}</p>}
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Valor automático</label>
+                            <div className="border rounded-lg px-2 py-1.5 text-sm text-center tabular-nums" style={{ borderColor: C.cremeBorder, backgroundColor: "#ECFDF5", color: "#065F46" }}>
+                              {rodioPreviewValor != null && !rodioErro
+                                ? `${fmt(rodioPreviewValor)} (${Math.round(getPctRodio(produtoSel) * 100)}%)`
+                                : rodioValidando ? "Calculando..." : "—"}
+                            </div>
+                          </div>
+                          <button onClick={() => void handleAddItem()}
+                            disabled={rodioValidando || !!descontoErr || pctDesconto > maxDesconto || updating}
+                            className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium disabled:opacity-40 transition-opacity"
+                            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                            {rodioValidando || updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Confirmar
+                          </button>
                         </div>
                       </div>
-                      <button onClick={handleAddItem} disabled={!!descontoErr || pctDesconto > maxDesconto || updating}
-                        className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium disabled:opacity-40 transition-opacity"
-                        style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-                        {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Confirmar
-                      </button>
-                    </div>
+                    ) : (
+                      /* Layout padrao 4 colunas para produtos normais (sem alteracao) */
+                      <div className="mt-3 grid grid-cols-4 gap-2 items-end">
+                        <div>
+                          <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Qtd</label>
+                          <input type="number" min={1} value={qtd} onChange={e => setQtd(Math.max(1, Number(e.target.value)))}
+                            className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center" style={{ borderColor: C.cremeBorder }} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>% Desconto <span style={{ color: "#9CA3AF" }}>(máx {maxDesconto}%)</span></label>
+                          <input type="number" min={0} max={maxDesconto} step={1} value={pctDesconto}
+                            onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(v > maxDesconto ? `Máximo: ${maxDesconto}%` : ""); }}
+                            onBlur={e => { if (e.target.value === "") setPctDesconto(0); }}
+                            className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
+                            style={{ borderColor: descontoErr ? "#EF4444" : C.cremeBorder }} />
+                          {descontoErr && <p className="text-[11px] text-red-500 mt-0.5">{descontoErr}</p>}
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Preço un</label>
+                          <div className="border rounded-lg px-2 py-1.5 text-sm text-center tabular-nums" style={{ borderColor: C.cremeBorder, backgroundColor: "#fff", color: C.esmeralda }}>
+                            {fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario)}
+                          </div>
+                        </div>
+                        <button onClick={() => void handleAddItem()} disabled={!!descontoErr || pctDesconto > maxDesconto || updating}
+                          className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium disabled:opacity-40 transition-opacity"
+                          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                          {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Confirmar
+                        </button>
+                      </div>
+                    )
                   )}
                 </div>
               )}

@@ -85,22 +85,9 @@ import {
   type CampoPersonalizacao,
 } from "@/lib/personalizacao-validacao";
 
-function normalizarTextoBusca(valor: string | null | undefined): string {
-  return (valor ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
-function isServicoRodio(sku: string | null | undefined, nome: string | null | undefined): boolean {
-  const skuNorm = normalizarTextoBusca(sku);
-  const nomeNorm = normalizarTextoBusca(nome);
-  return skuNorm === "srv-rodio" || skuNorm.includes("rodio") || skuNorm.includes("rhodio") || nomeNorm.includes("rodio") || nomeNorm.includes("rhodio");
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+// REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
+// Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos endpoints.
+import { normalizarTextoBusca, isServicoRodio, round2, getPctRodio } from "@/lib/servico-rodio";
 
 // ─── GET /api/vendas ───────────────────────────────────────────────────────────
 // Query params: inicio, fim, situacao, vendedor_id, q (busca)
@@ -421,9 +408,10 @@ export async function POST(req: NextRequest) {
           // Por que: evita erro operacional e impede manipulação manual do valor do serviço.
           // Impacto: remover este bloco volta a depender de cálculo manual da consultora e reabre risco financeiro.
           const [metaProduto] = await tx`
-            SELECT p.sku, p.nome, ti.tipo_item
+            SELECT p.sku, p.nome, ti.tipo_item, psc.pct_calculo_servico
             FROM public.produtos p
             LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
+            LEFT JOIN public.produtos_servico_config psc ON psc.id_produto = p.id_produto
             WHERE p.id_produto = ${item.produto_id}
             LIMIT 1
           `;
@@ -452,7 +440,8 @@ export async function POST(req: NextRequest) {
               throw new Error(`SKU base "${skuBase}" inválido para serviço de ródio (sem preço vigente)`);
             }
 
-            const precoRodio = round2(precoBase * 0.3);
+            const pctRodio = getPctRodio({ pct_calculo_servico: metaProduto?.pct_calculo_servico });
+            const precoRodio = round2(precoBase * pctRodio);
             const qtdRodio = Math.max(1, Number(item.quantidade) || 1);
             const totalRodio = round2(precoRodio * qtdRodio);
             const pctComissaoRodio = Number(item.pct_comissao ?? 0);
@@ -462,7 +451,8 @@ export async function POST(req: NextRequest) {
             precoUnitarioFinal = precoRodio;
             totalItemFinal = totalRodio;
             valorComissaoFinal = valorComissaoRodio;
-            const linhaRodio = `Ródio 30% - Base: ${String(baseRow.sku).toUpperCase()} - Preço base: R$ ${precoBase.toFixed(2)}`;
+            const pctExibicao = Math.round(pctRodio * 100);
+            const linhaRodio = `Ródio ${pctExibicao}% - Base: ${String(baseRow.sku).toUpperCase()} - Preço base: R$ ${precoBase.toFixed(2)}`;
             observacaoItem = [
               observacaoItem?.trim() || "",
               observacaoItem?.includes(linhaRodio) ? "" : linhaRodio,

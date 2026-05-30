@@ -15,6 +15,9 @@ import { maskCpfCnpj, formatDateBR } from "@/lib/formatters";
 import { normalizarCampoPersonalizacao } from "@/lib/personalizacao-validacao";
 import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
 import { createClient } from "@/lib/supabase/client";
+// REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
+// Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos frontends.
+import { isServicoRodioProduto, descricaoItemComBaseRodio, calcularPreviewRodioPorSkuBase, getPctRodio, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -57,6 +60,9 @@ interface Produto {
   promocao_nome?: string | null;
   preco_promo?: number | null;
   max_parcelas_promo?: number | null;
+  /** Percentual do servico automatico sobre joia base (ex: 0.30 = 30% para rodio).
+   *  NULL = usa PCT_RODIO_DEFAULT. Frente C do Plano de Acao (30/05/2026). */
+  pct_calculo_servico?: number | null;
 }
 
 interface FaixaComissao {
@@ -180,38 +186,6 @@ function getPersCampo(item: ItemVenda, idx: number): string {
   return item.personalizacao.campos[idx]?.valor ?? "";
 }
 
-function normalizarTextoBusca(valor: string | null | undefined): string {
-  return (valor ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
-function isServicoRodioProduto(produto: Produto | null): boolean {
-  if (!produto) return false;
-  const skuNorm = normalizarTextoBusca(produto.sku ?? "");
-  const nomeNorm = normalizarTextoBusca(produto.nome);
-  return skuNorm.includes("rodio") || skuNorm.includes("rhodio") || nomeNorm.includes("rodio") || nomeNorm.includes("rhodio");
-}
-
-/**
- * REGRA DE NEGOCIO:
- * O que: exibe no nome do item de ródio o SKU base informado pela consultora.
- * Por que: a equipe precisa visualizar imediatamente qual joia será rodinada,
- * sem depender de abrir detalhes/observação do item.
- * Impacto: remover essa composição reduz rastreabilidade operacional e aumenta
- * risco de executar serviço no SKU errado.
- */
-function descricaoItemComBaseRodio(item: ItemVenda): string {
-  const skuBase = item.personalizacao && "valor" in item.personalizacao
-    ? (item.personalizacao.valor ?? "").trim().toUpperCase()
-    : "";
-  if (!skuBase) return item.nome_produto;
-  const nomeNorm = normalizarTextoBusca(item.nome_produto);
-  const ehRodio = nomeNorm.includes("rodio") || nomeNorm.includes("rhodio");
-  if (!ehRodio) return item.nome_produto;
-  return `${item.nome_produto} - Base: ${skuBase}`;
-}
 function isPersMulti(item: ItemVenda): boolean {
   return !!item.personalizacao && "campos" in item.personalizacao;
 }
@@ -1197,17 +1171,6 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     );
   }
 
-  async function calcularPreviewRodioPorSkuBase(skuBase: string): Promise<number | null> {
-    const sku = skuBase.trim();
-    if (!sku) return null;
-    const res = await fetch(`/api/vendas/produtos/busca?q=${encodeURIComponent(sku)}&limit=20`);
-    if (!res.ok) return null;
-    const lista = (await res.json()) as Produto[];
-    const exato = lista.find((p) => (p.sku ?? "").toLowerCase() === sku.toLowerCase());
-    if (!exato || exato.preco_venda == null || Number(exato.preco_venda) <= 0) return null;
-    return Math.round(Number(exato.preco_venda) * 0.3 * 100) / 100;
-  }
-
   async function handleAddItem() {
     if (!produtoSel) return;
 
@@ -1226,7 +1189,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       setRodioValidando(true);
       setRodioErro("");
       try {
-        precoRodio = await calcularPreviewRodioPorSkuBase(skuBase);
+        precoRodio = await calcularPreviewRodioPorSkuBase(skuBase, getPctRodio(produtoSel));
       } finally {
         setRodioValidando(false);
       }
@@ -1249,13 +1212,17 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
     if (ehRodio && precoRodio != null) {
       const totalRodio = Math.round(precoRodio * qtd * 100) / 100;
+      const skuBaseUpper = rodioSkuBase.trim().toUpperCase();
       novoItem = {
         ...novoItem,
+        // SKU composto evita violar a constraint de unicidade (venda_id, produto_id, sku)
+        // no banco — cada joia base gera um SKU unico (ex: SRV-RODIO-AJ1519)
+        sku: `${novoItem.sku ?? SKU_RODIO_CANONICO}-${skuBaseUpper}`,
         preco_lista: precoRodio,
         preco_unitario: precoRodio,
         total_item: totalRodio,
         valor_comissao: Math.round(totalRodio * (novoItem.pct_comissao / 100) * 100) / 100,
-        personalizacao: { valor: rodioSkuBase.trim().toUpperCase() },
+        personalizacao: { valor: skuBaseUpper },
       };
     }
 

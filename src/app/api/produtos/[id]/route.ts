@@ -131,17 +131,20 @@ export async function GET(
             ts.status AS tiny_sync_status,
             ts.erro   AS tiny_sync_erro,
             ep.preco_servico,
-             COALESCE(ecc.controla_estoque, true) AS controla_estoque
-           FROM public.produtos p
-           LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
-           LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
-           LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
-           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
-           LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
-           LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
-           LEFT JOIN alissonerp.vw_pedras_preco vpd ON vpd.id_produto = p.id_produto
-           LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
-           WHERE p.id_produto = ${produtoId}
+             COALESCE(ecc.controla_estoque, true) AS controla_estoque,
+             -- Percentual de calculo automatico de servico (Frente C — 30/05/2026)
+             COALESCE(psc.pct_calculo_servico, NULL) AS pct_calculo_servico
+            FROM public.produtos p
+            LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
+            LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
+            LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+            LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
+            LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
+            LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
+            LEFT JOIN alissonerp.vw_pedras_preco vpd ON vpd.id_produto = p.id_produto
+            LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
+            LEFT JOIN public.produtos_servico_config psc ON psc.id_produto = p.id_produto
+            WHERE p.id_produto = ${produtoId}
         `
       : await sql`
           SELECT
@@ -189,7 +192,8 @@ export async function GET(
             p.id_api_produto,
             ts.status AS tiny_sync_status,
             ts.erro   AS tiny_sync_erro,
-            COALESCE(ecc.controla_estoque, true) AS controla_estoque
+            COALESCE(ecc.controla_estoque, true) AS controla_estoque,
+            COALESCE(psc.pct_calculo_servico, NULL) AS pct_calculo_servico
           FROM public.produtos p
           LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
           LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
@@ -197,6 +201,7 @@ export async function GET(
           LEFT JOIN alissonerp.tiny_sync_produtos ts ON ts.produto_id = p.id_produto
           LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
           LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
+          LEFT JOIN public.produtos_servico_config psc ON psc.id_produto = p.id_produto
           WHERE p.id_produto = ${produtoId}
         `;
 
@@ -422,7 +427,7 @@ export async function PATCH(
     !fotoBase64 &&
     precoCompraUsd === undefined &&
     quantidadePedra === undefined &&
-    body.controla_estoque === undefined && body.preco_servico === undefined
+    body.controla_estoque === undefined && body.preco_servico === undefined && body.pct_calculo_servico === undefined
   ) {
     return NextResponse.json({ error: "Nenhum campo editável informado" }, { status: 400 });
   }
@@ -625,6 +630,31 @@ export async function PATCH(
             `;
           }
         }
+      }
+    }
+
+    // ── Percentual de cálculo automático de serviço (Frente C — 30/05/2026) ────
+    // UPSERT em public.produtos_servico_config. Campo opcional via PATCH.
+    if (body.pct_calculo_servico !== undefined) {
+      if (body.pct_calculo_servico === null || body.pct_calculo_servico === "") {
+        // Remove a config — serviço deixa de ter cálculo automático
+        await sql`
+          DELETE FROM public.produtos_servico_config
+          WHERE id_produto = ${produtoId}
+        `;
+      } else {
+        const pct = Number(body.pct_calculo_servico);
+        if (isNaN(pct) || pct < 0 || pct > 1) {
+          return NextResponse.json({ error: "pct_calculo_servico inválido (deve ser entre 0 e 1)" }, { status: 400 });
+        }
+        await sql`
+          INSERT INTO public.produtos_servico_config (id_produto, pct_calculo_servico, updated_by)
+          VALUES (${produtoId}, ${pct}, ${user.id})
+          ON CONFLICT (id_produto) DO UPDATE SET
+            pct_calculo_servico = EXCLUDED.pct_calculo_servico,
+            updated_at = NOW(),
+            updated_by = EXCLUDED.updated_by
+        `;
       }
     }
 

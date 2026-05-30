@@ -25,6 +25,8 @@ import { enriquecerPedra, totalizarPedras, fmtCt, fmtPt } from "@/lib/pedras-hel
 import GaleriaProduto from "./GaleriaProduto";
 import AplicarTemplateModal from "@/components/produtos/AplicarTemplateModal";
 import { useAuth } from "@/hooks/useAuth";
+// REGRA DE NEGOCIO: helpers de rodio (Frente C — 30/05/2026)
+import { isServicoRodio } from "@/lib/servico-rodio";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -83,6 +85,8 @@ interface ProdutoDetalhe {
   tiny_sync_erro?: string | null;
   // Controle de estoque
   controla_estoque?: boolean;
+  /** Percentual de calculo automatico de servico (Frente C — 30/05/2026) */
+  pct_calculo_servico?: number | string | null;
 }
 
 interface Variacao {
@@ -513,6 +517,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   const [precoTinyEdit, setPrecoTinyEdit] = useState("");
   const [tipoItemEdit, setTipoItemEdit] = useState<"" | "joia" | "insumo" | "servico">("");
   const [precoServicoEdit, setPrecoServicoEdit] = useState("");
+  // Percentual de calculo automatico de servico (Frente C — 30/05/2026)
+  const [pctCalculoServicoEdit, setPctCalculoServicoEdit] = useState("");
   const [saving, setSaving] = useState(false);
   const [syncingTiny, setSyncingTiny] = useState(false);
   const [tinySyncMsg, setTinySyncMsg] = useState<{ ok: boolean; texto: string } | null>(null);
@@ -700,6 +706,14 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       setPrecoTinyEdit(toStr(data.produto.preco_tiny));
       setTipoItemEdit(data.produto.tipo_item ?? "");
       setPrecoServicoEdit(data.produto.preco_servico != null ? String(data.produto.preco_servico) : "");
+      // Percentual de calculo automatico de servico (Frente C — 30/05/2026)
+      const pctRaw = data.produto.pct_calculo_servico;
+      if (pctRaw != null) {
+        const n = typeof pctRaw === "string" ? parseFloat(pctRaw) : Number(pctRaw);
+        setPctCalculoServicoEdit(Number.isFinite(n) ? String(Math.round(n * 100)) : ""); // exibe como inteiro (30 = 30%)
+      } else {
+        setPctCalculoServicoEdit("");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro desconhecido");
     } finally {
@@ -883,6 +897,32 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
         body.preco_servico = !isNaN(n) && n > 0 ? n : null;
       } else if (produto.preco_servico != null) {
         body.preco_servico = null;
+      }
+
+      // Percentual de calculo automatico de servico (Frente C — 30/05/2026)
+      // Soh envia se o produto for servico de rodio E o valor mudou
+      const ehSvRodio = isServicoRodio(produto.sku, produto.nome);
+      if (ehSvRodio && tipoItemEdit === "servico") {
+        const pctAtual = produto.pct_calculo_servico != null
+          ? Math.round(Number(produto.pct_calculo_servico) * 100)
+          : null;
+        const pctNovo = pctCalculoServicoEdit.trim();
+        if (pctNovo === "") {
+          // Remove a config — volta ao default 30%
+          body.pct_calculo_servico = null;
+        } else {
+          const n = parseFloat(pctNovo);
+          if (!isNaN(n) && n > 0 && n <= 100) {
+            const novoNormalizado = n / 100; // converte 30 → 0.3000
+            if (pctAtual !== Math.round(novoNormalizado * 100)) {
+              body.pct_calculo_servico = novoNormalizado;
+            }
+          }
+        }
+      } else if (!ehSvRodio && produto.pct_calculo_servico != null) {
+        // Se o produto deixou de ser servico de rodio (ex: mudou tipo_item),
+        // limpa a config para nao ficar orfa
+        body.pct_calculo_servico = null;
       }
 
       // REGRA DE NEGÓCIO: decisão de replicação é pré-save e só vale para
@@ -1155,6 +1195,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
          : false)) ||
       tipoItemEdit           !== (produto.tipo_item ?? "") ||
       (precoServicoEdit || "") !== (produto.preco_servico != null ? String(produto.preco_servico) : "") ||
+      // Percentual de calculo automatico de servico (Frente C — 30/05/2026)
+      ((pctCalculoServicoEdit || "") !== (produto.pct_calculo_servico != null ? String(Math.round(Number(produto.pct_calculo_servico) * 100)) : "")) ||
       extrasDirty);
 
   return (
@@ -1473,8 +1515,25 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                               <span className="text-lg font-mono font-bold" style={{ color: "#184036" }}>
                                 {formatPreco(String(produto.pedra_preco_venda))}
                               </span>
-                            </div>
-                          )}
+                  </div>
+                  )}
+                  {/* Percentual de calculo automatico de servico (Frente C — 30/05/2026) */}
+                  {tipoItemEdit === "servico" && produto && isServicoRodio(produto.sku, produto.nome) && (
+                  <div className="mt-3">
+                    <p className={labelCls}>Percentual sobre joia base (%)</p>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={pctCalculoServicoEdit}
+                      onChange={(e) => setPctCalculoServicoEdit(e.target.value)}
+                      placeholder="30"
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                    />
+                    <p className="text-[11px] mt-0.5" style={{ color: "#6B7280" }}>
+                      Ex: 30 = 30% do valor da joia. Valor padrão do ródio é 30%. Deixe vazio para usar o padrão.
+                    </p>
+                  </div>
+                  )}
                         </div>
                       )}
                     </div>
