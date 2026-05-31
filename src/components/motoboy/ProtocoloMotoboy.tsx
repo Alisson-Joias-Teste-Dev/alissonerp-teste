@@ -38,8 +38,18 @@ interface OrdemDisponivel {
   status: string | null;
 }
 
+interface BaixaSangriaOption {
+  id: number;
+  gramas: number;
+  destino: string;
+  status: string;
+  realizado_nome: string | null;
+  created_at: string;
+}
+
 type View = "lista" | "detalhe" | "criar" | "camera";
 type Tab  = "ida" | "volta";
+type ModoCriacao = "ordens" | "sangria";
 
 // ── Badge de status ───────────────────────────────────────────────────────────
 function EtapaBadge({ etapa }: { etapa: string }) {
@@ -220,9 +230,14 @@ export default function ProtocoloMotoboy() {
 
   // ── Estado de criação ────────────────────────────────────────────────────────
   const [direcaoCriar,       setDirecaoCriar]       = useState<"ida" | "volta">("ida");
+  const [tipoProtocoloCriar, setTipoProtocoloCriar] = useState<"fabrica" | "service">("fabrica");
+  const [modoCriacao,        setModoCriacao]        = useState<ModoCriacao>("ordens");
+  const [tiposPermitidos,    setTiposPermitidos]    = useState<string[]>([]);
   const [ordensDisponiveis,  setOrdensDisponiveis]   = useState<OrdemDisponivel[]>([]);
+  const [baixasSangria,      setBaixasSangria]      = useState<BaixaSangriaOption[]>([]);
   const [loadingDisponiveis, setLoadingDisponiveis]  = useState(false);
   const [selectedCriar,      setSelectedCriar]       = useState<Set<number>>(new Set());
+  const [selectedBaixaId,    setSelectedBaixaId]     = useState<number | null>(null);
   const [fotoFile,            setFotoFile]           = useState<File | null>(null);
   const [fotoPreview,         setFotoPreview]        = useState<string | null>(null);
   const [criando,             setCriando]            = useState(false);
@@ -235,6 +250,20 @@ export default function ProtocoloMotoboy() {
       if (user) setUserId(user.id);
     });
   }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    fetch(`/api/protocolo/permissoes?user_id=${userId}`)
+      .then((r) => (r.ok ? r.json() : { tipos_permitidos: [] }))
+      .then((d) => {
+        const tipos = Array.isArray(d?.tipos_permitidos) ? d.tipos_permitidos : [];
+        setTiposPermitidos(tipos);
+        if (tipos.includes("fabrica") || tipos.includes("service")) {
+          setTipoProtocoloCriar(tipos.includes("fabrica") ? "fabrica" : "service");
+        }
+      })
+      .catch(() => setTiposPermitidos([]));
+  }, [userId]);
 
   // ── Carregar lista ───────────────────────────────────────────────────────────
   const loadLista = useCallback(async () => {
@@ -272,23 +301,59 @@ export default function ProtocoloMotoboy() {
   async function abrirCriar() {
     const dir = tab;
     setDirecaoCriar(dir);
+    setModoCriacao("ordens");
     setSelectedCriar(new Set());
+    setSelectedBaixaId(null);
     setFotoFile(null);
     setFotoPreview(null);
     setErroCriar("");
     setSucessoCriar(false);
     setView("criar");
+    await carregarItensCriacao(dir, tipoProtocoloCriar, "ordens");
+  }
+
+  /**
+   * REGRA DE NEGÓCIO: fluxo do motoboy precisa seguir mesmas regras do protocolo
+   * principal (ordens e sangria por destino).
+   *
+   * O QUE: carrega ordens para modo "ordens" e baixas pendentes para modo
+   * "sangria" conforme tipo de protocolo (fabrica/service).
+   * POR QUE: manter comportamento único evita divergência operacional entre
+   * front exclusivo do motoboy e módulo geral de protocolo.
+   * IMPACTO SE REMOVIDO: motoboy cria protocolos sem aderência ao fluxo oficial.
+   */
+  async function carregarItensCriacao(
+    dir: "ida" | "volta",
+    tipo: "fabrica" | "service",
+    modo: ModoCriacao,
+  ) {
     setLoadingDisponiveis(true);
-    const res  = await fetch(`/api/protocolo/ordens?direcao=${dir}&tipo_protocolo=fabrica`);
-    const data: OrdemDisponivel[] = await res.json().catch(() => []);
-    setOrdensDisponiveis(data);
-    setLoadingDisponiveis(false);
+    setOrdensDisponiveis([]);
+    setBaixasSangria([]);
+    try {
+      if (modo === "sangria") {
+        const res = await fetch(`/api/financeiro/cofre-ouro/baixas?status=esperando_protocolo&destino=${tipo}`);
+        const data: BaixaSangriaOption[] = await res.json().catch(() => []);
+        setBaixasSangria(Array.isArray(data) ? data : []);
+      } else {
+        const res = await fetch(`/api/protocolo/ordens?direcao=${dir}&tipo_protocolo=${tipo}`);
+        const data: OrdemDisponivel[] = await res.json().catch(() => []);
+        setOrdensDisponiveis(Array.isArray(data) ? data : []);
+      }
+    } finally {
+      setLoadingDisponiveis(false);
+    }
   }
 
   // ── Criar protocolo ──────────────────────────────────────────────────────────
   async function handleCriar() {
     setErroCriar("");
-    if (selectedCriar.size === 0) { setErroCriar("Selecione ao menos uma ordem."); return; }
+    if (modoCriacao === "sangria") {
+      if (!selectedBaixaId) { setErroCriar("Selecione uma baixa de sangria."); return; }
+    } else if (selectedCriar.size === 0) {
+      setErroCriar("Selecione ao menos uma ordem.");
+      return;
+    }
     if (!fotoFile)                { setErroCriar("Foto das joias é obrigatória."); return; }
     setCriando(true);
     try {
@@ -303,11 +368,12 @@ export default function ProtocoloMotoboy() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           direcao:        direcaoCriar,
-          ordem_ids:      Array.from(selectedCriar),
+          ordem_ids:      modoCriacao === "ordens" ? Array.from(selectedCriar) : undefined,
+          baixa_id:       modoCriacao === "sangria" ? selectedBaixaId : undefined,
           motoboy_id:     userId,
           foto_criacao:   fotoPath,
           user_id:        userId,
-          tipo_protocolo: "fabrica",
+          tipo_protocolo: tipoProtocoloCriar,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -367,14 +433,75 @@ export default function ProtocoloMotoboy() {
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5 pb-32">
 
+          <div className="grid grid-cols-2 gap-2">
+            {(["fabrica", "service"] as const)
+              .filter((t) => tiposPermitidos.length === 0 || tiposPermitidos.includes(t))
+              .map((t) => {
+                const ativo = tipoProtocoloCriar === t;
+                return (
+                  <button
+                    key={t}
+                    onClick={async () => {
+                      setTipoProtocoloCriar(t);
+                      setSelectedCriar(new Set());
+                      setSelectedBaixaId(null);
+                      await carregarItensCriacao(direcaoCriar, t, modoCriacao);
+                    }}
+                    className="h-10 rounded-lg border text-sm font-semibold"
+                    style={{
+                      borderColor: ativo ? C.esmeralda : C.cremeBorder,
+                      backgroundColor: ativo ? `${C.esmeralda}12` : "#fff",
+                      color: ativo ? C.esmeralda : C.muted,
+                    }}
+                  >
+                    {t === "fabrica" ? "🏭 Fábrica" : "🔧 Service"}
+                  </button>
+                );
+              })}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { key: "ordens", label: "Ordens" },
+              { key: "sangria", label: "Sangria" },
+            ] as const).map((op) => {
+              const ativo = modoCriacao === op.key;
+              return (
+                <button
+                  key={op.key}
+                  onClick={async () => {
+                    setModoCriacao(op.key);
+                    setSelectedCriar(new Set());
+                    setSelectedBaixaId(null);
+                    await carregarItensCriacao(direcaoCriar, tipoProtocoloCriar, op.key);
+                  }}
+                  className="h-10 rounded-lg border text-sm font-semibold"
+                  style={{
+                    borderColor: ativo ? C.esmeralda : C.cremeBorder,
+                    backgroundColor: ativo ? `${C.esmeralda}12` : "#fff",
+                    color: ativo ? C.esmeralda : C.muted,
+                  }}
+                >
+                  {op.key === "ordens" ? "📦 Ordens" : "🧪 Sangria"}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Ordens disponíveis */}
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-2.5" style={{ color: C.muted }}>
-              Selecionar Ordens
-              {selectedCriar.size > 0 && (
+              {modoCriacao === "sangria" ? "Selecionar Baixa" : "Selecionar Ordens"}
+              {modoCriacao === "ordens" && selectedCriar.size > 0 && (
                 <span className="ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
                   style={{ backgroundColor: `${C.esmeralda}18`, color: C.esmeralda }}>
                   {selectedCriar.size} selecionada{selectedCriar.size !== 1 ? "s" : ""}
+                </span>
+              )}
+              {modoCriacao === "sangria" && selectedBaixaId && (
+                <span className="ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
+                  style={{ backgroundColor: `${C.esmeralda}18`, color: C.esmeralda }}>
+                  1 selecionada
                 </span>
               )}
             </p>
@@ -382,6 +509,38 @@ export default function ProtocoloMotoboy() {
               <div className="flex justify-center py-8">
                 <Loader2 size={22} className="animate-spin" style={{ color: C.muted }} />
               </div>
+            ) : modoCriacao === "sangria" ? (
+              baixasSangria.length === 0 ? (
+                <p className="text-sm text-center py-6" style={{ color: C.muted }}>
+                  Nenhuma baixa pendente para {tipoProtocoloCriar === "service" ? "Service" : "Fábrica"}
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {baixasSangria.map((b) => {
+                    const sel = selectedBaixaId === b.id;
+                    return (
+                      <button
+                        key={b.id}
+                        onClick={() => setSelectedBaixaId((prev) => (prev === b.id ? null : b.id))}
+                        className="w-full flex items-center gap-3 rounded-xl px-4 py-4 text-left active:scale-[0.98] transition-all"
+                        style={{
+                          backgroundColor: sel ? `${C.esmeralda}0d` : C.cremeBg,
+                          border: `1.5px solid ${sel ? C.esmeralda + "50" : C.cremeBorder}`,
+                        }}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>
+                            Baixa Ouro #{b.id} · {Number(b.gramas).toFixed(3)}g
+                          </p>
+                          <p className="text-xs" style={{ color: C.muted }}>
+                            {b.realizado_nome ?? "—"} · {new Date(b.created_at).toLocaleDateString("pt-BR")}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )
             ) : ordensDisponiveis.length === 0 ? (
               <p className="text-sm text-center py-6" style={{ color: C.muted }}>
                 Nenhuma ordem disponível para protocolo {direcaoCriar}
@@ -485,13 +644,16 @@ export default function ProtocoloMotoboy() {
         >
           <button
             onClick={handleCriar}
-            disabled={criando || selectedCriar.size === 0 || !fotoFile || sucessoCriar}
+            disabled={criando || (modoCriacao === "ordens" ? selectedCriar.size === 0 : !selectedBaixaId) || !fotoFile || sucessoCriar}
             className="w-full h-14 rounded-xl flex items-center justify-center gap-2.5 text-base font-semibold shadow-lg active:scale-[0.98] transition-all disabled:opacity-40"
             style={{ backgroundColor: C.esmeralda, color: C.creme }}
           >
             {criando
               ? <><Loader2 size={20} className="animate-spin" /> Criando...</>
-              : <><Plus size={20} /> Criar Protocolo ({selectedCriar.size})</>
+              : <>
+                  <Plus size={20} />
+                  Criar Protocolo ({modoCriacao === "ordens" ? selectedCriar.size : selectedBaixaId ? 1 : 0})
+                </>
             }
           </button>
         </div>

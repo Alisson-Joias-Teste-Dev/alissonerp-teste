@@ -34,6 +34,14 @@ interface OrdemDetalheFoto {
   fotoPreview: string | null;
 }
 
+interface SangriaBaixaInfo {
+  id: number;
+  gramas: number;
+  destino: string;
+  realizado_nome: string | null;
+  created_at: string;
+}
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -52,6 +60,7 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
   const [ordens, setOrdens] = useState<OrdemRow[] | null>(null);
   const [ordensDetalhes, setOrdensDetalhes] = useState<OrdemDetalheFoto[]>([]);
+  const [sangriaBaixa, setSangriaBaixa] = useState<SangriaBaixaInfo | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -61,6 +70,7 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
     setFotoPreview(null);
     setOrdens(null);
     setOrdensDetalhes([]);
+    setSangriaBaixa(null);
     setUserRole("");
 
     const supabase = createClient();
@@ -73,7 +83,7 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
 
     fetch(`/api/protocolo/${protocoloId}`)
       .then((r) => r.json())
-      .then((data) => {
+      .then(async (data) => {
         const ordensData = Array.isArray(data) ? data : [];
         setOrdens(ordensData);
         // Inicializar fotos para ordens de conversão (metal apenas, SKU fotos são na execução)
@@ -84,6 +94,30 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
             fotoFile: null,
             fotoPreview: null,
           })));
+        }
+
+        /**
+         * REGRA DE NEGÓCIO: protocolo de sangria NÃO pode ser concluído sem
+         * mostrar o peso do metal que será recebido no destino.
+         *
+         * O QUE: quando não há ordens vinculadas (sangria), busca a baixa do
+         * cofre vinculada ao protocolo para exibir peso/destino no modal.
+         * POR QUE: impedir recebimento "às cegas".
+         * IMPACTO SE REMOVIDO: operador conclui sem conferir o peso real.
+         */
+        if (ordensData.length === 0) {
+          const baixaRes = await fetch(`/api/financeiro/cofre-ouro/baixas?protocolo_id=${protocoloId}`);
+          const baixaJson = await baixaRes.json().catch(() => []);
+          const baixa = Array.isArray(baixaJson) ? baixaJson[0] : null;
+          if (baixa && Number(baixa.gramas) > 0) {
+            setSangriaBaixa({
+              id: Number(baixa.id),
+              gramas: Number(baixa.gramas),
+              destino: String(baixa.destino ?? ""),
+              realizado_nome: baixa.realizado_nome ?? null,
+              created_at: String(baixa.created_at ?? ""),
+            });
+          }
         }
       })
       .catch(() => setOrdens([]));
@@ -99,6 +133,12 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
 
   async function handleSubmit() {
     setError("");
+
+    // Sangria exige peso carregado da baixa vinculada (não receber às cegas)
+    if (isSangria && (!sangriaBaixa || !sangriaBaixa.gramas || sangriaBaixa.gramas <= 0)) {
+      setError("Não foi possível carregar o peso da sangria. Reabra o protocolo e tente novamente.");
+      return;
+    }
 
     // Validar foto de confirmação geral
     if (!fotoFile) { setError("Foto de confirmação é obrigatória."); return; }
@@ -167,20 +207,26 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
 
   if (!isOpen) return null;
 
-  const descricao = direcao === "ida"
-    ? `Isso criará ${totalOrdens} PCP(s) automaticamente e moverá as ordens para "em andamento".`
-    : `Isso criará ${totalOrdens} aprovação(ões) de consultora automaticamente.`;
+  const isSangria = totalOrdens === 0;
+  const descricao = isSangria
+    ? "Confirme o recebimento do metal no destino. A baixa de ouro será atualizada para recebido."
+    : direcao === "ida"
+      ? `Isso criará ${totalOrdens} PCP(s) automaticamente e moverá as ordens para "em andamento".`
+      : `Isso criará ${totalOrdens} aprovação(ões) de consultora automaticamente.`;
 
   const bloqueado = userRole !== "" && !ROLES_CONCLUIR_PROTOCOLO.includes(userRole as typeof ROLES_CONCLUIR_PROTOCOLO[number]);
   const todasFotosConversaoOK = ordensDetalhes.length === 0 || ordensDetalhes.every(od => od.fotoFile !== null);
+  const destinoLabel = sangriaBaixa?.destino === "fabrica" ? "Fábrica" : sangriaBaixa?.destino === "service" ? "Service" : sangriaBaixa?.destino === "alisson" ? "Alisson" : "—";
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={handleClose}>
       <div className="bg-white w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4 md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
           <div>
-            <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>Concluir Protocolo</h3>
-            <p className="text-[12px] mt-0.5" style={{ color: "#9CA3AF" }}>Protocolo #{protocoloId} · {direcao === "ida" ? "Loja → Fábrica" : "Fábrica → Loja"}</p>
+            <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>Concluir Protocolo{isSangria ? " Sangria" : ""}</h3>
+            <p className="text-[12px] mt-0.5" style={{ color: "#9CA3AF" }}>
+              Protocolo #{protocoloId} · {isSangria ? "Recebimento de metal" : direcao === "ida" ? "Loja → Fábrica" : "Fábrica → Loja"}
+            </p>
           </div>
           <button onClick={handleClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100">
             <X size={17} style={{ color: "#9CA3AF" }} />
@@ -201,6 +247,23 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
                 <p className="text-sm" style={{ color: "#92400E" }}>{descricao}</p>
               </div>
 
+              {isSangria && (
+                <div className="rounded-lg px-4 py-3" style={{ backgroundColor: "#EFF6FF", border: "1px solid #BFDBFE" }}>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#1E40AF" }}>
+                    Resumo da Sangria
+                  </p>
+                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>
+                    Peso do metal a receber: {sangriaBaixa ? `${Number(sangriaBaixa.gramas).toFixed(3)}g` : "—"}
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: "#6B7280" }}>
+                    Baixa #{sangriaBaixa?.id ?? "—"} · Destino {destinoLabel} · por {sangriaBaixa?.realizado_nome ?? "—"}
+                  </p>
+                  <p className="text-xs" style={{ color: "#6B7280" }}>
+                    Data da baixa: {sangriaBaixa?.created_at ? new Date(sangriaBaixa.created_at).toLocaleString("pt-BR") : "—"}
+                  </p>
+                </div>
+              )}
+
               {/* Ordens do protocolo */}
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: "#9CA3AF" }}>
@@ -210,8 +273,10 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
                 <div className="rounded-xl overflow-hidden overflow-y-auto max-h-44" style={{ border: `1px solid ${C.cremeBorder}` }}>
                   {ordens === null ? (
                     <p className="text-center py-4 text-xs" style={{ color: "#9CA3AF" }}>Carregando ordens…</p>
-                  ) : ordens.length === 0 ? (
-                    <p className="text-center py-4 text-xs" style={{ color: "#9CA3AF" }}>Nenhuma ordem encontrada</p>
+                    ) : ordens.length === 0 ? (
+                      <p className="text-center py-4 text-xs" style={{ color: "#9CA3AF" }}>
+                        {isSangria ? "Protocolo de Sangria — metal será liberado para limpeza após conclusão" : "Nenhuma ordem encontrada"}
+                      </p>
                   ) : (
                     <table className="w-full text-xs">
                       <tbody>
@@ -341,7 +406,7 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
           {!bloqueado && (
             <button
               onClick={handleSubmit}
-              disabled={loading || success || !fotoFile || !todasFotosConversaoOK}
+              disabled={loading || success || !fotoFile || !todasFotosConversaoOK || (isSangria && !sangriaBaixa)}
               className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
               style={{ backgroundColor: C.esmeralda, color: C.creme }}
             >

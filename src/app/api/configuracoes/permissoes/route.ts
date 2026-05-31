@@ -103,6 +103,13 @@ async function ensureTable() {
       ('consultora','auditoria',false,false),('consultora','vendas',false,false),
       ('consultora','financeiro',false,false),('consultora','produtos',false,false),
       ('consultora','precificacao',false,false),('consultora','configuracoes',false,false),
+      /**
+       * REGRA DE NEGÓCIO: vendedoras/consultoras têm acesso ao módulo Metal
+       * para registrar compra e recebimento no fluxo comercial.
+       * IMPACTO SE REMOVIDO: permissões seed não criam acesso e o menu pode
+       * ocultar o módulo para novas bases/ambientes.
+       */
+      ('consultora','metal',true,true),
       ('estoquista_fabrica','dashboard',false,false),('estoquista_fabrica','dashboard_comercial',false,false),('estoquista_fabrica','dashboard_fabrica',false,false),
       ('estoquista_fabrica','ordens',false,false),('estoquista_fabrica','pcp',false,false),
       ('estoquista_fabrica','distribuicao',false,false),('estoquista_fabrica','estoque',true,true),

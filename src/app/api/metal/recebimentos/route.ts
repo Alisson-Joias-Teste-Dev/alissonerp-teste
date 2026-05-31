@@ -14,7 +14,14 @@ import { internalError } from "@/lib/api-error";
 import { RecebimentoPostSchema } from "@/lib/metal/types";
 import { criarRecebimentoMetal, listarRecebimentos } from "@/lib/metal/recebimentos";
 
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica"];
+/**
+ * REGRA DE NEGÓCIO: todas as consultoras podem operar o módulo de recebimento de metal.
+ *
+ * O QUE: inclui role `consultora` na whitelist da API de recebimentos.
+ * POR QUE: sem isso, a consultora acessa o módulo mas é bloqueada no POST/GET.
+ * IMPACTO SE REMOVIDO: quebra operacional com erro 403 ao salvar ou listar recebimentos.
+ */
+const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"];
 
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);

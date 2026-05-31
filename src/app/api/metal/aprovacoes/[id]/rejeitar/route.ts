@@ -10,7 +10,12 @@ import { authOr401 } from "@/lib/auth-server";
 import { internalError } from "@/lib/api-error";
 import { rejeitarCompra } from "@/lib/metal/compras";
 
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+/**
+ * REGRA DE NEGÓCIO: fluxo metal completo para consultora inclui rejeição de
+ * compra acima do teto quando necessário.
+ * IMPACTO SE REMOVIDO: bloqueio 403 na etapa de rejeitar aprovação.
+ */
+const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const [user, errRes] = await authOr401(req);

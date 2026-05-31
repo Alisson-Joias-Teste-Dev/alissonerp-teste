@@ -27,6 +27,7 @@ const CHAVES = [
   "aprovadora_credito_gerente",
   "aprovador_compra_comercial",
   "metal_aprovador_id",
+  "aprovador_limpeza",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -68,6 +69,12 @@ export async function GET() {
         END,
         nome
     `;
+    const aprovadoresLimpeza = await sql`
+      SELECT id, nome, role FROM alissonerp.usuarios
+      WHERE role IN ('admin', 'desenvolvedor', 'gerente_fabrica', 'gerente_loja')
+        AND ativo = true
+      ORDER BY nome
+    `;
 
     return NextResponse.json({
       aprovador_credito_diretor: configMap.get("aprovador_credito_diretor") ?? "",
@@ -76,11 +83,13 @@ export async function GET() {
       aprovadora_credito_gerente: configMap.get("aprovadora_credito_gerente") ?? "",
       aprovador_compra_comercial: configMap.get("aprovador_compra_comercial") ?? "",
       metal_aprovador_id: configMap.get("metal_aprovador_id") ?? "",
+      aprovador_limpeza: configMap.get("aprovador_limpeza") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
         admins_devs: adminsDevs,
         metal_aprovadores: aprovadoresMetal,
+        aprovadores_limpeza: aprovadoresLimpeza,
       },
     });
   } catch {
@@ -116,6 +125,20 @@ export async function PUT(req: NextRequest) {
     }
     if (body.metal_aprovador_id !== undefined) {
       updates.push({ chave: "metal_aprovador_id", valor: body.metal_aprovador_id });
+    }
+    /**
+     * REGRA DE NEGÓCIO: aprovador da limpeza de metal (sangria) precisa ser
+     * persistido em configuracoes_sistema para liberar o fluxo
+     * recebido -> em_limpeza -> aguardando_aprovacao -> concluido.
+     *
+     * O QUE: grava a chave `aprovador_limpeza` quando enviada pelo front.
+     * POR QUE: as APIs de limpeza/aprovação validam essa chave antes de
+     * permitir iniciar/concluir/aprovar.
+     * IMPACTO SE REMOVIDO: UI aparenta salvar, mas backend continua acusando
+     * "Aprovador de limpeza não configurado" (erro 409).
+     */
+    if (body.aprovador_limpeza !== undefined) {
+      updates.push({ chave: "aprovador_limpeza", valor: body.aprovador_limpeza });
     }
 
     for (const u of updates) {

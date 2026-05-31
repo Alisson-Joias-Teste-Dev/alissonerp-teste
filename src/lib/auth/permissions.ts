@@ -82,7 +82,11 @@ const ROLE_MENUS: Record<Role, string[]> = {
   gerente_loja:       ["/dashboard-comercial", "/ordens", "/estoque", "/protocolo", "/conferencia", "/entrega", "/auditoria", "/vendas", "/estoque-comercial", "/compras-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/metal", "/editor-ia", "/crediario"],
   ourives:            ["/ordens", "/pcp", "/editor-ia"],
   motoboy:            ["/protocolo", "/editor-ia"],
-  consultora:         ["/dashboard-comercial", "/ordens", "/estoque", "/conferencia", "/orcamento", "/editor-ia", "/crediario"],
+  // REGRA DE NEGOCIO:
+  // - O que faz: libera o módulo Metal para TODAS as consultoras.
+  // - Por que: a operação comercial precisa registrar compra/recebimento de metal sem depender de gerente.
+  // - Impacto se removido: consultora perde acesso ao menu/rotas de metal e bloqueia o fluxo no dia a dia.
+  consultora:         ["/dashboard-comercial", "/ordens", "/estoque", "/conferencia", "/orcamento", "/editor-ia", "/crediario", "/metal"],
   estoquista_fabrica: ["/estoque", "/quebra", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/editor-ia"],
   // REGRA DE NEGOCIO:
   // - O que faz: estoquista de loja pode operar compra comercial para entrada de produto acabado.

@@ -10,7 +10,12 @@ import { authOr401 } from "@/lib/auth-server";
 import { internalError } from "@/lib/api-error";
 import { getRecebimentoPorId } from "@/lib/metal/recebimentos";
 
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica"];
+/**
+ * REGRA DE NEGÓCIO: fluxo de metal liberado para consultora inclui detalhe de
+ * recebimentos para conferência comercial.
+ * IMPACTO SE REMOVIDO: drawer de detalhe de recebimento segue bloqueado.
+ */
+const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"];
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const [user, errRes] = await authOr401(req);

@@ -7,6 +7,7 @@ import {
   Ban, ArrowRight,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { STATUS_LABEL, STATUS_COLORS } from "@/lib/cofre-ouro-status";
 
 const C = {
   esmeralda: "#184036", cremeBorder: "#E8DCC8", cremeBg: "#FAFAF7",
@@ -22,12 +23,7 @@ const fmtDatetime = (d: string | null) => {
   return new Date(d).toLocaleString("pt-BR", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 };
 
-const STATUS_LABEL: Record<string, { label: string; bg: string; color: string }> = {
-  pendente:   { label: "Pendente",   bg: "#FEF3C7", color: "#92400E" },
-  em_trafego: { label: "Em Trânsito", bg: "#DBEAFE", color: "#1E40AF" },
-  concluido:  { label: "Concluído",  bg: "#D1FAE5", color: "#065F46" },
-  cancelado:  { label: "Cancelado",  bg: "#FEE2E2", color: "#991B1B" },
-};
+const STATUS_LABEL_MAP = STATUS_LABEL;
 
 const DESTINO_LABEL: Record<string, string> = {
   alisson: "Alisson (direta)",
@@ -292,7 +288,8 @@ export default function CofreClient() {
         ) : (
           <div className="space-y-2">
             {baixas.map(b => {
-              const st = STATUS_LABEL[b.status] ?? { label: b.status, bg: C.cremeBg, color: C.cinza };
+              const label = STATUS_LABEL[b.status] ?? b.status;
+              const col = STATUS_COLORS[b.status] ?? { bg: C.cremeBg, text: C.cinza };
               const expanded = baixaExpandida === b.id;
               return (
                 <div key={b.id} className="rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
@@ -311,7 +308,7 @@ export default function CofreClient() {
                           {Number(b.gramas).toFixed(3)}g
                         </span>
                         <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                          style={{ backgroundColor: st.bg, color: st.color }}>{st.label}</span>
+                          style={{ backgroundColor: col.bg, color: col.text }}>{label}</span>
                       </div>
                       <span className="text-xs" style={{ color: C.cinza }}>{DESTINO_LABEL[b.destino] ?? b.destino}</span>
                       <span className="text-xs" style={{ color: C.cinza }}>· {fmtDatetime(b.created_at)}</span>

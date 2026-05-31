@@ -16,8 +16,10 @@ import {
   Trash2,
   X,
   FlaskConical,
+  Sparkles,
 } from "lucide-react";
 import LigacaoTab, { type LigaTipo, type Ligacao, type LigacaoStats } from "./LigacaoTab";
+import LimpezaTab from "./LimpezaTab";
 import { normalizeImageUrl } from "@/lib/storage-url";
 
 // ─── Paleta ───────────────────────────────────────────────────────────────────
@@ -131,7 +133,7 @@ export default function PurificacaoClient({ purificacoes: initial, teores, stats
   const [purificacoes, setPurificacoes] = useState<Purificacao[]>(initial);
   const [filtroStatus, setFiltroStatus] = useState<string>("todos");
   const [canceladasAberto, setCanceladasAberto] = useState(false);
-  const [activeTab, setActiveTab] = useState<"purificacao" | "ligacao">("purificacao");
+  const [activeTab, setActiveTab] = useState<"purificacao" | "ligacao" | "limpeza">("purificacao");
 
   // Modais
   const [modalNova, setModalNova] = useState(false);
@@ -185,6 +187,7 @@ export default function PurificacaoClient({ purificacoes: initial, teores, stats
         {([
           { key: "purificacao", label: "Purificação", icon: <Flame size={15} /> },
           { key: "ligacao",     label: "Ligação",     icon: <FlaskConical size={15} /> },
+          { key: "limpeza",     label: "Limpeza",     icon: <Sparkles size={15} /> },
         ] as const).map(tab => (
           <button
             key={tab.key}
@@ -217,6 +220,14 @@ export default function PurificacaoClient({ purificacoes: initial, teores, stats
           userRole={userRole}
           userId={userId}
           permissoes={permissoesPurif}
+        />
+      )}
+
+      {/* ── ABA LIMPEZA ────────────────────────────────────────────────────────── */}
+      {activeTab === "limpeza" && (
+        <LimpezaTab
+          userRole={userRole}
+          userId={userId}
         />
       )}
 

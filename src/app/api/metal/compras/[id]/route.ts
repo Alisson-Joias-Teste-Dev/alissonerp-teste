@@ -13,7 +13,13 @@ import { internalError } from "@/lib/api-error";
 import { getCompraPorId } from "@/lib/metal/compras";
 import sql from "@/lib/db";
 
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica"];
+/**
+ * REGRA DE NEGÓCIO: fluxo de metal liberado para consultoras (vendedoras).
+ * O QUE: inclui role consultora no acesso ao detalhe da compra.
+ * POR QUE: sem o detalhe, a consultora não consegue acompanhar/operar o fluxo.
+ * IMPACTO SE REMOVIDO: drawer exibe "Sem permissão" mesmo com módulo visível.
+ */
+const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"];
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const [user, errRes] = await authOr401(req);

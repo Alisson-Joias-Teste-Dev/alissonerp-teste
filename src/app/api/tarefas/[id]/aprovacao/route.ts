@@ -22,6 +22,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { processarDecisao } from "@/lib/aprovacao-regras";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
+import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
 
 const AprovacaoTarefaPostSchema = z.object({
   aprovador_id: z.string().min(1, "obrigatório"),
@@ -326,6 +327,35 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const tags: string[] = Array.isArray(tagsRaw)
     ? tagsRaw
     : (typeof tagsRaw === "string" ? tagsRaw.replace(/[{}"]/g, "").split(",").filter(Boolean) : []);
+
+  /**
+   * REGRA DE NEGÓCIO: aprovação de quebra da limpeza deve refletir no kanban
+   * de baixas (cofre_ouro_baixas), e não só na tarefa.
+   *
+   * O QUE: ao aprovar/rejeitar tarefa `aprovacao_quebra_metal` (ou legado
+   * com tag limpeza_ouro), executa serviço único que transita a baixa,
+   * rastreia evento e mantém estoque consistente.
+   * POR QUE: evita divergência entre tarefa aprovada e baixa ainda em
+   * aguardando_aprovacao.
+   * IMPACTO SE REMOVIDO: usuário aprova a tarefa e a baixa fica "presa" no
+   * quadro de limpeza.
+   */
+  const tagLimpeza = tags.find((t) => t.startsWith("limpeza_ouro:"));
+  const baixaIdTag = tagLimpeza ? Number(tagLimpeza.split(":")[1]) : 0;
+  const isFluxoQuebraLimpeza = tarefaInfo?.tipo === "aprovacao_quebra_metal" || (tarefaInfo?.tipo === "protocolo_metal" && !!tagLimpeza);
+  if (isFluxoQuebraLimpeza && baixaIdTag > 0) {
+    const resultado = await processarAprovacaoQuebraLimpeza({
+      baixaId: baixaIdTag,
+      decisao: body.decisao === "aprovado" ? "aprovar" : "reprovar",
+      userId: user.id,
+      motivo: body.motivo,
+      tarefaId: Number(id),
+    });
+    if (!resultado.ok) {
+      return NextResponse.json({ error: resultado.error ?? "Erro ao processar aprovação da quebra" }, { status: resultado.status });
+    }
+    return NextResponse.json({ ok: true, quebra_limpeza: resultado.baixa ?? { id: baixaIdTag } });
+  }
 
   if (tarefaInfo?.tipo === "cartao_desconto" && tarefaInfo?.venda_id) {
     const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };

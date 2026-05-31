@@ -10,7 +10,12 @@ import { authOr401 } from "@/lib/auth-server";
 import { internalError } from "@/lib/api-error";
 import { listarAprovacoes } from "@/lib/metal/compras";
 
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+/**
+ * REGRA DE NEGÓCIO: permissão completa de consultora no fluxo metal inclui
+ * visualizar fila de aprovações.
+ * IMPACTO SE REMOVIDO: parte do fluxo fica invisível para vendedoras.
+ */
+const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
 
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);

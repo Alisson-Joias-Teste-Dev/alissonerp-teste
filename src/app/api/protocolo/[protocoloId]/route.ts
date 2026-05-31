@@ -5,6 +5,7 @@ import { ROLES_CONCLUIR_PROTOCOLO } from "@/lib/roles";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { authOr401 } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
+import { STATUS_BAIXA_OURO } from "@/lib/cofre-ouro-status";
 
 const ProtocoloPatchSchema = z.object({
   etapas: z.string().min(1, "obrigatório"),
@@ -98,6 +99,50 @@ export async function PATCH(
 
   if (rows.length === 0) {
     return NextResponse.json({ error: "Protocolo não encontrado" }, { status: 404 });
+  }
+
+  /**
+   * REGRA DE NEGÓCIO: ao concluir protocolo de sangria, transitar baixa
+   * de em_trafego → recebido. O responsável do destino confirma o recebimento.
+   *
+   * O QUE: atualiza cofre_ouro_baixas com status "recebido" e registra
+   *   recebedor_id e data do recebimento.
+   * POR QUE: fecha o ciclo de transporte — o metal chegou ao destino e foi
+   *   conferido pelo responsável local.
+   * IMPACTO SE REMOVIDO: baixa fica eternamente em em_trafego, impedindo
+   *   o início da limpeza.
+   */
+  if (etapas === "concluido") {
+    const [baixaVinculada] = await sql`
+      SELECT id, status FROM alissonerp.cofre_ouro_baixas
+      WHERE protocolo_id = ${id}
+        AND status = ${STATUS_BAIXA_OURO.EM_TRAFEGO}
+      LIMIT 1
+    `;
+    if (baixaVinculada) {
+      const [recebedor] = await sql`SELECT nome FROM alissonerp.usuarios WHERE id = ${recebedor_id ?? user.id}::uuid`;
+      await sql`
+        UPDATE alissonerp.cofre_ouro_baixas
+        SET status = ${STATUS_BAIXA_OURO.RECEBIDO},
+            recebedor_nome = (SELECT nome FROM alissonerp.usuarios WHERE id = ${recebedor_id ?? user.id}::uuid),
+            recebedor_id = ${recebedor_id ?? user.id}::uuid,
+            updated_at = now()
+        WHERE id = ${baixaVinculada.id}
+      `;
+
+      await sql`
+        INSERT INTO alissonerp.cofre_ouro_rastreios
+          (baixa_id, protocolo_id, evento, origem_nome, observacao)
+        VALUES
+          (
+            ${baixaVinculada.id},
+            ${id},
+            'recebido_confirmado',
+            ${recebedor?.nome ?? user.email ?? 'Sistema'},
+            ${'Recebimento confirmado no protocolo #' + id}
+          )
+      `;
+    }
   }
 
   // Processar ordens_detalhes (fotos da balança para conversão)

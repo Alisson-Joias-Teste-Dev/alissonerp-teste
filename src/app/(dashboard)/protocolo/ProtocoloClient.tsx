@@ -14,6 +14,21 @@ const TIPOS_PROTOCOLO_DROPDOWN = [
   { tipo: "service", label: "Service", emoji: "🔧" },
 ];
 
+/**
+ * REGRA DE NEGÓCIO: após escolher Fábrica ou Service, o usuário define
+ * se o protocolo é de Ordens ou Sangria.
+ *
+ * O QUE: sub-opções disponíveis após seleção do contexto principal.
+ * POR QUE: sangria lista baixas de ouro (esperando_protocolo) do mesmo destino,
+ *   ordens lista ordens de produção (comportamento atual).
+ * IMPACTO SE REMOVIDO: sem esta etapa o sistema não sabe se deve listar ordens
+ *   ou baixas de ouro pendentes.
+ */
+const SUB_OPCOES = [
+  { key: "ordens", label: "Ordens", desc: "Ordens de produção" },
+  { key: "sangria", label: "Sangria", desc: "Baixas de ouro pendentes" },
+] as const;
+
 function resolveStorageUrl(path: string | null | undefined): string | null {
   if (!path) return null;
   // getPublicUrl roteia bucket privado (protocolo-fotos) pelo proxy /api/storage/...
@@ -73,6 +88,7 @@ interface OrdemConcluida {
 interface ProtocoloConcluido {
   protocolo_id: number;
   direcao: "ida" | "volta";
+  tipo_protocolo?: string | null;
   protocolo_criado: string;
   data_conclusao: string | null;
   criado_por_nome: string | null;
@@ -80,6 +96,13 @@ interface ProtocoloConcluido {
   foto_criacao: string | null;
   foto_conclusao: string | null;
   ordens: OrdemConcluida[];
+  sangria?: {
+    baixa_id: number;
+    gramas: number;
+    destino: string;
+    realizado_nome: string | null;
+    created_at: string;
+  } | null;
 }
 
 interface Props {
@@ -140,12 +163,25 @@ function fmt(d: string | null) {
   return new Date(d).toLocaleDateString("pt-BR");
 }
 
+function destinoLabel(destino: string | null | undefined) {
+  if (destino === "fabrica") return "Fábrica";
+  if (destino === "service") return "Service";
+  if (destino === "alisson") return "Alisson";
+  return destino ?? "—";
+}
+
 export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos = [] }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("ida");
 
   // Modal state: which direcao + which tipo was selected from dropdown
-  const [modalAberto, setModalAberto] = useState<{ direcao: "ida" | "volta"; tipo: string } | null>(null);
+  const [modalAberto, setModalAberto] = useState<{ direcao: "ida" | "volta"; tipo: string; modo: "ordens" | "sangria" } | null>(null);
+
+  /**
+   * REGRA DE NEGÓCIO: após selecionar Fábrica/Service, exibe sub-menu Ordens/Sangria.
+   * Só abre o modal quando a sub-opção também for escolhida.
+   */
+  const [subSelecao, setSubSelecao] = useState<{ direcao: "ida" | "volta"; tipo: string } | null>(null);
 
   const [concluirProt, setConcluirProt] = useState<ProtocoloRow | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -175,10 +211,26 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  function abrirModal(direcao: "ida" | "volta", tipo: string) {
+  function abrirModal(direcao: "ida" | "volta", tipo: string, modo: "ordens" | "sangria" = "ordens") {
     setDropdownIdaAberto(false);
     setDropdownVoltaAberto(false);
-    setModalAberto({ direcao, tipo });
+    setModalAberto({ direcao, tipo, modo });
+  }
+
+  /**
+   * REGRA DE NEGÓCIO: ao clicar em Fábrica/Service, mostra sub-opções Ordens/Sangria
+   * em vez de abrir o modal direto. O modal só abre após escolha da sub-opção.
+   */
+  function selecionarTipo(direcao: "ida" | "volta", tipo: string) {
+    setDropdownIdaAberto(false);
+    setDropdownVoltaAberto(false);
+    setSubSelecao({ direcao, tipo });
+  }
+
+  function selecionarSubOpcao(sub: "ordens" | "sangria") {
+    if (!subSelecao) return;
+    setModalAberto({ direcao: subSelecao.direcao, tipo: subSelecao.tipo, modo: sub });
+    setSubSelecao(null);
   }
 
   const podeNovProtocolo = tiposProtocoloPermitidos.length > 0;
@@ -228,7 +280,7 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
             {tiposProtocoloPermitidos.length === 1 ? (
               /* Só 1 tipo permitido → botão direto */
               <button
-                onClick={() => abrirModal(tab, tiposProtocoloPermitidos[0])}
+                onClick={() => selecionarTipo(tab, tiposProtocoloPermitidos[0])}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-90"
                 style={{ backgroundColor: C.esmeralda, color: C.creme }}
               >
@@ -255,7 +307,7 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
                     {TIPOS_PROTOCOLO_DROPDOWN.filter((t) => tiposProtocoloPermitidos.includes(t.tipo)).map((t) => (
                       <button
                         key={t.tipo}
-                        onClick={() => abrirModal(tab, t.tipo)}
+                        onClick={() => selecionarTipo(tab, t.tipo)}
                         className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors text-left border-b last:border-0"
                         style={{ borderColor: "#F3EADA", color: "#1A1A1A" }}
                       >
@@ -267,6 +319,55 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
                 )}
               </>
             )}
+          </div>
+        )}
+
+        {/* 
+          REGRA DE NEGÓCIO: após selecionar Fábrica/Service, exibe sub-menu Ordens/Sangria.
+          Só abre o modal quando a sub-opção também for escolhida.
+        */}
+        {subSelecao && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20" onClick={() => setSubSelecao(null)}>
+            <div
+              className="bg-white rounded-2xl border w-full max-w-sm mx-4 p-6 space-y-4 shadow-xl"
+              style={{ borderColor: C.cremeBorder }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div>
+                <h3 className="text-lg font-semibold" style={{ color: "#1A1A1A" }}>
+                  Novo Protocolo {subSelecao.direcao === "ida" ? "Ida" : "Volta"}
+                </h3>
+                <p className="text-sm mt-0.5" style={{ color: "#6B7280" }}>
+                  {subSelecao.tipo === "service" ? "🔧 Service" : "🏭 Fábrica"} — escolha o tipo
+                </p>
+              </div>
+              <div className="space-y-2">
+                {SUB_OPCOES.map((op) => (
+                  <button
+                    key={op.key}
+                    onClick={() => selecionarSubOpcao(op.key)}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left hover:bg-gray-50 transition-colors"
+                    style={{ borderColor: C.cremeBorder }}
+                  >
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center"
+                      style={{ backgroundColor: op.key === "sangria" ? "#FEF3C7" : C.creme }}>
+                      <span className="text-lg">{op.key === "sangria" ? "🧪" : "📦"}</span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>{op.label}</p>
+                      <p className="text-xs" style={{ color: "#9CA3AF" }}>{op.desc}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setSubSelecao(null)}
+                className="w-full px-4 py-2.5 rounded-lg text-sm border font-medium"
+                style={{ borderColor: C.cremeBorder, color: "#6B7280" }}
+              >
+                Cancelar
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -346,6 +447,11 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
                   <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: C.cremeBg, color: "#6B7280" }}>
                     {p.direcao === "ida" ? "Loja → Fábrica" : "Fábrica → Loja"}
                   </span>
+                  {p.tipo_protocolo === "sangria" && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                      🧪 Sangria
+                    </span>
+                  )}
                 </div>
                 <EtapaBadge etapa="concluido" />
               </div>
@@ -391,9 +497,34 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
 
               {/* Ordens */}
               {p.ordens.length === 0 ? (
-                <div className="px-4 py-3 flex items-center gap-2 text-xs" style={{ color: "#9CA3AF" }}>
-                  <Package size={12} /> Sem ordens vinculadas
-                </div>
+                p.sangria ? (
+                  /**
+                   * REGRA DE NEGÓCIO: no histórico de entregas, protocolo de
+                   * sangria precisa mostrar peso/destino/baixa vinculada.
+                   *
+                   * O QUE: renderiza resumo da sangria quando não há ordens.
+                   * POR QUE: garantir conferência e auditoria do metal recebido.
+                   * IMPACTO SE REMOVIDO: entrega concluída sem contexto do peso.
+                   */
+                  <div className="px-4 py-3">
+                    <div className="rounded-lg border px-3 py-2.5" style={{ borderColor: C.cremeBorder, backgroundColor: "#FFFBEB" }}>
+                      <p className="text-[11px] uppercase tracking-wider font-semibold" style={{ color: "#B45309" }}>Resumo da Sangria</p>
+                      <p className="text-sm font-semibold mt-1" style={{ color: "#111827" }}>
+                        Baixa #{p.sangria.baixa_id} · {Number(p.sangria.gramas).toFixed(3)}g
+                      </p>
+                      <p className="text-xs mt-1" style={{ color: "#6B7280" }}>
+                        Destino: {destinoLabel(p.sangria.destino)} · Baixado por: {p.sangria.realizado_nome ?? "—"}
+                      </p>
+                      <p className="text-xs" style={{ color: "#6B7280" }}>
+                        Data da baixa: {fmt(p.sangria.created_at)}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="px-4 py-3 flex items-center gap-2 text-xs" style={{ color: "#9CA3AF" }}>
+                    <Package size={12} /> Sem ordens vinculadas
+                  </div>
+                )
               ) : (
                 <div>
                   {p.ordens.map((o, i) => (
@@ -432,13 +563,14 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
 
       </div>{/* fim do wrapper isPending */}
 
-      {/* Modal novo protocolo — tipo vem do dropdown */}
+      {/* Modal novo protocolo — tipo e modo vêm do dropdown + sub-opção */}
       {modalAberto && (
         <NovaProtocoloModal
           isOpen={true}
           onClose={() => setModalAberto(null)}
           direcao={modalAberto.direcao}
           tipoProtocolo={modalAberto.tipo}
+          modo={modalAberto.modo}
           onSuccess={() => { setModalAberto(null); refresh(); }}
         />
       )}

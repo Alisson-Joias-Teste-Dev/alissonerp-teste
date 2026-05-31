@@ -132,11 +132,13 @@ export default function Sidebar() {
   const ROLES_GESTAO_ESTOQUE = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
   const ROLES_SITE = ["desenvolvedor", "admin", "gerente_loja"];
   const ROLES_CREDIARIO_SIDEBAR = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
+  const ROLES_METAL_SIDEBAR = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
   const hasOrcamento = role && ROLES_ORCAMENTO.includes(role);
   const hasFiscal = role && ROLES_FISCAL_SIDEBAR.includes(role);
   const hasGestaoEstoque = role && ROLES_GESTAO_ESTOQUE.includes(role);
   const hasSite = role && ROLES_SITE.includes(role);
   const hasCrediario = role && ROLES_CREDIARIO_SIDEBAR.includes(role);
+  const hasMetal = role && ROLES_METAL_SIDEBAR.includes(role);
   const modulosEfetivos = [...modulos_leitura];
   if (modulosEfetivos.length > 0) {
     if (hasServicePanel && !modulosEfetivos.includes("service_painel")) modulosEfetivos.push("service_painel");
@@ -145,6 +147,16 @@ export default function Sidebar() {
     if (hasGestaoEstoque && !modulosEfetivos.includes("gestao_estoque")) modulosEfetivos.push("gestao_estoque");
     if (hasSite && !modulosEfetivos.includes("site")) modulosEfetivos.push("site");
     if (hasCrediario && !modulosEfetivos.includes("crediario")) modulosEfetivos.push("crediario");
+    /**
+     * REGRA DE NEGÓCIO: consultoras (vendedoras) devem sempre enxergar o módulo
+     * de Metal no menu, mesmo quando role_permissoes ainda não refletiu a regra.
+     *
+     * O QUE: injeta módulo `metal` na malha efetiva do sidebar por role elegível.
+     * POR QUE: evita sumiço do menu para quem já tem permissão operacional na API.
+     * IMPACTO SE REMOVIDO: front pode ocultar Metal para consultora apesar de
+     * backend já aceitar o acesso.
+     */
+    if (hasMetal && !modulosEfetivos.includes("metal")) modulosEfetivos.push("metal");
   }
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)

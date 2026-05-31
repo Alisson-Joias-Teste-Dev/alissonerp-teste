@@ -16,7 +16,12 @@ import { internalError } from "@/lib/api-error";
 import { verificarPagamentoCompra } from "@/lib/metal/compras";
 import { uploadFile } from "@/lib/storage";
 
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica"];
+/**
+ * REGRA DE NEGÓCIO: consultora pode confirmar pagamento manual com comprovante
+ * no fluxo metal quando o módulo está liberado para vendedoras.
+ * IMPACTO SE REMOVIDO: etapa de verificação manual retorna 403 para consultora.
+ */
+const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"];
 
 const VerificarBodySchema = z.object({
   comprovante_base64: z.string().min(1, "Comprovante é obrigatório"),

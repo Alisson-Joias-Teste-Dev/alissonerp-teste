@@ -28,6 +28,7 @@ import {
 import { dispararWebhook } from "@/lib/webhooks";
 import PeriodoFiltro, { type Periodo, calcPeriodo } from "@/components/ui/PeriodoFiltro";
 import { useErrorStore } from "@/stores/errorStore";
+import { STATUS_LABEL, STATUS_COLORS } from "@/lib/cofre-ouro-status";
 
 // ─── palette (tema claro/creme consistente com o resto do sistema) ───────────
 const C = {
@@ -1875,10 +1876,73 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   const [baixandoOuro, setBaixandoOuro] = useState(false);
   const [itensByBaixa, setItensByBaixa] = useState<Record<number, BaixaOuroItem[]>>({});
   const [itensLoadingByBaixa, setItensLoadingByBaixa] = useState<Record<number, boolean>>({});
-  const [rastreiosLegacyByBaixa, setRastreiosLegacyByBaixa] = useState<Record<number, RastreioOuroLegado[]>>({});
+  const [rastreiosByBaixa, setRastreiosByBaixa] = useState<Record<number, RastreioOuroLegado[]>>({});
   const [ouroSelecionadosIds, setOuroSelecionadosIds] = useState<string[]>([]);
   const [itensBaixadosAtivos, setItensBaixadosAtivos] = useState<BaixaOuroItem[]>([]);
   const [comprasMetal, setComprasMetal] = useState<CompraMetalResumo[]>([]);
+
+  /**
+   * REGRA DE NEGÓCIO: destino da baixa de ouro precisa aparecer no histórico
+   * para conferência operacional (quem recebeu em Fábrica/Service/Alisson).
+   *
+   * O QUE: normaliza rótulo de destino para exibição na UI.
+   * POR QUE: reduz erro de leitura no fechamento e rastreio da sangria.
+   * IMPACTO SE REMOVIDO: operador perde contexto crítico do lote no histórico.
+   */
+  const destinoLabel = (destino: string | null | undefined) => {
+    if (destino === "fabrica") return "Fábrica";
+    if (destino === "service") return "Service";
+    if (destino === "alisson") return "Alisson";
+    return destino ?? "—";
+  };
+
+  /**
+   * REGRA DE NEGÓCIO: observações técnicas (JSON/concat) devem aparecer de forma
+   * legível para o usuário operacional.
+   */
+  const formatObsLegivel = (obs: string | null | undefined) => {
+    if (!obs) return "—";
+    const trimmed = String(obs).trim();
+    if (!trimmed) return "—";
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      const pesoSujo = Number(parsed.peso_sujo ?? 0);
+      const pesoLimpo = Number(parsed.peso_limpo ?? 0);
+      const perda = Number(parsed.perda_gramas ?? 0);
+      if (pesoSujo > 0 || pesoLimpo > 0) {
+        return `Limpeza: sujo ${pesoSujo.toFixed(3)}g -> limpo ${pesoLimpo.toFixed(3)}g (perda ${perda.toFixed(3)}g)`;
+      }
+    } catch {
+      // string não-JSON
+    }
+    const parts = trimmed.split("|").map((s) => s.trim()).filter(Boolean);
+    const partesRelevantes = parts.filter((p) => {
+      const l = p.toLowerCase();
+      return l.startsWith("limpeza") || l.startsWith("peso") || l.startsWith("perda") || l.startsWith("obs:") || l.includes("aprovado") || l.includes("reprovado");
+    });
+    return (partesRelevantes.length > 0 ? partesRelevantes.join(" | ") : parts.join(" | ")) || trimmed;
+  };
+
+  /**
+   * REGRA DE NEGÓCIO: eventos da timeline do ouro precisam ser traduzidos para
+   * linguagem operacional da loja/fábrica.
+   *
+   * O QUE: converte o código técnico do rastreio em rótulo legível.
+   * POR QUE: reduz interpretação errada em fluxo sensível de sangria/limpeza.
+   * IMPACTO SE REMOVIDO: timeline continua exibindo códigos internos, piorando
+   * conferência manual e auditoria de operação.
+   */
+  const labelEventoOuro = (evento: string | null | undefined) => {
+    const ev = String(evento ?? "").trim();
+    if (ev === "baixa_direta_alisson") return "Retirada para Alisson";
+    if (ev === "baixa_iniciada") return "Baixa iniciada";
+    if (ev === "recebido_confirmado") return "Recebimento confirmado";
+    if (ev === "limpeza_iniciada") return "Limpeza iniciada";
+    if (ev === "limpeza_concluida") return "Limpeza concluída";
+    if (ev === "limpeza_aprovada") return "Limpeza aprovada";
+    if (ev === "limpeza_reprovada") return "Limpeza reprovada";
+    return ev || "Movimento";
+  };
 
   useEffect(() => {
     fetch("/api/configuracoes/gateways")
@@ -2015,6 +2079,13 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   const ouroSelecionados = ouroMovimentosPendentes.filter((m) => ouroSelecionadosIds.includes(m.id));
   const ouroSelecionadoTotalG = ouroSelecionados.reduce((s, m) => s + Number(m.ouro_gramas), 0);
   const ouroSelecionadoTotalValor = ouroSelecionados.reduce((s, m) => s + Number(m.valor), 0);
+  const podeAbrirBaixaOuro = podeBaixar && saldoOuroDisp > 0 && ouroSelecionadosIds.length > 0;
+  const baixaOuroResumoSelecao = ouroSelecionadosIds.length > 0
+    ? `${ouroSelecionadosIds.length} item(ns) · ${ouroSelecionadoTotalG.toFixed(3)}g · ${fmt(ouroSelecionadoTotalValor)}`
+    : "Selecione as linhas para dar baixa";
+  const baixaOuroLabel = ouroSelecionadosIds.length > 0
+    ? `Confirmar baixa de ${ouroSelecionadoTotalG.toFixed(3)}g (${fmt(ouroSelecionadoTotalValor)})`
+    : "Selecione itens para baixar";
 
   const showBaixa = formaFiltro === "Todos" || formaFiltro === "Dinheiro";
 
@@ -2133,24 +2204,20 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
       const json = await res.json().catch(() => []);
       if (res.ok && Array.isArray(json)) {
         setItensByBaixa((prev) => ({ ...prev, [baixaId]: json as BaixaOuroItem[] }));
-        // REGRA DE NEGÓCIO: baixas antigas não tinham itens; usar rastreio legado
-        // para manter histórico visível sem inventar origem inexistente.
-        if ((json as BaixaOuroItem[]).length === 0) {
-          const legRes = await fetch(`/api/financeiro/cofre-ouro/rastreios?baixa_id=${baixaId}`);
-          const legJson = await legRes.json().catch(() => []);
-          if (legRes.ok && Array.isArray(legJson)) {
-            setRastreiosLegacyByBaixa((prev) => ({ ...prev, [baixaId]: legJson as RastreioOuroLegado[] }));
-          } else {
-            setRastreiosLegacyByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
-          }
+        const legRes = await fetch(`/api/financeiro/cofre-ouro/rastreios?baixa_id=${baixaId}`);
+        const legJson = await legRes.json().catch(() => []);
+        if (legRes.ok && Array.isArray(legJson)) {
+          setRastreiosByBaixa((prev) => ({ ...prev, [baixaId]: legJson as RastreioOuroLegado[] }));
+        } else {
+          setRastreiosByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
         }
       } else {
         setItensByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
-        setRastreiosLegacyByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
+        setRastreiosByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
       }
     } catch {
       setItensByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
-      setRastreiosLegacyByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
+      setRastreiosByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
     } finally {
       setItensLoadingByBaixa((prev) => ({ ...prev, [baixaId]: false }));
     }
@@ -2413,12 +2480,26 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                   {baixasOuro.length} baixa{baixasOuro.length !== 1 ? "s" : ""} registrada{baixasOuro.length !== 1 ? "s" : ""}
                 </p>
               </div>
+              {
+                /**
+                 * REGRA DE NEGÓCIO: a baixa de ouro deve acontecer SOMENTE com itens
+                 * já selecionados na grade de pendentes.
+                 *
+                 * O QUE: botão principal do cofre só habilita quando há seleção e exibe
+                 * resumo exato (itens, gramas, valor) do que será baixado.
+                 * POR QUE: reforça conferência visual antes do modal para reduzir erro
+                 * operacional no processo sensível de baixa do ouro.
+                 * IMPACTO SE REMOVIDO: operador pode abrir fluxo sem contexto da seleção,
+                 * aumentando risco de confirmar baixa no lote errado.
+                 */
+              }
               {podeBaixar && saldoOuroDisp > 0 && (
-                <button onClick={() => { setBaixaOuroErro(null); setShowBaixaOuro(true); }}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
+                <button onClick={() => { setBaixaOuroErro(null); setShowBaixaOuro(true); }} disabled={!podeAbrirBaixaOuro}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ backgroundColor: "#D97706", color: "white" }}
                 >
-                  <ArrowUpCircle size={14} /> Dar Baixa no Ouro
+                  <ArrowUpCircle size={14} />
+                  {podeAbrirBaixaOuro ? `Dar baixa no Ouro · ${ouroSelecionadoTotalG.toFixed(3)}g` : "Dar Baixa no Ouro"}
                 </button>
               )}
               {podeBaixar && saldoOuroDisp <= 0 && (
@@ -2490,13 +2571,27 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
               <button onClick={() => setShowBaixaOuro(false)} disabled={baixandoOuro}
                 className="px-4 py-2 rounded-lg text-sm border font-medium disabled:opacity-40"
                 style={{ borderColor: C.cremeBorder, color: C.cinza }}>Cancelar</button>
-              <button onClick={darBaixaOuro} disabled={baixandoOuro || ouroSelecionadosIds.length === 0}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
-                style={{ backgroundColor: "#D97706", color: "white" }}>
+                <button onClick={darBaixaOuro} disabled={baixandoOuro || ouroSelecionadosIds.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+                  style={{ backgroundColor: "#D97706", color: "white" }}>
                 {baixandoOuro ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                {baixaOuroDestino === "alisson" ? "Confirmar Baixa" : "Criar Baixa + Protocolo"}
+                {
+                  /**
+                   * REGRA DE NEGÓCIO: o CTA da baixa deve refletir EXATAMENTE os itens
+                   * selecionados (gramas + valor) para evitar baixa indevida por erro humano.
+                   *
+                   * O QUE: renderiza total dinâmico da seleção no botão de confirmação.
+                   * POR QUE: reforça conferência operacional antes da persistência no cofre.
+                   * IMPACTO SE ALTERADO/REMOVIDO: operador perde feedback crítico e aumenta
+                   * risco de confirmar baixa com seleção errada.
+                   */
+                }
+                {baixaOuroLabel}
               </button>
             </div>
+            <p className="text-xs" style={{ color: "#B45309" }}>
+              {baixaOuroResumoSelecao}
+            </p>
           </div>
         </div>
       )}
@@ -2628,10 +2723,15 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
         baixasOuro.length > 0 ? (
           <div className="space-y-3">
             {baixasOuro.map((b) => {
-              const statusColor = b.status === "concluido" ? C.verde : b.status === "cancelado" ? C.vermelho : C.ambar;
-              const statusLabel = b.status === "concluido" ? "Concluído" : b.status === "cancelado" ? "Cancelado" : b.status === "em_trafego" ? "Em Tráfego" : "Pendente";
+              /**
+               * REGRA DE NEGÓCIO: usa módulo central cofre-ouro-status.ts como fonte única
+               * de labels e cores dos status da baixa.
+               */
+              const stCore = STATUS_COLORS[b.status] ?? { bg: "#FEF3C7", text: "#92400E" };
+              const statusColor = stCore.text;
+              const statusLabel = STATUS_LABEL[b.status] ?? b.status;
               const itens = itensByBaixa[b.id] ?? [];
-              const legacy = rastreiosLegacyByBaixa[b.id] ?? [];
+              const legacy = rastreiosByBaixa[b.id] ?? [];
               const loadingItens = !!itensLoadingByBaixa[b.id];
               const totalItensG = itens.reduce((s, it) => s + Number(it.gramas ?? 0), 0);
               const totalItensValor = itens.reduce((s, it) => s + Number(it.valor_brl ?? 0), 0);
@@ -2653,13 +2753,16 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                           Baixa Ouro #{b.id} · {Number(b.gramas).toFixed(3)}g
                         </p>
                         <p className="text-[11px]" style={{ color: C.cinza }}>
-                          {loadingItens ? "carregando linhas..." : `${itens.length > 0 ? itens.length : legacy.length} item(ns)`} · por {b.realizado_nome ?? "—"} · {fmtDatetime(b.created_at)}
+                          {loadingItens ? "carregando linhas..." : `${itens.length > 0 ? itens.length : legacy.length} item(ns)`} · destino {destinoLabel(b.destino)} · por {b.realizado_nome ?? "—"} · {fmtDatetime(b.created_at)}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                        {destinoLabel(b.destino)}
+                      </span>
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: statusColor + "20", color: statusColor }}>{statusLabel}</span>
-                      {b.obs && <span className="text-xs italic" style={{ color: C.cinza }}>{b.obs}</span>}
+                      {b.obs && <span className="text-xs italic" style={{ color: C.cinza }}>{formatObsLegivel(b.obs)}</span>}
                     </div>
                   </summary>
 
@@ -2694,7 +2797,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                         {!loadingItens && itens.length === 0 && legacy.length > 0 && legacy.map((rt) => (
                           <tr key={`legacy-${rt.id}`} className="border-t" style={{ borderColor: C.cremeBorder }}>
                             <td className="px-4 py-2.5 text-xs" style={{ color: "#374151" }}>
-                              {rt.evento === "baixa_direta_alisson" ? "Retirada para o Alisson" : rt.evento === "baixa_iniciada" ? "Baixa iniciada" : rt.evento === "recebido_confirmado" ? "Recebimento confirmado" : (rt.evento || "Movimento")}
+                              {labelEventoOuro(rt.evento)}
                             </td>
                             <td className="px-4 py-2.5 text-xs" style={{ color: C.esmeralda }}>—</td>
                             <td className="px-4 py-2.5 text-xs" style={{ color: C.cinza }}>{rt.origem_nome || b.realizado_nome || "—"}</td>
@@ -2703,7 +2806,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                               {rt.gramas != null ? `${Number(rt.gramas).toFixed(3)}g` : "—"}
                             </td>
                             <td className="px-4 py-2.5 text-right tabular-nums font-semibold" style={{ color: C.verde }}>—</td>
-                            <td className="px-4 py-2.5 text-xs max-w-[220px] truncate" style={{ color: C.cinza }}>{rt.observacao || b.obs || "—"}</td>
+                            <td className="px-4 py-2.5 text-xs max-w-[320px] truncate" style={{ color: C.cinza }}>{formatObsLegivel(rt.observacao || b.obs || undefined)}</td>
                           </tr>
                         ))}
                         {!loadingItens && itens.map((it) => (
@@ -2718,12 +2821,32 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                               {`${Number(it.gramas).toFixed(3)}g`}
                             </td>
                             <td className="px-4 py-2.5 text-right tabular-nums font-semibold" style={{ color: C.verde }}>{fmt(Number(it.valor_brl ?? 0))}</td>
-                            <td className="px-4 py-2.5 text-xs max-w-[220px] truncate" style={{ color: C.cinza }}>{b.obs || "—"}</td>
+                            <td className="px-4 py-2.5 text-xs max-w-[320px] truncate" style={{ color: C.cinza }}>{formatObsLegivel(b.obs)}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                  {!loadingItens && legacy.length > 0 && (
+                    <div className="px-4 py-3 border-t" style={{ borderColor: C.cremeBorder, backgroundColor: "#FFFBEB" }}>
+                      <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#92400E" }}>
+                        Linha do Tempo
+                      </p>
+                      <div className="space-y-1.5">
+                        {legacy.map((rt) => (
+                          <p key={`timeline-${rt.id}`} className="text-xs" style={{ color: C.cinza }}>
+                            <span style={{ color: "#111827", fontWeight: 600 }}>{fmtDatetime(rt.created_at)}</span>
+                            {" · "}
+                            {rt.origem_nome || rt.destino_nome || b.realizado_nome || "Usuário"}
+                            {" · "}
+                            {labelEventoOuro(rt.evento)}
+                            {rt.gramas != null ? ` · ${Number(rt.gramas).toFixed(3)}g` : ""}
+                            {rt.observacao ? ` · ${formatObsLegivel(rt.observacao)}` : ""}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {!loadingItens && itens.length > 0 && (
                     <div className="px-4 py-3 border-t flex justify-end gap-4" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
                       <p className="text-xs tabular-nums font-medium" style={{ color: "#92400E" }}>

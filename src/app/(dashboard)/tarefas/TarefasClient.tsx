@@ -100,6 +100,7 @@ const TIPO_LABEL: Record<string, string> = {
   desconto_acima: "Desconto acima do limite",
   sangria: "Sangria",
   protocolo_metal: "Protocolo de metal",
+  aprovacao_quebra_metal: "Aprovação de quebra de metal",
   compra_comercial: "Compra Comercial",
 };
 
@@ -772,6 +773,7 @@ export default function TarefasClient() {
                           <option value="desconto_acima">Aprovação desconto</option>
                           <option value="sangria">Sangria</option>
                           <option value="protocolo_metal">Protocolo metal</option>
+                          <option value="aprovacao_quebra_metal">Aprovação quebra metal</option>
                           <option value="compra_comercial">Compra comercial</option>
                         </select>
                       </div>

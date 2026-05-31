@@ -28,6 +28,7 @@ interface AprovadorConfig {
   aprovadora_credito_gerente?: string;
   aprovador_compra_comercial?: string;
   metal_aprovador_id?: string;
+  aprovador_limpeza?: string;
 }
 
 interface Usuario {
@@ -41,6 +42,7 @@ interface UsuariosPorRole {
   diretores_admins: Usuario[];
   admins_devs: Usuario[];
   metal_aprovadores: Usuario[];
+  aprovadores_limpeza: Usuario[];
 }
 
 const P = {
@@ -95,6 +97,22 @@ const CONFIG_ITENS = [
     usuariosKey: "metal_aprovadores" as const,
     icone: "⚖️",
   },
+  /**
+   * REGRA DE NEGÓCIO: aprovador da limpeza de metal (sangria).
+   * O QUE: define quem pode aprovar/reprovar limpezas concluídas
+   *   antes do metal entrar no estoque do destino.
+   * POR QUE: separa a responsabilidade operacional (limpeza) da decisão
+   *   final de qualidade (aprovação).
+   * IMPACTO SE REMOVIDO: sem aprovador configurado, o metal limpo nunca
+   *   entra no estoque do destino.
+   */
+  {
+    chave: "aprovador_limpeza" as const,
+    titulo: "Limpeza de Metal (Sangria)",
+    descricao: "Aprova a limpeza do metal vindo da sangria antes de entrar no estoque do destino",
+    usuariosKey: "aprovadores_limpeza" as const,
+    icone: "🧪",
+  },
 ];
 
 export default function TabAprovadores() {
@@ -105,12 +123,17 @@ export default function TabAprovadores() {
     aprovador_credito_diretor: "",
     aprovador_desconto_padrao: "",
     aprovador_cartao_desconto_padrao: "",
+    aprovadora_credito_gerente: "",
+    aprovador_compra_comercial: "",
+    metal_aprovador_id: "",
+    aprovador_limpeza: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
     diretores_admins: [],
     admins_devs: [],
     metal_aprovadores: [],
+    aprovadores_limpeza: [],
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -127,8 +150,9 @@ export default function TabAprovadores() {
           aprovadora_credito_gerente: d.aprovadora_credito_gerente ?? "",
           aprovador_compra_comercial: d.aprovador_compra_comercial ?? "",
           metal_aprovador_id: d.metal_aprovador_id ?? "",
+          aprovador_limpeza: d.aprovador_limpeza ?? "",
         });
-        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [] });
+        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [] });
       })
       .finally(() => setLoading(false));
   }, []);
@@ -141,7 +165,7 @@ export default function TabAprovadores() {
   function getUserName(chave: string): string {
     const id = (config as any)[chave];
     if (!id) return "";
-    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores];
+    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores, ...usuarios.aprovadores_limpeza];
     const u = all.find((x) => x.id === id);
     return u?.nome ?? "";
   }

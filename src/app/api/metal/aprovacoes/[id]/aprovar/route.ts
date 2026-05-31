@@ -11,7 +11,12 @@ import { authOr401 } from "@/lib/auth-server";
 import { internalError } from "@/lib/api-error";
 import { aprovarCompra } from "@/lib/metal/compras";
 
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+/**
+ * REGRA DE NEGÓCIO: fluxo metal com permissão completa para consultora permite
+ * executar decisão de aprovação quando aplicável.
+ * IMPACTO SE REMOVIDO: retorno 403 na etapa de aprovar compra acima do teto.
+ */
+const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const [user, errRes] = await authOr401(req);

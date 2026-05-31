@@ -298,6 +298,8 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
   const statusCol = STATUS_COLS.find(c => c.key === tarefa.status);
   const pendingAprovacao = aprovacoes.find(a => a.status === "pendente");
   const isAprovador = pendingAprovacao?.aprovador_id === currentUserId;
+  const isLimpezaOuro = Array.isArray(tarefa.tags)
+    && tarefa.tags.some((t) => String(t).startsWith("limpeza_ouro:"));
 
   return (
     <>
@@ -511,6 +513,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
 
                   {/* Confirmar Recebimento — protocolo de metal */}
                   {tarefa.tipo === "protocolo_metal"
+                    && !isLimpezaOuro
                     && tarefa.responsavel_id === currentUserId
                     && tarefa.status !== "concluida" && (
                     <div className="rounded-xl border p-4 space-y-2" style={{ borderColor: "#10B98133", backgroundColor: "#F0FDF4" }}>
