@@ -7,7 +7,7 @@ export interface StatCardProps {
   label: string;
   value: string | number;
   icon?: LucideIcon;
-  trend?: { value: number; label?: string };
+  trend?: { value: number; label?: string; baseValueLabel?: string };
   color?: "esmeralda" | "dourado" | "creme" | "prata" | "diamante";
   subtitle?: string;
   /** Ao informar onClick, o card fica clicável com cursor-pointer */
@@ -60,16 +60,34 @@ export default function StatCard({
         </p>
       )}
       {trend && (
-        <div
-          className="mt-2 flex items-center gap-1 text-xs font-medium"
-          style={{ color: positive ? P.sucesso : P.erro }}
-        >
-          <span>{positive ? "▲" : "▼"}</span>
-          <span className="tabular-nums">
-            {Math.abs(trend.value).toFixed(1).replace(".", ",")}%
-          </span>
-          {trend.label && <span style={{ opacity: 0.8 }}>{trend.label}</span>}
-        </div>
+        <>
+          <div
+            className="mt-2 flex items-center gap-1 text-xs font-medium"
+            style={{ color: positive ? P.sucesso : P.erro }}
+          >
+            <span>{positive ? "▲" : "▼"}</span>
+            <span className="tabular-nums">
+              {Math.abs(trend.value).toFixed(1).replace(".", ",")}%
+            </span>
+            {trend.label && <span style={{ opacity: 0.8 }}>{trend.label}</span>}
+          </div>
+          {trend.baseValueLabel && (
+            <>
+              {/*
+                REGRA DE NEGOCIO (contexto do comparativo):
+                O que faz: exibe o valor base do mesmo período do ano anterior logo
+                abaixo da variação percentual no card.
+                Por que foi implementado assim: evita leitura ambígua do "% vs ano anterior"
+                e dá transparência imediata da base usada no comparativo.
+                Impacto se alterar/remover: a equipe pode interpretar o percentual sem
+                referência numérica e tomar decisão com contexto incompleto.
+              */}
+              <p className="mt-1 text-[11px]" style={{ color: palette.fg, opacity: 0.7 }}>
+                Ano anterior: {trend.baseValueLabel}
+              </p>
+            </>
+          )}
+        </>
       )}
     </div>
   );

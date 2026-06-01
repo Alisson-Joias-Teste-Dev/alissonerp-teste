@@ -103,6 +103,10 @@ export default function DashboardComercialPage() {
                   ? {
                       value: comparativo.data.faturamento.delta_percentual,
                       label: "vs ano anterior",
+                      // REGRA DE NEGOCIO: mostra a base numérica do ano anterior para
+                      // evitar interpretação isolada do percentual no card de faturamento.
+                      // Impacto se remover: auditoria rápida do comparativo fica prejudicada.
+                      baseValueLabel: formatBRL(comparativo.data.faturamento.anterior),
                     }
                   : undefined
               }
@@ -117,6 +121,10 @@ export default function DashboardComercialPage() {
                   ? {
                       value: comparativo.data.quantidade_vendas.delta_percentual,
                       label: "vs ano anterior",
+                      // REGRA DE NEGOCIO: exibe a quantidade base do ano anterior para
+                      // contextualizar a variação percentual de vendas.
+                      // Impacto se remover: o usuário perde referência objetiva do comparativo.
+                      baseValueLabel: formatNumber(comparativo.data.quantidade_vendas.anterior),
                     }
                   : undefined
               }
@@ -131,6 +139,10 @@ export default function DashboardComercialPage() {
                   ? {
                       value: comparativo.data.ticket_medio.delta_percentual,
                       label: "vs ano anterior",
+                      // REGRA DE NEGOCIO: explicita o ticket médio base do ano anterior,
+                      // mantendo transparência da conta usada no comparativo.
+                      // Impacto se remover: aumenta risco de leitura equivocada do indicador.
+                      baseValueLabel: formatBRL(comparativo.data.ticket_medio.anterior),
                     }
                   : undefined
               }
