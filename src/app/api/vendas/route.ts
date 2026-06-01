@@ -129,6 +129,15 @@ export async function GET(req: NextRequest) {
   const situacao   = searchParams.get("situacao");   // rascunho|aprovado|enviado|cancelado|concluido
   const vendedorId = searchParams.get("vendedor_id");
   const q          = searchParams.get("q")?.trim();
+  const pageRaw = Number(searchParams.get("page") ?? "1");
+  const pageSizeRaw = Number(searchParams.get("page_size") ?? "15");
+
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+  const pageSizeLimit = 100;
+  const pageSize = Number.isFinite(pageSizeRaw) && pageSizeRaw > 0
+    ? Math.min(Math.floor(pageSizeRaw), pageSizeLimit)
+    : 15;
+  const offset = (page - 1) * pageSize;
 
   if (!inicio || !fim) {
     return NextResponse.json({ error: "inicio e fim obrigatórios" }, { status: 400 });
@@ -141,6 +150,35 @@ export async function GET(req: NextRequest) {
   // Mínimo 8 dígitos para busca por documento (CPF tem 11, CNPJ tem 14)
   // Evita confundir número de pedido (5 dígitos) com CPF/CNPJ
   const isDocSearch = !!q && qDigits.length >= 8 && /^[\d.\-\/\s]+$/.test(q);
+
+  /**
+   * REGRA DE NEGOCIO (listagem histórica de vendas):
+   * O que faz: pagina no banco com LIMIT/OFFSET e remove o teto fixo de 500.
+   * Por que: o filtro "Sem filtro" precisa permitir busca em qualquer data sem
+   * truncar o histórico; a UI renderiza 15 por vez.
+   * Impacto: se voltar o LIMIT fixo ou remover o COUNT com mesmos filtros,
+   * paginação e busca podem omitir vendas antigas e quebrar a confiança no resultado.
+   */
+  const [totalRow] = await sql<{ total: string }[]>`
+    SELECT COUNT(*)::text AS total
+    FROM alissonerp.vw_vendas_erp_completa v
+    WHERE v.data_venda >= ${inicio}::date
+      AND v.data_venda <  (${fim}::date + INTERVAL '1 day')
+      ${isFullAccess ? sql`` : sql`AND v.vendedor_id = ${meuVendedorId!}`}
+      ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}
+      ${vendedorId ? sql`AND v.vendedor_id = ${Number(vendedorId)}`    : sql``}
+      ${isDocSearch
+          ? sql`AND regexp_replace(COALESCE(v.cliente_cpf_cnpj, ''), '\D', '', 'g') ILIKE ${'%' + qDigits + '%'}`
+          : q
+            ? sql`AND (
+                v.numero_venda     ILIKE ${'%' + q + '%'} OR
+                v.cliente_nome     ILIKE ${'%' + q + '%'} OR
+                v.vendedor_nome    ILIKE ${'%' + q + '%'}
+              )`
+            : sql``}
+  `;
+  const total = Number(totalRow?.total ?? 0);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const vendas = await sql`
     SELECT
@@ -184,11 +222,12 @@ export async function GET(req: NextRequest) {
               )`
             : sql``}
     ORDER BY v.id DESC
-    LIMIT 500
+    LIMIT ${pageSize}
+    OFFSET ${offset}
   `;
 
-  return NextResponse.json(
-    vendas.map((v) => ({
+  return NextResponse.json({
+    items: vendas.map((v) => ({
       ...v,
       total_produtos: Number(v.total_produtos),
       total_desconto: Number(v.total_desconto),
@@ -197,8 +236,12 @@ export async function GET(req: NextRequest) {
       total_comissao: Number(v.total_comissao),
       total_pago:     Number(v.total_pago),
       qtd_itens:      Number(v.qtd_itens),
-    }))
-  );
+    })),
+    page,
+    page_size: pageSize,
+    total,
+    total_pages: totalPages,
+  });
 }
 
 // ─── POST /api/vendas ──────────────────────────────────────────────────────────

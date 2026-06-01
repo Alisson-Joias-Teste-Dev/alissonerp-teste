@@ -74,10 +74,21 @@ interface Vendedor {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-function toYMD(d: Date) { return d.toISOString().slice(0, 10); }
-function hoje() { return toYMD(new Date()); }
-function menosNDias(n: number) {
-  const d = new Date(); d.setDate(d.getDate() - n); return toYMD(d);
+function toYMDLocal(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function ontem() { return menosNDiasLocal(1); }
+function hojeLocal() { return toYMDLocal(new Date()); }
+function menosNDiasLocal(n: number) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return toYMDLocal(d);
+}
+function ultimoDiaMesLocal(ano: number, mes1a12: number) {
+  return toYMDLocal(new Date(ano, mes1a12, 0));
 }
 function fmt(v: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
@@ -98,7 +109,15 @@ interface Props {
   nomeUsuario: string;
 }
 
-type Preset = "today" | "7d" | "30d" | "mes" | "custom";
+type Preset = "all" | "today" | "yesterday" | "7d" | "30d" | "mes" | "custom";
+
+interface VendasPaginatedResponse {
+  items: VendaERP[];
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+}
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
@@ -107,8 +126,8 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
 
   // Período
   const [preset, setPreset] = useState<Preset>("30d");
-  const [inicio, setInicio] = useState(() => menosNDias(30));
-  const [fim,    setFim]    = useState(() => hoje());
+  const [inicio, setInicio] = useState(() => menosNDiasLocal(30));
+  const [fim,    setFim]    = useState(() => hojeLocal());
   const nowDate = new Date();
   const [mesSel, setMesSel] = useState(
     `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}`
@@ -126,6 +145,8 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
   const [vendedores, setVendedores] = useState<Vendedor[]>([]);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState<string | null>(null);
+  const [totalRegistros, setTotalRegistros] = useState(0);
+  const [totalPaginas, setTotalPaginas] = useState(1);
 
   // NFC-e modal
   const [vendaNfce, setVendaNfce] = useState<VendaERP | null>(null);
@@ -153,76 +174,83 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
   }, [isFullAccess]);
 
   // Fetch vendas
-  const fetchVendas = useCallback(async (ini: string, fi: string, vId?: number | "") => {
+  const [pagina, setPagina] = useState(1);
+  const POR_PAGINA = 15;
+
+  /**
+   * REGRA DE NEGOCIO (listagem de vendas):
+   * O que faz: busca vendas paginadas no backend, respeitando período, situação,
+   * vendedor e texto de busca em qualquer data.
+   * Por que: sem LIMIT fixo, o usuário consegue pesquisar histórico completo sem
+   * travar a tela; a UI renderiza só 15 por página.
+   * Impacto: se voltar para filtro/paginação local, o "Sem filtro" deixa de cobrir
+   * todo o banco e a busca pode omitir vendas antigas.
+   */
+  const fetchVendas = useCallback(async (
+    ini: string,
+    fi: string,
+    paginaAlvo: number,
+    vId?: number | "",
+    buscaTexto?: string,
+  ) => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ inicio: ini, fim: fi });
+      params.set("page", String(paginaAlvo));
+      params.set("page_size", String(POR_PAGINA));
       if (tabSituacao) params.set("situacao", tabSituacao);
       const vid = vId !== undefined ? vId : vendedorFiltro;
       if (vid) params.set("vendedor_id", String(vid));
+      const termoBusca = (buscaTexto ?? busca).trim();
+      if (termoBusca) params.set("q", termoBusca);
 
       const res  = await fetch(`/api/vendas?${params}`);
-      const body = await res.json() as VendaERP[] | { error: string };
+      const body = await res.json() as VendasPaginatedResponse | { error: string };
       if (!res.ok) throw new Error((body as { error: string }).error ?? `HTTP ${res.status}`);
-      setVendas(body as VendaERP[]);
+      const payload = body as VendasPaginatedResponse;
+      setVendas(payload.items);
+      setTotalRegistros(payload.total);
+      setTotalPaginas(Math.max(1, payload.total_pages));
+      setPagina(payload.page);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao carregar vendas");
     } finally {
       setLoading(false);
     }
-  }, [tabSituacao, vendedorFiltro]);
+  }, [tabSituacao, vendedorFiltro, busca]);
 
-  // Carregar ao montar + quando tab muda
+  // Carregar ao montar + quando filtros mudam
   useEffect(() => {
-    fetchVendas(inicio, fim);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabSituacao]);
-
-  const [pagina, setPagina] = useState(1);
-  const POR_PAGINA = 15;
-
-  // Filtro local
-  const filtradas = useMemo(() => {
-    const q = busca.toLowerCase().trim();
-    return vendas.filter(v => {
-      if (!q) return true;
-      return (
-        v.numero_venda?.toLowerCase().includes(q) ||
-        v.cliente_nome?.toLowerCase().includes(q) ||
-        v.vendedor_nome?.toLowerCase().includes(q)
-      );
-    });
-  }, [vendas, busca]);
-
-  const totalPaginas = Math.max(1, Math.ceil(filtradas.length / POR_PAGINA));
-  const paginaAtual  = Math.min(pagina, totalPaginas);
-  const visiveis     = filtradas.slice((paginaAtual - 1) * POR_PAGINA, paginaAtual * POR_PAGINA);
-
-  // Reset página ao filtrar
-  useEffect(() => { setPagina(1); }, [busca, tabSituacao, vendedorFiltro]);
+    const delay = setTimeout(() => {
+      fetchVendas(inicio, fim, 1);
+    }, 250);
+    return () => clearTimeout(delay);
+  }, [fetchVendas, inicio, fim, tabSituacao, vendedorFiltro, busca]);
 
   // Stats
   const stats = useMemo(() => ({
-    count:     filtradas.length,
-    faturado:  filtradas.reduce((s, v) => s + v.total_venda,    0),
-    comissao:  filtradas.reduce((s, v) => s + v.total_comissao, 0),
-    pago:      filtradas.reduce((s, v) => s + v.total_pago,     0),
-  }), [filtradas]);
+    count:     totalRegistros,
+    faturado:  vendas.reduce((s, v) => s + v.total_venda,    0),
+    comissao:  vendas.reduce((s, v) => s + v.total_comissao, 0),
+    pago:      vendas.reduce((s, v) => s + v.total_pago,     0),
+  }), [vendas, totalRegistros]);
 
   function applyPreset(p: Preset, mes?: string) {
     let ini = inicio, fi = fim;
-    if (p === "today") { ini = hoje();         fi = hoje(); }
-    if (p === "7d")    { ini = menosNDias(7);  fi = hoje(); }
-    if (p === "30d")   { ini = menosNDias(30); fi = hoje(); }
+    if (p === "all") { ini = "1900-01-01"; fi = "2999-12-31"; }
+    if (p === "today") { ini = hojeLocal();         fi = hojeLocal(); }
+    if (p === "yesterday") { ini = ontem(); fi = ontem(); }
+    if (p === "7d")    { ini = menosNDiasLocal(7);  fi = hojeLocal(); }
+    if (p === "30d")   { ini = menosNDiasLocal(30); fi = hojeLocal(); }
     if (p === "mes") {
       const ref = mes ?? mesSel;
       const [y, m] = ref.split("-").map(Number);
       ini = `${y}-${String(m).padStart(2, "0")}-01`;
-      fi  = new Date(y, m, 0).toISOString().slice(0, 10);
+      fi  = ultimoDiaMesLocal(y, m);
     }
     setPreset(p); setInicio(ini); setFim(fi);
-    fetchVendas(ini, fi);
+    fetchVendas(ini, fi, 1);
   }
 
   return (
@@ -329,8 +357,16 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
         className="flex flex-wrap items-center gap-2 mb-4 p-3 rounded-xl border"
         style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}
       >
-        {(["today", "7d", "30d", "mes", "custom"] as Preset[]).map(p => {
-          const labels: Record<Preset, string> = { today: "Hoje", "7d": "7 dias", "30d": "30 dias", mes: "Mês", custom: "Período" };
+        {(["all", "today", "yesterday", "7d", "30d", "mes", "custom"] as Preset[]).map(p => {
+          const labels: Record<Preset, string> = {
+            all: "Sem filtro",
+            today: "Hoje",
+            yesterday: "Ontem",
+            "7d": "7 dias",
+            "30d": "30 dias",
+            mes: "Mês",
+            custom: "Período",
+          };
           return (
             <button
               key={p}
@@ -372,7 +408,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
               className="border rounded-lg px-2 py-1 text-xs outline-none"
               style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }} />
             <button
-              onClick={() => fetchVendas(inicio, fim)}
+               onClick={() => fetchVendas(inicio, fim, 1)}
               disabled={loading}
               className="px-3 py-1 rounded-lg text-xs font-medium disabled:opacity-50"
               style={{ backgroundColor: C.esmeralda, color: C.creme }}
@@ -381,7 +417,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
         )}
 
         <button
-          onClick={() => fetchVendas(inicio, fim)}
+          onClick={() => fetchVendas(inicio, fim, pagina)}
           disabled={loading}
           className="ml-auto p-1.5 rounded-lg hover:opacity-70 disabled:opacity-40 transition-opacity"
           style={{ border: `1px solid ${C.cremeBorder}`, color: "#9CA3AF" }}
@@ -435,11 +471,11 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
             className="rounded-lg px-3 py-2 text-sm outline-none border"
             style={{ borderColor: C.cremeBorder, backgroundColor: "#fff", color: "#374151" }}
             value={vendedorFiltro}
-            onChange={e => {
-              const v = e.target.value === "" ? "" : Number(e.target.value);
-              setVendedorFiltro(v);
-              fetchVendas(inicio, fim, v);
-            }}
+              onChange={e => {
+                const v = e.target.value === "" ? "" : Number(e.target.value);
+                setVendedorFiltro(v);
+                fetchVendas(inicio, fim, 1, v);
+              }}
           >
             <option value="">Todas as vendedoras</option>
             {vendedores.map(v => (
@@ -473,14 +509,14 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
               </tr>
             </thead>
             <tbody>
-              {loading && filtradas.length === 0 ? (
+              {loading && vendas.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-4 py-12 text-center text-sm" style={{ color: "#9CA3AF" }}>
                     <Loader2 size={16} className="animate-spin inline-block mr-2" />
                     Carregando...
                   </td>
                 </tr>
-              ) : filtradas.length === 0 ? (
+              ) : vendas.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-4 py-12 text-center" style={{ color: "#9CA3AF" }}>
                     <ShoppingBag size={32} className="mx-auto mb-2 opacity-30" />
@@ -497,7 +533,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
                   </td>
                 </tr>
               ) : (
-                visiveis.map((v, i) => {
+                vendas.map((v, i) => {
                   const sit = SITUACAO[v.situacao] ?? { label: v.situacao, bg: "#F3F4F6", color: "#6B7280" };
                   const saldo = v.total_venda - v.total_pago;
                   return (
@@ -572,27 +608,33 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
           </table>
         </div>
 
-        {filtradas.length > 0 && (
+        {vendas.length > 0 && (
           <div
             className="px-4 py-2.5 flex items-center justify-between gap-3"
             style={{ borderTop: `1px solid ${C.cremeBorder}`, backgroundColor: C.cremeBg }}
           >
             <span className="text-[11px]" style={{ color: "#9CA3AF" }}>
-              {filtradas.length} venda{filtradas.length !== 1 ? "s" : ""}
-              {" · "}pág. {paginaAtual} de {totalPaginas}
+              {totalRegistros} venda{totalRegistros !== 1 ? "s" : ""}
+              {" · "}pág. {pagina} de {totalPaginas}
             </span>
             <div className="flex items-center gap-1">
               <button
-                onClick={() => setPagina(p => Math.max(1, p - 1))}
-                disabled={paginaAtual === 1}
+                onClick={() => {
+                  const proxima = Math.max(1, pagina - 1);
+                  fetchVendas(inicio, fim, proxima);
+                }}
+                disabled={pagina === 1 || loading}
                 className="p-1.5 rounded-lg border transition-opacity disabled:opacity-30 hover:opacity-70"
                 style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
               >
                 <ChevronLeft size={14} />
               </button>
               <button
-                onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}
-                disabled={paginaAtual === totalPaginas}
+                onClick={() => {
+                  const proxima = Math.min(totalPaginas, pagina + 1);
+                  fetchVendas(inicio, fim, proxima);
+                }}
+                disabled={pagina === totalPaginas || loading}
                 className="p-1.5 rounded-lg border transition-opacity disabled:opacity-30 hover:opacity-70"
                 style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
               >
@@ -607,7 +649,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
         <EmitirNfceModal
           venda={vendaNfce}
           onClose={() => setVendaNfce(null)}
-          onSuccess={() => { fetchVendas(inicio, fim); }}
+          onSuccess={() => { fetchVendas(inicio, fim, pagina); }}
         />
       )}
 
@@ -615,11 +657,11 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
         <LegacySaleModal
           onClose={() => setShowLegacyModal(false)}
           onSuccess={(result) => {
-            setShowLegacyModal(false);
-            fetchVendas(inicio, fim);
-          }}
-        />
-      )}
+              setShowLegacyModal(false);
+              fetchVendas(inicio, fim, pagina);
+            }}
+          />
+        )}
     </div>
   );
 }
