@@ -582,6 +582,22 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
   const pcpConcluido = ordem.pcp_etapas_cod === "5";
   const quebraAlta = Number(ordem.pcp_quebra_pct) > 5;
 
+  /**
+   * REGRA DE NEGÓCIO: quando a ordem for concluída via botão de contingência,
+   * o timeline deve refletir visualmente o fechamento total do fluxo.
+   * O QUE: detecta marcador persistido em detalhes_ordem para ativar modo
+   * "concluída pelo sistema" no timeline.
+   * POR QUE: evitar interpretação de pendências remanescentes após baixa
+   * forçada autorizada pelo responsável.
+   * IMPACTO SE REMOVIDO: usuário verá etapas em amarelo/cinza mesmo com a
+   * ordem finalizada por contingência, gerando retrabalho e confusão.
+   */
+  const concluidaPeloSistema = String(ordem.detalhes_ordem ?? "").includes("[CONCLUÍDA PELO SISTEMA");
+  const matchConclusaoSistema = String(ordem.detalhes_ordem ?? "").match(/\[CONCLUÍDA PELO SISTEMA em ([^\]]+) por /);
+  const dataConclusaoSistema = matchConclusaoSistema?.[1]
+    ? new Date(matchConclusaoSistema[1]).toLocaleString("pt-BR")
+    : null;
+
   // Encontrar o passo atual (primeiro não-concluido)
   const passoAtualIdx = timeline.findIndex((ev) => ev.status !== "concluido");
 
@@ -1194,9 +1210,9 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
             <p className="text-sm font-semibold mb-4" style={{ color: "#1A1A1A" }}>Timeline</p>
             <div>
               {timeline.map((ev, i) => {
-                const isConcluido  = ev.status === "concluido";
-                const isAtual      = i === passoAtualIdx;
-                const isPendente   = ev.status === "pendente" && !isAtual;
+                const isConcluido  = concluidaPeloSistema || ev.status === "concluido";
+                const isAtual      = !concluidaPeloSistema && i === passoAtualIdx;
+                const isPendente   = !concluidaPeloSistema && ev.status === "pendente" && !isAtual;
 
                 const dotColor = isConcluido ? C.esmeralda : isAtual ? C.dourado : C.cremeBorder;
                 const labelColor = isConcluido ? "#1A1A1A" : isAtual ? C.dourado : "#C4B5A0";
@@ -1226,6 +1242,11 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                       </p>
                       {ev.detalhe && !isPendente && (
                         <p className="text-[11px] mt-0.5" style={{ color: "#9CA3AF" }}>{ev.detalhe}</p>
+                      )}
+                      {concluidaPeloSistema && (
+                        <p className="text-[11px] mt-0.5" style={{ color: "#059669" }}>
+                          Concluída pelo sistema{dataConclusaoSistema ? ` em ${dataConclusaoSistema}` : ""}
+                        </p>
                       )}
                       {ev.data_evento && (
                         <p className="font-mono text-[10px] mt-0.5" style={{ color: "#C4B5A0" }}>

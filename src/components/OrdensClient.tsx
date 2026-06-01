@@ -99,6 +99,7 @@ const FUNIL_CARDS: { key: CardKey; label: string; color: string }[] = [
 export default function OrdensClient({
   ordens,
   tiposPermitidos = [],
+  podeConcluirSistema = false,
   currentPage = 1,
   totalPages = 1,
   totalOrdens = 0,
@@ -107,6 +108,7 @@ export default function OrdensClient({
 }: {
   ordens: any[];
   tiposPermitidos?: string[];
+  podeConcluirSistema?: boolean;
   currentPage?: number;
   totalPages?: number;
   totalOrdens?: number;
@@ -115,6 +117,7 @@ export default function OrdensClient({
 }) {
   const router = useRouter();
   const [filtrosAbertos, setFiltrosAbertos] = useState(false);
+  const [concluindoSistemaId, setConcluindoSistemaId] = useState<number | null>(null);
 
   // Valores atuais dos filtros (vindos do server via props)
   const filtros: Filtros = filtrosInit ?? { busca: "", status: "", dataInicio: "", dataFim: "" };
@@ -203,6 +206,36 @@ export default function OrdensClient({
     concluido: 0, a_vencer: 0, vencidas: 0,
     vencidas_producao: 0, vencidas_processo: 0,
   };
+
+  /**
+   * REGRA DE NEGÓCIO: conclusão forçada é botão de contingência do dono.
+   *
+   * O QUE: chama endpoint dedicado para concluir a ordem em todas as etapas.
+   * POR QUE: destravar ordens presas quando o fluxo operacional não foi
+   * finalizado pelas equipes.
+   * IMPACTO SE REMOVIDO: o gargalo permanece e as ordens continuam entulhando
+   * o rastreio/funil.
+   */
+  async function concluirViaSistema(ordemId: number) {
+    const ok = window.confirm(
+      "Concluir esta ordem via sistema em TODAS as etapas? Esta ação é de contingência e deve ser usada apenas para destravar fluxo.",
+    );
+    if (!ok) return;
+
+    setConcluindoSistemaId(ordemId);
+    try {
+      const res = await fetch(`/api/ordens/${ordemId}/concluir-sistema`, { method: "PATCH" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
+      await fetchFunil();
+      router.refresh();
+    } catch (err: unknown) {
+      const mensagem = err instanceof Error ? err.message : "Erro ao concluir via sistema";
+      window.alert(mensagem);
+    } finally {
+      setConcluindoSistemaId(null);
+    }
+  }
 
   return (
     <div className="px-3 md:px-6 py-4 md:py-8 max-w-7xl mx-auto">
@@ -523,6 +556,22 @@ export default function OrdensClient({
               { label: "Entrega", valor: o.data_entrega ? formatDateBR(o.data_entrega) : "—" },
               { label: "Vendedor",valor: o.vendedor_nome ?? "—" },
               { label: "Pedido",  valor: o.numero_pedido ? `#${o.numero_pedido}` : "—" },
+              ...(podeConcluirSistema && o.status !== "Concluído" && o.status !== "Concluido" ? [{
+                label: "Ação",
+                valor: (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void concluirViaSistema(Number(o.id));
+                    }}
+                    disabled={concluindoSistemaId === Number(o.id)}
+                    className="px-2 py-1 rounded-md text-[11px] font-semibold disabled:opacity-60"
+                    style={{ backgroundColor: "#7F1D1D14", color: "#991B1B" }}
+                  >
+                    {concluindoSistemaId === Number(o.id) ? "Concluindo..." : "Concluir via Sistema"}
+                  </button>
+                ),
+              }] : []),
             ]}
             onClick={() => router.push(`/ordens/${o.id}`)}
           />
@@ -540,7 +589,7 @@ export default function OrdensClient({
           <table className="w-full">
             <thead>
               <tr style={{ backgroundColor: "#184036" }}>
-                {["ID", "Pedido PDV", "Nº Ordem", "Status", "Tipo", "Vendedor", "Cliente", "Setor", "Entrega", "Criado"].map((h) => (
+                {["ID", "Pedido PDV", "Nº Ordem", "Status", "Tipo", "Vendedor", "Cliente", "Setor", "Entrega", "Criado", "Ações"].map((h) => (
                   <th key={h} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap"
                     style={{ color: "#80A795" }}>{h}</th>
                 ))}
@@ -592,11 +641,32 @@ export default function OrdensClient({
                   <td className="px-4 py-2.5 text-xs font-mono" style={{ color: "#6B7280" }}>
                     {o.date_created ? new Date(o.date_created).toLocaleDateString("pt-BR") : "—"}
                   </td>
+                  <td className="px-4 py-2.5 text-right">
+                    {podeConcluirSistema && o.status !== "Concluído" && o.status !== "Concluido" ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void concluirViaSistema(Number(o.id));
+                        }}
+                        disabled={concluindoSistemaId === Number(o.id)}
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold disabled:opacity-60"
+                        style={{ backgroundColor: "#7F1D1D14", color: "#991B1B" }}
+                      >
+                        {concluindoSistemaId === Number(o.id) ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Loader2 size={12} className="animate-spin" /> Concluindo...
+                          </span>
+                        ) : "Concluir via Sistema"}
+                      </button>
+                    ) : (
+                      <span style={{ color: "#D1D5DB" }}>—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
               {ordens.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-12 text-center text-sm" style={{ color: "#6B7280" }}>
+                  <td colSpan={11} className="px-4 py-12 text-center text-sm" style={{ color: "#6B7280" }}>
                     Nenhuma ordem encontrada
                   </td>
                 </tr>

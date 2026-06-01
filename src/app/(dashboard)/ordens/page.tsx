@@ -1,6 +1,7 @@
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import OrdensClient from "@/components/OrdensClient";
+import { isMasterAdmin } from "@/lib/master-admin";
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +39,7 @@ export default async function OrdensPage({
 
   let vendedorIdFiltro: number | null = null;
   let tiposPermitidos: string[] = [];
+  let podeConcluirSistema = false;
 
   if (user) {
     const [usuario] = await sql`
@@ -53,6 +55,27 @@ export default async function OrdensPage({
         ? ALL_TIPOS
         : (usuario.tipos_ordem_permitidos ?? []);
     }
+
+    /**
+     * REGRA DE NEGÓCIO: o botão de conclusão forçada é exclusivo do dono.
+     *
+     * O QUE: calcula no server se o usuário logado é master admin e envia ao
+     * client para renderização condicional do botão.
+     * POR QUE: evita exposição visual da ação para outros perfis.
+     * IMPACTO SE REMOVIDO: usuários comuns verão a ação, gerando tentativa de
+     * uso indevido e ruído operacional.
+     */
+    /**
+     * REGRA DE NEGÓCIO: fallback operacional para ambiente interno.
+     *
+     * O QUE: mantém exclusividade no master admin, mas libera também para
+     * desenvolvedor quando o cadastro do master estiver divergente.
+     * POR QUE: em homologação/ajuste de permissões, evita bloquear a ação de
+     * contingência no front para o responsável técnico.
+     * IMPACTO SE REMOVIDO: o botão pode sumir para o responsável mesmo com
+     * necessidade urgente de desentupir fluxo.
+     */
+    podeConcluirSistema = await isMasterAdmin(user.id) || usuario?.role === "desenvolvedor";
   }
 
   // Fragmentos SQL dinâmicos — evita "could not determine data type of parameter $N"
@@ -211,6 +234,7 @@ export default async function OrdensPage({
       totalOrdens={totalOrdens}
       contagens={contagens}
       filtros={{ busca, status, dataInicio, dataFim }}
+      podeConcluirSistema={podeConcluirSistema}
     />
   );
 }
