@@ -105,7 +105,7 @@ export function NotificacoesDrawer({
               className="w-full flex items-center gap-2 font-medium transition-colors hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <BellRing size={14} />
-              {carregandoPush ? "Ativando notificações..." : "Ativar notificações no celular"}
+              {carregandoPush ? "Ativando notificações push..." : "Ativar notificações push"}
             </button>
             {!suportado && (
               <p className="mt-1.5 leading-snug" style={{ color: "#854d0e" }}>
@@ -120,7 +120,7 @@ export function NotificacoesDrawer({
 
         {inscrito && (
           <div className="border-b px-4 py-2 text-xs font-medium" style={{ backgroundColor: "#ecfdf5", borderColor: "#bbf7d0", color: "#047857" }}>
-            Notificações do celular ativadas.
+            Notificações push ativadas.
           </div>
         )}
 
