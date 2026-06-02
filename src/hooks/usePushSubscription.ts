@@ -1,14 +1,55 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
+import { create } from "zustand";
 
 type PushPermission = NotificationPermission | "unsupported";
 
+interface PushState {
+  inscrito: boolean;
+  suportado: boolean;
+  carregando: boolean;
+  erro: string | null;
+  permissao: PushPermission;
+  setInscrito: (v: boolean) => void;
+  setSuportado: (v: boolean) => void;
+  setCarregando: (v: boolean) => void;
+  setErro: (v: string | null) => void;
+  setPermissao: (v: PushPermission) => void;
+}
+
+/**
+ * REGRA DE NEGOCIO: o estado de push deve ser compartilhado entre todos os
+ * componentes que usam usePushSubscription, para que o drawer e o registro
+ * automatico do ServiceWorker enxerguem a mesma ativacao.
+ * POR QUE: cada chamada de hook criava um estado isolado, entao o drawer
+ * pedia para ativar de novo mesmo apos o SW ja ter registrado.
+ * IMPACTO: se voltar a usar useState local em vez do store, o botao de
+ * ativacao volta a aparecer a cada recarga mesmo com permissao concedida.
+ */
+const usePushStore = create<PushState>((set) => ({
+  inscrito: false,
+  suportado: false,
+  carregando: false,
+  erro: null,
+  permissao: "default",
+  setInscrito: (v) => set({ inscrito: v }),
+  setSuportado: (v) => set({ suportado: v }),
+  setCarregando: (v) => set({ carregando: v }),
+  setErro: (v) => set({ erro: v }),
+  setPermissao: (v) => set({ permissao: v }),
+}));
+
 export function usePushSubscription() {
-  const [inscrito, setInscrito] = useState(false);
-  const [suportado, setSuportado] = useState(false);
-  const [carregando, setCarregando] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
-  const [permissao, setPermissao] = useState<PushPermission>("default");
+  const inscrito = usePushStore((s) => s.inscrito);
+  const suportado = usePushStore((s) => s.suportado);
+  const carregando = usePushStore((s) => s.carregando);
+  const erro = usePushStore((s) => s.erro);
+  const permissao = usePushStore((s) => s.permissao);
+  const setInscrito = usePushStore((s) => s.setInscrito);
+  const setSuportado = usePushStore((s) => s.setSuportado);
+  const setCarregando = usePushStore((s) => s.setCarregando);
+  const setErro = usePushStore((s) => s.setErro);
+  const setPermissao = usePushStore((s) => s.setPermissao);
 
   const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
@@ -30,7 +71,7 @@ export function usePushSubscription() {
     if (browserSuporta && !vapidPublicKey) {
       setErro("Chave publica de notificacao nao configurada.");
     }
-  }, [vapidPublicKey]);
+  }, [vapidPublicKey, setSuportado, setPermissao, setErro]);
 
   const registrarNoServidor = useCallback(async (sub: PushSubscription) => {
     const res = await fetch("/api/push/subscribe", {
@@ -80,7 +121,7 @@ export function usePushSubscription() {
     } finally {
       setCarregando(false);
     }
-  }, [registrarNoServidor, suportado, vapidPublicKey]);
+  }, [registrarNoServidor, suportado, vapidPublicKey, setCarregando, setErro, setInscrito, setPermissao]);
 
   return { inscrito, suportado, carregando, erro, permissao, inscrever };
 }
