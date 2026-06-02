@@ -122,7 +122,7 @@ export default function ConversaoSkuDetalheClient({ ordem, conversao, tarefa, us
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 16px" }}>
       <div style={{ marginBottom: 24 }}>
-        <a href="/dashboard/estoque-comercial" style={{ color: C.esmeralda, fontSize: 13, textDecoration: "none" }}>
+        <a href="/estoque-comercial" style={{ color: C.esmeralda, fontSize: 13, textDecoration: "none" }}>
           ← Conversões
         </a>
       </div>

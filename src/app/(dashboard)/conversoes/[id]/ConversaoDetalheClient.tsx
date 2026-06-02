@@ -2,7 +2,7 @@
 
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CheckCircle, XCircle, Clock, AlertCircle, ArrowRight, Package, Camera, RotateCcw } from "lucide-react";
+import { CheckCircle, XCircle, Clock, AlertCircle } from "lucide-react";
 
 const C = {
   esmeralda: "#184036",
@@ -13,38 +13,42 @@ const C = {
   dourado: "#DB9864",
 };
 
+// Conversão 2.0: fluxo simplificado (pendente → concluído direto na aprovação)
+// 'aprovado' e 'em_rota' não são mais estados intermediários — a aprovação já conclui tudo
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: any }> = {
   pendente:  { label: "Pendente",  color: "#92400E", bg: "#FEF3C7", icon: Clock },
-  aprovado:  { label: "Aprovado",  color: "#065F46", bg: "#D1FAE5", icon: CheckCircle },
   recusado:  { label: "Recusado",  color: "#991B1B", bg: "#FEE2E2", icon: XCircle },
-  em_rota:   { label: "Em Rota",   color: "#1E40AF", bg: "#DBEAFE", icon: ArrowRight },
-  concluido: { label: "Concluído", color: "#065F46", bg: "#D1FAE5", icon: CheckCircle },
+  concluido: { label: "Baixado",   color: "#065F46", bg: "#D1FAE5", icon: CheckCircle },
 };
 
 function Badge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status] ?? { label: status, color: "#6B7280", bg: "#F3F4F6" };
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, color: cfg.color, backgroundColor: cfg.bg }}>
-      {status}
+      {cfg.label}
     </span>
   );
 }
 
 function Timeline({ status }: { status: string }) {
+  // Conversão 2.0: fluxo em 3 etapas — Reservado → Aprovado → Baixado
+  // Quando status_conversao = 'concluido', os 3 passos aparecem marcados
   const allSteps = [
-    { key: "pendente", label: "Reservado", desc: "Produtos reservados" },
-    { key: "aprovado", label: "Aprovado", desc: "Aprovado por Alisson" },
-    { key: "em_rota", label: "Em Rota", desc: "Saiu para fábrica" },
-    { key: "concluido", label: "Concluído", desc: "Convertido em metal" },
+    { key: "pendente",  label: "Reservado", desc: "Produtos reservados" },
+    { key: "aprovado",  label: "Aprovado",  desc: "Aprovado por Alisson" },
+    { key: "concluido", label: "Baixado",   desc: "Entrou no Caixa de Ouro" },
   ];
 
   const steps = status === "recusado"
-    ? allSteps.filter(s => s.key === "pendente" || s.key === "recusado" || s.key === "aprovado")
+    ? [{ key: "pendente", label: "Reservado", desc: "Produtos reservados" },
+       { key: "recusado", label: "Recusado",  desc: "Recusado por Alisson" }]
     : allSteps;
 
-  const currentIdx = status === "recusado"
-    ? 0
-    : steps.findIndex(s => s.key === status) + (status === "recusado" ? -1 : 0);
+  // pendente → idx 0 (só Reservado), concluido → idx 2 (todos), recusado → idx 0 (só Reservado)
+  const currentIdx = status === "pendente" ? 0
+    : status === "concluido" ? 2
+    : status === "recusado" ? 0
+    : steps.findIndex(s => s.key === status);
 
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 16 }}>
@@ -83,8 +87,8 @@ export default function ConversaoDetalheClient({ ordem, conversao, itens, tarefa
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 16px" }}>
       <div style={{ marginBottom: 24 }}>
-        <a href="/dashboard/estoque-comercial" style={{ color: C.esmeralda, fontSize: 13, textDecoration: "none" }}>
-          ← Estoque Comercial
+        <a href="/conversoes" style={{ color: C.esmeralda, fontSize: 13, textDecoration: "none" }}>
+          ← Conversões
         </a>
       </div>
 
@@ -104,18 +108,25 @@ export default function ConversaoDetalheClient({ ordem, conversao, itens, tarefa
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
         <Card title="Detalhes da Conversão">
-          <Row label="Peso Total" value={`${conversao.peso_total}g`} />
+          <Row label="Peso Total" value={`${Number(conversao.peso_total).toFixed(2)}g`} />
           <Row label="Quantidade Total" value={`${conversao.quantidade_total} itens`} />
-          <Row label="Insumo Destino" value={`ID: ${conversao.insumo_destino}`} />
           <Row label="Status" value={STATUS_CONFIG[conversao.status_conversao]?.label ?? conversao.status_conversao} />
+          {/* REGRA: sempre exibe quem abriu (criador) com data/hora completa */}
+          {conversao.criado_por_nome && (
+            <Row label="Aberto por" value={`${conversao.criado_por_nome} em ${format(new Date(conversao.created_at), "dd/MM/yyyy 'às' HH:mm")}`} />
+          )}
           {conversao.aprovado_por && (
-            <Row label="Aprovado por" value={`${conversao.aprovado_por_nome} em ${format(new Date(conversao.aprovado_em), "dd/MM HH:mm")}`} />
+            <Row label="Aprovado por" value={`${conversao.aprovado_por_nome} em ${format(new Date(conversao.aprovado_em), "dd/MM/yyyy 'às' HH:mm")}`} />
           )}
           {conversao.recusado_por && (
-            <Row label="Recusado por" value={`${conversao.recusado_por_nome} em ${format(new Date(conversao.recusado_em), "dd/MM HH:mm")}`} />
+            <Row label="Recusado por" value={`${conversao.recusado_por_nome} em ${format(new Date(conversao.recusado_em), "dd/MM/yyyy 'às' HH:mm")}`} />
           )}
           {conversao.motivo_recusa && (
             <Row label="Motivo" value={conversao.motivo_recusa} />
+          )}
+          {/* Conversão 2.0: exibe quando entrou no Caixa de Ouro */}
+          {conversao.cofre_registrado && (
+            <Row label="Caixa de Ouro" value={"Registrado no cofre"} />
           )}
         </Card>
 

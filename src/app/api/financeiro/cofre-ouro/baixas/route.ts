@@ -13,7 +13,7 @@ const CofreBaixaPostSchema = z.object({
   transportador_nome: z.string().optional(),
   obs: z.string().optional(),
   itens: z.array(z.object({
-    origem_tipo: z.enum(["venda_ouro", "compra_metal", "recebimento_metal"]),
+    origem_tipo: z.enum(["venda_ouro", "compra_metal", "recebimento_metal", "conversao"]),
     origem_id: z.coerce.number().int().positive(),
     referencia: z.string().min(1),
     pessoa_nome: z.string().optional(),

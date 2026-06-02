@@ -1846,8 +1846,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   }
   interface BaixaOuroItem {
     id: number;
-    baixa_id: number | null;
-    origem_tipo: "venda_ouro" | "compra_metal" | "recebimento_metal";
+    origem_tipo: "venda_ouro" | "compra_metal" | "recebimento_metal" | "conversao";
     origem_id: number;
     referencia: string;
     pessoa_nome: string | null;
@@ -1866,6 +1865,17 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
     observacao: string | null;
     created_at: string;
   }
+  /** Conversão que entrou no Caixa de Ouro (v2.0) — aparece nos pendentes de baixa */
+  interface ConversaoCofreResumo {
+    id: number;
+    ordem_id: number;
+    numero_ordem: string;
+    peso_total: number;
+    created_at: string;
+    aprovado_em: string | null;
+    criado_por_nome: string | null;
+    aprovado_por_nome: string | null;
+  }
   const [baixasOuro, setBaixasOuro] = useState<BaixaOuro[]>([]);
   const [saldoOuroDisp, setSaldoOuroDisp] = useState<number>(0);
   const [loadingOuro, setLoadingOuro] = useState(false);
@@ -1880,6 +1890,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   const [ouroSelecionadosIds, setOuroSelecionadosIds] = useState<string[]>([]);
   const [itensBaixadosAtivos, setItensBaixadosAtivos] = useState<BaixaOuroItem[]>([]);
   const [comprasMetal, setComprasMetal] = useState<CompraMetalResumo[]>([]);
+  const [conversoesData, setConversoesData] = useState<ConversaoCofreResumo[]>([]);
 
   /**
    * REGRA DE NEGÓCIO: destino da baixa de ouro precisa aparecer no histórico
@@ -1965,8 +1976,9 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
       fetch("/api/financeiro/cofre-ouro/baixas").then(r => r.ok ? r.json() : null),
       fetch("/api/metal/compras?status=confirmado&limit=200").then(r => r.ok ? r.json() : null),
       fetch("/api/financeiro/cofre-ouro/baixas-itens").then(r => r.ok ? r.json() : []),
+      fetch("/api/financeiro/cofre-ouro/conversoes").then(r => r.ok ? r.json() : []),
     ])
-      .then(([disp, bx, comprasResp, itensAtivos]) => {
+      .then(([disp, bx, comprasResp, itensAtivos, convResp]) => {
         if (disp) setSaldoOuroDisp(Number(disp.disponivel_gramas ?? 0));
         if (Array.isArray(bx)) setBaixasOuro(bx);
         if (comprasResp && Array.isArray(comprasResp.data)) {
@@ -1974,6 +1986,9 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
         }
         if (Array.isArray(itensAtivos)) {
           setItensBaixadosAtivos(itensAtivos as BaixaOuroItem[]);
+        }
+        if (Array.isArray(convResp)) {
+          setConversoesData(convResp as ConversaoCofreResumo[]);
         }
       })
       .catch(() => useErrorStore.getState().push("Erro ao carregar baixas de ouro", { level: "warning" }))
@@ -2017,8 +2032,10 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   const byFormaPeriodo = (f: string) => byForma(f).filter(r => inPeriod(r.data_confirmacao));
 
   const ouroPeriodo = byFormaPeriodo("Ouro");
-  const ouroGramsPeriodo = ouroPeriodo.reduce((s, r) => s + Number(r.ouro_gramas ?? 0), 0);
-  const ouroTotalG = caixaList.filter(r => r.forma === "Ouro").reduce((s, r) => s + Number(r.ouro_gramas ?? 0), 0);
+  const ouroGramsPeriodo = ouroPeriodo.reduce((s, r) => s + Number(r.ouro_gramas ?? 0), 0)
+    + conversoesData.filter(cv => inPeriod(cv.aprovado_em ?? cv.created_at)).reduce((s, cv) => s + Number(cv.peso_total ?? 0), 0);
+  const ouroTotalG = caixaList.filter(r => r.forma === "Ouro").reduce((s, r) => s + Number(r.ouro_gramas ?? 0), 0)
+    + conversoesData.reduce((s, cv) => s + Number(cv.peso_total ?? 0), 0);
 
   // Métricas Dinheiro (para a view específica)
   const entradasDinheiroAntes = sumList(byForma("Dinheiro").filter(r => !!r.data_confirmacao && r.data_confirmacao.slice(0, 10) < cIni));
@@ -2033,8 +2050,8 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
 
   type OuroMov = {
     id: string;
-    origem: "Venda" | "Compra Metal";
-    origem_tipo: "venda_ouro" | "compra_metal";
+    origem: "Venda" | "Compra Metal" | "Conversão";
+    origem_tipo: "venda_ouro" | "compra_metal" | "conversao";
     origem_id: number;
     referencia: string;
     pessoa: string;
@@ -2069,6 +2086,20 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
       ouro_gramas: Number(c.peso_gramas ?? 0),
       valor: Number(c.valor_total ?? 0),
     })),
+    // Conversão 2.0: joias aprovadas que entraram no Caixa de Ouro
+    ...conversoesData
+      .filter((cv) => inPeriod(cv.aprovado_em ?? cv.created_at))
+      .map((cv) => ({
+        id: `conversao-${cv.id}`,
+        origem: "Conversão" as const,
+        origem_tipo: "conversao" as const,
+        origem_id: cv.id,
+        referencia: cv.numero_ordem,
+        pessoa: cv.aprovado_por_nome ?? cv.criado_por_nome ?? "—",
+        data: cv.aprovado_em ?? cv.created_at,
+        ouro_gramas: Number(cv.peso_total ?? 0),
+        valor: 0, // Conversão não tem valor financeiro, só peso em ouro
+      })),
   ].sort((a, b) => {
     const at = a.data ? new Date(a.data).getTime() : 0;
     const bt = b.data ? new Date(b.data).getTime() : 0;
@@ -2676,8 +2707,12 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                     <td className="px-4 py-3">
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium"
                         style={{
-                          backgroundColor: r.origem === "Compra Metal" ? "#FEF3C7" : C.esmeraldaLt,
-                          color: r.origem === "Compra Metal" ? "#92400E" : C.esmeralda,
+                          backgroundColor: r.origem === "Compra Metal" ? "#FEF3C7"
+                            : r.origem === "Conversão" ? "#E0F2FE"
+                            : C.esmeraldaLt,
+                          color: r.origem === "Compra Metal" ? "#92400E"
+                            : r.origem === "Conversão" ? "#0369A1"
+                            : C.esmeralda,
                         }}>
                         {r.origem}
                       </span>
@@ -2812,7 +2847,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                         {!loadingItens && itens.map((it) => (
                           <tr key={it.id} className="border-t" style={{ borderColor: C.cremeBorder }}>
                             <td className="px-4 py-2.5 text-xs" style={{ color: "#374151" }}>
-                              {it.origem_tipo === "venda_ouro" ? "Venda" : it.origem_tipo === "compra_metal" ? "Compra Metal" : "Recebimento Metal"}
+                              {it.origem_tipo === "venda_ouro" ? "Venda" : it.origem_tipo === "compra_metal" ? "Compra Metal" : it.origem_tipo === "conversao" ? "Conversão" : "Recebimento Metal"}
                             </td>
                             <td className="px-4 py-2.5 text-xs" style={{ color: C.esmeralda }}>{it.referencia}</td>
                             <td className="px-4 py-2.5 text-xs" style={{ color: C.cinza }}>{it.pessoa_nome || "—"}</td>
