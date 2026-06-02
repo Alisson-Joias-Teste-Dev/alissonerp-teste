@@ -5,6 +5,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 const TarefaPatchSchema = z.object({
   titulo: z.string().optional(),
@@ -140,17 +141,14 @@ export async function PATCH(
   `;
 
   if (novoResponsavel && novoResponsavel !== user.id && novoResponsavel !== responsavelAnterior) {
-    await sql`
-      INSERT INTO alissonerp.notificacoes
-        (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-      VALUES (
-        ${novoResponsavel}::uuid, 'tarefa',
-        ${'Tarefa delegada: ' + tarefaPatch.titulo},
-        ${body.motivo_delegacao ?? 'Tarefa delegada para você'},
-        ${user.id}::uuid,
-        ${`/tarefas?abrir=${tarefaId}`}
-      )
-    `.catch(() => {});
+    await criarNotificacao({
+      usuarioId: novoResponsavel,
+      tipo: "tarefa",
+      titulo: "Tarefa delegada: " + tarefaPatch.titulo,
+      mensagem: body.motivo_delegacao ?? "Tarefa delegada para você",
+      remetenteId: user.id,
+      link: `/tarefas?abrir=${tarefaId}`,
+    }).catch(() => {});
   }
 
   return NextResponse.json({ ok: true });

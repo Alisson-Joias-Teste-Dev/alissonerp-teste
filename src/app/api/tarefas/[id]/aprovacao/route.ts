@@ -23,6 +23,7 @@ import { processarDecisao } from "@/lib/aprovacao-regras";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 const AprovacaoTarefaPostSchema = z.object({
   aprovador_id: z.string().min(1, "obrigatório"),
@@ -263,12 +264,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     VALUES (${Number(id)}, ${user.id}::uuid, 'aguardando_aprovacao', now())
   `.catch(() => {});
 
-  await sql`
-    INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id)
-    VALUES (${body.aprovador_id}::uuid, 'aprovacao', 'Aprovação solicitada',
-      (SELECT titulo FROM alissonerp.tarefas WHERE id = ${Number(id)}),
-      ${user.id}::uuid)
-  `.catch(() => {});
+  const [tarefaTitulo] = await sql`
+    SELECT titulo FROM alissonerp.tarefas WHERE id = ${Number(id)}
+  `;
+  await criarNotificacao({
+    usuarioId: body.aprovador_id,
+    tipo: "aprovacao",
+    titulo: "Aprovação solicitada",
+    mensagem: tarefaTitulo?.titulo ?? "Tarefa aguardando aprovação",
+    remetenteId: user.id,
+    link: `/tarefas?abrir=${Number(id)}`,
+  }).catch(() => {});
 
   return NextResponse.json({ id: aprovacao.id }, { status: 201 });
 }
@@ -382,13 +388,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
       const [aprov] = await sql`SELECT solicitante_id FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${Number(id)} LIMIT 1`;
       if (aprov?.solicitante_id) {
-        await sql`
-          INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id)
-          VALUES (${String(aprov.solicitante_id)}::uuid, 'aprovacao',
-            ${body.decisao === "aprovado" ? "Cartão de crédito liberado!" : "Cartão de crédito não aprovado"},
-            ${body.motivo ?? (body.decisao === "aprovado" ? "O cartão de crédito foi liberado para esta venda." : "O uso do cartão de crédito foi recusado para esta venda.")},
-            ${user.id}::uuid)
-        `.catch(() => {});
+        await criarNotificacao({
+          usuarioId: String(aprov.solicitante_id),
+          tipo: "aprovacao",
+          titulo: body.decisao === "aprovado" ? "Cartão de crédito liberado!" : "Cartão de crédito não aprovado",
+          mensagem: body.motivo ?? (body.decisao === "aprovado" ? "O cartão de crédito foi liberado para esta venda." : "O uso do cartão de crédito foi recusado para esta venda."),
+          remetenteId: user.id,
+          link: tarefaInfo.venda_id ? `/vendas/${tarefaInfo.venda_id}` : `/tarefas?abrir=${Number(id)}`,
+          vendaId: tarefaInfo.venda_id ? Number(tarefaInfo.venda_id) : null,
+        }).catch(() => {});
       }
       console.log(`[cartao_desconto] CONCLUÍDO ok`, logCtx);
       return NextResponse.json({ ok: true, cartao_desconto: { decisao: body.decisao } });
@@ -431,13 +439,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
       const [aprov] = await sql`SELECT solicitante_id FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${Number(id)} LIMIT 1`;
       if (aprov?.solicitante_id) {
-        await sql`
-          INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id)
-          VALUES (${String(aprov.solicitante_id)}::uuid, 'aprovacao',
-            ${body.decisao === "aprovado" ? "Desconto liberado!" : "Desconto não aprovado"},
-            ${body.motivo ?? (body.decisao === "aprovado" ? "O desconto foi liberado. Finalize o pagamento para concluir a venda." : "O desconto solicitado foi recusado pelo administrador.")},
-            ${user.id}::uuid)
-        `.catch(() => {});
+        await criarNotificacao({
+          usuarioId: String(aprov.solicitante_id),
+          tipo: "aprovacao",
+          titulo: body.decisao === "aprovado" ? "Desconto liberado!" : "Desconto não aprovado",
+          mensagem: body.motivo ?? (body.decisao === "aprovado" ? "O desconto foi liberado. Finalize o pagamento para concluir a venda." : "O desconto solicitado foi recusado pelo administrador."),
+          remetenteId: user.id,
+          link: `/vendas/${tarefaInfo.venda_id}`,
+          vendaId: Number(tarefaInfo.venda_id),
+        }).catch(() => {});
       }
       console.log(`[desconto] CONCLUÍDO ok`, logCtx);
       await sql`
@@ -511,13 +521,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  await sql`
-    INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id)
-    VALUES (${String(aprovacao.solicitante_id)}::uuid, 'aprovacao',
-      ${body.decisao === "aprovado" ? "Tarefa aprovada!" : "Tarefa rejeitada"},
-      ${body.motivo ?? (body.decisao === "aprovado" ? "Aprovada com sucesso" : "Rejeitada pelo aprovador")},
-      ${user.id}::uuid)
-  `.catch(() => {});
+  await criarNotificacao({
+    usuarioId: String(aprovacao.solicitante_id),
+    tipo: "aprovacao",
+    titulo: body.decisao === "aprovado" ? "Tarefa aprovada!" : "Tarefa rejeitada",
+    mensagem: body.motivo ?? (body.decisao === "aprovado" ? "Aprovada com sucesso" : "Rejeitada pelo aprovador"),
+    remetenteId: user.id,
+    link: `/tarefas?abrir=${Number(id)}`,
+  }).catch(() => {});
 
   return NextResponse.json({ ok: true });
 }

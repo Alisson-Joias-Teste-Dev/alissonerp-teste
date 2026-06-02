@@ -67,9 +67,16 @@ export function NotificacoesDrawer({
   onRecarregar,
 }: Props) {
   const [tarefaAprovId, setTarefaAprovId] = useState<number | null>(null);
-  const { suportado, inscrito, inscrever } = usePushSubscription();
-  const mostrarBannerPush = suportado && !inscrito &&
-    typeof Notification !== "undefined" && Notification.permission !== "denied";
+  const { suportado, inscrito, carregando: carregandoPush, erro, permissao, inscrever } = usePushSubscription();
+  /**
+   * REGRA DE NEGOCIO: o usuario precisa saber se o celular foi realmente
+   * inscrito para receber alertas de aprovacao, mencao e tarefas fora do ERP.
+   * POR QUE: o banco estava sem assinaturas push e o botao antigo nao mostrava
+   * falhas de permissao, chave VAPID ou API.
+   * IMPACTO: se este feedback for removido, o problema volta a parecer apenas
+   * "notificacao nao funciona" sem indicar onde a ativacao quebrou.
+   */
+  const mostrarBannerPush = !inscrito && permissao !== "denied";
 
   if (!aberto) return null;
 
@@ -91,14 +98,36 @@ export function NotificacoesDrawer({
         </div>
 
         {mostrarBannerPush && (
-          <button
-            onClick={inscrever}
-            className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b transition-colors hover:opacity-80"
-            style={{ backgroundColor: "#f0fdf4", borderColor: "#bbf7d0", color: "#15803d" }}
-          >
-            <BellRing size={14} />
-            Ativar notificações no celular
-          </button>
+          <div className="border-b px-4 py-2.5 text-xs" style={{ backgroundColor: "#f0fdf4", borderColor: "#bbf7d0", color: "#15803d" }}>
+            <button
+              onClick={inscrever}
+              disabled={!suportado || carregandoPush}
+              className="w-full flex items-center gap-2 font-medium transition-colors hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <BellRing size={14} />
+              {carregandoPush ? "Ativando notificações..." : "Ativar notificações no celular"}
+            </button>
+            {!suportado && (
+              <p className="mt-1.5 leading-snug" style={{ color: "#854d0e" }}>
+                Este celular ou navegador nao esta pronto para Web Push. No iPhone, instale o ERP na tela inicial e abra pelo icone instalado.
+              </p>
+            )}
+            {erro && (
+              <p className="mt-1.5 leading-snug" style={{ color: "#b91c1c" }}>{erro}</p>
+            )}
+          </div>
+        )}
+
+        {inscrito && (
+          <div className="border-b px-4 py-2 text-xs font-medium" style={{ backgroundColor: "#ecfdf5", borderColor: "#bbf7d0", color: "#047857" }}>
+            Notificações do celular ativadas.
+          </div>
+        )}
+
+        {permissao === "denied" && (
+          <div className="border-b px-4 py-2 text-xs leading-snug" style={{ backgroundColor: "#fef2f2", borderColor: "#fecaca", color: "#b91c1c" }}>
+            Permissao de notificacao negada no navegador. Libere nas configuracoes do celular para ativar.
+          </div>
         )}
 
         {notificacoes.some((n) => !n.lida) && (

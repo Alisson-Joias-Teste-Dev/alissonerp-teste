@@ -1,5 +1,6 @@
 import sql from "@/lib/db";
 import { getMasterAdminId } from "@/lib/master-admin";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 export interface RegraAprovacao {
   id: number;
@@ -188,15 +189,14 @@ async function criarTarefaAprovacao(
     VALUES (${tarefa.id}, ${solicitanteId}::uuid, ${aprovadorId}::uuid, 'pendente')
   `;
 
-  await sql`
-    INSERT INTO alissonerp.notificacoes
-      (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-    VALUES (
-      ${aprovadorId}::uuid, 'aprovacao', ${titulo},
-      ${descricao}, ${solicitanteId}::uuid,
-      ${`/tarefas?abrir=${tarefa.id}`}
-    )
-  `.catch(() => {});
+  await criarNotificacao({
+    usuarioId: aprovadorId,
+    tipo: "aprovacao",
+    titulo,
+    mensagem: descricao,
+    remetenteId: solicitanteId,
+    link: `/tarefas?abrir=${tarefa.id}`,
+  }).catch(() => {});
 
   return tarefa.id;
 }

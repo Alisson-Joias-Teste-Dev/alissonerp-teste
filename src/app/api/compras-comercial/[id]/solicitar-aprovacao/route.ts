@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 type Params = Promise<{ id: string }>;
 
@@ -126,17 +127,14 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
     WHERE id = ${compraId}
   `;
 
-  await sql`
-    INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-    VALUES (
-      ${aprovadorId}::uuid,
-      'aprovacao',
-      ${`Aprovação solicitada - Compra Comercial #${compraId}`},
-      ${`Existe uma compra comercial aguardando sua aprovação.`},
-      ${user.id}::uuid,
-      ${`/tarefas?abrir=${tarefa.id}`}
-    )
-  `.catch(() => {});
+  await criarNotificacao({
+    usuarioId: aprovadorId,
+    tipo: "aprovacao",
+    titulo: `Aprovação solicitada - Compra Comercial #${compraId}`,
+    mensagem: "Existe uma compra comercial aguardando sua aprovação.",
+    remetenteId: user.id,
+    link: `/tarefas?abrir=${tarefa.id}`,
+  }).catch(() => {});
 
   return NextResponse.json({ ok: true, tarefa_id: tarefa.id, aprovador_id: aprovadorId });
 }

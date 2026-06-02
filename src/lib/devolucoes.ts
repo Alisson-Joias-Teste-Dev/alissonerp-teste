@@ -17,6 +17,7 @@
 import sql from "@/lib/db";
 import { gerarValeTroca } from "@/lib/vale-troca";
 import { estornarMP, criarContaPagarReembolso } from "@/lib/reembolso";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -311,13 +312,14 @@ export async function solicitarAprovacaoDevolucao(
   })) as { tarefa_id: number };
 
   // Notificar (best-effort)
-  await sql`
-    INSERT INTO alissonerp.notificacoes
-      (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-    VALUES
-      (${aprovadorId}::uuid, 'aprovacao', ${titulo}, ${descricao},
-       ${userId}::uuid, ${`/devolucoes/${id}`})
-  `.catch(() => {});
+  await criarNotificacao({
+    usuarioId: aprovadorId,
+    tipo: "aprovacao",
+    titulo,
+    mensagem: descricao,
+    remetenteId: userId,
+    link: `/devolucoes/${id}`,
+  }).catch(() => {});
 
   return result;
 }
@@ -351,16 +353,14 @@ export async function processarAprovacaoDevolucao(
       WHERE id = ${dev.id}
     `;
 
-    await sql`
-      INSERT INTO alissonerp.notificacoes
-        (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-      VALUES
-        (${String(dev.criado_por)}::uuid, 'aprovacao',
-         ${"Devolucao rejeitada — " + dev.numero},
-         ${motivo ?? "Devolucao rejeitada"},
-         ${aprovadorId}::uuid,
-         ${`/devolucoes/${dev.id}`})
-    `.catch(() => {});
+    await criarNotificacao({
+      usuarioId: String(dev.criado_por),
+      tipo: "aprovacao",
+      titulo: "Devolucao rejeitada — " + dev.numero,
+      mensagem: motivo ?? "Devolucao rejeitada",
+      remetenteId: aprovadorId,
+      link: `/devolucoes/${dev.id}`,
+    }).catch(() => {});
 
     return { ok: true, devolucao_id: dev.id, status: "rejeitado" };
   }
@@ -373,16 +373,14 @@ export async function processarAprovacaoDevolucao(
     WHERE id = ${dev.id}
   `;
 
-  await sql`
-    INSERT INTO alissonerp.notificacoes
-      (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-    VALUES
-      (${String(dev.criado_por)}::uuid, 'aprovacao',
-       ${"Devolucao aprovada — " + dev.numero},
-       ${"Devolucao aprovada. Inspecione os itens e conclua."},
-       ${aprovadorId}::uuid,
-       ${`/devolucoes/${dev.id}`})
-  `.catch(() => {});
+  await criarNotificacao({
+    usuarioId: String(dev.criado_por),
+    tipo: "aprovacao",
+    titulo: "Devolucao aprovada — " + dev.numero,
+    mensagem: "Devolucao aprovada. Inspecione os itens e conclua.",
+    remetenteId: aprovadorId,
+    link: `/devolucoes/${dev.id}`,
+  }).catch(() => {});
 
   return { ok: true, devolucao_id: dev.id, status: "aprovado" };
 }

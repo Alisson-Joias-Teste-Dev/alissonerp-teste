@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 const AplicarTemplateTarefaSchema = z.object({
   responsavel_id: z.string().optional(),
@@ -63,15 +64,14 @@ export async function POST(
   `;
 
   if (responsavelId && responsavelId !== user.id) {
-    await sql`
-      INSERT INTO alissonerp.notificacoes
-        (usuario_id, tipo, titulo, mensagem, remetente_id)
-      VALUES (
-        ${responsavelId}::uuid, 'tarefa',
-        'Nova tarefa (template)', ${titulo},
-        ${user.id}::uuid
-      )
-    `.catch(() => {});
+    await criarNotificacao({
+      usuarioId: responsavelId,
+      tipo: "tarefa",
+      titulo: "Nova tarefa (template)",
+      mensagem: titulo,
+      remetenteId: user.id,
+      link: `/tarefas?abrir=${tarefa.id}`,
+    }).catch(() => {});
   }
 
   return NextResponse.json(tarefa, { status: 201 });

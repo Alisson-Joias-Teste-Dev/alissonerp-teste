@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 // POST /api/crediario/aging-cron
 //
@@ -210,16 +211,13 @@ async function notificar(
   titulo: string,
   mensagem: string,
 ) {
-  await sql`
-    INSERT INTO alissonerp.notificacoes
-      (usuario_id, tipo, titulo, mensagem)
-    VALUES (
-      ${usuarioId}::uuid,
-      ${tipo},
-      ${titulo},
-      ${mensagem}
-    )
-  `.catch((err: Error) => {
+  await criarNotificacao({
+    usuarioId,
+    tipo,
+    titulo,
+    mensagem,
+    link: "/crediario",
+  }).catch((err: Error) => {
     console.error("[aging-cron] Erro ao notificar:", err.message);
   });
 }

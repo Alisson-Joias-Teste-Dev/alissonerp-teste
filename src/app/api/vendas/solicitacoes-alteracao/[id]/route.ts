@@ -5,6 +5,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
 import { estornarVenda, concluirVenda, approveVenda } from "@/lib/vendas-aprovar";
 import { logAudit } from "@/lib/audit";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 // Campos da venda que só podem ser alterados em rascunho (cliente/vendedor/data).
 // Espelha a regra do PATCH /api/vendas/[id] linhas 293-297.
@@ -287,13 +288,15 @@ async function notificarSolicitante(
       ? `Sua solicitação de alteração em ${alvo} foi aprovada por ${aprovadorNome}.`
       : `Sua solicitação de alteração em ${alvo} foi rejeitada. ${motivo ?? ""}`.trim();
     const link = `/vendas/${sol.venda_id}`;
-    await sql`
-      INSERT INTO alissonerp.notificacoes
-        (usuario_id, tipo, titulo, mensagem, remetente_id, venda_id, link)
-      VALUES
-        (${String(sol.solicitado_por_id)}::uuid, 'aprovacao', ${titulo}, ${mensagem},
-         ${adminId}::uuid, ${sol.venda_id as number}, ${link})
-    `;
+    await criarNotificacao({
+      usuarioId: String(sol.solicitado_por_id),
+      tipo: "aprovacao",
+      titulo,
+      mensagem,
+      remetenteId: adminId,
+      vendaId: sol.venda_id as number,
+      link,
+    });
   } catch (e) {
     console.error(`[solicitacoes-alteracao] erro ao notificar solicitante sol=${sol.id}:`, e);
   }

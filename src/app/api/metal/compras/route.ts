@@ -18,6 +18,7 @@ import { internalError } from "@/lib/api-error";
 import { CompraPostSchema } from "@/lib/metal/types";
 import { criarCompraMetal, listarCompras } from "@/lib/metal/compras";
 import { getModuloConfig } from "@/lib/metal/config";
+import { criarNotificacao } from "@/lib/notificacoes";
 import sql from "@/lib/db";
 
 /**
@@ -101,16 +102,14 @@ export async function POST(req: NextRequest) {
           WHERE id = ${result.id}
         `;
 
-        await sql`
-          INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-          VALUES (
-            ${aprovadorId}::uuid, 'aprovacao',
-            ${`Compra de Metal ${result.numero} aguardando aprovação`},
-            ${`${Number(result.peso_gramas).toFixed(3)}g a R$ ${Number(result.valor_pago_grama).toFixed(2)}/g (acima do teto). Total: R$ ${Number(result.valor_total).toFixed(2)}`},
-            ${user.id}::uuid,
-            ${`/tarefas?abrir=${tarefa.id}`}
-          )
-        `.catch(() => {});
+        await criarNotificacao({
+          usuarioId: aprovadorId,
+          tipo: "aprovacao",
+          titulo: `Compra de Metal ${result.numero} aguardando aprovação`,
+          mensagem: `${Number(result.peso_gramas).toFixed(3)}g a R$ ${Number(result.valor_pago_grama).toFixed(2)}/g (acima do teto). Total: R$ ${Number(result.valor_total).toFixed(2)}`,
+          remetenteId: user.id,
+          link: `/tarefas?abrir=${tarefa.id}`,
+        }).catch(() => {});
       }
     }
 

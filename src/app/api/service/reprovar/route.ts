@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile } from "@/lib/storage";
 import { zodError } from "@/lib/schemas/common";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 const ROLES_CONFERENCIA = ["consultora", "gerente_loja", "admin", "desenvolvedor"] as const;
 
@@ -97,28 +98,23 @@ export async function POST(req: NextRequest) {
       WHERE id = ${servico.ordem_id as number}
     `;
 
-    // 5. Notificação para o operador que executou o serviço
-    if (servico.concluido_por) {
-      await tx`
-        INSERT INTO alissonerp.notificacoes
-          (usuario_id, tipo, titulo, mensagem, link, ordem_id, remetente_id)
-        VALUES (
-          ${servico.concluido_por as string}::uuid,
-          'servico_reprovado',
-          ${`Serviço reprovado — ${servico.numero_ordem ?? ""}`},
-          ${motivo_reprovacao},
-          '/service',
-          ${servico.ordem_id as number},
-          ${user.id}::uuid
-        )
-      `;
-    }
-
     return {
       novo_protocolo_id: novoProtocolo.id as number,
       tentativa: Number(servico.tentativa),
     };
   });
+
+  if (servico.concluido_por) {
+    await criarNotificacao({
+      usuarioId: servico.concluido_por as string,
+      tipo: "servico_reprovado",
+      titulo: `Serviço reprovado — ${servico.numero_ordem ?? ""}`,
+      mensagem: motivo_reprovacao,
+      remetenteId: user.id,
+      link: "/service",
+      ordemId: servico.ordem_id as number,
+    }).catch(() => {});
+  }
 
   return NextResponse.json({
     success: true,

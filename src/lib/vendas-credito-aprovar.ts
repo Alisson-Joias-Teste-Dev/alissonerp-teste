@@ -13,7 +13,7 @@ import sql from "@/lib/db";
 import { getSaldoAtual, debitarSaldo } from "@/lib/saldo-credito";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
-import { enviarPushParaUsuario } from "@/lib/push";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -192,22 +192,14 @@ export async function submeterVendaParaAprovacaoCredito(
     if (!result) return { precisa_aprovacao: false };
     const { tarefa_id, aprovadorId: apId, tituloTarefa, descGerente, descDiretor } = result as any;
 
-    // Notificar aprovador
-    await sql`
-      INSERT INTO alissonerp.notificacoes
-        (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-      VALUES
-        (${apId}::uuid, 'aprovacao',
-         ${tituloTarefa},
-         ${tipo === "gerente" ? descGerente : descDiretor},
-         ${userId}::uuid,
-         ${`/tarefas/${tarefa_id}`})
-    `.catch(() => {});
-
-    await enviarPushParaUsuario(apId, {
+    // Notificar aprovador; o helper tambem tenta entregar no celular.
+    await criarNotificacao({
+      usuarioId: apId,
+      tipo: "aprovacao",
       titulo: tituloTarefa,
       mensagem: tipo === "gerente" ? descGerente : descDiretor,
-      url: `/tarefas?abrir=${tarefa_id}`,
+      remetenteId: userId,
+      link: `/tarefas?abrir=${tarefa_id}`,
     }).catch(() => {});
 
     return {
@@ -264,14 +256,15 @@ export async function processarAprovacaoCredito(
         WHERE id = ${vendaId}
       `;
       if (tarefa.criado_por) {
-        await sql`
-          INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id, venda_id)
-          VALUES (${String(tarefa.criado_por)}::uuid, 'aprovacao',
-            'Cartão de crédito liberado!',
-            'O cartão de crédito foi liberado para a venda ' || ${tarefa.numero_venda} || '.',
-            ${aprovadorId}::uuid,
-            ${vendaId})
-        `.catch(() => {});
+        await criarNotificacao({
+          usuarioId: String(tarefa.criado_por),
+          tipo: "aprovacao",
+          titulo: "Cartão de crédito liberado!",
+          mensagem: `O cartão de crédito foi liberado para a venda ${tarefa.numero_venda}.`,
+          remetenteId: aprovadorId,
+          vendaId,
+          link: `/vendas/${vendaId}`,
+        }).catch(() => {});
       }
       return { ok: true, acao: "cartao_liberado", message: "Cartão de crédito liberado para esta venda." };
     } else {
@@ -281,14 +274,15 @@ export async function processarAprovacaoCredito(
         WHERE id = ${vendaId}
       `;
       if (tarefa.criado_por) {
-        await sql`
-          INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id, venda_id)
-          VALUES (${String(tarefa.criado_por)}::uuid, 'aprovacao',
-            'Cartão de crédito não aprovado',
-            ${motivo ?? 'O uso do cartão de crédito foi recusado para a venda ' + tarefa.numero_venda},
-            ${aprovadorId}::uuid,
-            ${vendaId})
-        `.catch(() => {});
+        await criarNotificacao({
+          usuarioId: String(tarefa.criado_por),
+          tipo: "aprovacao",
+          titulo: "Cartão de crédito não aprovado",
+          mensagem: motivo ?? `O uso do cartão de crédito foi recusado para a venda ${tarefa.numero_venda}`,
+          remetenteId: aprovadorId,
+          vendaId,
+          link: `/vendas/${vendaId}`,
+        }).catch(() => {});
       }
       return { ok: true, acao: "cartao_rejeitado", message: "Cartão de crédito rejeitado." };
     }
@@ -324,17 +318,15 @@ export async function processarAprovacaoCredito(
       WHERE id = ${vendaId}
     `;
 
-    // Notificar consultora
-    await sql`
-      INSERT INTO alissonerp.notificacoes
-        (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-      VALUES
-        (${String(tarefa.criado_por)}::uuid, 'aprovacao',
-         ${"Crédito rejeitado — " + tarefa.numero_venda},
-         ${motivo ?? "Aprovação de crédito foi rejeitada pelo aprovador"},
-         ${aprovadorId}::uuid,
-         ${`/vendas/${vendaId}`})
-    `.catch(() => {});
+    // Notificar consultora tambem no celular quando houver assinatura push.
+    await criarNotificacao({
+      usuarioId: String(tarefa.criado_por),
+      tipo: "aprovacao",
+      titulo: "Crédito rejeitado — " + tarefa.numero_venda,
+      mensagem: motivo ?? "Aprovação de crédito foi rejeitada pelo aprovador",
+      remetenteId: aprovadorId,
+      link: `/vendas/${vendaId}`,
+    }).catch(() => {});
 
     return { ok: true, acao: "rejeitado", message: "Aprovação de crédito rejeitada" };
   }
@@ -424,15 +416,14 @@ export async function processarAprovacaoCredito(
         : `Crédito aprovado pelo diretor — Venda ${vendaInfo.numero_venda} aprovada (comissão zerada)`)
     : `Crédito aprovado — aguardando confirmação dos demais pagamentos da Venda ${vendaInfo.numero_venda}`;
 
-  await sql`
-    INSERT INTO alissonerp.notificacoes
-      (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-    VALUES
-      (${String(tarefa.criado_por)}::uuid, 'aprovacao',
-       ${msgOk}, ${motivo ?? msgOk},
-       ${aprovadorId}::uuid,
-       ${`/vendas/${vendaId}`})
-  `.catch(() => {});
+  await criarNotificacao({
+    usuarioId: String(tarefa.criado_por),
+    tipo: "aprovacao",
+    titulo: msgOk,
+    mensagem: motivo ?? msgOk,
+    remetenteId: aprovadorId,
+    link: `/vendas/${vendaId}`,
+  }).catch(() => {});
 
   return {
     ok: true,

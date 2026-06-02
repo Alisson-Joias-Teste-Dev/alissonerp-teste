@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { authOr401, ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { zodError } from "@/lib/schemas/common";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 const SolicitarAlteracaoSchema = z.object({
   tipo: z.enum(["pagamento_status", "venda_campo"]),
@@ -146,13 +147,15 @@ export async function POST(
     const mensagem = `${solicitanteNome} pediu alteração em ${descricaoAlvo} da venda ${numeroVenda}.`;
     const link = `/vendas/solicitacoes-alteracao`;
     for (const admin of admins) {
-      await sql`
-        INSERT INTO alissonerp.notificacoes
-          (usuario_id, tipo, titulo, mensagem, remetente_id, venda_id, link)
-        VALUES
-          (${admin.id}::uuid, 'aprovacao', ${titulo}, ${mensagem},
-           ${user.id}::uuid, ${vendaId}, ${link})
-      `;
+      await criarNotificacao({
+        usuarioId: admin.id,
+        tipo: "aprovacao",
+        titulo,
+        mensagem,
+        remetenteId: user.id,
+        vendaId,
+        link,
+      });
     }
   } catch (e) {
     console.error(`[solicitar-alteracao] erro ao notificar admins venda=${vendaId}:`, e);

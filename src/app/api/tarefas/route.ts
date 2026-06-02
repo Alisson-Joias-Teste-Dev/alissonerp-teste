@@ -10,6 +10,7 @@ import {
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
 import { zodError } from "@/lib/schemas/common";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 const TarefaPostSchema = z.object({
   titulo: z.string().min(1, "obrigatório"),
@@ -143,18 +144,14 @@ export async function POST(req: NextRequest) {
   `;
 
   if (body.responsavel_id && body.responsavel_id !== user.id) {
-    await sql`
-      INSERT INTO alissonerp.notificacoes
-        (usuario_id, tipo, titulo, mensagem, remetente_id, link)
-      VALUES (
-        ${body.responsavel_id}::uuid,
-        'tarefa',
-        ${"Nova tarefa atribuída: " + body.titulo.trim()},
-        ${body.descricao ?? body.titulo.trim()},
-        ${user.id}::uuid,
-        ${`/tarefas?abrir=${tarefa.id}`}
-      )
-    `.catch(() => {});
+    await criarNotificacao({
+      usuarioId: body.responsavel_id,
+      tipo: "tarefa",
+      titulo: "Nova tarefa atribuída: " + body.titulo.trim(),
+      mensagem: body.descricao ?? body.titulo.trim(),
+      remetenteId: user.id,
+      link: `/tarefas?abrir=${tarefa.id}`,
+    }).catch(() => {});
   }
 
   return NextResponse.json(tarefa, { status: 201 });

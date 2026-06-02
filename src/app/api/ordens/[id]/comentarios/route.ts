@@ -10,6 +10,7 @@ import {
   payloadTooLargeResponse,
 } from "@/lib/payload-limits";
 import { zodError } from "@/lib/schemas/common";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 const ComentarioPostSchema = z.object({
   texto: z.string().min(1, "obrigatório"),
@@ -121,23 +122,17 @@ export async function POST(
 
   for (const mencionadoId of mencoes) {
     if (mencionadoId === user.id) continue;
-    await sql`
-      INSERT INTO alissonerp.notificacoes (
-        usuario_id, tipo, titulo, mensagem, link, ordem_id, comentario_id, remetente_id,
-        aguardando_resposta
-      )
-      VALUES (
-        ${mencionadoId}::uuid,
-        'mencao',
-        ${`@${autor.nome} mencionou você na ${ordem?.numero_ordem ?? ordemId}`},
-        ${texto.substring(0, 100)},
-        ${`/ordens/${ordemId}`},
-        ${ordemId},
-        ${comentario.id},
-        ${user.id}::uuid,
-        true
-      )
-    `;
+    await criarNotificacao({
+      usuarioId: mencionadoId,
+      tipo: "mencao",
+      titulo: `@${autor.nome} mencionou você na ${ordem?.numero_ordem ?? ordemId}`,
+      mensagem: texto.substring(0, 100),
+      link: `/ordens/${ordemId}`,
+      ordemId,
+      comentarioId: comentario.id,
+      remetenteId: user.id,
+      aguardandoResposta: true,
+    }).catch(() => {});
   }
 
   return NextResponse.json({

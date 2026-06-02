@@ -1,5 +1,6 @@
 import sql from "@/lib/db";
 import { syncContatoToTiny } from "@/lib/tiny-contatos";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 const DELAYS_SEGUNDOS = [60, 300, 900, 3600, 21600]; // 1m, 5m, 15m, 1h, 6h
 const MAX_TENTATIVAS = 5;
@@ -99,15 +100,13 @@ export async function processarFila(limite = 10): Promise<ProcessarFilaResult> {
             SELECT id FROM alissonerp.usuarios WHERE role IN ('admin','desenvolvedor') AND ativo = true ORDER BY id LIMIT 1
           `;
           if (admin) {
-            await tx`
-              INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, link)
-              VALUES (
-                ${admin.id as string}::uuid, 'alerta',
-                ${'Falha definitiva na fila sync: ' + item.sistema + '/' + item.acao},
-                ${erroMsg.slice(0, 500)},
-                '/admin/fila-sync'
-              )
-            `.catch(() => {});
+            await criarNotificacao({
+              usuarioId: admin.id as string,
+              tipo: "alerta",
+              titulo: "Falha definitiva na fila sync: " + item.sistema + "/" + item.acao,
+              mensagem: erroMsg.slice(0, 500),
+              link: "/admin/fila-sync",
+            }).catch(() => {});
           }
           result.falhas_definitivas++;
           console.log(JSON.stringify({ event: "fila_sync.falha_definitiva", id: item.id, sistema: item.sistema, erro: erroMsg }));

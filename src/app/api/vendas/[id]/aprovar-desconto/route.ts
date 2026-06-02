@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 // POST /api/vendas/[id]/aprovar-desconto
 // Admin/desenvolvedor aprova desconto acima do threshold diretamente da notificação.
@@ -71,17 +72,15 @@ export async function POST(
   `.catch(() => []);
 
   if (tarefaInfo?.criado_por && tarefaInfo.criado_por !== user.id) {
-    await sql`
-      INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id, link, venda_id)
-      VALUES (
-        ${tarefaInfo.criado_por}::uuid, 'aprovacao',
-        ${"Desconto aprovado — Venda " + tarefaInfo.numero_venda},
-        ${`Seu desconto acima de ${thresholdAprov}% foi aprovado. Você já pode solicitar aprovação da venda.`},
-        ${user.id}::uuid,
-        ${`/vendas/${vendaId}`},
-        ${vendaId}
-      )
-    `.catch(() => {});
+    await criarNotificacao({
+      usuarioId: String(tarefaInfo.criado_por),
+      tipo: "aprovacao",
+      titulo: "Desconto aprovado — Venda " + tarefaInfo.numero_venda,
+      mensagem: `Seu desconto acima de ${thresholdAprov}% foi aprovado. Você já pode solicitar aprovação da venda.`,
+      remetenteId: user.id,
+      link: `/vendas/${vendaId}`,
+      vendaId,
+    }).catch(() => {});
   }
 
   return NextResponse.json({ ok: true });

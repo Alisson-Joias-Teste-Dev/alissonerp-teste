@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 // POST /api/automacoes-tarefa/[id]/executar — execução manual (cria tarefa agora)
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -39,11 +40,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   `;
 
   if (automacao.responsavel_id && String(automacao.responsavel_id) !== user.id) {
-    await sql`
-      INSERT INTO alissonerp.notificacoes (usuario_id, tipo, titulo, mensagem, remetente_id)
-      VALUES (${String(automacao.responsavel_id)}::uuid, 'tarefa', 'Nova tarefa automática',
-        ${automacao.titulo as string}, ${user.id}::uuid)
-    `.catch(() => {});
+    await criarNotificacao({
+      usuarioId: String(automacao.responsavel_id),
+      tipo: "tarefa",
+      titulo: "Nova tarefa automática",
+      mensagem: automacao.titulo as string,
+      remetenteId: user.id,
+      link: `/tarefas?abrir=${tarefa.id}`,
+    }).catch(() => {});
   }
 
   return NextResponse.json({ tarefa_id: tarefa.id, titulo: tarefa.titulo }, { status: 201 });
