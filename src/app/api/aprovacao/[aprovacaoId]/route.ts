@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
-import { authOr401, ForbiddenError } from "@/lib/auth-server";
+import { authOr401 } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
 import { isFullAccess } from "@/lib/roles";
 
@@ -10,10 +10,12 @@ const AprovacaoPatchSchema = z.object({
 }).passthrough();
 
 // PATCH /api/aprovacao/[aprovacaoId] — aprovar consultora
-// REGRA DE NEGÓCIO (Bug 5): verifica permissão antes de aprovar.
-// Antes QUALQUER usuário autenticado podia chamar este endpoint.
-// Agora só gerente_loja, gerente_fabrica, admin e desenvolvedor.
-// Se alterar: manter a verificação de role — consultora não pode auto-aprovar.
+// REGRA DE NEGOCIO:
+// - O que faz: valida quem pode aprovar/reprovar conferencias de consultora.
+// - Por que: gerencia/admin conferem qualquer consultora, mas consultora so pode
+//   aprovar a propria conferencia vinculada ao seu vendedor_id.
+// - Impacto se removido: qualquer usuario autenticado poderia alterar status de
+//   aprovacao ou consultora poderia aprovar conferencia de outra consultora.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ aprovacaoId: string }> }
@@ -21,15 +23,30 @@ export async function PATCH(
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
 
+  const { aprovacaoId } = await params;
+  const id = parseInt(aprovacaoId);
+
   const [usuario] = await sql`
-    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+    SELECT role, vendedor_id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
-  if (!usuario || !isFullAccess(usuario.role) && !["gerente_loja", "gerente_fabrica"].includes(usuario.role)) {
+  const role = usuario?.role as string | undefined;
+  const podeAprovarTodas = isFullAccess(role) || ["gerente_loja", "gerente_fabrica"].includes(role ?? "");
+  let podeAprovarPropria = false;
+
+  if (role === "consultora" && usuario.vendedor_id != null) {
+    const [aprovacao] = await sql`
+      SELECT consultora_id
+      FROM alissonerp.aprovacoes_consultora
+      WHERE id = ${id}
+      LIMIT 1
+    `;
+    podeAprovarPropria = aprovacao?.consultora_id === usuario.vendedor_id;
+  }
+
+  if (!usuario || (!podeAprovarTodas && !podeAprovarPropria)) {
     return NextResponse.json({ error: "Sem permissão para aprovar consultora" }, { status: 403 });
   }
 
-  const { aprovacaoId } = await params;
-  const id = parseInt(aprovacaoId);
   const raw = await req.json().catch(() => ({}));
   const parsed = AprovacaoPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
