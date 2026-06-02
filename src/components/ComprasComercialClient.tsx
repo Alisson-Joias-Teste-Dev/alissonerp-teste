@@ -111,6 +111,113 @@ function NovaCompraModal({ open, onClose, onCreated }: { open: boolean; onClose:
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
+  // REGRA DE NEGOCIO:
+  // - O que faz: estado do subformulario de cadastro rapido de fornecedor dentro do modal de nova compra.
+  // - Por que: o operador precisa cadastrar fornecedor novo sem sair do fluxo da compra, usando a tabela public.contatos
+  //           como fonte unica (AGENTS.md #2 do modulo Crediario — tabela de contatos e a referencia correta para compras comercial).
+  // - Impacto se removido: operador precisa abrir outra tela para cadastrar contato, quebrando o fluxo da compra.
+  const [showCadastroFornecedor, setShowCadastroFornecedor] = useState(false);
+  const [formFornecedor, setFormFornecedor] = useState({
+    nome: "",
+    cpf_cnpj: "",
+    telefone: "",
+    celular: "",
+    email: "",
+    cep: "",
+    endereco: "",
+    numero: "",
+    complemento: "",
+    bairro: "",
+    municipio: "",
+    uf: "",
+  });
+  const [salvandoFornecedor, setSalvandoFornecedor] = useState(false);
+  const [erroFornecedor, setErroFornecedor] = useState("");
+
+  // REGRA DE NEGOCIO:
+  // - O que faz: busca CEP na API ViaCEP e preenche endereco automaticamente.
+  // - Por que: reduz digitacao e erro de preenchimento manual de endereco.
+  // - Impacto se removido: operador precisa preencher endereco manualmente, aumentando chance de erro.
+  async function buscarCepFornecedor(cep: string) {
+    const limpo = cep.replace(/\D/g, "");
+    if (limpo.length !== 8) return;
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${limpo}/json/`);
+      const data = await res.json();
+      if (data.erro) return;
+      setFormFornecedor((prev) => ({
+        ...prev,
+        endereco: data.logradouro ?? prev.endereco,
+        bairro: data.bairro ?? prev.bairro,
+        municipio: data.localidade ?? prev.municipio,
+        uf: data.uf ?? prev.uf,
+      }));
+    } catch { /* silencioso */ }
+  }
+
+  // REGRA DE NEGOCIO:
+  // - O que faz: cadastra novo contato via POST /api/contatos e seleciona automaticamente como fornecedor da compra.
+  // - Por que: mantem fluxo unico — o operador nao precisa sair da tela de compra e voltar para selecionar o contato.
+  // - Impacto se removido: o fornecedor nao fica selecionado apos cadastro, obrigando nova busca manual.
+  async function cadastrarFornecedor() {
+    setErroFornecedor("");
+    if (!formFornecedor.nome.trim()) {
+      setErroFornecedor("Nome e obrigatorio.");
+      return;
+    }
+    setSalvandoFornecedor(true);
+    try {
+      const res = await fetch("/api/contatos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nome: formFornecedor.nome.trim(),
+          cpf_cnpj: formFornecedor.cpf_cnpj.trim() || undefined,
+          telefone: formFornecedor.telefone.trim() || undefined,
+          celular: formFornecedor.celular.trim() || undefined,
+          email: formFornecedor.email.trim() || undefined,
+          cep: formFornecedor.cep.replace(/\D/g, "") || undefined,
+          endereco: formFornecedor.endereco.trim() || undefined,
+          numero: formFornecedor.numero.trim() || undefined,
+          complemento: formFornecedor.complemento.trim() || undefined,
+          bairro: formFornecedor.bairro.trim() || undefined,
+          municipio: formFornecedor.municipio.trim() || undefined,
+          uf: formFornecedor.uf.trim().toUpperCase() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        // 409 = CPF/CNPJ ja cadastrado — exibe nome do contato existente
+        if (res.status === 409 && data.contato?.nome) {
+          setErroFornecedor(`CPF/CNPJ ja cadastrado para: ${data.contato.nome}`);
+          // Sugere selecionar o contato existente em vez de cadastrar duplicado
+          setFornecedorId(String(data.contato.id_contato));
+          setBuscaFornecedor(data.contato.nome);
+          setShowSugestoesFornecedor(false);
+        } else {
+          setErroFornecedor(data.error ?? "Erro ao cadastrar fornecedor");
+        }
+        return;
+      }
+      // REGRA DE NEGOCIO:
+      // - O que faz: seleciona automaticamente o fornecedor recem-cadastrado na compra.
+      // - Por que: evita que o operador precise buscar novamente o contato que acabou de criar.
+      setFornecedorId(String(data.id));
+      setBuscaFornecedor(data.nome);
+      setShowSugestoesFornecedor(false);
+      setShowCadastroFornecedor(false);
+      // Limpa formulario para proximo uso
+      setFormFornecedor({
+        nome: "", cpf_cnpj: "", telefone: "", celular: "", email: "",
+        cep: "", endereco: "", numero: "", complemento: "", bairro: "", municipio: "", uf: "",
+      });
+    } catch {
+      setErroFornecedor("Erro de rede ao cadastrar fornecedor.");
+    } finally {
+      setSalvandoFornecedor(false);
+    }
+  }
+
   useEffect(() => {
     if (!open) return;
     fetch("/api/locais-estoque").then((r) => r.json()).then((d: Local[]) => {
@@ -171,7 +278,7 @@ function NovaCompraModal({ open, onClose, onCreated }: { open: boolean; onClose:
           <h3 className="font-semibold text-lg" style={{ color: C.verde }}>Nova Compra Comercial</h3>
           <p className="text-xs mt-0.5" style={{ color: "#5B6B67" }}>Preencha os dados da compra e defina o plano financeiro.</p>
         </div>
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
         <div className="space-y-1">
           <p className="text-[11px] font-bold" style={{ color: "#7D8A86" }}>Fornecedor</p>
           <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#5B6B67" }}>Fornecedor</label>
@@ -212,6 +319,183 @@ function NovaCompraModal({ open, onClose, onCreated }: { open: boolean; onClose:
             )}
           </div>
           {!!fornecedorId && <p className="text-xs" style={{ color: C.verde }}>Fornecedor selecionado.</p>}
+
+          {/* REGRA DE NEGOCIO:
+              - O que faz: botao para abrir/fechar subformulario de cadastro rapido de fornecedor dentro do modal.
+              - Por que: permite cadastrar fornecedor novo sem sair do fluxo da compra comercial.
+              - Impacto se removido: operador precisa acessar outra tela para cadastrar contato, quebrando o fluxo. */}
+          <button
+            type="button"
+            className="text-xs mt-1 underline underline-offset-2"
+            style={{ color: C.verde }}
+            onClick={() => { setShowCadastroFornecedor((v) => !v); setErroFornecedor(""); }}
+          >
+            {showCadastroFornecedor ? "Fechar cadastro" : "+ Cadastrar fornecedor"}
+          </button>
+
+          {showCadastroFornecedor && (
+            <div className="mt-2 border rounded-xl p-4 space-y-3" style={{ borderColor: C.borda, backgroundColor: `${C.creme}40` }}>
+              <p className="text-xs font-semibold" style={{ color: C.verde }}>Novo fornecedor</p>
+
+              {/* Nome + CPF/CNPJ */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>Nome *</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="Nome do fornecedor"
+                    value={formFornecedor.nome}
+                    onChange={(e) => setFormFornecedor((p) => ({ ...p, nome: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>CPF/CNPJ</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="CPF ou CNPJ"
+                    value={formFornecedor.cpf_cnpj}
+                    onChange={(e) => setFormFornecedor((p) => ({ ...p, cpf_cnpj: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Telefone + Celular + Email */}
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>Telefone</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="(99) 9999-9999"
+                    value={formFornecedor.telefone}
+                    onChange={(e) => setFormFornecedor((p) => ({ ...p, telefone: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>Celular</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="(99) 99999-9999"
+                    value={formFornecedor.celular}
+                    onChange={(e) => setFormFornecedor((p) => ({ ...p, celular: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>Email</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="email@exemplo.com"
+                    value={formFornecedor.email}
+                    onChange={(e) => setFormFornecedor((p) => ({ ...p, email: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* CEP + Endereco */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>CEP</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="00000-000"
+                    value={formFornecedor.cep}
+                    maxLength={9}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setFormFornecedor((p) => ({ ...p, cep: v }));
+                      if (v.replace(/\D/g, "").length === 8) buscarCepFornecedor(v);
+                    }}
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>Endereco</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="Rua, Av."
+                    value={formFornecedor.endereco}
+                    onChange={(e) => setFormFornecedor((p) => ({ ...p, endereco: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Numero + Complemento + Bairro */}
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>Numero</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="S/N"
+                    value={formFornecedor.numero}
+                    onChange={(e) => setFormFornecedor((p) => ({ ...p, numero: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>Complemento</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="Apto, Sala"
+                    value={formFornecedor.complemento}
+                    onChange={(e) => setFormFornecedor((p) => ({ ...p, complemento: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>Bairro</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="Bairro"
+                    value={formFornecedor.bairro}
+                    onChange={(e) => setFormFornecedor((p) => ({ ...p, bairro: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Municipio + UF */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>Municipio</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="Municipio"
+                    value={formFornecedor.municipio}
+                    onChange={(e) => setFormFornecedor((p) => ({ ...p, municipio: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold mb-0.5" style={{ color: "#7D8A86" }}>UF</p>
+                  <input
+                    className="w-full border rounded-lg px-2.5 py-2 text-xs focus:outline-none"
+                    style={{ borderColor: C.borda, color: C.verde }}
+                    placeholder="UF"
+                    maxLength={2}
+                    value={formFornecedor.uf}
+                    onChange={(e) => setFormFornecedor((p) => ({ ...p, uf: e.target.value.toUpperCase() }))}
+                  />
+                </div>
+              </div>
+
+              {erroFornecedor && <p className="text-xs text-red-600">{erroFornecedor}</p>}
+
+              <button
+                type="button"
+                className="px-3 py-2 rounded-lg text-xs font-semibold w-full"
+                style={{ backgroundColor: C.verde, color: C.dourado }}
+                onClick={cadastrarFornecedor}
+                disabled={salvandoFornecedor}
+              >
+                {salvandoFornecedor ? "Salvando..." : "Salvar fornecedor"}
+              </button>
+            </div>
+          )}
         </div>
         <div className="grid md:grid-cols-2 gap-3">
           <div className="space-y-1">
