@@ -139,10 +139,31 @@ export async function PATCH(
       WHERE id = ${ordemId}
     `;
 
+    /**
+     * REGRA DE NEGÓCIO: sweep final de PCP para blindar kanban de rota.
+     *
+     * O QUE: reaplica conclusão em qualquer PCP da ordem que tenha ficado
+     * ativo após atualizações intermediárias do fluxo.
+     * POR QUE: evita que OF reapareça em "Novas Ordens" no PCP depois da
+     * conclusão forçada da ordem.
+     * IMPACTO SE REMOVIDO: ordem concluída pode continuar entulhando o PCP,
+     * gerando retrabalho operacional.
+     */
+    const pcpSweepRows = await tx`
+      UPDATE alissonerp.pcp
+      SET etapas = 'concluido',
+          data_conclusao = COALESCE(data_conclusao, now()),
+          updated_at = now()
+      WHERE ordem_id = ${ordemId}
+        AND etapas <> 'concluido'
+      RETURNING id
+    `;
+
     return {
       notFound: false,
       ordem_id: ordemId,
       pcp_concluidos: pcpRows.length,
+      pcp_concluidos_sweep_final: pcpSweepRows.length,
       protocolos_concluidos: protocoloRows.length,
       auditorias_concluidas: auditoriaRows.length,
       aprovacoes_concluidas: aprovacaoRows.length,

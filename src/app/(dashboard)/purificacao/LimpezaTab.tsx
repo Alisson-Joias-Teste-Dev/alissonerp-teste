@@ -36,6 +36,12 @@ interface BaixaLimpeza {
   foto_comprovacao: string | null;
   obs: string | null;
   created_at: string;
+  limpeza_peso_limpo?: number | null;
+  limpeza_houve_pedras?: boolean | null;
+  limpeza_peso_pedras?: number | null;
+  limpeza_foto_antes_path?: string | null;
+  limpeza_foto_depois_path?: string | null;
+  limpeza_foto_peso_pedras_path?: string | null;
 }
 
 interface Props {
@@ -104,9 +110,16 @@ export default function LimpezaTab({ userRole, userId }: Props) {
   const [aguardando, setAguardando] = useState<BaixaLimpeza[]>([]);
   const [concluidos, setConcluidos] = useState<BaixaLimpeza[]>([]);
   const [loading, setLoading] = useState(true);
+  const [modalIniciar, setModalIniciar] = useState<BaixaLimpeza | null>(null);
+  const [fotoEntrada, setFotoEntrada] = useState<File | null>(null);
+  const [fotoEntradaPreview, setFotoEntradaPreview] = useState<string | null>(null);
   const [modalConcluir, setModalConcluir] = useState<BaixaLimpeza | null>(null);
   const [fotoSaida, setFotoSaida] = useState<File | null>(null);
   const [fotoSaidaPreview, setFotoSaidaPreview] = useState<string | null>(null);
+  const [houvePedras, setHouvePedras] = useState(false);
+  const [pesoPedras, setPesoPedras] = useState("");
+  const [fotoPedras, setFotoPedras] = useState<File | null>(null);
+  const [fotoPedrasPreview, setFotoPedrasPreview] = useState<string | null>(null);
   const [pesoSaida, setPesoSaida] = useState("");
   const [obs, setObs] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -160,10 +173,10 @@ export default function LimpezaTab({ userRole, userId }: Props) {
     setLoading(true);
     try {
       const [recebidasRes, emLimpezaRes, aguardandoRes, concluidosRes] = await Promise.all([
-        fetch("/api/financeiro/cofre-ouro/baixas?status=recebido").then(r => r.ok ? r.json() : []),
-        fetch("/api/financeiro/cofre-ouro/baixas?status=em_limpeza").then(r => r.ok ? r.json() : []),
-        fetch("/api/financeiro/cofre-ouro/baixas?status=aguardando_aprovacao").then(r => r.ok ? r.json() : []),
-        fetch("/api/financeiro/cofre-ouro/baixas?status=concluido").then(r => r.ok ? r.json() : []),
+        fetch("/api/purificacao/limpeza?status=recebido").then(r => r.ok ? r.json() : []),
+        fetch("/api/purificacao/limpeza?status=em_limpeza").then(r => r.ok ? r.json() : []),
+        fetch("/api/purificacao/limpeza?status=aguardando_aprovacao").then(r => r.ok ? r.json() : []),
+        fetch("/api/purificacao/limpeza?status=concluido").then(r => r.ok ? r.json() : []),
       ]);
       /**
        * REGRA DE NEGÓCIO: baixas destino "alisson" não passam pelo processo de
@@ -195,21 +208,37 @@ export default function LimpezaTab({ userRole, userId }: Props) {
    * REGRA DE NEGÓCIO: iniciar limpeza transita recebido → em_limpeza.
    * O peso sujo (gramas da baixa) é preservado automaticamente.
    */
-  async function iniciarLimpeza(baixaId: number) {
+  async function iniciarLimpeza() {
+    if (!modalIniciar) return;
+    if (!fotoEntrada) { setErro("Foto do metal antes da limpeza é obrigatória."); return; }
+
+    setSalvando(true);
+    setErro(null);
     try {
+      const supabase = createClient();
+      const fotoPath = `limpeza/${modalIniciar.id}/antes-${Date.now()}.jpg`;
+      const { error: uploadErr } = await supabase.storage
+        .from("purificacao-fotos")
+        .upload(fotoPath, fotoEntrada, { contentType: fotoEntrada.type || "image/jpeg", upsert: false });
+      if (uploadErr) throw new Error(uploadErr.message);
+
       const res = await fetch("/api/purificacao/limpeza", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ acao: "iniciar", baixa_id: baixaId }),
+        body: JSON.stringify({ acao: "iniciar", baixa_id: modalIniciar.id, foto_entrada: fotoPath }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setErro(d.error ?? "Erro ao iniciar limpeza");
         return;
       }
+      setModalIniciar(null);
+      setFotoEntrada(null);
+      setFotoEntradaPreview(null);
       carregar();
       router.refresh();
-    } catch { setErro("Erro de rede"); }
+    } catch (e) { setErro(e instanceof Error ? e.message : "Erro de rede"); }
+    finally { setSalvando(false); }
   }
 
   /**
@@ -222,6 +251,9 @@ export default function LimpezaTab({ userRole, userId }: Props) {
     const peso = parseFloat(pesoSaida.replace(",", "."));
     if (!peso || peso <= 0) { setErro("Informe o peso de saída."); return; }
     if (peso > Number(modalConcluir.gramas)) { setErro("Peso de saída não pode ser maior que o peso sujo."); return; }
+    const pedras = parseFloat(pesoPedras.replace(",", "."));
+    if (houvePedras && (!pedras || pedras <= 0)) { setErro("Informe o peso das pedras removidas."); return; }
+    if (houvePedras && !fotoPedras) { setErro("Foto do peso das pedras é obrigatória."); return; }
 
     setSalvando(true);
     setErro(null);
@@ -233,6 +265,15 @@ export default function LimpezaTab({ userRole, userId }: Props) {
         .upload(fotoPath, fotoSaida, { contentType: fotoSaida.type || "image/jpeg", upsert: false });
       if (uploadErr) throw new Error(uploadErr.message);
 
+      let fotoPedrasPath: string | undefined;
+      if (houvePedras && fotoPedras) {
+        fotoPedrasPath = `limpeza/${modalConcluir.id}/pedras-${Date.now()}.jpg`;
+        const { error: uploadPedrasErr } = await supabase.storage
+          .from("purificacao-fotos")
+          .upload(fotoPedrasPath, fotoPedras, { contentType: fotoPedras.type || "image/jpeg", upsert: false });
+        if (uploadPedrasErr) throw new Error(uploadPedrasErr.message);
+      }
+
       const res = await fetch("/api/purificacao/limpeza", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -241,6 +282,9 @@ export default function LimpezaTab({ userRole, userId }: Props) {
           baixa_id: modalConcluir.id,
           peso_saida: peso,
           foto_saida: fotoPath,
+          houve_pedras: houvePedras,
+          peso_pedras: houvePedras ? pedras : undefined,
+          foto_peso_pedras: fotoPedrasPath,
           obs: obs || undefined,
         }),
       });
@@ -253,6 +297,10 @@ export default function LimpezaTab({ userRole, userId }: Props) {
       setModalConcluir(null);
       setFotoSaida(null);
       setFotoSaidaPreview(null);
+      setHouvePedras(false);
+      setPesoPedras("");
+      setFotoPedras(null);
+      setFotoPedrasPreview(null);
       setPesoSaida("");
       setObs("");
       carregar();
@@ -315,7 +363,7 @@ export default function LimpezaTab({ userRole, userId }: Props) {
                     <p style={{ fontSize: 24, fontWeight: 700, color: P.verde, margin: "0 0 4px" }}>{formatPeso(Number(b.gramas))}</p>
                     <p style={{ fontSize: 11, color: P.muted, margin: "0 0 12px" }}>Peso sujo</p>
                     <button
-                      onClick={() => iniciarLimpeza(b.id)}
+                      onClick={() => setModalIniciar(b)}
                       disabled={!podeLimpar}
                       style={{
                         width: "100%", padding: "10px 0", borderRadius: 8,
@@ -401,7 +449,7 @@ export default function LimpezaTab({ userRole, userId }: Props) {
                     <p style={{ fontSize: 20, fontWeight: 700, color: "#7C3AED", margin: "0 0 4px" }}>{formatPeso(Number(b.gramas))}</p>
                     <p style={{ fontSize: 11, color: P.muted, margin: "0 0 2px" }}>Entrada (sujo): {formatPeso(Number(b.gramas))}</p>
                     <p style={{ fontSize: 11, color: P.muted, margin: "0 0 14px" }}>
-                      Saída (limpo): {formatPeso(pesoSaidaByBaixa[b.id] ?? extrairPesoSaida(b.obs) ?? Number(b.gramas))}
+                      Saída (limpo): {formatPeso(Number(b.limpeza_peso_limpo ?? pesoSaidaByBaixa[b.id] ?? extrairPesoSaida(b.obs) ?? Number(b.gramas)))}
                     </p>
 
                     {/**
@@ -461,7 +509,7 @@ export default function LimpezaTab({ userRole, userId }: Props) {
                     <p style={{ fontSize: 20, fontWeight: 700, color: P.verde, margin: "0 0 4px" }}>{formatPeso(Number(b.gramas))}</p>
                     <p style={{ fontSize: 11, color: P.muted, margin: "0 0 2px" }}>Entrada (sujo): {formatPeso(Number(b.gramas))}</p>
                     <p style={{ fontSize: 11, color: P.muted, margin: 0 }}>
-                      Saída (limpo): {formatPeso(pesoSaidaByBaixa[b.id] ?? extrairPesoSaida(b.obs) ?? Number(b.gramas))}
+                      Saída (limpo): {formatPeso(Number(b.limpeza_peso_limpo ?? pesoSaidaByBaixa[b.id] ?? extrairPesoSaida(b.obs) ?? Number(b.gramas)))}
                     </p>
                 </div>
               );
@@ -470,6 +518,74 @@ export default function LimpezaTab({ userRole, userId }: Props) {
           )}
         </Section>
       </div>
+
+      {/* ─── Modal Iniciar Limpeza ──────────────────────────────────────────── */}
+      {modalIniciar && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.5)", padding: 16 }}
+          onClick={() => !salvando && setModalIniciar(null)}>
+          <div style={{ backgroundColor: "#fff", borderRadius: 16, width: "100%", maxWidth: 420, padding: 24 }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontWeight: 700, fontSize: 18, color: P.text, margin: "0 0 4px" }}>
+              Iniciar Limpeza — Baixa #{modalIniciar.id}
+            </h3>
+            <p style={{ fontSize: 13, color: P.muted, margin: "0 0 20px" }}>
+              Peso sujo: {formatPeso(Number(modalIniciar.gramas))}
+            </p>
+
+            {/**
+             * REGRA DE NEGÓCIO: a limpeza v2 só inicia com foto do metal antes
+             * do processo.
+             * O QUE: captura a evidência inicial enviada para a API.
+             * POR QUE: o aprovador precisa comparar antes/depois para validar a
+             * quebra e eventuais pedras removidas.
+             * IMPACTO SE REMOVIDO: a aprovação fica sem prova visual de entrada.
+             */}
+            <div style={{ marginBottom: 16 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: P.text, marginBottom: 6 }}>
+                Foto antes da limpeza <span style={{ color: P.vermelho }}>*</span>
+              </p>
+              {fotoEntradaPreview ? (
+                <div style={{ position: "relative", borderRadius: 12, overflow: "hidden" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={fotoEntradaPreview} alt="Foto antes" style={{ width: "100%", maxHeight: 180, objectFit: "cover" }} />
+                  <button onClick={() => { setFotoEntrada(null); setFotoEntradaPreview(null); }}
+                    style={{ position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: "50%", backgroundColor: "rgba(0,0,0,0.6)", border: "none", cursor: "pointer" }}>
+                    <RotateCcw size={13} color="white" />
+                  </button>
+                </div>
+              ) : (
+                <label style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 120, borderRadius: 12, border: `2px dashed ${P.border}`, backgroundColor: P.bg, cursor: "pointer" }}>
+                  <Camera size={20} style={{ color: P.muted }} />
+                  <span style={{ fontSize: 12, color: P.muted, marginTop: 4 }}>Tirar foto antes da limpeza</span>
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) { setFotoEntrada(file); setFotoEntradaPreview(URL.createObjectURL(file)); }
+                    }} />
+                </label>
+              )}
+            </div>
+
+            {erro && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, marginBottom: 12, backgroundColor: "#FEF2F2", color: P.vermelho, fontSize: 12 }}>
+                <AlertTriangle size={12} /> {erro}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => { setModalIniciar(null); setErro(null); }} disabled={salvando}
+                style={{ padding: "10px 16px", borderRadius: 8, border: `1px solid ${P.border}`, backgroundColor: "#fff", color: P.muted, fontSize: 13, cursor: "pointer" }}>
+                Cancelar
+              </button>
+              <button onClick={iniciarLimpeza} disabled={salvando || !fotoEntrada}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", borderRadius: 8, border: "none", backgroundColor: P.amber, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", opacity: salvando ? 0.5 : 1 }}>
+                {salvando ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                Iniciar Limpeza
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── Modal Concluir Limpeza ──────────────────────────────────────────── */}
       {modalConcluir && (
@@ -507,7 +623,7 @@ export default function LimpezaTab({ userRole, userId }: Props) {
 
             <div style={{ marginBottom: 16 }}>
               <p style={{ fontSize: 12, fontWeight: 600, color: P.text, marginBottom: 6 }}>
-                Foto da limpeza <span style={{ color: P.vermelho }}>*</span>
+                Foto depois da limpeza <span style={{ color: P.vermelho }}>*</span>
               </p>
               {fotoSaidaPreview ? (
                 <div style={{ position: "relative", borderRadius: 12, overflow: "hidden" }}>
@@ -532,6 +648,61 @@ export default function LimpezaTab({ userRole, userId }: Props) {
                     }}
                   />
                 </label>
+              )}
+            </div>
+
+            {/**
+             * REGRA DE NEGÓCIO: pedras removidas na limpeza precisam ser
+             * evidenciadas com peso e foto da balança.
+             * O QUE: quando o operador marca que houve pedras, campos de peso e
+             * foto ficam obrigatórios antes de concluir.
+             * POR QUE: pedras explicam parte da diferença entre peso sujo e peso
+             * limpo, mas não entram como ouro no estoque.
+             * IMPACTO SE REMOVIDO: a quebra pode parecer perda de metal sem
+             * evidência do material removido.
+             */}
+            <div style={{ marginBottom: 16, padding: 12, borderRadius: 12, border: `1px solid ${P.border}`, backgroundColor: P.bg }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: P.text, cursor: "pointer" }}>
+                <input type="checkbox" checked={houvePedras} onChange={e => setHouvePedras(e.target.checked)} />
+                Houve pedras removidas
+              </label>
+
+              {houvePedras && (
+                <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+                  <div>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: P.text, marginBottom: 6 }}>
+                      Peso das pedras <span style={{ color: P.vermelho }}>*</span>
+                    </p>
+                    <input type="text" inputMode="decimal" value={pesoPedras} onChange={e => setPesoPedras(e.target.value)} placeholder="Ex: 0.18"
+                      style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: `1px solid ${P.border}`, fontSize: 14, boxSizing: "border-box" }} />
+                  </div>
+
+                  <div>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: P.text, marginBottom: 6 }}>
+                      Foto do peso das pedras <span style={{ color: P.vermelho }}>*</span>
+                    </p>
+                    {fotoPedrasPreview ? (
+                      <div style={{ position: "relative", borderRadius: 12, overflow: "hidden" }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={fotoPedrasPreview} alt="Foto peso pedras" style={{ width: "100%", maxHeight: 140, objectFit: "cover" }} />
+                        <button onClick={() => { setFotoPedras(null); setFotoPedrasPreview(null); }}
+                          style={{ position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: "50%", backgroundColor: "rgba(0,0,0,0.6)", border: "none", cursor: "pointer" }}>
+                          <RotateCcw size={13} color="white" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 90, borderRadius: 12, border: `2px dashed ${P.border}`, backgroundColor: "#fff", cursor: "pointer" }}>
+                        <Camera size={18} style={{ color: P.muted }} />
+                        <span style={{ fontSize: 12, color: P.muted, marginTop: 4 }}>Foto da balança com pedras</span>
+                        <input type="file" accept="image/*" capture="environment" className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) { setFotoPedras(file); setFotoPedrasPreview(URL.createObjectURL(file)); }
+                          }} />
+                      </label>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
 
@@ -561,7 +732,7 @@ export default function LimpezaTab({ userRole, userId }: Props) {
               </button>
               <button
                 onClick={concluirLimpeza}
-                disabled={salvando || !fotoSaida || !pesoSaida}
+                disabled={salvando || !fotoSaida || !pesoSaida || (houvePedras && (!pesoPedras || !fotoPedras))}
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", borderRadius: 8, border: "none", backgroundColor: P.azul, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", opacity: salvando ? 0.5 : 1 }}
               >
                 {salvando ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}

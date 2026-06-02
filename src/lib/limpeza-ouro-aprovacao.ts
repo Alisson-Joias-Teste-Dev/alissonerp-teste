@@ -43,6 +43,25 @@ export async function processarAprovacaoQuebraLimpeza(params: Params): Promise<R
   `;
   if (!baixa) return { ok: false, status: 404, error: "Baixa não encontrada" };
 
+  /**
+   * REGRA DE NEGÓCIO: Limpeza 2.0 usa a última tentativa estruturada como
+   * fonte oficial de peso/fotos para aprovação.
+   * O QUE: carrega peso limpo, fotos antes/depois e dados de pedras da tabela
+   * alissonerp.limpezas_ouro.
+   * POR QUE: o campo obs é legado e pode conter múltiplas limpezas/reprovações;
+   * aprovar por regex pode usar a tentativa errada.
+   * IMPACTO SE REMOVIDO: entrada de estoque pode usar peso incorreto e a tarefa
+   * pode ser aprovada sem as evidências visuais obrigatórias.
+   */
+  const [limpeza] = await sql`
+    SELECT id, status, peso_limpo, foto_antes_path, foto_depois_path,
+           houve_pedras, peso_pedras, foto_peso_pedras_path
+    FROM alissonerp.limpezas_ouro
+    WHERE baixa_id = ${baixaId}
+    ORDER BY tentativa DESC
+    LIMIT 1
+  `;
+
   const [usuario] = await sql`
     SELECT nome FROM alissonerp.usuarios WHERE id = ${userId}::uuid
   `;
@@ -73,6 +92,17 @@ export async function processarAprovacaoQuebraLimpeza(params: Params): Promise<R
       WHERE id = ${baixaId}
       RETURNING id, status
     `;
+
+    if (limpeza?.id) {
+      await sql`
+        UPDATE alissonerp.limpezas_ouro
+        SET status = 'reprovada',
+            aprovador_id = ${userId}::uuid,
+            motivo_reprovacao = ${motivo ?? null},
+            updated_at = now()
+        WHERE id = ${Number(limpeza.id)}
+      `;
+    }
 
     await sql`
       INSERT INTO alissonerp.cofre_ouro_rastreios
@@ -133,8 +163,14 @@ export async function processarAprovacaoQuebraLimpeza(params: Params): Promise<R
   if (!insumo18k) return { ok: false, status: 500, error: "Insumo Ouro 18k Amarelo não encontrado" };
 
   const obsTxt = String((baixa as any).obs ?? "");
-  const matchPesoLimpo = obsTxt.match(/Peso limpo:\s*([0-9]+(?:\.[0-9]+)?)g/i);
-  const pesoLimpo = matchPesoLimpo ? Number(matchPesoLimpo[1]) : Number(baixa.gramas);
+  const matchesPesoLimpo = Array.from(obsTxt.matchAll(/Peso limpo:\s*([0-9]+(?:[\.,][0-9]+)?)g/gi));
+  const pesoLegado = matchesPesoLimpo.length > 0
+    ? Number(String(matchesPesoLimpo[matchesPesoLimpo.length - 1]?.[1] ?? "").replace(",", "."))
+    : Number(baixa.gramas);
+  const pesoLimpo = limpeza?.peso_limpo != null ? Number(limpeza.peso_limpo) : pesoLegado;
+  if (!Number.isFinite(pesoLimpo) || pesoLimpo <= 0) {
+    return { ok: false, status: 409, error: "Peso limpo da limpeza não encontrado" };
+  }
   const localDestino = String(baixa.destino) === "service" ? 3 : 1;
 
   await sql`
@@ -159,6 +195,16 @@ export async function processarAprovacaoQuebraLimpeza(params: Params): Promise<R
     VALUES
       (${baixaId}, 'limpeza_aprovada', ${pesoLimpo}, ${nome}, ${String(baixa.destino)}, ${'Entrada no 18k do local ' + localDestino})
   `;
+
+  if (limpeza?.id) {
+    await sql`
+      UPDATE alissonerp.limpezas_ouro
+      SET status = 'aprovada',
+          aprovador_id = ${userId}::uuid,
+          updated_at = now()
+      WHERE id = ${Number(limpeza.id)}
+    `;
+  }
 
   if (tarefa?.id) {
     await sql`

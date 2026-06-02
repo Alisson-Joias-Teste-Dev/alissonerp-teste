@@ -18,6 +18,7 @@
 
 import { useEffect, useState } from "react";
 import { useErrorStore } from "@/stores/errorStore";
+import { EvidenciasLimpeza, extrairBaixaIdLimpeza } from "@/components/EvidenciasLimpeza";
 
 interface TarefaData {
   id: number;
@@ -378,6 +379,13 @@ export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
                   </p>
                 </div>
               )}
+
+              {/* Evidências da limpeza de ouro v2 */}
+              {(() => {
+                const baixaId = extrairBaixaIdLimpeza(detalhes.tarefa.tags);
+                if (baixaId <= 0) return null;
+                return <EvidenciasLimpeza baixaId={baixaId} />;
+              })()}
 
               {modoRejeicao && (
                 <div className="flex flex-col gap-1 pt-2">

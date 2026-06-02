@@ -7,6 +7,7 @@ import {
   Paperclip, History, ArrowRightLeft,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
+import { getPublicUrl } from "@/lib/storage-url";
 import { useErrorStore } from "@/stores/errorStore";
 import { type Tarefa, type Usuario, PRIORIDADE_BADGE, STATUS_COLS } from "./TarefasClient";
 
@@ -55,6 +56,22 @@ interface Anexo {
   tipo_mime: string | null;
   usuario_nome: string | null;
   created_at: string;
+}
+
+interface EvidenciaLimpeza {
+  id: number;
+  gramas: number;
+  destino: string;
+  limpeza_peso_limpo: number | null;
+  limpeza_perda_bruta_g: number | null;
+  limpeza_perda_bruta_pct: number | null;
+  limpeza_perda_ouro_g: number | null;
+  limpeza_perda_ouro_pct: number | null;
+  limpeza_houve_pedras: boolean | null;
+  limpeza_peso_pedras: number | null;
+  limpeza_foto_antes_path: string | null;
+  limpeza_foto_depois_path: string | null;
+  limpeza_foto_peso_pedras_path: string | null;
 }
 
 interface Props {
@@ -108,6 +125,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
   const [aprovacoes, setAprovacoes] = useState<Aprovacao[]>([]);
   const [historico, setHistorico] = useState<HistoricoEntry[]>([]);
   const [anexos, setAnexos] = useState<Anexo[]>([]);
+  const [evidenciaLimpeza, setEvidenciaLimpeza] = useState<EvidenciaLimpeza | null>(null);
   const [novoComentario, setNovoComentario] = useState("");
   const [sendingComment, setSendingComment] = useState(false);
   const [aba, setAba] = useState<"detalhes" | "comentarios" | "aprovacao" | "historico" | "anexos">("detalhes");
@@ -133,6 +151,10 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
   const [delegando, setDelegando] = useState(false);
   const [novoResponsavelId, setNovoResponsavelId] = useState("");
   const [motivoDelegacao, setMotivoDelegacao] = useState("");
+
+  const baixaIdLimpeza = Array.isArray(tarefa.tags)
+    ? Number(tarefa.tags.find((t) => String(t).startsWith("limpeza_ouro:"))?.split(":")[1] ?? 0)
+    : 0;
 
   const carregarComentarios = useCallback(async () => {
     try {
@@ -166,6 +188,26 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
     carregarComentarios();
     carregarAprovacoes();
   }, [carregarComentarios, carregarAprovacoes]);
+
+  useEffect(() => {
+    /**
+     * REGRA DE NEGÓCIO: aprovação de limpeza precisa mostrar fotos antes/depois
+     * e dados de pedras antes do aprovador decidir.
+     * O QUE: busca a última tentativa estruturada da baixa vinculada à tag
+     * limpeza_ouro:{id}.
+     * POR QUE: a decisão de quebra depende de evidência visual, não só da
+     * descrição textual da tarefa.
+     * IMPACTO SE REMOVIDO: aprovador pode aprovar limpeza sem ver as fotos
+     * obrigatórias da versão 2.0.
+     */
+    if (!baixaIdLimpeza) {
+      setEvidenciaLimpeza(null);
+      return;
+    }
+    apiFetch<EvidenciaLimpeza | null>(`/api/purificacao/limpeza?baixa_id=${baixaIdLimpeza}`)
+      .then((data) => setEvidenciaLimpeza(data))
+      .catch(() => setEvidenciaLimpeza(null));
+  }, [baixaIdLimpeza]);
 
   useEffect(() => {
     if (aba === "historico") carregarHistorico();
@@ -298,8 +340,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
   const statusCol = STATUS_COLS.find(c => c.key === tarefa.status);
   const pendingAprovacao = aprovacoes.find(a => a.status === "pendente");
   const isAprovador = pendingAprovacao?.aprovador_id === currentUserId;
-  const isLimpezaOuro = Array.isArray(tarefa.tags)
-    && tarefa.tags.some((t) => String(t).startsWith("limpeza_ouro:"));
+  const isLimpezaOuro = baixaIdLimpeza > 0;
 
   return (
     <>
@@ -608,6 +649,67 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
           {/* ─── Aprovação ─── */}
           {aba === "aprovacao" && (
             <div className="p-5 space-y-4">
+              {isLimpezaOuro && evidenciaLimpeza && (
+                <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "#7C3AED33", backgroundColor: "#F5F3FF" }}>
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={16} style={{ color: "#7C3AED" }} />
+                    <p className="text-sm font-semibold" style={{ color: "#5B21B6" }}>Evidências da Limpeza</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-lg bg-white p-2 border" style={{ borderColor: "#DDD6FE" }}>
+                      <p style={{ color: "#6B7280" }}>Peso sujo</p>
+                      <p className="font-bold" style={{ color: "#111827" }}>{Number(evidenciaLimpeza.gramas).toFixed(3)}g</p>
+                    </div>
+                    <div className="rounded-lg bg-white p-2 border" style={{ borderColor: "#DDD6FE" }}>
+                      <p style={{ color: "#6B7280" }}>Peso limpo</p>
+                      <p className="font-bold" style={{ color: "#111827" }}>{evidenciaLimpeza.limpeza_peso_limpo != null ? `${Number(evidenciaLimpeza.limpeza_peso_limpo).toFixed(3)}g` : "-"}</p>
+                    </div>
+                    <div className="rounded-lg bg-white p-2 border" style={{ borderColor: "#DDD6FE" }}>
+                      <p style={{ color: "#6B7280" }}>Perda bruta</p>
+                      <p className="font-bold" style={{ color: "#111827" }}>{evidenciaLimpeza.limpeza_perda_bruta_g != null ? `${Number(evidenciaLimpeza.limpeza_perda_bruta_g).toFixed(3)}g` : "-"}</p>
+                    </div>
+                    <div className="rounded-lg bg-white p-2 border" style={{ borderColor: "#DDD6FE" }}>
+                      <p style={{ color: "#6B7280" }}>Quebra real ouro</p>
+                      <p className="font-bold" style={{ color: "#111827" }}>{evidenciaLimpeza.limpeza_perda_ouro_g != null ? `${Number(evidenciaLimpeza.limpeza_perda_ouro_g).toFixed(3)}g` : "-"}</p>
+                      {evidenciaLimpeza.limpeza_perda_ouro_pct != null && (
+                        <p className="text-[10px]" style={{ color: "#6B7280" }}>{Number(evidenciaLimpeza.limpeza_perda_ouro_pct).toFixed(2)}%</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {evidenciaLimpeza.limpeza_foto_antes_path && (
+                      <a href={getPublicUrl("purificacao-fotos", evidenciaLimpeza.limpeza_foto_antes_path)} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border bg-white" style={{ borderColor: "#DDD6FE" }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={getPublicUrl("purificacao-fotos", evidenciaLimpeza.limpeza_foto_antes_path)} alt="Antes da limpeza" className="w-full h-28 object-cover" />
+                        <p className="text-[11px] font-semibold px-2 py-1" style={{ color: "#5B21B6" }}>Antes</p>
+                      </a>
+                    )}
+                    {evidenciaLimpeza.limpeza_foto_depois_path && (
+                      <a href={getPublicUrl("purificacao-fotos", evidenciaLimpeza.limpeza_foto_depois_path)} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border bg-white" style={{ borderColor: "#DDD6FE" }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={getPublicUrl("purificacao-fotos", evidenciaLimpeza.limpeza_foto_depois_path)} alt="Depois da limpeza" className="w-full h-28 object-cover" />
+                        <p className="text-[11px] font-semibold px-2 py-1" style={{ color: "#5B21B6" }}>Depois</p>
+                      </a>
+                    )}
+                  </div>
+
+                  {evidenciaLimpeza.limpeza_houve_pedras && (
+                    <div className="rounded-xl border bg-white p-3 space-y-2" style={{ borderColor: "#DDD6FE" }}>
+                      <p className="text-xs font-semibold" style={{ color: "#5B21B6" }}>
+                        Pedras removidas: {evidenciaLimpeza.limpeza_peso_pedras != null ? `${Number(evidenciaLimpeza.limpeza_peso_pedras).toFixed(3)}g` : "peso não informado"}
+                      </p>
+                      {evidenciaLimpeza.limpeza_foto_peso_pedras_path && (
+                        <a href={getPublicUrl("purificacao-fotos", evidenciaLimpeza.limpeza_foto_peso_pedras_path)} target="_blank" rel="noreferrer" className="block rounded-lg overflow-hidden border" style={{ borderColor: "#DDD6FE" }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={getPublicUrl("purificacao-fotos", evidenciaLimpeza.limpeza_foto_peso_pedras_path)} alt="Peso das pedras" className="w-full h-32 object-cover" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {aprovacoes.length > 0 && (
                 <div className="space-y-3">
                   {aprovacoes.map(a => {

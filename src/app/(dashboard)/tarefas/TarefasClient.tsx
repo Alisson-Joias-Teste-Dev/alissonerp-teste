@@ -21,6 +21,7 @@ import TarefaDrawer from "./TarefaDrawer";
 import AutomacoesTab from "./AutomacoesTab";
 import ConfigTab from "./ConfigTab";
 import { useErrorStore } from "@/stores/errorStore";
+import { EvidenciasLimpeza, extrairBaixaIdLimpeza } from "@/components/EvidenciasLimpeza";
 
 export interface Tarefa {
   id: number;
@@ -954,6 +955,13 @@ export default function TarefasClient() {
                           ))}
                         </div>
                       ) : null;
+                    })()}
+
+                    {/* Evidências da limpeza de ouro v2 */}
+                    {(() => {
+                      const baixaId = extrairBaixaIdLimpeza(t.tags);
+                      if (baixaId <= 0) return null;
+                      return <EvidenciasLimpeza baixaId={baixaId} compact />;
                     })()}
 
                     {/* Tempo */}
