@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { STATUS_LABEL, STATUS_COLORS } from "@/lib/cofre-ouro-status";
+import { EvidenciasLimpeza } from "@/components/EvidenciasLimpeza";
 
 /**
  * REGRA DE NEGÓCIO: aba Limpeza dentro de Purificação para tratar metal sujo
@@ -478,6 +479,7 @@ export default function LimpezaTab({ userRole, userId }: Props) {
                     >
                       Abrir tarefa de aprovação
                     </button>
+                    <EvidenciasLimpeza baixaId={b.id} compact />
                 </div>
               );
             })}
@@ -511,6 +513,7 @@ export default function LimpezaTab({ userRole, userId }: Props) {
                     <p style={{ fontSize: 11, color: P.muted, margin: 0 }}>
                       Saída (limpo): {formatPeso(Number(b.limpeza_peso_limpo ?? pesoSaidaByBaixa[b.id] ?? extrairPesoSaida(b.obs) ?? Number(b.gramas)))}
                     </p>
+                    <EvidenciasLimpeza baixaId={b.id} compact />
                 </div>
               );
             })}
