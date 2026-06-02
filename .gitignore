@@ -38,6 +38,10 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Allow versioned env templates (no secrets)
+!.env.example
+!env/.env.homolog.example
+
 # vercel
 .vercel
 

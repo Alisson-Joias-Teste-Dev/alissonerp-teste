@@ -5,7 +5,13 @@
 cd "$(dirname "$0")/.."
 
 if [ ! -f .env.homolog ]; then
-  echo "❌ Template .env.homolog não encontrado"
+  echo "❌ Arquivo .env.homolog não encontrado."
+  echo ""
+  echo "   Execute o setup uma vez:"
+  echo ""
+  echo "   bash scripts/setup-homolog-env.sh"
+  echo ""
+  echo "   Depois edite .env.homolog com a senha real."
   exit 1
 fi
 
