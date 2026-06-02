@@ -1,0 +1,3 @@
+# Force LF line endings for shell scripts
+# CRLF quebra scripts no Linux/WSL — o bash interpreta \r como parte do comando
+*.sh text eol=lf
