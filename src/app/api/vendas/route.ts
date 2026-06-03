@@ -203,6 +203,21 @@ export async function GET(req: NextRequest) {
       v.updated_at,
       v.qtd_itens,
       v.total_pago,
+      EXISTS(
+        SELECT 1
+        FROM alissonerp.vendas_entrega_excecoes_pagamento ex
+        WHERE ex.venda_id = v.id AND ex.status = 'aprovado'
+      ) AS entrega_sem_pagamento_aprovada,
+      GREATEST(
+        v.total_venda - COALESCE((
+          SELECT SUM(p.valor)
+          FROM alissonerp.pagamentos_venda p
+          WHERE p.venda_id = v.id
+            AND p.status = 'confirmado'
+            AND p.data_confirmacao IS NOT NULL
+        ), 0),
+        0
+      )::numeric AS saldo_financeiro_aberto,
       ve.empresa_emitente_id,
       ve.nota_fiscal_id
     FROM alissonerp.vw_vendas_erp_completa v
@@ -236,6 +251,14 @@ export async function GET(req: NextRequest) {
       total_comissao: Number(v.total_comissao),
       total_pago:     Number(v.total_pago),
       qtd_itens:      Number(v.qtd_itens),
+      // REGRA DE NEGOCIO: selo da Automacao de Estoque 2.0 e derivado do
+      // pagamento atual + excecao aprovada. Quando o A Receber e quitado, a
+      // listagem volta automaticamente a mostrar apenas "Entregue".
+      // IMPACTO SE REMOVIDO: equipe perde visibilidade de vendas entregues com
+      // saldo financeiro aberto.
+      entrega_sem_pagamento_aprovada: Boolean(v.entrega_sem_pagamento_aprovada),
+      saldo_financeiro_aberto: Number(v.saldo_financeiro_aberto ?? 0),
+      entregue_com_pendencia_financeira: v.situacao === "entregue" && Boolean(v.entrega_sem_pagamento_aprovada) && Number(v.saldo_financeiro_aberto ?? 0) > 0.01,
     })),
     page,
     page_size: pageSize,

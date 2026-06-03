@@ -6,6 +6,7 @@ import { zodError } from "@/lib/schemas/common";
 import { estornarVenda, concluirVenda, approveVenda } from "@/lib/vendas-aprovar";
 import { logAudit } from "@/lib/audit";
 import { criarNotificacao } from "@/lib/notificacoes";
+import { vendaTemExcecaoEntregaAprovada, vendaTemPagamentoCompleto } from "@/lib/entrega-sem-pagamento";
 
 // Campos da venda que só podem ser alterados em rascunho (cliente/vendedor/data).
 // Espelha a regra do PATCH /api/vendas/[id] linhas 293-297.
@@ -214,6 +215,26 @@ export async function PATCH(
     // Situações que passam por helpers com transação própria (approveVenda / concluirVenda):
     // não podem ser envolvidas em sql.begin() externo.
     // Strategy: aplica o helper primeiro; depois marca + audit em tx separada.
+    if (campo === "situacao" && String(sol.valor_solicitado) === "entregue") {
+      /**
+       * REGRA DE NEGOCIO: Automacao de Estoque 2.0.
+       * O QUE: impede que solicitacoes_alteracao marque `entregue` por fora da
+       * aprovacao configurada quando existe saldo financeiro aberto.
+       * POR QUE: `entregue` baixa estoque real; a excecao precisa passar pelo
+       * fluxo rastreado de entrega sem pagamento total.
+       * IMPACTO SE REMOVIDO: admins poderiam furar a regra e baixar estoque sem
+       * gerar/rastrear A Receber da excecao.
+       */
+      const pagamentoCompleto = await vendaTemPagamentoCompleto(Number(sol.venda_id));
+      const excecaoAprovada = await vendaTemExcecaoEntregaAprovada(Number(sol.venda_id));
+      if (!pagamentoCompleto && !excecaoAprovada) {
+        return NextResponse.json(
+          { error: "Entrega com pagamento incompleto deve ser solicitada pelo fluxo de Entrega sem pagamento total." },
+          { status: 409 },
+        );
+      }
+    }
+
     if (campo === "situacao" && SITUACOES_COM_HELPER.has(String(sol.valor_solicitado))) {
       const v = String(sol.valor_solicitado);
       try {

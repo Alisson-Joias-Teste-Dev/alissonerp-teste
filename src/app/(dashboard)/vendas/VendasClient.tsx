@@ -66,6 +66,9 @@ interface VendaERP {
   nota_fiscal_id:     number | null;
   nfce_chave_44:      string | null;
   empresa_emitente_id: number | null;
+  entrega_sem_pagamento_aprovada?: boolean;
+  saldo_financeiro_aberto?: number;
+  entregue_com_pendencia_financeira?: boolean;
 }
 
 interface Vendedor {
@@ -536,6 +539,15 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
                 vendas.map((v, i) => {
                   const sit = SITUACAO[v.situacao] ?? { label: v.situacao, bg: "#F3F4F6", color: "#6B7280" };
                   const saldo = v.total_venda - v.total_pago;
+                  // REGRA DE NEGOCIO: Automacao de Estoque 2.0 mostra selo
+                  // especial quando a venda ja baixou estoque (`entregue`), mas
+                  // ainda tem saldo financeiro aberto por excecao aprovada.
+                  // IMPACTO SE REMOVIDO: pedido entregue sem quitacao fica
+                  // visualmente igual ao entregue totalmente pago.
+                  const sitLabel = v.entregue_com_pendencia_financeira ? "Entregue c/ pendência" : sit.label;
+                  const sitStyle = v.entregue_com_pendencia_financeira
+                    ? { bg: "#FEF3C7", color: "#92400E" }
+                    : sit;
                   return (
                     <tr
                       key={v.id}
@@ -569,9 +581,9 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
                       <td className="px-4 py-3">
                         <span
                           className="text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap"
-                          style={{ backgroundColor: sit.bg, color: sit.color }}
+                          style={{ backgroundColor: sitStyle.bg, color: sitStyle.color }}
                         >
-                          {sit.label}
+                          {sitLabel}
                         </span>
                       </td>
                       <td className="px-4 py-3">

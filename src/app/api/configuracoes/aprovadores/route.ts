@@ -10,6 +10,7 @@
 //   - vendas-credito-aprovar.ts (aprovador_credito_diretor)
 //   - aprovacao-regras.ts (aprovador_desconto, aprovador_cartao_desconto)
 //   - solicitar-aprovacao/route.ts
+//   - entrega-sem-pagamento.ts (Automacao de Estoque 2.0)
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from "next/server";
@@ -28,6 +29,7 @@ const CHAVES = [
   "aprovador_compra_comercial",
   "metal_aprovador_id",
   "aprovador_limpeza",
+  "aprovador_entrega_sem_pagamento",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -75,6 +77,26 @@ export async function GET() {
         AND ativo = true
       ORDER BY nome
     `;
+    /**
+     * REGRA DE NEGOCIO: entrega com pagamento incompleto baixa estoque de loja,
+     * entao o aprovador deve ser alguem com alçada de baixa/financeiro.
+     * IMPACTO SE AMPLIADO: consultora poderia liberar estoque sem pagamento total.
+     */
+    const aprovadoresEntregaSemPagamento = await sql`
+      SELECT id, nome, role FROM alissonerp.usuarios
+      WHERE role IN ('admin', 'desenvolvedor', 'diretor', 'gerente_fabrica', 'gerente_loja')
+        AND ativo = true
+      ORDER BY
+        CASE role
+          WHEN 'diretor' THEN 1
+          WHEN 'admin' THEN 2
+          WHEN 'desenvolvedor' THEN 3
+          WHEN 'gerente_fabrica' THEN 4
+          WHEN 'gerente_loja' THEN 5
+          ELSE 9
+        END,
+        nome
+    `;
 
     return NextResponse.json({
       aprovador_credito_diretor: configMap.get("aprovador_credito_diretor") ?? "",
@@ -84,12 +106,14 @@ export async function GET() {
       aprovador_compra_comercial: configMap.get("aprovador_compra_comercial") ?? "",
       metal_aprovador_id: configMap.get("metal_aprovador_id") ?? "",
       aprovador_limpeza: configMap.get("aprovador_limpeza") ?? "",
+      aprovador_entrega_sem_pagamento: configMap.get("aprovador_entrega_sem_pagamento") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
         admins_devs: adminsDevs,
         metal_aprovadores: aprovadoresMetal,
         aprovadores_limpeza: aprovadoresLimpeza,
+        aprovadores_entrega_sem_pagamento: aprovadoresEntregaSemPagamento,
       },
     });
   } catch {
@@ -139,6 +163,16 @@ export async function PUT(req: NextRequest) {
      */
     if (body.aprovador_limpeza !== undefined) {
       updates.push({ chave: "aprovador_limpeza", valor: body.aprovador_limpeza });
+    }
+    /**
+     * REGRA DE NEGOCIO: Automacao de Estoque 2.0 permite entregar com saldo
+     * aberto apenas com aprovador configurado. A chave roteia a tarefa de
+     * excecao; sem ela, o backend bloqueia a entrega incompleta.
+     * IMPACTO SE REMOVIDO: pedidos poderiam ficar sem responsavel claro para
+     * liberar baixa de estoque antes da quitacao total.
+     */
+    if (body.aprovador_entrega_sem_pagamento !== undefined) {
+      updates.push({ chave: "aprovador_entrega_sem_pagamento", valor: body.aprovador_entrega_sem_pagamento });
     }
 
     for (const u of updates) {

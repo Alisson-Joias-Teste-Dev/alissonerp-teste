@@ -1149,7 +1149,8 @@ BEGIN
     IF NOT FOUND THEN CONTINUE; END IF;
 
     -- GUARD Conversão 2.0: se já entrou no Caixa de Ouro, pular
-    -- A baixa do estoque comercial já foi feita no momento da aprovação
+    -- A baixa do estoque comercial acontece na entrega; aqui apenas evitamos
+    -- reprocessar conversao que ja foi registrada no cofre.
     IF v_conversao.cofre_registrado = true THEN
       CONTINUE;
     END IF;
@@ -32758,4 +32759,3 @@ ALTER TABLE public.vendedores ENABLE ROW LEVEL SECURITY;
 --
 
 \unrestrict f0zN0JzySD8CVN0VEA391PkUAeSZy3BRkQ4vTd41l7mXKhYZKrn4Id4a8qoeeNV
-

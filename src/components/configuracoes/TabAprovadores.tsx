@@ -3,7 +3,7 @@
 //
 // REGRA DE NEGÓCIO: permite que admin/desenvolvedor escolha quem aprova
 // cada tipo de solicitação (crédito, desconto, cartão, compra comercial,
-// compra de metal acima do teto).
+// compra de metal acima do teto e entrega sem pagamento total).
 // Só exibe dropdowns editáveis para admin/desenvolvedor.
 // Os demais usuários só visualizam o nome do aprovador configurado.
 //
@@ -12,6 +12,7 @@
 //   - vendas-credito-aprovar.ts
 //   - aprovacao-regras.ts
 //   - solicitar-aprovacao/route.ts
+//   - entrega-sem-pagamento.ts
 // ═══════════════════════════════════════════════════════════════════════════
 
 "use client";
@@ -29,6 +30,7 @@ interface AprovadorConfig {
   aprovador_compra_comercial?: string;
   metal_aprovador_id?: string;
   aprovador_limpeza?: string;
+  aprovador_entrega_sem_pagamento?: string;
 }
 
 interface Usuario {
@@ -43,6 +45,7 @@ interface UsuariosPorRole {
   admins_devs: Usuario[];
   metal_aprovadores: Usuario[];
   aprovadores_limpeza: Usuario[];
+  aprovadores_entrega_sem_pagamento: Usuario[];
 }
 
 const P = {
@@ -113,6 +116,22 @@ const CONFIG_ITENS = [
     usuariosKey: "aprovadores_limpeza" as const,
     icone: "🧪",
   },
+  /**
+   * REGRA DE NEGOCIO: Automacao de Estoque 2.0.
+   * O QUE: define quem pode aprovar entrega quando a venda ainda nao esta
+   * 100% paga, antes da baixa real do estoque comercial.
+   * POR QUE: estoque baixa somente em `entregue`; liberar entrega sem pagamento
+   * total exige responsavel rastreavel e alçada equivalente a baixa financeira.
+   * IMPACTO SE REMOVIDO: o backend fica sem aprovador configurado e bloqueia a
+   * excecao, ou a empresa perde controle sobre saida de estoque sem quitacao.
+   */
+  {
+    chave: "aprovador_entrega_sem_pagamento" as const,
+    titulo: "Entrega sem pagamento total",
+    descricao: "Aprova marcar pedido como entregue mesmo com saldo financeiro em aberto",
+    usuariosKey: "aprovadores_entrega_sem_pagamento" as const,
+    icone: "📦",
+  },
 ];
 
 export default function TabAprovadores() {
@@ -127,6 +146,7 @@ export default function TabAprovadores() {
     aprovador_compra_comercial: "",
     metal_aprovador_id: "",
     aprovador_limpeza: "",
+    aprovador_entrega_sem_pagamento: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
@@ -134,6 +154,7 @@ export default function TabAprovadores() {
     admins_devs: [],
     metal_aprovadores: [],
     aprovadores_limpeza: [],
+    aprovadores_entrega_sem_pagamento: [],
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -151,8 +172,9 @@ export default function TabAprovadores() {
           aprovador_compra_comercial: d.aprovador_compra_comercial ?? "",
           metal_aprovador_id: d.metal_aprovador_id ?? "",
           aprovador_limpeza: d.aprovador_limpeza ?? "",
+          aprovador_entrega_sem_pagamento: d.aprovador_entrega_sem_pagamento ?? "",
         });
-        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [] });
+        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [] });
       })
       .finally(() => setLoading(false));
   }, []);
@@ -165,7 +187,7 @@ export default function TabAprovadores() {
   function getUserName(chave: string): string {
     const id = (config as any)[chave];
     if (!id) return "";
-    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores, ...usuarios.aprovadores_limpeza];
+    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores, ...usuarios.aprovadores_limpeza, ...usuarios.aprovadores_entrega_sem_pagamento];
     const u = all.find((x) => x.id === id);
     return u?.nome ?? "";
   }

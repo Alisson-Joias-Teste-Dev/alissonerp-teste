@@ -7,9 +7,11 @@ import { isFullAccess } from "@/lib/roles";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 import { zodError, IdSchema } from "@/lib/schemas/common";
+import { internalError } from "@/lib/api-error";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { orcamentoFichaToDados, nomeItemOrdem } from "@/lib/orcamento-ficha-to-dados";
 import { isMasterAdmin } from "@/lib/master-admin";
+import { solicitarAprovacaoEntregaSemPagamento, vendaTemExcecaoEntregaAprovada } from "@/lib/entrega-sem-pagamento";
 
 const toNum = (v: unknown) => (v === null || v === undefined ? v : Number(v));
 
@@ -143,6 +145,23 @@ export async function GET(
     ORDER BY id DESC
   `;
 
+  const [excecaoEntrega] = await sql`
+    SELECT id
+    FROM alissonerp.vendas_entrega_excecoes_pagamento
+    WHERE venda_id = ${vendaId} AND status = 'aprovado'
+    LIMIT 1
+  `;
+  // REGRA DE NEGOCIO: o selo de entrega pendente nao e gravado manualmente.
+  // O QUE: deriva do snapshot de excecao aprovada + pagamento confirmado atual.
+  // POR QUE: quando o A Receber for baixado, o selo muda sozinho para Entregue.
+  // IMPACTO SE ALTERADO: status visual pode ficar congelado e esconder saldo aberto.
+  const totalConfirmadoAtual = pagamentos.reduce((acc: number, p: Record<string, unknown>) => {
+    return acc + (p.status === "confirmado" && p.data_confirmacao ? Number(p.valor ?? 0) : 0);
+  }, 0);
+  const saldoFinanceiroAberto = Math.max(0, Number(venda.total_venda ?? 0) - totalConfirmadoAtual);
+  const entregueComPendenciaFinanceira =
+    venda.situacao === "entregue" && !!excecaoEntrega && saldoFinanceiroAberto > 0.01;
+
   const descontoThreshold = await getDescontoThreshold(vendaId);
 
   return NextResponse.json({
@@ -176,6 +195,9 @@ export async function GET(
     desconto_aprovado_em: venda.desconto_aprovado_em ?? null,
     desconto_cartao_aprovado_por_nome: venda.desconto_cartao_aprovado_por_nome ?? null,
     desconto_cartao_aprovado_em: venda.desconto_cartao_aprovado_em ?? null,
+    entrega_sem_pagamento_aprovada: !!excecaoEntrega,
+    saldo_financeiro_aberto: Number(saldoFinanceiroAberto.toFixed(2)),
+    entregue_com_pendencia_financeira: entregueComPendenciaFinanceira,
     descontoThreshold,
     itens: itens.map((i) => ({
       ...i,
@@ -482,7 +504,12 @@ export async function PATCH(
   }
 
   // ── Guard: transições que avançam o status exigem pagamento completo ────────
-  // Aplica para concluido, aprovado, enviado, entregue. Rascunho e cancelado não.
+  // REGRA DE NEGOCIO: Automacao de Estoque 2.0 mantém a regra padrao de
+  // pagamento total antes da entrega. A unica excecao e `entregue` com
+  // aprovacao formal de entrega sem pagamento total; nesse caso o helper de
+  // aprovacao garante A Receber sem duplicar antes da baixa real de estoque.
+  // IMPACTO SE REMOVIDO: pedido pode baixar estoque sem pagamento e sem trilha
+  // de aprovacao/rastreio financeiro.
   if (body.situacao && ["concluido", "aprovado", "enviado", "entregue"].includes(body.situacao)) {
     const [pcCheck] = await sql`
       SELECT
@@ -494,15 +521,43 @@ export async function PATCH(
       WHERE v.id = ${vendaId}
       GROUP BY v.total_venda
     `;
-    if (Number(pcCheck?.soma_pendentes ?? 0) > 0) {
+    const somaPendentes = Number(pcCheck?.soma_pendentes ?? 0);
+    const somaPaga = Number(pcCheck?.soma_confirmados ?? 0);
+    const totalDev = Number(pcCheck?.total_venda ?? 0);
+    const pagamentoIncompleto = somaPendentes > 0 || somaPaga < totalDev - 0.01;
+    let permitirEntregaSemPagamento = false;
+
+    if (body.situacao === "entregue" && pagamentoIncompleto) {
+      const temExcecaoAprovada = await vendaTemExcecaoEntregaAprovada(vendaId);
+      if (!temExcecaoAprovada) {
+        try {
+          const result = await solicitarAprovacaoEntregaSemPagamento(vendaId, user.id);
+          return NextResponse.json(
+            {
+              ok: true,
+              precisa_aprovacao_entrega: true,
+              tarefa_id: result.tarefaId,
+              ja_existia: result.jaExistia,
+              message: result.jaExistia
+                ? "Entrega sem pagamento total já aguarda aprovação."
+                : "Entrega sem pagamento total enviada para aprovação.",
+            },
+            { status: 202 },
+          );
+        } catch (err) {
+          return internalError(`[PATCH /api/vendas/${vendaId}] entrega_sem_pagamento`, err, "Falha ao solicitar aprovação de entrega sem pagamento total", 409);
+        }
+      }
+      permitirEntregaSemPagamento = temExcecaoAprovada;
+    }
+
+    if (!permitirEntregaSemPagamento && somaPendentes > 0) {
       return NextResponse.json(
         { error: "Venda possui pagamentos pendentes. Confirme todos antes de concluir." },
         { status: 409 },
       );
     }
-    const somaPaga = Number(pcCheck?.soma_confirmados ?? 0);
-    const totalDev = Number(pcCheck?.total_venda ?? 0);
-    if (somaPaga < totalDev - 0.01) {
+    if (!permitirEntregaSemPagamento && somaPaga < totalDev - 0.01) {
       return NextResponse.json(
         { error: `Pagamento insuficiente: R$${somaPaga.toFixed(2)} confirmados de R$${totalDev.toFixed(2)} devidos.` },
         { status: 409 },
@@ -885,7 +940,10 @@ export async function PATCH(
       }
     }
 
-    // Auto-baixa estoque comercial removida — trigger 111 (trg_estoque_comercial_baixa_venda) já cuida disso.
+    // REGRA DE NEGOCIO: aprovação não baixa estoque comercial.
+    // O trigger de item cria reserva; a baixa real ocorre no trigger de entrega
+    // quando `situacao` muda para `entregue`.
+    // IMPACTO SE ALTERADO: pode duplicar saída de estoque ou antecipar baixa antes da entrega.
 
     // ── Auto-criar ordem de fabricação se venda veio de orçamento (ao aprovar ou concluir) ──
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

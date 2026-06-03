@@ -676,9 +676,10 @@ export async function approveVenda(
     }
   }
 
-  // 4. Reposição automática — após o estoque ter sido baixado pelo trigger
-  //    trg_estoque_comercial_aprovar_venda. Best-effort: erro aqui não impede
-  //    a aprovação da venda.
+  // 4. Reposição automática — aprovação NÃO baixa estoque comercial.
+  //    Itens da venda mantêm reserva ativa; a saída efetivada ocorre somente
+  //    quando a venda muda para `entregue`. Aqui verificamos reposição de forma
+  //    best-effort para antecipar falta sem bloquear a aprovação.
   try {
     const itensProdutos = await sql`
       SELECT DISTINCT produto_id

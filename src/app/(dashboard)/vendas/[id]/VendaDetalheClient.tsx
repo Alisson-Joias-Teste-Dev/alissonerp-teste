@@ -104,6 +104,9 @@ interface Venda {
   desconto_aprovado_em?: string | null;
   desconto_cartao_aprovado_por_nome?: string | null;
   desconto_cartao_aprovado_em?: string | null;
+  entrega_sem_pagamento_aprovada?: boolean;
+  saldo_financeiro_aberto?: number;
+  entregue_com_pendencia_financeira?: boolean;
   endereco_entrega?: string | null; endereco_entrega_numero?: string | null;
   endereco_entrega_complemento?: string | null; endereco_entrega_bairro?: string | null;
   endereco_entrega_cidade?: string | null; endereco_entrega_cep?: string | null;
@@ -561,6 +564,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   // ── Action states ───────────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
+  const [saveInfo, setSaveInfo] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const handleSaveRef    = useRef<() => Promise<void>>(async () => {});
@@ -1554,7 +1558,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   // ── Status change ───────────────────────────────────────────────────────────
   async function changeSituacao(s: string) {
     if (!venda) return;
-    setUpdating(true); setSaveErr("");
+    setUpdating(true); setSaveErr(""); setSaveInfo("");
     try {
       const res = await fetch(`/api/vendas/${venda.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -1584,6 +1588,16 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         return;
       }
       if (!res.ok) throw new Error((d.error as string | undefined) ?? `HTTP ${res.status}`);
+      if (d.precisa_aprovacao_entrega) {
+        // REGRA DE NEGOCIO: Automacao de Estoque 2.0 nao marca entregue quando
+        // ha saldo aberto; o backend cria tarefa de aprovacao e a baixa de
+        // estoque so acontece se o aprovador liberar.
+        // IMPACTO SE REMOVIDO: usuario recebe falso erro apesar da solicitacao
+        // ter sido criada corretamente e pode repetir a acao sem necessidade.
+        setSaveInfo((d.message as string | undefined) ?? "Entrega sem pagamento total enviada para aprovação. O pedido ainda não foi marcado como entregue.");
+        await load();
+        return;
+      }
       if (d.ordem_criada && d.tiny_warning) {
         alert(`Ordem ${d.ordem_criada} criada!\n\nAtenção: falha ao sincronizar com Tiny — ${d.tiny_warning}\nA venda ficará pendente de sync no Tiny.`);
       } else if (d.ordem_criada) {
@@ -1814,6 +1828,14 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const cartaoBloqueado = temDescontoCartao && !descontoCartaoAprovado;
   // REGRA DE NEGÓCIO #1: verifica campo próprio de cartão, não de crédito
   const precisaSolicitarDescontoCartao = cartaoBloqueado && !venda.aprovacao_cartao_desconto_tarefa_id && venda.situacao === "rascunho";
+  // REGRA DE NEGOCIO: Automacao de Estoque 2.0.
+  // O QUE: badge visual e derivado do backend quando venda entregue ainda tem
+  // saldo aberto aprovado por excecao.
+  // POR QUE: ao quitar o A Receber, o backend deixa de enviar pendencia e o selo
+  // volta automaticamente para Entregue.
+  // IMPACTO SE REMOVIDO: equipe perde visibilidade de pedidos entregues sem
+  // pagamento total.
+  const entregueComPendenciaFinanceira = !!venda.entregue_com_pendencia_financeira;
 
   return (
     <>
@@ -1834,6 +1856,12 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               style={{ backgroundColor: situacaoStyle.bg, color: situacaoStyle.text }}>
               {SITUACAO_LABEL[venda.situacao] ?? venda.situacao}
             </span>
+            {entregueComPendenciaFinanceira && (
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                Entregue com pendência financeira
+              </span>
+            )}
             {venda.tiny_pedido_id && (
               <span className="text-xs px-2.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: "#DBEAFE", color: "#1E40AF" }}>
                 Tiny #{venda.tiny_pedido_id}
@@ -1920,6 +1948,21 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           </button>
         </div>
       </div>
+
+      {/* ── Banner informativo (aprovacoes pendentes, etc.) ── */}
+      {saveInfo && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-start gap-2"
+          style={{ backgroundColor: "#EFF6FF", borderColor: "#BFDBFE", color: "#1D4ED8" }}>
+          <CheckCircle size={16} className="shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium">Solicitação registrada</p>
+            <p className="text-xs mt-0.5">{saveInfo}</p>
+          </div>
+          <button onClick={() => setSaveInfo("")} className="shrink-0 p-0.5 hover:opacity-70">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* ── Banner de erro (Tiny, status, etc.) ── */}
       {saveErr && (

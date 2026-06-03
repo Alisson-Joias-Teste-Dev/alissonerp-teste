@@ -24,6 +24,7 @@ import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
 import { criarNotificacao } from "@/lib/notificacoes";
+import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } from "@/lib/entrega-sem-pagamento";
 
 const AprovacaoTarefaPostSchema = z.object({
   aprovador_id: z.string().min(1, "obrigatório"),
@@ -333,6 +334,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const tags: string[] = Array.isArray(tagsRaw)
     ? tagsRaw
     : (typeof tagsRaw === "string" ? tagsRaw.replace(/[{}"]/g, "").split(",").filter(Boolean) : []);
+
+  /**
+   * REGRA DE NEGOCIO: Automacao de Estoque 2.0.
+   * O QUE: ao aprovar entrega sem pagamento total, reconcilia A Receber sem
+   * duplicar e so depois muda a venda para `entregue`, disparando a baixa real
+   * do estoque comercial pelos triggers existentes.
+   * POR QUE: tarefas registram a decisao, mas a excecao precisa refletir no
+   * financeiro e no estoque de forma atomica.
+   * IMPACTO SE REMOVIDO: tarefa ficaria aprovada sem entregar a venda ou sem
+   * gerar o saldo aberto no crediario.
+   */
+  if (tarefaInfo?.tipo === ENTREGA_SEM_PAGAMENTO_TIPO || tags.includes("aprov_entrega_sem_pagamento")) {
+    try {
+      const resultado = await processarAprovacaoEntregaSemPagamento(
+        Number(id),
+        user.id,
+        body.decisao,
+        body.motivo,
+      );
+      return NextResponse.json({ ok: true, entrega_sem_pagamento: resultado });
+    } catch (err) {
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] entrega_sem_pagamento`, err);
+    }
+  }
 
   /**
    * REGRA DE NEGÓCIO: aprovação de quebra da limpeza deve refletir no kanban
