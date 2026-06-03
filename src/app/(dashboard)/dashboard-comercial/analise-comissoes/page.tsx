@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { DollarSign, TrendingDown, Percent, Award } from "lucide-react";
 import DashboardHeader from "@/components/dashboard-comercial/DashboardHeader";
 import StatCard from "@/components/dashboard-comercial/StatCard";
 import ConsultoraAvatar from "@/components/dashboard-comercial/ConsultoraAvatar";
 import { LoadingBlock, ErrorBlock } from "@/components/dashboard-comercial/LoadingBlock";
 import { P } from "@/components/dashboard-comercial/theme";
-import { formatBRL, formatPercent, formatDateBR } from "@/lib/dashboard-comercial/utils";
+import { formatBRL, formatPercent, formatDateBR, sum, safeDiv } from "@/lib/dashboard-comercial/utils";
 import { useDateRange, useAnaliseComissoes } from "@/hooks/dashboard-comercial/useDashboardData";
 
 export default function AnaliseComissoesPage() {
@@ -16,6 +16,38 @@ export default function AnaliseComissoesPage() {
   const [filtroConsultora, setFiltroConsultora] = useState<number | null>(null);
   const [filtroPedido, setFiltroPedido] = useState<string>("");
   const dados = useAnaliseComissoes(from, to);
+
+  /**
+   * Itens já filtrados por consultora e pedido, limitados a 500.
+   * Base para numeração das linhas e cálculo dos totais do rodapé.
+   * REGRA DE NEGÓCIO: totais refletem os filtros ativos — se filtrar por uma consultora,
+   * os totais mostram apenas os valores dela.
+   */
+  const itensFiltrados = useMemo(() => {
+    if (!dados.data) return [];
+    return dados.data.itens_detalhados
+      .filter((i) => filtroConsultora === null || i.id_vendedor === filtroConsultora)
+      .filter((i) => !filtroPedido || String(i.numero_pedido ?? "").toLowerCase().includes(filtroPedido.toLowerCase()))
+      .slice(0, 500);
+  }, [dados.data, filtroConsultora, filtroPedido]);
+
+  /**
+   * Totais para a linha de rodapé (tfoot).
+   * Médias de desconto e comissão são ponderadas pelo valor (não média simples de percentuais).
+   * safeDiv protege contra divisão por zero quando não há itens.
+   */
+  const totais = useMemo(() => {
+    const totalCheio = sum(itensFiltrados.map((i) => i.preco_cheio));
+    const totalVendido = sum(itensFiltrados.map((i) => i.preco_vendido));
+    const totalGanho = sum(itensFiltrados.map((i) => i.comissao_ganha));
+    const totalPerdido = sum(itensFiltrados.map((i) => i.comissao_perdida));
+    // Média ponderada: desconto total / preço cheio total
+    const totalDesconto = totalCheio - totalVendido;
+    const mediaDesconto = safeDiv(totalDesconto, totalCheio) * 100;
+    // Média ponderada: comissão total / preço vendido total
+    const mediaComissao = safeDiv(totalGanho, totalVendido) * 100;
+    return { totalCheio, totalVendido, totalGanho, totalPerdido, mediaDesconto, mediaComissao };
+  }, [itensFiltrados]);
 
   return (
     <div className="p-6">
@@ -214,6 +246,7 @@ export default function AnaliseComissoesPage() {
                 <table className="w-full text-sm">
                   <thead style={{ backgroundColor: P.cremeSoft }} className="sticky top-0">
                     <tr>
+                      <th className="px-4 py-2 text-center" style={{ color: P.esmeralda, width: 40 }}>#</th>
                       <th className="px-4 py-2 text-left" style={{ color: P.esmeralda }}>Data</th>
                       <th className="px-4 py-2 text-left" style={{ color: P.esmeralda }}>Pedido</th>
                       <th className="px-4 py-2 text-left" style={{ color: P.esmeralda }}>Consultora</th>
@@ -231,8 +264,11 @@ export default function AnaliseComissoesPage() {
                     {dados.data.itens_detalhados
                       .filter((i) => filtroConsultora === null || i.id_vendedor === filtroConsultora)
                       .filter((i) => !filtroPedido || String(i.numero_pedido ?? "").toLowerCase().includes(filtroPedido.toLowerCase()))
-                      .slice(0, 500).map((i) => (
+                      .slice(0, 500).map((i, idx) => (
                       <tr key={i.id} className="border-t" style={{ borderColor: P.cremeMuted }}>
+                        <td className="px-4 py-1.5 text-center text-xs" style={{ color: P.esmeraldaMid }}>
+                          {idx + 1}
+                        </td>
                         <td className="px-4 py-1.5" style={{ color: P.esmeralda }}>
                           {formatDateBR(i.data_venda)}
                         </td>
@@ -268,9 +304,35 @@ export default function AnaliseComissoesPage() {
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-                {dados.data.itens_detalhados.length > 500 && (
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ borderTop: `2px solid ${P.esmeraldaMid}`, background: P.cremeSoft }}>
+                        <td style={{ padding: "10px 4px" }} />
+                        <td style={{ padding: "10px 6px", color: P.esmeralda, fontWeight: 700, fontSize: 13 }} colSpan={5}>
+                          TOTAL — {itensFiltrados.length} {itensFiltrados.length === 1 ? "item" : "itens"}
+                        </td>
+                        <td style={{ padding: "10px 6px", textAlign: "right", color: P.esmeraldaMid, fontWeight: 700, fontSize: 13 }}>
+                          {formatBRL(totais.totalCheio)}
+                        </td>
+                        <td style={{ padding: "10px 6px", textAlign: "right", color: P.esmeralda, fontWeight: 700, fontSize: 13 }}>
+                          {formatBRL(totais.totalVendido)}
+                        </td>
+                        <td style={{ padding: "10px 6px", textAlign: "right", color: P.erro, fontWeight: 700, fontSize: 13 }}>
+                          {formatPercent(totais.mediaDesconto)}
+                        </td>
+                        <td style={{ padding: "10px 6px", textAlign: "right", color: P.dourado, fontWeight: 700, fontSize: 13 }}>
+                          {formatPercent(totais.mediaComissao)}
+                        </td>
+                        <td style={{ padding: "10px 6px", textAlign: "right", color: P.sucesso, fontWeight: 700, fontSize: 13 }}>
+                          {formatBRL(totais.totalGanho)}
+                        </td>
+                        <td style={{ padding: "10px 6px", textAlign: "right", color: P.erro, fontWeight: 700, fontSize: 13 }}>
+                          {formatBRL(totais.totalPerdido)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                  {dados.data.itens_detalhados.length > 500 && (
                   <div
                     className="border-t px-4 py-2 text-center text-xs"
                     style={{ color: P.esmeraldaMid, borderColor: P.cremeMuted }}
