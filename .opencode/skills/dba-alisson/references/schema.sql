@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict f0zN0JzySD8CVN0VEA391PkUAeSZy3BRkQ4vTd41l7mXKhYZKrn4Id4a8qoeeNV
+\restrict p8uWog6A656LdNOXJ6DMH0IwaOgSWe1kgg7Wc1aL36W9GpxMn4u4AFfitbyxX9L
 
 -- Dumped from database version 15.8
 -- Dumped by pg_dump version 15.18 (Ubuntu 15.18-1.pgdg24.04+1)
@@ -1149,8 +1149,7 @@ BEGIN
     IF NOT FOUND THEN CONTINUE; END IF;
 
     -- GUARD Conversão 2.0: se já entrou no Caixa de Ouro, pular
-    -- A baixa do estoque comercial acontece na entrega; aqui apenas evitamos
-    -- reprocessar conversao que ja foi registrada no cofre.
+    -- A baixa do estoque comercial já foi feita no momento da aprovação
     IF v_conversao.cofre_registrado = true THEN
       CONTINUE;
     END IF;
@@ -4153,6 +4152,20 @@ CREATE FUNCTION alissonerp.fn_updated_at_mp_point_devices() RETURNS trigger
 
 
 --
+-- Name: fn_updated_at_pagbank_devices(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.fn_updated_at_pagbank_devices() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at := NOW();
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: fn_updated_at_tarefas(); Type: FUNCTION; Schema: alissonerp; Owner: -
 --
 
@@ -7129,7 +7142,7 @@ CREATE TABLE alissonerp.cofre_ouro_baixa_itens (
     valor_brl numeric(12,2) DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT cofre_ouro_baixa_itens_gramas_check CHECK ((gramas > (0)::numeric)),
-    CONSTRAINT cofre_ouro_baixa_itens_origem_tipo_check CHECK (((origem_tipo)::text = ANY ((ARRAY['venda_ouro'::character varying, 'compra_metal'::character varying, 'recebimento_metal'::character varying])::text[])))
+    CONSTRAINT cofre_ouro_baixa_itens_origem_tipo_check CHECK (((origem_tipo)::text = ANY ((ARRAY['venda_ouro'::character varying, 'compra_metal'::character varying, 'recebimento_metal'::character varying, 'conversao'::character varying])::text[])))
 );
 
 
@@ -10152,6 +10165,79 @@ ALTER SEQUENCE alissonerp.itens_venda_personalizacao_id_seq OWNED BY alissonerp.
 
 
 --
+-- Name: itens_venda_upgrade; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.itens_venda_upgrade (
+    item_venda_id integer NOT NULL,
+    peso_gramas numeric(10,4) NOT NULL,
+    peso_liquido numeric(10,4) NOT NULL,
+    quebra_percentual numeric(5,2) NOT NULL,
+    valor_por_grama numeric(15,2) NOT NULL,
+    foto_balanca_path text NOT NULL,
+    cofre_registrado boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT itens_venda_upgrade_peso_gramas_check CHECK ((peso_gramas > (0)::numeric))
+);
+
+
+--
+-- Name: TABLE itens_venda_upgrade; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON TABLE alissonerp.itens_venda_upgrade IS 'Snapshot do upgrade no momento da venda. Congela peso, quebra e valor/grama.';
+
+
+--
+-- Name: COLUMN itens_venda_upgrade.item_venda_id; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.itens_venda_upgrade.item_venda_id IS 'FK para alissonerp.itens_venda_erp(id). Um item só pode ter 1 upgrade (UNIQUE). ON DELETE CASCADE.';
+
+
+--
+-- Name: COLUMN itens_venda_upgrade.peso_gramas; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.itens_venda_upgrade.peso_gramas IS 'Peso bruto do ouro entregue pelo cliente, em gramas (foto da balança).';
+
+
+--
+-- Name: COLUMN itens_venda_upgrade.peso_liquido; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.itens_venda_upgrade.peso_liquido IS 'Peso líquido após aplicar a quebra: peso_gramas * (1 - quebra_percentual/100).';
+
+
+--
+-- Name: COLUMN itens_venda_upgrade.quebra_percentual; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.itens_venda_upgrade.quebra_percentual IS 'Percentual de quebra aplicado (snapshot da config no momento da venda).';
+
+
+--
+-- Name: COLUMN itens_venda_upgrade.valor_por_grama; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.itens_venda_upgrade.valor_por_grama IS 'Valor da mão de obra por grama (snapshot da config no momento da venda).';
+
+
+--
+-- Name: COLUMN itens_venda_upgrade.foto_balanca_path; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.itens_venda_upgrade.foto_balanca_path IS 'Caminho da foto da balança no bucket de storage. Obrigatório.';
+
+
+--
+-- Name: COLUMN itens_venda_upgrade.cofre_registrado; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.itens_venda_upgrade.cofre_registrado IS 'Se true, o peso bruto já foi registrado no cofre_ouro_rastreios (na aprovação da venda).';
+
+
+--
 -- Name: joias_leituras; Type: TABLE; Schema: alissonerp; Owner: -
 --
 
@@ -11525,7 +11611,7 @@ CREATE TABLE alissonerp.pagamentos_venda (
     source character varying(20),
     ouro_peso numeric(10,3),
     ouro_foto_path text,
-    CONSTRAINT pagamentos_venda_source_check CHECK (((source)::text = ANY ((ARRAY['webhook_mp'::character varying, 'manual_mp'::character varying, 'pdv'::character varying, 'manual'::character varying, 'ouro'::character varying, 'dinheiro'::character varying, 'vale_troca'::character varying, 'a_receber'::character varying])::text[])))
+    CONSTRAINT chk_pagamentos_venda_source CHECK (((source)::text = ANY ((ARRAY['webhook_mp'::character varying, 'manual_mp'::character varying, 'webhook_pagbank'::character varying, 'manual_pagbank'::character varying, 'pdv'::character varying, 'manual'::character varying, 'ouro'::character varying, 'dinheiro'::character varying, 'vale_troca'::character varying, 'a_receber'::character varying])::text[])))
 );
 
 
@@ -11547,6 +11633,44 @@ CREATE SEQUENCE alissonerp.pagamentos_venda_id_seq
 --
 
 ALTER SEQUENCE alissonerp.pagamentos_venda_id_seq OWNED BY alissonerp.pagamentos_venda.id;
+
+
+--
+-- Name: pagbank_devices; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.pagbank_devices (
+    id integer NOT NULL,
+    device_id text NOT NULL,
+    nome_legivel text NOT NULL,
+    ativo boolean DEFAULT true NOT NULL,
+    loja text,
+    vendedor_id integer,
+    is_reserva boolean DEFAULT false NOT NULL,
+    last_sync_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: pagbank_devices_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.pagbank_devices_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: pagbank_devices_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.pagbank_devices_id_seq OWNED BY alissonerp.pagbank_devices.id;
 
 
 --
@@ -12580,6 +12704,57 @@ CREATE TABLE alissonerp.produto_tipo_item (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT produto_tipo_item_tipo_item_check CHECK ((tipo_item = ANY (ARRAY['joia'::text, 'insumo'::text, 'servico'::text])))
 );
+
+
+--
+-- Name: produto_upgrade_config; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.produto_upgrade_config (
+    produto_id bigint NOT NULL,
+    valor_por_grama numeric(15,2) NOT NULL,
+    quebra_percentual numeric(5,2) DEFAULT 10.00 NOT NULL,
+    ativo boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT produto_upgrade_config_quebra_percentual_check CHECK (((quebra_percentual >= (0)::numeric) AND (quebra_percentual <= (100)::numeric))),
+    CONSTRAINT produto_upgrade_config_valor_por_grama_check CHECK ((valor_por_grama > (0)::numeric))
+);
+
+
+--
+-- Name: TABLE produto_upgrade_config; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON TABLE alissonerp.produto_upgrade_config IS 'Configuração de upgrade por produto: valor da mão de obra por grama e percentual de quebra.';
+
+
+--
+-- Name: COLUMN produto_upgrade_config.produto_id; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.produto_upgrade_config.produto_id IS 'FK para public.produtos(id_produto). Um produto só pode ter 1 config de upgrade (UNIQUE).';
+
+
+--
+-- Name: COLUMN produto_upgrade_config.valor_por_grama; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.produto_upgrade_config.valor_por_grama IS 'Valor cobrado pela mão de obra, em R$ por grama de ouro entregue pelo cliente.';
+
+
+--
+-- Name: COLUMN produto_upgrade_config.quebra_percentual; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.produto_upgrade_config.quebra_percentual IS 'Percentual de perda no processo (informativo, não afeta o cofre). Padrão: 10%.';
+
+
+--
+-- Name: COLUMN produto_upgrade_config.ativo; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.produto_upgrade_config.ativo IS 'Se false, o upgrade não é oferecido para este produto.';
 
 
 --
@@ -14538,6 +14713,67 @@ CREATE SEQUENCE alissonerp.venda_numero_seq
     NO MINVALUE
     NO MAXVALUE
     CACHE 1;
+
+
+--
+-- Name: vendas_entrega_excecoes_pagamento; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.vendas_entrega_excecoes_pagamento (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    venda_id integer NOT NULL,
+    tarefa_id integer,
+    solicitante_id uuid,
+    aprovador_id uuid,
+    status text DEFAULT 'pendente'::text NOT NULL,
+    total_venda numeric(15,2) DEFAULT 0 NOT NULL,
+    valor_confirmado_no_momento numeric(15,2) DEFAULT 0 NOT NULL,
+    valor_a_receber_existente_no_momento numeric(15,2) DEFAULT 0 NOT NULL,
+    valor_aberto_no_momento numeric(15,2) DEFAULT 0 NOT NULL,
+    motivo_solicitacao text NOT NULL,
+    motivo_decisao text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    respondido_em timestamp with time zone,
+    CONSTRAINT vendas_entrega_excecoes_pagamento_decisao_check CHECK ((((status = 'pendente'::text) AND (respondido_em IS NULL)) OR ((status = ANY (ARRAY['aprovado'::text, 'rejeitado'::text])) AND (respondido_em IS NOT NULL)))),
+    CONSTRAINT vendas_entrega_excecoes_pagamento_status_check CHECK ((status = ANY (ARRAY['pendente'::text, 'aprovado'::text, 'rejeitado'::text]))),
+    CONSTRAINT vendas_entrega_excecoes_pagamento_valores_check CHECK (((total_venda >= (0)::numeric) AND (valor_confirmado_no_momento >= (0)::numeric) AND (valor_a_receber_existente_no_momento >= (0)::numeric) AND (valor_aberto_no_momento >= (0)::numeric)))
+);
+
+
+--
+-- Name: TABLE vendas_entrega_excecoes_pagamento; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON TABLE alissonerp.vendas_entrega_excecoes_pagamento IS 'Evento de negocio para rastrear entrega de venda com pagamento incompleto. Nao substitui contas_receber nem pagamentos_venda.';
+
+
+--
+-- Name: COLUMN vendas_entrega_excecoes_pagamento.total_venda; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.vendas_entrega_excecoes_pagamento.total_venda IS 'Snapshot do total da venda no momento da solicitacao. Nao e fonte financeira oficial.';
+
+
+--
+-- Name: COLUMN vendas_entrega_excecoes_pagamento.valor_confirmado_no_momento; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.vendas_entrega_excecoes_pagamento.valor_confirmado_no_momento IS 'Snapshot do valor ja confirmado no momento da solicitacao. A fonte oficial continua em pagamentos_venda.';
+
+
+--
+-- Name: COLUMN vendas_entrega_excecoes_pagamento.valor_a_receber_existente_no_momento; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.vendas_entrega_excecoes_pagamento.valor_a_receber_existente_no_momento IS 'Snapshot do valor ja lancado em A Receber no momento da solicitacao. A fonte oficial continua em pagamentos_venda/contas_receber.';
+
+
+--
+-- Name: COLUMN vendas_entrega_excecoes_pagamento.valor_aberto_no_momento; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON COLUMN alissonerp.vendas_entrega_excecoes_pagamento.valor_aberto_no_momento IS 'Snapshot do valor ainda aberto no momento da solicitacao. Usado apenas para auditoria da excecao.';
 
 
 --
@@ -21658,6 +21894,13 @@ ALTER TABLE ONLY alissonerp.pagamentos_venda ALTER COLUMN id SET DEFAULT nextval
 
 
 --
+-- Name: pagbank_devices id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagbank_devices ALTER COLUMN id SET DEFAULT nextval('alissonerp.pagbank_devices_id_seq'::regclass);
+
+
+--
 -- Name: pcp id; Type: DEFAULT; Schema: alissonerp; Owner: -
 --
 
@@ -22914,6 +23157,14 @@ ALTER TABLE ONLY alissonerp.itens_venda_personalizacao
 
 
 --
+-- Name: itens_venda_upgrade itens_venda_upgrade_item_venda_id_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.itens_venda_upgrade
+    ADD CONSTRAINT itens_venda_upgrade_item_venda_id_key UNIQUE (item_venda_id);
+
+
+--
 -- Name: joias_leituras joias_leituras_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -23178,6 +23429,22 @@ ALTER TABLE ONLY alissonerp.pagamentos_venda
 
 
 --
+-- Name: pagbank_devices pagbank_devices_device_id_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagbank_devices
+    ADD CONSTRAINT pagbank_devices_device_id_key UNIQUE (device_id);
+
+
+--
+-- Name: pagbank_devices pagbank_devices_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagbank_devices
+    ADD CONSTRAINT pagbank_devices_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: parametros parametros_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -23391,6 +23658,14 @@ ALTER TABLE ONLY alissonerp.produto_rota
 
 ALTER TABLE ONLY alissonerp.produto_tipo_item
     ADD CONSTRAINT produto_tipo_item_pkey PRIMARY KEY (produto_id);
+
+
+--
+-- Name: produto_upgrade_config produto_upgrade_config_produto_id_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.produto_upgrade_config
+    ADD CONSTRAINT produto_upgrade_config_produto_id_key UNIQUE (produto_id);
 
 
 --
@@ -23855,6 +24130,14 @@ ALTER TABLE ONLY alissonerp.vale_troca
 
 ALTER TABLE ONLY alissonerp.vale_troca
     ADD CONSTRAINT vale_troca_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: vendas_entrega_excecoes_pagamento vendas_entrega_excecoes_pagamento_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.vendas_entrega_excecoes_pagamento
+    ADD CONSTRAINT vendas_entrega_excecoes_pagamento_pkey PRIMARY KEY (id);
 
 
 --
@@ -25930,6 +26213,13 @@ CREATE INDEX idx_pagamentos_venda_gateway_id ON alissonerp.pagamentos_venda USIN
 
 
 --
+-- Name: idx_pagbank_devices_ativo; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_pagbank_devices_ativo ON alissonerp.pagbank_devices USING btree (ativo) WHERE (ativo = true);
+
+
+--
 -- Name: idx_pcp_etapas; Type: INDEX; Schema: alissonerp; Owner: -
 --
 
@@ -26074,6 +26364,13 @@ CREATE INDEX idx_produto_rota_setor ON alissonerp.produto_rota USING btree (seto
 --
 
 CREATE INDEX idx_produto_tipo_item_tipo ON alissonerp.produto_tipo_item USING btree (tipo_item);
+
+
+--
+-- Name: idx_produto_upgrade_config_ativo; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_produto_upgrade_config_ativo ON alissonerp.produto_upgrade_config USING btree (produto_id, ativo);
 
 
 --
@@ -26553,6 +26850,27 @@ CREATE INDEX idx_vale_troca_status ON alissonerp.vale_troca USING btree (status)
 
 
 --
+-- Name: idx_vendas_entrega_excecoes_pagamento_status; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_vendas_entrega_excecoes_pagamento_status ON alissonerp.vendas_entrega_excecoes_pagamento USING btree (status);
+
+
+--
+-- Name: idx_vendas_entrega_excecoes_pagamento_tarefa; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_vendas_entrega_excecoes_pagamento_tarefa ON alissonerp.vendas_entrega_excecoes_pagamento USING btree (tarefa_id) WHERE (tarefa_id IS NOT NULL);
+
+
+--
+-- Name: idx_vendas_entrega_excecoes_pagamento_venda; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_vendas_entrega_excecoes_pagamento_venda ON alissonerp.vendas_entrega_excecoes_pagamento USING btree (venda_id);
+
+
+--
 -- Name: idx_vendas_erp_empresa_emitente; Type: INDEX; Schema: alissonerp; Owner: -
 --
 
@@ -26711,6 +27029,20 @@ CREATE UNIQUE INDEX uq_regras_fiscais_sem_empresa ON alissonerp.regras_fiscais U
 --
 
 CREATE UNIQUE INDEX uq_regras_fiscais_sem_uf ON alissonerp.regras_fiscais USING btree (empresa_emitente_id, ncm) WHERE ((empresa_emitente_id IS NOT NULL) AND (uf_destino IS NULL));
+
+
+--
+-- Name: uq_vendas_entrega_excecoes_pagamento_aprovada_por_venda; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_vendas_entrega_excecoes_pagamento_aprovada_por_venda ON alissonerp.vendas_entrega_excecoes_pagamento USING btree (venda_id) WHERE (status = 'aprovado'::text);
+
+
+--
+-- Name: uq_vendas_entrega_excecoes_pagamento_pendente_por_venda; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_vendas_entrega_excecoes_pagamento_pendente_por_venda ON alissonerp.vendas_entrega_excecoes_pagamento USING btree (venda_id) WHERE (status = 'pendente'::text);
 
 
 --
@@ -27558,6 +27890,20 @@ CREATE TRIGGER trg_updated_at_conversoes_sku BEFORE UPDATE ON alissonerp.convers
 --
 
 CREATE TRIGGER trg_updated_at_mp_point_devices BEFORE UPDATE ON alissonerp.mp_point_devices FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_updated_at_mp_point_devices();
+
+
+--
+-- Name: pagbank_devices trg_updated_at_pagbank_devices; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_updated_at_pagbank_devices BEFORE UPDATE ON alissonerp.pagbank_devices FOR EACH ROW EXECUTE FUNCTION alissonerp.fn_updated_at_pagbank_devices();
+
+
+--
+-- Name: produto_upgrade_config trg_updated_at_produto_upgrade_config; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_updated_at_produto_upgrade_config BEFORE UPDATE ON alissonerp.produto_upgrade_config FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -28914,11 +29260,27 @@ ALTER TABLE ONLY alissonerp.devolucoes_venda
 
 
 --
+-- Name: itens_venda_upgrade fk_itens_venda_upgrade_item; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.itens_venda_upgrade
+    ADD CONSTRAINT fk_itens_venda_upgrade_item FOREIGN KEY (item_venda_id) REFERENCES alissonerp.itens_venda_erp(id) ON DELETE CASCADE;
+
+
+--
 -- Name: ordens fk_ordens_distribuicao; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
 ALTER TABLE ONLY alissonerp.ordens
     ADD CONSTRAINT fk_ordens_distribuicao FOREIGN KEY (distribuicao_id) REFERENCES alissonerp.distribuicoes(id) ON DELETE SET NULL;
+
+
+--
+-- Name: produto_upgrade_config fk_produto_upgrade_config_produto; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.produto_upgrade_config
+    ADD CONSTRAINT fk_produto_upgrade_config_produto FOREIGN KEY (produto_id) REFERENCES public.produtos(id_produto);
 
 
 --
@@ -30578,6 +30940,38 @@ ALTER TABLE ONLY alissonerp.vale_troca
 
 
 --
+-- Name: vendas_entrega_excecoes_pagamento vendas_entrega_excecoes_pagamento_aprovador_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.vendas_entrega_excecoes_pagamento
+    ADD CONSTRAINT vendas_entrega_excecoes_pagamento_aprovador_id_fkey FOREIGN KEY (aprovador_id) REFERENCES auth.users(id);
+
+
+--
+-- Name: vendas_entrega_excecoes_pagamento vendas_entrega_excecoes_pagamento_solicitante_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.vendas_entrega_excecoes_pagamento
+    ADD CONSTRAINT vendas_entrega_excecoes_pagamento_solicitante_id_fkey FOREIGN KEY (solicitante_id) REFERENCES auth.users(id);
+
+
+--
+-- Name: vendas_entrega_excecoes_pagamento vendas_entrega_excecoes_pagamento_tarefa_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.vendas_entrega_excecoes_pagamento
+    ADD CONSTRAINT vendas_entrega_excecoes_pagamento_tarefa_id_fkey FOREIGN KEY (tarefa_id) REFERENCES alissonerp.tarefas(id) ON DELETE SET NULL;
+
+
+--
+-- Name: vendas_entrega_excecoes_pagamento vendas_entrega_excecoes_pagamento_venda_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.vendas_entrega_excecoes_pagamento
+    ADD CONSTRAINT vendas_entrega_excecoes_pagamento_venda_id_fkey FOREIGN KEY (venda_id) REFERENCES alissonerp.vendas_erp(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: vendas_erp vendas_erp_aprovacao_cartao_desconto_tarefa_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -31443,6 +31837,12 @@ CREATE POLICY gerente_fab_protocolos ON alissonerp.protocolos TO authenticated U
 
 
 --
+-- Name: itens_venda_upgrade; Type: ROW SECURITY; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE alissonerp.itens_venda_upgrade ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: protocolos motoboy_select_protocolos; Type: POLICY; Schema: alissonerp; Owner: -
 --
 
@@ -31533,6 +31933,12 @@ ALTER TABLE alissonerp.pcp ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE alissonerp.preparacoes_entrega ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: produto_upgrade_config; Type: ROW SECURITY; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE alissonerp.produto_upgrade_config ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: protocolo_fotos; Type: ROW SECURITY; Schema: alissonerp; Owner: -
@@ -32758,4 +33164,5 @@ ALTER TABLE public.vendedores ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict f0zN0JzySD8CVN0VEA391PkUAeSZy3BRkQ4vTd41l7mXKhYZKrn4Id4a8qoeeNV
+\unrestrict p8uWog6A656LdNOXJ6DMH0IwaOgSWe1kgg7Wc1aL36W9GpxMn4u4AFfitbyxX9L
+

@@ -5,6 +5,8 @@ import {
 } from "lucide-react";
 import CartaoInline from "@/components/vendas/CartaoInline";
 import PixQrInline from "@/components/vendas/PixQrInline";
+import PagBankCobranca from "@/components/vendas/PagBankCobranca";
+import PagBankQrInline from "@/components/vendas/PagBankQrInline";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -169,7 +171,7 @@ export interface PagamentoFormProps {
 /** Métodos de pagamento fixos (não dependem de gateways do banco) */
 const FORMAS_PAGAMENTO_BASE = [
   "Dinheiro", "Cartão de Crédito", "Pix", "Ouro",
-  "Vale-Troca", "A Receber", "Múltiplas", "Manual (MP)",
+  "Vale-Troca", "A Receber", "Múltiplas", "Manual (MP)", "Manual (PagBank)",
 ];
 
 const CONDICOES = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
@@ -247,7 +249,7 @@ export default function PagamentoForm({
   multOuroValidando, setMultOuroValidando,
   // Manual (MP)
   mpManualId, setMpManualId,
-  mpManualLoading,
+  mpManualLoading, setMpManualLoading,
   mpManualMsg, setMpManualMsg,
   // Valor form simples
   pagFormValor, setPagFormValor,
@@ -381,7 +383,7 @@ export default function PagamentoForm({
             <div>
               <Label>Gateway</Label>
               <Sel value={pagGateway} onChange={e => setPagGateway(e.target.value)}>
-                {gateways.filter(g => g.nome === "Mercado Pago").map(g => <option key={g.id} value={g.nome}>{g.nome}</option>)}
+                {gateways.filter(g => g.nome === "Mercado Pago" || g.nome === "PagBank").map(g => <option key={g.id} value={g.nome}>{g.nome}</option>)}
               </Sel>
             </div>
             {pagForma === "Cartão de Crédito" && (
@@ -460,20 +462,49 @@ export default function PagamentoForm({
         </div>
       )}
 
-      {/* Pix In-Store (só no modo criacao; edicao usa o botão Registrar) */}
-      {pagForma === "Pix" && totalVenda > 0 && mode === "criacao" && (
+      {/* Pix — Mercado Pago */}
+      {pagForma === "Pix" && totalVenda > 0 && mode === "criacao" && pagGateway === "Mercado Pago" && (
         <PixQrInline
           vendaId={vendaId ?? null}
           numeroVenda={numeroVenda || "Nova"}
           valor={totalVenda}
           endpoint="criar-pix-instore"
           obterVendaId={mode === "criacao" && !vendaId ? obterVendaId : undefined}
-          onPagamentoConfirmado={onPagamentoConfirmado ?? (() => {})}
+          onPagamentoConfirmado={() => {
+            /**
+             * REGRA DE NEGÓCIO: confirmação PagBank em criação precisa devolver
+             * o ID da venda para a tela avançar/abrir detalhe corretamente.
+             * O QUE: adapta callback sem argumento do modal para o contrato do form.
+             * POR QUE: PagBankCobranca só sinaliza confirmação; o form conhece vendaId.
+             * IMPACTO SE REMOVIDO: confirmação compila quebrada ou não navega após pagar.
+             */
+            if (vendaId) onPagamentoConfirmado?.(vendaId);
+          }}
         />
       )}
 
-      {/* Cartão inline (só no modo criacao; edicao usa o botão Registrar) */}
-      {pagForma === "Cartão de Crédito" && totalVenda > 0 && mode === "criacao" && (() => {
+      {/* Pix — PagBank */}
+      {pagForma === "Pix" && totalVenda > 0 && mode === "criacao" && pagGateway === "PagBank" && (
+        <PagBankQrInline
+          vendaId={vendaId ?? null}
+          numeroVenda={numeroVenda || "Nova"}
+          valor={totalVenda}
+          obterVendaId={mode === "criacao" && !vendaId ? obterVendaId : undefined}
+          onPagamentoConfirmado={() => {
+            /**
+             * REGRA DE NEGÓCIO: confirmação PagBank em criação precisa devolver
+             * o ID da venda para a tela avançar/abrir detalhe corretamente.
+             * O QUE: adapta callback sem argumento do modal para o contrato do form.
+             * POR QUE: PagBankCobranca só sinaliza confirmação; o form conhece vendaId.
+             * IMPACTO SE REMOVIDO: confirmação compila quebrada ou não navega após pagar.
+             */
+            if (vendaId) onPagamentoConfirmado?.(vendaId);
+          }}
+        />
+      )}
+
+      {/* Cartão inline — Mercado Pago */}
+      {pagForma === "Cartão de Crédito" && totalVenda > 0 && mode === "criacao" && pagGateway === "Mercado Pago" && (() => {
         if (cartaoBloqueado) {
           return (
             <div className="rounded-xl border p-4 space-y-3"
@@ -511,6 +542,27 @@ export default function PagamentoForm({
         );
       })()}
 
+      {/* Cartão inline — PagBank */}
+      {pagForma === "Cartão de Crédito" && totalVenda > 0 && mode === "criacao" && pagGateway === "PagBank" && (
+        <PagBankCobranca
+          vendaId={vendaId ?? 0}
+          numeroVenda={numeroVenda || "Nova"}
+          valorSugerido={totalVenda}
+          situacao={"rascunho"}
+          bloqueado={cartaoBloqueado ?? false}
+          onPagamentoConfirmado={() => {
+            /**
+             * REGRA DE NEGÓCIO: confirmação PagBank em criação precisa devolver
+             * o ID da venda para a tela avançar/abrir detalhe corretamente.
+             * O QUE: adapta callback sem argumento do modal para o contrato do form.
+             * POR QUE: PagBankCobranca só sinaliza confirmação; o form conhece vendaId.
+             * IMPACTO SE REMOVIDO: confirmação compila quebrada ou não navega após pagar.
+             */
+            if (vendaId) onPagamentoConfirmado?.(vendaId);
+          }}
+        />
+      )}
+
       {/* Manual (MP) */}
       {pagForma === "Manual (MP)" && vendaId && (
         <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
@@ -531,6 +583,55 @@ export default function PagamentoForm({
             </p>
           )}
           <button onClick={handleMpManual}
+            disabled={mpManualLoading || !mpManualId.trim() || saving}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+            {mpManualLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+            Verificar e Registrar
+          </button>
+        </div>
+      )}
+
+      {/* Manual (PagBank) */}
+      {pagForma === "Manual (PagBank)" && vendaId && (
+        <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
+          <p className="text-xs" style={{ color: "#6B7280" }}>
+            Cole o ID do pedido ou cobrança do PagBank. O sistema vai consultar o PagBank e registrar automaticamente se estiver aprovado.
+          </p>
+          <div>
+            <Label>ID do Pedido/Cobrança (PagBank)</Label>
+            <input type="text" value={mpManualId}
+              onChange={e => setMpManualId(e.target.value)}
+              placeholder="ex: ORDE_123456789 ou CHAR_987654321"
+              className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none font-mono"
+              style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+          </div>
+          {mpManualMsg && (
+            <p className="text-xs font-medium" style={{ color: mpManualMsg.ok ? "#059669" : "#DC2626" }}>
+              {mpManualMsg.text}
+            </p>
+          )}
+          <button
+            onClick={async () => {
+              if (!vendaId) return;
+              setMpManualLoading(true);
+              setMpManualMsg(null);
+              try {
+                const res = await fetch(`/api/vendas/${vendaId}/pagbank/verificar-manual`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ payment_id: mpManualId.trim() }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || "Erro ao verificar PagBank");
+                setMpManualMsg({ text: `Pagamento PagBank confirmado! R$ ${(data as any).pb_valor?.toFixed(2) ?? "?"}`, ok: true });
+                onPagamentoConfirmado?.(vendaId);
+              } catch (err) {
+                setMpManualMsg({ text: err instanceof Error ? err.message : "Erro ao verificar", ok: false });
+              } finally {
+                setMpManualLoading(false);
+              }
+            }}
             disabled={mpManualLoading || !mpManualId.trim() || saving}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
             style={{ backgroundColor: C.esmeralda, color: C.creme }}>

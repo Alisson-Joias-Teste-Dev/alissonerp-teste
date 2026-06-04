@@ -109,14 +109,22 @@ export async function GET(
 
   const itens = await sql`
     SELECT
-      id, produto_id, nome_produto, sku,
-      quantidade,
-      preco_lista, pct_desconto, preco_unitario, total_item,
-      pct_comissao, valor_comissao, markup_aplicado,
-      desconto_autorizado_por, observacao, peso_estimado, personalizacao, created_at
-    FROM alissonerp.itens_venda_erp
-    WHERE venda_id = ${vendaId}
-    ORDER BY id
+      ive.id, ive.produto_id, ive.nome_produto, ive.sku,
+      ive.quantidade,
+      ive.preco_lista, ive.pct_desconto, ive.preco_unitario, ive.total_item,
+      ive.pct_comissao, ive.valor_comissao, ive.markup_aplicado,
+      ive.desconto_autorizado_por, ive.observacao, ive.peso_estimado, ive.personalizacao, ive.created_at,
+      -- Dados de upgrade (se existirem)
+      iuv.peso_gramas      AS upgrade_peso_gramas,
+      iuv.peso_liquido     AS upgrade_peso_liquido,
+      iuv.quebra_percentual AS upgrade_quebra_percentual,
+      iuv.valor_por_grama  AS upgrade_valor_por_grama,
+      iuv.foto_balanca_path AS upgrade_foto_balanca_path,
+      iuv.cofre_registrado AS upgrade_cofre_registrado
+    FROM alissonerp.itens_venda_erp ive
+    LEFT JOIN alissonerp.itens_venda_upgrade iuv ON iuv.item_venda_id = ive.id
+    WHERE ive.venda_id = ${vendaId}
+    ORDER BY ive.id
   `;
 
   const pagamentos = await sql`
@@ -209,6 +217,15 @@ export async function GET(
       pct_comissao:    Number(i.pct_comissao),
       valor_comissao:  Number(i.valor_comissao),
       markup_aplicado: i.markup_aplicado != null ? Number(i.markup_aplicado) : null,
+      // Upgrade data (nulo se nao for item upgrade)
+      upgrade: i.upgrade_peso_gramas != null ? {
+        peso_gramas:       Number(i.upgrade_peso_gramas),
+        peso_liquido:      Number(i.upgrade_peso_liquido),
+        quebra_percentual: Number(i.upgrade_quebra_percentual),
+        valor_por_grama:   Number(i.upgrade_valor_por_grama),
+        foto_balanca_path: i.upgrade_foto_balanca_path as string,
+        cofre_registrado:  Boolean(i.upgrade_cofre_registrado),
+      } : null,
     })),
     pagamentos: pagamentos.map((p) => ({
       ...p,
@@ -944,6 +961,57 @@ export async function PATCH(
     // O trigger de item cria reserva; a baixa real ocorre no trigger de entrega
     // quando `situacao` muda para `entregue`.
     // IMPACTO SE ALTERADO: pode duplicar saída de estoque ou antecipar baixa antes da entrega.
+
+    if (body.situacao === "aprovado") {
+      /**
+       * REGRA DE NEGOCIO (Produto Upgrade): o metal do cliente entra no
+       * cofre quando a venda e aprovada. Esta rota PATCH aprova venda direto
+       * pela tela de detalhe e nao passa pelo helper approveVenda.
+       * O QUE: registra peso bruto em cofre_ouro_rastreios e marca
+       * cofre_registrado=true.
+       * POR QUE: a partir da aprovação, o metal e responsabilidade da empresa
+       * e precisa aparecer no cofre/rastreio.
+       * IMPACTO SE REMOVIDO: vendas upgrade aprovadas pela tela ficam com
+       * status aprovado, mas sem entrada no cofre.
+       */
+      const [upgradeVenda] = await sql`
+        SELECT numero_venda
+        FROM alissonerp.vendas_erp
+        WHERE id = ${vendaId}
+      `;
+
+      const upgradeItens = await sql`
+        SELECT iuv.item_venda_id, iuv.peso_gramas,
+               ive.sku, ive.nome_produto
+        FROM alissonerp.itens_venda_upgrade iuv
+        JOIN alissonerp.itens_venda_erp ive ON ive.id = iuv.item_venda_id
+        WHERE ive.venda_id = ${vendaId}
+          AND iuv.cofre_registrado = false
+      `;
+
+      for (const item of upgradeItens) {
+        const origemNome = `Upgrade Venda ${String(upgradeVenda?.numero_venda ?? vendaId)} — ${String(item.sku ?? item.nome_produto ?? "")}`;
+        await sql`
+          INSERT INTO alissonerp.cofre_ouro_rastreios
+            (evento, gramas, origem_nome, observacao, created_at)
+          VALUES
+            ('entrada_upgrade', ${Number(item.peso_gramas)}, ${origemNome},
+             ${`Upgrade venda ${String(upgradeVenda?.numero_venda ?? vendaId)}`},
+             NOW())
+        `;
+      }
+
+      if (upgradeItens.length > 0) {
+        await sql`
+          UPDATE alissonerp.itens_venda_upgrade iuv
+          SET cofre_registrado = true
+          FROM alissonerp.itens_venda_erp ive
+          WHERE ive.id = iuv.item_venda_id
+            AND ive.venda_id = ${vendaId}
+            AND iuv.cofre_registrado = false
+        `;
+      }
+    }
 
     // ── Auto-criar ordem de fabricação se venda veio de orçamento (ao aprovar ou concluir) ──
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

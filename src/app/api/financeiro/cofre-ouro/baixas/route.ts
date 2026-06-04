@@ -13,7 +13,14 @@ const CofreBaixaPostSchema = z.object({
   transportador_nome: z.string().optional(),
   obs: z.string().optional(),
   itens: z.array(z.object({
-    origem_tipo: z.enum(["venda_ouro", "compra_metal", "recebimento_metal", "conversao"]),
+    /**
+     * REGRA DE NEGÓCIO: Upgrade é uma entrada física de ouro no cofre, apesar de
+     * nascer como item de venda e não como forma de pagamento.
+     * O QUE: permite baixar itens de origem "upgrade" junto das fontes já existentes.
+     * POR QUE: o peso do upgrade vira responsabilidade da empresa após aprovação da venda.
+     * IMPACTO SE REMOVIDO: upgrades registrados no cofre ficam sem caminho auditável de baixa.
+     */
+    origem_tipo: z.enum(["venda_ouro", "compra_metal", "recebimento_metal", "conversao", "upgrade"]),
     origem_id: z.coerce.number().int().positive(),
     referencia: z.string().min(1),
     pessoa_nome: z.string().optional(),

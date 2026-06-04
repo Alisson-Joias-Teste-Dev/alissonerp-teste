@@ -590,9 +590,75 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   // Controle de estoque
-  const { modulos_escrita } = useAuth();
+  const { modulos_escrita, role } = useAuth();
   const userPermissaoControlarEstoque = podeEditar && modulos_escrita.includes("controlar_estoque");
   const [confirmDesligarEstoque, setConfirmDesligarEstoque] = useState(false);
+
+  // ── Upgrade config (admin/gerente_loja) ─────────────────────────────────
+  const ROLES_UPGRADE = ["admin", "desenvolvedor", "gerente_loja"];
+  const podeEditarUpgrade = podeEditar && role && ROLES_UPGRADE.includes(role);
+  // REGRA DE NEGOCIO: configuração de upgrade só aparece para produtos da
+  // categoria Upgrade. O QUE: evita mostrar valor/grama em produtos comuns.
+  // POR QUE: Upgrade é um processo específico e não deve poluir cadastro de
+  // joias, serviços ou insumos. IMPACTO SE ALTERADO: usuários podem configurar
+  // produto comum como upgrade por engano.
+  const produtoEhCategoriaUpgrade = (categoriaEdit || produto?.categoria || "").trim().toLowerCase() === "upgrade";
+  const [upgradeValorGramaEdit, setUpgradeValorGramaEdit] = useState("");
+  const [upgradeQuebraPctEdit, setUpgradeQuebraPctEdit] = useState("10");
+  const [upgradeAtivo, setUpgradeAtivo] = useState(false);
+  const [upgradeConfigLoaded, setUpgradeConfigLoaded] = useState(false);
+  const [upgradeConfigLoading, setUpgradeConfigLoading] = useState(false);
+  const [upgradeConfigSaving, setUpgradeConfigSaving] = useState(false);
+
+  // Carrega config de upgrade ao abrir o drawer
+  useEffect(() => {
+    if (!produto || !podeEditarUpgrade || !produtoEhCategoriaUpgrade) return;
+    setUpgradeConfigLoading(true);
+    fetch(`/api/produtos/upgrade-config?produto_id=${produto.id_produto}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => {
+        if (cfg) {
+          setUpgradeValorGramaEdit(String(cfg.valor_por_grama));
+          setUpgradeQuebraPctEdit(String(cfg.quebra_percentual));
+          setUpgradeAtivo(cfg.ativo);
+        } else {
+          setUpgradeValorGramaEdit("");
+          setUpgradeQuebraPctEdit("10");
+          setUpgradeAtivo(false);
+        }
+        setUpgradeConfigLoaded(true);
+      })
+      .catch(() => { setUpgradeConfigLoaded(true); })
+      .finally(() => setUpgradeConfigLoading(false));
+  }, [produto?.id_produto, podeEditarUpgrade, produtoEhCategoriaUpgrade]);
+
+  async function salvarUpgradeConfig() {
+    if (!produto) return;
+    const valor = parseFloat(upgradeValorGramaEdit.replace(",", "."));
+    if (!valor || valor <= 0) return;
+    setUpgradeConfigSaving(true);
+    try {
+      const res = await fetch("/api/produtos/upgrade-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          produto_id: produto.id_produto,
+          valor_por_grama: valor,
+          quebra_percentual: parseFloat(upgradeQuebraPctEdit) || 10,
+          ativo: upgradeAtivo,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(d.error ?? "Erro ao salvar");
+      }
+      await res.json();
+    } catch (e) {
+      console.error("Erro ao salvar upgrade config:", e);
+    } finally {
+      setUpgradeConfigSaving(false);
+    }
+  }
 
   // Load product details
   const loadProduto = useCallback(async () => {
@@ -1608,6 +1674,74 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                     </div>
                   )}
 
+                  {/* ── Configuração de Upgrade (admin/gerente) ── */}
+                  {podeEditarUpgrade && produtoEhCategoriaUpgrade && upgradeConfigLoaded && (
+                    <div className="border-t border-gray-100 pt-3 mt-2">
+                      <p className="text-sm font-semibold text-gray-800 mb-2">
+                        Upgrade (Mão de Obra por Grama)
+                      </p>
+                      {upgradeConfigLoading ? (
+                        <p className="text-xs text-gray-400">Carregando...</p>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-gray-600">Ativo</span>
+                            <button
+                              type="button"
+                              onClick={() => setUpgradeAtivo(!upgradeAtivo)}
+                              className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none shrink-0"
+                              style={{ backgroundColor: upgradeAtivo ? C.esmeralda : "#D1D5DB" }}
+                              role="switch"
+                              aria-checked={upgradeAtivo}
+                            >
+                              <span
+                                className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+                                style={{ transform: upgradeAtivo ? "translateX(18px)" : "translateX(2px)" }}
+                              />
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <p className="text-xs text-gray-500 mb-0.5">Valor por Grama (R$)</p>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={upgradeValorGramaEdit}
+                                onChange={(e) => setUpgradeValorGramaEdit(e.target.value.replace(/[^\d.,]/g, ""))}
+                                placeholder="Ex: 250,00"
+                                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                              />
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-500 mb-0.5">Quebra (%)</p>
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={upgradeQuebraPctEdit}
+                                onChange={(e) => setUpgradeQuebraPctEdit(e.target.value)}
+                                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white focus:outline-none focus:border-[#184036]"
+                              />
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={salvarUpgradeConfig}
+                            disabled={upgradeConfigSaving}
+                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-colors"
+                            style={{ backgroundColor: C.esmeralda }}
+                          >
+                            {upgradeConfigSaving ? (
+                              <><Loader2 size={14} className="animate-spin" /> Salvando...</>
+                            ) : (
+                              <><Save size={14} /> Salvar Configuração de Upgrade</>
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {showAvancado && (<>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -1855,8 +1989,8 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                                 )}
                               </button>
                             </div>
-                          </div>
-                        )}
+                    </div>
+                  )}
                       </div>
                     ))}
                   </div>

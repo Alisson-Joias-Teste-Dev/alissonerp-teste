@@ -4016,6 +4016,91 @@ function TabIntegracoes() {
         )}
       </div>
 
+      {/* PagBank (Orders API + Moderninha) */}
+      <div
+        className="rounded-xl p-5 space-y-4"
+        style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-lg p-2 flex items-center justify-center"
+              style={{ backgroundColor: "#00D972" + "22", color: "#00D972" }}
+            >
+              <CreditCard size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>PagBank</p>
+              <p className="text-xs" style={{ color: P.muted }}>
+                Pagamentos via PIX, cartão de crédito e link de pagamento
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-3 text-xs" style={{ color: P.muted }}>
+          <div>
+            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+              URL do Webhook (copie e cole no painel PagBank)
+            </label>
+            <input
+              type="text"
+              readOnly
+              value={`${typeof window !== "undefined" ? window.location.origin : "https://erp.alisson.api.br"}/api/webhooks/pagbank`}
+              className="w-full bg-transparent px-3 py-2 rounded-lg text-xs border outline-none"
+              style={{ borderColor: P.border, color: P.muted }}
+              onFocus={(e) => e.target.select()}
+            />
+          </div>
+
+          <div>
+            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+              Access Token
+            </label>
+            <input
+              type="password"
+              value={""}
+              onChange={() => {}}
+              placeholder="Cole o Access Token do PagBank (obtido no iBanking/Painel)"
+              className="w-full bg-transparent px-3 py-2 rounded-lg text-xs border outline-none"
+              style={{ borderColor: P.border, color: P.creme }}
+            />
+          </div>
+
+          <div>
+            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+              Webhook Secret (token da conta)
+            </label>
+            <input
+              type="password"
+              value={""}
+              onChange={() => {}}
+              placeholder="Token da conta PagBank para validação de webhook"
+              className="w-full bg-transparent px-3 py-2 rounded-lg text-xs border outline-none"
+              style={{ borderColor: P.border, color: P.creme }}
+            />
+          </div>
+
+          <div>
+            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+              Webhook Base URL (opcional)
+            </label>
+            <input
+              type="text"
+              value={""}
+              onChange={() => {}}
+              placeholder="https://erp.alisson.api.br"
+              className="w-full bg-transparent px-3 py-2 rounded-lg text-xs border outline-none"
+              style={{ borderColor: P.border, color: P.creme }}
+            />
+          </div>
+        </div>
+
+        <p className="text-[10px]" style={{ color: P.muted }}>
+          As credenciais são salvas via API em configuracoes_secrets com criptografia. Configure também o webhook no painel PagBank apontando para a URL acima.
+        </p>
+      </div>
+
       {/* Banco Inter */}
       <div
         className="rounded-xl p-5 space-y-4"
@@ -4612,7 +4697,31 @@ function TabMaquininhas() {
                             ))}
                           </select>
                           {/* Campo parcelas padrão — só habilitado quando há vendedor selecionado */}
-                          <div>
+          <div>
+            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+              Ambiente
+            </label>
+            <select
+              defaultValue="producao"
+              onChange={async (e) => {
+                const v = e.target.value;
+                try {
+                  await fetch("/api/configuracoes/integracoes", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ pagbank_ambiente: v }),
+                  });
+                } catch { /* silencia */ }
+              }}
+              className="w-full bg-transparent px-3 py-2 rounded-lg text-xs border outline-none"
+              style={{ borderColor: P.border, color: P.creme }}
+            >
+              <option value="producao">Produção (api.pagseguro.com)</option>
+              <option value="sandbox">Sandbox (sandbox.api.pagseguro.com)</option>
+            </select>
+          </div>
+
+          <div>
                             <label
                               className="text-[10px] uppercase tracking-wider block mb-1"
                               style={{ color: editVendedorId ? P.muted : P.muted + "80" }}

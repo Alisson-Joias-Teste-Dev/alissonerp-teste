@@ -14,6 +14,8 @@ import { maskCpfCnpj } from "@/lib/formatters";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
 import MercadoPagoCobranca from "@/components/vendas/MercadoPagoCobranca";
+import PagBankCobranca from "@/components/vendas/PagBankCobranca";
+import PagBankQrInline from "@/components/vendas/PagBankQrInline";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import CartaoInline from "@/components/vendas/CartaoInline";
 import PagamentoForm, { type PagamentoEntry, fmt as fmtPagamento } from "@/components/vendas/PagamentoForm";
@@ -60,6 +62,15 @@ interface ItemVenda {
    *  cai na faixas_comissao por desconto. */
   markup_aplicado?: number | null;
   personalizacao?: { valor?: string; preco_por_letra?: number; peso_por_letra?: number } | null;
+  /** Dados de upgrade (nulo se não for item upgrade) */
+  upgrade?: {
+    peso_gramas: number;
+    peso_liquido: number;
+    quebra_percentual: number;
+    valor_por_grama: number;
+    foto_balanca_path: string;
+    cofre_registrado: boolean;
+  } | null;
 }
 interface PagamentoServer {
   id: number; forma: string; gateway: string | null; valor: number;
@@ -121,6 +132,15 @@ interface Venda {
     valor_comissao: number; observacao: string | null; peso_estimado?: number | null;
     markup_aplicado?: number | null;
     personalizacao?: { valor?: string; preco_por_letra?: number; peso_por_letra?: number } | null;
+    /** Dados de upgrade (nulo se não for item upgrade) */
+    upgrade?: {
+      peso_gramas: number;
+      peso_liquido: number;
+      quebra_percentual: number;
+      valor_por_grama: number;
+      foto_balanca_path: string;
+      cofre_registrado: boolean;
+    } | null;
   }>;
   pagamentos: PagamentoServer[];
   ordens?: Array<{
@@ -537,10 +557,20 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   } | null>(null);
 
   // ── Gateways dinâmicos ──────────────────────────────────────────────────────
-  const [gateways, setGateways] = useState<{ id: number; nome: string }[]>([]);
+  const [gateways, setGateways] = useState<{ id: number; nome: string }[]>([
+    { id: 1, nome: "Mercado Pago" },
+    { id: 2, nome: "PagBank" },
+  ]);
   useEffect(() => {
     fetch("/api/configuracoes/gateways").then(r => r.json()).then(d => {
-      if (Array.isArray(d)) setGateways(d.filter((g: any) => g.ativo));
+      if (Array.isArray(d)) {
+        const lista = d.filter((g: any) => g.ativo);
+        // Garante que PagBank aparece mesmo antes do migration ser aplicado
+        if (!lista.some((g: any) => g.nome === "PagBank")) {
+          lista.push({ id: 999, nome: "PagBank" });
+        }
+        setGateways(lista);
+      }
     }).catch(() => {});
   }, []);
 
@@ -702,6 +732,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       peso_estimado: i.peso_estimado ?? null, unidade: null, observacao: i.observacao,
       markup_aplicado: i.markup_aplicado ?? null,
       personalizacao: i.personalizacao ?? null,
+      upgrade: i.upgrade ?? null,
     })),
   [venda]);
 
@@ -2500,7 +2531,15 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                     {itens.map((item, idx) => (<Fragment key={item._key}>
                       <tr className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                         <td className="px-2 py-2 tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
-                        <td className="px-2 py-2 max-w-[140px] truncate font-medium" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
+                        <td className="px-2 py-2 max-w-[140px] truncate font-medium" style={{ color: "#1A1A1A" }}>
+                          {item.nome_produto}
+                          {item.upgrade && (
+                            <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full align-middle"
+                              style={{ backgroundColor: "#D1FAE5", color: "#065F46" }}>
+                              Upgrade
+                            </span>
+                          )}
+                        </td>
                         <td className="px-2 py-2 font-mono" style={{ color: "#6B7280" }}>{item.sku}</td>
                         <td className="px-2 py-2 text-center tabular-nums" style={{ color: "#374151" }}>
                           {edit.limited && item.id ? (
@@ -2620,6 +2659,70 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                           </td>
                         )}
                       </tr>
+                      {item.upgrade && (
+                        <tr key={`${item._key}-upgrade`} style={{ backgroundColor: "#F0F7F4" }}>
+                          <td colSpan={20} className="px-4 py-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                            {/**
+                             * REGRA DE NEGOCIO (Produto Upgrade): o ouro do
+                             * cliente precisa ficar rastreável na venda antes
+                             * de entrar no cofre. O QUE: exibe foto anexada,
+                             * peso bruto e peso futuro apos quebra. POR QUE:
+                             * a empresa assume responsabilidade pelo metal ao
+                             * fechar a venda. IMPACTO SE REMOVIDO: vendedor e
+                             * gerente perdem evidência visual e operacional do
+                             * ouro recebido.
+                             */}
+                            <div className="flex items-start gap-3 rounded-lg border p-3" style={{ borderColor: "#B7E4CF", backgroundColor: "#FFFFFF" }}>
+                              <a
+                                href={getPublicUrl("pagamento-fotos", item.upgrade.foto_balanca_path)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block shrink-0"
+                                title="Abrir foto da balança"
+                              >
+                                <img
+                                  src={getPublicUrl("pagamento-fotos", item.upgrade.foto_balanca_path)}
+                                  alt="Foto da balança do upgrade"
+                                  className="w-24 h-16 object-cover rounded-md border"
+                                  style={{ borderColor: C.cremeBorder }}
+                                />
+                              </a>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap mb-2">
+                                  <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.esmeralda }}>
+                                    Rastro do Ouro - Upgrade
+                                  </span>
+                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: item.upgrade.cofre_registrado ? "#D1FAE5" : "#FEF3C7", color: item.upgrade.cofre_registrado ? "#065F46" : "#92400E" }}>
+                                    {item.upgrade.cofre_registrado
+                                      ? "Cofre registrado"
+                                      : venda?.situacao === "aprovado"
+                                        ? "Aguardando registro no cofre"
+                                        : "Aguardando aprovação da venda"}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                                  <div>
+                                    <p style={{ color: "#6B7280" }}>Peso bruto recebido</p>
+                                    <p className="font-mono font-semibold" style={{ color: "#1A1A1A" }}>{item.upgrade.peso_gramas.toFixed(2)}g</p>
+                                  </div>
+                                  <div>
+                                    <p style={{ color: "#6B7280" }}>Quebra futura</p>
+                                    <p className="font-mono font-semibold" style={{ color: "#D97706" }}>{item.upgrade.quebra_percentual.toFixed(2)}%</p>
+                                  </div>
+                                  <div>
+                                    <p style={{ color: "#6B7280" }}>Peso após quebra</p>
+                                    <p className="font-mono font-semibold" style={{ color: "#065F46" }}>{item.upgrade.peso_liquido.toFixed(2)}g</p>
+                                  </div>
+                                  <div>
+                                    <p style={{ color: "#6B7280" }}>Valor por grama</p>
+                                    <p className="font-mono font-semibold" style={{ color: C.esmeralda }}>{fmt(item.upgrade.valor_por_grama)}/g</p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                       {item.personalizacao?.valor && (
                         <tr key={`${item._key}-pers`} style={{ backgroundColor: "#FFFCF5" }}>
                           <td colSpan={20} className="px-4 py-2 border-t" style={{ borderColor: C.cremeBorder }}>
@@ -2781,7 +2884,15 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                   ) : itens.map((item, idx) => (
                     <tr key={item._key} className="border-t" style={{ borderColor: C.cremeBorder }}>
                       <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
-                      <td className="px-3 py-2.5 max-w-[180px] truncate" style={{ color: "#1A1A1A" }}>{item.nome_produto}</td>
+                      <td className="px-3 py-2.5 max-w-[180px] truncate" style={{ color: "#1A1A1A" }}>
+                        {item.nome_produto}
+                        {item.upgrade && (
+                          <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full align-middle"
+                            style={{ backgroundColor: "#D1FAE5", color: "#065F46" }}>
+                            Upgrade
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku}</td>
                       <td className="px-3 py-2.5 text-center" style={{ color: "#374151" }}>{item.quantidade}</td>
                       <td className="px-3 py-2.5 tabular-nums font-medium" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
@@ -3114,8 +3225,8 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       </div>
                     )}
 
-                    {/* Pix inline — gerar QR direto nessa linha */}
-                    {isPix && pag.status === "pendente" && (
+                    {/* Pix inline MP */}
+                    {isPix && pag.status === "pendente" && newPagGateway === "Mercado Pago" && (
                       <div className="px-3 pb-3 border-t" style={{ borderColor: C.cremeBorder }}>
                         <PixQrInline
                           vendaId={venda.id}
@@ -3126,9 +3237,20 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                         />
                       </div>
                     )}
+                    {/* Pix inline PagBank */}
+                    {isPix && pag.status === "pendente" && newPagGateway === "PagBank" && (
+                      <div className="px-3 pb-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                        <PagBankQrInline
+                          vendaId={venda.id}
+                          numeroVenda={venda.numero_venda}
+                          valor={pag.valor}
+                          onPagamentoConfirmado={() => load()}
+                        />
+                      </div>
+                    )}
 
-                    {/* Cartão de Crédito inline */}
-                    {isCartao && pag.status === "pendente" && (
+                    {/* Cartão de Crédito inline MP */}
+                    {isCartao && pag.status === "pendente" && newPagGateway === "Mercado Pago" && (
                       <div className="px-3 pb-3 border-t" style={{ borderColor: C.cremeBorder }}>
                         {cartaoBloqueado ? (
                           <div className="flex items-start gap-2 p-3 rounded-lg"
@@ -3183,30 +3305,41 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
             </div>
           )}
 
-          {/* ── Cobrança Mercado Pago (link online + maquininha Point) ── */}
-          <MercadoPagoCobranca
-            vendaId={venda.id}
-            numeroVenda={venda.numero_venda}
-            valorSugerido={Math.max(0, venda.total_venda - venda.total_pago)}
-            situacao={venda.situacao}
-            bloqueado={venda.bloqueado}
-            onPagamentoConfirmado={load}
-            vendaPolling={{
-              pagamentoPendenteId: null,
-              detectarConfirmacao: async () => {
-                const r = await fetch(`/api/vendas/${venda.id}`);
-                if (!r.ok) return false;
-                const d = await r.json() as Venda;
-                // Se a venda foi concluída ou se há novo pagamento MP confirmado
-                if (d.situacao === "concluido") return true;
-                const temMpConfirmado = (d.pagamentos ?? []).some(
-                  p => (p.gateway === "Mercado Pago Online" || p.gateway === "Mercado Pago Point")
-                    && p.status === "confirmado"
-                );
-                return temMpConfirmado;
-              },
-            }}
-          />
+          {/* ── Cobrança gateway (link online + maquininha) ── */}
+          {newPagGateway === "Mercado Pago" && (
+            <MercadoPagoCobranca
+              vendaId={venda.id}
+              numeroVenda={venda.numero_venda}
+              valorSugerido={Math.max(0, venda.total_venda - venda.total_pago)}
+              situacao={venda.situacao}
+              bloqueado={venda.bloqueado}
+              onPagamentoConfirmado={load}
+              vendaPolling={{
+                pagamentoPendenteId: null,
+                detectarConfirmacao: async () => {
+                  const r = await fetch(`/api/vendas/${venda.id}`);
+                  if (!r.ok) return false;
+                  const d = await r.json() as Venda;
+                  if (d.situacao === "concluido") return true;
+                  const temMpConfirmado = (d.pagamentos ?? []).some(
+                    p => (p.gateway === "Mercado Pago Online" || p.gateway === "Mercado Pago Point")
+                      && p.status === "confirmado"
+                  );
+                  return temMpConfirmado;
+                },
+              }}
+            />
+          )}
+          {newPagGateway === "PagBank" && (
+            <PagBankCobranca
+              vendaId={venda.id}
+              numeroVenda={venda.numero_venda}
+              valorSugerido={Math.max(0, venda.total_venda - venda.total_pago)}
+              situacao={venda.situacao}
+              bloqueado={venda.bloqueado}
+              onPagamentoConfirmado={load}
+            />
+          )}
 
           {/* ── Formulário de pagamento padronizado ── */}
           {edit.pagamento && (() => {
@@ -3259,7 +3392,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                   vendaId={venda.id}
                   numeroVenda={venda.numero_venda}
                   mode="edicao"
-                  gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagSeguro" }, { id: 3, nome: "Cielo" }, { id: 4, nome: "Stone" }, { id: 5, nome: "Getnet" }, { id: 6, nome: "Rede" }, { id: 7, nome: "Outro" }]}
+                  gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagBank" }]}
                   // Payment form
                   pagForma={newPagForma} setPagForma={setNewPagForma}
                   pagGateway={newPagGateway} setPagGateway={setNewPagGateway}
@@ -3357,7 +3490,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       vendaId={venda.id}
                       numeroVenda={venda.numero_venda}
                       mode="edicao"
-                      gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagSeguro" }, { id: 3, nome: "Cielo" }, { id: 4, nome: "Stone" }, { id: 5, nome: "Getnet" }, { id: 6, nome: "Rede" }, { id: 7, nome: "Outro" }]}
+                      gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagBank" }]}
                       pagForma={newPagForma} setPagForma={setNewPagForma}
                       pagGateway={newPagGateway} setPagGateway={setNewPagGateway}
                       pagCondicao={newPagCondicao} setPagCondicao={setNewPagCondicao}

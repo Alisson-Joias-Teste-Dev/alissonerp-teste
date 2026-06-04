@@ -146,6 +146,7 @@ function DetalheDrawer({
   const [detalhe, setDetalhe] = useState<ContaDetalhe | null>(null);
   const [loading, setLoading] = useState(true);
   const [mpPaymentId, setMpPaymentId] = useState("");
+  const [pbPaymentId, setPbPaymentId] = useState("");
   const [formaRecebimento, setFormaRecebimento] = useState<string | null>(null);
   const [valorPago, setValorPago] = useState("");
   const [obs, setObs] = useState("");
@@ -194,6 +195,30 @@ function DetalheDrawer({
       onClose();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Erro ao verificar pagamento");
+    } finally {
+      setBaixando(false);
+    }
+  }
+
+  async function handleVerificarPagBank() {
+    if (!pbPaymentId.trim()) {
+      setErr("Informe o ID do pedido ou cobrança do PagBank");
+      return;
+    }
+    setBaixando(true);
+    setErr("");
+    try {
+      await apiFetch(`/api/crediario/${contaId}/verificar-pagbank`, {
+        method: "POST",
+        body: JSON.stringify({
+          payment_id: pbPaymentId.trim(),
+          obs: obs.trim() || undefined,
+        }),
+      });
+      onBaixa(contaId);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Erro ao verificar pagamento PagBank");
     } finally {
       setBaixando(false);
     }
@@ -431,8 +456,8 @@ function DetalheDrawer({
             {podeRegistrarBaixa && (
               <div style={{
                 marginBottom: 16, padding: "14px", borderRadius: 10,
-                border: `1px solid ${formaRecebimento === "Manual (MP)" ? "#0070E040" : C.verde}40`,
-                background: formaRecebimento === "Manual (MP)" ? "#EBF5FB" : C.cremeBg,
+                border: `1px solid ${formaRecebimento === "Manual (MP)" ? "#0070E040" : formaRecebimento === "PagBank" ? "#00D97240" : C.verde}40`,
+                background: formaRecebimento === "Manual (MP)" ? "#EBF5FB" : formaRecebimento === "PagBank" ? "#F0FDF6" : C.cremeBg,
               }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.esmeralda, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
                   <CreditCard size={14} />
@@ -444,13 +469,13 @@ function DetalheDrawer({
                   <>
                     <div style={{ fontSize: 11, color: C.cinza, marginBottom: 8 }}>Como o cliente pagou?</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                      {(["Dinheiro", "Cartão de Crédito", "Pix", "Ouro", "Vale-Troca", "Manual (MP)"] as const).map(f => (
+                      {(["Dinheiro", "Cartão de Crédito", "Pix", "Ouro", "Vale-Troca", "Manual (MP)", "PagBank"] as const).map(f => (
                         <button
                           key={f}
                           onClick={() => {
                             setFormaRecebimento(f);
                             setErr("");
-                            if (f !== "Manual (MP)") {
+                            if (f !== "Manual (MP)" && f !== "PagBank") {
                               setValorPago(detalhe ? detalhe.valor.toFixed(2).replace(".", ",") : "");
                             }
                           }}
@@ -528,8 +553,68 @@ function DetalheDrawer({
                   </>
                 )}
 
+                {/* PagBank → campo ID + verificação */}
+                {formaRecebimento === "PagBank" && (
+                  <>
+                    <div style={{ fontSize: 11, color: "#4A6FA5", marginBottom: 10, lineHeight: 1.5 }}>
+                      Informe o ID do pedido (ORDE_...) ou cobrança (CHAR_...) do PagBank. O sistema consulta a API do PagBank e só confirma se o status for <b>PAID</b>.
+                    </div>
+                    <input
+                      value={pbPaymentId}
+                      onChange={e => setPbPaymentId(e.target.value)}
+                      placeholder="ID PagBank (ex: ORDE_123456789)"
+                      type="text"
+                      style={{
+                        width: "100%", fontSize: 13, padding: "8px 10px",
+                        border: `1px solid #00D97240`, borderRadius: 6,
+                        outline: "none", background: "#fff", boxSizing: "border-box",
+                        fontFamily: "monospace",
+                      }}
+                    />
+                    <textarea
+                      value={obs}
+                      onChange={e => setObs(e.target.value)}
+                      placeholder="Observação adicional (opcional)..."
+                      rows={2}
+                      style={{
+                        marginTop: 6, width: "100%", fontSize: 12, padding: "7px 10px",
+                        border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
+                        resize: "none", outline: "none", background: "#fff",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                      <button
+                        onClick={() => { setFormaRecebimento(null); setPbPaymentId(""); setErr(""); }}
+                        style={{
+                          padding: "10px 14px", background: "none", border: `1px solid ${C.cremeBorder}`,
+                          borderRadius: 8, fontSize: 12, color: C.cinza, cursor: "pointer",
+                        }}>
+                        Voltar
+                      </button>
+                      <button
+                        onClick={handleVerificarPagBank}
+                        disabled={baixando || !pbPaymentId.trim()}
+                        style={{
+                          flex: 1, padding: "10px",
+                          background: pbPaymentId.trim() ? "#00D972" : "#A0E8C0",
+                          color: "#fff", border: "none",
+                          borderRadius: 8, fontSize: 13, fontWeight: 700,
+                          cursor: baixando || !pbPaymentId.trim() ? "not-allowed" : "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                        }}
+                      >
+                        {baixando
+                          ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Verificando no PagBank...</>
+                          : <><CheckCircle size={14} /> Verificar e Confirmar</>
+                        }
+                      </button>
+                    </div>
+                  </>
+                )}
+
                 {/* Demais formas → valor + (Ouro: peso/grama/foto) */}
-                {formaRecebimento && formaRecebimento !== "Manual (MP)" && (
+                {formaRecebimento && formaRecebimento !== "Manual (MP)" && formaRecebimento !== "PagBank" && (
                   <>
                     {/* Valor pago */}
                     <div style={{ marginBottom: 8 }}>

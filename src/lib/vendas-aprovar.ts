@@ -694,6 +694,54 @@ export async function approveVenda(
     console.error(`[approveVenda] Reposição automática falhou (não-bloqueante) p/ venda ${vendaId}:`, err);
   }
 
+  // 5. Registrar metal de upgrade no cofre_ouro_rastreios (na aprovação)
+  // REGRA DE NEGÓCIO (Produto Upgrade): o metal do cliente só entra no cofre
+  // quando a venda é aprovada. Enquanto rascunho, o metal não é da empresa.
+  // cofre_registrado = true impede dupla entrada (idempotência).
+  try {
+    const [upgradeVenda] = await sql`
+      SELECT ve.numero_venda
+      FROM alissonerp.vendas_erp ve WHERE ve.id = ${vendaId}
+    `;
+
+    const upgradeItens = await sql`
+      SELECT iuv.item_venda_id, iuv.peso_gramas, iuv.foto_balanca_path,
+             ive.sku, ive.nome_produto
+      FROM alissonerp.itens_venda_upgrade iuv
+      JOIN alissonerp.itens_venda_erp ive ON ive.id = iuv.item_venda_id
+      WHERE ive.venda_id = ${vendaId}
+        AND iuv.cofre_registrado = false
+    `;
+
+    for (const item of upgradeItens) {
+      const gramas = Number(item.peso_gramas);
+      const origemNome = `Upgrade Venda ${String(upgradeVenda?.numero_venda ?? vendaId)} — ${String(item.sku ?? item.nome_produto ?? "")}`;
+
+      await sql`
+        INSERT INTO alissonerp.cofre_ouro_rastreios
+          (evento, gramas, origem_nome, observacao, created_at)
+        VALUES
+          ('entrada_upgrade', ${gramas}, ${origemNome},
+           ${`Upgrade venda ${String(upgradeVenda?.numero_venda ?? vendaId)}`},
+           NOW())
+      `;
+    }
+
+    if (upgradeItens.length > 0) {
+      await sql`
+        UPDATE alissonerp.itens_venda_upgrade iuv
+        SET cofre_registrado = true
+        FROM alissonerp.itens_venda_erp ive
+        WHERE ive.id = iuv.item_venda_id
+          AND ive.venda_id = ${vendaId}
+          AND iuv.cofre_registrado = false
+      `;
+    }
+  } catch (err) {
+    console.error(`[approveVenda] Erro ao registrar upgrade no cofre p/ venda ${vendaId}:`, err);
+    // best-effort: venda ja foi aprovada, metal pode ser reconciliado depois
+  }
+
   return {
     ok: true,
     ...(ordemCriada ? { ordem_criada: ordemCriada } : {}),

@@ -14,6 +14,7 @@ import PagamentoForm from "@/components/vendas/PagamentoForm";
 import { maskCpfCnpj, formatDateBR } from "@/lib/formatters";
 import { normalizarCampoPersonalizacao } from "@/lib/personalizacao-validacao";
 import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
+import UpgradeItemFields, { type UpgradeFieldsData } from "@/components/vendas/UpgradeItemFields";
 import { createClient } from "@/lib/supabase/client";
 // REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos frontends.
@@ -103,6 +104,14 @@ interface ItemVenda {
   /** Nome da campanha — para exibir no banner de parcelas restritas. */
   promocao_nome?: string | null;
   personalizacao?: PersonalizacaoItem;
+  /** Dados de upgrade (nulo se não for item upgrade) */
+  upgrade?: {
+    peso_gramas: number;
+    foto_balanca_path: string;
+    valor_por_grama?: number;
+    quebra_percentual?: number;
+    peso_liquido?: number;
+  } | null;
 }
 
 // Config de personalizacao (config vinda de /api/produtos/[id]/personalizacao)
@@ -589,6 +598,15 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [itens, setItens] = useState<ItemVenda[]>([]);
   const [faixas, setFaixas] = useState<FaixaComissao[]>([]);
   const [produtoSel, setProdutoSel] = useState<Produto | null>(null);
+  // ── Upgrade ─────────────────────────────────────────────────────────────
+  const [isUpgradeProduto, setIsUpgradeProduto] = useState(false);
+  const [upgradeValorPorGrama, setUpgradeValorPorGrama] = useState(0);
+  const [upgradeQuebraPct, setUpgradeQuebraPct] = useState(10);
+  const [upgradePesoGramas, setUpgradePesoGramas] = useState("");
+  const [upgradeFotoB64, setUpgradeFotoB64] = useState<string | null>(null);
+  const [upgradeFotoPreview, setUpgradeFotoPreview] = useState<string | null>(null);
+  const [upgradeFotoPath, setUpgradeFotoPath] = useState<string | null>(null);
+  const [uploadingUpgradeFoto, setUploadingUpgradeFoto] = useState(false);
   const [qtd, setQtd] = useState(1);
   const [pctDesconto, setPctDesconto] = useState(0);
   const [descontoErr, setDescontoErr] = useState("");
@@ -609,10 +627,20 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [servValor, setServValor] = useState("");
 
   // ── Gateways dinâmicos ────────────────────────────────────────────────────
-  const [gateways, setGateways] = useState<{ id: number; nome: string }[]>([]);
+  const [gateways, setGateways] = useState<{ id: number; nome: string }[]>([
+    { id: 1, nome: "Mercado Pago" },
+    { id: 2, nome: "PagBank" },
+  ]);
   useEffect(() => {
     fetch("/api/configuracoes/gateways").then(r => r.json()).then(d => {
-      if (Array.isArray(d)) setGateways(d.filter((g: any) => g.ativo));
+      if (Array.isArray(d)) {
+        const lista = d.filter((g: any) => g.ativo);
+        // Garante que PagBank aparece mesmo antes do migration ser aplicado
+        if (!lista.some((g: any) => g.nome === "PagBank")) {
+          lista.push({ id: 999, nome: "PagBank" });
+        }
+        setGateways(lista);
+      }
     }).catch(() => {});
   }, []);
   const formasPagamento = [...gateways.map(g => g.nome), ...FORMAS_FIXAS];
@@ -1103,6 +1131,59 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     }
   }, [personalizacoesCache]);
 
+  // ─── Upgrade (produto_upgrade_config) ────────────────────────────────────
+  // REGRA DE NEGÓCIO: detecta se o produto selecionado é upgrade
+  // e carrega a config (valor_por_grama, quebra_percentual).
+  async function checkUpgradeConfig(produtoId: number) {
+    try {
+      const res = await fetch(`/api/produtos/upgrade-config?produto_id=${produtoId}`);
+      if (!res.ok) { setIsUpgradeProduto(false); return; }
+      const config = await res.json();
+      if (config) {
+        setIsUpgradeProduto(true);
+        setUpgradeValorPorGrama(config.valor_por_grama);
+        setUpgradeQuebraPct(config.quebra_percentual);
+      } else {
+        setIsUpgradeProduto(false);
+      }
+    } catch {
+      setIsUpgradeProduto(false);
+    }
+  }
+
+  // REGRA DE NEGÓCIO: faz upload da foto da balança para o bucket
+  // pagamento-fotos e retorna o path para uso no item da venda.
+  async function handleUpgradeFotoUpload(b64: string): Promise<string | null> {
+    setUploadingUpgradeFoto(true);
+    try {
+      const res = await fetch("/api/produtos/upgrade/foto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ foto_base64: b64 }),
+      });
+      if (!res.ok) throw new Error("Upload falhou");
+      const data = await res.json() as { path: string };
+      setUpgradeFotoPath(data.path);
+      return data.path;
+    } catch {
+      setUpgradeFotoPath(null);
+      return null;
+    } finally {
+      setUploadingUpgradeFoto(false);
+    }
+  }
+
+  // Reseta estado de upgrade ao fechar ou limpar produto
+  function resetUpgradeState() {
+    setIsUpgradeProduto(false);
+    setUpgradeValorPorGrama(0);
+    setUpgradeQuebraPct(10);
+    setUpgradePesoGramas("");
+    setUpgradeFotoB64(null);
+    setUpgradeFotoPreview(null);
+    setUpgradeFotoPath(null);
+  }
+
   // Valida valor atual do item contra config. Retorna erro (string) ou null.
   function validarItemPersonalizacao(
     item: ItemVenda,
@@ -1200,7 +1281,31 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       setRodioPreviewValor(precoRodio);
     }
 
-    const novoItemBase = calcItem(produtoSel, qtd, pctDesconto);
+    // ── Upgrade: valida peso e foto obrigatórios ───────────────────────
+    // REGRA DE NEGÓCIO: para upgrade, qtd é sempre 1 e o preco é
+    // calculado como peso_gramas × valor_por_grama. Peso e foto da
+    // balança são obrigatórios.
+    let upgradePayload: ItemVenda["upgrade"] = null;
+    if (isUpgradeProduto) {
+      const pesoNum = parseFloat(upgradePesoGramas.replace(",", "."));
+      if (!pesoNum || pesoNum <= 0) {
+        setDescontoErr("Informe o peso do metal antes de adicionar o upgrade.");
+        return;
+      }
+      if (!upgradeFotoPath) {
+        setDescontoErr("Anexe a foto da balança antes de adicionar o upgrade.");
+        return;
+      }
+      upgradePayload = {
+        peso_gramas: pesoNum,
+        foto_balanca_path: upgradeFotoPath,
+        valor_por_grama: upgradeValorPorGrama,
+        quebra_percentual: upgradeQuebraPct,
+        peso_liquido: Math.round(pesoNum * (1 - upgradeQuebraPct / 100) * 10000) / 10000,
+      };
+    }
+
+    const novoItemBase = calcItem(produtoSel, isUpgradeProduto ? 1 : qtd, pctDesconto);
     // Se o produto ja tem config com preco_por_letra no cache, zera precos iniciais
     // (serao calculados ao digitar o nome). Se ainda nao esta no cache, o fetch
     // abaixo atualiza o cache e o render do form detecta automaticamente.
@@ -1226,10 +1331,32 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       };
     }
 
-    setItens(prev => [...prev, { _key: uid(), ...novoItem }]);
+    if (isUpgradeProduto && upgradePayload) {
+      // REGRA DE NEGOCIO (Produto Upgrade): o preço exibido na venda deve ser
+      // calculado imediatamente como peso_gramas × valor_por_grama, e não usar
+      // o preço padrão do cadastro do produto. O backend recalcula novamente
+      // para segurança. Se remover, a consultora verá valor incorreto até salvar.
+      const valorLista = Math.round(upgradePayload.peso_gramas * upgradeValorPorGrama * 100) / 100;
+      const valorUnitario = Math.round(valorLista * (1 - pctDesconto / 100) * 100) / 100;
+      const totalUpgrade = valorUnitario;
+      const pctComissaoUpgrade = getComissao(pctDesconto);
+      novoItem = {
+        ...novoItem,
+        quantidade: 1,
+        preco_lista: valorLista,
+        preco_unitario: valorUnitario,
+        total_item: totalUpgrade,
+        pct_comissao: pctComissaoUpgrade,
+        valor_comissao: Math.round(totalUpgrade * (pctComissaoUpgrade / 100) * 100) / 100,
+        peso_estimado: upgradePayload.peso_gramas,
+      };
+    }
+
+    setItens(prev => [...prev, { _key: uid(), ...novoItem, upgrade: upgradePayload }]);
     // Busca config de personalizacao do produto (async, nao bloqueia o add)
     void fetchPersonalizacaoConfig(produtoSel.id);
     setProdutoSel(null); setQtd(1); setPctDesconto(0); setDescontoErr(""); setAddingItem(false);
+    resetUpgradeState();
     setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro("");
   }
 
@@ -1312,6 +1439,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
           }
           return { valor };
         })(),
+        upgrade: i.upgrade ?? undefined,
       })),
       pagamentos: pagamentosBody,
     };
@@ -2503,7 +2631,26 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                         <tr key={item._key} className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                           <td className="px-3 py-2.5 text-xs" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
                           <td className="px-3 py-2.5 font-medium" style={{ color: "#1A1A1A", minWidth: "160px" }}>
-                            <span className="block">{item.nome_produto}</span>
+                            <span className="block">
+                              {item.nome_produto}
+                              {item.upgrade && (
+                                <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                                  style={{ backgroundColor: "#D1FAE5", color: "#065F46" }}>
+                                  Upgrade
+                                </span>
+                              )}
+                            </span>
+                            {item.upgrade && (
+                              <span className="block text-[10px] mt-0.5" style={{ color: "#6B7280" }}>
+                                {item.upgrade.peso_gramas.toFixed(2)}g
+                                {item.upgrade.quebra_percentual != null && item.upgrade.peso_liquido != null
+                                  ? ` · quebra ${item.upgrade.quebra_percentual}% → ${item.upgrade.peso_liquido.toFixed(2)}g`
+                                  : ""}
+                                {item.upgrade.valor_por_grama != null
+                                  ? ` · ${fmt(item.upgrade.valor_por_grama)}/g`
+                                  : ""}
+                              </span>
+                            )}
                             {tipoVenda === "produto" && item.saldo_disponivel < item.quantidade && (
                               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded mt-0.5"
                                 style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
@@ -2720,7 +2867,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                   <div className="p-4 rounded-xl border" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
                     <div className="flex items-center justify-between mb-3">
                       <p className="text-sm font-medium" style={{ color: "#374151" }}>Adicionar produto</p>
-                      <button onClick={() => { setAddingItem(false); setProdutoSel(null); setDescontoErr(""); }} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+                      <button onClick={() => { setAddingItem(false); setProdutoSel(null); setDescontoErr(""); resetUpgradeState(); }} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
                     </div>
                     <Autocomplete<Produto>
                       placeholder="Buscar por nome ou SKU..."
@@ -2737,11 +2884,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                           </p>
                         </div>
                       )}
-                      onSelect={p => { setProdutoSel(p); setPctDesconto(0); setDescontoErr(""); }}
+                      onSelect={p => { setProdutoSel(p); setPctDesconto(0); setDescontoErr(""); void checkUpgradeConfig(p.id); }}
                       selectedLabel={produtoSel ? `${produtoSel.nome} · ${fmt(produtoSel.preco_venda ?? 0)}` : null}
-                      onClear={() => { setProdutoSel(null); setDescontoErr(""); }}
+                      onClear={() => { setProdutoSel(null); setDescontoErr(""); resetUpgradeState(); }}
                     />
-                    {produtoSel && (
+                    {produtoSel && !isUpgradeProduto && (
                       <div className="mt-3 grid grid-cols-4 gap-2 items-end">
                         <div>
                           <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Qtd</label>
@@ -2769,6 +2916,45 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                         </button>
                       </div>
                     )}
+                    {/* Campos de upgrade (substitui qtd/preço quando é upgrade) */}
+                    {produtoSel && isUpgradeProduto && (
+                      <div className="mt-3 space-y-3">
+                        <UpgradeItemFields
+                          valorPorGrama={upgradeValorPorGrama}
+                          quebraPercentual={upgradeQuebraPct}
+                          pesoGramas={upgradePesoGramas}
+                          onPesoChange={setUpgradePesoGramas}
+                          fotoB64={upgradeFotoB64}
+                          fotoPreview={upgradeFotoPreview}
+                          fotoPath={upgradeFotoPath}
+                          uploadingFoto={uploadingUpgradeFoto}
+                          onFotoChange={(b64, preview) => {
+                            setUpgradeFotoB64(b64);
+                            setUpgradeFotoPreview(preview);
+                          }}
+                          onFotoUpload={handleUpgradeFotoUpload}
+                          disabled={false}
+                        />
+                        {/* Desconto (abaixo dos campos de upgrade) */}
+                        {upgradeValorPorGrama > 0 && (
+                          <div className="flex items-center gap-3 pt-1">
+                            <div>
+                              <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>% Desconto</label>
+                              <input type="number" min={0} step={1} value={pctDesconto}
+                                onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(""); }}
+                                className="w-24 border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
+                                style={{ borderColor: pctDesconto > maxDesconto ? "#F97316" : C.cremeBorder, color: pctDesconto > maxDesconto ? "#EA580C" : undefined }} />
+                              {pctDesconto > maxDesconto && <p className="text-[11px] mt-0.5" style={{ color: "#EA580C" }}>Precisa aprovação</p>}
+                            </div>
+                            <button onClick={() => void handleAddItem()} disabled={false}
+                              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                              <Plus size={14} /> Confirmar
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
                 <button onClick={() => setAddingItem(true)} disabled={addingItem}
@@ -2794,9 +2980,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         {step === 5 && (
           <div className="p-6 space-y-4">
             <h3 className="text-lg font-semibold" style={{ color: "#1A1A1A" }}>
-              <CreditCard size={18} className="inline mr-2" style={{ color: C.esmeralda }} />
-              Pagamento
-            </h3>
+                <CreditCard size={18} className="inline mr-2" style={{ color: C.esmeralda }} />
+                Pagamento
+              </h3>
 
             <PagamentoForm
               totalVenda={totalVenda}
@@ -2880,6 +3066,13 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               showAReceberWarning={temAReceber}
               cartaoBloqueado={cartaoBloqueado}
               onSolicitarAprovacaoCartao={async () => {
+                /**
+                 * REGRA DE NEGÓCIO: cartão com desconto acima do limite exige
+                 * aprovação antes da confirmação do pagamento.
+                 * O QUE: garante rascunho persistido e abre tarefa de aprovação.
+                 * POR QUE: a aprovação depende do ID da venda já criado no banco.
+                 * IMPACTO SE REMOVIDO: venda com desconto de cartão pode avançar sem alçada.
+                 */
                 let idFinal = vendaId;
                 if (!idFinal) {
                   const { id } = await salvarRascunho({ skipPagamentos: true });

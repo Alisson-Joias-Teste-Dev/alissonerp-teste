@@ -51,6 +51,24 @@ export async function verificarReposicaoAutomatica(
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function processarProduto(db: any, produtoId: number, userId: string): Promise<ReposicaoResultado> {
+  /**
+   * REGRA DE NEGOCIO (Produto Upgrade): upgrade usa ouro do cliente e cobra
+   * mao de obra por grama; nao e reposicao de estoque comercial.
+   * O QUE: ignora produtos configurados em produto_upgrade_config.
+   * POR QUE: esses produtos podem estar marcados como sob encomenda para
+   * aparecer na venda, mas nao devem gerar OF/reposicao automatica.
+   * IMPACTO SE REMOVIDO: aprovar venda com item upgrade pode abrir ordem
+   * indevida no PCP.
+   */
+  const [upgradeCfg] = await db`
+    SELECT produto_id
+    FROM alissonerp.produto_upgrade_config
+    WHERE produto_id = ${produtoId}
+      AND ativo = true
+    LIMIT 1
+  `;
+  if (upgradeCfg) return { produto_id: produtoId, ofs_criadas: 0, numeros_ordem: [], motivo: "sem_config" };
+
   // 1. Config de reposição
   const [cfg] = await db`
     SELECT estoque_minimo, ativo, tempo_fabricacao_dias

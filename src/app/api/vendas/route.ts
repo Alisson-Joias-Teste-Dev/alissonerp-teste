@@ -423,8 +423,27 @@ export async function POST(req: NextRequest) {
         const dispMap = new Map<number, number>(
           saldosPre.map((s: Record<string, unknown>) => [Number(s.produto_id), Number(s.disponivel)])
         );
+        /**
+         * REGRA DE NEGOCIO (Produto Upgrade): produto com config de upgrade
+         * pode estar marcado como sob encomenda para aparecer/vender, mas NAO
+         * deve abrir ordem de reposicao/fabricacao automatica.
+         * O QUE: remove SKUs upgrade da lista de produtos que viram reposicao.
+         * POR QUE: o upgrade e mao de obra com ouro do cliente, nao reposicao
+         * de estoque comercial da loja.
+         * IMPACTO SE REMOVIDO: vender PZ0003/Upgrade abre ordem indevida no PCP.
+         */
+        const upgradesRows = await tx`
+          SELECT produto_id
+          FROM alissonerp.produto_upgrade_config
+          WHERE produto_id = ANY(${pids}::bigint[])
+            AND ativo = true
+        `;
+        const produtosUpgrade = new Set<number>(
+          upgradesRows.map((r: Record<string, unknown>) => Number(r.produto_id))
+        );
         for (const item of body.itens as ItemInput[]) {
           if (!item.produto_id) continue;
+          if (produtosUpgrade.has(Number(item.produto_id))) continue;
           const disp = dispMap.get(Number(item.produto_id)) ?? 0;
           if (disp < item.quantidade) produtosParaReposicao.add(Number(item.produto_id));
         }
@@ -466,6 +485,15 @@ export async function POST(req: NextRequest) {
         let totalItemFinal     = item.total_item;
         let valorComissaoFinal = item.valor_comissao ?? 0;
         let pesoEstimadoFinal: number | null = item.peso_estimado ?? null;
+        // Dados de upgrade (populados dentro de if (item.produto_id), usados
+        // fora para INSERT em itens_venda_upgrade)
+        let upgradeData: {
+          peso_gramas: number;
+          peso_liquido: number;
+          quebra_percentual: number;
+          valor_por_grama: number;
+          foto_balanca_path: string;
+        } | null = null;
 
         if (item.produto_id) {
           // REGRA DE NEGOCIO (Ródio automático):
@@ -525,6 +553,72 @@ export async function POST(req: NextRequest) {
             ].filter(Boolean).join("\n");
             personalizacaoJson = { valor: String(baseRow.sku) };
           }
+
+          // ── Produto Upgrade: deteccao e recalculo server-side ────────────
+          // REGRA DE NEGOCIO: Produto Upgrade — cliente entrega metal (ouro),
+          // paga mao de obra por grama. O valor do item e calculado como
+          // peso_gramas × valor_por_grama. A quebra e informativa (nao afeta
+          // o cofre). Foto da balanca e obrigatoria.
+          // IMPACTO SE REMOVIDO: itens upgrade viram itens normais sem
+          // validacao de peso/foto e sem recalculo de valor.
+          upgradeData = null; // reset para este item (declarado no escopo externo)
+
+          const [upgradeCfg] = await tx`
+              SELECT valor_por_grama, quebra_percentual
+              FROM alissonerp.produto_upgrade_config
+              WHERE produto_id = ${item.produto_id} AND ativo = true
+            `;
+
+            if (upgradeCfg) {
+              const upgRaw = (item as unknown as Record<string, unknown>).upgrade;
+
+              if (!upgRaw || typeof upgRaw !== "object") {
+                throw new Error(
+                  `Item upgrade "${item.sku ?? item.nome_produto}" exige dados de upgrade (peso, foto)`
+                );
+              }
+
+              const upg = upgRaw as Record<string, unknown>;
+              const pesoGramas = Number(upg.peso_gramas ?? 0);
+              const fotoBalanca = typeof upg.foto_balanca_path === "string"
+                ? upg.foto_balanca_path.trim()
+                : null;
+
+              if (!pesoGramas || pesoGramas <= 0) {
+                throw new Error(
+                  `Peso do metal e obrigatorio para upgrade "${item.sku ?? item.nome_produto}"`
+                );
+              }
+
+              if (!fotoBalanca || fotoBalanca.length === 0) {
+                throw new Error(
+                  `Foto da balanca e obrigatoria para upgrade "${item.sku ?? item.nome_produto}"`
+                );
+              }
+
+              const valorPorGrama = Number(upgradeCfg.valor_por_grama);
+              const quebraPct = Number(upgradeCfg.quebra_percentual);
+              const pesoLiquido = Math.round(pesoGramas * (1 - quebraPct / 100) * 10000) / 10000;
+              const valorCalculado = Math.round(pesoGramas * valorPorGrama * 100) / 100;
+              const totalUpgrade = Math.round(valorCalculado * (Number(item.quantidade) || 1) * 100) / 100;
+              const pctComUpgrade = Number(item.pct_comissao ?? 0);
+              const comissaoUpgrade = Math.round(totalUpgrade * (pctComUpgrade / 100) * 100) / 100;
+
+              // Sobrescreve valores do item com o calculo do upgrade
+              precoListaFinal    = valorCalculado;
+              precoUnitarioFinal = valorCalculado;
+              totalItemFinal     = totalUpgrade;
+              valorComissaoFinal = comissaoUpgrade;
+              pesoEstimadoFinal  = pesoGramas;
+
+              upgradeData = {
+                peso_gramas: pesoGramas,
+                peso_liquido: pesoLiquido,
+                quebra_percentual: quebraPct,
+                valor_por_grama: valorPorGrama,
+                foto_balanca_path: fotoBalanca,
+              };
+            }
 
           const [cfg] = await tx`
             SELECT
@@ -658,7 +752,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        await tx`
+        const [itemRow] = await tx`
           INSERT INTO alissonerp.itens_venda_erp (
             venda_id, produto_id, nome_produto, sku,
             quantidade, preco_lista,
@@ -681,7 +775,29 @@ export async function POST(req: NextRequest) {
             ${observacaoItem},
             ${personalizacaoJson ? sql.json(personalizacaoJson as never) : null}
           )
+          RETURNING id
         `;
+
+        // ── Item upgrade: grava snapshot dos dados do metal ────────────────
+        // REGRA DE NEGOCIO: Os dados do upgrade (peso, quebra, foto) sao
+        // congelados no momento da venda. Se a config mudar depois, vendas
+        // antigas mantem os valores originais. cofre_registrado = false
+        // ate a venda ser aprovada.
+        if (upgradeData) {
+          await tx`
+            INSERT INTO alissonerp.itens_venda_upgrade (
+              item_venda_id, peso_gramas, peso_liquido,
+              quebra_percentual, valor_por_grama, foto_balanca_path
+            ) VALUES (
+              ${itemRow.id},
+              ${upgradeData.peso_gramas},
+              ${upgradeData.peso_liquido},
+              ${upgradeData.quebra_percentual},
+              ${upgradeData.valor_por_grama},
+              ${upgradeData.foto_balanca_path}
+            )
+          `;
+        }
     }
 
     // 4. Inserir pagamentos
