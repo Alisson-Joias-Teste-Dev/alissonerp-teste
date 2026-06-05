@@ -284,6 +284,19 @@ export interface ItemComissaoDetalhado {
   comissao_percentual: number;
   comissao_ganha: number;
   comissao_perdida: number;
+  // Comissão proporcional ao valor recebido
+  // REGRA DE NEGÓCIO: comissão_liberada = comissao_ganha * (valor_pago_valido / total_venda)
+  // O que: calcula quanto da comissão já pode ser paga com base nos pagamentos confirmados,
+  // excluindo Vale-Troca e A Receber pendente.
+  // Por que: a consultora só recebe comissão sobre o que foi efetivamente pago.
+  // Impacto se alterado: pode pagar comissão antes do recebimento ou travar pagamento indevido.
+  comissao_liberada: number;
+  comissao_pendente: number;
+  comissao_excluida_vt: number;
+  // Valores de referência para auditoria
+  valor_pago_valido: number;
+  valor_vale_troca: number;
+  valor_a_receber: number;
 }
 
 export interface ResumoComissaoConsultora {
@@ -297,6 +310,10 @@ export interface ResumoComissaoConsultora {
   media_comissao: number;
   comissao_ganha: number;
   comissao_perdida: number;
+  comissao_liberada: number;
+  comissao_pendente: number;
+  comissao_excluida_vt: number;
+  valor_pago_valido: number;
   comissao_na_meta: number;
   comissao_fora_meta: number;
   meta_prata: number;
@@ -307,6 +324,7 @@ export interface ResumoComissaoConsultora {
 export interface RankingComissao {
   maior_comissao_media_perc: number;
   maior_comissao_valor: number;
+  maior_comissao_liberada: number;
   maior_desconto_medio: number;
   maior_comissao_perdida: number;
 }

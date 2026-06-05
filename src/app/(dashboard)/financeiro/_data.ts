@@ -5,7 +5,7 @@ export async function getFinanceiroData() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const [usuario, pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas] = await Promise.all([
+  const [usuario, pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas, comissoes, vendedores] = await Promise.all([
     user ? sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1` : Promise.resolve([]),
     sql`
       SELECT
@@ -99,6 +99,25 @@ export async function getFinanceiroData() {
       ORDER BY id DESC
       LIMIT 50
     `,
+    sql`
+      SELECT
+        fc.*,
+        fc.id::text,
+        fc.created_by::text,
+        fc.approved_by::text,
+        fc.created_at::text,
+        fc.updated_at::text,
+        fc.approved_at::text,
+        fc.paid_at::text,
+        fc.cancelled_at::text,
+        (SELECT COUNT(*)::int FROM alissonerp.fechamento_comissao_itens fci WHERE fci.fechamento_id = fc.id) AS qtd_itens
+      FROM alissonerp.fechamentos_comissao fc
+      ORDER BY fc.created_at DESC
+      LIMIT 100
+    `,
+    sql`
+      SELECT id_vendedor, nome FROM public.vendedores WHERE situacao = 'Ativo' ORDER BY nome
+    `,
   ]);
 
   return {
@@ -109,5 +128,7 @@ export async function getFinanceiroData() {
     lancamentos:     lancamentos as any[],
     caixaPagamentos: caixaPagamentos as any[],
     caixaBaixas:     caixaBaixas as any[],
+    comissoes:       comissoes as any[],
+    vendedores:      vendedores as any[],
   };
 }

@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     const itens = await sql<
       Array<{
         id: number;
-        venda_id: number;
+        venda_id: number | string;
         data_venda: string;
         numero_pedido: string | null;
         sku: string | null;
@@ -102,6 +102,98 @@ export async function GET(req: NextRequest) {
       WHERE ve.data_venda BETWEEN ${from}::date AND ${to}::date
         AND ve.vendedor_id IS NOT NULL
     `;
+
+    /**
+     * 1a. Dados de pagamentos por venda
+     * REGRA DE NEGÓCIO: comissão proporcional ao valor recebido.
+     * O que: busca pagamentos confirmados por venda para ratear a comissão.
+     * Vale-Troca não gera nova comissão. A Receber pendente fica como comissão pendente.
+     * Por que: a consultora só recebe comissão sobre o que o cliente pagou efetivamente.
+     * Impacto se alterado: pode pagar comissão antes do dinheiro entrar.
+     *
+     * Fonte: pagamentos_venda (ERP) + vw_dash_vendas_todas (legado)
+     */
+    const pagamentosVenda = await sql<
+      Array<{
+        venda_id: string;
+        total_venda: string;
+        valor_pago_valido: string;
+        valor_vale_troca: string;
+        valor_a_receber_pendente: string;
+        valor_a_receber_pago: string;
+      }>
+    >`
+      -- Pagamentos ERP: agrega por venda com detalhamento por forma/status
+      SELECT
+        pv.venda_id::text,
+        ve.total_venda::text,
+        COALESCE(SUM(CASE WHEN pv.status = 'confirmado' AND pv.forma NOT IN ('Vale-Troca', 'A Receber') THEN pv.valor ELSE 0 END), 0)::text AS valor_pago_valido,
+        COALESCE(SUM(CASE WHEN pv.forma = 'Vale-Troca' AND pv.status = 'confirmado' THEN pv.valor ELSE 0 END), 0)::text AS valor_vale_troca,
+        COALESCE(SUM(CASE WHEN pv.forma = 'A Receber' AND pv.status = 'pendente' THEN pv.valor ELSE 0 END), 0)::text AS valor_a_receber_pendente,
+        COALESCE(SUM(CASE WHEN pv.forma = 'A Receber' AND pv.status = 'confirmado' THEN pv.valor ELSE 0 END), 0)::text AS valor_a_receber_pago
+      FROM alissonerp.pagamentos_venda pv
+      JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
+        AND ve.situacao IN ('aprovado', 'enviado', 'entregue', 'concluido')
+        AND ve.data_venda >= '2026-04-23'
+      WHERE ve.data_venda BETWEEN ${from}::date AND ${to}::date
+        AND ve.vendedor_id IS NOT NULL
+      GROUP BY pv.venda_id, ve.total_venda
+    `;
+
+    /**
+     * Mapa de pagamentos por venda.
+     * Chave: venda_id (string) — UUID para ERP, número para legado.
+     */
+    const pagamentoMap = new Map<string, {
+      total_venda: number;
+      valor_pago_valido: number;
+      valor_vale_troca: number;
+      valor_a_receber_pendente: number;
+      valor_a_receber_pago: number;
+    }>();
+
+    for (const p of pagamentosVenda) {
+      pagamentoMap.set(String(p.venda_id).trim(), {
+        total_venda: Number(p.total_venda),
+        valor_pago_valido: Number(p.valor_pago_valido),
+        valor_vale_troca: Number(p.valor_vale_troca),
+        valor_a_receber_pendente: Number(p.valor_a_receber_pendente),
+        valor_a_receber_pago: Number(p.valor_a_receber_pago),
+      });
+    }
+
+    /**
+     * Para vendas legado (que não estão em pagamentos_venda),
+     * usa vw_dash_vendas_todas como fallback.
+     * Simplificação: assume que tudo menos VT foi pago.
+     * Impacto: legado não tem breakdown de A Receber.
+     */
+    const vendasLegado = await sql<Array<{ venda_id: string; total_venda: string; valor_vale_troca: string }>>`
+      SELECT
+        v.id::text AS venda_id,
+        v.total_venda::text,
+        v.valor_vale_troca::text
+      FROM alissonerp.vw_dash_vendas_todas v
+      WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
+        AND v.status IS NOT NULL AND v.status != 4
+        AND v.vendedor_id IS NOT NULL
+        AND v.fonte = 'legado'
+    `;
+
+    for (const v of vendasLegado) {
+      const vid = String(v.venda_id).trim();
+      if (!pagamentoMap.has(vid)) {
+        const tot = Number(v.total_venda);
+        const vt = Number(v.valor_vale_troca ?? 0);
+        pagamentoMap.set(vid, {
+          total_venda: tot,
+          valor_pago_valido: tot - vt,
+          valor_vale_troca: vt,
+          valor_a_receber_pendente: 0,
+          valor_a_receber_pago: 0,
+        });
+      }
+    }
 
     // 2. Tabelas de comissão disponíveis
     const comissoesRaw = await sql<Array<{ id: number; tabela: unknown }>>`
@@ -172,6 +264,41 @@ export async function GET(req: NextRequest) {
       const comissaoSeCheio = (precoCheio * maxComissao) / 100;
       const comissaoPerdida = Math.max(0, comissaoSeCheio - comissaoGanha);
 
+      /**
+       * Cálculo da comissão proporcional por venda.
+       * REGRA DE NEGÓCIO: comissão liberada = comissão total × (valor pago válido / total venda)
+       * O que: rateia a comissão do item proporcionalmente ao que foi recebido na venda.
+       * Por que: consultora só ganha comissão sobre o que o cliente pagou.
+       * Impacto se alterado: pagamento indevido ou trava de comissão correta.
+       *
+       * Pagamentos considerados "válidos": confirmados, exceto Vale-Troca e A Receber pendente.
+       * Vale-Troca: não gera nova comissão (já foi comissionado na venda original).
+       * A Receber pendente: fica como comissão pendente até o cliente pagar.
+       */
+      const pagData = pagamentoMap.get(String(i.venda_id));
+      const totalVenda = pagData?.total_venda ?? precoTotal;
+      const pagoValido = pagData?.valor_pago_valido ?? totalVenda;
+      const vtValor = pagData?.valor_vale_troca ?? 0;
+      const aReceberPendente = pagData?.valor_a_receber_pendente ?? 0;
+      const aReceberPago = pagData?.valor_a_receber_pago ?? 0;
+
+      // REGRA DE NEGÓCIO: tudo que não está pago, não é VT e não é A Receber
+      // deve ser tratado como pendente.
+      // O que: calcula o resto não contabilizado (total - pago - VT - A Receber)
+      // e adiciona ao pendente.
+      // Por que: cliente pode dever sem estar registrado como A Receber formal.
+      // Impacto se alterado: comissão pendente fica zerada indevidamente.
+      const totalContabilizado = pagoValido + vtValor + aReceberPendente + aReceberPago;
+      const restoNaoContabilizado = Math.max(0, totalVenda - totalContabilizado);
+
+      const ratioLiberada = totalVenda > 0 ? pagoValido / totalVenda : 0;
+      const ratioVt = totalVenda > 0 ? vtValor / totalVenda : 0;
+      const ratioPendente = totalVenda > 0 ? (aReceberPendente + restoNaoContabilizado) / totalVenda : 0;
+
+      const comissaoLiberada = comissaoGanha * ratioLiberada;
+      const comissaoExcluidaVt = comissaoGanha * ratioVt;
+      const comissaoPendenteItem = comissaoGanha * ratioPendente;
+
       itensDetalhados.push({
         id: i.id,
         id_vendedor: Number(i.id_vendedor),
@@ -187,10 +314,18 @@ export async function GET(req: NextRequest) {
         comissao_percentual: comissaoPerc,
         comissao_ganha: comissaoGanha,
         comissao_perdida: comissaoPerdida,
+        // Comissão proporcional
+        comissao_liberada: comissaoLiberada,
+        comissao_pendente: comissaoPendenteItem,
+        comissao_excluida_vt: comissaoExcluidaVt,
+        valor_pago_valido: pagoValido * (precoTotal / totalVenda),
+        valor_vale_troca: vtValor * (precoTotal / totalVenda),
+        valor_a_receber: (aReceberPendente + restoNaoContabilizado) * (precoTotal / totalVenda),
       });
 
       // Agregado por consultora — normaliza id_vendedor para number (postgres bigint → string)
       const idVendedor = Number(i.id_vendedor);
+
       if (!resumoMap.has(idVendedor)) {
         resumoMap.set(idVendedor, {
           id_vendedor: idVendedor,
@@ -203,6 +338,10 @@ export async function GET(req: NextRequest) {
           media_comissao: 0,
           comissao_ganha: 0,
           comissao_perdida: 0,
+          comissao_liberada: 0,
+          comissao_pendente: 0,
+          comissao_excluida_vt: 0,
+          valor_pago_valido: 0,
           comissao_na_meta: 0,
           comissao_fora_meta: 0,
           meta_prata: metaPrataMap.get(idVendedor) ?? 0,
@@ -214,6 +353,10 @@ export async function GET(req: NextRequest) {
       r.total_desejado += precoCheio;
       r.comissao_ganha += comissaoGanha;
       r.comissao_perdida += comissaoPerdida;
+      r.comissao_liberada += comissaoLiberada;
+      r.comissao_pendente += comissaoPendenteItem;
+      r.comissao_excluida_vt += comissaoExcluidaVt;
+      r.valor_pago_valido += pagoValido * (precoTotal / totalVenda);
       r.media_desconto += descontoPerc;
       r.media_comissao += comissaoPerc;
       r.qtd_itens += 1;
@@ -228,7 +371,11 @@ export async function GET(req: NextRequest) {
       r.media_comissao = safeDiv(r.media_comissao, r.qtd_itens);
       r.esta_dentro_meta = r.meta_prata > 0 && r.total_realizado >= r.meta_prata;
       r.comissao_na_meta = r.esta_dentro_meta ? r.comissao_ganha : 0;
-      r.comissao_fora_meta = r.comissao_ganha * 0.5;
+      // REGRA DE NEGÓCIO: fora da meta, paga 50% da comissão liberada.
+      // O que: comissão_fora_meta = metade do valor liberado.
+      // Por que: consultora só recebe metade se não bater a meta.
+      // Impacto se alterado: valor de pagamento diferente do esperado.
+      r.comissao_fora_meta = r.comissao_liberada * 0.5;
     }
 
     const resumo = Array.from(resumoMap.values()).sort((a, b) => b.total_realizado - a.total_realizado);
@@ -236,6 +383,7 @@ export async function GET(req: NextRequest) {
     const ranking = {
       maior_comissao_valor: Math.max(0, ...resumo.map((r) => r.comissao_ganha)),
       maior_comissao_media_perc: Math.max(0, ...resumo.map((r) => r.media_comissao)),
+      maior_comissao_liberada: Math.max(0, ...resumo.map((r) => r.comissao_liberada)),
       maior_desconto_medio: Math.max(0, ...resumo.map((r) => r.media_desconto)),
       maior_comissao_perdida: Math.max(0, ...resumo.map((r) => r.comissao_perdida)),
     };
