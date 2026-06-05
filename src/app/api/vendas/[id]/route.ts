@@ -880,6 +880,68 @@ export async function PATCH(
     }
   }
 
+  /**
+   * REGRA DE NEGOCIO (Sob encomenda / reposicao_venda): item vendido sem estoque
+   * abre ordem de reposicao, mas a entrega so pode baixar estoque depois que a
+   * peca pronta existir no livro rigido (SLE).
+   * O QUE: antes de mudar para "entregue", detecta reservas de reposicao ja
+   * concluida que ainda nao possuem saldo SLE suficiente no local da reserva.
+   * POR QUE: evita tratar sob encomenda como peca de pronta-entrega e troca o
+   * erro tecnico STOCK_NEGATIVE por orientacao operacional para registrar a entrada.
+   * IMPACTO SE REMOVIDO: vendas sob encomenda sem entrada formal tentam baixar
+   * estoque inexistente e voltam a falhar com STOCK_NEGATIVE.
+   */
+  if (body.situacao === "entregue" && venda.situacao !== "entregue") {
+    const reposicoesSemEntrada = await sql`
+      SELECT
+        r.produto_id,
+        COALESCE(p.sku, io.sku) AS sku,
+        COALESCE(p.nome, io.nome_produto) AS nome_produto,
+        r.quantidade,
+        COALESCE(r.local_estoque_id, 2) AS local_estoque_id,
+        o.numero_ordem,
+        COALESCE(SUM(sle.actual_qty) FILTER (WHERE sle.is_cancelled = false), 0)::numeric AS saldo_sle
+      FROM alissonerp.reservas_estoque_comercial r
+      JOIN alissonerp.ordens o
+        ON o.venda_id = r.venda_id
+       AND o.tipo_ordem = 'reposicao_venda'
+       AND o.status = 'concluido'
+      JOIN alissonerp.itens_ordem io
+        ON io.ordem_id = o.id
+       AND io.produto_id = r.produto_id
+      LEFT JOIN public.produtos p ON p.id_produto = r.produto_id
+      LEFT JOIN alissonerp.stock_ledger_entry sle
+        ON sle.item_id = r.produto_id
+       AND sle.item_type = 'produto'
+       AND sle.warehouse_id = COALESCE(r.local_estoque_id, 2)
+      WHERE r.venda_id = ${vendaId}
+        AND r.status = 'ativo'
+      GROUP BY r.produto_id, p.sku, io.sku, p.nome, io.nome_produto,
+               r.quantidade, r.local_estoque_id, o.numero_ordem
+      HAVING COALESCE(SUM(sle.actual_qty) FILTER (WHERE sle.is_cancelled = false), 0) < r.quantidade
+    `;
+
+    if (reposicoesSemEntrada.length > 0) {
+      const item = reposicoesSemEntrada[0];
+      return NextResponse.json(
+        {
+          error: `Produto sob encomenda ainda não entrou no estoque. Registre a entrada da ordem ${item.numero_ordem} antes de entregar a venda.`,
+          code: "REPOSICAO_SEM_ENTRADA_ESTOQUE",
+          itens: reposicoesSemEntrada.map((row) => ({
+            produto_id: Number(row.produto_id),
+            sku: row.sku,
+            nome_produto: row.nome_produto,
+            quantidade: Number(row.quantidade),
+            local_estoque_id: Number(row.local_estoque_id),
+            numero_ordem: row.numero_ordem,
+            saldo_sle: Number(row.saldo_sle),
+          })),
+        },
+        { status: 409 },
+      );
+    }
+  }
+
   // ── Persistir alterações com captura de erros do banco ──────────────────────
   // try/catch generalista para capturar exceções lançadas por triggers do banco
   // (STOCK_NEGATIVE, ENTREGA_BLOCKED, etc.) e devolver como JSON em vez de
