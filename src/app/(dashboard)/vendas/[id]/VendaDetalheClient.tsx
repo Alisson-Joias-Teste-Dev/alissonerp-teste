@@ -19,6 +19,7 @@ import PagBankQrInline from "@/components/vendas/PagBankQrInline";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import CartaoInline from "@/components/vendas/CartaoInline";
 import PagamentoForm, { type PagamentoEntry, fmt as fmtPagamento } from "@/components/vendas/PagamentoForm";
+import UpgradeItemFields from "@/components/vendas/UpgradeItemFields";
 import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 import { useErrorStore } from "@/stores/errorStore";
@@ -481,6 +482,19 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [rodioPreviewValor, setRodioPreviewValor] = useState<number | null>(null);
   const [rodioValidando, setRodioValidando] = useState(false);
   const [rodioErro, setRodioErro] = useState("");
+  // ── Upgrade (produto_upgrade_config)
+  // REGRA DE NEGOCIO: detecta se o produto selecionado e upgrade
+  // e gerencia campos especificos (peso, foto, quebra).
+  // POR QUE: o VendaDetalheClient nao tinha tratamento de upgrade,
+  // impedindo adicionar/editar upgrades pelo detalhe da venda.
+  const [isUpgradeProduto, setIsUpgradeProduto] = useState(false);
+  const [upgradeValorPorGrama, setUpgradeValorPorGrama] = useState(0);
+  const [upgradeQuebraPct, setUpgradeQuebraPct] = useState(10);
+  const [upgradePesoGramas, setUpgradePesoGramas] = useState("");
+  const [upgradeFotoB64, setUpgradeFotoB64] = useState<string | null>(null);
+  const [upgradeFotoPreview, setUpgradeFotoPreview] = useState<string | null>(null);
+  const [upgradeFotoPath, setUpgradeFotoPath] = useState<string | null>(null);
+  const [uploadingUpgradeFoto, setUploadingUpgradeFoto] = useState(false);
   const [addingItem, setAddingItem] = useState(false);
   const [prodTab, setProdTab] = useState<"produtos" | "comissoes">("produtos");
   const [pendingAuths, setPendingAuths] = useState<Record<number, PendingAuth>>({});
@@ -811,6 +825,61 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     };
   }
 
+  // ─── Upgrade (produto_upgrade_config) ────────────────────────────────────────
+  // REGRA DE NEGOCIO: espelha NovaVendaClientV2.tsx — detecta se o produto
+  // selecionado e upgrade e carrega a config (valor_por_grama, quebra_percentual).
+  // POR QUE: sem esta deteccao, o produto upgrade e tratado como item comum no
+  // detalhe da venda, sem os campos obrigatorios de peso e foto.
+  async function checkUpgradeConfig(produtoId: number) {
+    try {
+      const res = await fetch(`/api/produtos/upgrade-config?produto_id=${produtoId}`);
+      if (!res.ok) { setIsUpgradeProduto(false); return; }
+      const config = await res.json();
+      if (config) {
+        setIsUpgradeProduto(true);
+        setUpgradeValorPorGrama(config.valor_por_grama);
+        setUpgradeQuebraPct(config.quebra_percentual);
+      } else {
+        setIsUpgradeProduto(false);
+      }
+    } catch {
+      setIsUpgradeProduto(false);
+    }
+  }
+
+  // REGRA DE NEGOCIO: faz upload da foto da balanca para o bucket
+  // pagamento-fotos e retorna o path para uso no item da venda.
+  async function handleUpgradeFotoUpload(b64: string): Promise<string | null> {
+    setUploadingUpgradeFoto(true);
+    try {
+      const res = await fetch("/api/produtos/upgrade/foto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ foto_base64: b64 }),
+      });
+      if (!res.ok) throw new Error("Upload falhou");
+      const data = await res.json() as { path: string };
+      setUpgradeFotoPath(data.path);
+      return data.path;
+    } catch {
+      setUpgradeFotoPath(null);
+      return null;
+    } finally {
+      setUploadingUpgradeFoto(false);
+    }
+  }
+
+  // Reseta estado de upgrade ao fechar ou limpar produto
+  function resetUpgradeState() {
+    setIsUpgradeProduto(false);
+    setUpgradeValorPorGrama(0);
+    setUpgradeQuebraPct(10);
+    setUpgradePesoGramas("");
+    setUpgradeFotoB64(null);
+    setUpgradeFotoPreview(null);
+    setUpgradeFotoPath(null);
+  }
+
   // ── Item actions (immediate save) ───────────────────────────────────────────
   // REGRA DE NEGOCIO (Ródio automatico — Frente A, 30/05/2026):
   // O que: quando o produto selecionado e servico de rodio, exige SKU base da joia,
@@ -826,6 +895,48 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     if (pctDesconto > maxDesconto) { setDescontoErr(`Máximo: ${maxDesconto}%`); return; }
 
     let item: Record<string, unknown> = calcItem(produtoSel, qtd, pctDesconto);
+
+    // ── Upgrade: valida peso e foto obrigatorios ───────────────────────
+    // REGRA DE NEGOCIO: para upgrade, qtd e sempre 1 e o preco e
+    // calculado como peso_gramas × valor_por_grama. Peso e foto da
+    // balanca sao obrigatorios.
+    let upgradePayload: Record<string, unknown> | null = null;
+    if (isUpgradeProduto) {
+      const pesoNum = parseFloat(upgradePesoGramas.replace(",", "."));
+      if (!pesoNum || pesoNum <= 0) {
+        setDescontoErr("Informe o peso do metal antes de adicionar o upgrade.");
+        return;
+      }
+      if (!upgradeFotoPath) {
+        setDescontoErr("Anexe a foto da balanca antes de adicionar o upgrade.");
+        return;
+      }
+      upgradePayload = {
+        peso_gramas: pesoNum,
+        foto_balanca_path: upgradeFotoPath,
+        valor_por_grama: upgradeValorPorGrama,
+        quebra_percentual: upgradeQuebraPct,
+        peso_liquido: Math.round(pesoNum * (1 - upgradeQuebraPct / 100) * 10000) / 10000,
+      };
+
+      // Recalcula valores do item com base no upgrade
+      const valorLista = Math.round(pesoNum * upgradeValorPorGrama * 100) / 100;
+      const valorUnitario = Math.round(valorLista * (1 - pctDesconto / 100) * 100) / 100;
+      const totalUpgrade = valorUnitario;
+      const pctComissaoUpgrade = getComissao(pctDesconto);
+      item = {
+        ...item,
+        ...upgradePayload,
+        quantidade: 1,
+        preco_lista: valorLista,
+        preco_unitario: valorUnitario,
+        total_item: totalUpgrade,
+        pct_comissao: pctComissaoUpgrade,
+        valor_comissao: Math.round(totalUpgrade * (pctComissaoUpgrade / 100) * 100) / 100,
+        peso_estimado: pesoNum,
+        upgrade: upgradePayload,
+      };
+    }
 
     // ── Ródio: valida SKU base e recalcula preços ─────────────────────────────
     if (isServicoRodioProduto(produtoSel)) {
@@ -876,6 +987,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       setProdutoSel(null); setQtd(1); setPctDesconto(0); setDescontoErr(""); setAddingItem(false);
       // Limpa estado do rodio apos sucesso
       setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro("");
+      // Limpa estado de upgrade apos sucesso
+      resetUpgradeState();
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao adicionar item"); }
     finally { setUpdating(false); }
   }
@@ -2753,7 +2866,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                 <div className="mb-3 p-4 rounded-xl border" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-medium" style={{ color: "#374151" }}>Adicionar produto</p>
-                    <button onClick={() => { setAddingItem(false); setProdutoSel(null); setDescontoErr(""); setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro(""); }} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+                    <button onClick={() => { setAddingItem(false); setProdutoSel(null); setDescontoErr(""); setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro(""); resetUpgradeState(); }} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
                   </div>
                   <Autocomplete<Produto>
                     placeholder="Buscar por nome ou SKU..."
@@ -2764,12 +2877,51 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                         <p className="text-xs" style={{ color: "#9CA3AF" }}>{p.sku} · {p.preco_venda != null ? fmt(p.preco_venda) : "sem preço"}</p>
                       </div>
                     )}
-                    onSelect={p => { setProdutoSel(p); setPctDesconto(0); setDescontoErr(""); setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro(""); }}
+                    onSelect={p => { setProdutoSel(p); setPctDesconto(0); setDescontoErr(""); setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro(""); void checkUpgradeConfig(p.id); }}
                     selectedLabel={produtoSel ? `${produtoSel.nome} · ${fmt(produtoSel.preco_venda ?? 0)}` : null}
-                    onClear={() => { setProdutoSel(null); setDescontoErr(""); setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro(""); }}
+                    onClear={() => { setProdutoSel(null); setDescontoErr(""); setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro(""); resetUpgradeState(); }}
                   />
                   {produtoSel && (
-                    isServicoRodioProduto(produtoSel) ? (
+                    isUpgradeProduto ? (
+                      /* Layout para produto upgrade — campos de peso, foto e quebra */
+                      <div className="mt-3 space-y-3">
+                        <UpgradeItemFields
+                          valorPorGrama={upgradeValorPorGrama}
+                          quebraPercentual={upgradeQuebraPct}
+                          pesoGramas={upgradePesoGramas}
+                          onPesoChange={setUpgradePesoGramas}
+                          fotoB64={upgradeFotoB64}
+                          fotoPreview={upgradeFotoPreview}
+                          fotoPath={upgradeFotoPath}
+                          uploadingFoto={uploadingUpgradeFoto}
+                          onFotoChange={(b64, preview) => {
+                            setUpgradeFotoB64(b64);
+                            setUpgradeFotoPreview(preview);
+                          }}
+                          onFotoUpload={handleUpgradeFotoUpload}
+                          disabled={false}
+                        />
+                        {/* Desconto (abaixo dos campos de upgrade) */}
+                        {upgradeValorPorGrama > 0 && (
+                          <div className="flex items-center gap-3 pt-1">
+                            <div>
+                              <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>% Desconto <span style={{ color: "#9CA3AF" }}>(máx {maxDesconto}%)</span></label>
+                              <input type="number" min={0} max={maxDesconto} step={1} value={pctDesconto}
+                                onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(v > maxDesconto ? `Máximo: ${maxDesconto}%` : ""); }}
+                                onBlur={e => { if (e.target.value === "") setPctDesconto(0); }}
+                                className="w-24 border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
+                                style={{ borderColor: descontoErr ? "#EF4444" : C.cremeBorder }} />
+                              {descontoErr && <p className="text-[11px] text-red-500 mt-0.5">{descontoErr}</p>}
+                            </div>
+                            <button onClick={() => void handleAddItem()} disabled={!!descontoErr || pctDesconto > maxDesconto || updating}
+                              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40 transition-opacity"
+                              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                              {updating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Confirmar
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : isServicoRodioProduto(produtoSel) ? (
                       /* Layout inline 5 colunas para servico de rodio (Frente A — 30/05/2026) */
                       <div className="mt-3 space-y-2">
                         {/* Linha 1: SKU base (full width) */}
@@ -3225,32 +3377,46 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       </div>
                     )}
 
-                    {/* Pix inline MP */}
-                    {isPix && pag.status === "pendente" && newPagGateway === "Mercado Pago" && (
+                    {/* Pix inline MP — usa gateway salvo no pagamento, ou fallback newPagGateway */}
+                    {isPix && pag.status === "pendente" && (
+                      pag.gateway
+                        ? pag.gateway.includes("Mercado Pago")
+                        : newPagGateway === "Mercado Pago"
+                    ) && (
                       <div className="px-3 pb-3 border-t" style={{ borderColor: C.cremeBorder }}>
                         <PixQrInline
                           vendaId={venda.id}
                           numeroVenda={venda.numero_venda}
                           valor={pag.valor}
                           endpoint="criar-pix-instore"
+                          pagamentoId={pag.id}
                           onPagamentoConfirmado={() => load()}
                         />
                       </div>
                     )}
-                    {/* Pix inline PagBank */}
-                    {isPix && pag.status === "pendente" && newPagGateway === "PagBank" && (
+                    {/* Pix inline PagBank — usa gateway salvo no pagamento, ou fallback newPagGateway */}
+                    {isPix && pag.status === "pendente" && (
+                      pag.gateway
+                        ? pag.gateway.includes("PagBank")
+                        : newPagGateway === "PagBank"
+                    ) && (
                       <div className="px-3 pb-3 border-t" style={{ borderColor: C.cremeBorder }}>
                         <PagBankQrInline
                           vendaId={venda.id}
                           numeroVenda={venda.numero_venda}
                           valor={pag.valor}
+                          pagamentoId={pag.id}
                           onPagamentoConfirmado={() => load()}
                         />
                       </div>
                     )}
 
-                    {/* Cartão de Crédito inline MP */}
-                    {isCartao && pag.status === "pendente" && newPagGateway === "Mercado Pago" && (
+                    {/* Cartão de Crédito inline MP — usa gateway salvo no pagamento, ou fallback newPagGateway */}
+                    {isCartao && pag.status === "pendente" && (
+                      pag.gateway
+                        ? pag.gateway.includes("Mercado Pago")
+                        : newPagGateway === "Mercado Pago"
+                    ) && (
                       <div className="px-3 pb-3 border-t" style={{ borderColor: C.cremeBorder }}>
                         {cartaoBloqueado ? (
                           <div className="flex items-start gap-2 p-3 rounded-lg"
@@ -3267,6 +3433,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                             numeroVenda={venda.numero_venda}
                             valor={pag.valor}
                             installments={pag.parcelas || 1}
+                            pagamentoId={pag.id}
                             onPagamentoConfirmado={() => load()}
                           />
                         )}
@@ -3355,7 +3522,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                 if (!v || v <= 0) return;
                 const parcelas = newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao) || 1;
                 const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas };
-                if (newPagForma === "Cartão de Crédito") body.gateway = newPagGateway;
+                if (newPagForma === "Cartão de Crédito" || newPagForma === "Pix") body.gateway = newPagGateway;
                 if (newPagForma === "Vale-Troca") body.vale_numero = valeNumero.trim();
                 if (newPagForma === "Ouro") {
                   const peso = parseFloat(ouroPeso.replace(",", "."));
