@@ -1013,8 +1013,12 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       const item = venda.itens.find(i => i.id === itemId);
       if (!item || item.preco_lista <= 0) return;
       const novoPreco = parseFloat(raw.replace(",", ".")) || 0;
-      if (novoPreco < 0 || novoPreco > item.preco_lista) return;
-      let pct = ((item.preco_lista - novoPreco) / item.preco_lista) * 100;
+      if (novoPreco < 0) return;
+      // REGRA DE NEGOCIO: markup (preco acima da lista) e permitido — consultora pode
+      // vender produto mais caro sem aprovacao. Nesse caso pct_desconto = 0.
+      let pct = novoPreco > item.preco_lista
+        ? 0
+        : ((item.preco_lista - novoPreco) / item.preco_lista) * 100;
       if (pct > maxDesconto && venda.situacao !== "rascunho") return;
       pct = Math.round(pct * 100) / 100;
 
@@ -2669,7 +2673,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                             ? (() => {
                                 const p = parseFloat((localPrecoUn[item.id!] || "0").replace(",", ".")) || 0;
                                 return p > 0 && item.preco_lista > 0
-                                  ? Math.round(((item.preco_lista - p) / item.preco_lista) * 10000) / 100
+                                  ? Math.max(0, Math.round(((item.preco_lista - p) / item.preco_lista) * 10000) / 100)
                                   : item.pct_desconto;
                               })()
                             : (localPct[item.id!] !== undefined ? localPct[item.id!] : item.pct_desconto);
@@ -2729,8 +2733,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                                 const raw = e.target.value;
                                 setLocalPrecoUn(prev => ({ ...prev, [item.id!]: raw }));
                                 const novoPreco = parseFloat(raw.replace(",", ".")) || 0;
-                                if (novoPreco > 0 && novoPreco <= item.preco_lista) {
-                                  const pct = Math.round(((item.preco_lista - novoPreco) / item.preco_lista) * 10000) / 100;
+                                if (novoPreco > 0) {
+                                  // markup: preco acima da lista sem aprovacao → pct = 0
+                                  const pct = novoPreco > item.preco_lista
+                                    ? 0
+                                    : Math.round(((item.preco_lista - novoPreco) / item.preco_lista) * 10000) / 100;
                                   setLocalPct(prev => ({ ...prev, [item.id!]: Math.min(maxDesconto, pct) }));
                                 }
                               }}

@@ -1011,10 +1011,16 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       }
       if (field === "preco_unitario") {
         const novoPreco = parseFloat(raw.replace(",", ".")) || 0;
-        if (item.preco_lista > 0 && novoPreco >= 0 && novoPreco <= item.preco_lista) {
-          pct = Math.min(maxDesconto, Math.max(0, ((item.preco_lista - novoPreco) / item.preco_lista) * 100));
-          pct = Math.round(pct * 100) / 100;
-          precoUnitDigitado = novoPreco;
+        if (item.preco_lista > 0 && novoPreco >= 0) {
+          // markup: preco acima da lista permitido sem aprovacao → pct = 0
+          if (novoPreco > item.preco_lista) {
+            pct = 0;
+            precoUnitDigitado = novoPreco;
+          } else {
+            pct = Math.min(maxDesconto, Math.max(0, ((item.preco_lista - novoPreco) / item.preco_lista) * 100));
+            pct = Math.round(pct * 100) / 100;
+            precoUnitDigitado = novoPreco;
+          }
         }
       }
 
