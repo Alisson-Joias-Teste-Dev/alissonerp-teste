@@ -965,12 +965,12 @@ export default function MarcarEntregaModal({
      * Cancelar automaticamente mantém a lista limpa. O dado fica no banco
      * como 'cancelada' para auditoria, mas não aparece no frontend.
      *
-     * Funciona tanto para retirada quanto para motoboy. Se for motoboy,
-     * o código B foi enviado por WhatsApp e será invalidado ao cancelar —
-     * na próxima abertura um novo código será gerado.
-     * IMPACTO SE REMOVIDO: entregas pendentes órfãs acumulam na lista.
+     * EXCEÇÃO: entrega via motoboy NÃO é cancelada, pois o Código A será
+     * digitado depois pelo cliente (via drawer). Se cancelar, o motoboy
+     * perde a entrega que já foi atribuída a ele.
+     * IMPACTO SE REMOVIDO: entregas de motoboy somem antes da confirmação.
      */
-    if (codigosGerados && !codigoConfirmado) {
+    if (codigosGerados && !codigoConfirmado && !codigosGerados.codigoMotoboy) {
       await apiFetch(
         `/api/entregas-venda/${codigosGerados.entrega.id}/cancelar`,
         { method: "POST" },
