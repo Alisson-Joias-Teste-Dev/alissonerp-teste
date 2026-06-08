@@ -46,6 +46,16 @@ export const ROLES_FISCAL = [
 // Roles que podem dar baixa no caixa dinheiro
 export const ROLES_BAIXA_CAIXA = ["admin", "desenvolvedor", "gerente_loja", "gerente_fabrica"] as const;
 
+// REGRA DE NEGÓCIO: Fonte única da verdade para acesso ao módulo Metal.
+// O QUE: centraliza a lista de roles que acessam compras e recebimentos de metal.
+// POR QUE: antes estava duplicada em 10+ arquivos (compras, recebimentos,
+//   aprovações, sidebar) com inconsistências entre si.
+// IMPACTO SE REMOVIDO: quebra verificação de permissão em todas as rotas
+//   do módulo metal, causando 403 para todos os usuários.
+export const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"];
+
+export const ROLES_METAL_APROVACOES = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
+
 export function podedarBaixaCaixa(role: string | null | undefined): boolean {
   return ROLES_BAIXA_CAIXA.includes(role as typeof ROLES_BAIXA_CAIXA[number]);
 }
