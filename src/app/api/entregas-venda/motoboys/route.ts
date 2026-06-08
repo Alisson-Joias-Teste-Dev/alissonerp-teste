@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
       gen_random_uuid(),
       ${email},
       ${novoUserId}::uuid,
-      jsonb_build_object('sub', ${novoUserId}::text, 'email', ${email}),
+      ${JSON.stringify({ sub: novoUserId, email })}::jsonb,
       'email',
       now(),
       now(),
