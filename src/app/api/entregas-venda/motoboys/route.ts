@@ -20,7 +20,6 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@supabase/supabase-js";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
@@ -142,70 +141,66 @@ export async function POST(req: NextRequest) {
 
   const { nome, email, senha, telefone, cpf, rua, numero, bairro, cidade, uf, cep, complemento, placa } = parsed.data;
 
-  // REGRA DE NEGÓCIO: cria o auth.user primeiro (o trigger auto-cria o
-  // usuario). Se o e-mail já existir, o Supabase retorna erro.
-  // A role='motoboy' vai no user_metadata para o trigger setar em usuarios.
-  const serviceKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!serviceKey) {
+  // REGRA DE NEGÓCIO: verifica se e-mail já existe antes de tentar criar.
+  const [existente] = await sql`
+    SELECT id FROM auth.users WHERE email = ${email} LIMIT 1
+  `;
+  if (existente) {
     return NextResponse.json(
-      { error: "Serviço de autenticação não configurado" },
-      { status: 500 },
+      { error: `E-mail "${email}" já está cadastrado no sistema.` },
+      { status: 409 },
     );
   }
 
-  const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    serviceKey,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
+  // REGRA DE NEGÓCIO: cria auth.user + identity via SQL direto.
+  // O trigger fn_handle_new_user cria automaticamente o registro em usuarios.
+  // IMPACTO SE ALTERADO: usar API Supabase não funciona neste ambiente
+  // (Invalid authentication credentials). SQL direto é a abordagem que
+  // funcionou nos testes.
+  const novoUserId = (await sql`
+    INSERT INTO auth.users (
+      instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+      raw_app_meta_data, raw_user_meta_data, is_super_admin,
+      created_at, updated_at, confirmation_token, recovery_token,
+      email_change_token_new, email_change
+    ) VALUES (
+      '00000000-0000-0000-0000-000000000000',
+      gen_random_uuid(),
+      'authenticated',
+      'authenticated',
+      ${email},
+      crypt(${senha}, gen_salt('bf')),
+      now(),
+      '{"provider":"email","providers":["email"]}',
+      ${JSON.stringify({ nome, role: "entregador" })},
+      false,
+      now(),
+      now(),
+      '',
+      '',
+      '',
+      ''
+    )
+    RETURNING id
+  ` as Record<string, unknown>[])[0]?.id as string;
 
-  let novoUserId: string;
-
-  try {
-    const { data: authUser, error: authError } =
-      await supabaseAdmin.auth.admin.createUser({
-        email,
-        password: senha,
-        email_confirm: true, // Não precisa confirmar e-mail
-        user_metadata: { nome, role: "entregador" },
-      });
-
-    if (authError) {
-      const msg = authError.message.toLowerCase();
-      if (msg.includes("already") || msg.includes("duplicate") || msg.includes("exists")) {
-        return NextResponse.json(
-          { error: `E-mail "${email}" já está cadastrado no sistema.` },
-          { status: 409 },
-        );
-      }
-      console.error("[entregas-venda/motoboys] Erro ao criar auth.user:", authError);
-      return NextResponse.json(
-        { error: `Erro ao criar usuário: ${authError.message}` },
-        { status: 500 },
-      );
-    }
-
-    if (!authUser?.user?.id) {
-      return NextResponse.json(
-        { error: "Usuário criado mas ID não retornado pelo Supabase." },
-        { status: 500 },
-      );
-    }
-
-    novoUserId = authUser.user.id;
-  } catch (err) {
-    console.error("[entregas-venda/motoboys] Exceção ao criar auth.user:", err);
-    return NextResponse.json(
-      { error: "Erro ao conectar com serviço de autenticação." },
-      { status: 500 },
-    );
-  }
+  // REGRA DE NEGÓCIO: cria identity para login funcionar.
+  await sql`
+    INSERT INTO auth.identities (id, provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+    VALUES (
+      gen_random_uuid(),
+      ${email},
+      ${novoUserId}::uuid,
+      jsonb_build_object('sub', ${novoUserId}::text, 'email', ${email}),
+      'email',
+      now(),
+      now(),
+      now()
+    )
+  `;
 
   // REGRA DE NEGÓCIO: insere o motoboy vinculado ao auth.user recém-criado.
-  // O trigger fn_handle_new_user já criou o registro em usuarios com role='motoboy'.
+  // O trigger fn_handle_new_user já criou o registro em usuarios com role='entregador'.
   try {
     const [novo] = await sql`
       INSERT INTO alissonerp.motoboys (
@@ -252,12 +247,12 @@ export async function POST(req: NextRequest) {
       { status: 201 },
     );
   } catch (err) {
-    // REGRA DE NEGÓCIO: se a inserção no motoboys falhar, tenta
-    // limpar o auth.user criado para não deixar órfão.
+    // REGRA DE NEGÓCIO: limpar auth.user criado se motoboy falhar.
     const message = err instanceof Error ? err.message : "Erro ao cadastrar motoboy";
     console.error("[entregas-venda/motoboys] Erro ao criar motoboy, removendo auth.user:", err);
     try {
-      await supabaseAdmin.auth.admin.deleteUser(novoUserId!);
+      await sql`DELETE FROM auth.identities WHERE user_id = ${novoUserId}::uuid`;
+      await sql`DELETE FROM auth.users WHERE id = ${novoUserId}::uuid`;
     } catch {
       // best-effort cleanup
     }
