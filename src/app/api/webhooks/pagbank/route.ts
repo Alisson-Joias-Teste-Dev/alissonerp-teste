@@ -110,9 +110,17 @@ export async function POST(req: NextRequest) {
   const orderId = String(payload.id ?? "");
   const charges = (payload.charges as Array<Record<string, unknown>>) ?? [];
 
-  if (!orderId || charges.length === 0) {
-    await logWebhookUpdate(orderId, 400, "Pedido sem ID ou sem charges");
-    return NextResponse.json({ error: "Payload sem id ou charges" }, { status: 400 });
+  if (!orderId) {
+    await logWebhookUpdate(orderId, 400, "Pedido sem ID");
+    return NextResponse.json({ error: "Payload sem id" }, { status: 400 });
+  }
+
+  // QR Pix pode chegar com charges vazio até o pagamento efetivar —
+  // não rejeitar, apenas processar o que existir.
+  if (charges.length === 0) {
+    console.log(`[webhook-pagbank] Order ${orderId} sem charges — ignorado (aguardando pagamento)`);
+    await logWebhookUpdate(orderId, 200, "Sem charges para processar");
+    return NextResponse.json({ ok: true, mensagem: "Sem charges — aguardando pagamento" });
   }
 
   // Valida autenticidade

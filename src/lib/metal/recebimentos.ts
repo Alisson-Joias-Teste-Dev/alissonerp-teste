@@ -27,10 +27,11 @@ import type { RecebimentoInput, RecebimentoRecord, CreditoClienteRecord } from "
  * 1. Lê cotação do ouro (congelada)
  * 2. Lê configurações (min/max %)
  * 3. Consulta a venda para obter o valor total
- * 4. Calcula crédito vs venda → aplicado + excedente
- * 5. Se foto: valida peso com IA
- * 6. Gera número RM-AAAA-NNNN
- * 7. Transação: INSERT recebimento, credita excedente, abate venda
+ * 4. Se acima do teto: status = pendente_aprovacao, não aplica crédito, não entra cofre
+ * 5. Se normal: calcula crédito vs venda, aplica, entra no cofre
+ * 6. Se foto: valida peso com IA
+ * 7. Gera número RM-AAAA-NNNN
+ * 8. Transação: INSERT recebimento, (se normal) credita excedente, abate venda
  */
 export async function criarRecebimentoMetal(
   input: RecebimentoInput,
@@ -46,8 +47,15 @@ export async function criarRecebimentoMetal(
   const maxLimit = parseFloat((cotacao * (config.receb_metal_max_pct / 100)).toFixed(2));
 
   // REGRA DE NEGÓCIO: Se ultrapassar o teto, marca excedeu_teto = true (alerta)
-  const excedeuTeto = input.valor_credito_grama > maxLimit;
+  const excedeuTeto = input.acima_teto && input.valor_credito_grama > maxLimit;
   const valorTotal = parseFloat((input.peso_gramas * input.valor_credito_grama).toFixed(2));
+
+  // REGRA DE NEGÓCIO: Se valor acima do teto, recebimento nasce com
+  // status 'pendente_aprovacao' e precisa de aprovação antes de entrar no cofre.
+  const aprovadorMetalId = (config.metal_aprovador_id ?? "").trim();
+  if (excedeuTeto && !aprovadorMetalId) {
+    throw new Error("Aprovador de metal acima do teto não configurado.");
+  }
 
   // Busca a venda vinculada
   const [venda] = await sql`
@@ -58,9 +66,10 @@ export async function criarRecebimentoMetal(
   if (!venda) throw new Error(`Venda #${input.venda_id} não encontrada`);
 
   // REGRA DE NEGÓCIO: Calcula crédito aplicado na venda e excedente
+  // Quando acima do teto, crédito NÃO é aplicado (aguarda aprovação)
   const valorVenda = parseFloat(venda.total_venda);
-  const creditoAplicado = Math.min(valorTotal, valorVenda);
-  const creditoExcedente = parseFloat((valorTotal - creditoAplicado).toFixed(2));
+  const creditoAplicado = excedeuTeto ? 0 : Math.min(valorTotal, valorVenda);
+  const creditoExcedente = excedeuTeto ? 0 : parseFloat((valorTotal - creditoAplicado).toFixed(2));
 
   // Validação IA da foto
   let pesoIa: number | null = null;
@@ -79,6 +88,10 @@ export async function criarRecebimentoMetal(
     iaConfianca = iaResult.confianca;
     iaMatch = iaResult.match;
   }
+
+  // Define status e cofre conforme acima do teto ou não
+  const statusInicial = excedeuTeto ? "pendente_aprovacao" : "ativo";
+  const cofreRegistrado = !excedeuTeto;
 
   // Transação atômica
   return sql.begin(async (tx: any) => {
@@ -102,10 +115,11 @@ export async function criarRecebimentoMetal(
       }
     }
 
-    // REGRA DE NEGÓCIO: Se houver excedente, cria registro em creditos_cliente
+    // REGRA DE NEGÓCIO: Crédito excedente só é criado se NÃO estiver
+    // acima do teto. Se pendente_aprovacao, aguarda decisão.
     let creditoExcedenteId: number | null = null;
 
-    if (creditoExcedente > 0) {
+    if (creditoExcedente > 0 && !excedeuTeto) {
       const [cred] = await tx`
         INSERT INTO alissonerp.creditos_cliente
           (cliente_id, saldo_disponivel, venda_origem_id, status)
@@ -129,20 +143,21 @@ export async function criarRecebimentoMetal(
         ${input.valor_credito_grama}, ${minLimit}, ${maxLimit}, ${excedeuTeto},
         ${valorTotal}, ${input.venda_id}, ${creditoExcedente}, ${creditoExcedenteId},
         ${fotoPath}, ${pesoIa}, ${iaConfianca}, ${iaMatch},
-        'ativo', true, ${input.observacao ?? null}, ${userId}::uuid
+        ${statusInicial}, ${cofreRegistrado}, ${input.observacao ?? null}, ${userId}::uuid
       )
       RETURNING *
     `;
 
-    // Atualiza venda com o crédito aplicado
-    // REGRA DE NEGÓCIO: Abate o crédito do valor da venda.
-    // Se venda for de ouro no crediário, não mexe no fluxo financeiro.
-    const novoTotal = parseFloat((valorVenda - creditoAplicado).toFixed(2));
-    await tx`
-      UPDATE alissonerp.vendas_erp
-      SET total_venda = ${novoTotal < 0 ? 0 : novoTotal}
-      WHERE id = ${input.venda_id}
-    `;
+    // REGRA DE NEGÓCIO: Só aplica crédito na venda se NÃO estiver acima do teto.
+    // Se pendente_aprovacao, a aplicação ocorre após aprovação.
+    if (!excedeuTeto) {
+      const novoTotal = parseFloat((valorVenda - creditoAplicado).toFixed(2));
+      await tx`
+        UPDATE alissonerp.vendas_erp
+        SET total_venda = ${novoTotal < 0 ? 0 : novoTotal}
+        WHERE id = ${input.venda_id}
+      `;
+    }
 
     const result = row as RecebimentoRecord;
 
@@ -294,4 +309,104 @@ export async function getRecebimentoPorId(id: number): Promise<RecebimentoRecord
     WHERE rm.id = ${id}
   `;
   return (row as RecebimentoRecord) ?? null;
+}
+
+/**
+ * Aprova um recebimento de metal acima do teto.
+ *
+ * REGRA DE NEGÓCIO: Ao aprovar, o recebimento é ativado:
+ * 1. Status → 'ativo'
+ * 2. Cofre → registrado (entrada no estoque de metal)
+ * 3. Crédito aplicado na venda
+ * 4. Excedente vira saldo do cliente
+ */
+export async function aprovarRecebimentoMetal(recebimentoId: number, userId: string) {
+  const [receb] = await sql`
+    SELECT * FROM alissonerp.recebimentos_metal WHERE id = ${recebimentoId}
+  `;
+  if (!receb) throw new Error("Recebimento não encontrado");
+  if (receb.status !== "pendente_aprovacao") {
+    throw new Error("Recebimento não está aguardando aprovação");
+  }
+
+  return sql.begin(async (tx: any) => {
+    const valorTotal = parseFloat(receb.valor_total);
+
+    // Busca venda para aplicar crédito
+    const [venda] = await tx`
+      SELECT id, total_venda FROM alissonerp.vendas_erp
+      WHERE id = ${receb.venda_id}
+    `;
+    const valorVenda = venda ? parseFloat(venda.total_venda) : 0;
+    const creditoAplicado = Math.min(valorTotal, valorVenda);
+    const creditoExcedente = parseFloat((valorTotal - creditoAplicado).toFixed(2));
+
+    // Aplica crédito na venda
+    if (venda && creditoAplicado > 0) {
+      const novoTotal = parseFloat((valorVenda - creditoAplicado).toFixed(2));
+      await tx`
+        UPDATE alissonerp.vendas_erp
+        SET total_venda = ${novoTotal < 0 ? 0 : novoTotal}
+        WHERE id = ${receb.venda_id}
+      `;
+    }
+
+    // Cria crédito excedente se houver
+    let creditoExcedenteId: number | null = null;
+    if (creditoExcedente > 0) {
+      const [cred] = await tx`
+        INSERT INTO alissonerp.creditos_cliente
+          (cliente_id, saldo_disponivel, venda_origem_id, status)
+        VALUES
+          (${receb.cliente_id}, ${creditoExcedente}, ${receb.venda_id}, 'ativo')
+        RETURNING id
+      `;
+      creditoExcedenteId = cred.id;
+    }
+
+    // Atualiza recebimento
+    await tx`
+      UPDATE alissonerp.recebimentos_metal
+      SET
+        status = 'ativo',
+        cofre_registrado = true,
+        credito_excedente = ${creditoExcedente},
+        credito_excedente_id = ${creditoExcedenteId},
+        updated_at = now()
+      WHERE id = ${recebimentoId}
+    `;
+
+    return { ok: true, recebimento_id: recebimentoId };
+  });
+}
+
+/**
+ * Rejeita um recebimento de metal acima do teto.
+ *
+ * REGRA DE NEGÓCIO: Ao rejeitar, o recebimento é cancelado e não entra
+ * no cofre. Não há impacto financeiro pois nenhum crédito foi aplicado.
+ */
+export async function rejeitarRecebimentoMetal(recebimentoId: number, userId: string, motivo?: string) {
+  const [receb] = await sql`
+    SELECT * FROM alissonerp.recebimentos_metal WHERE id = ${recebimentoId}
+  `;
+  if (!receb) throw new Error("Recebimento não encontrado");
+  if (receb.status !== "pendente_aprovacao") {
+    throw new Error("Recebimento não está aguardando aprovação");
+  }
+
+  await sql`
+    UPDATE alissonerp.recebimentos_metal
+    SET
+      status = 'cancelado',
+      cofre_registrado = false,
+      observacao = CASE
+        WHEN observacao IS NULL THEN ${motivo ?? "Rejeitado pelo aprovador"}
+        ELSE observacao || E'\nRejeitado: ' || ${motivo ?? "Rejeitado pelo aprovador"}
+      END,
+      updated_at = now()
+    WHERE id = ${recebimentoId}
+  `;
+
+  return { ok: true, recebimento_id: recebimentoId };
 }

@@ -9,18 +9,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { internalError } from "@/lib/api-error";
 import { listarAprovacoes } from "@/lib/metal/compras";
+import { ROLES_METAL_APROVACOES } from "@/lib/roles";
 
-/**
- * REGRA DE NEGÓCIO: permissão completa de consultora no fluxo metal inclui
- * visualizar fila de aprovações.
- * IMPACTO SE REMOVIDO: parte do fluxo fica invisível para vendedoras.
- */
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
 
 export async function GET(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  if (!ROLES_METAL.includes(user.role)) {
+  if (!ROLES_METAL_APROVACOES.includes(user.role)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 

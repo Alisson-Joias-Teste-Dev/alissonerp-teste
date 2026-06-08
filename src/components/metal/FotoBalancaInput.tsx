@@ -192,9 +192,11 @@ export default function FotoBalancaInput({
 
   const iaColors: Record<IaState, string> = {
     idle: "border-[#C59B6D]/30",
-    uploading: "border-blue-300",
-    analyzing: "border-purple-300",
-    waiting: "border-sky-300",
+    // REGRA DE NEGÓCIO: estados de loading da IA agora têm fundo azul claro
+    // para diferenciar visualmente de idle e dar feedback mais forte.
+    uploading: "border-blue-300 bg-blue-50/50",
+    analyzing: "border-purple-300 bg-purple-50/50",
+    waiting: "border-sky-300 bg-sky-50/50",
     success: "border-emerald-400 bg-emerald-50",
     mismatch: "border-amber-400 bg-amber-50",
     error: "border-red-300 bg-red-50",
@@ -234,7 +236,7 @@ export default function FotoBalancaInput({
                 if (debounceRef.current) clearTimeout(debounceRef.current);
                 if (fileInputRef.current) fileInputRef.current.value = "";
               }}
-              className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full hover:bg-red-600"
+              className="absolute top-1 right-1 bg-red-50 text-red-600 p-1 rounded-full hover:bg-red-100 transition-colors"
             >
               <XCircle size={14} />
             </button>

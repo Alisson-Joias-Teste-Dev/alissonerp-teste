@@ -28,6 +28,12 @@ export interface MetalConfig {
   receb_metal_max_pct: number;
   /** UUID do usuário que aprova compras acima do teto (vazio = sem aprovador configurado) */
   metal_aprovador_id?: string;
+  /**
+   * REGRA DE NEGÓCIO: Lista de roles que abrem direto no módulo Metal ao logar.
+   * Configurável pelo admin via /api/metal/configuracoes.
+   * Array vazio = ninguém é redirecionado (comportamento padrão).
+   */
+  metal_home_roles: string[];
 }
 
 // REGRA DE NEGÓCIO: Valores padrão usados quando as configs não existem no banco.
@@ -41,6 +47,9 @@ export const DEFAULT_METAL_CONFIG: MetalConfig = {
   receb_metal_min_pct: 95,
   receb_metal_max_pct: 100,
   metal_aprovador_id: "",
+  // REGRA DE NEGÓCIO: Por padrão ninguém é redirecionado para /metal.
+  // O admin deve configurar explicitamente quais roles abrem no módulo.
+  metal_home_roles: [],
 };
 
 // ─── Compra de Metal ────────────────────────────────────────────────────────
@@ -120,6 +129,7 @@ export const RecebimentoPostSchema = z.object({
   foto_base64: z.string().optional(),
   foto_media_type: z.string().optional(),
   observacao: z.string().max(2000).nullable().optional(),
+  acima_teto: z.boolean().optional().default(false),
 });
 
 export type RecebimentoInput = z.infer<typeof RecebimentoPostSchema>;
@@ -144,8 +154,9 @@ export interface RecebimentoRecord {
   foto_peso_ia: number | null;
   ia_confianca: string | null;
   ia_match: boolean | null;
-  status: "ativo" | "cancelado";
+  status: "ativo" | "pendente_aprovacao" | "cancelado";
   cofre_registrado: boolean;
+  tarefa_aprovacao_id: number | null;
   observacao: string | null;
   created_by: string;
   created_at: string;
@@ -192,14 +203,15 @@ export interface IaValidacaoResult {
   provedor: string;
 }
 
-// ─── Aprovação de Compra acima do teto ─────────────────────────────────────
+// ─── Aprovação de Metal acima do teto ───────────────────────────────────────
 
 /**
- * Registro de aprovação de compra de metal acima do teto.
+ * Registro de aprovação de metal acima do teto.
  *
- * REGRA DE NEGÓCIO: Quando o valor_pago_grama > max_limit (teto),
- * a compra é criada com status 'pendente_aprovacao' e fica bloqueada
- * até que o aprovador configurado aprove ou rejeite.
+ * REGRA DE NEGÓCIO: Quando o valor > max_limit (teto), a operação
+ * (compra ou recebimento) é criada com status 'pendente_aprovacao'
+ * e fica bloqueada até que o aprovador configurado aprove ou rejeite.
+ * Durante pendência: não entra no cofre, não afeta financeiro.
  */
 export interface CompraAprovacaoRecord {
   id: number;

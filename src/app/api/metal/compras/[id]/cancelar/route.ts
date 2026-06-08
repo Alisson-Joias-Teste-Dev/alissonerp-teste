@@ -9,13 +9,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { internalError } from "@/lib/api-error";
 import { cancelarCompraMetal } from "@/lib/metal/compras";
+import { ROLES_METAL } from "@/lib/roles";
 
-/**
- * REGRA DE NEGÓCIO: consultora com acesso completo ao módulo metal pode cancelar
- * compras pendentes dentro do próprio fluxo.
- * IMPACTO SE REMOVIDO: operação de ajuste fica bloqueada por 403.
- */
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"];
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const [user, errRes] = await authOr401(req);

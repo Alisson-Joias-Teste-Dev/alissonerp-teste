@@ -12,13 +12,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { internalError } from "@/lib/api-error";
 import { cancelarRecebimentoMetal } from "@/lib/metal/recebimentos";
+import { ROLES_METAL } from "@/lib/roles";
 
-/**
- * REGRA DE NEGÓCIO: consultora com permissão completa no metal também pode
- * cancelar recebimento para corrigir operação.
- * IMPACTO SE REMOVIDO: 403 ao tentar reverter recebimento no próprio fluxo.
- */
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"];
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const [user, errRes] = await authOr401(req);

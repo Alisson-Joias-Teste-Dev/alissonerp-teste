@@ -27,7 +27,10 @@ export default function MetalHistoricoPage() {
 
   const [compras, setCompras] = useState<CompraRecord[]>([]);
   const [recebimentos, setRecebimentos] = useState<RecebimentoRecord[]>([]);
+  const [comprasTotal, setComprasTotal] = useState(0);
+  const [recebimentosTotal, setRecebimentosTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState("");
   const [drawerCompraId, setDrawerCompraId] = useState<number | null>(null);
   const [drawerRecebimentoId, setDrawerRecebimentoId] = useState<number | null>(null);
 
@@ -67,6 +70,7 @@ export default function MetalHistoricoPage() {
 
   const carregar = useCallback(async () => {
     setLoading(true);
+    setErro("");
     const { inicio, fim } = calcularDatas();
 
     try {
@@ -80,6 +84,9 @@ export default function MetalHistoricoPage() {
         if (res.ok) {
           const data = await res.json();
           setCompras(data.data ?? []);
+          setComprasTotal(data.total ?? data.data?.length ?? 0);
+        } else {
+          throw new Error(`Erro ${res.status} ao carregar compras`);
         }
       } else {
         const params = new URLSearchParams();
@@ -91,10 +98,13 @@ export default function MetalHistoricoPage() {
         if (res.ok) {
           const data = await res.json();
           setRecebimentos(data.data ?? []);
+          setRecebimentosTotal(data.total ?? data.data?.length ?? 0);
+        } else {
+          throw new Error(`Erro ${res.status} ao carregar recebimentos`);
         }
       }
-    } catch {
-      // silencioso
+    } catch (e) {
+      setErro((e as Error).message || "Erro ao carregar dados");
     } finally {
       setLoading(false);
     }
@@ -131,7 +141,7 @@ export default function MetalHistoricoPage() {
             tab === "compras" ? "bg-[#1A3C34] text-[#C59B6D] shadow-md" : "text-[#1A3C34]/60 hover:text-[#1A3C34]"
           }`}
         >
-          Compras {compras.length > 0 && `(${compras.length})`}
+          Compras {comprasTotal > 0 && `(${comprasTotal})`}
         </button>
         <button
           onClick={() => setTab("recebimentos")}
@@ -139,7 +149,7 @@ export default function MetalHistoricoPage() {
             tab === "recebimentos" ? "bg-[#1A3C34] text-[#C59B6D] shadow-md" : "text-[#1A3C34]/60 hover:text-[#1A3C34]"
           }`}
         >
-          Recebimentos {recebimentos.length > 0 && `(${recebimentos.length})`}
+          Recebimentos {recebimentosTotal > 0 && `(${recebimentosTotal})`}
         </button>
       </div>
 
@@ -162,29 +172,44 @@ export default function MetalHistoricoPage() {
         {/* Filtro custom de data */}
         {filtroPeriodo === "custom" && (
           <div className="flex items-center gap-2 ml-2">
-            <input
-              type="date"
-              value={dataInicio}
-              onChange={(e) => setDataInicio(e.target.value)}
-              className="bg-white border border-[#C59B6D]/30 rounded-lg px-2 py-1 text-xs text-[#1A3C34] outline-none"
-            />
-            <span className="text-[10px] text-[#1A3C34]/40">até</span>
-            <input
-              type="date"
-              value={dataFim}
-              onChange={(e) => setDataFim(e.target.value)}
-              className="bg-white border border-[#C59B6D]/30 rounded-lg px-2 py-1 text-xs text-[#1A3C34] outline-none"
-            />
+            <label className="flex items-center gap-1">
+              <span className="text-[10px] text-[#1A3C34]/50 font-bold">De:</span>
+              <input
+                type="date"
+                value={dataInicio}
+                onChange={(e) => setDataInicio(e.target.value)}
+                className="bg-white border border-[#C59B6D]/30 rounded-lg px-2 py-1 text-xs text-[#1A3C34] outline-none"
+              />
+            </label>
+            <label className="flex items-center gap-1">
+              <span className="text-[10px] text-[#1A3C34]/50 font-bold">Até:</span>
+              <input
+                type="date"
+                value={dataFim}
+                onChange={(e) => setDataFim(e.target.value)}
+                className="bg-white border border-[#C59B6D]/30 rounded-lg px-2 py-1 text-xs text-[#1A3C34] outline-none"
+              />
+            </label>
           </div>
         )}
       </div>
 
       {/* Tabela */}
       <div className="bg-white rounded-2xl border border-[#C59B6D]/30 shadow-sm overflow-hidden p-4">
+        {/* REGRA DE NEGÓCIO: banner de erro visível no topo da tabela quando
+            a API falha. Antes ficava silencioso. */}
+        {erro && (
+          <div className="mb-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs text-red-700 flex items-center justify-between">
+            <span>{erro}</span>
+            <button onClick={carregar} className="text-xs font-bold underline ml-4 shrink-0">
+              Tentar novamente
+            </button>
+          </div>
+        )}
         {tab === "compras" ? (
-          <TabelaCompras data={compras} loading={loading} onRowClick={setDrawerCompraId} />
+          <TabelaCompras data={compras} loading={loading} error={erro ? "" : undefined} onRowClick={setDrawerCompraId} />
         ) : (
-          <TabelaRecebimentos data={recebimentos} loading={loading} onRowClick={setDrawerRecebimentoId} />
+          <TabelaRecebimentos data={recebimentos} loading={loading} error={erro ? "" : undefined} onRowClick={setDrawerRecebimentoId} />
         )}
       </div>
 

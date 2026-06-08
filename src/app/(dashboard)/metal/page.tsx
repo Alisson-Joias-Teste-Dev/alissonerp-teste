@@ -1,74 +1,56 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // TASK-022: /metal/page.tsx — Página principal do módulo Metal
 //
-// REGRA DE NEGÓCIO: Dashboard do módulo metal. Mostra cards de resumo
-// e ações rápidas para nova compra ou recebimento.
+// REGRA DE NEGÓCIO: Agora funciona como landing page única para operações
+// de compra e recebimento. Server component que carrega cotação + configs
+// e delega ao client component MetalPageClient a exibição com abas.
+//
+// IMPACTO SE ALTERADO: Usuário perde acesso rápido aos formulários de metal.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import Link from "next/link";
-import { ShoppingBag, ArrowRightLeft } from "lucide-react";
-import ResumoMetal from "@/components/metal/ResumoMetal";
+import { getCotacaoOuro, getModuloConfig } from "@/lib/metal/config";
+import MetalPageClient from "./MetalPageClient";
+import { AlertTriangle } from "lucide-react";
 
-export default function MetalPage() {
+// REGRA DE NEGÓCIO: força renderização dinâmica para evitar cotação congelada.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+export default async function MetalPage() {
+  let cotacaoOuro = 0;
+  let configs = {
+    compra_metal_min_pct: 80,
+    compra_metal_max_pct: 85,
+    compra_metal_comm_pct: 50,
+    receb_metal_min_pct: 95,
+    receb_metal_max_pct: 100,
+    metal_home_roles: [] as string[],
+  };
+
+  try {
+    cotacaoOuro = await getCotacaoOuro();
+  } catch (err) {
+    console.error("[METAL][page] Falha ao carregar cotação", err);
+  }
+
+  try {
+    configs = await getModuloConfig();
+  } catch (err) {
+    console.error("[METAL][page] Falha ao carregar configuração", err);
+  }
+
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-8 animate-[fadeIn_0.3s_ease-out]">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-[#1A3C34]">Metal</h1>
-        <p className="text-sm text-[#1A3C34]/60 mt-1">
-          Gerencie a entrada de metal no sistema
-        </p>
-      </div>
-
-      {/* Resumo */}
-      <ResumoMetal />
-
-      {/* Ações rápidas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Link
-          href="/metal/comprar"
-          className="bg-white border-2 border-[#1A3C34] rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all group"
-        >
-          <div className="flex items-center gap-4">
-            <div className="bg-[#1A3C34] p-3 rounded-xl group-hover:scale-110 transition-transform">
-              <ShoppingBag size={24} className="text-[#C59B6D]" />
-            </div>
-            <div>
-              <h2 className="font-bold text-lg text-[#1A3C34]">Nova Compra</h2>
-              <p className="text-xs text-[#1A3C34]/60">
-                Comprar metal de fornecedor. Pagamento via Mercado Pago.
-              </p>
-            </div>
+    <>
+      {/* REGRA DE NEGÓCIO: se a cotação falhou, mostra banner de alerta antes do form. */}
+      {cotacaoOuro <= 0 && (
+        <div className="max-w-5xl mx-auto px-6 pt-6">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-700 flex items-center gap-2">
+            <AlertTriangle size={14} className="shrink-0" />
+            <span>Cotacão do ouro indisponível no momento. Os valores podem estar incorretos.</span>
           </div>
-        </Link>
-
-        <Link
-          href="/metal/receber"
-          className="bg-white border-2 border-[#C59B6D] rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all group"
-        >
-          <div className="flex items-center gap-4">
-            <div className="bg-[#C59B6D] p-3 rounded-xl group-hover:scale-110 transition-transform">
-              <ArrowRightLeft size={24} className="text-[#1A3C34]" />
-            </div>
-            <div>
-              <h2 className="font-bold text-lg text-[#1A3C34]">Novo Recebimento</h2>
-              <p className="text-xs text-[#1A3C34]/60">
-                Receber metal de cliente como pagamento. Gera crédito na venda.
-              </p>
-            </div>
-          </div>
-        </Link>
-      </div>
-
-      {/* Link histórico */}
-      <div className="text-center">
-        <Link
-          href="/metal/historico"
-          className="inline-flex items-center gap-1 text-sm font-bold text-[#1A3C34]/60 hover:text-[#1A3C34] transition-colors"
-        >
-          Ver histórico completo →
-        </Link>
-      </div>
-    </div>
+        </div>
+      )}
+      <MetalPageClient cotacaoOuro={cotacaoOuro} configs={configs} />
+    </>
   );
 }

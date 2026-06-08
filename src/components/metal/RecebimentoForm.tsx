@@ -15,6 +15,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { DollarSign, Scale, Calculator, AlertTriangle, Info } from "lucide-react";
+import { toast } from "sonner";
 import ClienteSelector from "./ClienteSelector";
 import FotoBalancaInput from "./FotoBalancaInput";
 import type { ClienteOption } from "./ClienteSelector";
@@ -52,7 +53,20 @@ export default function RecebimentoForm({ cotacaoOuro, configs }: RecebimentoFor
   const minLimit = cotacaoOuro * (configs.receb_metal_min_pct / 100);
   const maxLimit = cotacaoOuro * (configs.receb_metal_max_pct / 100);
   const excedeuTeto = numericCredito > maxLimit;
+  const acimaTeto = numericCredito > maxLimit;
+  const aprovadorConfigurado = !!configs.metal_aprovador_id?.trim();
   const valorTotal = numericPeso * numericCredito;
+
+  const motivoBloqueio =
+    !fotoBase64
+      ? "Envie a foto da balança para continuar."
+      : numericPeso <= 0
+      ? "Informe o peso do metal para continuar."
+      : !iaMatch
+      ? "A validação da IA precisa confirmar o peso da balança."
+      : acimaTeto && !aprovadorConfigurado
+      ? "Defina o aprovador em Configurações > Aprovadores > Compra de Metal acima do teto."
+      : "";
 
   const creditoAplicado = valorVenda !== null ? Math.min(valorTotal, valorVenda) : valorTotal;
   const creditoExcedente = valorVenda !== null ? Math.max(0, valorTotal - valorVenda) : 0;
@@ -83,6 +97,10 @@ export default function RecebimentoForm({ cotacaoOuro, configs }: RecebimentoFor
     if (!vendaId || !parseInt(vendaId)) { setError("Informe o ID da venda"); return; }
     if (!peso || numericPeso <= 0) { setError("Informe o peso do metal"); return; }
     if (!creditoGrama || numericCredito <= 0) { setError("Informe o valor do crédito"); return; }
+    if (acimaTeto && !aprovadorConfigurado) {
+      setError("Defina o aprovador em Configurações > Aprovadores > Compra de Metal acima do teto.");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -97,6 +115,7 @@ export default function RecebimentoForm({ cotacaoOuro, configs }: RecebimentoFor
           foto_base64: fotoBase64 || undefined,
           foto_media_type: fotoMediaType || undefined,
           observacao: observacao || null,
+          acima_teto: acimaTeto || undefined,
         }),
       });
 
@@ -105,7 +124,13 @@ export default function RecebimentoForm({ cotacaoOuro, configs }: RecebimentoFor
         throw new Error(err.error || err.message || "Erro ao registrar recebimento");
       }
 
-      router.push(`/metal/historico`);
+      const result = await res.json();
+      if (result.status === "pendente_aprovacao") {
+        toast.success(`Recebimento ${result?.numero || ""} enviado para aprovação!`);
+      } else {
+        toast.success(`Recebimento ${result?.numero || ""} registrado!`);
+      }
+      setTimeout(() => router.push("/metal/historico"), 400);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao registrar recebimento");
     } finally {
@@ -146,9 +171,11 @@ export default function RecebimentoForm({ cotacaoOuro, configs }: RecebimentoFor
             type="button"
             onClick={buscarVenda}
             disabled={buscaVenda === "loading" || !vendaId}
-            className="px-3 py-1 bg-[#1A3C34] text-[#C59B6D] rounded-lg text-[10px] font-bold hover:bg-[#132A26] disabled:opacity-50"
+            className="px-3 py-1 bg-[#1A3C34] text-[#C59B6D] rounded-lg text-[10px] font-bold hover:bg-[#132A26] disabled:opacity-50 flex items-center gap-1"
           >
-            {buscaVenda === "loading" ? "..." : "Buscar"}
+            {buscaVenda === "loading" ? (
+              <><div className="w-3 h-3 border border-[#C59B6D] border-t-transparent rounded-full animate-spin" /> Buscando</>
+            ) : "Buscar"}
           </button>
         </div>
 
@@ -186,8 +213,16 @@ export default function RecebimentoForm({ cotacaoOuro, configs }: RecebimentoFor
 
       {/* Crédito */}
       <div className="bg-[#1A3C34] text-[#F2E8D5] rounded-2xl p-5 shadow-lg">
-        <p className="text-[10px] font-bold uppercase tracking-wider opacity-60 mb-1">Cotação Atual</p>
-        <p className="text-2xl font-bold text-[#C59B6D] mb-4">R$ {cotacaoOuro.toFixed(2)}/g</p>
+        <div className="flex justify-between items-center mb-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Cotação Atual</p>
+            <p className="text-2xl font-bold text-[#C59B6D]">R$ {cotacaoOuro.toFixed(2)}/g</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-bold uppercase opacity-60">Teto Máximo</p>
+            <p className="text-lg font-bold">R$ {maxLimit.toFixed(2)}/g</p>
+          </div>
+        </div>
 
         <div className="bg-[#132A26] rounded-xl p-4">
           <label className="text-[10px] font-bold text-[#C59B6D] uppercase mb-2 block">
@@ -215,7 +250,7 @@ export default function RecebimentoForm({ cotacaoOuro, configs }: RecebimentoFor
               <span>R$ {minLimit.toFixed(2)} ({pctMin}%)</span>
               <span>R$ {maxLimit.toFixed(2)} ({pctMax}%)</span>
             </div>
-            <div className="h-3 bg-[#1A3C34] rounded-full overflow-hidden relative">
+            <div className="h-4 bg-[#1A3C34] rounded-full overflow-hidden relative">
               <div
                 className={`h-full rounded-full transition-all ${
                   excedeuTeto ? "bg-amber-500" : numericCredito > 0 ? "bg-emerald-500" : "bg-[#C59B6D]/30"
@@ -278,6 +313,14 @@ export default function RecebimentoForm({ cotacaoOuro, configs }: RecebimentoFor
         </div>
       )}
 
+      {/* REGRA DE NEGÓCIO: motivo de bloqueio explica por que o botão de submit
+          está desabilitado, igual ao CompraForm. */}
+      {!submitting && !!motivoBloqueio && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+          {motivoBloqueio}
+        </p>
+      )}
+
       <div className="flex gap-3 pt-2">
         <button
           type="button"
@@ -288,19 +331,31 @@ export default function RecebimentoForm({ cotacaoOuro, configs }: RecebimentoFor
         </button>
         <button
           type="submit"
-          disabled={submitting || !fotoBase64 || numericPeso <= 0 || !iaMatch}
-          className="flex-1 py-3 bg-[#1A3C34] text-[#C59B6D] rounded-xl text-sm font-bold hover:bg-[#132A26] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+          disabled={submitting || !fotoBase64 || numericPeso <= 0 || !iaMatch || (acimaTeto && !aprovadorConfigurado)}
+          className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${
+            acimaTeto
+              ? "bg-amber-500 text-white hover:bg-amber-600"
+              : "bg-[#1A3C34] text-[#C59B6D] hover:bg-[#132A26]"
+          }`}
         >
           {submitting ? (
             <>
-              <div className="w-4 h-4 border-2 border-[#C59B6D] border-t-transparent rounded-full animate-spin" />
-              Registrando...
+              <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              {acimaTeto ? "Enviando..." : "Registrando..."}
             </>
+          ) : acimaTeto ? (
+            "Solicitar Aprovação"
           ) : (
             "Registrar Recebimento"
           )}
         </button>
       </div>
+
+      {acimaTeto && !aprovadorConfigurado && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+          Para solicitar aprovação acima do teto, selecione o aprovador em Configurações &gt; Aprovadores &gt; Compra de Metal acima do teto.
+        </p>
+      )}
     </form>
   );
 }

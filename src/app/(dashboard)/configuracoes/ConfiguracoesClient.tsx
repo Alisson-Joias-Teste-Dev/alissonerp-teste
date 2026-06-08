@@ -3119,6 +3119,22 @@ function TabIntegracoes() {
   const [mpAccessToken, setMpAccessToken] = useState("");
   const [mpWebhookSecret, setMpWebhookSecret] = useState("");
   const [mpUserId, setMpUserId] = useState("");
+  /** REGRA DE NEGÓCIO: toggle ativar/desativar gateway Mercado Pago.
+   *  O QUE: controla se o Mercado Pago aparece no dropdown de gateways das vendas.
+   *  POR QUE: permite operar só com PagBank ou só com MP, sem precisar excluir config.
+   *  IMPACTO: fonte da verdade é fin_gateways.ativo — lido do GET /api/configuracoes/integracoes. */
+  const [mpAtivo, setMpAtivo] = useState(true);
+  // PagBank
+  const [pagbankToken, setPagbankToken] = useState("");
+  const [pagbankWebhookSecret, setPagbankWebhookSecret] = useState("");
+  const [pagbankWebhookBaseUrl, setPagbankWebhookBaseUrl] = useState("");
+  const [pagbankConfigured, setPagbankConfigured] = useState(false);
+  const [pagbankSaved, setPagbankSaved] = useState(false);
+  /** REGRA DE NEGÓCIO: toggle ativar/desativar gateway PagBank.
+   *  O QUE: controla se o PagBank aparece no dropdown de gateways das vendas.
+   *  POR QUE: permite operar só com Mercado Pago ou só com PagBank, sem precisar excluir config.
+   *  IMPACTO: fonte da verdade é fin_gateways.ativo — lido do GET /api/configuracoes/integracoes. */
+  const [pagbankAtivo, setPagbankAtivo] = useState(true);
   const [mpWebhookBaseUrl, setMpWebhookBaseUrl] = useState("");
   const [showMpToken, setShowMpToken] = useState(false);
   const [showMpSecret, setShowMpSecret] = useState(false);
@@ -3175,6 +3191,10 @@ function TabIntegracoes() {
           setTinyConfigured(data.tiny_configured);
           setMpConfigured(data.mp_configured ?? false);
           setInterConfigured(data.inter_configured ?? false);
+          setPagbankConfigured(data.pagbank_configured ?? false);
+          /** Le estado de ativacao dos gateways do banco (fin_gateways.ativo) */
+          if (typeof data.mp_ativo === "boolean") setMpAtivo(data.mp_ativo);
+          if (typeof data.pagbank_ativo === "boolean") setPagbankAtivo(data.pagbank_ativo);
           if (data.mp_configured) carregarMpDevices();
         }
       } catch { /* silenciar */ }
@@ -3324,6 +3344,69 @@ function TabIntegracoes() {
       setMsg({ tipo: "erro", texto: d.error ?? "Erro ao salvar" });
     }
     setTimeout(() => setMsg(null), 4000);
+  }
+
+  async function salvarPagBank() {
+    if (!pagbankToken.trim() && !pagbankWebhookSecret.trim() && !pagbankWebhookBaseUrl.trim()) return;
+    setSaving(true);
+    setMsg(null);
+    const body: Record<string, string> = {};
+    if (pagbankToken.trim())          body.pagbank_access_token    = pagbankToken.trim();
+    if (pagbankWebhookSecret.trim())  body.pagbank_webhook_secret  = pagbankWebhookSecret.trim();
+    if (pagbankWebhookBaseUrl.trim()) body.pagbank_webhook_base_url = pagbankWebhookBaseUrl.trim();
+    const res = await fetch("/api/configuracoes/integracoes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setPagbankSaved(true);
+      setTimeout(() => setPagbankSaved(false), 3000);
+      setMsg({ tipo: "ok", texto: "PagBank salvo com sucesso" });
+      fetch("/api/configuracoes/integracoes").then(r => r.ok ? r.json() : null).then(d => {
+        if (d) {
+          setWooConfigured(d.woo_configured);
+          setKommoConfigured(d.kommo_configured);
+          setTinyConfigured(d.tiny_configured);
+          setTinyHasCredentials(d.tiny_has_credentials ?? false);
+          setMpConfigured(d.mp_configured ?? false);
+          setPagbankConfigured(d.pagbank_configured ?? false);
+        }
+      }).catch(() => {});
+    } else {
+      const d = await res.json().catch(() => ({ error: "Erro ao salvar" }));
+      setMsg({ tipo: "erro", texto: d.error ?? "Erro ao salvar" });
+    }
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  /** REGRA DE NEGÓCIO: toggle ativar/desativar gateway Mercado Pago.
+   *  O QUE: inverte o estado e atualiza fin_gateways.ativo via PATCH.
+   *  POR QUE: operadora pode querer desativar MP sem perder as credenciais.
+   *  IMPACTO SE ALTERADO: toggle não mais sincroniza com o banco. */
+  async function alternarMpAtivo() {
+    const novo = !mpAtivo;
+    setMpAtivo(novo);
+    await fetch("/api/configuracoes/integracoes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mp_ativo: String(novo) }),
+    });
+  }
+
+  /** REGRA DE NEGÓCIO: toggle ativar/desativar gateway PagBank.
+   *  O QUE: inverte o estado e atualiza fin_gateways.ativo via PATCH.
+   *  POR QUE: operadora pode querer desativar PagBank sem perder as credenciais.
+   *  IMPACTO SE ALTERADO: toggle não mais sincroniza com o banco. */
+  async function alternarPagbankAtivo() {
+    const novo = !pagbankAtivo;
+    setPagbankAtivo(novo);
+    await fetch("/api/configuracoes/integracoes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pagbank_ativo: String(novo) }),
+    });
   }
 
   function gerarCronSecret() {
@@ -3773,7 +3856,24 @@ function TabIntegracoes() {
               </p>
             </div>
           </div>
-          <StatusBadge ok={mpConfigured} />
+          <div className="flex items-center gap-2">
+            <StatusBadge ok={mpConfigured} />
+            {/* Toggle ativar/desativar gateway Mercado Pago nas vendas */}
+            <button
+              onClick={alternarMpAtivo}
+              className="flex items-center gap-1 text-xs transition-opacity hover:opacity-80"
+              title={mpAtivo ? "Mercado Pago ativo — clique para desativar" : "Mercado Pago inativo — clique para ativar"}
+            >
+              {mpAtivo ? (
+                <ToggleRight size={20} style={{ color: P.verde }} />
+              ) : (
+                <ToggleLeft size={20} style={{ color: P.muted }} />
+              )}
+              <span style={{ color: mpAtivo ? P.verde : P.muted, fontSize: "11px" }}>
+                {mpAtivo ? "Ativo" : "Inativo"}
+              </span>
+            </button>
+          </div>
         </div>
 
         <button
@@ -3887,8 +3987,8 @@ function TabIntegracoes() {
         )}
 
         {mpConfigured && !mpExpanded && (
-          <p className="text-xs flex items-center gap-1" style={{ color: P.verde }}>
-            <CheckCircle size={12} /> Mercado Pago ativo — recebimentos automáticos
+          <p className="text-xs flex items-center gap-1" style={{ color: mpAtivo ? P.verde : P.muted }}>
+            <CheckCircle size={12} /> {mpAtivo ? "Mercado Pago ativo — recebimentos automáticos" : "Mercado Pago configurado mas INATIVO nas vendas"}
           </p>
         )}
 
@@ -4030,12 +4130,32 @@ function TabIntegracoes() {
               <CreditCard size={18} />
             </div>
             <div>
-              <p className="text-sm font-semibold" style={{ color: P.creme }}>PagBank</p>
+              <p className="text-sm font-semibold" style={{ color: P.creme }}>
+                PagBank
+                {pagbankConfigured && (
+                  <span className="ml-2 text-xs font-normal" style={{ color: P.verde }}>✓ configurado</span>
+                )}
+              </p>
               <p className="text-xs" style={{ color: P.muted }}>
                 Pagamentos via PIX, cartão de crédito e link de pagamento
               </p>
             </div>
           </div>
+          {/* Toggle ativar/desativar gateway PagBank nas vendas */}
+          <button
+            onClick={alternarPagbankAtivo}
+            className="flex items-center gap-1 text-xs transition-opacity hover:opacity-80"
+            title={pagbankAtivo ? "PagBank ativo — clique para desativar" : "PagBank inativo — clique para ativar"}
+          >
+            {pagbankAtivo ? (
+              <ToggleRight size={20} style={{ color: P.verde }} />
+            ) : (
+              <ToggleLeft size={20} style={{ color: P.muted }} />
+            )}
+            <span style={{ color: pagbankAtivo ? P.verde : P.muted, fontSize: "11px" }}>
+              {pagbankAtivo ? "Ativo" : "Inativo"}
+            </span>
+          </button>
         </div>
 
         <div className="space-y-3 text-xs" style={{ color: P.muted }}>
@@ -4055,29 +4175,63 @@ function TabIntegracoes() {
 
           <div>
             <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
-              Access Token
+              Ambiente
+            </label>
+            <select
+              defaultValue="producao"
+              onChange={async (e) => {
+                const v = e.target.value;
+                try {
+                  await fetch("/api/configuracoes/integracoes", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ pagbank_ambiente: v }),
+                  });
+                } catch { /* silencia */ }
+              }}
+              className="w-full bg-transparent px-3 py-2 rounded-lg text-xs border outline-none"
+              style={{ borderColor: P.border, color: P.creme }}
+            >
+              <option value="producao">Produção (api.pagseguro.com)</option>
+              <option value="sandbox">Sandbox (sandbox.api.pagseguro.com)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
+              Token PagBank
+              {pagbankSaved && <span className="ml-1 text-[10px] font-normal" style={{ color: P.verde }}>✓ salvou!</span>}
             </label>
             <input
               type="password"
-              value={""}
-              onChange={() => {}}
-              placeholder="Cole o Access Token do PagBank (obtido no iBanking/Painel)"
+              value={pagbankToken}
+              onChange={(e) => setPagbankToken(e.target.value)}
+              placeholder="Token de integração fornecido no painel PagBank"
               className="w-full bg-transparent px-3 py-2 rounded-lg text-xs border outline-none"
-              style={{ borderColor: P.border, color: P.creme }}
+              style={{
+                borderColor: pagbankSaved ? P.verde : P.border,
+                color: P.creme,
+                transition: "border-color 0.3s ease",
+              }}
             />
           </div>
 
           <div>
             <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
-              Webhook Secret (token da conta)
+              Webhook Secret (normalmente o mesmo Token)
+              {pagbankSaved && <span className="ml-1 text-[10px] font-normal" style={{ color: P.verde }}>✓ salvou!</span>}
             </label>
             <input
               type="password"
-              value={""}
-              onChange={() => {}}
-              placeholder="Token da conta PagBank para validação de webhook"
+              value={pagbankWebhookSecret}
+              onChange={(e) => setPagbankWebhookSecret(e.target.value)}
+              placeholder="Usado para validar notificações — geralmente o mesmo Token acima"
               className="w-full bg-transparent px-3 py-2 rounded-lg text-xs border outline-none"
-              style={{ borderColor: P.border, color: P.creme }}
+              style={{
+                borderColor: pagbankSaved ? P.verde : P.border,
+                color: P.creme,
+                transition: "border-color 0.3s ease",
+              }}
             />
           </div>
 
@@ -4087,13 +4241,30 @@ function TabIntegracoes() {
             </label>
             <input
               type="text"
-              value={""}
-              onChange={() => {}}
+              value={pagbankWebhookBaseUrl}
+              onChange={(e) => setPagbankWebhookBaseUrl(e.target.value)}
               placeholder="https://erp.alisson.api.br"
               className="w-full bg-transparent px-3 py-2 rounded-lg text-xs border outline-none"
               style={{ borderColor: P.border, color: P.creme }}
             />
           </div>
+        </div>
+
+        <div className="flex items-center justify-between pt-2">
+          <button
+            onClick={salvarPagBank}
+            disabled={saving || (!pagbankToken.trim() && !pagbankWebhookSecret.trim())}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 transition-opacity"
+            style={{ backgroundColor: P.dourado, color: "#fff" }}
+          >
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+            {saving ? "Salvando..." : "Salvar PagBank"}
+          </button>
+          {pagbankConfigured && (
+            <span className="text-xs flex items-center gap-1 font-semibold" style={{ color: pagbankAtivo ? P.verde : P.muted }}>
+              <CheckCircle size={13} /> {pagbankAtivo ? "PagBank configurado e ativo" : "PagBank configurado mas INATIVO nas vendas"}
+            </span>
+          )}
         </div>
 
         <p className="text-[10px]" style={{ color: P.muted }}>
@@ -4697,30 +4868,6 @@ function TabMaquininhas() {
                             ))}
                           </select>
                           {/* Campo parcelas padrão — só habilitado quando há vendedor selecionado */}
-          <div>
-            <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: P.sage }}>
-              Ambiente
-            </label>
-            <select
-              defaultValue="producao"
-              onChange={async (e) => {
-                const v = e.target.value;
-                try {
-                  await fetch("/api/configuracoes/integracoes", {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ pagbank_ambiente: v }),
-                  });
-                } catch { /* silencia */ }
-              }}
-              className="w-full bg-transparent px-3 py-2 rounded-lg text-xs border outline-none"
-              style={{ borderColor: P.border, color: P.creme }}
-            >
-              <option value="producao">Produção (api.pagseguro.com)</option>
-              <option value="sandbox">Sandbox (sandbox.api.pagseguro.com)</option>
-            </select>
-          </div>
-
           <div>
                             <label
                               className="text-[10px] uppercase tracking-wider block mb-1"
@@ -5768,41 +5915,60 @@ function TabMetal() {
     compra_metal_comm_pct: 50,
     receb_metal_min_pct: 95,
     receb_metal_max_pct: 100,
+    metal_home_roles: [] as string[],
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [erroMsg, setErroMsg] = useState("");
+  const [erroLoad, setErroLoad] = useState("");
 
   useEffect(() => {
     fetch("/api/metal/configuracoes")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`Erro ${r.status} ao carregar`);
+        return r.json();
+      })
       .then((d) => {
         if (d && typeof d === "object") setConfig((c) => ({ ...c, ...d }));
       })
-      .catch(() => {})
+      .catch((e) => {
+        setErroLoad((e as Error).message || "Falha ao carregar configurações");
+      })
       .finally(() => setLoading(false));
   }, []);
 
   async function salvar() {
     setSaving(true);
     setSaved(false);
+    setErroMsg("");
     try {
       const res = await fetch("/api/metal/configuracoes", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       });
-      if (!res.ok) throw new Error("Erro ao salvar");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.details || `Erro ${res.status}`);
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch {
-      // erro silencioso
+    } catch (e) {
+      setErroMsg((e as Error).message || "Erro ao salvar");
     } finally {
       setSaving(false);
     }
   }
 
   if (loading) return <div className="text-center py-8 text-sm text-muted-foreground">Carregando...</div>;
+
+  if (erroLoad) return (
+    <div className="text-center py-8 space-y-2">
+      <p className="text-sm text-red-600">{erroLoad}</p>
+      <button onClick={() => { setErroLoad(""); setLoading(true); window.location.reload(); }} className="text-xs text-[#1A3C34] underline">Tentar novamente</button>
+    </div>
+  );
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -5856,12 +6022,58 @@ function TabMetal() {
         </div>
       </div>
 
+      {/* REGRA DE NEGÓCIO: Roles que abrem o sistema direto no módulo Metal.
+           Apenas roles com acesso ao módulo metal são listadas. */}
+      <div className="bg-white rounded-2xl border border-[#C59B6D]/20 p-5 space-y-4">
+        <h3 className="text-sm font-bold text-[#1A3C34]">Abrir Metal ao Logar</h3>
+        <p className="text-xs text-[#1A3C34]/60">
+          Usuários com estas roles serão redirecionados para o módulo Metal ao acessar o sistema.
+          Nenhum selecionado = ninguém é redirecionado.
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+          {["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"].map((role) => {
+            const checked = config.metal_home_roles.includes(role);
+            return (
+              <label
+                key={role}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-xs transition-colors ${
+                  checked
+                    ? "bg-[#1A3C34] border-[#1A3C34] text-[#F2E8D5]"
+                    : "bg-[#F2E8D5]/20 border-[#C59B6D]/20 text-[#1A3C34]/70 hover:border-[#C59B6D]/50"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={checked}
+                  onChange={() => {
+                    setConfig((c) => ({
+                      ...c,
+                      metal_home_roles: checked
+                        ? c.metal_home_roles.filter((r) => r !== role)
+                        : [...c.metal_home_roles, role],
+                    }));
+                  }}
+                />
+                <span className="capitalize">{role.replace(/_/g, " ")}</span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+      {erroMsg && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs text-red-700">
+          {erroMsg}
+        </div>
+      )}
+
       <button
         onClick={salvar}
         disabled={saving}
         className="w-full bg-[#1A3C34] text-white py-3 rounded-xl text-sm font-bold hover:bg-[#1A3C34]/90 disabled:opacity-50 transition-colors"
       >
-        {saving ? "Salvando..." : saved ? "Salvo!" : "Salvar Configurações"}
+        {saving ? "Salvando..." : saved ? "Salvo!" : erroMsg ? "Tentar Novamente" : "Salvar Configurações"}
       </button>
     </div>
   );

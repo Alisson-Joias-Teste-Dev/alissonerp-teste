@@ -18,6 +18,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { X, Loader2, ImageIcon, CheckCircle2, AlertTriangle, Ban, ShieldCheck, Upload } from "lucide-react";
+import { toast } from "sonner";
 import type { CompraRecord } from "@/lib/metal/types";
 import StatusPagamento from "./StatusPagamento";
 import { getPublicUrl } from "@/lib/storage-url";
@@ -75,6 +76,7 @@ export default function DrawerCompraDetalhe({ compraId, onClose, onUpdated }: Pr
         const err = await res.json().catch(() => ({ error: "Erro ao cancelar" }));
         throw new Error(err.error || "Erro ao cancelar");
       }
+      toast.success("Compra cancelada.");
       await carregar();
       onUpdated();
     } catch (err) {
@@ -93,6 +95,7 @@ export default function DrawerCompraDetalhe({ compraId, onClose, onUpdated }: Pr
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Erro ao aprovar");
       }
+      toast.success("Compra aprovada com sucesso!");
       await carregar();
       onUpdated();
     } catch (err) {
@@ -118,6 +121,7 @@ export default function DrawerCompraDetalhe({ compraId, onClose, onUpdated }: Pr
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Erro ao rejeitar");
       }
+      toast.success("Compra rejeitada.");
       await carregar();
       onUpdated();
     } catch (err) {
@@ -163,6 +167,7 @@ export default function DrawerCompraDetalhe({ compraId, onClose, onUpdated }: Pr
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Erro ao confirmar pagamento");
       }
+      toast.success("Pagamento confirmado! Metal entrou no cofre.");
       setComprovanteFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       await carregar();
@@ -202,37 +207,37 @@ export default function DrawerCompraDetalhe({ compraId, onClose, onUpdated }: Pr
           {loading && !compra && <div className="flex items-center justify-center py-20"><Loader2 size={32} className="animate-spin text-[#C59B6D]" /></div>}
 
           {compra && (<>
-            <S titulo="Fornecedor">
-              <R label="Nome" value={compra.fornecedor_nome || "—"} />
-              {compra.fornecedor_cpf && <R label="CPF/CNPJ" value={compra.fornecedor_cpf} />}
-            </S>
-            <S titulo="Peso e Valores">
-              <R label="Peso (g)" value={`${Number(compra.peso_gramas).toFixed(3)}g`} />
-              <R label="Cotação do Ouro" value={`R$ ${Number(compra.cotacao_ouro).toFixed(2)}`} />
-              <R label="Valor Pago / g" value={`R$ ${Number(compra.valor_pago_grama).toFixed(2)}`} />
-              <div className="flex items-center gap-3"><R label="Faixa Mínima" value={`R$ ${Number(compra.min_limit).toFixed(2)}`} /><R label="Faixa Máxima" value={`R$ ${Number(compra.max_limit).toFixed(2)}`} /></div>
-              <R label="Spread / g" value={`R$ ${Number(compra.spread_grama).toFixed(2)}`} />
+            <DetailSection titulo="Fornecedor">
+              <DetailRow label="Nome" value={compra.fornecedor_nome || "—"} />
+              {compra.fornecedor_cpf && <DetailRow label="CPF/CNPJ" value={compra.fornecedor_cpf} />}
+            </DetailSection>
+            <DetailSection titulo="Peso e Valores">
+              <DetailRow label="Peso (g)" value={`${Number(compra.peso_gramas).toFixed(3)}g`} />
+              <DetailRow label="Cotação do Ouro" value={`R$ ${Number(compra.cotacao_ouro).toFixed(2)}`} />
+              <DetailRow label="Valor Pago / g" value={`R$ ${Number(compra.valor_pago_grama).toFixed(2)}`} />
+              <div className="flex items-center gap-3"><DetailRow label="Faixa Mínima" value={`R$ ${Number(compra.min_limit).toFixed(2)}`} /><DetailRow label="Faixa Máxima" value={`R$ ${Number(compra.max_limit).toFixed(2)}`} /></div>
+              <DetailRow label="Spread / g" value={`R$ ${Number(compra.spread_grama).toFixed(2)}`} />
               <hr className="border-[#C59B6D]/20" />
-              <R label="Valor Total" value={`R$ ${Number(compra.valor_total).toFixed(2)}`} bold />
-              <R label="Economia Total" value={`R$ ${Number(compra.economia_total).toFixed(2)}`} />
-              <R label="Comissão" value={`${Number(compra.comissao_pct).toFixed(0)}% • R$ ${Number(compra.comissao_valor).toFixed(2)}`} />
-            </S>
-            <S titulo="Foto da Balança">
+              <DetailRow label="Valor Total" value={`R$ ${Number(compra.valor_total).toFixed(2)}`} bold />
+              <DetailRow label="Economia Total" value={`R$ ${Number(compra.economia_total).toFixed(2)}`} />
+              <DetailRow label="Comissão" value={`${Number(compra.comissao_pct).toFixed(0)}% • R$ ${Number(compra.comissao_valor).toFixed(2)}`} />
+            </DetailSection>
+            <DetailSection titulo="Foto da Balança">
               {fotoUrl ? (<div className="space-y-2">
                 <img src={fotoUrl} alt="Foto da balança" className="w-full max-h-64 object-contain rounded-xl border border-[#C59B6D]/20 bg-white" />
                 {compra.foto_peso_ia != null && (<div className={`flex items-start gap-2 text-xs p-3 rounded-lg ${compra.ia_match ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{compra.ia_match ? <CheckCircle2 size={14} className="mt-0.5 shrink-0" /> : <AlertTriangle size={14} className="mt-0.5 shrink-0" />}<div><p><strong>Peso lido pela IA:</strong> {Number(compra.foto_peso_ia).toFixed(3)}g &bull; <strong>Confiança:</strong> {compra.ia_confianca || "—"}</p><p className="mt-0.5">{compra.ia_match ? "Peso confere com a foto da balança." : "Peso NÃO confere com a foto da balança. Verifique."}</p></div></div>)}
                 {compra.foto_peso_ia == null && <p className="text-xs text-[#1A3C34]/50">Foto registrada sem validação IA.</p>}
               </div>) : (<div className="flex items-center gap-2 text-xs text-[#1A3C34]/50 bg-white rounded-xl p-4 border border-dashed border-[#C59B6D]/20"><ImageIcon size={16} />Nenhuma foto registrada para esta compra.</div>)}
-            </S>
-            {(compra.mp_payment_id || compra.mp_preference_id || compra.mp_payment_status) && (<S titulo="Pagamento Mercado Pago">
-              {compra.mp_payment_id && <R label="Payment ID" value={compra.mp_payment_id} />}
-              {compra.mp_preference_id && <R label="Preference ID" value={compra.mp_preference_id} />}
-              {compra.mp_payment_status && <R label="Status MP" value={compra.mp_payment_status} />}
-              {compra.mp_valor_pago != null && <R label="Valor Pago" value={`R$ ${Number(compra.mp_valor_pago).toFixed(2)}`} />}
-              {compra.mp_diferenca_valor != null && compra.mp_diferenca_valor > 0 && <R label="Diferença" value={`R$ ${Number(compra.mp_diferenca_valor).toFixed(2)}`} className="text-amber-600" />}
-              {compra.mp_data_pagamento && <R label="Data Pagamento" value={new Date(compra.mp_data_pagamento).toLocaleString("pt-BR")} />}
-            </S>)}
-            {pagamentos.length > 0 && (<S titulo="Histórico de Pagamentos">
+            </DetailSection>
+            {(compra.mp_payment_id || compra.mp_preference_id || compra.mp_payment_status) && (<DetailSection titulo="Pagamento Mercado Pago">
+              {compra.mp_payment_id && <DetailRow label="Payment ID" value={compra.mp_payment_id} />}
+              {compra.mp_preference_id && <DetailRow label="Preference ID" value={compra.mp_preference_id} />}
+              {compra.mp_payment_status && <DetailRow label="Status MP" value={compra.mp_payment_status} />}
+              {compra.mp_valor_pago != null && <DetailRow label="Valor Pago" value={`R$ ${Number(compra.mp_valor_pago).toFixed(2)}`} />}
+              {compra.mp_diferenca_valor != null && compra.mp_diferenca_valor > 0 && <DetailRow label="Diferença" value={`R$ ${Number(compra.mp_diferenca_valor).toFixed(2)}`} className="text-amber-600" />}
+              {compra.mp_data_pagamento && <DetailRow label="Data Pagamento" value={new Date(compra.mp_data_pagamento).toLocaleString("pt-BR")} />}
+            </DetailSection>)}
+            {pagamentos.length > 0 && (<DetailSection titulo="Histórico de Pagamentos">
               <div className="space-y-2">
                 {pagamentos.map((pg: any, i: number) => (
                   <div key={pg.id ?? i} className={`text-xs p-3 rounded-lg border ${
@@ -275,16 +280,16 @@ export default function DrawerCompraDetalhe({ compraId, onClose, onUpdated }: Pr
                   );
                 })()}
               </div>
-            </S>)}
-            {compra.observacao && (<S titulo="Observação"><p className="text-sm text-[#1A3C34]/80 whitespace-pre-wrap bg-white rounded-xl p-4 border border-[#C59B6D]/20">{compra.observacao}</p></S>)}
-            <S titulo="Auditoria">
-              <R label="Criado por" value={compra.created_by || "—"} />
-              <R label="Criado em" value={new Date(compra.created_at).toLocaleString("pt-BR")} />
-              <R label="Atualizado em" value={new Date(compra.updated_at).toLocaleString("pt-BR")} />
-              <R label="Registrado no Cofre" value={compra.cofre_registrado ? "Sim" : "Não"} />
-            </S>
+            </DetailSection>)}
+            {compra.observacao && (<DetailSection titulo="Observação"><p className="text-sm text-[#1A3C34]/80 whitespace-pre-wrap bg-white rounded-xl p-4 border border-[#C59B6D]/20">{compra.observacao}</p></DetailSection>)}
+            <DetailSection titulo="Auditoria">
+              <DetailRow label="Criado por" value={compra.created_by || "—"} />
+              <DetailRow label="Criado em" value={new Date(compra.created_at).toLocaleString("pt-BR")} />
+              <DetailRow label="Atualizado em" value={new Date(compra.updated_at).toLocaleString("pt-BR")} />
+              <DetailRow label="Registrado no Cofre" value={compra.cofre_registrado ? "Sim" : "Não"} />
+            </DetailSection>
             {compra.status === "pendente_aprovacao" && aprovacao && (
-              <div className="sticky bottom-0 bg-[#FAFAF7] border-t border-[#C59B6D]/30 -mx-6 -mb-6 px-6 py-4 space-y-2">
+              <div className="sticky bottom-0 bg-[#FAFAF7] border-t border-[#C59B6D]/30 px-0 py-4 space-y-2">
                 <div className="flex items-center gap-2 text-amber-700 bg-amber-50 rounded-xl px-3 py-2 text-xs">
                   <AlertTriangle size={14} />
                   <span>R$ {Number(aprovacao.valor_pago_grama).toFixed(2)}/g ({((Number(aprovacao.valor_pago_grama) / Number(aprovacao.cotacao_ouro)) * 100).toFixed(0)}% da cotação) — acima do teto de R$ {Number(aprovacao.max_limit).toFixed(2)}/g</span>
@@ -334,6 +339,17 @@ export default function DrawerCompraDetalhe({ compraId, onClose, onUpdated }: Pr
                   </button>
                 )}
               </div>
+              {/* REGRA DE NEGÓCIO: preview do comprovante para confirmar visualmente
+                  que o arquivo correto foi anexado (M7). */}
+              {comprovanteFile && comprovanteFile.type.startsWith("image/") && (
+                <div className="mt-2">
+                  <img
+                    src={URL.createObjectURL(comprovanteFile)}
+                    alt="Preview do comprovante"
+                    className="max-h-32 rounded-lg border border-[#C59B6D]/20 object-contain"
+                  />
+                </div>
+              )}
               <button
                 onClick={handleConfirmarPagamento}
                 disabled={verificandoPagamento || !comprovanteFile}
@@ -351,9 +367,9 @@ export default function DrawerCompraDetalhe({ compraId, onClose, onUpdated }: Pr
   );
 }
 
-function S({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+function DetailSection({ titulo, children }: { titulo: string; children: React.ReactNode }) {
   return <div className="space-y-2"><h3 className="text-[10px] font-bold text-[#1A3C34]/60 uppercase tracking-wide">{titulo}</h3><div className="bg-white rounded-xl border border-[#C59B6D]/20 p-4 space-y-1.5">{children}</div></div>;
 }
-function R({ label, value, bold, className }: { label: string; value: string; bold?: boolean; className?: string }) {
+function DetailRow({ label, value, bold, className }: { label: string; value: string; bold?: boolean; className?: string }) {
   return <div className="flex items-center justify-between gap-4"><span className="text-[10px] font-bold text-[#1A3C34]/60 uppercase tracking-wide shrink-0">{label}</span><span className={`text-sm text-right ${bold ? "font-bold text-[#1A3C34]" : "font-medium text-[#1A3C34]/80"} ${className ?? ""}`}>{value}</span></div>;
 }

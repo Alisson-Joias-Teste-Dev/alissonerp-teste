@@ -13,15 +13,11 @@ import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { internalError } from "@/lib/api-error";
 import { RecebimentoPostSchema } from "@/lib/metal/types";
 import { criarRecebimentoMetal, listarRecebimentos } from "@/lib/metal/recebimentos";
+import { getModuloConfig } from "@/lib/metal/config";
+import { criarNotificacao } from "@/lib/notificacoes";
+import { ROLES_METAL } from "@/lib/roles";
+import sql from "@/lib/db";
 
-/**
- * REGRA DE NEGÓCIO: todas as consultoras podem operar o módulo de recebimento de metal.
- *
- * O QUE: inclui role `consultora` na whitelist da API de recebimentos.
- * POR QUE: sem isso, a consultora acessa o módulo mas é bloqueada no POST/GET.
- * IMPACTO SE REMOVIDO: quebra operacional com erro 403 ao salvar ou listar recebimentos.
- */
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"];
 
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
@@ -46,6 +42,66 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await criarRecebimentoMetal(parsed.data, user.id);
+
+    // REGRA DE NEGÓCIO: Se recebimento acima do teto, cria tarefa de aprovação
+    // + notificação para o aprovador configurado (mesmo fluxo da compra de metal).
+    if (result.status === "pendente_aprovacao") {
+      const config = await getModuloConfig();
+      const aprovadorId = (config.metal_aprovador_id ?? "").trim();
+      if (aprovadorId) {
+        // Busca nome do cliente para o resumo da tarefa
+        const [cli] = await sql`
+          SELECT nome FROM public.contatos WHERE id_contato = ${result.cliente_id} LIMIT 1
+        `;
+        const clienteNome = String(cli?.nome ?? "Não informado");
+
+        const descricao = [
+          `Recebimento de Metal #${result.numero}`,
+          `Cliente: ${clienteNome}`,
+          `Peso: ${Number(result.peso_gramas).toFixed(3)}g`,
+          `Crédito: R$ ${Number(result.valor_credito_grama).toFixed(2)}/g`,
+          `Valor total: R$ ${Number(result.valor_total).toFixed(2)}`,
+          `Teto: R$ ${Number(result.max_limit).toFixed(2)}/g (${Math.round(Number(result.valor_credito_grama) / Number(result.cotacao_ouro) * 100)}% da cotação)`,
+        ].join("\n");
+
+        const [tarefa] = await sql`
+          INSERT INTO alissonerp.tarefas
+            (titulo, descricao, responsavel_id, criado_por, prioridade, status, tags, tipo)
+          VALUES (
+            ${`Aprovação Recebimento Metal ${result.numero}`},
+            ${descricao},
+            ${aprovadorId}::uuid,
+            ${user.id}::uuid,
+            'alta',
+            'aguardando_aprovacao',
+            ${sql.array(["aprovacao_recebimento_metal", `recebimento_metal:${result.id}`])},
+            'recebimento_metal'
+          )
+          RETURNING id
+        `;
+
+        await sql`
+          INSERT INTO alissonerp.aprovacoes_tarefa (tarefa_id, solicitante_id, aprovador_id, status)
+          VALUES (${tarefa.id}, ${user.id}::uuid, ${aprovadorId}::uuid, 'pendente')
+        `;
+
+        await sql`
+          UPDATE alissonerp.recebimentos_metal
+          SET tarefa_aprovacao_id = ${tarefa.id}
+          WHERE id = ${result.id}
+        `;
+
+        await criarNotificacao({
+          usuarioId: aprovadorId,
+          tipo: "aprovacao",
+          titulo: `Recebimento de Metal ${result.numero} aguardando aprovação`,
+          mensagem: `${Number(result.peso_gramas).toFixed(3)}g a R$ ${Number(result.valor_credito_grama).toFixed(2)}/g (acima do teto). Total: R$ ${Number(result.valor_total).toFixed(2)}`,
+          remetenteId: user.id,
+          link: `/tarefas?abrir=${tarefa.id}`,
+        }).catch(() => {});
+      }
+    }
+
     return NextResponse.json(result, { status: 201 });
   } catch (err) {
     return internalError("[POST /api/metal/recebimentos]", err, (err as Error).message || "Erro ao registrar recebimento", 400);

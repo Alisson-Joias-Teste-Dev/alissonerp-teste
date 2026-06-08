@@ -83,7 +83,7 @@ export async function GET(
         valorEfetivo,
         gateway: String(pag.gateway),
         gatewayId: orderId,
-        source: "webhook_pagbank",
+        source: "polling_pagbank",
       });
 
       // Se valor pago < valor do pagamento, cria split

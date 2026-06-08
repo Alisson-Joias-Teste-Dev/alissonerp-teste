@@ -9,18 +9,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { internalError } from "@/lib/api-error";
 import { rejeitarCompra } from "@/lib/metal/compras";
+import { ROLES_METAL_APROVACOES } from "@/lib/roles";
 
-/**
- * REGRA DE NEGÓCIO: fluxo metal completo para consultora inclui rejeição de
- * compra acima do teto quando necessário.
- * IMPACTO SE REMOVIDO: bloqueio 403 na etapa de rejeitar aprovação.
- */
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  if (!ROLES_METAL.includes(user.role)) {
+  if (!ROLES_METAL_APROVACOES.includes(user.role)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 

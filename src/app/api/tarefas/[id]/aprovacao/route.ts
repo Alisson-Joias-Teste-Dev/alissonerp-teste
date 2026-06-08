@@ -167,6 +167,31 @@ async function processarAprovacaoCompraComercial(
   return { ok: true, decisao };
 }
 
+// ─── Handler específico para Recebimento de Metal ─────────────────────────
+async function processarAprovacaoRecebimentoMetal(
+  tarefaId: number,
+  decisao: "aprovado" | "rejeitado",
+  aprovadorId: string,
+  motivo?: string,
+) {
+  const [receb] = await sql`
+    SELECT * FROM alissonerp.recebimentos_metal
+    WHERE tarefa_aprovacao_id = ${tarefaId}
+    LIMIT 1
+  `;
+  if (!receb) throw new Error("Recebimento de metal não encontrado para esta tarefa");
+
+  const { aprovarRecebimentoMetal, rejeitarRecebimentoMetal } = await import("@/lib/metal/recebimentos");
+
+  if (decisao === "aprovado") {
+    await aprovarRecebimentoMetal(receb.id, aprovadorId);
+  } else {
+    await rejeitarRecebimentoMetal(receb.id, aprovadorId, motivo);
+  }
+
+  return { ok: true, decisao };
+}
+
 // ─── Handler específico para Compra de Metal ──────────────────────────────
 async function processarAprovacaoCompraMetal(
   tarefaId: number,
@@ -534,6 +559,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ ok: true, compra_comercial: resultado });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] compra_comercial`, err);
+    }
+  }
+
+  if (tarefaInfo?.tipo === "recebimento_metal" || tags.includes("aprovacao_recebimento_metal")) {
+    try {
+      const resultado = await processarAprovacaoRecebimentoMetal(Number(id), body.decisao, user.id, body.motivo);
+      return NextResponse.json({ ok: true, recebimento_metal: resultado });
+    } catch (err) {
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] recebimento_metal`, err);
     }
   }
 

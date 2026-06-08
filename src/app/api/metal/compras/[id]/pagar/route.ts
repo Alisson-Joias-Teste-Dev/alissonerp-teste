@@ -12,14 +12,8 @@ import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { internalError } from "@/lib/api-error";
 import { PagarCompraSchema } from "@/lib/metal/types";
 import { gerarPagamentoCompra } from "@/lib/metal/compras";
+import { ROLES_METAL } from "@/lib/roles";
 
-/**
- * REGRA DE NEGÓCIO: consultora também pode executar pagamento no fluxo metal.
- * O QUE: libera role consultora no endpoint de pagar compra.
- * POR QUE: pedido de permissão completa no módulo metal.
- * IMPACTO SE REMOVIDO: quebra o fluxo operacional com 403 na etapa de pagamento.
- */
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"];
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const [user, errRes] = await authOr401(req);

@@ -63,6 +63,7 @@ export default function PagBankQrInline({
   const [pixCode, setPixCode] = useState<string | null>(null);
   const [pixQrBase64, setPixQrBase64] = useState<string | null>(null);
   const [pixQrDataUrl, setPixQrDataUrl] = useState<string | null>(null);
+  const [qrFallback, setQrFallback] = useState(false);
   const [expiraEm, setExpiraEm] = useState<Date | null>(null);
   const [expirado, setExpirado] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -71,17 +72,17 @@ export default function PagBankQrInline({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Gera QR code data URL a partir do base64
+  // Gera QR code data URL a partir do base64 (com fallback para geração local)
   useEffect(() => {
-    if (pixQrBase64) {
+    if (pixQrBase64 && !qrFallback) {
       setPixQrDataUrl(`data:image/png;base64,${pixQrBase64}`);
-    } else if (pixCode && !pixQrBase64) {
+    } else if (pixCode) {
       // Fallback: gera QR code localmente do EMV string
       QRCode.toDataURL(pixCode, { width: 240, margin: 1 })
-        .then(setPixQrDataUrl)
+        .then((url) => setPixQrDataUrl(url))
         .catch(console.error);
     }
-  }, [pixCode, pixQrBase64]);
+  }, [pixCode, pixQrBase64, qrFallback]);
 
   // Contagem regressiva de expiração
   useEffect(() => {
@@ -245,7 +246,15 @@ export default function PagBankQrInline({
         {pixQrDataUrl && (
           <div className="flex justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={pixQrDataUrl} alt="QR Code PIX PagBank" className="rounded-lg border" style={{ width: 200, height: 200, borderColor: C.cremeBorder }} />
+            <img
+              src={pixQrDataUrl}
+              alt="QR Code PIX PagBank"
+              className="rounded-lg border"
+              style={{ width: 200, height: 200, borderColor: C.cremeBorder }}
+              onError={() => {
+                if (!qrFallback) setQrFallback(true);
+              }}
+            />
           </div>
         )}
 

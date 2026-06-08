@@ -20,7 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { criarPedidoPagamento, buscarQrCodeBase64, getPagBankWebhookBaseUrl } from "@/lib/pagbank";
+import { criarPedidoPagamento, buscarQrCodeBase64, getPagBankWebhookBaseUrl, sanitizarNomeCliente } from "@/lib/pagbank";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
@@ -199,8 +199,8 @@ export async function POST(
       valor: valorCobranca,
       items: itemsPagBank,
       customer: {
-        name: venda.cliente_nome ? String(venda.cliente_nome) : "Cliente",
-        email: venda.cliente_email ? String(venda.cliente_email) : undefined,
+        name: sanitizarNomeCliente(venda.cliente_nome ? String(venda.cliente_nome) : "Cliente"),
+        email: "pagbank@alissonjoias.com.br",
         tax_id: venda.cliente_cpf_cnpj ? String(venda.cliente_cpf_cnpj).replace(/\D/g, "") : undefined,
       },
       notificationUrl,
@@ -222,14 +222,13 @@ export async function POST(
     );
   }
 
-  // Busca imagem base64 do QR code (se houver qr_code_id)
+  // Busca imagem base64 do QR code via endpoint PagBank (qr_codes[0].id = QRCO_*)
   let qrCodeBase64 = "";
   if (pedido.qr_code_id) {
     try {
       qrCodeBase64 = await buscarQrCodeBase64(pedido.qr_code_id);
     } catch (err) {
       console.error("[pagbank/criar-pix] Erro ao buscar QR code base64:", err);
-      // Continua mesmo sem a imagem — o EMV string é suficiente
     }
   }
 

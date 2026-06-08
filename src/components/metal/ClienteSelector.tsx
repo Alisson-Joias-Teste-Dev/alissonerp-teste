@@ -53,8 +53,11 @@ export default function ClienteSelector({
         setIsOpen(false);
       }
     }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    // REGRA DE NEGÓCIO: usa click em vez de mousedown para evitar
+    // race condition com o botão X de limpar (dropdown fechava antes do
+    // clique no X ser processado).
+    document.addEventListener("click", handleClick);
+    return () => document.removeEventListener("click", handleClick);
   }, []);
 
   const buscar = useCallback(async (q: string) => {

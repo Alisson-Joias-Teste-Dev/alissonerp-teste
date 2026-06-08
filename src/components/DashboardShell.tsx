@@ -11,6 +11,7 @@ import GlobalErrorToast from "@/components/ui/GlobalErrorToast";
 import MencaoAlarme from "@/components/MencaoAlarme";
 import InstallPrompt from "@/components/InstallPrompt";
 import EnvironmentBadge from "@/components/EnvironmentBadge";
+import { Toaster } from "sonner";
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const { loading, isOperadorService } = useAuth();
@@ -35,6 +36,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
         <ServiceApp />
         <GlobalErrorToast />
         <EnvironmentBadge />
+        <Toaster position="top-right" richColors closeButton />
       </ServiceLayout>
     );
   }
@@ -56,6 +58,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
       {/* Banner de instalação PWA — só aparece em browsers que disparam beforeinstallprompt */}
       <InstallPrompt />
       <EnvironmentBadge />
+      <Toaster position="top-right" richColors closeButton />
     </SidebarProvider>
   );
 }

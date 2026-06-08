@@ -13,6 +13,15 @@ import { getModuloConfig, updateModuloConfig } from "@/lib/metal/config";
 
 const ROLES_FULL_ACCESS = ["desenvolvedor", "admin"];
 
+// REGRA DE NEGÓCIO: configurações do Metal precisam refletir o banco sempre.
+// O QUE: força esta API a não ser cacheada/estática pelo Next.js.
+// POR QUE: `metal_home_roles` controla redirecionamento na abertura do sistema;
+//   se o GET vier cacheado, a tela mostra roles desmarcadas após salvar.
+// IMPACTO SE REMOVIDO: usuário salva configuração, mas recarrega a tela e vê
+//   estado antigo, quebrando a confiança na configuração.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const ConfigUpdateSchema = z.object({
   compra_metal_min_pct: z.number().min(0).max(100).optional(),
   compra_metal_max_pct: z.number().min(0).max(100).optional(),
@@ -20,6 +29,9 @@ const ConfigUpdateSchema = z.object({
   receb_metal_min_pct: z.number().min(0).max(100).optional(),
   receb_metal_max_pct: z.number().min(0).max(100).optional(),
   metal_aprovador_id: z.string().optional(),
+  // REGRA DE NEGÓCIO: Admin define quais roles abrem o sistema direto no /metal.
+  // Array vazio = ninguém é redirecionado.
+  metal_home_roles: z.array(z.string()).optional(),
 });
 
 export async function GET() {

@@ -21,14 +21,24 @@ export async function getModuloConfig(): Promise<MetalConfig> {
     SELECT chave, valor FROM alissonerp.configuracoes_sistema
     WHERE chave IN (
       'compra_metal_min_pct', 'compra_metal_max_pct', 'compra_metal_comm_pct',
-      'receb_metal_min_pct', 'receb_metal_max_pct', 'metal_aprovador_id'
+      'receb_metal_min_pct', 'receb_metal_max_pct', 'metal_aprovador_id',
+      'metal_home_roles'
     )
   `;
 
-  const config: Record<string, string | number> = {};
+  const config: Record<string, string | number | string[]> = {};
   for (const r of rows) {
     if (r.chave === 'metal_aprovador_id') {
       config[r.chave] = r.valor;
+    } else if (r.chave === 'metal_home_roles') {
+      // REGRA DE NEGÓCIO: metal_home_roles é armazenado como JSON array.
+      // Parse seguro com fallback para array vazio.
+      try {
+        const parsed = JSON.parse(r.valor);
+        config[r.chave] = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        config[r.chave] = [];
+      }
     } else {
       config[r.chave] = parseFloat(r.valor);
     }
@@ -41,6 +51,7 @@ export async function getModuloConfig(): Promise<MetalConfig> {
     receb_metal_min_pct: (config.receb_metal_min_pct as number) ?? DEFAULT_METAL_CONFIG.receb_metal_min_pct,
     receb_metal_max_pct: (config.receb_metal_max_pct as number) ?? DEFAULT_METAL_CONFIG.receb_metal_max_pct,
     metal_aprovador_id: (config.metal_aprovador_id as string) ?? DEFAULT_METAL_CONFIG.metal_aprovador_id,
+    metal_home_roles: (config.metal_home_roles as string[]) ?? DEFAULT_METAL_CONFIG.metal_home_roles,
   };
 }
 
@@ -58,9 +69,13 @@ export async function updateModuloConfig(
   if (entries.length === 0) return getModuloConfig();
 
   for (const [chave, valor] of entries) {
+    // REGRA DE NEGÓCIO: metal_home_roles é array de strings, serializado como JSON.
+    const valorStr = chave === 'metal_home_roles' && Array.isArray(valor)
+      ? JSON.stringify(valor)
+      : String(valor);
     await sql`
       INSERT INTO alissonerp.configuracoes_sistema (chave, valor, descricao)
-      VALUES (${chave}, ${String(valor)}, 'Módulo Metal — atualizado via API')
+      VALUES (${chave}, ${valorStr}, 'Módulo Metal — atualizado via API')
       ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor, updated_at = now()
     `;
   }

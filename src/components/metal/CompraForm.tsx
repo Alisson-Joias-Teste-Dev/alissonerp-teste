@@ -18,6 +18,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { DollarSign, Scale, Calculator, Info, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 import ClienteSelector from "./ClienteSelector";
 import FotoBalancaInput from "./FotoBalancaInput";
 import type { ClienteOption } from "./ClienteSelector";
@@ -114,7 +115,9 @@ export default function CompraForm({ cotacaoOuro, configs }: CompraFormProps) {
       }
 
       const compra = await res.json();
-      router.push(`/metal/historico`);
+      // REGRA DE NEGÓCIO: toast de sucesso antes do redirect para feedback imediato.
+      toast.success(`Compra ${compra?.numero || ""} registrada com sucesso!`);
+      setTimeout(() => router.push("/metal/historico"), 400);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao registrar compra");
     } finally {
@@ -210,7 +213,7 @@ export default function CompraForm({ cotacaoOuro, configs }: CompraFormProps) {
               <span>R$ {minLimit.toFixed(2)} ({pctMin}%)</span>
               <span>R$ {maxLimit.toFixed(2)} ({pctMax}%)</span>
             </div>
-            <div className="h-3 bg-[#1A3C34] rounded-full overflow-hidden relative">
+            <div className="h-4 bg-[#1A3C34] rounded-full overflow-hidden relative">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
                   numericValor > maxLimit ? "bg-red-500" : numericValor > 0 ? "bg-emerald-500" : "bg-[#C59B6D]/30"
@@ -327,7 +330,7 @@ export default function CompraForm({ cotacaoOuro, configs }: CompraFormProps) {
       )}
 
       {!submitting && !!motivoBloqueio && (
-        <p className="text-xs text-[#1A3C34]/70 bg-[#F2E8D5]/40 border border-[#C59B6D]/20 rounded-xl px-3 py-2">
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
           {motivoBloqueio}
         </p>
       )}

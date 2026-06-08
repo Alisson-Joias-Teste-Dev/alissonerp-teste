@@ -101,7 +101,7 @@ export async function POST() {
         valorEfetivo,
         gateway: String(pag.gateway),
         gatewayId: orderId,
-        source: "webhook_pagbank",
+        source: "reconciliacao_pagbank",
       });
 
       // Se valor pago < valor do pagamento, cria split

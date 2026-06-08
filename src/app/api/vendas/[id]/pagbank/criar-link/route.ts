@@ -1,8 +1,9 @@
 /**
  * POST /api/vendas/[id]/pagbank/criar-link
  *
- * Cria um Pedido PagBank (Checkout Link) para cartão de crédito.
- * O cliente acessa o link e paga com cartão na página do PagBank.
+ * Cria um Checkout PagBank (link de pagamento) para cartão de crédito.
+ * Usa POST /checkouts, que gera uma página de pagamento pública no PagBank.
+ * O cliente acessa o checkout_url e paga com cartão.
  *
  * Fluxo:
  *   1. Autentica e verifica permissão do usuário
@@ -19,7 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { criarPedidoPagamento, getPagBankWebhookBaseUrl } from "@/lib/pagbank";
+import { criarCheckoutPagamento, getPagBankWebhookBaseUrl, sanitizarNomeCliente } from "@/lib/pagbank";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
@@ -188,48 +189,47 @@ export async function POST(
   const baseUrl = await getPagBankWebhookBaseUrl(origin);
   const notificationUrl = `${baseUrl}/api/webhooks/pagbank`;
 
-  // Cria pedido no PagBank
+  // Cria checkout no PagBank
   let pedido;
   try {
-    pedido = await criarPedidoPagamento({
+    pedido = await criarCheckoutPagamento({
       vendaId,
       pagamentoId,
       numeroVenda: String(venda.numero_venda),
       valor: valorCobranca,
       items: itemsPagBank,
       customer: {
-        name: venda.cliente_nome ? String(venda.cliente_nome) : "Cliente",
-        email: venda.cliente_email ? String(venda.cliente_email) : undefined,
+        name: sanitizarNomeCliente(venda.cliente_nome ? String(venda.cliente_nome) : "Cliente"),
+        email: "pagbank@alissonjoias.com.br",
         tax_id: venda.cliente_cpf_cnpj ? String(venda.cliente_cpf_cnpj).replace(/\D/g, "") : undefined,
       },
       notificationUrl,
-      tipo: "CREDIT_CARD",
       installments: body.installments && body.installments >= 1 ? Math.round(body.installments) : undefined,
     });
   } catch (err: unknown) {
-    const internalMsg = err instanceof Error ? err.message : "Erro ao criar pedido PagBank";
+    const internalMsg = err instanceof Error ? err.message : "Erro ao criar checkout PagBank";
     await sql`
       UPDATE alissonerp.pagamentos_venda
       SET gateway_payload = ${JSON.stringify({ erro: internalMsg, quando: new Date().toISOString() })}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
     return internalError(
-      "[POST /api/vendas/[id]/pagbank/criar-link] criarPedidoPagamento",
+      "[POST /api/vendas/[id]/pagbank/criar-link] criarCheckoutPagamento",
       err,
-      "Erro ao criar pedido PagBank",
+      "Erro ao criar checkout PagBank",
       502,
     );
   }
 
-  // Persiste order_id no pagamento
+  // Persiste checkout_id no pagamento
   await sql`
     UPDATE alissonerp.pagamentos_venda
     SET
-      gateway_id      = ${pedido.order_id},
+      gateway_id      = ${pedido.checkout_id},
       gateway_payload = ${JSON.stringify({
-        tipo: "order",
-        order_id: pedido.order_id,
-        payment_url: pedido.payment_url,
+        tipo: "checkout",
+        checkout_id: pedido.checkout_id,
+        checkout_url: pedido.checkout_url,
         status: pedido.status,
         criado_em: new Date().toISOString(),
         criado_por: user.id,
@@ -240,8 +240,8 @@ export async function POST(
   return NextResponse.json({
     ok: true,
     pagamento_id: pagamentoId,
-    order_id: pedido.order_id,
-    payment_url: pedido.payment_url,
+    checkout_id: pedido.checkout_id,
+    payment_url: pedido.checkout_url,
     valor: valorCobranca,
   });
 }

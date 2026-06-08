@@ -19,17 +19,13 @@ import { CompraPostSchema } from "@/lib/metal/types";
 import { criarCompraMetal, listarCompras } from "@/lib/metal/compras";
 import { getModuloConfig } from "@/lib/metal/config";
 import { criarNotificacao } from "@/lib/notificacoes";
+import { ROLES_METAL } from "@/lib/roles";
 import sql from "@/lib/db";
 
 /**
- * REGRA DE NEGÓCIO: todas as consultoras podem operar o módulo de compra de metal.
- *
- * O QUE: inclui role `consultora` na whitelist da API de compras de metal.
- * POR QUE: o acesso ao módulo foi liberado para todas as consultoras no fluxo comercial.
- * IMPACTO SE REMOVIDO: front abre o módulo, mas a API bloqueia com 403 ao registrar/listar.
+ * REGRA DE NEGÓCIO: verificação de permissão centralizada em @/lib/roles.
+ * A constante ROLES_METAL é a fonte única para compras, recebimentos e sidebar.
  */
-const ROLES_METAL = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"];
-
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
