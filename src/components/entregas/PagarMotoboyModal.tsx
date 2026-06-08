@@ -72,6 +72,11 @@ export default function PagarMotoboyModal({ isOpen, onClose }: PagarMotoboyModal
   const [submetendo, setSubmetendo] = useState(false);
   const [sucesso, setSucesso] = useState("");
 
+  // Data de vencimento para conta a pagar (padrão: hoje + 7 dias)
+  const hoje = new Date();
+  hoje.setDate(hoje.getDate() + 7);
+  const [dataVencimento, setDataVencimento] = useState(hoje.toISOString().slice(0, 10));
+
   // Carregar motoboys ao abrir
   const carregarMotoboys = useCallback(async () => {
     setLoadingMotoboys(true);
@@ -156,6 +161,7 @@ export default function PagarMotoboyModal({ isOpen, onClose }: PagarMotoboyModal
           body: JSON.stringify({
             motoboy_id: motoboyId,
             entrega_ids: idsSelecionados,
+            data_vencimento: dataVencimento,
           }),
         },
       );
@@ -300,6 +306,18 @@ export default function PagarMotoboyModal({ isOpen, onClose }: PagarMotoboyModal
                   {fmtBRL(totalSelecionado)}
                 </span>
               </div>
+
+              {/* Data de vencimento para conta a pagar */}
+              <label style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6, display: "block" }}>
+                Vencimento da conta a pagar
+              </label>
+              <input type="date" value={dataVencimento}
+                onChange={e => setDataVencimento(e.target.value)}
+                style={{
+                  width: "100%", padding: "10px 12px", fontSize: 13,
+                  border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
+                  background: "#fff", color: "#1f2937", marginBottom: 14,
+                }} />
 
               <button onClick={handlePagar}
                 disabled={idsSelecionados.length === 0 || submetendo}

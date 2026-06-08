@@ -28,6 +28,7 @@ const PagarMotoboySchema = z.object({
   motoboy_id: z.string().min(1, "Motoboy é obrigatório"),
   entrega_ids: z.array(z.number().int().positive()).min(1, "Selecione pelo menos uma entrega"),
   observacoes: z.string().max(500).optional(),
+  data_vencimento: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -51,11 +52,24 @@ export async function POST(req: NextRequest) {
   const parsed = PagarMotoboySchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
 
-  const { motoboy_id, entrega_ids, observacoes } = parsed.data;
+  const { motoboy_id, entrega_ids, observacoes, data_vencimento } = parsed.data;
+
+  // Busca nome do motoboy para descrição da conta a pagar
+  const [motoboy] = await sql`
+    SELECT nome FROM alissonerp.motoboys
+    WHERE user_id = ${motoboy_id}::uuid LIMIT 1
+  `;
+  const motoboyNome = (motoboy as { nome: string } | null)?.nome ?? "Motoboy";
+
+  // Data de vencimento: padrão hoje + 7 dias se não informada
+  const vencimento = data_vencimento ?? (() => {
+    const d = new Date(); d.setDate(d.getDate() + 7);
+    return d.toISOString().slice(0, 10);
+  })();
 
   // Validação: as entregas pertencem ao motoboy, estão confirmadas e não pagas
   const entregasRows: Record<string, unknown>[] = await sql`
-    SELECT ev.id, ev.frete_motoboy, ev.situacao
+    SELECT ev.id, ev.frete_motoboy, ev.codigo_entrega, ev.situacao
     FROM alissonerp.entregas_venda ev
     WHERE ev.id = ANY(${entrega_ids})
       AND ev.motoboy_id = ${motoboy_id}::uuid
@@ -80,7 +94,7 @@ export async function POST(req: NextRequest) {
 
   const valorTotal = entregas.reduce((sum, e) => sum + e.frete_motoboy, 0);
 
-  // Transação: criar pagamento + itens
+  // Transação: criar pagamento + itens + conta a pagar
   try {
     await sql.begin(async (tx: DbTx) => {
       const [pagamento] = await tx`
@@ -99,6 +113,25 @@ export async function POST(req: NextRequest) {
             (${Number(pagamento.id)}, ${e.id}, ${e.frete_motoboy})
         `;
       }
+
+      // REGRA DE NEGÓCIO: ao pagar motoboy, criar conta a pagar no financeiro.
+      // Isso faz o pagamento aparecer em Contas a Pagar e no fluxo de caixa.
+      // Categoria 'motoboy' permite filtrar/fechar por tipo de despesa.
+      const codigosStr = entregas.map((e) => (e as Record<string, unknown>).codigo_entrega).join(", ");
+      await tx`
+        INSERT INTO alissonerp.contas_pagar
+          (descricao, valor, data_vencimento, situacao, categoria, obs, created_by)
+        VALUES
+          (
+            ${`Pagamento ${motoboyNome} — ${entregas.length} entregas`},
+            ${valorTotal},
+            ${vencimento}::date,
+            'pendente',
+            'motoboy',
+            ${`Entregas: ${codigosStr}. ${observacoes ?? ""}`},
+            ${user.id}::uuid
+          )
+      `;
     });
 
     return NextResponse.json({
