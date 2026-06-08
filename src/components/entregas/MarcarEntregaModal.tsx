@@ -723,6 +723,7 @@ export default function MarcarEntregaModal({
   const [reenviandoWhatsappMotoboy, setReenviandoWhatsappMotoboy] = useState(false);
   /** REGRA DE NEGÓCIO: sem código confirmado, a entrega é cancelada ao fechar. */
   const [codigoConfirmado, setCodigoConfirmado] = useState(false);
+  const codigoConfirmadoRef = useRef(false); // synced with state for immediate read
 
   // ── Cálculos derivados ───────────────────────────────────────────────────────
 
@@ -974,7 +975,7 @@ export default function MarcarEntregaModal({
      * o Código A será digitado depois pelo cliente (via drawer).
      * IMPACTO SE REMOVIDO: entregas pendentes órfãs acumulam na lista.
      */
-    if (codigosGerados && !codigoConfirmado) {
+    if (codigosGerados && !codigoConfirmadoRef.current) {
       await apiFetch(
         `/api/entregas-venda/${codigosGerados.entrega.id}/cancelar`,
         { method: "POST" },
@@ -985,6 +986,7 @@ export default function MarcarEntregaModal({
     }
     setCodigosGerados(null);
     setCodigoConfirmado(false);
+    codigoConfirmadoRef.current = false;
     onClose();
   }
 
@@ -1900,7 +1902,7 @@ export default function MarcarEntregaModal({
           reenviando={reenviandoWhatsapp}
           reenviandoMotoboy={reenviandoWhatsappMotoboy}
           onConfirmado={handleFecharCodigos}
-          onCodigoConfirmado={() => setCodigoConfirmado(true)}
+          onCodigoConfirmado={() => { setCodigoConfirmado(true); codigoConfirmadoRef.current = true; }}
           onClose={handleFecharCodigos}
         />
       )}
