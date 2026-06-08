@@ -79,6 +79,10 @@ interface EntregasVendaClientProps {
   situacaoFiltro: string;
   /** Texto de busca vindo da URL */
   buscaFiltro: string;
+  /** Filtro de data início da URL */
+  dataInicioFiltro: string;
+  /** Filtro de data fim da URL */
+  dataFimFiltro: string;
   /** Role do usuário logado */
   userRole: string;
 }
@@ -151,6 +155,8 @@ export default function EntregasVendaClient({
   pageSize,
   situacaoFiltro,
   buscaFiltro,
+  dataInicioFiltro,
+  dataFimFiltro,
   userRole: _userRole, // prefixado com _: reservado para ações futuras (ex: permissões)
 }: EntregasVendaClientProps) {
   const router = useRouter();
@@ -166,6 +172,11 @@ export default function EntregasVendaClient({
 
   // Input de busca (estado local, não sincronizado com URL em tempo real)
   const [buscaInput, setBuscaInput] = useState(buscaFiltro);
+
+  // REGRA DE NEGÓCIO: filtro de período. "personalizado" mostra inputs de data.
+  const [periodo, setPeriodo] = useState("");
+  const [dataInicioInput, setDataInicioInput] = useState(dataInicioFiltro);
+  const [dataFimInput, setDataFimInput] = useState(dataFimFiltro);
 
   // Entrega selecionada para abrir o drawer
   const [selectedEntregaId, setSelectedEntregaId] = useState<number | null>(null);
@@ -257,6 +268,63 @@ export default function EntregasVendaClient({
     const params = new URLSearchParams();
     params.set("page", "1");
     if (situacaoFiltro) params.set("situacao", situacaoFiltro);
+    if (dataInicioFiltro) params.set("data_inicio", dataInicioFiltro);
+    if (dataFimFiltro) params.set("data_fim", dataFimFiltro);
+    router.push(`/entregas-venda?${params.toString()}`);
+  }
+
+  /** Aplica período pré-definido ou personalizado */
+  function handlePeriodoChange(tipo: string) {
+    setPeriodo(tipo);
+    const hoje = new Date();
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+    let ini = "";
+    let fim = "";
+
+    if (tipo === "hoje") {
+      ini = fim = fmt(hoje);
+    } else if (tipo === "ontem") {
+      const ontem = new Date(hoje); ontem.setDate(ontem.getDate() - 1);
+      ini = fim = fmt(ontem);
+    } else if (tipo === "7dias") {
+      const sete = new Date(hoje); sete.setDate(sete.getDate() - 7);
+      ini = fmt(sete); fim = fmt(hoje);
+    } else if (tipo === "mes") {
+      ini = fmt(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
+      fim = fmt(hoje);
+    } else if (tipo.startsWith("mes_")) {
+      const m = parseInt(tipo.split("_")[1]);
+      ini = fmt(new Date(hoje.getFullYear(), m, 1));
+      fim = fmt(new Date(hoje.getFullYear(), m + 1, 0));
+    } else if (tipo === "personalizado") {
+      ini = dataInicioInput; fim = dataFimInput;
+    }
+
+    const params = new URLSearchParams();
+    params.set("page", "1");
+    if (situacaoFiltro) params.set("situacao", situacaoFiltro);
+    if (ini) params.set("data_inicio", ini);
+    if (fim) params.set("data_fim", fim);
+    router.push(`/entregas-venda?${params.toString()}`);
+  }
+
+  function handleAplicarPersonalizado() {
+    const params = new URLSearchParams();
+    params.set("page", "1");
+    if (situacaoFiltro) params.set("situacao", situacaoFiltro);
+    if (dataInicioInput) params.set("data_inicio", dataInicioInput);
+    if (dataFimInput) params.set("data_fim", dataFimInput);
+    router.push(`/entregas-venda?${params.toString()}`);
+  }
+
+  function handleLimparData() {
+    setPeriodo("");
+    setDataInicioInput("");
+    setDataFimInput("");
+    const params = new URLSearchParams();
+    params.set("page", "1");
+    if (situacaoFiltro) params.set("situacao", situacaoFiltro);
     router.push(`/entregas-venda?${params.toString()}`);
   }
 
@@ -274,6 +342,8 @@ export default function EntregasVendaClient({
   const paginacaoExtraParams = [
     situacaoFiltro ? `situacao=${encodeURIComponent(situacaoFiltro)}` : "",
     buscaFiltro ? `busca=${encodeURIComponent(buscaFiltro)}` : "",
+    dataInicioFiltro ? `data_inicio=${encodeURIComponent(dataInicioFiltro)}` : "",
+    dataFimFiltro ? `data_fim=${encodeURIComponent(dataFimFiltro)}` : "",
   ].filter(Boolean).join("&");
 
   // ── Dados da UI ────────────────────────────────────────────────────────────
@@ -281,8 +351,23 @@ export default function EntregasVendaClient({
   const situacoes = [
     { value: "",            label: "Todas" },
     { value: "pendente",    label: "Pendentes" },
+    { value: "em_rota",     label: "Em Rota" },
     { value: "confirmada",  label: "Confirmadas" },
-    { value: "cancelada",   label: "Canceladas" },
+  ];
+
+  const meses = [
+    { value: "mes_0",  label: "Janeiro" },
+    { value: "mes_1",  label: "Fevereiro" },
+    { value: "mes_2",  label: "Março" },
+    { value: "mes_3",  label: "Abril" },
+    { value: "mes_4",  label: "Maio" },
+    { value: "mes_5",  label: "Junho" },
+    { value: "mes_6",  label: "Julho" },
+    { value: "mes_7",  label: "Agosto" },
+    { value: "mes_8",  label: "Setembro" },
+    { value: "mes_9",  label: "Outubro" },
+    { value: "mes_10", label: "Novembro" },
+    { value: "mes_11", label: "Dezembro" },
   ];
 
   return (
@@ -439,6 +524,96 @@ export default function EntregasVendaClient({
             </button>
           ))}
         </div>
+
+        {/* ── Filtros de período ───────────────────────────────────────────── */}
+        <div style={{
+          display: "flex", gap: 6, alignItems: "center",
+          marginBottom: 14, flexWrap: "wrap",
+        }}>
+          {[
+            { val: "hoje", label: "Hoje" },
+            { val: "ontem", label: "Ontem" },
+            { val: "7dias", label: "7 dias" },
+            { val: "mes", label: "Este mês" },
+          ].map(p => (
+            <button key={p.val}
+              onClick={() => handlePeriodoChange(p.val)}
+              style={{
+                padding: "5px 12px", borderRadius: 20, border: "none",
+                cursor: "pointer", fontSize: 12, fontWeight: 600,
+                background: periodo === p.val ? C.esmeralda : "#fff",
+                color: periodo === p.val ? "#fff" : C.cinza,
+                boxShadow: periodo === p.val ? "none" : `0 0 0 1px ${C.cremeBorder}`,
+              }}>
+              {p.label}
+            </button>
+          ))}
+
+          <select
+            value={periodo.startsWith("mes_") ? periodo : ""}
+            onChange={(e) => { if (e.target.value) handlePeriodoChange(e.target.value); }}
+            style={{
+              padding: "5px 10px", borderRadius: 20, border: `1px solid ${C.cremeBorder}`,
+              background: "#fff", color: C.cinza, fontSize: 12, fontWeight: 600, cursor: "pointer",
+            }}>
+            <option value="">Mês...</option>
+            {meses.map(m => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => setPeriodo("personalizado")}
+            style={{
+              padding: "5px 12px", borderRadius: 20, border: "none",
+              cursor: "pointer", fontSize: 12, fontWeight: 600,
+              background: periodo === "personalizado" ? C.esmeralda : "#fff",
+              color: periodo === "personalizado" ? "#fff" : C.cinza,
+              boxShadow: periodo === "personalizado" ? "none" : `0 0 0 1px ${C.cremeBorder}`,
+            }}>
+            Personalizado
+          </button>
+
+          {(dataInicioFiltro || dataFimFiltro) && (
+            <button onClick={handleLimparData}
+              style={{
+                padding: "5px 10px", borderRadius: 20, border: "none",
+                background: C.vermelhoLt, color: C.vermelho, fontSize: 12, fontWeight: 600, cursor: "pointer",
+              }}>
+              ✕ Limpar
+            </button>
+          )}
+        </div>
+
+        {/* ── Inputs de data personalizada ─────────────────────────────────── */}
+        {periodo === "personalizado" && (
+          <div style={{
+            display: "flex", gap: 8, alignItems: "center",
+            marginBottom: 14, flexWrap: "wrap",
+          }}>
+            <label style={{ fontSize: 12, color: C.cinza, fontWeight: 600 }}>De:</label>
+            <input type="date" value={dataInicioInput}
+              onChange={e => setDataInicioInput(e.target.value)}
+              style={{
+                padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.cremeBorder}`,
+                fontSize: 12, background: "#fff", color: "#1f2937",
+              }} />
+            <label style={{ fontSize: 12, color: C.cinza, fontWeight: 600 }}>Até:</label>
+            <input type="date" value={dataFimInput}
+              onChange={e => setDataFimInput(e.target.value)}
+              style={{
+                padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.cremeBorder}`,
+                fontSize: 12, background: "#fff", color: "#1f2937",
+              }} />
+            <button onClick={handleAplicarPersonalizado}
+              style={{
+                padding: "6px 14px", borderRadius: 6, border: "none",
+                background: C.esmeralda, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
+              }}>
+              Filtrar
+            </button>
+          </div>
+        )}
 
         {/* ── Busca ─────────────────────────────────────────────────────────── */}
         <div style={{

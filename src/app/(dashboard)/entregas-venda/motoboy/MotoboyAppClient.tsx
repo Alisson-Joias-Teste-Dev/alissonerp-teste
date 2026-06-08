@@ -82,13 +82,22 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
   const [erro, setErro] = useState("");
   const [situacaoFiltro, setSituacaoFiltro] = useState("");
 
+  // Filtro de período
+  const [periodo, setPeriodo] = useState("");
+  const [dataInicio, setDataInicio] = useState("");
+  const [dataFim, setDataFim] = useState("");
+
   const carregar = useCallback(async () => {
     setLoading(true);
     setErro("");
     try {
-      const params = situacaoFiltro ? `?situacao=${situacaoFiltro}` : "";
+      const params = new URLSearchParams();
+      if (situacaoFiltro) params.set("situacao", situacaoFiltro);
+      if (dataInicio) params.set("data_inicio", dataInicio);
+      if (dataFim) params.set("data_fim", dataFim);
+      const qs = params.toString();
       const data = await apiFetch<{ items: EntregaMotoboy[]; cards: Cards }>(
-        `/api/entregas-venda/motoboy/minhas${params}`,
+        `/api/entregas-venda/motoboy/minhas${qs ? "?" + qs : ""}`,
       );
       setItems(data.items);
       setCards(data.cards);
@@ -97,15 +106,54 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [situacaoFiltro]);
+  }, [situacaoFiltro, dataInicio, dataFim]);
 
   useEffect(() => { carregar(); }, [carregar]);
+
+  function handlePeriodoChange(tipo: string) {
+    setPeriodo(tipo);
+    const hoje = new Date();
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+    if (tipo === "hoje") {
+      setDataInicio(fmt(hoje)); setDataFim(fmt(hoje));
+    } else if (tipo === "ontem") {
+      const ontem = new Date(hoje); ontem.setDate(ontem.getDate() - 1);
+      setDataInicio(fmt(ontem)); setDataFim(fmt(ontem));
+    } else if (tipo === "7dias") {
+      const sete = new Date(hoje); sete.setDate(sete.getDate() - 7);
+      setDataInicio(fmt(sete)); setDataFim(fmt(hoje));
+    } else if (tipo === "mes") {
+      setDataInicio(fmt(new Date(hoje.getFullYear(), hoje.getMonth(), 1)));
+      setDataFim(fmt(hoje));
+    } else if (tipo.startsWith("mes_")) {
+      const m = parseInt(tipo.split("_")[1]);
+      setDataInicio(fmt(new Date(hoje.getFullYear(), m, 1)));
+      setDataFim(fmt(new Date(hoje.getFullYear(), m + 1, 0)));
+    } else if (tipo === "limpar") {
+      setDataInicio(""); setDataFim("");
+    }
+  }
+
+  function handlePersonalizado() {
+    // already reads from dataInicio/dataFim state via carregar
+    carregar();
+  }
 
   const situacoes = [
     { value: "", label: "Todas" },
     { value: "pendente", label: "Pendentes" },
     { value: "em_rota", label: "Em Rota" },
     { value: "confirmada", label: "Entregues" },
+  ];
+
+  const meses = [
+    { value: "mes_0", label: "Jan" }, { value: "mes_1", label: "Fev" },
+    { value: "mes_2", label: "Mar" }, { value: "mes_3", label: "Abr" },
+    { value: "mes_4", label: "Mai" }, { value: "mes_5", label: "Jun" },
+    { value: "mes_6", label: "Jul" }, { value: "mes_7", label: "Ago" },
+    { value: "mes_8", label: "Set" }, { value: "mes_9", label: "Out" },
+    { value: "mes_10", label: "Nov" }, { value: "mes_11", label: "Dez" },
   ];
 
   return (
@@ -161,6 +209,73 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
               {s.label}
             </button>
           ))}
+        </div>
+
+        {/* Filtros de período */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+          {[
+            { val: "hoje", label: "Hoje" },
+            { val: "ontem", label: "Ontem" },
+            { val: "7dias", label: "7 dias" },
+            { val: "mes", label: "Este mês" },
+          ].map(p => (
+            <button key={p.val}
+              onClick={() => handlePeriodoChange(p.val)}
+              style={{
+                padding: "5px 10px", borderRadius: 20, border: `1px solid ${C.cremeBorder}`,
+                background: periodo === p.val ? C.esmeralda : "#fff",
+                color: periodo === p.val ? "#fff" : C.cinza,
+                fontSize: 11, fontWeight: 600, cursor: "pointer",
+              }}>
+              {p.label}
+            </button>
+          ))}
+
+          <select
+            value={periodo.startsWith("mes_") ? periodo : ""}
+            onChange={(e) => { if (e.target.value) handlePeriodoChange(e.target.value); }}
+            style={{
+              padding: "5px 8px", borderRadius: 20, border: `1px solid ${C.cremeBorder}`,
+              background: "#fff", color: C.cinza, fontSize: 11, fontWeight: 600, cursor: "pointer",
+            }}>
+            <option value="">Mês...</option>
+            {meses.map(m => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <input type="date" value={dataInicio}
+              onChange={e => { setDataInicio(e.target.value); setPeriodo(""); }}
+              style={{
+                padding: "5px 6px", borderRadius: 20, border: `1px solid ${C.cremeBorder}`,
+                fontSize: 11, background: "#fff", color: "#1f2937", width: 115,
+              }} />
+            <span style={{ fontSize: 11, color: C.cinza }}>a</span>
+            <input type="date" value={dataFim}
+              onChange={e => { setDataFim(e.target.value); setPeriodo(""); }}
+              style={{
+                padding: "5px 6px", borderRadius: 20, border: `1px solid ${C.cremeBorder}`,
+                fontSize: 11, background: "#fff", color: "#1f2937", width: 115,
+              }} />
+            <button onClick={handlePersonalizado}
+              style={{
+                padding: "5px 10px", borderRadius: 20, border: `1px solid ${C.esmeralda}`,
+                background: C.esmeralda, color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer",
+              }}>
+              OK
+            </button>
+          </div>
+
+          {(dataInicio || dataFim) && (
+            <button onClick={() => handlePeriodoChange("limpar")}
+              style={{
+                padding: "5px 10px", borderRadius: 20, border: "none",
+                background: C.vermelhoLt, color: C.vermelho, fontSize: 11, fontWeight: 600, cursor: "pointer",
+              }}>
+              ✕
+            </button>
+          )}
         </div>
 
         {/* Loading / Erro */}

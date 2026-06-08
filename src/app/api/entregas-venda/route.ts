@@ -84,6 +84,8 @@ export async function GET(req: NextRequest) {
   const vendaId = url.searchParams.get("venda_id");
   const situacao = url.searchParams.get("situacao") ?? "";
   const motoboyId = url.searchParams.get("motoboy_id");
+  const dataInicio = url.searchParams.get("data_inicio") ?? "";
+  const dataFim = url.searchParams.get("data_fim") ?? "";
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 50));
   const offset = (page - 1) * limit;
@@ -117,6 +119,14 @@ export async function GET(req: NextRequest) {
 
   const whereMotoboy = motoboyId
     ? sql`AND ev.motoboy_id = ${Number(motoboyId)}`
+    : sql``;
+
+  const whereDataInicio = dataInicio
+    ? sql`AND ev.created_at >= ${dataInicio}::date`
+    : sql``;
+
+  const whereDataFim = dataFim
+    ? sql`AND ev.created_at < (${dataFim}::date + interval '1 day')`
     : sql``;
 
   // Duas queries em paralelo: dados + contagem total
@@ -158,6 +168,8 @@ export async function GET(req: NextRequest) {
         ${whereVenda}
         ${whereSituacao}
         ${whereMotoboy}
+        ${whereDataInicio}
+        ${whereDataFim}
       ORDER BY ev.created_at DESC, ev.id DESC
       LIMIT ${limit} OFFSET ${offset}
     `,
@@ -170,6 +182,8 @@ export async function GET(req: NextRequest) {
         ${whereVenda}
         ${whereSituacao}
         ${whereMotoboy}
+        ${whereDataInicio}
+        ${whereDataFim}
     `,
   ]);
 

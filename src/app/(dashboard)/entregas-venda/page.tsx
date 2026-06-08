@@ -93,6 +93,8 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
   const offset = (page - 1) * limit;
   const situacao = typeof params.situacao === "string" ? params.situacao : "";
   const busca = typeof params.busca === "string" ? params.busca : "";
+  const dataInicio = typeof params.data_inicio === "string" ? params.data_inicio : "";
+  const dataFim = typeof params.data_fim === "string" ? params.data_fim : "";
 
   const isConsultora = usuario.role === "consultora";
   const vendedorId = usuario.vendedor_id as number | null;
@@ -111,6 +113,16 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
   // Filtro de busca: código de entrega ou número da venda (case-insensitive)
   const whereBusca = busca
     ? sql`AND (ev.codigo_entrega ILIKE ${"%" + busca + "%"} OR ve.numero_venda ILIKE ${"%" + busca + "%"})`
+    : sql``;
+
+  // REGRA DE NEGÓCIO: filtro de data por período. data_inicio filtra por
+  // created_at >= inicio. data_fim filtra por created_at < fim+1dia (inclui o dia todo).
+  const whereDataInicio = dataInicio
+    ? sql`AND ev.created_at >= ${dataInicio}::date`
+    : sql``;
+
+  const whereDataFim = dataFim
+    ? sql`AND ev.created_at < (${dataFim}::date + interval '1 day')`
     : sql``;
 
   // ── Queries em paralelo: dados + contagens ─────────────────────────────────
@@ -148,6 +160,8 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
         ${whereVendedor}
         ${whereSituacao}
         ${whereBusca}
+        ${whereDataInicio}
+        ${whereDataFim}
       ORDER BY ev.created_at DESC, ev.id DESC
       LIMIT ${limit} OFFSET ${offset}
     `,
@@ -165,6 +179,8 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
         ${whereVendedor}
         ${whereSituacao}
         ${whereBusca}
+        ${whereDataInicio}
+        ${whereDataFim}
     `,
   ]);
 
@@ -215,6 +231,8 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
       pageSize={limit}
       situacaoFiltro={situacao}
       buscaFiltro={busca}
+      dataInicioFiltro={dataInicio}
+      dataFimFiltro={dataFim}
       userRole={usuario.role as string}
     />
   );

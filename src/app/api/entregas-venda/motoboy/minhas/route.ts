@@ -70,6 +70,8 @@ export async function GET(req: NextRequest) {
   }
 
   const situacao = url.searchParams.get("situacao") ?? "";
+  const dataInicio = url.searchParams.get("data_inicio") ?? "";
+  const dataFim = url.searchParams.get("data_fim") ?? "";
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const limit = 50;
   const offset = (page - 1) * limit;
@@ -77,6 +79,15 @@ export async function GET(req: NextRequest) {
   // Filtro por situacao
   const whereSituacao = situacao
     ? sql`AND ev.situacao = ${situacao}`
+    : sql``;
+
+  // Filtro por período
+  const whereDataInicio = dataInicio
+    ? sql`AND ev.created_at >= ${dataInicio}::date`
+    : sql``;
+
+  const whereDataFim = dataFim
+    ? sql`AND ev.created_at < (${dataFim}::date + interval '1 day')`
     : sql``;
 
   // REGRA DE NEGÓCIO: retorna apenas entregas do motoboy logado
@@ -98,6 +109,8 @@ export async function GET(req: NextRequest) {
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
         AND ev.situacao <> 'cancelada'
         ${whereSituacao}
+        ${whereDataInicio}
+        ${whereDataFim}
       ORDER BY ev.created_at DESC, ev.id DESC
       LIMIT ${limit} OFFSET ${offset}
     `,
@@ -107,6 +120,8 @@ export async function GET(req: NextRequest) {
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
         AND ev.situacao <> 'cancelada'
         ${whereSituacao}
+        ${whereDataInicio}
+        ${whereDataFim}
     `,
     sql`
       SELECT
@@ -125,7 +140,10 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.entregas_venda ev
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
         AND ev.situacao <> 'cancelada'
-        AND ev.created_at >= date_trunc('month', now())
+        ${dataInicio
+          ? sql`AND ev.created_at >= ${dataInicio}::date`
+          : sql`AND ev.created_at >= date_trunc('month', now())`}
+        ${whereDataFim}
     `,
   ]);
 
