@@ -450,13 +450,17 @@ function CodigosModal({
             )}
           </div>
 
-          {whatsappEnviado && (
-            <div style={{
-              padding: "14px 16px", borderRadius: 10,
-              background: C.esmeraldaLt,
-              border: `1px solid ${C.esmeralda}`,
-              marginBottom: 12,
-            }}>
+          {/* ── Confirmação com Código A ─────────────────────────────── */}
+          {/* REGRA DE NEGÓCIO: campo SEMPRE visível. O operador digita o
+              código informado pelo cliente, independente se o WhatsApp foi
+              enviado ou não. Para retirada, o código já foi enviado. Para
+              motoboy, será enviado após a confirmação do Código B. */}
+          <div style={{
+            padding: "14px 16px", borderRadius: 10,
+            background: C.esmeraldaLt,
+            border: `1px solid ${C.esmeralda}`,
+            marginBottom: 12,
+          }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <Hash size={16} color={C.esmeralda} />
                 <span style={{ fontSize: 13, fontWeight: 700, color: C.esmeralda }}>
@@ -540,7 +544,6 @@ function CodigosModal({
                 </div>
               )}
             </div>
-          )}
 
           {/* ── Código B — Motoboy (apenas se aplicável) ────────────────── */}
           {codigoMotoboy && (
