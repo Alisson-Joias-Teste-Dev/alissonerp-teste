@@ -241,6 +241,11 @@ export default function EntregaDetalheDrawer({
   // os códigos completos. Demais roles veem sempre mascarado.
   const podeVerCodigos = userRole === "desenvolvedor" || userRole === "admin";
 
+  // REGRA DE SEGURANÇA: seção de códigos visível apenas para admin,
+  // desenvolvedor e entregador (motoboy). Consultora, gerente etc
+  // não precisam ver os códigos — só digitam o que o cliente informa.
+  const podeVerSecaoCodigos = podeVerCodigos || userRole === "entregador";
+
   // ── Carregar detalhe ────────────────────────────────────────────────────────
 
   const carregar = useCallback(async () => {
@@ -968,6 +973,8 @@ export default function EntregaDetalheDrawer({
             )}
 
             {/* ── Códigos ──────────────────────────────────────────────────── */}
+            {/* REGRA DE SEGURANÇA: apenas admin, dev e entregador veem códigos */}
+            {podeVerSecaoCodigos && (
             <div style={{ marginBottom: 20 }}>
               <div
                 style={{
@@ -1098,6 +1105,7 @@ export default function EntregaDetalheDrawer({
                 </div>
               </div>
             </div>
+            )}
 
             {/* ── Foto de comprovação ───────────────────────────────────── */}
             {/* REGRA DE NEGÓCIO: foto anexada na confirmação da entrega
