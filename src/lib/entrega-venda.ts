@@ -788,6 +788,26 @@ export async function criarEntrega(
 
   if (params.formaEntrega === "retirada") {
     whatsAppResult = await tentarEnviarWhatsApp(params.vendaId, entregaBase.codigoCliente);
+  } else {
+    // REGRA DE NEGÓCIO: mesmo sem enviar, verifica se o cliente tem WhatsApp.
+    // Se não tiver, o modal avisa o operador antes que seja tarde demais
+    // (o Código A será enviado após a confirmação do Código B).
+    const [cliente] = await sql`
+      SELECT c.nome, c.celular, c.telefone
+      FROM alissonerp.vendas_erp ve
+      JOIN public.contatos c ON c.id_contato = ve.cliente_id
+      WHERE ve.id = ${params.vendaId}
+      LIMIT 1
+    `;
+    const nome = (cliente as { nome?: string } | null)?.nome ?? null;
+    const numero = (((cliente as { celular?: string; telefone?: string } | null)?.celular ||
+      (cliente as { celular?: string; telefone?: string } | null)?.telefone || "").trim());
+    whatsAppResult = {
+      whatsappEnviado: false,
+      whatsappErro: numero ? null : "Cliente sem WhatsApp cadastrado",
+      clienteNome: nome,
+      clienteTelefone: numero || null,
+    };
   }
 
   // REGRA DE NEGÓCIO: se a entrega é via motoboy, o Código B também é enviado
