@@ -45,6 +45,7 @@ import {
   EyeOff,
   Send,
   Camera,
+  Phone,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import ConfirmarEntregaModal from "./ConfirmarEntregaModal";
@@ -99,6 +100,8 @@ interface EntregaDetalhe {
   venda_situacao: string | null;
   cliente_id: number | null;
   cliente_nome: string | null;
+  cliente_celular: string | null;
+  cliente_telefone: string | null;
   vendedor_id: number | null;
   endereco_entrega: string | null;
   endereco_entrega_numero: string | null;
@@ -589,6 +592,16 @@ export default function EntregaDetalheDrawer({
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#1f2937" }}>
                   {detalhe.cliente_nome ?? "—"}
                 </div>
+                {/* WhatsApp do cliente — motoboy pode precisar entrar em contato */}
+                {(detalhe.cliente_celular || detalhe.cliente_telefone) && (
+                  <div style={{
+                    fontSize: 12, color: "#059669", marginTop: 3,
+                    display: "flex", alignItems: "center", gap: 4,
+                  }}>
+                    <Phone size={12} />
+                    {detalhe.cliente_celular || detalhe.cliente_telefone}
+                  </div>
+                )}
               </div>
             </div>
 

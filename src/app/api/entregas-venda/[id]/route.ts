@@ -83,6 +83,8 @@ export async function GET(
         ve.situacao AS venda_situacao,
         ve.cliente_id,
         c.nome AS cliente_nome,
+        c.celular AS cliente_celular,
+        c.telefone AS cliente_telefone,
         ve.vendedor_id,
         -- Endereço de entrega da venda
         ve.endereco_entrega,
@@ -200,6 +202,8 @@ export async function GET(
     venda_situacao: e.venda_situacao,
     cliente_id: e.cliente_id ? Number(e.cliente_id) : null,
     cliente_nome: e.cliente_nome,
+    cliente_celular: e.cliente_celular ?? null,
+    cliente_telefone: e.cliente_telefone ?? null,
     vendedor_id: e.vendedor_id ? Number(e.vendedor_id) : null,
     // Endereço de entrega da venda
     endereco_entrega: e.endereco_entrega ?? null,
