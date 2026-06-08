@@ -269,8 +269,11 @@ function CodigosModal({
    */
   async function handleConfirmarCodigoCliente() {
     const codigo = codigoClienteInput.trim();
+    const isMotoboy = !!codigoMotoboy;
     if (codigo.length < 6) {
-      setErroCodigo("Digite os 6 dígitos do código recebido pelo cliente.");
+      setErroCodigo(isMotoboy
+        ? "Digite os 6 dígitos do Código B recebido pelo motoboy."
+        : "Digite os 6 dígitos do código recebido pelo cliente.");
       return;
     }
 
@@ -450,26 +453,31 @@ function CodigosModal({
             )}
           </div>
 
-          {/* ── Confirmação com Código A ─────────────────────────────── */}
-          {/* REGRA DE NEGÓCIO: campo SEMPRE visível. O operador digita o
-              código informado pelo cliente, independente se o WhatsApp foi
-              enviado ou não. Para retirada, o código já foi enviado. Para
-              motoboy, será enviado após a confirmação do Código B. */}
+          {/* ── Confirmação com Código ───────────────────────────────── */}
+          {/* REGRA DE NEGÓCIO: retirada pede Código A do cliente.
+              Motoboy pede Código B do entregador. Ambos chamam o mesmo
+              endpoint /confirmar que valida contra os códigos da entrega. */}
           <div style={{
             padding: "14px 16px", borderRadius: 10,
             background: C.esmeraldaLt,
             border: `1px solid ${C.esmeralda}`,
             marginBottom: 12,
           }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              {codigoMotoboy ? (
+                <Bike size={16} color={C.esmeralda} />
+              ) : (
                 <Hash size={16} color={C.esmeralda} />
-                <span style={{ fontSize: 13, fontWeight: 700, color: C.esmeralda }}>
-                  Confirmar baixa com Código A
-                </span>
-              </div>
-              <p style={{ fontSize: 12, color: C.cinza, marginBottom: 10, lineHeight: 1.5 }}>
-                Peça ao cliente o código recebido no WhatsApp e digite abaixo para confirmar a entrega e baixar o estoque.
-              </p>
+              )}
+              <span style={{ fontSize: 13, fontWeight: 700, color: C.esmeralda }}>
+                {codigoMotoboy ? "Confirmar retirada com Código B" : "Confirmar baixa com Código A"}
+              </span>
+            </div>
+            <p style={{ fontSize: 12, color: C.cinza, marginBottom: 10, lineHeight: 1.5 }}>
+              {codigoMotoboy
+                ? "Peça ao motoboy o código recebido no WhatsApp e digite abaixo para registrar a retirada da mercadoria."
+                : "Peça ao cliente o código recebido no WhatsApp e digite abaixo para confirmar a entrega e baixar o estoque."}
+            </p>
               <div style={{ display: "flex", gap: 8 }}>
                 <input
                   type="text"
@@ -961,16 +969,12 @@ export default function MarcarEntregaModal({
   async function handleFecharCodigos() {
     /**
      * REGRA DE NEGÓCIO: entrega sem código confirmado = lixo operacional.
-     * O operador abriu o modal, gerou os códigos, mas não digitou Código A.
-     * Cancelar automaticamente mantém a lista limpa. O dado fica no banco
-     * como 'cancelada' para auditoria, mas não aparece no frontend.
-     *
-     * EXCEÇÃO: entrega via motoboy NÃO é cancelada, pois o Código A será
-     * digitado depois pelo cliente (via drawer). Se cancelar, o motoboy
-     * perde a entrega que já foi atribuída a ele.
-     * IMPACTO SE REMOVIDO: entregas de motoboy somem antes da confirmação.
+     * Retirada ou motoboy — se o código não foi digitado, a entrega é
+     * cancelada ao fechar. Para motoboy, o Código B é digitado aqui;
+     * o Código A será digitado depois pelo cliente (via drawer).
+     * IMPACTO SE REMOVIDO: entregas pendentes órfãs acumulam na lista.
      */
-    if (codigosGerados && !codigoConfirmado && !codigosGerados.codigoMotoboy) {
+    if (codigosGerados && !codigoConfirmado) {
       await apiFetch(
         `/api/entregas-venda/${codigosGerados.entrega.id}/cancelar`,
         { method: "POST" },
