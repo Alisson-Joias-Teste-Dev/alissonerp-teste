@@ -170,7 +170,7 @@ export async function POST(req: NextRequest) {
         email,
         password: senha,
         email_confirm: true, // Não precisa confirmar e-mail
-        user_metadata: { nome, role: "motoboy" },
+        user_metadata: { nome, role: "entregador" },
       });
 
     if (authError) {

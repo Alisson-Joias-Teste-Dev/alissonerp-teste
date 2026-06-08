@@ -63,17 +63,18 @@ export default async function Home() {
     }
   }
 
-  // REGRA DE NEGÓCIO: se o usuário está cadastrado como motoboy ativo
-  // (tabela motoboys), redireciona automaticamente para o app de entregas.
-  // Protocolistas têm a mesma role "motoboy" mas não têm registro na tabela
-  // motoboys, então não são redirecionados — continuam na home normal.
+  // REGRA DE NEGÓCIO: se o usuário tem role 'entregador' ou está cadastrado
+  // como motoboy ativo, redireciona para o app de entregas.
+  // 'entregador' é a role específica para entregadores de app.
+  // 'motoboy' continua sendo a role dos protocolistas (funcionários).
   try {
-    const [mb] = await sql`
+    const ehEntregador = userRole === "entregador";
+    const [mb] = ehEntregador ? [] : await sql`
       SELECT 1 FROM alissonerp.motoboys
       WHERE user_id = ${user.id}::uuid AND ativo = true
       LIMIT 1
     `;
-    if (mb) redirect("/entregas-venda/motoboy");
+    if (ehEntregador || mb) redirect("/entregas-venda/motoboy");
   } catch {
     // se falhar, segue normalmente
   }

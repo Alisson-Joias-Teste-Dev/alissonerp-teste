@@ -5,6 +5,7 @@ export type Role =
   | "gerente_loja"
   | "ourives"
   | "motoboy"
+  | "entregador"
   | "consultora"
   | "estoquista_fabrica"
   | "estoquista_loja"
@@ -84,6 +85,9 @@ const ROLE_MENUS: Record<Role, string[]> = {
   gerente_loja:       ["/dashboard-comercial", "/ordens", "/estoque", "/protocolo", "/conferencia", "/entregas-venda", "/auditoria", "/vendas", "/estoque-comercial", "/compras-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/fiscal/emitentes", "/fiscal/regras", "/metal", "/editor-ia", "/crediario", "/financeiro/comissoes"],
   ourives:            ["/ordens", "/pcp", "/editor-ia"],
   motoboy:            ["/protocolo", "/editor-ia"],
+  // REGRA DE NEGOCIO: role especifica para entregadores de app.
+  // Diferente de 'motoboy' (protocolistas). Entregador so ve suas entregas.
+  entregador:          ["/entregas-venda"],
   // REGRA DE NEGOCIO:
   // - O que faz: libera o módulo Metal para TODAS as consultoras.
   // - Por que: a operação comercial precisa registrar compra/recebimento de metal sem depender de gerente.

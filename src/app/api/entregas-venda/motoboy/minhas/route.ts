@@ -37,6 +37,10 @@ export async function GET(req: NextRequest) {
   let motoboyUserId: string;
   let motoboyNome: string | null = null;
 
+  // REGRA DE NEGÓCIO: role 'entregador' é a role específica para entregadores
+  // de app. Protocolistas usam role 'motoboy' e não acessam esta rota.
+  const ehEntregador = usuario.role === "entregador";
+
   if (adminMotoboyId && rolesAdmin.includes(usuario.role as string)) {
     motoboyUserId = adminMotoboyId;
     const [mbAdmin] = await sql`
@@ -44,6 +48,13 @@ export async function GET(req: NextRequest) {
       WHERE user_id = ${adminMotoboyId}::uuid LIMIT 1
     `;
     motoboyNome = mbAdmin?.nome ?? null;
+  } else if (ehEntregador) {
+    motoboyUserId = user.id;
+    const [motoboy] = await sql`
+      SELECT nome FROM alissonerp.motoboys
+      WHERE user_id = ${user.id}::uuid LIMIT 1
+    `;
+    motoboyNome = motoboy?.nome ?? null;
   } else {
     const [motoboy] = await sql`
       SELECT id, user_id, nome
