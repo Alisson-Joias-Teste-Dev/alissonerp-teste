@@ -32,7 +32,15 @@ export async function GET(_req: NextRequest) {
   `;
   if (!usuario) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const gerenteId = user.id;
+  // REGRA DE NEGÓCIO: saldo de frete é da gerente da loja, não do usuário logado.
+  // Buscar o gerente_loja ativo (ou fallback para o próprio usuário se não houver).
+  let gerenteId = user.id;
+  const [gerente] = await sql`
+    SELECT id FROM alissonerp.usuarios
+    WHERE role = 'gerente_loja' AND ativo = true
+    ORDER BY created_at LIMIT 1
+  `;
+  if (gerente) gerenteId = gerente.id;
 
   try {
     const [saldo, movimentacoes] = await Promise.all([
