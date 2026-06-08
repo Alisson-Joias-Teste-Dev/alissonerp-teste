@@ -170,6 +170,13 @@ export default function EntregasVendaClient({
   const [contagens, setContagens] = useState<ContagensEntregas>(ssrContagens);
   const [loading, setLoading] = useState(false);
 
+  // REGRA DE NEGÓCIO: sincroniza estado local com props do SSR quando a URL muda
+  // (router.push com novos filtros). Sem isso, o estado fica preso nos dados iniciais.
+  useEffect(() => {
+    setItems(ssrItems);
+    setContagens(ssrContagens);
+  }, [ssrItems, ssrContagens]);
+
   // Input de busca (estado local, não sincronizado com URL em tempo real)
   const [buscaInput, setBuscaInput] = useState(buscaFiltro);
 
@@ -208,6 +215,8 @@ export default function EntregasVendaClient({
         limit: String(pageSize),
       });
       if (situacaoFiltro) params.set("situacao", situacaoFiltro);
+      if (dataInicioFiltro) params.set("data_inicio", dataInicioFiltro);
+      if (dataFimFiltro) params.set("data_fim", dataFimFiltro);
 
       const data = await apiFetch<EntregasListResponse>(
         `/api/entregas-venda?${params.toString()}`,
