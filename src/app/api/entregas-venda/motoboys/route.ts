@@ -185,13 +185,19 @@ export async function POST(req: NextRequest) {
   ` as Record<string, unknown>[])[0]?.id as string;
 
   // REGRA DE NEGÓCIO: cria identity para login funcionar.
+  const identityJson = JSON.stringify({
+    sub: novoUserId,
+    email,
+    email_verified: false,
+    phone_verified: false,
+  });
   await sql`
     INSERT INTO auth.identities (id, provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
     VALUES (
       gen_random_uuid(),
       ${email},
       ${novoUserId}::uuid,
-      ${JSON.stringify({ sub: novoUserId, email })}::jsonb,
+      ${identityJson}::jsonb,
       'email',
       now(),
       now(),
