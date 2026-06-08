@@ -144,6 +144,10 @@ function money(v: unknown): number {
   return Math.round(Number(v ?? 0) * 100) / 100;
 }
 
+function fmBRL(v: number): string {
+  return `R$ ${v.toFixed(2)}`;
+}
+
 /**
  * Baixa no estoque comercial apenas os itens confirmados nesta entrega.
  *
@@ -676,6 +680,54 @@ export async function criarEntrega(
         })),
       },
     });
+
+    // REGRA DE NEGÓCIO: saldo de frete grátis da gerente.
+    // Se frete_cobrado > frete_motoboy: sobra vira crédito (abastece saldo).
+    // Se frete_cobrado < frete_motoboy: diferença consome saldo (débito).
+    // Se frete_cobrado == 0 (grátis total): valor integral do motoboy sai do saldo.
+    // O que faz: busca o gerente_loja ativo e registra a movimentação.
+    // IMPACTO SE REMOVIDO: saldo de frete grátis nunca atualiza.
+    if (params.formaEntrega === "motoboy") {
+      const diff = money(freteCobrado - freteMotoboyCalculado);
+      if (diff !== 0 || freteCobrado === 0) {
+        // Busca gerente_loja para vincular a movimentação
+        const [gerente] = await tx`
+          SELECT id FROM alissonerp.usuarios
+          WHERE role = 'gerente_loja' AND ativo = true
+          ORDER BY created_at LIMIT 1
+        `;
+        const gerenteId = gerente?.id ?? userId;
+
+        const saldoAntes = await obterSaldoFreteGerenteNoTx(tx, gerenteId);
+
+        if (diff > 0) {
+          // Sobra: crédito
+          await tx`
+            INSERT INTO alissonerp.saldo_frete_gratis
+              (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
+            VALUES
+              (${gerenteId}::uuid, 'credito', ${diff}, ${saldoAntes}, ${money(saldoAntes + diff)},
+               ${entregaId}, ${params.vendaId},
+               ${`Frete cobrado ${fmBRL(freteCobrado)} > motoboy ${fmBRL(freteMotoboyCalculado)}`},
+               ${userId}::uuid)
+          `;
+        } else {
+          // Débito: frete grátis parcial ou total
+          const debito = diff < 0 ? Math.abs(diff) : freteMotoboyCalculado;
+          await tx`
+            INSERT INTO alissonerp.saldo_frete_gratis
+              (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
+            VALUES
+              (${gerenteId}::uuid, 'debito', ${debito}, ${saldoAntes}, ${money(saldoAntes - debito)},
+               ${entregaId}, ${params.vendaId},
+               ${diff < 0
+                  ? `Frete cobrado ${fmBRL(freteCobrado)} < motoboy ${fmBRL(freteMotoboyCalculado)}`
+                  : `Frete grátis total — motoboy ${fmBRL(freteMotoboyCalculado)}`},
+               ${userId}::uuid)
+          `;
+        }
+      }
+    }
 
     // Retornar entrega completa
     return {
