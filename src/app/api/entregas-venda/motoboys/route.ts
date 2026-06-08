@@ -169,7 +169,7 @@ export async function POST(req: NextRequest) {
       'authenticated',
       'authenticated',
       ${email},
-      crypt(${senha}, extensions.gen_salt('bf')),
+      extensions.crypt(${senha}, extensions.gen_salt('bf')),
       now(),
       '{"provider":"email","providers":["email"]}',
       ${JSON.stringify({ nome, role: "entregador" })},
