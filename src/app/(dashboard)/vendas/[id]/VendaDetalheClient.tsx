@@ -22,6 +22,8 @@ import PagamentoForm, { type PagamentoEntry, fmt as fmtPagamento } from "@/compo
 import UpgradeItemFields from "@/components/vendas/UpgradeItemFields";
 import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
+// REGRA DE NEGÓCIO: modal de entrega (parcial/total) da venda
+import MarcarEntregaModal from "@/components/entregas/MarcarEntregaModal";
 import { useErrorStore } from "@/stores/errorStore";
 import { getPublicUrl } from "@/lib/storage-url";
 // REGRA DE NEGOCIO: helpers de rodio (Frente A — 30/05/2026)
@@ -183,12 +185,13 @@ interface ParcelaRow { num: number; dias: number; data: string; valor: number; }
 
 const SITUACAO_LABEL: Record<string, string> = {
   rascunho: "Rascunho", aprovado: "Aprovado", enviado: "Enviado",
-  entregue: "Entregue", cancelado: "Cancelado", concluido: "Concluído",
+  em_rota: "Em Rota", entregue: "Entregue", cancelado: "Cancelado", concluido: "Concluído",
 };
 const SITUACAO_COLOR: Record<string, { bg: string; text: string }> = {
   rascunho:  { bg: "#F3F4F6", text: "#6B7280" },
   aprovado:  { bg: "#D1FAE5", text: "#065F46" },
   enviado:   { bg: "#DBEAFE", text: "#1D4ED8" },
+  em_rota:   { bg: "#FFF7ED", text: "#9A3412" },
   entregue:  { bg: "#EDE9FE", text: "#5B21B6" },
   cancelado: { bg: "#FEE2E2", text: "#991B1B" },
   concluido: { bg: C.esmeraldaLt, text: C.esmeralda },
@@ -202,9 +205,9 @@ const PAG_STATUS_COLOR: Record<string, { bg: string; text: string }> = {
 
 const PROXIMA_SITUACAO: Record<string, { label: string; value: string; icon: typeof CheckCircle }[]> = {
   rascunho:  [{ label: "Salvar Venda",    value: "aprovado", icon: CheckCircle }],
-  aprovado:  [{ label: "Marcar Enviado",  value: "enviado",  icon: Truck },
-              { label: "Marcar Entregue", value: "entregue", icon: PackageCheck }],
-  enviado:   [{ label: "Marcar Entregue", value: "entregue", icon: PackageCheck }],
+  aprovado:  [],
+  em_rota:   [],
+  enviado:   [],
   entregue:  [],
   cancelado: [],
   concluido: [],
@@ -622,6 +625,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [abrirNfce, setAbrirNfce] = useState(false);
   const [verNotaId, setVerNotaId] = useState<number | null>(null);
+  // REGRA DE NEGÓCIO: controla a abertura do modal de Marcar Entrega — permite
+  // registrar entregas parciais ou totais dos itens da venda aprovada.
+  const [showMarcarEntrega, setShowMarcarEntrega] = useState(false);
 
   // Modal de solicitação de alteração (quando o backend devolve 403 com solicitar:true)
   const [solicitarPayload, setSolicitarPayload] = useState<{
@@ -1660,6 +1666,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         if (!res.ok) {
           const d = await res.json();
           if (res.status === 409 && d.error?.includes("Conflito")) {
+            // REGRA DE NEGÓCIO: o backend protege contra concorrência comparando
+            // client_updated_at com updated_at do banco. Se divergirem, a venda
+            // foi alterada por outro usuário/sessão.
             throw new Error("Esta venda foi modificada por outro usuário. Recarregue a página.");
           }
           // Backend bloqueou por ser campo restrito a admin — abre modal de solicitação.
@@ -1680,8 +1689,16 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           }
           throw new Error(d.error ?? `HTTP ${res.status}`);
         }
-        // Atualiza referência local sem recarregar a página inteira
-        setVenda(prev => prev ? { ...prev, ...patch } : prev);
+        // REGRA DE NEGÓCIO: após salvar com sucesso, sincroniza o estado local
+        // com o servidor. O updated_at do banco é atualizado a cada write;
+        // o frontend precisa do novo valor para o optimistic locking do próximo
+        // save (client_updated_at). Sem esta recarga, o próximo save envia
+        // o timestamp antigo e recebe erro 409 "modificado por outro usuário".
+        // O QUE: recarrega os dados da venda do servidor após save bem-sucedido.
+        // POR QUE: o servidor faz updated_at = now() a cada UPDATE e o frontend
+        // precisa do valor exato para a checagem de concorrência.
+        // IMPACTO SE REMOVIDO: todo segundo save consecutivo falha com 409.
+        await load();
       }
       setIsDirty(false);
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao salvar"); }
@@ -3900,12 +3917,26 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         <div className="px-6 py-5 flex items-center justify-between gap-3">
           {saveErr && <p className="text-sm text-red-600 flex-1">{saveErr}</p>}
 
-          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
             {podeCancelar && (
               <button onClick={cancelar} disabled={updating}
                 className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium border disabled:opacity-50"
                 style={{ borderColor: "#FCA5A5", color: "#EF4444" }}>
                 {updating ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />} Cancelar Venda
+              </button>
+            )}
+            {/* REGRA DE NEGÓCIO: botão Marcar Entrega — substitui o antigo "Marcar Entregue".
+                Abre o modal de entrega parcial/total com códigos de verificação.
+                Visível apenas quando a venda já foi enviada, seguindo o fluxo:
+                rascunho → aprovado (Salvar/Marcar Enviado) → enviado (Marcar Entrega). */}
+            {["aprovado", "enviado"].includes(venda.situacao) && (
+              <button
+                onClick={() => setShowMarcarEntrega(true)}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}
+              >
+                <PackageCheck size={16} />
+                Marcar Entrega
               </button>
             )}
           </div>
@@ -4043,6 +4074,28 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           )}
         </div>
       </div>
+    )}
+    {/* REGRA DE NEGÓCIO: Modal de Marcar Entrega — exibido ao clicar no botão da barra de ações.
+     * Recebe os itens da venda para cálculo de saldo pendente de cada item.
+     * Ao fechar, reseta o estado showMarcarEntrega.
+     * Ao concluir com sucesso, fecha o modal e recarrega os dados da venda. */}
+    {showMarcarEntrega && venda && (
+      <MarcarEntregaModal
+        vendaId={venda.id}
+        vendaItems={(venda.itens || []).map((item) => ({
+          id: item.id,
+          nomeProduto: item.nome_produto || "",
+          sku: item.sku || "",
+          quantidade: item.quantidade,
+        }))}
+        isOpen={showMarcarEntrega}
+        onClose={() => setShowMarcarEntrega(false)}
+        formaEnvioVenda={venda.forma_envio}
+        onSuccess={(_entrega: unknown) => {
+          setShowMarcarEntrega(false);
+          load();
+        }}
+      />
     )}
     </>
   );

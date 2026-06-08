@@ -58,7 +58,7 @@ import PerfilDrawer from "./PerfilDrawer";
 import { useAuth } from "@/hooks/useAuth";
 import { createClient } from "@/lib/supabase/client";
 import { getMenuGroupsForRole, getMenuGroupsForModulos, type MenuGroup, type MenuEntry, type MenuItem } from "@/lib/auth/permissions";
-import { ROLES_SERVICE_PANEL } from "@/lib/roles";
+import { ROLES_SERVICE_PANEL, ROLES_METAL } from "@/lib/roles";
 import UserAvatar from "@/components/UserAvatar";
 import { useSidebar } from "@/contexts/SidebarContext";
 
@@ -132,13 +132,17 @@ export default function Sidebar() {
   const ROLES_GESTAO_ESTOQUE = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
   const ROLES_SITE = ["desenvolvedor", "admin", "gerente_loja"];
   const ROLES_CREDIARIO_SIDEBAR = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
-  const ROLES_METAL_SIDEBAR = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora"];
+  const ROLES_ENTREGAS_VENDA = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica"];
+  // REGRA DE NEGÓCIO: Acesso ao módulo Metal no menu lateral agora usa a
+  // constante centralizada ROLES_METAL de @/lib/roles (fonte única da verdade).
+  // Inclui estoquista_fabrica, que já tinha acesso à API mas não via o menu.
+  const hasMetal = role ? ROLES_METAL.includes(role) : false;
   const hasOrcamento = role && ROLES_ORCAMENTO.includes(role);
   const hasFiscal = role && ROLES_FISCAL_SIDEBAR.includes(role);
   const hasGestaoEstoque = role && ROLES_GESTAO_ESTOQUE.includes(role);
   const hasSite = role && ROLES_SITE.includes(role);
   const hasCrediario = role && ROLES_CREDIARIO_SIDEBAR.includes(role);
-  const hasMetal = role && ROLES_METAL_SIDEBAR.includes(role);
+  const hasEntregasVenda = role && ROLES_ENTREGAS_VENDA.includes(role);
   const modulosEfetivos = [...modulos_leitura];
   if (modulosEfetivos.length > 0) {
     if (hasServicePanel && !modulosEfetivos.includes("service_painel")) modulosEfetivos.push("service_painel");
@@ -157,6 +161,7 @@ export default function Sidebar() {
      * backend já aceitar o acesso.
      */
     if (hasMetal && !modulosEfetivos.includes("metal")) modulosEfetivos.push("metal");
+    if (hasEntregasVenda && !modulosEfetivos.includes("entregas_venda")) modulosEfetivos.push("entregas_venda");
   }
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)

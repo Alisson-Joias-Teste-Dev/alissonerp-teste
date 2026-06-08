@@ -1,6 +1,7 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
 import { redirect } from "next/navigation";
+import { getModuloConfig } from "@/lib/metal/config";
 
 export const dynamic = 'force-dynamic';
 
@@ -31,15 +32,50 @@ export default async function Home() {
 
   if (!user) redirect("/login");
 
-  // Nome do usuário — fonte: alissonerp.usuarios (fonte de verdade)
+  // Nome e role do usuário — fonte: alissonerp.usuarios (fonte de verdade)
   let nomeUsuario = (user.user_metadata?.nome as string | undefined) || user.email?.split("@")[0] || "Usuário";
+  let userRole = "";
   try {
-    const [u] = await sql<{ nome: string }[]>`
-      SELECT nome FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+    const [u] = await sql<{ nome: string; role: string }[]>`
+      SELECT nome, role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
     `;
     if (u?.nome) nomeUsuario = u.nome;
+    if (u?.role) userRole = u.role;
   } catch {
     // fallback: JWT já definido acima
+  }
+
+  // REGRA DE NEGÓCIO: Se a role do usuário está configurada em metal_home_roles,
+  // o sistema abre direto no módulo Metal em vez da tela de boas-vindas.
+  // Configurável pelo admin via /api/metal/configuracoes.
+  // IMPORTANTE: redirect() NÃO pode estar dentro de try-catch — o Next.js
+  // usa throw interno para redirecionar.
+  if (userRole) {
+    let metalConfig = null;
+    try {
+      metalConfig = await getModuloConfig();
+    } catch {
+      // Se falhar ao ler config, mostra a home normal (segurança)
+    }
+    const roles = metalConfig?.metal_home_roles;
+    if (roles && roles.length > 0 && roles.includes(userRole)) {
+      redirect("/metal");
+    }
+  }
+
+  // REGRA DE NEGÓCIO: se o usuário está cadastrado como motoboy ativo
+  // (tabela motoboys), redireciona automaticamente para o app de entregas.
+  // Protocolistas têm a mesma role "motoboy" mas não têm registro na tabela
+  // motoboys, então não são redirecionados — continuam na home normal.
+  try {
+    const [mb] = await sql`
+      SELECT 1 FROM alissonerp.motoboys
+      WHERE user_id = ${user.id}::uuid AND ativo = true
+      LIMIT 1
+    `;
+    if (mb) redirect("/entregas-venda/motoboy");
+  } catch {
+    // se falhar, segue normalmente
   }
 
   // Saudação dinâmica (horário de Brasília)

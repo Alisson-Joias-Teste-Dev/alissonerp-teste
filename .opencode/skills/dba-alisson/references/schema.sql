@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict p8uWog6A656LdNOXJ6DMH0IwaOgSWe1kgg7Wc1aL36W9GpxMn4u4AFfitbyxX9L
+\restrict X7xRK0VMVu0NARzwP1X0WMlkmaMy65iYkcfYRyBWQA6SZDybvfStW7y0jbo6wdc
 
 -- Dumped from database version 15.8
 -- Dumped by pg_dump version 15.18 (Ubuntu 15.18-1.pgdg24.04+1)
@@ -46,6 +46,50 @@ COMMENT ON SCHEMA public IS 'standard public schema';
 CREATE TYPE alissonerp.enum_direcao_protocolo AS ENUM (
     'ida',
     'volta'
+);
+
+
+--
+-- Name: enum_entrega_forma; Type: TYPE; Schema: alissonerp; Owner: -
+--
+
+CREATE TYPE alissonerp.enum_entrega_forma AS ENUM (
+    'retirada',
+    'motoboy'
+);
+
+
+--
+-- Name: enum_entrega_regiao; Type: TYPE; Schema: alissonerp; Owner: -
+--
+
+CREATE TYPE alissonerp.enum_entrega_regiao AS ENUM (
+    'fortaleza',
+    'fora_fortaleza',
+    'longe',
+    'correios'
+);
+
+
+--
+-- Name: enum_entrega_situacao; Type: TYPE; Schema: alissonerp; Owner: -
+--
+
+CREATE TYPE alissonerp.enum_entrega_situacao AS ENUM (
+    'pendente',
+    'em_rota',
+    'confirmada',
+    'cancelada'
+);
+
+
+--
+-- Name: enum_entrega_tipo; Type: TYPE; Schema: alissonerp; Owner: -
+--
+
+CREATE TYPE alissonerp.enum_entrega_tipo AS ENUM (
+    'parcial',
+    'total'
 );
 
 
@@ -156,6 +200,16 @@ CREATE TYPE alissonerp.enum_marcador_estoque AS ENUM (
 CREATE TYPE alissonerp.enum_rota_ordem AS ENUM (
     'pcp',
     'protocolo'
+);
+
+
+--
+-- Name: enum_saldo_frete_tipo; Type: TYPE; Schema: alissonerp; Owner: -
+--
+
+CREATE TYPE alissonerp.enum_saldo_frete_tipo AS ENUM (
+    'credito',
+    'debito'
 );
 
 
@@ -3541,24 +3595,22 @@ DECLARE
   v_para VARCHAR(30) := NEW.situacao;
   v_ok   BOOLEAN;
 BEGIN
-  -- Nao faz nada se situacao nao mudou
   IF v_de IS NOT DISTINCT FROM v_para THEN
     RETURN NEW;
   END IF;
 
-  -- Máquina de estados — Novo fluxo:
-  -- rascunho → aprovado → enviado/entregue → concluído
-  -- confirmado removido, mas aceito p/ vendas que ainda possuem esse status
   IF v_de IS NULL THEN
     v_ok := v_para = ANY(ARRAY['rascunho','aprovado','confirmado','cancelado']);
   ELSIF v_de = 'rascunho' THEN
     v_ok := v_para = ANY(ARRAY['aprovado','cancelado']);
   ELSIF v_de = 'aprovado' THEN
-    -- Novo: pode ir para enviado, entregue, concluido ou cancelado
-    v_ok := v_para = ANY(ARRAY['enviado','entregue','concluido','cancelado']);
+    -- aprovado → enviado, em_rota, entregue, concluido ou cancelado
+    v_ok := v_para = ANY(ARRAY['enviado','em_rota','entregue','concluido','cancelado']);
+  ELSIF v_de = 'em_rota' THEN
+    -- em_rota → entregue, concluido ou cancelado
+    v_ok := v_para = ANY(ARRAY['entregue','concluido','cancelado']);
   ELSIF v_de = 'confirmado' THEN
-    -- Mantido para vendas existentes — permite migrar para qualquer status do fluxo
-    v_ok := v_para = ANY(ARRAY['aprovado','enviado','entregue','concluido','cancelado']);
+    v_ok := v_para = ANY(ARRAY['aprovado','enviado','em_rota','entregue','concluido','cancelado']);
   ELSIF v_de = 'enviado' THEN
     v_ok := v_para = ANY(ARRAY['entregue','cancelado']);
   ELSIF v_de = 'entregue' THEN
@@ -3566,7 +3618,6 @@ BEGIN
   ELSIF v_de IN ('concluido','cancelado') THEN
     v_ok := false;
   ELSE
-    -- Estados desconhecidos: permissivo para compatibilidade futura
     v_ok := true;
   END IF;
 
@@ -3574,21 +3625,9 @@ BEGIN
     RAISE EXCEPTION 'Transição inválida: % → %', COALESCE(v_de, 'NULL'), v_para;
   END IF;
 
-  -- Registrar transição na auditoria
   INSERT INTO alissonerp.vendas_transicoes
-    (venda_id, de_situacao, para_situacao, usuario_id, payload)
-  VALUES (
-    NEW.id,
-    v_de,
-    v_para,
-    auth.uid(),
-    jsonb_build_object(
-      'total_venda', NEW.total_venda,
-      'total_pago',  NEW.total_pago,
-      'cliente_id',  NEW.cliente_id,
-      'updated_at',  NEW.updated_at
-    )
-  );
+    (venda_id, de_situacao, para_situacao, created_at)
+  VALUES (NEW.id, v_de, v_para, now());
 
   RETURN NEW;
 END;
@@ -4484,6 +4523,20 @@ $$;
 --
 
 COMMENT ON FUNCTION alissonerp.proximo_sku_pz() IS 'Retorna proximo SKU PZ disponivel (formato PZ0001..PZ9999). Atomico via nextval.';
+
+
+--
+-- Name: set_updated_at(); Type: FUNCTION; Schema: alissonerp; Owner: -
+--
+
+CREATE FUNCTION alissonerp.set_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$;
 
 
 --
@@ -7142,7 +7195,7 @@ CREATE TABLE alissonerp.cofre_ouro_baixa_itens (
     valor_brl numeric(12,2) DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT cofre_ouro_baixa_itens_gramas_check CHECK ((gramas > (0)::numeric)),
-    CONSTRAINT cofre_ouro_baixa_itens_origem_tipo_check CHECK (((origem_tipo)::text = ANY ((ARRAY['venda_ouro'::character varying, 'compra_metal'::character varying, 'recebimento_metal'::character varying, 'conversao'::character varying])::text[])))
+    CONSTRAINT cofre_ouro_baixa_itens_origem_tipo_check CHECK (((origem_tipo)::text = ANY (ARRAY[('venda_ouro'::character varying)::text, ('compra_metal'::character varying)::text, ('recebimento_metal'::character varying)::text, ('conversao'::character varying)::text, ('upgrade'::character varying)::text])))
 );
 
 
@@ -8943,6 +8996,103 @@ ALTER SEQUENCE alissonerp.empresas_emitentes_id_seq OWNED BY alissonerp.empresas
 
 
 --
+-- Name: entregas_venda; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.entregas_venda (
+    id integer NOT NULL,
+    venda_id integer NOT NULL,
+    codigo_entrega text NOT NULL,
+    codigo_cliente text NOT NULL,
+    codigo_motoboy text,
+    tipo alissonerp.enum_entrega_tipo NOT NULL,
+    situacao alissonerp.enum_entrega_situacao DEFAULT 'pendente'::alissonerp.enum_entrega_situacao NOT NULL,
+    forma_entrega alissonerp.enum_entrega_forma NOT NULL,
+    regiao alissonerp.enum_entrega_regiao,
+    frete_cobrado numeric(12,2) DEFAULT 0 NOT NULL,
+    frete_motoboy numeric(12,2) DEFAULT 0 NOT NULL,
+    data_retirada timestamp with time zone,
+    retirado_por text,
+    confirmado_por_retirada uuid,
+    motoboy_id uuid,
+    data_saida timestamp with time zone,
+    data_entrega_prevista date,
+    data_entrega_realizada timestamp with time zone,
+    confirmado_por_motoboy_retirada uuid,
+    confirmado_por_motoboy_entrega uuid,
+    correios_rastreio text,
+    correios_data_postagem timestamp with time zone,
+    aprovacao_frete_necessaria boolean DEFAULT false NOT NULL,
+    aprovacao_frete_status character varying(20),
+    aprovacao_frete_por uuid,
+    aprovacao_frete_em timestamp with time zone,
+    observacoes text,
+    created_by uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    foto_entrega_path text,
+    CONSTRAINT entregas_venda_frete_cobrado_check CHECK ((frete_cobrado >= (0)::numeric)),
+    CONSTRAINT entregas_venda_frete_motoboy_check CHECK ((frete_motoboy >= (0)::numeric))
+);
+
+
+--
+-- Name: entregas_venda_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.entregas_venda_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: entregas_venda_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.entregas_venda_id_seq OWNED BY alissonerp.entregas_venda.id;
+
+
+--
+-- Name: entregas_venda_itens; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.entregas_venda_itens (
+    id integer NOT NULL,
+    entrega_id integer NOT NULL,
+    item_venda_id integer NOT NULL,
+    quantidade_entregue integer NOT NULL,
+    baixa_estoque_realizada boolean DEFAULT false NOT NULL,
+    movimentacao_estoque_id integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT entregas_venda_itens_quantidade_entregue_check CHECK ((quantidade_entregue > 0))
+);
+
+
+--
+-- Name: entregas_venda_itens_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.entregas_venda_itens_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: entregas_venda_itens_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.entregas_venda_itens_id_seq OWNED BY alissonerp.entregas_venda_itens.id;
+
+
+--
 -- Name: epc_serial; Type: TABLE; Schema: alissonerp; Owner: -
 --
 
@@ -9159,6 +9309,64 @@ ALTER SEQUENCE alissonerp.faixas_comissao_id_seq OWNED BY alissonerp.faixas_comi
 
 
 --
+-- Name: fechamento_comissao_itens; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.fechamento_comissao_itens (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    fechamento_id uuid NOT NULL,
+    venda_id integer,
+    numero_venda_snapshot text,
+    pagamento_venda_id integer,
+    conta_receber_id bigint,
+    consultora_id integer NOT NULL,
+    cliente_nome_snapshot text,
+    data_venda date,
+    data_recebimento date,
+    forma_recebimento text,
+    valor_venda numeric(12,2) DEFAULT 0 NOT NULL,
+    valor_pagamento numeric(12,2) DEFAULT 0 NOT NULL,
+    valor_comissionavel numeric(12,2) DEFAULT 0 NOT NULL,
+    percentual_rateio numeric(8,6) DEFAULT 0 NOT NULL,
+    comissao_total_venda numeric(12,2) DEFAULT 0 NOT NULL,
+    comissao_calculada numeric(12,2) DEFAULT 0 NOT NULL,
+    status text DEFAULT 'liberado'::text NOT NULL,
+    tipo_item text DEFAULT 'normal'::text NOT NULL,
+    estorno_de_item_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT fechamento_comissao_itens_status_check CHECK ((status = ANY (ARRAY['liberado'::text, 'fechado'::text, 'pago'::text, 'estornado'::text, 'cancelado'::text]))),
+    CONSTRAINT fechamento_comissao_itens_tipo_item_check CHECK ((tipo_item = ANY (ARRAY['normal'::text, 'ajuste_positivo'::text, 'ajuste_negativo'::text, 'estorno'::text])))
+);
+
+
+--
+-- Name: fechamentos_comissao; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.fechamentos_comissao (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    consultora_id integer NOT NULL,
+    consultora_nome_snapshot text NOT NULL,
+    periodo_inicio date NOT NULL,
+    periodo_fim date NOT NULL,
+    competencia text NOT NULL,
+    valor_total numeric(12,2) DEFAULT 0 NOT NULL,
+    status text DEFAULT 'rascunho'::text NOT NULL,
+    conta_pagar_id bigint,
+    created_by uuid NOT NULL,
+    approved_by uuid,
+    approved_at timestamp with time zone,
+    paid_at timestamp with time zone,
+    cancelled_at timestamp with time zone,
+    cancel_reason text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT fechamentos_comissao_status_check CHECK ((status = ANY (ARRAY['rascunho'::text, 'fechado'::text, 'enviado_financeiro'::text, 'pago'::text, 'cancelado'::text])))
+);
+
+
+--
 -- Name: fechamentos_distribuicao; Type: TABLE; Schema: alissonerp; Owner: -
 --
 
@@ -9232,6 +9440,46 @@ CREATE SEQUENCE alissonerp.fechamentos_fabrica_id_seq
 --
 
 ALTER SEQUENCE alissonerp.fechamentos_fabrica_id_seq OWNED BY alissonerp.fechamentos_fabrica.id;
+
+
+--
+-- Name: fechamentos_frete; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.fechamentos_frete (
+    id integer NOT NULL,
+    gerente_id uuid NOT NULL,
+    mes_referencia date NOT NULL,
+    saldo_anterior numeric(12,2) NOT NULL,
+    total_creditos numeric(12,2) NOT NULL,
+    total_debitos numeric(12,2) NOT NULL,
+    saldo_final numeric(12,2) NOT NULL,
+    status character varying(20) DEFAULT 'aberto'::character varying NOT NULL,
+    valor_descontado_folha numeric(12,2) DEFAULT 0,
+    observacoes text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by uuid
+);
+
+
+--
+-- Name: fechamentos_frete_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.fechamentos_frete_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: fechamentos_frete_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.fechamentos_frete_id_seq OWNED BY alissonerp.fechamentos_frete.id;
 
 
 --
@@ -10748,6 +10996,51 @@ ALTER SEQUENCE alissonerp.metas_vendedoras_id_seq OWNED BY alissonerp.metas_vend
 
 
 --
+-- Name: motoboys; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.motoboys (
+    id integer NOT NULL,
+    user_id uuid,
+    nome text NOT NULL,
+    telefone text,
+    veiculo text,
+    placa text,
+    ativo boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    cpf character varying(14),
+    endereco text,
+    rua text,
+    numero character varying(20),
+    bairro text,
+    cidade text,
+    uf character varying(2),
+    cep character varying(10),
+    complemento text
+);
+
+
+--
+-- Name: motoboys_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.motoboys_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: motoboys_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.motoboys_id_seq OWNED BY alissonerp.motoboys.id;
+
+
+--
 -- Name: movimentacoes_estoque; Type: TABLE; Schema: alissonerp; Owner: -
 --
 
@@ -11583,6 +11876,76 @@ CREATE SEQUENCE alissonerp.outros_insumos_pcp_id_seq
 --
 
 ALTER SEQUENCE alissonerp.outros_insumos_pcp_id_seq OWNED BY alissonerp.outros_insumos_pcp.id;
+
+
+--
+-- Name: pagamentos_motoboy; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.pagamentos_motoboy (
+    id integer NOT NULL,
+    motoboy_id uuid NOT NULL,
+    data_inicio date,
+    data_fim date,
+    valor_total numeric(12,2) NOT NULL,
+    observacoes text,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pagamentos_motoboy_valor_total_check CHECK ((valor_total > (0)::numeric))
+);
+
+
+--
+-- Name: pagamentos_motoboy_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.pagamentos_motoboy_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: pagamentos_motoboy_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.pagamentos_motoboy_id_seq OWNED BY alissonerp.pagamentos_motoboy.id;
+
+
+--
+-- Name: pagamentos_motoboy_itens; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.pagamentos_motoboy_itens (
+    id integer NOT NULL,
+    pagamento_id integer NOT NULL,
+    entrega_id integer NOT NULL,
+    frete_motoboy numeric(12,2) NOT NULL,
+    CONSTRAINT pagamentos_motoboy_itens_frete_motoboy_check CHECK ((frete_motoboy >= (0)::numeric))
+);
+
+
+--
+-- Name: pagamentos_motoboy_itens_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.pagamentos_motoboy_itens_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: pagamentos_motoboy_itens_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.pagamentos_motoboy_itens_id_seq OWNED BY alissonerp.pagamentos_motoboy_itens.id;
 
 
 --
@@ -13189,8 +13552,9 @@ CREATE TABLE alissonerp.recebimentos_metal (
     created_by uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    tarefa_aprovacao_id integer,
     CONSTRAINT recebimentos_metal_peso_gramas_check CHECK ((peso_gramas > (0)::numeric)),
-    CONSTRAINT recebimentos_metal_status_check CHECK (((status)::text = ANY ((ARRAY['ativo'::character varying, 'cancelado'::character varying])::text[]))),
+    CONSTRAINT recebimentos_metal_status_check CHECK (((status)::text = ANY ((ARRAY['ativo'::character varying, 'cancelado'::character varying, 'pendente_aprovacao'::character varying])::text[]))),
     CONSTRAINT recebimentos_metal_valor_credito_grama_check CHECK ((valor_credito_grama > (0)::numeric))
 );
 
@@ -13696,6 +14060,53 @@ CREATE SEQUENCE alissonerp.saldo_credito_loja_id_seq
 --
 
 ALTER SEQUENCE alissonerp.saldo_credito_loja_id_seq OWNED BY alissonerp.saldo_credito_loja.id;
+
+
+--
+-- Name: saldo_frete_gratis; Type: TABLE; Schema: alissonerp; Owner: -
+--
+
+CREATE TABLE alissonerp.saldo_frete_gratis (
+    id integer NOT NULL,
+    gerente_id uuid NOT NULL,
+    tipo alissonerp.enum_saldo_frete_tipo NOT NULL,
+    valor numeric(12,2) NOT NULL,
+    saldo_antes numeric(12,2) NOT NULL,
+    saldo_depois numeric(12,2) NOT NULL,
+    entrega_id integer,
+    venda_id integer,
+    descricao text,
+    fechamento_id integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by uuid
+);
+
+
+--
+-- Name: TABLE saldo_frete_gratis; Type: COMMENT; Schema: alissonerp; Owner: -
+--
+
+COMMENT ON TABLE alissonerp.saldo_frete_gratis IS 'Conta-corrente de frete grátis por gerente. Créditos abastecem (frete cobrado > motoboy). Débitos consomem (frete grátis ou parcial). Fechamento mensal: positivo carrega, negativo desconta em folha.';
+
+
+--
+-- Name: saldo_frete_gratis_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
+--
+
+CREATE SEQUENCE alissonerp.saldo_frete_gratis_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: saldo_frete_gratis_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
+--
+
+ALTER SEQUENCE alissonerp.saldo_frete_gratis_id_seq OWNED BY alissonerp.saldo_frete_gratis.id;
 
 
 --
@@ -15184,19 +15595,28 @@ CREATE VIEW alissonerp.vw_cofre_ouro_disponivel AS
             (0)::numeric AS valor_brl
            FROM alissonerp.conversoes_estoque ce
           WHERE (((ce.status_conversao)::text = 'concluido'::text) AND (ce.cofre_registrado = true))
+        ), upgrades AS (
+         SELECT (count(*))::integer AS transacoes,
+            COALESCE(sum(iuv.peso_gramas), (0)::numeric) AS gramas,
+            COALESCE(sum((iuv.peso_gramas * iuv.valor_por_grama)), (0)::numeric) AS valor_brl
+           FROM ((alissonerp.itens_venda_upgrade iuv
+             JOIN alissonerp.itens_venda_erp ive ON ((ive.id = iuv.item_venda_id)))
+             JOIN alissonerp.vendas_erp ve ON ((ve.id = ive.venda_id)))
+          WHERE ((iuv.cofre_registrado = true) AND ((ve.situacao)::text = ANY (ARRAY['aprovado'::text, 'entregue'::text, 'concluido'::text])))
         ), total_entradas AS (
-         SELECT (((v.transacoes + c.transacoes) + r.transacoes) + cv.transacoes) AS total_transacoes,
-            (((v.gramas + c.gramas) + r.gramas) + cv.gramas) AS total_gramas,
-            (((v.valor_brl + c.valor_brl) + r.valor_brl) + cv.valor_brl) AS total_valor_brl,
+         SELECT ((((v.transacoes + c.transacoes) + r.transacoes) + cv.transacoes) + up.transacoes) AS total_transacoes,
+            ((((v.gramas + c.gramas) + r.gramas) + cv.gramas) + up.gramas) AS total_gramas,
+            ((((v.valor_brl + c.valor_brl) + r.valor_brl) + cv.valor_brl) + up.valor_brl) AS total_valor_brl,
             v.preco_medio_grama
-           FROM (((vendas_ouro v
+           FROM ((((vendas_ouro v
              CROSS JOIN compras_metal c)
              CROSS JOIN recebimentos_metal r)
              CROSS JOIN conversoes cv)
+             CROSS JOIN upgrades up)
         ), baixas AS (
          SELECT COALESCE(sum(cb.gramas), (0)::numeric) AS baixado_gramas
            FROM alissonerp.cofre_ouro_baixas cb
-          WHERE ((cb.status)::text = ANY ((ARRAY['pendente'::character varying, 'em_trafego'::character varying, 'concluido'::character varying])::text[]))
+          WHERE ((cb.status)::text = ANY (ARRAY[('pendente'::character varying)::text, ('em_trafego'::character varying)::text, ('concluido'::character varying)::text]))
         )
  SELECT e.total_transacoes,
     e.total_gramas,
@@ -16009,15 +16429,16 @@ CREATE VIEW alissonerp.vw_dash_vendas_todas AS
     NULL::text AS forma_envio_texto,
     (COALESCE(( SELECT sum(p.valor) AS sum
            FROM public.parcelas_pedidos p
-          WHERE ((p.pedido_id_api = v.id_api_tiny) AND (p.forma_pagamento = 'Vale-troca'::text))), (0)::double precision))::numeric AS valor_vale_troca
+          WHERE ((p.pedido_id_api = v.id_api_tiny) AND (p.forma_pagamento = 'Vale-troca'::text))), (0)::double precision))::numeric AS valor_vale_troca,
+    false AS em_rota
    FROM public.vendas v
   WHERE ((NOT (EXISTS ( SELECT 1
            FROM alissonerp.vendas_erp ve
-          WHERE (((ve.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND (ve.tiny_pedido_id IS NOT NULL) AND (ve.tiny_pedido_id = v.id_api_tiny) AND (ve.data_venda >= '2026-04-23'::date))))) AND (NOT (EXISTS ( SELECT 1
+          WHERE (((ve.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('em_rota'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND (ve.tiny_pedido_id IS NOT NULL) AND (ve.tiny_pedido_id = v.id_api_tiny) AND (ve.data_venda >= '2026-04-23'::date))))) AND (NOT (EXISTS ( SELECT 1
            FROM alissonerp.vendas_erp ve2
-          WHERE (((ve2.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND (ve2.tiny_pedido_id IS NULL) AND (ve2.numero_venda = (v.numero_pedido)::text) AND (ve2.data_venda < '2026-04-23'::date) AND (v.status <> 2))))) AND (NOT (EXISTS ( SELECT 1
+          WHERE (((ve2.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('em_rota'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND (ve2.tiny_pedido_id IS NULL) AND (ve2.numero_venda = (v.numero_pedido)::text) AND (ve2.data_venda < '2026-04-23'::date) AND (v.status <> 2))))) AND (NOT (EXISTS ( SELECT 1
            FROM alissonerp.vendas_erp ve3
-          WHERE (((ve3.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND (ve3.tiny_pedido_id IS NOT NULL) AND (ve3.tiny_pedido_id = v.id_api_tiny) AND (ve3.data_venda < '2026-04-23'::date) AND (v.status IS DISTINCT FROM 2))))))
+          WHERE (((ve3.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('em_rota'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND (ve3.tiny_pedido_id IS NOT NULL) AND (ve3.tiny_pedido_id = v.id_api_tiny) AND (ve3.data_venda < '2026-04-23'::date) AND (v.status IS DISTINCT FROM 2))))))
 UNION ALL
  SELECT 'erp'::text AS fonte,
     (ve.id)::bigint AS id,
@@ -16035,9 +16456,10 @@ UNION ALL
     ve.forma_envio AS forma_envio_texto,
     COALESCE(( SELECT sum(pv.valor) AS sum
            FROM alissonerp.pagamentos_venda pv
-          WHERE ((pv.venda_id = ve.id) AND ((pv.forma)::text = 'Vale-Troca'::text) AND ((pv.status)::text = 'confirmado'::text))), (0)::numeric) AS valor_vale_troca
+          WHERE ((pv.venda_id = ve.id) AND ((pv.forma)::text = 'Vale-Troca'::text) AND ((pv.status)::text = 'confirmado'::text))), (0)::numeric) AS valor_vale_troca,
+    ((ve.situacao)::text = 'em_rota'::text) AS em_rota
    FROM alissonerp.vendas_erp ve
-  WHERE (((ve.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND ((ve.data_venda >= '2026-04-23'::date) OR ((ve.data_venda < '2026-04-23'::date) AND (ve.tiny_pedido_id IS NULL) AND (ve.total_venda > (0)::numeric) AND (EXISTS ( SELECT 1
+  WHERE (((ve.situacao)::text = ANY (ARRAY[('aprovado'::character varying)::text, ('em_rota'::character varying)::text, ('enviado'::character varying)::text, ('entregue'::character varying)::text, ('concluido'::character varying)::text])) AND ((ve.data_venda >= '2026-04-23'::date) OR ((ve.data_venda < '2026-04-23'::date) AND (ve.tiny_pedido_id IS NULL) AND (ve.total_venda > (0)::numeric) AND (EXISTS ( SELECT 1
            FROM public.vendas v2
           WHERE (((v2.numero_pedido)::text = ve.numero_venda) AND (v2.status <> 2))))) OR ((ve.data_venda < '2026-04-23'::date) AND (ve.tiny_pedido_id IS NOT NULL) AND (ve.total_venda > (0)::numeric) AND (EXISTS ( SELECT 1
            FROM public.vendas v3
@@ -16048,7 +16470,7 @@ UNION ALL
 -- Name: VIEW vw_dash_vendas_todas; Type: COMMENT; Schema: alissonerp; Owner: -
 --
 
-COMMENT ON VIEW alissonerp.vw_dash_vendas_todas IS 'Dashboard Comercial: vendas unificadas legado (public.vendas) + ERP (vendas_erp). ERP inclui situacao aprovado/enviado/entregue/concluido (ex-confirmado removido). ERP inclui >= 2026-04-23 e pré-cutoff sem duplicata aprovada no legado. valor_vale_troca pré-computado por fonte.';
+COMMENT ON VIEW alissonerp.vw_dash_vendas_todas IS 'Dashboard Comercial: vendas unificadas legado (public.vendas) + ERP (vendas_erp). ERP inclui situacao aprovado/em_rota/enviado/entregue/concluido. valor_vale_troca pré-computado por fonte.';
 
 
 --
@@ -16159,6 +16581,25 @@ CREATE VIEW alissonerp.vw_detalhe_pote AS
           GROUP BY vw_saldo_estoque.insumo_id) se ON ((se.insumo_id = i.id)))
   WHERE (i.ativo = true)
   ORDER BY ci.nome, i.nome;
+
+
+--
+-- Name: vw_entregas_pendentes; Type: VIEW; Schema: alissonerp; Owner: -
+--
+
+CREATE VIEW alissonerp.vw_entregas_pendentes AS
+ SELECT iv.id AS item_venda_id,
+    iv.venda_id,
+    iv.produto_id,
+    iv.nome_produto,
+    iv.sku,
+    iv.quantidade AS qtd_vendida,
+    COALESCE(sum(ei.quantidade_entregue) FILTER (WHERE (ev.situacao = 'confirmada'::alissonerp.enum_entrega_situacao)), (0)::bigint) AS qtd_entregue,
+    (iv.quantidade - COALESCE(sum(ei.quantidade_entregue) FILTER (WHERE (ev.situacao = 'confirmada'::alissonerp.enum_entrega_situacao)), (0)::bigint)) AS saldo_pendente
+   FROM ((alissonerp.itens_venda_erp iv
+     LEFT JOIN alissonerp.entregas_venda_itens ei ON ((ei.item_venda_id = iv.id)))
+     LEFT JOIN alissonerp.entregas_venda ev ON ((ev.id = ei.entrega_id)))
+  GROUP BY iv.id, iv.venda_id, iv.produto_id, iv.nome_produto, iv.sku, iv.quantidade;
 
 
 --
@@ -16604,6 +17045,26 @@ CREATE VIEW alissonerp.vw_kpis_gerais AS
     ( SELECT COALESCE(sum(contas_receber.valor), (0)::numeric) AS "coalesce"
            FROM alissonerp.contas_receber
           WHERE ((contas_receber.situacao)::text = 'pendente'::text)) AS total_a_receber;
+
+
+--
+-- Name: vw_motoboy_entregas; Type: VIEW; Schema: alissonerp; Owner: -
+--
+
+CREATE VIEW alissonerp.vw_motoboy_entregas AS
+ SELECT ev.id AS entrega_id,
+    ev.motoboy_id,
+    mb.nome AS motoboy_nome,
+    ev.codigo_entrega,
+    ev.venda_id,
+    ev.data_entrega_realizada,
+    ev.regiao,
+    ev.frete_motoboy,
+    ev.situacao,
+    ev.created_at
+   FROM (alissonerp.entregas_venda ev
+     LEFT JOIN alissonerp.motoboys mb ON ((mb.user_id = ev.motoboy_id)))
+  WHERE ((ev.situacao = 'confirmada'::alissonerp.enum_entrega_situacao) AND (ev.forma_entrega = 'motoboy'::alissonerp.enum_entrega_forma));
 
 
 --
@@ -21523,6 +21984,20 @@ ALTER TABLE ONLY alissonerp.empresas_emitentes ALTER COLUMN id SET DEFAULT nextv
 
 
 --
+-- Name: entregas_venda id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda ALTER COLUMN id SET DEFAULT nextval('alissonerp.entregas_venda_id_seq'::regclass);
+
+
+--
+-- Name: entregas_venda_itens id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda_itens ALTER COLUMN id SET DEFAULT nextval('alissonerp.entregas_venda_itens_id_seq'::regclass);
+
+
+--
 -- Name: erp_produtos id; Type: DEFAULT; Schema: alissonerp; Owner: -
 --
 
@@ -21562,6 +22037,13 @@ ALTER TABLE ONLY alissonerp.fechamentos_distribuicao ALTER COLUMN id SET DEFAULT
 --
 
 ALTER TABLE ONLY alissonerp.fechamentos_fabrica ALTER COLUMN id SET DEFAULT nextval('alissonerp.fechamentos_fabrica_id_seq'::regclass);
+
+
+--
+-- Name: fechamentos_frete id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamentos_frete ALTER COLUMN id SET DEFAULT nextval('alissonerp.fechamentos_frete_id_seq'::regclass);
 
 
 --
@@ -21789,6 +22271,13 @@ ALTER TABLE ONLY alissonerp.metas_vendedoras ALTER COLUMN id SET DEFAULT nextval
 
 
 --
+-- Name: motoboys id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.motoboys ALTER COLUMN id SET DEFAULT nextval('alissonerp.motoboys_id_seq'::regclass);
+
+
+--
 -- Name: movimentacoes_estoque id; Type: DEFAULT; Schema: alissonerp; Owner: -
 --
 
@@ -21884,6 +22373,20 @@ ALTER TABLE ONLY alissonerp.outros_insumos_distribuicao ALTER COLUMN id SET DEFA
 --
 
 ALTER TABLE ONLY alissonerp.outros_insumos_pcp ALTER COLUMN id SET DEFAULT nextval('alissonerp.outros_insumos_pcp_id_seq'::regclass);
+
+
+--
+-- Name: pagamentos_motoboy id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagamentos_motoboy ALTER COLUMN id SET DEFAULT nextval('alissonerp.pagamentos_motoboy_id_seq'::regclass);
+
+
+--
+-- Name: pagamentos_motoboy_itens id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagamentos_motoboy_itens ALTER COLUMN id SET DEFAULT nextval('alissonerp.pagamentos_motoboy_itens_id_seq'::regclass);
 
 
 --
@@ -22115,6 +22618,13 @@ ALTER TABLE ONLY alissonerp.saidas_ordem ALTER COLUMN id SET DEFAULT nextval('al
 --
 
 ALTER TABLE ONLY alissonerp.saldo_credito_loja ALTER COLUMN id SET DEFAULT nextval('alissonerp.saldo_credito_loja_id_seq'::regclass);
+
+
+--
+-- Name: saldo_frete_gratis id; Type: DEFAULT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.saldo_frete_gratis ALTER COLUMN id SET DEFAULT nextval('alissonerp.saldo_frete_gratis_id_seq'::regclass);
 
 
 --
@@ -22845,6 +23355,54 @@ ALTER TABLE ONLY alissonerp.empresas_emitentes
 
 
 --
+-- Name: entregas_venda entregas_venda_codigo_cliente_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda
+    ADD CONSTRAINT entregas_venda_codigo_cliente_key UNIQUE (codigo_cliente);
+
+
+--
+-- Name: entregas_venda entregas_venda_codigo_entrega_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda
+    ADD CONSTRAINT entregas_venda_codigo_entrega_key UNIQUE (codigo_entrega);
+
+
+--
+-- Name: entregas_venda entregas_venda_codigo_motoboy_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda
+    ADD CONSTRAINT entregas_venda_codigo_motoboy_key UNIQUE (codigo_motoboy);
+
+
+--
+-- Name: entregas_venda_itens entregas_venda_itens_entrega_id_item_venda_id_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda_itens
+    ADD CONSTRAINT entregas_venda_itens_entrega_id_item_venda_id_key UNIQUE (entrega_id, item_venda_id);
+
+
+--
+-- Name: entregas_venda_itens entregas_venda_itens_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda_itens
+    ADD CONSTRAINT entregas_venda_itens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: entregas_venda entregas_venda_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda
+    ADD CONSTRAINT entregas_venda_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: epc_serial epc_serial_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -22917,6 +23475,22 @@ ALTER TABLE ONLY alissonerp.faixas_comissao
 
 
 --
+-- Name: fechamento_comissao_itens fechamento_comissao_itens_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamento_comissao_itens
+    ADD CONSTRAINT fechamento_comissao_itens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: fechamentos_comissao fechamentos_comissao_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamentos_comissao
+    ADD CONSTRAINT fechamentos_comissao_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: fechamentos_distribuicao fechamentos_distribuicao_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -22930,6 +23504,22 @@ ALTER TABLE ONLY alissonerp.fechamentos_distribuicao
 
 ALTER TABLE ONLY alissonerp.fechamentos_fabrica
     ADD CONSTRAINT fechamentos_fabrica_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: fechamentos_frete fechamentos_frete_gerente_id_mes_referencia_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamentos_frete
+    ADD CONSTRAINT fechamentos_frete_gerente_id_mes_referencia_key UNIQUE (gerente_id, mes_referencia);
+
+
+--
+-- Name: fechamentos_frete fechamentos_frete_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamentos_frete
+    ADD CONSTRAINT fechamentos_frete_pkey PRIMARY KEY (id);
 
 
 --
@@ -23277,6 +23867,22 @@ ALTER TABLE ONLY alissonerp.metas_vendedoras
 
 
 --
+-- Name: motoboys motoboys_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.motoboys
+    ADD CONSTRAINT motoboys_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: motoboys motoboys_user_id_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.motoboys
+    ADD CONSTRAINT motoboys_user_id_key UNIQUE (user_id);
+
+
+--
 -- Name: movimentacoes_estoque_comercial movimentacoes_estoque_comercial_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -23418,6 +24024,30 @@ ALTER TABLE ONLY alissonerp.outros_insumos_distribuicao
 
 ALTER TABLE ONLY alissonerp.outros_insumos_pcp
     ADD CONSTRAINT outros_insumos_pcp_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pagamentos_motoboy_itens pagamentos_motoboy_itens_entrega_id_key; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagamentos_motoboy_itens
+    ADD CONSTRAINT pagamentos_motoboy_itens_entrega_id_key UNIQUE (entrega_id);
+
+
+--
+-- Name: pagamentos_motoboy_itens pagamentos_motoboy_itens_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagamentos_motoboy_itens
+    ADD CONSTRAINT pagamentos_motoboy_itens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pagamentos_motoboy pagamentos_motoboy_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagamentos_motoboy
+    ADD CONSTRAINT pagamentos_motoboy_pkey PRIMARY KEY (id);
 
 
 --
@@ -23874,6 +24504,14 @@ ALTER TABLE ONLY alissonerp.saidas_ordem
 
 ALTER TABLE ONLY alissonerp.saldo_credito_loja
     ADD CONSTRAINT saldo_credito_loja_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: saldo_frete_gratis saldo_frete_gratis_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.saldo_frete_gratis
+    ADD CONSTRAINT saldo_frete_gratis_pkey PRIMARY KEY (id);
 
 
 --
@@ -25499,6 +26137,62 @@ CREATE INDEX idx_empresas_emitentes_local ON alissonerp.empresas_emitentes USING
 
 
 --
+-- Name: idx_entregas_itens_entrega_id; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_entregas_itens_entrega_id ON alissonerp.entregas_venda_itens USING btree (entrega_id);
+
+
+--
+-- Name: idx_entregas_itens_item_venda_id; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_entregas_itens_item_venda_id ON alissonerp.entregas_venda_itens USING btree (item_venda_id);
+
+
+--
+-- Name: idx_entregas_venda_codigo_cliente; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_entregas_venda_codigo_cliente ON alissonerp.entregas_venda USING btree (codigo_cliente);
+
+
+--
+-- Name: idx_entregas_venda_codigo_motoboy; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_entregas_venda_codigo_motoboy ON alissonerp.entregas_venda USING btree (codigo_motoboy) WHERE (codigo_motoboy IS NOT NULL);
+
+
+--
+-- Name: idx_entregas_venda_created_at; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_entregas_venda_created_at ON alissonerp.entregas_venda USING btree (created_at);
+
+
+--
+-- Name: idx_entregas_venda_motoboy_id; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_entregas_venda_motoboy_id ON alissonerp.entregas_venda USING btree (motoboy_id) WHERE (motoboy_id IS NOT NULL);
+
+
+--
+-- Name: idx_entregas_venda_situacao; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_entregas_venda_situacao ON alissonerp.entregas_venda USING btree (situacao);
+
+
+--
+-- Name: idx_entregas_venda_venda_id; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_entregas_venda_venda_id ON alissonerp.entregas_venda USING btree (venda_id);
+
+
+--
 -- Name: idx_erp_produtos_eh_pai; Type: INDEX; Schema: alissonerp; Owner: -
 --
 
@@ -25566,6 +26260,69 @@ CREATE INDEX idx_estornos_dist_ordem ON alissonerp.estornos_distribuicao USING b
 --
 
 CREATE INDEX idx_exec_automacao ON alissonerp.automacoes_execucoes USING btree (automacao_id);
+
+
+--
+-- Name: idx_fci_conta_receber; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_fci_conta_receber ON alissonerp.fechamento_comissao_itens USING btree (conta_receber_id) WHERE (conta_receber_id IS NOT NULL);
+
+
+--
+-- Name: idx_fci_fechamento; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_fci_fechamento ON alissonerp.fechamento_comissao_itens USING btree (fechamento_id);
+
+
+--
+-- Name: idx_fci_pagamento_venda; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_fci_pagamento_venda ON alissonerp.fechamento_comissao_itens USING btree (pagamento_venda_id) WHERE (pagamento_venda_id IS NOT NULL);
+
+
+--
+-- Name: idx_fci_unique_conta_receber; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_fci_unique_conta_receber ON alissonerp.fechamento_comissao_itens USING btree (conta_receber_id) WHERE ((conta_receber_id IS NOT NULL) AND (status <> ALL (ARRAY['estornado'::text, 'cancelado'::text])));
+
+
+--
+-- Name: idx_fci_unique_pagamento; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_fci_unique_pagamento ON alissonerp.fechamento_comissao_itens USING btree (pagamento_venda_id) WHERE ((pagamento_venda_id IS NOT NULL) AND (status <> ALL (ARRAY['estornado'::text, 'cancelado'::text])));
+
+
+--
+-- Name: idx_fechamentos_comissao_consultora; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_fechamentos_comissao_consultora ON alissonerp.fechamentos_comissao USING btree (consultora_id);
+
+
+--
+-- Name: idx_fechamentos_comissao_status; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_fechamentos_comissao_status ON alissonerp.fechamentos_comissao USING btree (status);
+
+
+--
+-- Name: idx_fechamentos_comissao_unique_periodo; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_fechamentos_comissao_unique_periodo ON alissonerp.fechamentos_comissao USING btree (consultora_id, periodo_inicio, periodo_fim) WHERE (status <> 'cancelado'::text);
+
+
+--
+-- Name: idx_fechamentos_gerente_mes; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_fechamentos_gerente_mes ON alissonerp.fechamentos_frete USING btree (gerente_id, mes_referencia);
 
 
 --
@@ -25853,6 +26610,20 @@ CREATE INDEX idx_markup_alteracoes_status ON alissonerp.markup_alteracoes USING 
 --
 
 CREATE INDEX idx_markup_pedras_faixa ON alissonerp.markup_pedras USING btree (tamanho_min, tamanho_max) WHERE (ativo = true);
+
+
+--
+-- Name: idx_motoboys_ativo; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_motoboys_ativo ON alissonerp.motoboys USING btree (ativo) WHERE (ativo = true);
+
+
+--
+-- Name: idx_motoboys_user_id; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_motoboys_user_id ON alissonerp.motoboys USING btree (user_id);
 
 
 --
@@ -26189,6 +26960,20 @@ CREATE INDEX idx_ordens_venda_id ON alissonerp.ordens USING btree (venda_id) WHE
 --
 
 CREATE INDEX idx_ordens_vendedor ON alissonerp.ordens USING btree (vendedor_id);
+
+
+--
+-- Name: idx_pagamentos_motoboy_itens_pagamento; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_pagamentos_motoboy_itens_pagamento ON alissonerp.pagamentos_motoboy_itens USING btree (pagamento_id);
+
+
+--
+-- Name: idx_pagamentos_motoboy_motoboy; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_pagamentos_motoboy_motoboy ON alissonerp.pagamentos_motoboy USING btree (motoboy_id, created_at DESC);
 
 
 --
@@ -26588,6 +27373,27 @@ CREATE INDEX idx_saldo_credito_pagamento ON alissonerp.saldo_credito_loja USING 
 --
 
 CREATE INDEX idx_saldo_credito_venda ON alissonerp.saldo_credito_loja USING btree (venda_id) WHERE (venda_id IS NOT NULL);
+
+
+--
+-- Name: idx_saldo_frete_created_at; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_saldo_frete_created_at ON alissonerp.saldo_frete_gratis USING btree (created_at);
+
+
+--
+-- Name: idx_saldo_frete_entrega_id; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_saldo_frete_entrega_id ON alissonerp.saldo_frete_gratis USING btree (entrega_id);
+
+
+--
+-- Name: idx_saldo_frete_gerente_id; Type: INDEX; Schema: alissonerp; Owner: -
+--
+
+CREATE INDEX idx_saldo_frete_gerente_id ON alissonerp.saldo_frete_gratis USING btree (gerente_id);
 
 
 --
@@ -27886,6 +28692,20 @@ CREATE TRIGGER trg_updated_at_conversoes_sku BEFORE UPDATE ON alissonerp.convers
 
 
 --
+-- Name: fechamento_comissao_itens trg_updated_at_fechamento_comissao_itens; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_updated_at_fechamento_comissao_itens BEFORE UPDATE ON alissonerp.fechamento_comissao_itens FOR EACH ROW EXECUTE FUNCTION alissonerp.set_updated_at();
+
+
+--
+-- Name: fechamentos_comissao trg_updated_at_fechamentos_comissao; Type: TRIGGER; Schema: alissonerp; Owner: -
+--
+
+CREATE TRIGGER trg_updated_at_fechamentos_comissao BEFORE UPDATE ON alissonerp.fechamentos_comissao FOR EACH ROW EXECUTE FUNCTION alissonerp.set_updated_at();
+
+
+--
 -- Name: mp_point_devices trg_updated_at_mp_point_devices; Type: TRIGGER; Schema: alissonerp; Owner: -
 --
 
@@ -29108,6 +29928,78 @@ ALTER TABLE ONLY alissonerp.empresas_emitentes
 
 
 --
+-- Name: entregas_venda entregas_venda_aprovacao_frete_por_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda
+    ADD CONSTRAINT entregas_venda_aprovacao_frete_por_fkey FOREIGN KEY (aprovacao_frete_por) REFERENCES auth.users(id);
+
+
+--
+-- Name: entregas_venda entregas_venda_confirmado_por_motoboy_entrega_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda
+    ADD CONSTRAINT entregas_venda_confirmado_por_motoboy_entrega_fkey FOREIGN KEY (confirmado_por_motoboy_entrega) REFERENCES auth.users(id);
+
+
+--
+-- Name: entregas_venda entregas_venda_confirmado_por_motoboy_retirada_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda
+    ADD CONSTRAINT entregas_venda_confirmado_por_motoboy_retirada_fkey FOREIGN KEY (confirmado_por_motoboy_retirada) REFERENCES auth.users(id);
+
+
+--
+-- Name: entregas_venda entregas_venda_confirmado_por_retirada_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda
+    ADD CONSTRAINT entregas_venda_confirmado_por_retirada_fkey FOREIGN KEY (confirmado_por_retirada) REFERENCES auth.users(id);
+
+
+--
+-- Name: entregas_venda entregas_venda_created_by_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda
+    ADD CONSTRAINT entregas_venda_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
+
+
+--
+-- Name: entregas_venda_itens entregas_venda_itens_entrega_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda_itens
+    ADD CONSTRAINT entregas_venda_itens_entrega_id_fkey FOREIGN KEY (entrega_id) REFERENCES alissonerp.entregas_venda(id) ON DELETE CASCADE;
+
+
+--
+-- Name: entregas_venda_itens entregas_venda_itens_item_venda_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda_itens
+    ADD CONSTRAINT entregas_venda_itens_item_venda_id_fkey FOREIGN KEY (item_venda_id) REFERENCES alissonerp.itens_venda_erp(id);
+
+
+--
+-- Name: entregas_venda entregas_venda_motoboy_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda
+    ADD CONSTRAINT entregas_venda_motoboy_id_fkey FOREIGN KEY (motoboy_id) REFERENCES auth.users(id);
+
+
+--
+-- Name: entregas_venda entregas_venda_venda_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.entregas_venda
+    ADD CONSTRAINT entregas_venda_venda_id_fkey FOREIGN KEY (venda_id) REFERENCES alissonerp.vendas_erp(id);
+
+
+--
 -- Name: erp_produtos erp_produtos_parent_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -29148,6 +30040,54 @@ ALTER TABLE ONLY alissonerp.faixas_comissao
 
 
 --
+-- Name: fechamento_comissao_itens fechamento_comissao_itens_conta_receber_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamento_comissao_itens
+    ADD CONSTRAINT fechamento_comissao_itens_conta_receber_id_fkey FOREIGN KEY (conta_receber_id) REFERENCES alissonerp.contas_receber(id);
+
+
+--
+-- Name: fechamento_comissao_itens fechamento_comissao_itens_estorno_de_item_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamento_comissao_itens
+    ADD CONSTRAINT fechamento_comissao_itens_estorno_de_item_id_fkey FOREIGN KEY (estorno_de_item_id) REFERENCES alissonerp.fechamento_comissao_itens(id);
+
+
+--
+-- Name: fechamento_comissao_itens fechamento_comissao_itens_fechamento_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamento_comissao_itens
+    ADD CONSTRAINT fechamento_comissao_itens_fechamento_id_fkey FOREIGN KEY (fechamento_id) REFERENCES alissonerp.fechamentos_comissao(id) ON DELETE CASCADE;
+
+
+--
+-- Name: fechamentos_comissao fechamentos_comissao_approved_by_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamentos_comissao
+    ADD CONSTRAINT fechamentos_comissao_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES auth.users(id);
+
+
+--
+-- Name: fechamentos_comissao fechamentos_comissao_conta_pagar_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamentos_comissao
+    ADD CONSTRAINT fechamentos_comissao_conta_pagar_id_fkey FOREIGN KEY (conta_pagar_id) REFERENCES alissonerp.contas_pagar(id);
+
+
+--
+-- Name: fechamentos_comissao fechamentos_comissao_created_by_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamentos_comissao
+    ADD CONSTRAINT fechamentos_comissao_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
+
+
+--
 -- Name: fechamentos_distribuicao fechamentos_distribuicao_created_by_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
 --
 
@@ -29185,6 +30125,22 @@ ALTER TABLE ONLY alissonerp.fechamentos_fabrica
 
 ALTER TABLE ONLY alissonerp.fechamentos_fabrica
     ADD CONSTRAINT fechamentos_fabrica_setor_id_fkey FOREIGN KEY (setor_id) REFERENCES alissonerp.setores(id);
+
+
+--
+-- Name: fechamentos_frete fechamentos_frete_created_by_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamentos_frete
+    ADD CONSTRAINT fechamentos_frete_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
+
+
+--
+-- Name: fechamentos_frete fechamentos_frete_gerente_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.fechamentos_frete
+    ADD CONSTRAINT fechamentos_frete_gerente_id_fkey FOREIGN KEY (gerente_id) REFERENCES auth.users(id);
 
 
 --
@@ -29289,6 +30245,14 @@ ALTER TABLE ONLY alissonerp.produto_upgrade_config
 
 ALTER TABLE ONLY alissonerp.recebimentos_metal
     ADD CONSTRAINT fk_recebimentos_credito_excedente FOREIGN KEY (credito_excedente_id) REFERENCES alissonerp.creditos_cliente(id);
+
+
+--
+-- Name: saldo_frete_gratis fk_saldo_frete_fechamento; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.saldo_frete_gratis
+    ADD CONSTRAINT fk_saldo_frete_fechamento FOREIGN KEY (fechamento_id) REFERENCES alissonerp.fechamentos_frete(id) NOT VALID;
 
 
 --
@@ -29665,6 +30629,14 @@ ALTER TABLE ONLY alissonerp.locais_estoque
 
 ALTER TABLE ONLY alissonerp.metas_vendedoras
     ADD CONSTRAINT metas_vendedoras_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
+
+
+--
+-- Name: motoboys motoboys_user_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.motoboys
+    ADD CONSTRAINT motoboys_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id);
 
 
 --
@@ -30073,6 +31045,38 @@ ALTER TABLE ONLY alissonerp.outros_insumos_pcp
 
 ALTER TABLE ONLY alissonerp.outros_insumos_pcp
     ADD CONSTRAINT outros_insumos_pcp_pcp_id_fkey FOREIGN KEY (pcp_id) REFERENCES alissonerp.pcp(id) ON DELETE SET NULL;
+
+
+--
+-- Name: pagamentos_motoboy pagamentos_motoboy_created_by_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagamentos_motoboy
+    ADD CONSTRAINT pagamentos_motoboy_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
+
+
+--
+-- Name: pagamentos_motoboy_itens pagamentos_motoboy_itens_entrega_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagamentos_motoboy_itens
+    ADD CONSTRAINT pagamentos_motoboy_itens_entrega_id_fkey FOREIGN KEY (entrega_id) REFERENCES alissonerp.entregas_venda(id);
+
+
+--
+-- Name: pagamentos_motoboy_itens pagamentos_motoboy_itens_pagamento_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagamentos_motoboy_itens
+    ADD CONSTRAINT pagamentos_motoboy_itens_pagamento_id_fkey FOREIGN KEY (pagamento_id) REFERENCES alissonerp.pagamentos_motoboy(id) ON DELETE CASCADE;
+
+
+--
+-- Name: pagamentos_motoboy pagamentos_motoboy_motoboy_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.pagamentos_motoboy
+    ADD CONSTRAINT pagamentos_motoboy_motoboy_id_fkey FOREIGN KEY (motoboy_id) REFERENCES auth.users(id);
 
 
 --
@@ -30513,6 +31517,38 @@ ALTER TABLE ONLY alissonerp.saldo_credito_loja
 
 ALTER TABLE ONLY alissonerp.saldo_credito_loja
     ADD CONSTRAINT saldo_credito_loja_venda_id_fkey FOREIGN KEY (venda_id) REFERENCES alissonerp.vendas_erp(id);
+
+
+--
+-- Name: saldo_frete_gratis saldo_frete_gratis_created_by_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.saldo_frete_gratis
+    ADD CONSTRAINT saldo_frete_gratis_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
+
+
+--
+-- Name: saldo_frete_gratis saldo_frete_gratis_entrega_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.saldo_frete_gratis
+    ADD CONSTRAINT saldo_frete_gratis_entrega_id_fkey FOREIGN KEY (entrega_id) REFERENCES alissonerp.entregas_venda(id);
+
+
+--
+-- Name: saldo_frete_gratis saldo_frete_gratis_gerente_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.saldo_frete_gratis
+    ADD CONSTRAINT saldo_frete_gratis_gerente_id_fkey FOREIGN KEY (gerente_id) REFERENCES auth.users(id);
+
+
+--
+-- Name: saldo_frete_gratis saldo_frete_gratis_venda_id_fkey; Type: FK CONSTRAINT; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE ONLY alissonerp.saldo_frete_gratis
+    ADD CONSTRAINT saldo_frete_gratis_venda_id_fkey FOREIGN KEY (venda_id) REFERENCES alissonerp.vendas_erp(id);
 
 
 --
@@ -31800,6 +32836,18 @@ CREATE POLICY creditos_cliente_update ON alissonerp.creditos_cliente FOR UPDATE 
 --
 
 ALTER TABLE alissonerp.distribuicoes ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: fechamento_comissao_itens; Type: ROW SECURITY; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE alissonerp.fechamento_comissao_itens ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: fechamentos_comissao; Type: ROW SECURITY; Schema: alissonerp; Owner: -
+--
+
+ALTER TABLE alissonerp.fechamentos_comissao ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: distribuicoes gerente_fab_distribuicoes; Type: POLICY; Schema: alissonerp; Owner: -
@@ -33164,5 +34212,5 @@ ALTER TABLE public.vendedores ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict p8uWog6A656LdNOXJ6DMH0IwaOgSWe1kgg7Wc1aL36W9GpxMn4u4AFfitbyxX9L
+\unrestrict X7xRK0VMVu0NARzwP1X0WMlkmaMy65iYkcfYRyBWQA6SZDybvfStW7y0jbo6wdc
 
