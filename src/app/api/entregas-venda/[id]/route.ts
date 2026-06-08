@@ -92,6 +92,14 @@ export async function GET(
         ve.endereco_entrega_cidade,
         ve.endereco_entrega_cep,
         ve.endereco_entrega_uf,
+        -- Endereço do cadastro do cliente (fallback)
+        c.endereco AS cliente_endereco,
+        c.numero AS cliente_numero,
+        c.complemento AS cliente_complemento,
+        c.bairro AS cliente_bairro,
+        c.municipio AS cliente_municipio,
+        c.cep AS cliente_cep,
+        c.uf AS cliente_uf,
         -- Dados do motoboy
         mb.nome AS motoboy_nome,
         mb.telefone AS motoboy_telefone,
@@ -194,6 +202,14 @@ export async function GET(
     endereco_entrega_cidade: e.endereco_entrega_cidade ?? null,
     endereco_entrega_cep: e.endereco_entrega_cep ?? null,
     endereco_entrega_uf: e.endereco_entrega_uf ?? null,
+    // Endereço do cadastro (fallback se venda não tiver)
+    cliente_endereco: e.cliente_endereco ?? null,
+    cliente_numero: e.cliente_numero ?? null,
+    cliente_complemento: e.cliente_complemento ?? null,
+    cliente_bairro: e.cliente_bairro ?? null,
+    cliente_municipio: e.cliente_municipio ?? null,
+    cliente_cep: e.cliente_cep ?? null,
+    cliente_uf: e.cliente_uf ?? null,
     // Dados do motoboy
     motoboy_nome: e.motoboy_nome,
     motoboy_telefone: e.motoboy_telefone,

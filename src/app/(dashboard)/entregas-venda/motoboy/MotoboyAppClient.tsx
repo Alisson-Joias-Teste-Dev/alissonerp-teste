@@ -14,6 +14,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
+import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
 
 const C = {
   esmeralda: "#184036",
@@ -81,6 +82,9 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
   const [situacaoFiltro, setSituacaoFiltro] = useState("");
+
+  // Drawer de detalhe
+  const [selectedEntregaId, setSelectedEntregaId] = useState<number | null>(null);
 
   // Filtro de período
   const [periodo, setPeriodo] = useState("");
@@ -290,64 +294,86 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
           </div>
         )}
 
-        {/* Tabela */}
+        {/* Lista de entregas */}
         {!loading && !erro && items.length === 0 && (
           <p style={{ textAlign: "center", color: C.cinza, padding: 40 }}>Nenhuma entrega encontrada.</p>
         )}
 
         {!loading && items.length > 0 && (
-          <div style={{ overflow: "auto", borderRadius: 10, border: `1px solid ${C.cremeBorder}`, background: "#fff" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: C.cremeBg }}>
-                  <th style={thStyle}>Código</th>
-                  <th style={thStyle}>Venda</th>
-                  <th style={thStyle}>Cliente</th>
-                  <th style={thStyle}>Status</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Frete</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Pago?</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item) => {
-                  const badge = statusBadge(item.situacao);
-                  return (
-                    <tr key={item.id} style={{ borderBottom: `1px solid ${C.cremeBorder}` }}>
-                      <td style={tdStyle}>
-                        <span style={{ fontWeight: 600, fontSize: 11 }}>{item.codigo_entrega}</span>
-                      </td>
-                      <td style={tdStyle}>{item.numero_venda ?? "—"}</td>
-                      <td style={tdStyle}>{item.cliente_nome ?? "—"}</td>
-                      <td style={tdStyle}>
-                        <span style={{
-                          padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600,
-                          background: badge.bg, color: badge.color,
-                        }}>
-                          {badge.text}
-                        </span>
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: "right", fontWeight: 600 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {items.map((item) => {
+              const badge = statusBadge(item.situacao);
+              return (
+                <div key={item.id}
+                  onClick={() => setSelectedEntregaId(item.id)}
+                  style={{
+                    background: "#fff", borderRadius: 10,
+                    border: `1px solid ${C.cremeBorder}`,
+                    padding: "14px", cursor: "pointer",
+                    transition: "box-shadow 0.15s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.08)"}
+                  onMouseLeave={e => e.currentTarget.style.boxShadow = "none"}
+                >
+                  {/* Linha 1: código + status + frete */}
+                  <div style={{
+                    display: "flex", justifyContent: "space-between",
+                    alignItems: "center", marginBottom: 6,
+                  }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: C.esmeralda }}>
+                      {item.codigo_entrega}
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{
+                        padding: "3px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+                        background: badge.bg, color: badge.color,
+                      }}>
+                        {badge.text}
+                      </span>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: C.esmeralda }}>
                         {fmtBRL(item.frete_motoboy)}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: "center" }}>
-                        <span style={{
-                          fontSize: 10, fontWeight: 600,
-                          padding: "2px 6px", borderRadius: 4,
-                          background: item.foi_pago ? C.verdeLt : C.cremeBg,
-                          color: item.foi_pago ? C.verde : C.cinza,
-                        }}>
-                          {item.foi_pago ? "Pago" : "—"}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Linha 2: cliente + venda + pago */}
+                  <div style={{
+                    display: "flex", justifyContent: "space-between",
+                    alignItems: "center", fontSize: 12, color: C.cinza,
+                  }}>
+                    <div>
+                      <span style={{ fontWeight: 600, color: "#1f2937" }}>
+                        {item.cliente_nome ?? "—"}
+                      </span>
+                      <span style={{ margin: "0 6px", color: C.cremeBorder }}>·</span>
+                      Venda {item.numero_venda ?? "—"}
+                    </div>
+                    <span style={{
+                      fontSize: 10, fontWeight: 600,
+                      padding: "2px 8px", borderRadius: 4,
+                      background: item.foi_pago ? C.verdeLt : C.cremeBg,
+                      color: item.foi_pago ? C.verde : C.cinza,
+                    }}>
+                      {item.foi_pago ? "Pago" : "—"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
       </div>
+
+      {/* ── Drawer de detalhe ────────────────────────────────────────────────── */}
+      {selectedEntregaId !== null && (
+        <EntregaDetalheDrawer
+          entregaId={selectedEntregaId}
+          isOpen={selectedEntregaId !== null}
+          onClose={() => { setSelectedEntregaId(null); carregar(); }}
+        />
+      )}
+
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
@@ -371,10 +397,3 @@ function Card({ icon, label, value, color }: {
   );
 }
 
-const thStyle: React.CSSProperties = {
-  padding: "10px 12px", fontSize: 10, fontWeight: 600, color: C.cinza,
-  textTransform: "uppercase", textAlign: "left", whiteSpace: "nowrap",
-};
-const tdStyle: React.CSSProperties = {
-  padding: "10px 12px", color: "#1f2937", whiteSpace: "nowrap",
-};

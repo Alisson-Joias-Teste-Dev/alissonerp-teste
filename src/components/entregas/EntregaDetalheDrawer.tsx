@@ -107,6 +107,13 @@ interface EntregaDetalhe {
   endereco_entrega_cidade: string | null;
   endereco_entrega_cep: string | null;
   endereco_entrega_uf: string | null;
+  cliente_endereco: string | null;
+  cliente_numero: string | null;
+  cliente_complemento: string | null;
+  cliente_bairro: string | null;
+  cliente_municipio: string | null;
+  cliente_cep: string | null;
+  cliente_uf: string | null;
   motoboy_nome: string | null;
   motoboy_telefone: string | null;
   criado_por_nome: string | null;
@@ -597,28 +604,35 @@ export default function EntregaDetalheDrawer({
                 }}>
                   <MapPin size={12} /> Endereço de Entrega
                 </div>
-                {(detalhe.endereco_entrega || detalhe.endereco_entrega_bairro) ? (
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#7C2D12", lineHeight: 1.5 }}>
-                    {[
-                      detalhe.endereco_entrega,
-                      detalhe.endereco_entrega_numero,
-                    ].filter(Boolean).join(", ")}
-                    {detalhe.endereco_entrega_complemento && (
-                      <span> — {detalhe.endereco_entrega_complemento}</span>
-                    )}
-                    {detalhe.endereco_entrega_bairro && (
-                      <div style={{ marginTop: 2 }}>
-                        {[detalhe.endereco_entrega_bairro,
-                          detalhe.endereco_entrega_cidade ? `${detalhe.endereco_entrega_cidade}/${detalhe.endereco_entrega_uf}` : null,
-                        ].filter(Boolean).join(" — ")}
+                {(detalhe.endereco_entrega || detalhe.endereco_entrega_bairro ||
+                  detalhe.cliente_endereco || detalhe.cliente_bairro) ? (
+                  (() => {
+                    // REGRA DE NEGÓCIO: prioriza endereço da venda. Se vazio,
+                    // usa o cadastro do cliente como fallback.
+                    const rua = detalhe.endereco_entrega || detalhe.cliente_endereco;
+                    const num = detalhe.endereco_entrega_numero || detalhe.cliente_numero;
+                    const comp = detalhe.endereco_entrega_complemento || detalhe.cliente_complemento;
+                    const bairro = detalhe.endereco_entrega_bairro || detalhe.cliente_bairro;
+                    const cidade = detalhe.endereco_entrega_cidade || detalhe.cliente_municipio;
+                    const uf = detalhe.endereco_entrega_uf || detalhe.cliente_uf;
+                    const cep = detalhe.endereco_entrega_cep || detalhe.cliente_cep;
+                    return (
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#7C2D12", lineHeight: 1.5 }}>
+                        {[rua, num].filter(Boolean).join(", ")}
+                        {comp && <span> — {comp}</span>}
+                        {bairro && (
+                          <div style={{ marginTop: 2 }}>
+                            {[bairro, cidade && uf ? `${cidade}/${uf}` : cidade].filter(Boolean).join(" — ")}
+                          </div>
+                        )}
+                        {cep && (
+                          <div style={{ marginTop: 2, fontSize: 12, color: "#9A3412" }}>
+                            CEP: {cep}
+                          </div>
+                        )}
                       </div>
-                    )}
-                    {detalhe.endereco_entrega_cep && (
-                      <div style={{ marginTop: 2, fontSize: 12, color: "#9A3412" }}>
-                        CEP: {detalhe.endereco_entrega_cep}
-                      </div>
-                    )}
-                  </div>
+                    );
+                  })()
                 ) : (
                   <div style={{ fontSize: 12, color: "#9A3412" }}>
                     Endereço não informado na venda.
