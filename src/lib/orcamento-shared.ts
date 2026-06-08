@@ -16,10 +16,11 @@ export const ROLES_ORCAMENTO = [
 ] as const;
 export type RoleOrcamento = typeof ROLES_ORCAMENTO[number];
 
-// Subconjunto que pode APROVAR/REJEITAR (sem consultora).
+// Subconjunto que pode APROVAR/REJEITAR (consultora incluída em 08/06/2026 — regra: consultora pode aprovar orçamentos próprios).
 export const ROLES_APROVACAO = [
   "desenvolvedor",
   "admin",
+  "consultora",
   "gerente_loja",
   "gerente_fabrica",
 ] as const;
