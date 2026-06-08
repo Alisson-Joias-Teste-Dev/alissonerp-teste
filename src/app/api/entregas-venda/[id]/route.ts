@@ -84,6 +84,14 @@ export async function GET(
         ve.cliente_id,
         c.nome AS cliente_nome,
         ve.vendedor_id,
+        -- Endereço de entrega da venda
+        ve.endereco_entrega,
+        ve.endereco_entrega_numero,
+        ve.endereco_entrega_complemento,
+        ve.endereco_entrega_bairro,
+        ve.endereco_entrega_cidade,
+        ve.endereco_entrega_cep,
+        ve.endereco_entrega_uf,
         -- Dados do motoboy
         mb.nome AS motoboy_nome,
         mb.telefone AS motoboy_telefone,
@@ -178,6 +186,14 @@ export async function GET(
     cliente_id: e.cliente_id ? Number(e.cliente_id) : null,
     cliente_nome: e.cliente_nome,
     vendedor_id: e.vendedor_id ? Number(e.vendedor_id) : null,
+    // Endereço de entrega da venda
+    endereco_entrega: e.endereco_entrega ?? null,
+    endereco_entrega_numero: e.endereco_entrega_numero ?? null,
+    endereco_entrega_complemento: e.endereco_entrega_complemento ?? null,
+    endereco_entrega_bairro: e.endereco_entrega_bairro ?? null,
+    endereco_entrega_cidade: e.endereco_entrega_cidade ?? null,
+    endereco_entrega_cep: e.endereco_entrega_cep ?? null,
+    endereco_entrega_uf: e.endereco_entrega_uf ?? null,
     // Dados do motoboy
     motoboy_nome: e.motoboy_nome,
     motoboy_telefone: e.motoboy_telefone,

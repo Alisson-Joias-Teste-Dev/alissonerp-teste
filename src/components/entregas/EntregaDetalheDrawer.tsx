@@ -100,6 +100,13 @@ interface EntregaDetalhe {
   cliente_id: number | null;
   cliente_nome: string | null;
   vendedor_id: number | null;
+  endereco_entrega: string | null;
+  endereco_entrega_numero: string | null;
+  endereco_entrega_complemento: string | null;
+  endereco_entrega_bairro: string | null;
+  endereco_entrega_cidade: string | null;
+  endereco_entrega_cep: string | null;
+  endereco_entrega_uf: string | null;
   motoboy_nome: string | null;
   motoboy_telefone: string | null;
   criado_por_nome: string | null;
@@ -572,6 +579,53 @@ export default function EntregaDetalheDrawer({
                 </div>
               </div>
             </div>
+
+            {/* ── Endereço de Entrega (apenas motoboy) ─────────────────────── */}
+            {/* REGRA DE NEGÓCIO: endereço de entrega é crítico para o motoboy.
+                A venda pode ter um endereço diferente do cadastro do cliente.
+                Exibido com destaque para o entregador não errar a rota. */}
+            {detalhe.forma_entrega === "motoboy" && (
+              <div style={{
+                padding: "12px 14px", borderRadius: 8,
+                background: "#FFF7ED", border: "1px solid #FED7AA",
+                marginBottom: 16,
+              }}>
+                <div style={{
+                  fontSize: 10, fontWeight: 600, color: "#9A3412",
+                  textTransform: "uppercase", letterSpacing: 1, marginBottom: 6,
+                  display: "flex", alignItems: "center", gap: 5,
+                }}>
+                  <MapPin size={12} /> Endereço de Entrega
+                </div>
+                {(detalhe.endereco_entrega || detalhe.endereco_entrega_bairro) ? (
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#7C2D12", lineHeight: 1.5 }}>
+                    {[
+                      detalhe.endereco_entrega,
+                      detalhe.endereco_entrega_numero,
+                    ].filter(Boolean).join(", ")}
+                    {detalhe.endereco_entrega_complemento && (
+                      <span> — {detalhe.endereco_entrega_complemento}</span>
+                    )}
+                    {detalhe.endereco_entrega_bairro && (
+                      <div style={{ marginTop: 2 }}>
+                        {[detalhe.endereco_entrega_bairro,
+                          detalhe.endereco_entrega_cidade ? `${detalhe.endereco_entrega_cidade}/${detalhe.endereco_entrega_uf}` : null,
+                        ].filter(Boolean).join(" — ")}
+                      </div>
+                    )}
+                    {detalhe.endereco_entrega_cep && (
+                      <div style={{ marginTop: 2, fontSize: 12, color: "#9A3412" }}>
+                        CEP: {detalhe.endereco_entrega_cep}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: "#9A3412" }}>
+                    Endereço não informado na venda.
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ── Timeline ────────────────────────────────────────────────── */}
             <div style={{ marginBottom: 20 }}>
