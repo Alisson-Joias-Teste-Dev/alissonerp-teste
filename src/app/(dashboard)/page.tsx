@@ -67,16 +67,25 @@ export default async function Home() {
   // como motoboy ativo, redireciona para o app de entregas.
   // 'entregador' é a role específica para entregadores de app.
   // 'motoboy' continua sendo a role dos protocolistas (funcionários).
-  try {
-    const ehEntregador = userRole === "entregador";
-    const [mb] = ehEntregador ? [] : await sql`
-      SELECT 1 FROM alissonerp.motoboys
-      WHERE user_id = ${user.id}::uuid AND ativo = true
-      LIMIT 1
-    `;
-    if (ehEntregador || mb) redirect("/entregas-venda/motoboy");
-  } catch {
-    // se falhar, segue normalmente
+  // IMPORTANTE: redirect() NÃO pode estar dentro de try-catch — o Next.js
+  // usa throw interno para redirecionar.
+  const ehEntregador = userRole === "entregador";
+  let estaNaTabelaMotoboys = false;
+  if (!ehEntregador) {
+    try {
+      const [mb] = await sql`
+        SELECT 1 FROM alissonerp.motoboys
+        WHERE user_id = ${user.id}::uuid AND ativo = true
+        LIMIT 1
+      `;
+      if (mb) estaNaTabelaMotoboys = true;
+    } catch {
+      // se falhar, segue normalmente
+    }
+  }
+
+  if (ehEntregador || estaNaTabelaMotoboys) {
+    redirect("/entregas-venda/motoboy");
   }
 
   // Saudação dinâmica (horário de Brasília)
