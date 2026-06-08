@@ -130,6 +130,60 @@ function labelForma(f: string): string {
   return f === "retirada" ? "Retirada" : "Motoboy";
 }
 
+/**
+ * Renderiza a coluna de data conforme o status da entrega.
+ * REGRA DE NEGÓCIO: entrega confirmada mostra data de entrega/retirada,
+ * em rota mostra data de saída, pendente mostra data de criação.
+ */
+function renderDataColuna(item: EntregaItem) {
+  if (item.situacao === "confirmada" && item.data_entrega_realizada) {
+    return (
+      <>
+        <div style={{ fontSize: 12, color: "#16A34A", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3 }}>
+          {fmtData(item.data_entrega_realizada)}
+        </div>
+        <div style={{ fontSize: 10, color: C.cinza, marginTop: 2 }}>
+          Entregue {fmtDtHr(item.data_entrega_realizada)}
+        </div>
+      </>
+    );
+  }
+  if (item.situacao === "confirmada" && item.data_retirada) {
+    return (
+      <>
+        <div style={{ fontSize: 12, color: "#16A34A", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3 }}>
+          {fmtData(item.data_retirada)}
+        </div>
+        <div style={{ fontSize: 10, color: C.cinza, marginTop: 2 }}>
+          Retirada {fmtDtHr(item.data_retirada)}
+        </div>
+      </>
+    );
+  }
+  if (item.situacao === "em_rota" && item.data_saida) {
+    return (
+      <>
+        <div style={{ fontSize: 12, color: "#9A3412", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3 }}>
+          {fmtData(item.data_saida)}
+        </div>
+        <div style={{ fontSize: 10, color: C.cinza, marginTop: 2 }}>
+          Saiu {fmtDtHr(item.data_saida)}
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <div style={{ fontSize: 12, color: "#1f2937" }}>
+        {fmtData(item.created_at)}
+      </div>
+      <div style={{ fontSize: 10, color: C.cinza, marginTop: 2 }}>
+        {fmtDtHr(item.created_at)}
+      </div>
+    </>
+  );
+}
+
 /** Badge de status com cores */
 function statusBadge(situacao: string) {
   switch (situacao) {
@@ -861,16 +915,14 @@ export default function EntregasVendaClient({
                         </td>
 
                         {/* Data */}
+                        {/* REGRA DE NEGÓCIO: mostra a data mais relevante conforme o status.
+                            Pendente → data de criação. Em rota → data de saída.
+                            Confirmada → data de entrega (ou retirada). */}
                         <td style={{
                           padding: "10px 14px", whiteSpace: "nowrap",
                           textAlign: "right",
                         }}>
-                          <div style={{ fontSize: 12, color: "#1f2937" }}>
-                            {fmtData(item.created_at)}
-                          </div>
-                          <div style={{ fontSize: 10, color: C.cinza, marginTop: 2 }}>
-                            {fmtDtHr(item.created_at)}
-                          </div>
+                          {renderDataColuna(item)}
                         </td>
                       </tr>
                     );
