@@ -371,6 +371,7 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
           entregaId={selectedEntregaId}
           isOpen={selectedEntregaId !== null}
           onClose={() => { setSelectedEntregaId(null); carregar(); }}
+          userRole="entregador"
         />
       )}
 

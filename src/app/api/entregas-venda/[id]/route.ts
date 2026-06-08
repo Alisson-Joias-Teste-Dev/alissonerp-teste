@@ -21,7 +21,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 
-const ROLES_ENTREGAS = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
+const ROLES_ENTREGAS = ["desenvolvedor", "admin", "gerente_loja", "consultora", "entregador"];
 
 export async function GET(
   _req: NextRequest,
@@ -153,6 +153,13 @@ export async function GET(
   // IMPACTO SE REMOVIDO: vazamento de dados entre consultoras.
   if (usuario.role === "consultora" && usuario.vendedor_id != null) {
     if (entrega[0].vendedor_id !== usuario.vendedor_id) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
+  }
+
+  // REGRA DE NEGÓCIO: entregador só vê suas próprias entregas.
+  if (usuario.role === "entregador") {
+    if (!entrega[0].motoboy_id || entrega[0].motoboy_id !== user.id) {
       return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
     }
   }
