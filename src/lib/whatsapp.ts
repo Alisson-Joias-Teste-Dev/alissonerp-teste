@@ -157,3 +157,107 @@ export async function enviarCodigoWhatsAppDetalhado(
 export function whatsappConfigurado(): boolean {
   return !!(API_URL && API_KEY && INSTANCE_ID);
 }
+
+/**
+ * Envia o Código A para o cliente quando o motoboy retira a mercadoria.
+ *
+ * REGRA DE NEGÓCIO: o código só é enviado ao cliente DEPOIS que o motoboy
+ * confirma a retirada (Código B). Antes disso o cliente não recebe nada,
+ * evitando ansiedade e confusão sobre quando o pedido chega.
+ *
+ * @param telefone — número do cliente
+ * @param codigo — Código A de 6 dígitos
+ * @param nome — nome do cliente
+ */
+export async function enviarCodigoClienteEmRota(
+  telefone: string,
+  codigo: string,
+  nome: string,
+): Promise<EnviarCodigoWhatsAppResult> {
+  const mensagem =
+    `Prezado(a) ${nome},\n\n` +
+    `Seu pedido foi cuidadosamente preparado e já está a caminho.\n\n` +
+    `Para assegurar uma experiência de entrega exclusiva e totalmente segura, ` +
+    `utilize o código abaixo no momento do recebimento:\n\n` +
+    `🔐 *Código de Confirmação: ${codigo}*\n\n` +
+    `Solicitamos que este código seja informado apenas ao nosso entregador autorizado. ` +
+    `A entrega será concluída somente após a validação do código, ` +
+    `garantindo a proteção de sua compra.\n\n` +
+    `Agradecemos por escolher a Alisson Joias. ` +
+    `É uma satisfação fazer parte de momentos especiais.\n\n` +
+    `Cordialmente,\n` +
+    `Equipe Alisson Joias`;
+
+  return enviarMensagemWhatsApp(telefone, mensagem, nome);
+}
+
+/**
+ * Envia mensagem de confirmação quando a entrega é finalizada.
+ *
+ * REGRA DE NEGÓCIO: ao confirmar o Código A, o cliente recebe uma
+ * mensagem de conclusão, fechando o ciclo da experiência de compra.
+ *
+ * @param telefone — número do cliente
+ * @param nome — nome do cliente
+ */
+export async function enviarConfirmacaoEntregaConcluida(
+  telefone: string,
+  nome: string,
+): Promise<EnviarCodigoWhatsAppResult> {
+  const mensagem =
+    `✨ *Entrega Concluída*\n\n` +
+    `Prezado(a) ${nome},\n\n` +
+    `Sua joia foi entregue com sucesso e a experiência de compra foi finalizada.\n\n` +
+    `Agradecemos por escolher a Alisson Joias. ` +
+    `É uma honra participar de momentos que merecem ser eternizados.\n\n` +
+    `Caso necessite de qualquer suporte, nossa equipe estará sempre à disposição.\n\n` +
+    `Atenciosamente,\n` +
+    `Equipe Alisson Joias`;
+
+  return enviarMensagemWhatsApp(telefone, mensagem, nome);
+}
+
+/**
+ * Envia mensagem genérica pelo WhatsApp (uso interno).
+ */
+async function enviarMensagemWhatsApp(
+  telefone: string,
+  texto: string,
+  nome: string,
+): Promise<EnviarCodigoWhatsAppResult> {
+  if (!API_URL || !API_KEY || !INSTANCE_ID) {
+    return { enviado: false, erro: "WhatsApp não configurado", numeroFormatado: null };
+  }
+
+  const numero = telefone.replace(/[\s\-\(\)\+]/g, "");
+  const numeroFormatado = numero.startsWith("55") ? numero : `55${numero}`;
+
+  if (numeroFormatado.length < 12) {
+    return { enviado: false, erro: "Número inválido", numeroFormatado };
+  }
+
+  try {
+    const url = `${API_URL}/message/sendText/${INSTANCE_ID}`;
+    const resposta = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: API_KEY },
+      body: JSON.stringify({ number: numeroFormatado, text: texto }),
+    });
+
+    if (!resposta.ok) {
+      const erro = await resposta.text().catch(() => "sem corpo");
+      return {
+        enviado: false,
+        erro: erro.includes("exists\":false")
+          ? "Número não encontrado no WhatsApp."
+          : "WhatsApp indisponível no momento.",
+        numeroFormatado,
+      };
+    }
+
+    console.log(`[whatsapp] Mensagem enviada para ${nome} (${numeroFormatado})`);
+    return { enviado: true, erro: null, numeroFormatado };
+  } catch {
+    return { enviado: false, erro: "Erro ao conectar com WhatsApp.", numeroFormatado };
+  }
+}

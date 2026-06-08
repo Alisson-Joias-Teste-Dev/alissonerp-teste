@@ -35,6 +35,7 @@ import {
   Bike,
   Store,
   Camera,
+  Clock,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 
@@ -413,6 +414,16 @@ function CodigosModal({
                     {reenviando ? "..." : "Salvar e Enviar"}
                   </button>
                 </div>
+              </div>
+            )}
+
+            {/* Motoboy: Código A será enviado após retirada */}
+            {!whatsappEnviado && !whatsappErro && codigoMotoboy && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Clock size={16} color={C.cinza} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: C.cinza }}>
+                  Código será enviado ao cliente após retirada do motoboy
+                </span>
               </div>
             )}
 

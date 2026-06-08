@@ -27,7 +27,7 @@
 
 import sql from "@/lib/db";
 import { logAudit } from "@/lib/audit";
-import { enviarCodigoWhatsAppDetalhado } from "@/lib/whatsapp";
+import { enviarCodigoWhatsAppDetalhado, enviarCodigoClienteEmRota, enviarConfirmacaoEntregaConcluida } from "@/lib/whatsapp";
 import { uploadFile } from "@/lib/storage";
 
 // O client transacional do pacote postgres não expõe call signature adequada
@@ -776,13 +776,19 @@ export async function criarEntrega(
   }) as any as Entrega;
 
   // ── WhatsApp (fora da transação, best-effort) ───────────────────────────
-  // REGRA DE NEGÓCIO: o envio do código A para o cliente via WhatsApp é
-  // feito após o commit da entrega. Se falhar, a entrega NÃO é desfeita.
-  // O código existe no banco e pode ser reenviado depois.
-  const whatsAppResult = await tentarEnviarWhatsApp(
-    params.vendaId,
-    entregaBase.codigoCliente,
-  );
+  // REGRA DE NEGÓCIO: Código A só é enviado quando o motoboy confirmar
+  // a retirada (Código B). Na criação, apenas o Código B vai para o motoboy.
+  // Se formaEntrega for retirada, o Código A é enviado imediatamente.
+  let whatsAppResult: {
+    whatsappEnviado: boolean;
+    whatsappErro: string | null;
+    clienteNome: string | null;
+    clienteTelefone: string | null;
+  } = { whatsappEnviado: false, whatsappErro: null, clienteNome: null, clienteTelefone: null };
+
+  if (params.formaEntrega === "retirada") {
+    whatsAppResult = await tentarEnviarWhatsApp(params.vendaId, entregaBase.codigoCliente);
+  }
 
   // REGRA DE NEGÓCIO: se a entrega é via motoboy, o Código B também é enviado
   // por WhatsApp para o entregador. Mesmo princípio best-effort — falha no
@@ -931,6 +937,60 @@ async function tentarEnviarWhatsAppMotoboy(
   }
 }
 
+/**
+ * Envia Código A para o cliente quando o motoboy retira a mercadoria.
+ *
+ * REGRA DE NEGÓCIO: o Código A só é enviado ao cliente DEPOIS que o
+ * motoboy confirma a retirada (Código B). Antes disso o cliente não
+ * recebe nada. A mensagem informa que o pedido está a caminho.
+ */
+async function tentarEnviarWhatsAppAoCliente(
+  vendaId: number,
+  codigo: string,
+): Promise<void> {
+  try {
+    const [row] = await sql`
+      SELECT c.nome, c.celular, c.telefone
+      FROM alissonerp.vendas_erp ve
+      JOIN public.contatos c ON c.id_contato = ve.cliente_id
+      WHERE ve.id = ${vendaId}
+      LIMIT 1
+    `;
+    const nome = (row as { nome?: string } | null)?.nome ?? "Cliente";
+    const numero = ((row as { celular?: string; telefone?: string } | null)?.celular ||
+      (row as { celular?: string; telefone?: string } | null)?.telefone || "").trim();
+    if (!numero) return;
+    await enviarCodigoClienteEmRota(numero, codigo, nome);
+  } catch (err) {
+    console.error("[entrega-venda] Erro ao enviar Código A ao cliente:", err);
+  }
+}
+
+/**
+ * Envia mensagem de conclusão quando a entrega é finalizada.
+ *
+ * REGRA DE NEGÓCIO: ao confirmar Código A, o cliente recebe uma
+ * mensagem confirmando que a entrega foi concluída com sucesso.
+ */
+async function tentarEnviarWhatsAppConclusao(vendaId: number): Promise<void> {
+  try {
+    const [row] = await sql`
+      SELECT c.nome, c.celular, c.telefone
+      FROM alissonerp.vendas_erp ve
+      JOIN public.contatos c ON c.id_contato = ve.cliente_id
+      WHERE ve.id = ${vendaId}
+      LIMIT 1
+    `;
+    const nome = (row as { nome?: string } | null)?.nome ?? "Cliente";
+    const numero = ((row as { celular?: string; telefone?: string } | null)?.celular ||
+      (row as { celular?: string; telefone?: string } | null)?.telefone || "").trim();
+    if (!numero) return;
+    await enviarConfirmacaoEntregaConcluida(numero, nome);
+  } catch (err) {
+    console.error("[entrega-venda] Erro ao enviar msg de conclusão:", err);
+  }
+}
+
 // ─── 5. Confirmação de Entrega ────────────────────────────────────────────────
 
 /**
@@ -1004,7 +1064,7 @@ export async function confirmarEntrega(
 
   // ─── Transação atômica ──────────────────────────────────────────────────
 
-  return sql.begin(async (tx: DbSql) => {
+  const resultado = await sql.begin(async (tx: DbSql) => {
     let etapa: "retirada_loja" | "entrega_cliente";
     let novaSituacao: string;
 
@@ -1158,9 +1218,23 @@ export async function confirmarEntrega(
       },
     });
 
-    return { etapa, situacao: novaSituacao };
+    return { etapa, situacao: novaSituacao, vendaId: Number(entrega.venda_id), codigoCliente: String(entrega.codigo_cliente) };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  }) as any as Promise<ConfirmacaoResult>;
+  }) as any;
+
+  // ── WhatsApp pós-confirmação (fora da transação, best-effort) ──────────
+  // REGRA DE NEGÓCIO: ao confirmar Código B (motoboy retirou), envia
+  // Código A para o cliente avisando que o pedido está a caminho.
+  // Ao confirmar Código A (retirada ou entrega finalizada), envia msg conclusão.
+  if (!matchMotoboy && resultado.situacao === "confirmada") {
+    // Código A foi usado → entrega concluída → msg de conclusão
+    tentarEnviarWhatsAppConclusao(resultado.vendaId).catch(() => {});
+  } else if (matchMotoboy) {
+    // Código B foi usado → motoboy retirou → enviar Código A ao cliente
+    tentarEnviarWhatsAppAoCliente(resultado.vendaId, resultado.codigoCliente).catch(() => {});
+  }
+
+  return { etapa: resultado.etapa, situacao: resultado.situacao } as ConfirmacaoResult;
 }
 
 // ─── 6. Cancelamento de Entrega ───────────────────────────────────────────────
