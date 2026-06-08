@@ -545,20 +545,36 @@ function CodigosModal({
                   Código B — Motoboy
                 </span>
               </div>
-              <div style={{
-                fontSize: 28, fontWeight: 900, letterSpacing: 4, textAlign: "center",
-                color: "#7C2D12", padding: "10px 0", fontFamily: "monospace",
-              }}>
-                {codigoMotoboy}
-              </div>
-              <p style={{ fontSize: 11, color: "#9A3412", textAlign: "center" }}>
-                Entregue este código ao motoboy para retirada na loja
-              </p>
 
-              {/* ── WhatsApp do Motoboy ────────────────────────────── */}
-              {/* REGRA DE NEGÓCIO: Código B é enviado automaticamente
-                  para o WhatsApp do motoboy. Se falhar, o operador ainda
-                  vê o código na tela como fallback e pode reenviar. */}
+              {/* REGRA DE SEGURANÇA: Código B é enviado automaticamente
+                  para o WhatsApp do motoboy. O operador NUNCA vê os dígitos
+                  na tela — só o status do envio. Se falhar, pode reenviar. */}
+              {whatsappMotoboyEnviado ? (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "10px 12px", borderRadius: 6,
+                  background: C.verdeLt, border: `1px solid ${C.verde}`,
+                }}>
+                  <CheckCircle size={14} color={C.verde} />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: C.verde }}>
+                    Enviado para {motoboyNome || "motoboy"}
+                    {motoboyTelefone ? ` · ${motoboyTelefone}` : ""}
+                  </span>
+                </div>
+              ) : (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "10px 12px", borderRadius: 6,
+                  background: C.cremeBg, border: `1px solid ${C.cremeBorder}`,
+                }}>
+                  <Loader2 size={14} color={C.cinza} style={{ animation: "spin 1s linear infinite" }} />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: C.cinza }}>
+                    Enviando código para {motoboyNome || "motoboy"}...
+                  </span>
+                </div>
+              )}
+
+              {/* WhatsApp do motoboy com erro — campo para corrigir e reenviar */}
               {whatsappMotoboyErro && (
                 <div style={{
                   marginTop: 10, padding: "10px 12px", borderRadius: 8,
@@ -604,22 +620,8 @@ function CodigosModal({
                   </div>
                 </div>
               )}
-
-              {whatsappMotoboyEnviado && (
-                <div style={{
-                  marginTop: 10, display: "flex", alignItems: "center", gap: 8,
-                  padding: "8px 10px", borderRadius: 6,
-                  background: C.verdeLt, border: `1px solid ${C.verde}`,
-                }}>
-                  <CheckCircle size={14} color={C.verde} />
-                  <span style={{ fontSize: 12, fontWeight: 600, color: C.verde }}>
-                    Código enviado para {motoboyNome || "motoboy"}
-                    {motoboyTelefone ? ` · ${motoboyTelefone}` : ""}
-                  </span>
-                </div>
-              )}
             </div>
-          )}
+              )}
 
           <button
             onClick={onClose}
