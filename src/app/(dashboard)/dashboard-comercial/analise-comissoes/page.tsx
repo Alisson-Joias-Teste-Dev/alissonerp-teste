@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { DollarSign, TrendingDown, Percent, Award, Ban, Clock, CheckCircle } from "lucide-react";
+import { DollarSign, TrendingDown, Percent, Award, Ban, Clock, CheckCircle, X } from "lucide-react";
 import DashboardHeader from "@/components/dashboard-comercial/DashboardHeader";
 import StatCard from "@/components/dashboard-comercial/StatCard";
 import ConsultoraAvatar from "@/components/dashboard-comercial/ConsultoraAvatar";
@@ -15,6 +15,16 @@ export default function AnaliseComissoesPage() {
   const [view, setView] = useState<"resumo" | "detalhe">("resumo");
   const [filtroConsultora, setFiltroConsultora] = useState<number | null>(null);
   const [filtroPedido, setFiltroPedido] = useState<string>("");
+  /**
+   * Filtro ativado ao clicar no card "Comissão Pendente".
+   * Limita o detalhamento a itens com comissao_pendente > 0.
+   * REGRA DE NEGÓCIO: permite auditoria rápida de quais vendas ainda têm
+   * valores "A Receber" que impactam a comissão.
+   * Impacto se remover: perde-se o drill-down rápido entre o card e as vendas pendentes.
+   */
+  const [filtroApenasPendentes, setFiltroApenasPendentes] = useState(false);
+  /** Estado do modal de auditoria de comissões pendentes (aberto ao clicar no card "Comissão Pendente") */
+  const [showPendentesModal, setShowPendentesModal] = useState(false);
   const dados = useAnaliseComissoes(from, to);
 
   /**
@@ -28,8 +38,9 @@ export default function AnaliseComissoesPage() {
     return dados.data.itens_detalhados
       .filter((i) => filtroConsultora === null || i.id_vendedor === filtroConsultora)
       .filter((i) => !filtroPedido || String(i.numero_pedido ?? "").toLowerCase().includes(filtroPedido.toLowerCase()))
+      .filter((i) => !filtroApenasPendentes || i.comissao_pendente > 0)
       .slice(0, 500);
-  }, [dados.data, filtroConsultora, filtroPedido]);
+  }, [dados.data, filtroConsultora, filtroPedido, filtroApenasPendentes]);
 
   /**
    * Totais para a linha de rodapé (tfoot).
@@ -104,6 +115,8 @@ export default function AnaliseComissoesPage() {
               value={formatBRL(sumario.pendente)}
               icon={Clock}
               color="dourado"
+              subtitle="Clique para auditar"
+              onClick={() => setShowPendentesModal(true)}
             />
             <StatCard
               label="Excluído por Vale-Troca"
@@ -152,7 +165,10 @@ export default function AnaliseComissoesPage() {
               return (
                 <button
                   key={v}
-                  onClick={() => setView(v)}
+                  onClick={() => {
+                    setView(v);
+                    if (v === "resumo") setFiltroApenasPendentes(false);
+                  }}
                   className="rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors"
                   style={{
                     backgroundColor: active ? P.esmeralda : "transparent",
@@ -314,6 +330,16 @@ export default function AnaliseComissoesPage() {
                     Limpar
                   </button>
                 )}
+                {/* Indicador de filtro pendentes ativo */}
+                {filtroApenasPendentes && (
+                  <button
+                    onClick={() => setFiltroApenasPendentes(false)}
+                    className="ml-auto rounded-md px-3 py-1 text-xs font-medium"
+                    style={{ backgroundColor: P.alerta + "22", color: P.alerta }}
+                  >
+                    Apenas pendentes ✕
+                  </button>
+                )}
               </div>
               <div className="max-h-[70vh] overflow-auto">
                 <table className="w-full text-sm">
@@ -339,6 +365,7 @@ export default function AnaliseComissoesPage() {
                     {dados.data.itens_detalhados
                       .filter((i) => filtroConsultora === null || i.id_vendedor === filtroConsultora)
                       .filter((i) => !filtroPedido || String(i.numero_pedido ?? "").toLowerCase().includes(filtroPedido.toLowerCase()))
+                      .filter((i) => !filtroApenasPendentes || i.comissao_pendente > 0)
                       .slice(0, 500).map((i, idx) => (
                       <tr key={i.id} className="border-t" style={{ borderColor: P.cremeMuted }}>
                         <td className="px-4 py-1.5 text-center text-xs" style={{ color: P.esmeraldaMid }}>
@@ -432,6 +459,153 @@ export default function AnaliseComissoesPage() {
           )}
         </>
       )}
+
+      {/* Modal de auditoria: itens com comissão pendente */}
+      {showPendentesModal && dados.data && (
+        <ComissaoPendenteModal
+          itens={dados.data.itens_detalhados
+            .filter((i) => i.comissao_pendente > 0)
+            .sort((a, b) => b.comissao_pendente - a.comissao_pendente)}
+          onClose={() => setShowPendentesModal(false)}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Modal de auditoria de comissões pendentes — exibe todos os itens com comissao_pendente > 0,
+ * ordenados do maior pendente para o menor.
+ *
+ * REGRA DE NEGÓCIO: comissão pendente é a parcela da comissão que ainda não pode ser paga
+ * porque os valores estão como "A Receber" (não pagos pelo cliente).
+ * O que: permite auditar rapidamente quais vendas/itens estão travando a comissão das consultoras.
+ * Por que: o gerente precisa saber onde estão os recebíveis pendentes para cobrar o cliente
+ * e liberar a comissão da consultora.
+ * Impacto se remover: perde-se a capacidade de drill-down do card "Comissão Pendente" para os itens.
+ */
+function ComissaoPendenteModal({
+  itens,
+  onClose,
+}: {
+  itens: Array<{
+    id: number;
+    id_vendedor: number;
+    consultora: string;
+    foto: string | null;
+    data_venda: string;
+    numero_pedido: number | string | null;
+    sku: string | null;
+    quantidade: number;
+    preco_vendido: number;
+    valor_a_receber: number;
+    comissao_pendente: number;
+  }>;
+  onClose: () => void;
+}) {
+  const totalAReceber = itens.reduce((s, i) => s + i.valor_a_receber, 0);
+  const totalPendente = itens.reduce((s, i) => s + i.comissao_pendente, 0);
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 40,
+        }}
+      />
+      <div style={{
+        position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+        zIndex: 50, width: "min(90vw, 900px)", maxHeight: "80vh",
+        background: "#fff", borderRadius: 12, boxShadow: "0 8px 40px rgba(0,0,0,0.15)",
+        display: "flex", flexDirection: "column",
+      }}>
+        {/* Header */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 20px", borderBottom: `1px solid ${P.cremeMuted}`,
+          background: P.cremeSoft,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Clock size={18} color={P.alerta} />
+            <span style={{ fontWeight: 700, fontSize: 15, color: P.esmeralda }}>
+              Vendas com Comissão Pendente — {itens.length} {itens.length === 1 ? "item" : "itens"}
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+            <X size={18} color={P.esmeraldaMid} />
+          </button>
+        </div>
+
+        {/* Tabela */}
+        <div style={{ flex: 1, overflow: "auto", padding: "0 20px 16px" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: `2px solid ${P.cremeMuted}` }}>
+                <th style={{ textAlign: "center", padding: "10px 4px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase", width: 32 }}>#</th>
+                <th style={{ textAlign: "left", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Consultora</th>
+                <th style={{ textAlign: "left", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Data</th>
+                <th style={{ textAlign: "left", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Pedido</th>
+                <th style={{ textAlign: "left", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>SKU</th>
+                <th style={{ textAlign: "right", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Qtd</th>
+                <th style={{ textAlign: "right", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Vendido</th>
+                <th style={{ textAlign: "right", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>A Receber</th>
+                <th style={{ textAlign: "right", padding: "10px 6px", color: P.esmeraldaMid, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Com. Pendente</th>
+              </tr>
+            </thead>
+            <tbody>
+              {itens.map((i, idx) => (
+                <tr key={i.id} style={{ borderBottom: `1px solid ${P.cremeMuted}` }}>
+                  <td style={{ padding: "10px 4px", color: P.esmeraldaMid, fontSize: 12, textAlign: "center" }}>
+                    {idx + 1}
+                  </td>
+                  <td style={{ padding: "10px 6px", color: P.esmeralda }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <ConsultoraAvatar nome={i.consultora} foto={i.foto} size={24} />
+                      {i.consultora}
+                    </div>
+                  </td>
+                  <td style={{ padding: "10px 6px", color: P.esmeraldaMid, whiteSpace: "nowrap" }}>
+                    {formatDateBR(i.data_venda)}
+                  </td>
+                  <td style={{ padding: "10px 6px", color: P.esmeralda }}>
+                    {i.numero_pedido ?? "—"}
+                  </td>
+                  <td style={{ padding: "10px 6px", fontFamily: "monospace", fontSize: 11, color: P.esmeraldaMid }}>
+                    {i.sku ?? "—"}
+                  </td>
+                  <td style={{ padding: "10px 6px", textAlign: "right", color: P.esmeralda }}>
+                    {i.quantidade}
+                  </td>
+                  <td style={{ padding: "10px 6px", textAlign: "right", color: P.esmeralda, fontWeight: 500 }}>
+                    {formatBRL(i.preco_vendido)}
+                  </td>
+                  <td style={{ padding: "10px 6px", textAlign: "right", color: P.alerta, fontWeight: 600 }}>
+                    {formatBRL(i.valor_a_receber)}
+                  </td>
+                  <td style={{ padding: "10px 6px", textAlign: "right", color: P.dourado, fontWeight: 600 }}>
+                    {formatBRL(i.comissao_pendente)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop: `2px solid ${P.esmeraldaMid}`, background: P.cremeSoft }}>
+                <td style={{ padding: "10px 4px" }} />
+                <td style={{ padding: "10px 6px", color: P.esmeralda, fontWeight: 700, fontSize: 13 }} colSpan={6}>
+                  TOTAL — {itens.length} {itens.length === 1 ? "item" : "itens"}
+                </td>
+                <td style={{ padding: "10px 6px", textAlign: "right", color: P.alerta, fontWeight: 700, fontSize: 13 }}>
+                  {formatBRL(totalAReceber)}
+                </td>
+                <td style={{ padding: "10px 6px", textAlign: "right", color: P.dourado, fontWeight: 700, fontSize: 13 }}>
+                  {formatBRL(totalPendente)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </>
   );
 }
