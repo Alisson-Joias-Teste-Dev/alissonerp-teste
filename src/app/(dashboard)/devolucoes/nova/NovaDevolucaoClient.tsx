@@ -108,8 +108,10 @@ export default function NovaDevolucaoClient({ role }: Props) {
       const detRes = await fetch(`/api/vendas/${match.id}`);
       if (!detRes.ok) throw new Error("Erro ao carregar detalhes da venda");
       const d = (await detRes.json()) as Venda;
-      if (!["aprovado", "enviado", "concluido", "entregue"].includes(d.situacao)) {
-        setBuscaErr(`Venda ${d.numero_venda} está em situação '${d.situacao}' — só é possível devolver vendas aprovadas, enviadas, concluídas ou entregues`);
+      // REGRA DE NEGÓCIO: devolução só pode ser criada para vendas entregues
+      // IMPACTO SE REMOVIDO: permitiria devolver vendas que ainda não foram entregues ao cliente
+      if (d.situacao !== "entregue") {
+        setBuscaErr(`Venda ${d.numero_venda} está em situação '${d.situacao}' — só é possível devolver vendas entregues`);
         return;
       }
       setVenda(d);

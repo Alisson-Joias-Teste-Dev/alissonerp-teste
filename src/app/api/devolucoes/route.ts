@@ -115,6 +115,22 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
 
+  // REGRA DE NEGÓCIO: devolução só pode ser criada para vendas entregues
+  // Validação server-side para evitar bypass via API direta
+  // IMPACTO SE REMOVIDO: permitiria devolver vendas que ainda não foram entregues ao cliente
+  const [venda] = await sql`
+    SELECT situacao FROM alissonerp.vendas_erp WHERE id = ${body.venda_id}
+  `;
+  if (!venda) {
+    return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
+  }
+  if (venda.situacao !== "entregue") {
+    return NextResponse.json(
+      { error: `Venda está em situação '${venda.situacao}' — só é possível devolver vendas entregues` },
+      { status: 409 }
+    );
+  }
+
   try {
     const opts: CriarDevolucaoOpts = {
       tipo: body.tipo,
