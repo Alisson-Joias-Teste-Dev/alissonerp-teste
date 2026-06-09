@@ -95,7 +95,10 @@ export default function NovaDevolucaoClient({ role }: Props) {
       if (!listRes.ok) throw new Error("Erro ao buscar venda");
       const listaRaw = await listRes.json();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const lista = (Array.isArray(listaRaw) ? listaRaw : (listaRaw as any).data ?? []) as Array<{ id: number; numero_venda: string }>;
+      // REGRA DE NEGÓCIO: GET /api/vendas retorna { items: [...], ... }, não { data: [...] }
+      // Acessar .data em vez de .items causa lista sempre vazia e "Venda não encontrada"
+      // IMPACTO SE REMOVIDO: a busca de vendas no wizard de devolução para de funcionar
+      const lista = (Array.isArray(listaRaw) ? listaRaw : (listaRaw as any).items ?? []) as Array<{ id: number; numero_venda: string }>;
 
       const match = lista.find((v) => v.numero_venda === buscaInput.trim()) ?? lista[0];
       if (!match) {
