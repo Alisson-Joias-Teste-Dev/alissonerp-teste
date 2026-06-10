@@ -40,7 +40,9 @@ export async function POST(
   if (!usuario) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   const isAdmin = ROLES_ADMIN.includes(usuario.role as string);
-  const isMotoboy = usuario.role === "motoboy";
+  // REGRA: role 'entregador' é o motoboy do app; 'motoboy' é protocolista.
+  // Ambos podem confirmar a própria corrida; admin confirma qualquer uma.
+  const isMotoboy = usuario.role === "entregador" || usuario.role === "motoboy";
 
   if (!isAdmin && !isMotoboy) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });

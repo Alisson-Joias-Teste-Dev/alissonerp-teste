@@ -283,7 +283,7 @@ export default function EntregasVendaClient({
       const serialized = (data.items || []).map((r) => ({
         ...r,
         id:                          Number(r.id),
-        venda_id:                    Number(r.venda_id),
+        venda_id:                    r.venda_id != null ? Number(r.venda_id) : null,
         frete_cobrado:               Number(r.frete_cobrado ?? 0),
         frete_motoboy:               Number(r.frete_motoboy ?? 0),
         total_venda:                 r.total_venda ? Number(r.total_venda) : null,

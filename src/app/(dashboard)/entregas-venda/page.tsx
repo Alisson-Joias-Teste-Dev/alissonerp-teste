@@ -35,7 +35,7 @@ const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_loja", "consultora"
 /** Item de entrega serializado para o client */
 export interface EntregaItem {
   id: number;
-  venda_id: number;
+  venda_id: number | null;
   codigo_entrega: string;
   tipo: string;
   situacao: string;
@@ -205,7 +205,7 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
   // IMPACTO SE REMOVIDO: frontend recebe strings e formatações/cálculos quebram.
   const items: EntregaItem[] = itemsResult.map((r: Record<string, unknown>) => ({
     id:                          Number(r.id),
-    venda_id:                    Number(r.venda_id),
+    venda_id:                    r.venda_id != null ? Number(r.venda_id) : null,
     codigo_entrega:              String(r.codigo_entrega ?? ""),
     tipo:                        String(r.tipo ?? ""),
     situacao:                    String(r.situacao ?? ""),

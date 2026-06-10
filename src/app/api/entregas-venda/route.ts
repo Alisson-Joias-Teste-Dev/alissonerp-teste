@@ -157,11 +157,14 @@ export async function GET(req: NextRequest) {
         ve.numero_venda,
         ve.total_venda,
         ve.situacao AS venda_situacao,
-        c.nome AS cliente_nome,
-        mb.nome AS motoboy_nome
+        COALESCE(c.nome, ca.nome) AS cliente_nome,
+        mb.nome AS motoboy_nome,
+        ev.is_avulso,
+        ev.descricao_avulso
       FROM alissonerp.entregas_venda ev
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
+      LEFT JOIN public.contatos ca ON ca.id_contato = ev.contato_id
       LEFT JOIN alissonerp.motoboys mb ON mb.user_id = ev.motoboy_id
       WHERE 1=1
         ${whereVendedor}
@@ -195,12 +198,14 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     items: items.map((r) => ({
       ...r,
-      venda_id: Number(r.venda_id),
+      venda_id: r.venda_id != null ? Number(r.venda_id) : null,
       motoboy_id: r.motoboy_id ? String(r.motoboy_id) : null,
       frete_cobrado: Number(r.frete_cobrado ?? 0),
       frete_motoboy: Number(r.frete_motoboy ?? 0),
       total_venda: r.total_venda ? Number(r.total_venda) : null,
       aprovacao_frete_necessaria: Boolean(r.aprovacao_frete_necessaria),
+      is_avulso: Boolean(r.is_avulso),
+      descricao_avulso: r.descricao_avulso ? String(r.descricao_avulso) : null,
     })),
     total,
     page,

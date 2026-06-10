@@ -239,6 +239,9 @@ export default function EntregaDetalheDrawer({
   const [cancelando, setCancelando] = useState(false);
   const [mostrarCancelarConfirm, setMostrarCancelarConfirm] = useState(false);
 
+  // Confirmação de frete avulso (sem código de verificação)
+  const [confirmandoAvulso, setConfirmandoAvulso] = useState(false);
+
   // Toggle visibilidade dos códigos (mascarados → completos)
   const [mostrarCodigos, setMostrarCodigos] = useState(false);
 
@@ -309,6 +312,22 @@ export default function EntregaDetalheDrawer({
     }
   }
 
+  /** Confirmar frete avulso (sem código — botão simples) */
+  async function handleConfirmarAvulso() {
+    if (!entregaId) return;
+    setConfirmandoAvulso(true);
+    try {
+      await apiFetch(`/api/entregas-venda/${entregaId}/confirmar-avulso`, {
+        method: "POST",
+      });
+      await carregar();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erro ao confirmar corrida.");
+    } finally {
+      setConfirmandoAvulso(false);
+    }
+  }
+
   /** Callback após confirmação ou rastreio bem-sucedidos */
   function handleRefresh() {
     void carregar();
@@ -330,9 +349,11 @@ export default function EntregaDetalheDrawer({
     isPendente && isMotoboy && !detalhe?.data_saida && !detalhe?.is_avulso;
   const podeCancelar = isPendente;
   const podeInformarCorreios =
-    !isCancelada;
+    !isCancelada && !detalhe?.is_avulso;
   const podeConfirmarEntregaCliente =
     isPendente && isMotoboy && !!detalhe?.data_saida && !detalhe?.is_avulso;
+  // Avulso confirma com botão simples, sem código nem registro de saída
+  const podeConfirmarAvulso = isPendente && !!detalhe?.is_avulso;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -1380,6 +1401,32 @@ export default function EntregaDetalheDrawer({
                 >
                   <CheckCircle size={14} />
                   Confirmar Entrega
+                </button>
+              )}
+
+              {/* Confirmar Corrida Avulsa (sem código) */}
+              {podeConfirmarAvulso && (
+                <button
+                  onClick={handleConfirmarAvulso}
+                  disabled={confirmandoAvulso}
+                  style={{
+                    padding: "10px 12px",
+                    background: C.verde,
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: confirmandoAvulso ? "not-allowed" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    opacity: confirmandoAvulso ? 0.6 : 1,
+                  }}
+                >
+                  <CheckCircle size={14} />
+                  {confirmandoAvulso ? "Confirmando..." : "Confirmar Entrega"}
                 </button>
               )}
 
