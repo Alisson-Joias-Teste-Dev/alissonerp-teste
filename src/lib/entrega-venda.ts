@@ -1082,6 +1082,29 @@ export async function confirmarEntrega(
     throw new Error("Código inválido");
   }
 
+  // ── Pré-validação: ordens de reposição pendentes ──────────────────────────
+  // REGRA DE NEGÓCIO: impede confirmar entrega se há reposição pendente,
+  // replicando a validação da trigger fn_estoque_comercial_entrega_venda
+  // mas com mensagem de erro clara antes de iniciar a transação pesada.
+  // POR QUE: a trigger do banco só dispara no UPDATE de vendas_erp setando
+  // situacao='entregue', que é o último passo. Se falhar lá, toda a transação
+  // (baixa estoque, atualização de entregas, etc) já rodou — desperdício e erro confuso.
+  // IMPACTO SE REMOVIDO: o erro volta a ser capturado apenas na trigger.
+  const [reposPendentes] = await sql`
+    SELECT COUNT(*)::integer AS total
+    FROM alissonerp.ordens o
+    WHERE o.venda_id = ${Number(entrega.venda_id)}
+      AND o.tipo_ordem = 'reposicao_venda'
+      AND o.situacao IN ('criado', 'rascunho')
+      AND o.status  != 'concluido'
+  `;
+
+  if (Number(reposPendentes.total) > 0) {
+    throw new Error(
+      `Entrega ${entrega.codigo_entrega} bloqueada: venda possui ${reposPendentes.total} ordem(ns) de reposição pendente(s). Conclua ou cancele antes de confirmar a entrega.`,
+    );
+  }
+
   // ─── Transação atômica ──────────────────────────────────────────────────
 
   const resultado = await sql.begin(async (tx: DbSql) => {

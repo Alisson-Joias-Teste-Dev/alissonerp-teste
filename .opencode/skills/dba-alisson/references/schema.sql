@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict X7xRK0VMVu0NARzwP1X0WMlkmaMy65iYkcfYRyBWQA6SZDybvfStW7y0jbo6wdc
+\restrict hKAZAC8WZPPlffXQd402JyVHlopbOpjQZkg4geVhYHiTE4c1TkzC1V90ssmr0NQ
 
 -- Dumped from database version 15.8
 -- Dumped by pg_dump version 15.18 (Ubuntu 15.18-1.pgdg24.04+1)
@@ -1776,11 +1776,15 @@ BEGIN
   IF OLD.situacao = 'entregue'  THEN RETURN NEW; END IF;
 
   -- 🔒 Bloquear entrega se a venda possui ordens de reposição pendentes
+  -- REGRA DE NEGÓCIO: situacao ('criado', 'rascunho') é o status do ciclo de vida
+  -- da ordem, mas quem indica conclusão é o campo status = 'concluido'.
+  -- Uma ordem 'criado' + 'concluido' já foi finalizada e não deve bloquear.
   SELECT COUNT(*) INTO v_pendentes
   FROM alissonerp.ordens
   WHERE venda_id = NEW.id
     AND tipo_ordem = 'reposicao_venda'
-    AND situacao IN ('criado', 'rascunho');
+    AND situacao IN ('criado', 'rascunho')
+    AND status  != 'concluido';
 
   IF v_pendentes > 0 THEN
     RAISE EXCEPTION 'ENTREGA_BLOCKED: Venda #% possui % ordem(ns) de reposição pendente(s). Conclua antes de marcar como entregue.',
@@ -2219,7 +2223,7 @@ CREATE FUNCTION alissonerp.fn_prevent_negative_sle() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-  IF NEW.voucher_type = 'inventario' THEN
+  IF NEW.voucher_type IN ('inventario', 'transferencia') THEN
     RETURN NEW;
   END IF;
   IF (SELECT COALESCE(SUM(actual_qty), 0) + NEW.actual_qty
@@ -6523,87 +6527,6 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
--- Name: _backup_fn_processar_fechamento_dist_pre_guard_20260429; Type: TABLE; Schema: alissonerp; Owner: -
---
-
-CREATE TABLE alissonerp._backup_fn_processar_fechamento_dist_pre_guard_20260429 (
-    info text
-);
-
-
---
--- Name: _backup_servicos_20260331; Type: TABLE; Schema: alissonerp; Owner: -
---
-
-CREATE TABLE alissonerp._backup_servicos_20260331 (
-    id integer,
-    ordem_id integer,
-    pcp_id integer,
-    operador_id integer,
-    tentativa integer,
-    peso_entrada numeric(10,2),
-    peso_saida numeric(10,2),
-    usou_solda boolean,
-    peso_fio_antes numeric(10,2),
-    peso_fio_depois numeric(10,2),
-    consumo_solda numeric(10,2),
-    colocou_pedra boolean,
-    pedras_colocadas jsonb,
-    status character varying(20),
-    foto_recebimento text,
-    foto_conclusao text,
-    foto_fio_solda text,
-    recebido_em timestamp with time zone,
-    concluido_em timestamp with time zone,
-    concluido_por uuid,
-    created_at timestamp with time zone,
-    motivo_reprovacao text,
-    foto_reprovacao text,
-    reprovado_em timestamp with time zone,
-    reprovado_por uuid
-);
-
-
---
--- Name: _backup_tedmd_20260313; Type: TABLE; Schema: alissonerp; Owner: -
---
-
-CREATE TABLE alissonerp._backup_tedmd_20260313 (
-    id bigint,
-    entrada real,
-    saida real,
-    insumo_id integer,
-    deposito_id integer,
-    setor_id integer,
-    ordem_id integer,
-    marcador alissonerp.enum_marcador_estoque,
-    obs text,
-    data_hora timestamp with time zone,
-    valor_total numeric(12,2),
-    preco_compra numeric(12,2),
-    created_at timestamp with time zone,
-    created_by uuid
-);
-
-
---
--- Name: _backup_transferservice_20260331; Type: TABLE; Schema: alissonerp; Owner: -
---
-
-CREATE TABLE alissonerp._backup_transferservice_20260331 (
-    id integer,
-    pcp_id integer,
-    ordem_id integer,
-    setor_id integer,
-    deposito_id integer,
-    obs text,
-    created_at timestamp with time zone,
-    updated_at timestamp with time zone,
-    created_by uuid
-);
-
-
---
 -- Name: api_chaves; Type: TABLE; Schema: alissonerp; Owner: -
 --
 
@@ -7097,55 +7020,6 @@ CREATE SEQUENCE alissonerp.automacoes_tarefa_id_seq
 --
 
 ALTER SEQUENCE alissonerp.automacoes_tarefa_id_seq OWNED BY alissonerp.automacoes_tarefa.id;
-
-
---
--- Name: backup_estorno_inv_20260517; Type: TABLE; Schema: alissonerp; Owner: -
---
-
-CREATE TABLE alissonerp.backup_estorno_inv_20260517 (
-    id bigint NOT NULL,
-    mov_id bigint,
-    sle_id bigint,
-    item_inv_id integer,
-    executado_em timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: backup_estorno_inv_20260517_id_seq; Type: SEQUENCE; Schema: alissonerp; Owner: -
---
-
-CREATE SEQUENCE alissonerp.backup_estorno_inv_20260517_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: backup_estorno_inv_20260517_id_seq; Type: SEQUENCE OWNED BY; Schema: alissonerp; Owner: -
---
-
-ALTER SEQUENCE alissonerp.backup_estorno_inv_20260517_id_seq OWNED BY alissonerp.backup_estorno_inv_20260517.id;
-
-
---
--- Name: backup_pre_limpeza_20260315; Type: TABLE; Schema: alissonerp; Owner: -
---
-
-CREATE TABLE alissonerp.backup_pre_limpeza_20260315 (
-    src text,
-    id bigint,
-    ordem_id integer,
-    insumo_id integer,
-    deposito_id integer,
-    entrada real,
-    saida real,
-    marcador alissonerp.enum_marcador_estoque,
-    data_hora timestamp with time zone
-);
 
 
 --
@@ -18901,69 +18775,6 @@ ALTER SEQUENCE alissonerp.webhook_log_id_seq OWNED BY alissonerp.webhook_log.id;
 
 
 --
--- Name: backup_itens_venda_3313; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.backup_itens_venda_3313 (
-    id integer,
-    venda_id integer,
-    produto_id integer,
-    sku text,
-    quantidade numeric(10,2),
-    preco_tabela numeric(10,2),
-    preco_unitario_final numeric(10,2),
-    preco_total numeric(10,2),
-    desconto_percentual numeric(10,2),
-    desconto_valor numeric(10,2),
-    comissao_valor numeric(10,2),
-    comissao_percentual numeric,
-    n8n boolean
-);
-
-
---
--- Name: backup_itens_venda_pre_correcao_marco; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.backup_itens_venda_pre_correcao_marco (
-    id integer,
-    venda_id integer,
-    produto_id integer,
-    sku text,
-    quantidade numeric(10,2),
-    preco_tabela numeric(10,2),
-    preco_unitario_final numeric(10,2),
-    preco_total numeric(10,2),
-    desconto_percentual numeric(10,2),
-    desconto_valor numeric(10,2),
-    comissao_valor numeric(10,2),
-    comissao_percentual numeric,
-    n8n boolean
-);
-
-
---
--- Name: backup_itens_venda_test_3313; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.backup_itens_venda_test_3313 (
-    id integer,
-    venda_id integer,
-    produto_id integer,
-    sku text,
-    quantidade numeric(10,2),
-    preco_tabela numeric(10,2),
-    preco_unitario_final numeric(10,2),
-    preco_total numeric(10,2),
-    desconto_percentual numeric(10,2),
-    desconto_valor numeric(10,2),
-    comissao_valor numeric(10,2),
-    comissao_percentual numeric,
-    n8n boolean
-);
-
-
---
 -- Name: banco_imagens; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -20764,32 +20575,6 @@ ALTER TABLE public.forma_envio ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENT
 
 
 --
--- Name: loock; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.loock (
-    id bigint NOT NULL,
-    flow_name character varying,
-    "timestamp" timestamp without time zone,
-    status character varying
-);
-
-
---
--- Name: look_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-ALTER TABLE public.loock ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTITY (
-    SEQUENCE NAME public.look_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
-);
-
-
---
 -- Name: map_asana; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -21394,16 +21179,6 @@ ALTER SEQUENCE public.suporte_conversas_id_seq OWNED BY public.suporte_conversas
 
 
 --
--- Name: teste; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.teste (
-    id integer,
-    teste character varying
-);
-
-
---
 -- Name: tipos_contatos; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -21750,13 +21525,6 @@ ALTER TABLE ONLY alissonerp.automacoes_execucoes ALTER COLUMN id SET DEFAULT nex
 --
 
 ALTER TABLE ONLY alissonerp.automacoes_tarefa ALTER COLUMN id SET DEFAULT nextval('alissonerp.automacoes_tarefa_id_seq'::regclass);
-
-
---
--- Name: backup_estorno_inv_20260517 id; Type: DEFAULT; Schema: alissonerp; Owner: -
---
-
-ALTER TABLE ONLY alissonerp.backup_estorno_inv_20260517 ALTER COLUMN id SET DEFAULT nextval('alissonerp.backup_estorno_inv_20260517_id_seq'::regclass);
 
 
 --
@@ -22960,14 +22728,6 @@ ALTER TABLE ONLY alissonerp.automacoes_execucoes
 
 ALTER TABLE ONLY alissonerp.automacoes_tarefa
     ADD CONSTRAINT automacoes_tarefa_pkey PRIMARY KEY (id);
-
-
---
--- Name: backup_estorno_inv_20260517 backup_estorno_inv_20260517_pkey; Type: CONSTRAINT; Schema: alissonerp; Owner: -
---
-
-ALTER TABLE ONLY alissonerp.backup_estorno_inv_20260517
-    ADD CONSTRAINT backup_estorno_inv_20260517_pkey PRIMARY KEY (id);
 
 
 --
@@ -25240,22 +25000,6 @@ ALTER TABLE ONLY public.forma_envio
 
 ALTER TABLE ONLY public.forma_envio
     ADD CONSTRAINT logistica_pkey PRIMARY KEY (id);
-
-
---
--- Name: loock look_id_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.loock
-    ADD CONSTRAINT look_id_key UNIQUE (id);
-
-
---
--- Name: loock look_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.loock
-    ADD CONSTRAINT look_pkey PRIMARY KEY (id);
 
 
 --
@@ -33117,13 +32861,6 @@ CREATE POLICY "Alisson ERP" ON public.meio_pagamento USING (true);
 
 
 --
--- Name: leads Alisson erp; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY "Alisson erp" ON public.leads USING (true) WITH CHECK (true);
-
-
---
 -- Name: ficha_tecnica_orcamento Allow insert ficha tecnica; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -33208,13 +32945,6 @@ CREATE POLICY "Direcuts-insert" ON public.itens_venda FOR INSERT TO directus WIT
 
 
 --
--- Name: contatos Enable read access for all users; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY "Enable read access for all users" ON public.contatos USING (true);
-
-
---
 -- Name: vendedores Select; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -33247,13 +32977,6 @@ CREATE POLICY "Sistema de Metas" ON public.vendedores TO anon USING (true) WITH 
 --
 
 CREATE POLICY "alisson erp" ON public.itens_venda USING (true) WITH CHECK (true);
-
-
---
--- Name: vendas alisson erp; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY "alisson erp" ON public.vendas USING (true) WITH CHECK (true);
 
 
 --
@@ -33351,6 +33074,13 @@ ALTER TABLE public.contas_a_receber ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.contatos ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: contatos contatos_auth_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY contatos_auth_select ON public.contatos FOR SELECT TO authenticated USING (true);
+
+
+--
 -- Name: controle_de_execucao; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -33442,13 +33172,6 @@ CREATE POLICY directus_delete_historico_preco ON public.historico_preco FOR DELE
 --
 
 CREATE POLICY directus_delete_itens_pedido ON public.itens_pedido FOR DELETE TO directus USING (true);
-
-
---
--- Name: loock directus_delete_loock; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY directus_delete_loock ON public.loock FOR DELETE TO directus USING (true);
 
 
 --
@@ -33564,13 +33287,6 @@ CREATE POLICY directus_insert_itens_pedido ON public.itens_pedido FOR INSERT TO 
 
 
 --
--- Name: loock directus_insert_loock; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY directus_insert_loock ON public.loock FOR INSERT TO directus WITH CHECK (true);
-
-
---
 -- Name: pagamentos directus_insert_pagamentos; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -33683,13 +33399,6 @@ CREATE POLICY directus_select_itens_pedido ON public.itens_pedido FOR SELECT TO 
 
 
 --
--- Name: loock directus_select_loock; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY directus_select_loock ON public.loock FOR SELECT TO directus USING (true);
-
-
---
 -- Name: pagamentos directus_select_pagamentos; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -33799,13 +33508,6 @@ CREATE POLICY directus_update_historico_preco ON public.historico_preco FOR UPDA
 --
 
 CREATE POLICY directus_update_itens_pedido ON public.itens_pedido FOR UPDATE TO directus USING (true) WITH CHECK (true);
-
-
---
--- Name: loock directus_update_loock; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY directus_update_loock ON public.loock FOR UPDATE TO directus USING (true) WITH CHECK (true);
 
 
 --
@@ -34052,12 +33754,6 @@ ALTER TABLE public.itens_venda ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.leads ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: loock; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.loock ENABLE ROW LEVEL SECURITY;
-
---
 -- Name: map_asana; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -34203,6 +33899,13 @@ ALTER TABLE public.vales_troca ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.vendas ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: vendas vendas_directus_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY vendas_directus_all ON public.vendas TO directus USING (true) WITH CHECK (true);
+
+
+--
 -- Name: vendedores; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -34212,5 +33915,5 @@ ALTER TABLE public.vendedores ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict X7xRK0VMVu0NARzwP1X0WMlkmaMy65iYkcfYRyBWQA6SZDybvfStW7y0jbo6wdc
+\unrestrict hKAZAC8WZPPlffXQd402JyVHlopbOpjQZkg4geVhYHiTE4c1TkzC1V90ssmr0NQ
 
