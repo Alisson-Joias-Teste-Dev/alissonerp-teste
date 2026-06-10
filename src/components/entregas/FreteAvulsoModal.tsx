@@ -70,6 +70,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado }: Props) {
   const [contatoSelecionado, setContatoSelecionado] = useState<Contato | null>(null);
   const [buscandoContato, setBuscandoContato] = useState(false);
 
+  const [freteNegociado, setFreteNegociado] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
   const [sucesso, setSucesso] = useState(false);
@@ -108,6 +109,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado }: Props) {
     setRegiao("fortaleza");
     setDescricao("");
     setObservacoes("");
+    setFreteNegociado("");
     setBuscaContato("");
     setContatos([]);
     setContatoSelecionado(null);
@@ -126,12 +128,14 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado }: Props) {
     setEnviando(true);
 
     try {
+      const freteNegociadoNum = freteNegociado ? parseFloat(freteNegociado.replace(",", ".")) : undefined;
       await apiFetch("/api/entregas-venda/frete-avulso", {
         method: "POST",
         body: JSON.stringify({
           motoboyId,
           regiao,
           freteCobrado: 0,
+          freteMotoboyOverride: freteNegociadoNum && freteNegociadoNum > 0 ? freteNegociadoNum : undefined,
           descricaoAvulso: descricao.trim(),
           contatoId: contatoSelecionado?.id_contato,
           observacoes: observacoes.trim() || undefined,
@@ -270,6 +274,31 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado }: Props) {
                   Motoboy recebe: R${freteCalculado.toFixed(2)} — descontado do saldo de frete grátis
                 </p>
               )}
+              {freteCalculado === 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: C.cinza, display: "block", marginBottom: 4 }}>
+                    Valor negociado com o motoboy (R$) *
+                  </label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    placeholder="Ex: 35,00"
+                    value={freteNegociado}
+                    onChange={e => setFreteNegociado(e.target.value)}
+                    style={{
+                      width: "100%", padding: "8px 12px", borderRadius: 8,
+                      border: `1px solid ${C.cremeBorder}`, fontSize: 13,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  {freteNegociado && parseFloat(freteNegociado.replace(",", ".")) > 0 && (
+                    <p style={{ fontSize: 11, color: C.cinza, marginTop: 4 }}>
+                      Motoboy recebe: R${parseFloat(freteNegociado.replace(",", ".")).toFixed(2)} — descontado do saldo de frete grátis
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Cliente (opcional) */}
@@ -363,14 +392,14 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado }: Props) {
             {/* Botão */}
             <button
               type="submit"
-              disabled={enviando || !motoboyId || !descricao.trim() || !regiao}
+              disabled={enviando || !motoboyId || !descricao.trim() || !regiao || (freteCalculado === 0 && !(freteNegociado && parseFloat(freteNegociado.replace(",", ".")) > 0))}
               style={{
                 width: "100%", padding: "12px 0",
                 background: C.esmeralda, color: "#fff",
                 border: "none", borderRadius: 10,
                 fontSize: 14, fontWeight: 700, cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                opacity: (enviando || !motoboyId || !descricao.trim()) ? 0.6 : 1,
+                opacity: (enviando || !motoboyId || !descricao.trim() || (freteCalculado === 0 && !(freteNegociado && parseFloat(freteNegociado.replace(",", ".")) > 0))) ? 0.6 : 1,
               }}
             >
               {enviando ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Bike size={16} />}

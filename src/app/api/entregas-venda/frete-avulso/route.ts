@@ -24,6 +24,7 @@ const FreteAvulsoSchema = z.object({
   motoboyId: z.string().uuid("motoboyId deve ser um UUID válido"),
   regiao: z.enum(["fortaleza", "fora_fortaleza", "longe", "correios"]),
   freteCobrado: z.number().nonnegative("freteCobrado não pode ser negativo"),
+  freteMotoboyOverride: z.number().positive().optional(),
   descricaoAvulso: z.string().min(1, "Descrição da corrida é obrigatória").max(500),
   contatoId: z.number().int().positive().optional(),
   observacoes: z.string().max(2000).optional(),

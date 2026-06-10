@@ -1650,6 +1650,7 @@ export interface CriarFreteAvulsoParams {
   motoboyId: string; // UUID — obrigatório
   regiao: "fortaleza" | "fora_fortaleza" | "longe" | "correios";
   freteCobrado: number;
+  freteMotoboyOverride?: number; // usado em longe/correios onde frete=0 e valor é negociado
   descricaoAvulso?: string;
   contatoId?: number;
   observacoes?: string;
@@ -1701,7 +1702,8 @@ export async function criarFreteAvulso(
     throw new Error("Valor do frete não pode ser negativo.");
   }
 
-  const freteMotoboy = calcularValorMotoboy(params.regiao);
+  const freteBase = calcularValorMotoboy(params.regiao);
+  const freteMotoboy = freteBase > 0 ? freteBase : money(params.freteMotoboyOverride ?? 0);
   const freteCobrado = money(params.freteCobrado);
 
   const resultado = await sql.begin(async (tx: DbSql) => {
