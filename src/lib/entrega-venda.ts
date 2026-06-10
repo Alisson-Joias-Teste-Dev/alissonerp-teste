@@ -1637,3 +1637,248 @@ function montarMovimentacao(r: any): MovimentacaoFrete {
     createdAt: String(r.created_at),
   };
 }
+
+// ─── 10. Frete Avulso ─────────────────────────────────────────────────────────
+
+/**
+ * Parâmetros para criação de frete avulso (corrida sem venda vinculada).
+ * REGRA DE NEGÓCIO: avulso não tem venda, itens ou código de verificação.
+ * Motoboy e frete_cobrado são obrigatórios. Cliente e descrição são opcionais.
+ * IMPACTO SE ALTERADO: avulso sem motoboy não pode ser confirmado depois.
+ */
+export interface CriarFreteAvulsoParams {
+  motoboyId: string; // UUID — obrigatório
+  regiao: "fortaleza" | "fora_fortaleza" | "longe" | "correios";
+  freteCobrado: number;
+  descricaoAvulso?: string;
+  contatoId?: number;
+  observacoes?: string;
+}
+
+/** Resultado da criação de frete avulso */
+export interface FreteAvulso {
+  id: number;
+  codigoEntrega: string;
+  situacao: string;
+  regiao: string;
+  motoboyId: string;
+  freteCobrado: number;
+  freteMotoboy: number;
+  descricaoAvulso: string | null;
+  contatoId: number | null;
+  clienteNome: string | null;
+  observacoes: string | null;
+  createdAt: string;
+  motoboyNome: string | null;
+  motoboyTelefone: string | null;
+}
+
+/**
+ * Cria um frete avulso — corrida de motoboy sem venda vinculada.
+ *
+ * REGRA DE NEGÓCIO: frete avulso não tem itens, não tem código de verificação
+ * e não dispara WhatsApp. O motoboy confirma com botão simples no app.
+ * O valor do frete_motoboy é calculado pela região (igual às entregas normais)
+ * e entra no acerto financeiro do motoboy normalmente.
+ *
+ * O QUE: insere linha em entregas_venda com is_avulso=true, venda_id=NULL,
+ * codigo_cliente=NULL, codigo_motoboy=NULL e registra auditoria.
+ *
+ * POR QUE: reutiliza a infraestrutura de motoboys, saldo de frete e pagamento
+ * sem duplicar tabelas. A constraint chk_entrega_origem garante consistência.
+ *
+ * IMPACTO SE ALTERADO: avulsas confirmadas vão para pagamento de motoboys —
+ * não alterar frete_motoboy sem ajustar o acerto.
+ */
+export async function criarFreteAvulso(
+  params: CriarFreteAvulsoParams,
+  userId: string,
+): Promise<FreteAvulso> {
+  if (!params.motoboyId) {
+    throw new Error("Motoboy é obrigatório para frete avulso.");
+  }
+  if (params.freteCobrado < 0) {
+    throw new Error("Valor do frete não pode ser negativo.");
+  }
+
+  const freteMotoboy = calcularValorMotoboy(params.regiao);
+  const freteCobrado = money(params.freteCobrado);
+
+  const resultado = await sql.begin(async (tx: DbSql) => {
+    const codigoEntrega = await gerarCodigoEntrega(tx);
+
+    const [row] = await tx`
+      INSERT INTO alissonerp.entregas_venda (
+        is_avulso, venda_id,
+        contato_id, descricao_avulso,
+        codigo_entrega, codigo_cliente, codigo_motoboy,
+        tipo, forma_entrega, situacao, regiao,
+        motoboy_id, frete_cobrado, frete_motoboy,
+        aprovacao_frete_necessaria, observacoes,
+        created_by
+      ) VALUES (
+        true, NULL,
+        ${params.contatoId ?? null}, ${params.descricaoAvulso ?? null},
+        ${codigoEntrega}, NULL, NULL,
+        'total', 'motoboy', 'pendente', ${params.regiao},
+        ${params.motoboyId}::uuid, ${freteCobrado}, ${freteMotoboy},
+        false, ${params.observacoes ?? null},
+        ${userId}::uuid
+      )
+      RETURNING *
+    `;
+
+    const entregaId = Number(row.id);
+
+    // REGRA DE NEGÓCIO: saldo de frete da gerente também se aplica a avulsas.
+    // Avulso sempre consome saldo (o frete_motoboy é custo da loja).
+    // Se frete_cobrado > frete_motoboy: crédito (sobra).
+    // Se frete_cobrado < frete_motoboy: débito (déficit).
+    if (freteMotoboy > 0 || freteCobrado > 0) {
+      const diff = money(freteCobrado - freteMotoboy);
+      if (diff !== 0) {
+        const [gerente] = await tx`
+          SELECT id FROM alissonerp.usuarios
+          WHERE role = 'gerente_loja' AND ativo = true
+          ORDER BY created_at LIMIT 1
+        `;
+        const gerenteId = (gerente?.id as string) ?? userId;
+        const saldoAntes = await obterSaldoFreteGerenteNoTx(tx, gerenteId);
+
+        if (diff > 0) {
+          await tx`
+            INSERT INTO alissonerp.saldo_frete_gratis
+              (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
+            VALUES
+              (${gerenteId}::uuid, 'credito', ${diff}, ${saldoAntes}, ${money(saldoAntes + diff)},
+               ${entregaId}, NULL,
+               ${`Frete avulso cobrado ${fmBRL(freteCobrado)} > motoboy ${fmBRL(freteMotoboy)}`},
+               ${userId}::uuid)
+          `;
+        } else {
+          const debito = Math.abs(diff);
+          await tx`
+            INSERT INTO alissonerp.saldo_frete_gratis
+              (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
+            VALUES
+              (${gerenteId}::uuid, 'debito', ${debito}, ${saldoAntes}, ${money(saldoAntes - debito)},
+               ${entregaId}, NULL,
+               ${`Frete avulso cobrado ${fmBRL(freteCobrado)} < motoboy ${fmBRL(freteMotoboy)}`},
+               ${userId}::uuid)
+          `;
+        }
+      }
+    }
+
+    await logAudit(tx, {
+      tabela: "entregas_venda",
+      operacao: "INSERT",
+      registro_id: entregaId,
+      usuario_id: userId,
+      dados_depois: {
+        is_avulso: true,
+        codigo_entrega: codigoEntrega,
+        motoboy_id: params.motoboyId,
+        regiao: params.regiao,
+        frete_cobrado: freteCobrado,
+        frete_motoboy: freteMotoboy,
+        descricao_avulso: params.descricaoAvulso ?? null,
+      },
+    });
+
+    return row;
+  }) as Record<string, unknown>;
+
+  // Buscar nome/telefone do motoboy para retornar na resposta
+  const [motoboy] = await sql`
+    SELECT nome, telefone FROM alissonerp.motoboys
+    WHERE user_id = ${params.motoboyId}::uuid AND ativo = true LIMIT 1
+  `;
+
+  // Buscar nome do contato se informado
+  let clienteNome: string | null = null;
+  if (params.contatoId) {
+    const [contato] = await sql`
+      SELECT nome FROM public.contatos WHERE id_contato = ${params.contatoId} LIMIT 1
+    `;
+    clienteNome = contato?.nome ? String(contato.nome) : null;
+  }
+
+  return {
+    id: Number(resultado.id),
+    codigoEntrega: String(resultado.codigo_entrega),
+    situacao: String(resultado.situacao),
+    regiao: String(resultado.regiao),
+    motoboyId: String(resultado.motoboy_id),
+    freteCobrado: money(resultado.frete_cobrado),
+    freteMotoboy: money(resultado.frete_motoboy),
+    descricaoAvulso: resultado.descricao_avulso ? String(resultado.descricao_avulso) : null,
+    contatoId: resultado.contato_id ? Number(resultado.contato_id) : null,
+    clienteNome,
+    observacoes: resultado.observacoes ? String(resultado.observacoes) : null,
+    createdAt: String(resultado.created_at),
+    motoboyNome: motoboy?.nome ? String(motoboy.nome) : null,
+    motoboyTelefone: motoboy?.telefone ? String(motoboy.telefone) : null,
+  };
+}
+
+/**
+ * Confirma um frete avulso (sem código de verificação).
+ *
+ * REGRA DE NEGÓCIO: avulso não usa código A/B. O motoboy clica "Confirmar"
+ * no app e isso encerra a corrida. Apenas o motoboy dono da entrega ou
+ * admin/gerente podem confirmar.
+ *
+ * O QUE: valida que a entrega é avulsa e está pendente, depois atualiza
+ * situacao='confirmada' e data_entrega_realizada=now().
+ *
+ * IMPACTO SE ALTERADO: entrega confirmada entra no acerto do motoboy.
+ * Não duplicar confirmação (guard situacao='pendente').
+ */
+export async function confirmarFreteAvulso(
+  entregaId: number,
+  usuarioId: string,
+): Promise<void> {
+  const [entrega] = await sql`
+    SELECT id, situacao, codigo_entrega, is_avulso, motoboy_id
+    FROM alissonerp.entregas_venda
+    WHERE id = ${entregaId}
+  `;
+
+  if (!entrega) {
+    throw new Error(`Entrega ${entregaId} não encontrada.`);
+  }
+
+  if (!entrega.is_avulso) {
+    throw new Error("Esta rota é exclusiva para fretes avulsos.");
+  }
+
+  if (entrega.situacao === "confirmada") {
+    throw new Error(`Entrega ${entrega.codigo_entrega} já foi confirmada.`);
+  }
+
+  if (entrega.situacao === "cancelada") {
+    throw new Error(`Entrega ${entrega.codigo_entrega} está cancelada.`);
+  }
+
+  await sql.begin(async (tx: DbSql) => {
+    await tx`
+      UPDATE alissonerp.entregas_venda
+      SET
+        situacao = 'confirmada',
+        data_entrega_realizada = now(),
+        confirmado_por_motoboy_entrega = ${usuarioId}::uuid,
+        updated_at = now()
+      WHERE id = ${entregaId}
+    `;
+
+    await logAudit(tx, {
+      tabela: "entregas_venda",
+      operacao: "UPDATE",
+      registro_id: entregaId,
+      usuario_id: usuarioId,
+      dados_antes: { situacao: entrega.situacao },
+      dados_depois: { situacao: "confirmada", is_avulso: true },
+    });
+  });
+}

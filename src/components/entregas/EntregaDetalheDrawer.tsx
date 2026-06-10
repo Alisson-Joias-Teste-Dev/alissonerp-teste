@@ -133,6 +133,8 @@ interface EntregaDetalhe {
     sku: string;
   }>;
   itens_count: number;
+  is_avulso: boolean;
+  descricao_avulso: string | null;
 }
 
 // ── Props ───────────────────────────────────────────────────────────────────────
@@ -247,7 +249,7 @@ export default function EntregaDetalheDrawer({
   // REGRA DE SEGURANÇA: seção de códigos visível apenas para admin,
   // desenvolvedor e entregador (motoboy). Consultora, gerente etc
   // não precisam ver os códigos — só digitam o que o cliente informa.
-  const podeVerSecaoCodigos = podeVerCodigos || userRole === "entregador";
+  const podeVerSecaoCodigos = (podeVerCodigos || userRole === "entregador") && !detalhe?.is_avulso;
 
   // ── Carregar detalhe ────────────────────────────────────────────────────────
 
@@ -323,14 +325,14 @@ export default function EntregaDetalheDrawer({
 
   // Ações disponíveis
   const podeConfirmarRetirada =
-    isPendente && isRetirada;
+    isPendente && isRetirada && !detalhe?.is_avulso;
   const podeRegistrarSaida =
-    isPendente && isMotoboy && !detalhe?.data_saida;
+    isPendente && isMotoboy && !detalhe?.data_saida && !detalhe?.is_avulso;
   const podeCancelar = isPendente;
   const podeInformarCorreios =
     !isCancelada;
   const podeConfirmarEntregaCliente =
-    isPendente && isMotoboy && !!detalhe?.data_saida;
+    isPendente && isMotoboy && !!detalhe?.data_saida && !detalhe?.is_avulso;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -561,21 +563,28 @@ export default function EntregaDetalheDrawer({
                 >
                   Venda
                 </div>
-                <a
-                  href={`/vendas/${detalhe.venda_id}`}
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: C.esmeralda,
-                    textDecoration: "none",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 4,
-                  }}
-                >
-                  {detalhe.numero_venda ?? `#${detalhe.venda_id}`}
-                  <ExternalLink size={11} />
-                </a>
+                {detalhe.is_avulso ? (
+                  <span style={{
+                    fontSize: 12, fontWeight: 700, color: "#7c3aed",
+                    background: "#f3e8ff", padding: "2px 8px", borderRadius: 10,
+                  }}>Avulso</span>
+                ) : (
+                  <a
+                    href={`/vendas/${detalhe.venda_id}`}
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: C.esmeralda,
+                      textDecoration: "none",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    {detalhe.numero_venda ?? `#${detalhe.venda_id}`}
+                    <ExternalLink size={11} />
+                  </a>
+                )}
               </div>
               <div>
                 <div
@@ -769,7 +778,20 @@ export default function EntregaDetalheDrawer({
               </div>
             </div>
 
+            {/* ── Descrição (avulso) ──────────────────────────────────── */}
+            {detalhe.is_avulso && detalhe.descricao_avulso && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
+                <Bike size={13} /> Corrida Avulsa
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 8, border: `1px solid #e9d5ff`, background: "#faf5ff", fontSize: 13, color: "#6b21a8" }}>
+                {detalhe.descricao_avulso}
+              </div>
+            </div>
+            )}
+
             {/* ── Itens ───────────────────────────────────────────────────── */}
+            {!detalhe.is_avulso && (
             <div style={{ marginBottom: 20 }}>
               <div
                 style={{
@@ -851,6 +873,7 @@ export default function EntregaDetalheDrawer({
                 ))}
               </div>
             </div>
+            )}
 
             {/* ── Transporte ───────────────────────────────────────────────── */}
             <div style={{ marginBottom: 20 }}>

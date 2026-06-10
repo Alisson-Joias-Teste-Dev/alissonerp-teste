@@ -48,6 +48,8 @@ interface EntregaMotoboy {
   total_venda: number | null;
   cliente_nome: string | null;
   foi_pago: boolean;
+  is_avulso: boolean;
+  descricao_avulso: string | null;
 }
 
 interface Cards {
@@ -85,6 +87,9 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
 
   // Drawer de detalhe
   const [selectedEntregaId, setSelectedEntregaId] = useState<number | null>(null);
+
+  // Confirmação de avulso
+  const [confirmandoAvulso, setConfirmandoAvulso] = useState<number | null>(null);
 
   // Filtro de período
   const [periodo, setPeriodo] = useState("");
@@ -336,7 +341,7 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                     </div>
                   </div>
 
-                  {/* Linha 2: cliente + venda + pago */}
+                  {/* Linha 2: cliente + venda/avulso + pago */}
                   <div style={{
                     display: "flex", justifyContent: "space-between",
                     alignItems: "center", fontSize: 12, color: C.cinza,
@@ -346,7 +351,10 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                         {item.cliente_nome ?? "—"}
                       </span>
                       <span style={{ margin: "0 6px", color: C.cremeBorder }}>·</span>
-                      Venda {item.numero_venda ?? "—"}
+                      {item.is_avulso
+                        ? <span style={{ color: "#6D28D9", fontWeight: 600 }}>{item.descricao_avulso ?? "Corrida avulsa"}</span>
+                        : `Venda ${item.numero_venda ?? "—"}`
+                      }
                     </div>
                     <span style={{
                       fontSize: 10, fontWeight: 600,
@@ -357,6 +365,41 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                       {item.foi_pago ? "Pago" : "—"}
                     </span>
                   </div>
+
+                  {/* Botão confirmar avulso (só para pendentes avulsas) */}
+                  {item.is_avulso && item.situacao === "pendente" && (
+                    <div style={{ marginTop: 10 }} onClick={e => e.stopPropagation()}>
+                      <button
+                        disabled={confirmandoAvulso === item.id}
+                        onClick={async () => {
+                          setConfirmandoAvulso(item.id);
+                          try {
+                            const { apiFetch } = await import("@/lib/apiFetch");
+                            await apiFetch(`/api/entregas-venda/${item.id}/confirmar-avulso`, { method: "POST" });
+                            await carregar();
+                          } catch (e) {
+                            alert(e instanceof Error ? e.message : "Erro ao confirmar");
+                          } finally {
+                            setConfirmandoAvulso(null);
+                          }
+                        }}
+                        style={{
+                          width: "100%", padding: "8px 0",
+                          background: C.esmeralda, color: "#fff",
+                          border: "none", borderRadius: 8,
+                          fontSize: 13, fontWeight: 700, cursor: "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                          opacity: confirmandoAvulso === item.id ? 0.6 : 1,
+                        }}
+                      >
+                        {confirmandoAvulso === item.id
+                          ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                          : <CheckCircle size={14} />
+                        }
+                        Confirmar Entrega
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}

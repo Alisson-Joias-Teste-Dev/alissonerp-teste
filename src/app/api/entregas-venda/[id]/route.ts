@@ -77,6 +77,8 @@ export async function GET(
         ev.created_at,
         ev.updated_at,
         ev.foto_entrega_path,
+        ev.is_avulso,
+        ev.descricao_avulso,
         -- Dados da venda vinculada
         ve.numero_venda,
         ve.total_venda,
@@ -196,6 +198,8 @@ export async function GET(
     created_at: e.created_at,
     updated_at: e.updated_at,
     foto_entrega_path: e.foto_entrega_path ?? null,
+    is_avulso: Boolean(e.is_avulso),
+    descricao_avulso: e.descricao_avulso ?? null,
     // Dados da venda
     numero_venda: e.numero_venda,
     total_venda: e.total_venda ? Number(e.total_venda) : null,
