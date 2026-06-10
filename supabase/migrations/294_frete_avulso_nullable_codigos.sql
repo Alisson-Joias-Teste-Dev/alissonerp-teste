@@ -14,11 +14,12 @@ ALTER TABLE alissonerp.entregas_venda
   ALTER COLUMN codigo_motoboy DROP NOT NULL;
 
 -- Constraint que garante: entrega normal (is_avulso=false) ainda exige os códigos
+-- NOT VALID: 17 registros históricos (pré-avulso) têm codigo_motoboy=NULL; grandfathered
 ALTER TABLE alissonerp.entregas_venda
   ADD CONSTRAINT chk_codigos_obrigatorios
     CHECK (
       is_avulso = true
       OR (codigo_cliente IS NOT NULL AND codigo_motoboy IS NOT NULL)
-    );
+    ) NOT VALID;
 
 COMMIT;
