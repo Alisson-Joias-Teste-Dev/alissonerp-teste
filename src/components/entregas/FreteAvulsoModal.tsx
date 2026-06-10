@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { X, Loader2, CheckCircle, Bike, MapPin, DollarSign, AlignLeft, User } from "lucide-react";
+import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, User } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 
 const C = {
@@ -61,7 +61,6 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado }: Props) {
   const [motoboys, setMotoboys] = useState<Motoboy[]>([]);
   const [motoboyId, setMotoboyId] = useState("");
   const [regiao, setRegiao] = useState<Regiao>("fortaleza");
-  const [freteCobrado, setFreteCobrado] = useState("");
   const [descricao, setDescricao] = useState("");
   const [observacoes, setObservacoes] = useState("");
 
@@ -107,7 +106,6 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado }: Props) {
   function resetar() {
     setMotoboyId("");
     setRegiao("fortaleza");
-    setFreteCobrado("");
     setDescricao("");
     setObservacoes("");
     setBuscaContato("");
@@ -127,15 +125,13 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado }: Props) {
     setErro("");
     setEnviando(true);
 
-    const freteCobradoNum = parseFloat(freteCobrado.replace(",", ".")) || 0;
-
     try {
       await apiFetch("/api/entregas-venda/frete-avulso", {
         method: "POST",
         body: JSON.stringify({
           motoboyId,
           regiao,
-          freteCobrado: freteCobradoNum,
+          freteCobrado: 0,
           descricaoAvulso: descricao.trim(),
           contatoId: contatoSelecionado?.id_contato,
           observacoes: observacoes.trim() || undefined,
@@ -269,46 +265,11 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado }: Props) {
                   </button>
                 ))}
               </div>
-            </div>
-
-            {/* Frete cobrado */}
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                <DollarSign size={13} /> Valor cobrado do cliente (R$) *
-              </label>
-              <div style={{ position: "relative" }}>
-                <input
-                  type="number"
-                  required
-                  min="0"
-                  step="0.01"
-                  placeholder={String(freteCalculado)}
-                  value={freteCobrado}
-                  onChange={e => setFreteCobrado(e.target.value)}
-                  style={{
-                    width: "100%", padding: "9px 12px", borderRadius: 8,
-                    border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                    boxSizing: "border-box",
-                  }}
-                />
-                {freteCalculado > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setFreteCobrado(String(freteCalculado))}
-                    style={{
-                      position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-                      background: C.esmeraldaLt, border: "none", borderRadius: 4,
-                      fontSize: 10, color: C.esmeralda, fontWeight: 700, cursor: "pointer",
-                      padding: "3px 6px",
-                    }}
-                  >
-                    R${freteCalculado}
-                  </button>
-                )}
-              </div>
-              <p style={{ fontSize: 11, color: C.cinza, marginTop: 4 }}>
-                Motoboy recebe: R${freteCalculado.toFixed(2)}
-              </p>
+              {freteCalculado > 0 && (
+                <p style={{ fontSize: 11, color: C.cinza, marginTop: 6 }}>
+                  Motoboy recebe: R${freteCalculado.toFixed(2)} — descontado do saldo de frete grátis
+                </p>
+              )}
             </div>
 
             {/* Cliente (opcional) */}
@@ -402,7 +363,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado }: Props) {
             {/* Botão */}
             <button
               type="submit"
-              disabled={enviando || !motoboyId || !descricao.trim()}
+              disabled={enviando || !motoboyId || !descricao.trim() || !regiao}
               style={{
                 width: "100%", padding: "12px 0",
                 background: C.esmeralda, color: "#fff",
