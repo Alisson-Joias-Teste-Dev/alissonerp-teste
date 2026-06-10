@@ -189,9 +189,15 @@ async function baixarEstoqueDaEntrega(
       evi.quantidade_entregue
     FROM alissonerp.entregas_venda_itens evi
     JOIN alissonerp.itens_venda_erp ive ON ive.id = evi.item_venda_id
+    LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = ive.produto_id
     WHERE evi.entrega_id = ${entregaId}
       AND evi.baixa_estoque_realizada = false
       AND ive.produto_id IS NOT NULL
+      -- REGRA DE NEGÓCIO: só dá baixa em produtos que controlam estoque.
+      -- Produtos com controla_estoque=false (ex.: componentes feitos sob
+      -- encomenda) não têm reserva e não devem ser baixados — apenas pulados.
+      -- COALESCE(...,true): produto sem config controla estoque por padrão.
+      AND COALESCE(ecc.controla_estoque, true) = true
     ORDER BY evi.id
   `).map((row: Record<string, unknown>) => ({
     itemVendaId: Number(row.item_venda_id),
