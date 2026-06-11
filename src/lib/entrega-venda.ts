@@ -27,7 +27,7 @@
 
 import sql from "@/lib/db";
 import { logAudit } from "@/lib/audit";
-import { enviarCodigoWhatsAppDetalhado, enviarCodigoClienteEmRota, enviarConfirmacaoEntregaConcluida } from "@/lib/whatsapp";
+import { enviarCodigoWhatsAppDetalhado, enviarCodigoClienteEmRota, enviarConfirmacaoEntregaConcluida, enviarAvisoDesenvolvedor } from "@/lib/whatsapp";
 import { uploadFile } from "@/lib/storage";
 
 // O client transacional do pacote postgres não expõe call signature adequada
@@ -835,11 +835,70 @@ export async function criarEntrega(
 }
 
 /**
+ * Lê o WhatsApp do desenvolvedor configurado em configuracoes_secrets.
+ *
+ * REGRA DE NEGÓCIO (Etapa 3): número para onde vai o aviso quando o código não
+ * chega ao cliente. Configurado na aba Integrações (chave whatsapp_desenvolvedor).
+ * Retorna "" se não configurado (aí o aviso é só pulado, sem erro).
+ */
+async function lerWhatsappDesenvolvedor(): Promise<string> {
+  try {
+    const [row] = await sql`
+      SELECT valor_encrypted FROM alissonerp.configuracoes_secrets
+      WHERE chave = 'whatsapp_desenvolvedor'
+    `;
+    if (!row?.valor_encrypted) return "";
+    let v: string;
+    try { v = JSON.parse(row.valor_encrypted as string); } catch { v = String(row.valor_encrypted); }
+    return v.replace(/"/g, "").trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Avisa o desenvolvedor (via WhatsApp) quando o envio do código ao CLIENTE falha.
+ *
+ * REGRA DE NEGÓCIO (Etapa 3 — decisão Jonathan 11/06): código que não chegou ao
+ * cliente vai para o WhatsApp do desenvolvedor com o motivo do erro, pra ninguém
+ * ficar sem o código. Best-effort: se o número não estiver configurado ou o envio
+ * ao dev também falhar, apenas loga — nunca quebra a entrega.
+ */
+async function avisarDesenvolvedorFalhaCodigo(params: {
+  vendaId: number;
+  codigo: string;
+  tipoCodigo: string; // "Cliente (A)" | "Motoboy (B)"
+  clienteNome: string | null;
+  erro: string | null;
+}): Promise<void> {
+  try {
+    const numeroDev = await lerWhatsappDesenvolvedor();
+    if (!numeroDev) return; // não configurado → silencioso
+
+    const [v] = await sql`SELECT numero_venda FROM alissonerp.vendas_erp WHERE id = ${params.vendaId}`;
+    const numeroVenda = (v as { numero_venda?: string } | null)?.numero_venda ?? `#${params.vendaId}`;
+
+    const texto =
+      `⚠️ *Falha no envio do código ao cliente*\n\n` +
+      `Venda: ${numeroVenda}\n` +
+      `Cliente: ${params.clienteNome ?? "(sem nome)"}\n` +
+      `Código ${params.tipoCodigo}: *${params.codigo}*\n` +
+      `Motivo: ${params.erro ?? "desconhecido"}\n\n` +
+      `Repasse o código ao cliente manualmente ou corrija o WhatsApp do cadastro.`;
+
+    await enviarAvisoDesenvolvedor(numeroDev, texto);
+  } catch (err) {
+    console.error("[entrega-venda] Falha ao avisar desenvolvedor sobre código:", err);
+  }
+}
+
+/**
  * Tenta enviar o código de verificação via WhatsApp para o cliente da venda.
  *
  * REGRA DE NEGÓCIO: best-effort — se o cliente não tiver WhatsApp cadastrado
  * ou o envio falhar, a entrega continua válida. O frontend mostra o status
- * e permite reenviar ou cadastrar o número depois.
+ * e permite reenviar ou cadastrar o número depois. Etapa 3: quando falha, o
+ * código vai para o WhatsApp do desenvolvedor (avisarDesenvolvedorFalhaCodigo).
  *
  * O QUE: busca celular/nome do cliente via vendas_erp → contatos e chama
  * enviarCodigoWhatsApp(). Retorna status do envio.
@@ -869,6 +928,11 @@ async function tentarEnviarWhatsApp(
     const numero: string = (row?.celular || row?.telefone || "").trim();
 
     if (!numero) {
+      // Cliente sem WhatsApp → avisa o desenvolvedor com o código
+      await avisarDesenvolvedorFalhaCodigo({
+        vendaId, codigo, tipoCodigo: "Cliente (A)",
+        clienteNome: nome || null, erro: "Cliente sem WhatsApp cadastrado",
+      });
       return {
         whatsappEnviado: false,
         whatsappErro: "Cliente sem WhatsApp cadastrado",
@@ -878,6 +942,14 @@ async function tentarEnviarWhatsApp(
     }
 
     const envio = await enviarCodigoWhatsAppDetalhado(numero, codigo, nome);
+
+    // Etapa 3: se o envio ao cliente falhou, o código vai para o desenvolvedor
+    if (!envio.enviado) {
+      await avisarDesenvolvedorFalhaCodigo({
+        vendaId, codigo, tipoCodigo: "Cliente (A)",
+        clienteNome: nome || null, erro: envio.erro,
+      });
+    }
 
     return {
       whatsappEnviado: envio.enviado,
@@ -985,8 +1057,22 @@ async function tentarEnviarWhatsAppAoCliente(
     const nome = (row as { nome?: string } | null)?.nome ?? "Cliente";
     const numero = ((row as { celular?: string; telefone?: string } | null)?.celular ||
       (row as { celular?: string; telefone?: string } | null)?.telefone || "").trim();
-    if (!numero) return;
-    await enviarCodigoClienteEmRota(numero, codigo, nome);
+    if (!numero) {
+      // Cliente sem WhatsApp na hora de mandar o Código A → avisa o desenvolvedor
+      await avisarDesenvolvedorFalhaCodigo({
+        vendaId, codigo, tipoCodigo: "Cliente (A)",
+        clienteNome: (row as { nome?: string } | null)?.nome ?? null,
+        erro: "Cliente sem WhatsApp cadastrado",
+      });
+      return;
+    }
+    const envio = await enviarCodigoClienteEmRota(numero, codigo, nome);
+    // Etapa 3: falhou o envio ao cliente → código vai para o desenvolvedor
+    if (!envio.enviado) {
+      await avisarDesenvolvedorFalhaCodigo({
+        vendaId, codigo, tipoCodigo: "Cliente (A)", clienteNome: nome, erro: envio.erro,
+      });
+    }
   } catch (err) {
     console.error("[entrega-venda] Erro ao enviar Código A ao cliente:", err);
   }

@@ -1,8 +1,36 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 11/06/2026 — Versão: v2.63.0 <!-- Revisado 11/06/2026 -->
+> 📋 Última atualização automática: 11/06/2026 — Versão: v2.64.0 <!-- Revisado 11/06/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## feat(vendas): Etapa 3 — celular obrigatório + WhatsApp do desenvolvedor (v2.64.0)
+
+**Contexto:** Etapa 3 da refatoração vendas/entregas (decisões do Jonathan 11/06/2026).
+Sem migration — só código.
+
+**1) Celular obrigatório para aprovar a venda:** `approveVenda` (src/lib/vendas-aprovar.ts)
+agora bloqueia a aprovação se o cliente não tiver celular cadastrado. Regra: a partir da
+aprovação entra a entrega, e o código de retirada (Código A) vai por WhatsApp — sem
+celular o código não tem para onde ir. Telefone fixo NÃO conta. Como o PATCH
+`/api/vendas/[id]` (situacao='aprovado') delega ao `approveVenda` (Etapa 2), a regra vale
+para a tela e para os webhooks de pagamento.
+
+**2) WhatsApp do desenvolvedor (fallback de segurança):** quando o envio do código ao
+CLIENTE falha (número inválido, cliente sem WhatsApp, Evolution fora), o sistema manda o
+código + o motivo do erro para o WhatsApp do desenvolvedor — assim ninguém fica sem o
+código. Novo campo na aba **Configurações › Integrações** ("WhatsApp do desenvolvedor",
+chave `whatsapp_desenvolvedor`). Implementado em `src/lib/whatsapp.ts`
+(`enviarAvisoDesenvolvedor`) e `src/lib/entrega-venda.ts` (hooks nos pontos de envio do
+Código A — retirada e em_rota). Best-effort: se o número não estiver configurado, só pula.
+
+**Teste E2E (banco de teste, 13 asserções, todas PASS):** ciclo completo verificado —
+item cria reserva de estoque; reserva permanece na aprovação; pagamento total cria conta
+a receber JÁ paga na hora; pagamento não muda status; entrega mantém 'entregue' (não vira
+'concluido') e converte a reserva em saída de estoque; conta a receber não duplica; trava
+barra transição inválida (rascunho→entregue); estorno de entregue não desfaz a entrega
+(entregue→cancelado permitido); pagamento parcial não baixa, completar o total baixa.
+`tsc` limpo; suíte vitest sem falha nova vs HEAD.
 
 ## feat(vendas): trava de status + baixa automática no pagamento (v2.63.0)
 

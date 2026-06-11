@@ -10,8 +10,8 @@
 | 0 — Backup + banco de teste | ✅ Dump prod (280MB) em `~/backups/alissonerp/prod_full_2026-06-11.dump`; tag `v2.60.4-pre-refatoracao-vendas` e branch `backup-pre-refatoracao-vendas-2026-06` no origin. ✅ Banco de teste RECRIADO do zero (1º restore tinha corrompido — banco-alvo não estava vazio). Validado: `vendas_erp` 14.958, `auth.users` 29, 0 usuários órfãos, FKs de entregas_venda/contas_receber/compras_metal ok. Erros restantes no log v2 são só de roles/extensões Supabase ausentes no WSL (irrelevantes). |
 | 1 — Blindagem | ✅ Código pronto e commitado (v2.61.0). Migration 295 aplicada no banco de TESTE; NÃO em produção. |
 | 2 — Novos status (fim do concluído) | ✅ FEITO (v2.62.0 + v2.63.0). Migrations 296+297 no TESTE. Código refatorado, trava ligada, baixa-na-hora, ponte de volta desligada. tsc limpo, 0 falha nova. Commitado em homolog (PAROU — sem main). Aguarda teste do Jonathan. |
-| 3 — Celular obrigatório + códigos | ⬜ Próxima. |
-| 4 — Pagamento na entrega | ⬜ |
+| 3 — Celular obrigatório + códigos | ✅ FEITO (v2.64.0). Celular obrigatório p/ aprovar (approveVenda); WhatsApp do desenvolvedor (fallback quando código não chega ao cliente) + campo em Config›Integrações. Sem migration. Teste E2E 13/13 PASS. tsc limpo, 0 falha nova. Commitado em homolog — aguarda teste do Jonathan. |
+| 4 — Pagamento na entrega | ⬜ Próxima. |
 | 5 — Testes + subida | ⬜ |
 
 ## Decisões do Jonathan (NÃO re-perguntar)

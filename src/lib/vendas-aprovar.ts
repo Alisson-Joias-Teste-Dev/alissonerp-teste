@@ -613,6 +613,25 @@ export async function approveVenda(
     return { ok: true, ja_aprovada: true };
   }
 
+  // ── Celular obrigatório para aprovar (Etapa 3 — decisão Jonathan 11/06) ───
+  // REGRA DE NEGÓCIO: a partir da aprovação entra a entrega, e o código de
+  // retirada (Código A) é enviado por WhatsApp. Sem celular do cliente o código
+  // não tem para onde ir. Por isso NÃO se aprova venda cujo cliente não tem
+  // celular cadastrado. O telefone fixo NÃO conta — WhatsApp exige celular.
+  // IMPACTO SE REMOVIDO: vendas aprovadas sem como mandar o código ao cliente.
+  const [clienteCel] = await sql`
+    SELECT c.celular
+    FROM alissonerp.vendas_erp v
+    LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
+    WHERE v.id = ${vendaId}
+  `;
+  const celular = ((clienteCel?.celular ?? "") as string).trim();
+  if (!celular) {
+    throw new Error(
+      "Cliente sem celular cadastrado. O código de entrega é enviado por WhatsApp — cadastre o celular do cliente antes de aprovar a venda.",
+    );
+  }
+
   // ── Bloquear aprovação se cartão foi liberado mas sem pagamento ainda ────
   const [cartaoBlock] = await sql`
     SELECT

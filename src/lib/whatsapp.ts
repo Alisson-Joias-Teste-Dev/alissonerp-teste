@@ -159,6 +159,33 @@ export function whatsappConfigurado(): boolean {
 }
 
 /**
+ * Envia um aviso para o WhatsApp do DESENVOLVEDOR (fallback de segurança).
+ *
+ * REGRA DE NEGÓCIO (Etapa 3 — decisão Jonathan 11/06/2026): quando o envio do
+ * código de retirada para o CLIENTE falha (número inválido, cliente sem
+ * WhatsApp, Evolution fora), o sistema manda o código + o motivo do erro para
+ * o WhatsApp do desenvolvedor configurado em `whatsapp_desenvolvedor`. Assim
+ * ninguém fica sem o código: o desenvolvedor repassa manualmente ou corrige o
+ * cadastro. O número do desenvolvedor é lido do banco pelo chamador (esta lib
+ * não acessa o banco) e passado aqui.
+ *
+ * IMPACTO SE REMOVIDO: falha de WhatsApp do cliente vira ponto cego — o código
+ * não chega a ninguém e a entrega fica travada sem aviso.
+ *
+ * @param numeroDev — WhatsApp do desenvolvedor (formato livre; é normalizado)
+ * @param texto — mensagem já montada (código + contexto + erro)
+ */
+export async function enviarAvisoDesenvolvedor(
+  numeroDev: string,
+  texto: string,
+): Promise<EnviarCodigoWhatsAppResult> {
+  if (!numeroDev || !numeroDev.trim()) {
+    return { enviado: false, erro: "WhatsApp do desenvolvedor não configurado", numeroFormatado: null };
+  }
+  return enviarMensagemWhatsApp(numeroDev, texto, "Desenvolvedor");
+}
+
+/**
  * Envia o Código A para o cliente quando o motoboy retira a mercadoria.
  *
  * REGRA DE NEGÓCIO: o código só é enviado ao cliente DEPOIS que o motoboy
