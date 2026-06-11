@@ -3,6 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
 
@@ -108,34 +109,39 @@ export async function PATCH(
   }
 
   // Atualizar ligação
-  await sql`
-    UPDATE alissonerp.ligacoes SET
-      status               = 'concluida',
-      peso_18k_real        = ${peso_18k_real},
-      perda_processo       = ${perda_processo},
-      perda_percentual     = ${perda_percentual},
-      foto_resultado       = ${foto_url},
-      observacao_resultado = ${observacao ?? null},
-      data_conclusao       = NOW(),
-      concluido_por        = ${user.id}::uuid,
-      updated_at           = NOW()
-    WHERE id = ${ligacao_id}
-  `;
-
-  // CE entrada 18k no pote
+  // Conclusão = update da ligação + CE de entrada do 18k em UMA transação atômica.
+  // IMPACTO se removido: se a CE de entrada falhar após o update, a ligação fica "concluida"
+  // mas o 18k nunca entra no pote → produção perdida no saldo.
   const tipo_18k_insumo_id = Number((ligacao as any).tipo_18k_insumo_id);
-  await sql`
-    INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
-    VALUES (
-      ${tipo_18k_insumo_id}, 1,
-      ${peso_18k_real}::real,
-      'LIGA_ENTRADA_18K'::alissonerp.enum_marcador_estoque,
-      ${'Ligação #' + ligacao_id + ' — entrada ' + (ligacao as any).tipo_18k_nome},
-      ${user.id}::uuid,
-      NOW(), 1
-    )
-  `;
+  await sql.begin(async (tx: any) => {
+    await tx`
+      UPDATE alissonerp.ligacoes SET
+        status               = 'concluida',
+        peso_18k_real        = ${peso_18k_real},
+        perda_processo       = ${perda_processo},
+        perda_percentual     = ${perda_percentual},
+        foto_resultado       = ${foto_url},
+        observacao_resultado = ${observacao ?? null},
+        data_conclusao       = NOW(),
+        concluido_por        = ${user.id}::uuid,
+        updated_at           = NOW()
+      WHERE id = ${ligacao_id}
+    `;
+
+    // CE entrada 18k no pote
+    await tx`
+      INSERT INTO alissonerp.movimentacoes_estoque
+        (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
+      VALUES (
+        ${tipo_18k_insumo_id}, 1,
+        ${peso_18k_real}::real,
+        'LIGA_ENTRADA_18K'::alissonerp.enum_marcador_estoque,
+        ${'Ligação #' + ligacao_id + ' — entrada ' + (ligacao as any).tipo_18k_nome},
+        ${user.id}::uuid,
+        NOW(), 1
+      )
+    `;
+  });
 
   return NextResponse.json({
     ok: true,
@@ -187,41 +193,49 @@ export async function DELETE(
 
   const { peso_24k, liga_insumo_id, liga_nome, peso_liga_calculado } = ligacao as any;
 
-  // CE reversa: 24k volta pro pote
-  await sql`
-    INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
-    VALUES (
-      275, 1,
-      ${Number(peso_24k)}::real,
-      'LIGA_CANCEL'::alissonerp.enum_marcador_estoque,
-      ${'Cancelamento Ligação #' + ligacao_id + ' — estorno Ouro 24k'},
-      ${user.id}::uuid,
-      NOW(), 1
-    )
-  `;
+  // insumo_id do Ouro 24k vem do PARÂMETRO (não literal 275), §5.
+  const ouro24kLigaId = await getParametroNumber(PARAM.OURO_24K_LIGA_INSUMO_ID);
 
-  // CE reversa: liga volta pro pote
-  await sql`
-    INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
-    VALUES (
-      ${Number(liga_insumo_id)}, 1,
-      ${Number(peso_liga_calculado)}::real,
-      'LIGA_CANCEL'::alissonerp.enum_marcador_estoque,
-      ${'Cancelamento Ligação #' + ligacao_id + ' — estorno ' + liga_nome},
-      ${user.id}::uuid,
-      NOW(), 1
-    )
-  `;
+  // Cancelamento = 2 CEs reversas (24k + liga) + update em UMA transação atômica.
+  // IMPACTO se removido: se a 2ª CE ou o update falhar, o estorno fica pela metade →
+  // saldo do pote duplica ou some, e a ligação pode ficar com status errado.
+  await sql.begin(async (tx: any) => {
+    // CE reversa: 24k volta pro pote
+    await tx`
+      INSERT INTO alissonerp.movimentacoes_estoque
+        (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
+      VALUES (
+        ${ouro24kLigaId}, 1,
+        ${Number(peso_24k)}::real,
+        'LIGA_CANCEL'::alissonerp.enum_marcador_estoque,
+        ${'Cancelamento Ligação #' + ligacao_id + ' — estorno Ouro 24k'},
+        ${user.id}::uuid,
+        NOW(), 1
+      )
+    `;
 
-  // Marcar como cancelada
-  await sql`
-    UPDATE alissonerp.ligacoes SET
-      status     = 'cancelada',
-      updated_at = NOW()
-    WHERE id = ${ligacao_id}
-  `;
+    // CE reversa: liga volta pro pote
+    await tx`
+      INSERT INTO alissonerp.movimentacoes_estoque
+        (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
+      VALUES (
+        ${Number(liga_insumo_id)}, 1,
+        ${Number(peso_liga_calculado)}::real,
+        'LIGA_CANCEL'::alissonerp.enum_marcador_estoque,
+        ${'Cancelamento Ligação #' + ligacao_id + ' — estorno ' + liga_nome},
+        ${user.id}::uuid,
+        NOW(), 1
+      )
+    `;
+
+    // Marcar como cancelada
+    await tx`
+      UPDATE alissonerp.ligacoes SET
+        status     = 'cancelada',
+        updated_at = NOW()
+      WHERE id = ${ligacao_id}
+    `;
+  });
 
   return NextResponse.json({ ok: true });
 }

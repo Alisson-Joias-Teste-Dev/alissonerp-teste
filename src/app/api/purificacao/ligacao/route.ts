@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
           l.liga_insumo_id,
           l.liga_nome,
           l.peso_24k,
+          l.pureza,
           l.teor,
           l.peso_liga_calculado,
           l.peso_18k_esperado,
@@ -74,6 +75,7 @@ export async function GET(req: NextRequest) {
           l.liga_insumo_id,
           l.liga_nome,
           l.peso_24k,
+          l.pureza,
           l.teor,
           l.peso_liga_calculado,
           l.peso_18k_esperado,
@@ -166,6 +168,7 @@ export async function POST(req: NextRequest) {
     SELECT
       lto.id,
       lto.liga_insumo_id,
+      lto.teor_default,
       i18k.nome  AS tipo_18k_nome,
       iliga.nome AS liga_nome
     FROM alissonerp.liga_tipo_ouro lto
@@ -184,8 +187,29 @@ export async function POST(req: NextRequest) {
   }
 
   const liga_insumo_id  = (mapeamento as any).liga_insumo_id as number;
+  const teor_default    = Number((mapeamento as any).teor_default);
   const tipo_18k_nome   = (mapeamento as any).tipo_18k_nome  as string;
   const liga_nome       = (mapeamento as any).liga_nome      as string;
+
+  // REGRA DE NEGÓCIO: o teor define quanto de liga é consumido e quanto de 18k é gerado
+  // (ouro = dinheiro). O cadeado de "editar teor manual" existe na tela, mas a tela pode ser
+  // burlada por requisição direta — por isso a permissão é REVALIDADA aqui no servidor.
+  // Só checa quando o teor enviado difere do teor_default do tipo (tolerância de float, §3).
+  // IMPACTO se removido: usuário sem 'editar_teor_ligacao' poderia forjar teor arbitrário,
+  // alterando o consumo de liga e a produção de 18k sem rastro de permissão.
+  const teorDivergeDoPadrao = Math.abs(teor - teor_default) > 0.0001;
+  if (teorDivergeDoPadrao && !isFullAccess(user.role)) {
+    const [permTeor] = await sql`
+      SELECT permitido FROM alissonerp.permissoes_usuario
+      WHERE usuario_id = ${user.id}::uuid AND acao = 'editar_teor_ligacao'
+    `;
+    if (!permTeor?.permitido) {
+      return NextResponse.json(
+        { error: "Você não tem permissão para alterar o teor. Use o teor padrão ou solicite ao administrador." },
+        { status: 403 },
+      );
+    }
+  }
 
   const ouro24kLigaId = await getParametroNumber(PARAM.OURO_24K_LIGA_INSUMO_ID);
 
@@ -239,59 +263,105 @@ export async function POST(req: NextRequest) {
     foto_url = uploadResult.url;
   }
 
-  // Inserir ligação e movimentações em transação
-  const [ligacao] = await sql`
-    INSERT INTO alissonerp.ligacoes (
-      status,
-      tipo_18k_insumo_id, tipo_18k_nome,
-      liga_insumo_id, liga_nome,
-      peso_24k, pureza, teor,
-      peso_liga_calculado, peso_18k_esperado,
-      foto_envio, observacao_envio,
-      data_envio, criado_por
-    ) VALUES (
-      'em_processo',
-      ${tipo_18k_insumo_id}, ${tipo_18k_nome},
-      ${liga_insumo_id}, ${liga_nome},
-      ${peso_24k}, ${Number(pureza.toFixed(2))}, ${Number(teor.toFixed(4))},
-      ${peso_liga_calculado}, ${peso_18k_esperado},
-      ${foto_url},
-      ${observacao ?? null},
-      NOW(),
-      ${user.id}::uuid
-    )
-    RETURNING id
-  `;
+  // Inserir ligação + as 2 CEs de saída em UMA transação atômica (§0 dupla-entrada).
+  // IMPACTO se removido: se a 2ª CE falhar, ouro/liga sai do pote sem contrapartida e a
+  // ligação fica órfã → saldo do pote inconsistente. Aqui é "ou grava tudo, ou nada".
+  let ligacao_id = 0;
+  let saldoErro: string | null = null;
+  try {
+    await sql.begin(async (tx: any) => {
+      // Trava as linhas dos insumos (ordem de id p/ evitar deadlock) — serializa ligações
+      // concorrentes sobre os mesmos insumos e fecha o race do saldo (TOCTOU).
+      await tx`
+        SELECT id FROM alissonerp.insumos
+        WHERE id IN (${ouro24kLigaId}, ${liga_insumo_id})
+        ORDER BY id
+        FOR UPDATE
+      `;
 
-  const ligacao_id = (ligacao as { id: number }).id;
+      // Reconfere saldo DENTRO da transação (autoritativo) — pode ter mudado entre a
+      // checagem inicial e o upload da foto. Se faltar, aborta a transação inteira.
+      const [s24] = await tx`
+        SELECT COALESCE(saldo_real, 0)::numeric AS saldo_real
+        FROM alissonerp.vw_detalhe_pote WHERE insumo_id = ${ouro24kLigaId}
+      `;
+      const saldo24kTx = Number((s24 as any)?.saldo_real ?? 0);
+      if (peso_24k > saldo24kTx) {
+        saldoErro = `Saldo insuficiente de Ouro 24k. Saldo: ${saldo24kTx.toFixed(3)}g, Solicitado: ${peso_24k}g`;
+        throw new Error("SALDO_INSUFICIENTE");
+      }
 
-  // CE saída 24k do pote
-  await sql`
-    INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at, local_estoque_id)
-    VALUES (
-      275, 1,
-      ${peso_24k}::real,
-      'LIGA_SAIDA_24K'::alissonerp.enum_marcador_estoque,
-      ${'Ligação #' + ligacao_id + ' — saída Ouro 24k'},
-      ${user.id}::uuid,
-      NOW(), 1
-    )
-  `;
+      const [sLiga] = await tx`
+        SELECT COALESCE(saldo_real, 0)::numeric AS saldo_real
+        FROM alissonerp.vw_detalhe_pote WHERE insumo_id = ${liga_insumo_id}
+      `;
+      const saldoLigaTx = Number((sLiga as any)?.saldo_real ?? 0);
+      if (peso_liga_calculado > saldoLigaTx) {
+        saldoErro = `Saldo insuficiente de ${liga_nome}. Saldo: ${saldoLigaTx.toFixed(3)}g, Necessário: ${peso_liga_calculado.toFixed(3)}g`;
+        throw new Error("SALDO_INSUFICIENTE");
+      }
 
-  // CE saída liga do pote
-  await sql`
-    INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at, local_estoque_id)
-    VALUES (
-      ${liga_insumo_id}, 1,
-      ${peso_liga_calculado}::real,
-      'LIGA_SAIDA_LIGA'::alissonerp.enum_marcador_estoque,
-      ${'Ligação #' + ligacao_id + ' — saída ' + liga_nome},
-      ${user.id}::uuid,
-      NOW(), 1
-    )
-  `;
+      const [ligacao] = await tx`
+        INSERT INTO alissonerp.ligacoes (
+          status,
+          tipo_18k_insumo_id, tipo_18k_nome,
+          liga_insumo_id, liga_nome,
+          peso_24k, pureza, teor,
+          peso_liga_calculado, peso_18k_esperado,
+          foto_envio, observacao_envio,
+          data_envio, criado_por
+        ) VALUES (
+          'em_processo',
+          ${tipo_18k_insumo_id}, ${tipo_18k_nome},
+          ${liga_insumo_id}, ${liga_nome},
+          ${peso_24k}, ${Number(pureza.toFixed(2))}, ${Number(teor.toFixed(4))},
+          ${peso_liga_calculado}, ${peso_18k_esperado},
+          ${foto_url},
+          ${observacao ?? null},
+          NOW(),
+          ${user.id}::uuid
+        )
+        RETURNING id
+      `;
+      ligacao_id = (ligacao as { id: number }).id;
+
+      // CE saída 24k do pote — insumo_id vem do PARÂMETRO (não literal 275), §5.
+      // IMPACTO se voltar a ser literal: a checagem de saldo e a movimentação podem apontar
+      // para insumos diferentes caso o parâmetro mude.
+      await tx`
+        INSERT INTO alissonerp.movimentacoes_estoque
+          (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at, local_estoque_id)
+        VALUES (
+          ${ouro24kLigaId}, 1,
+          ${peso_24k}::real,
+          'LIGA_SAIDA_24K'::alissonerp.enum_marcador_estoque,
+          ${'Ligação #' + ligacao_id + ' — saída Ouro 24k'},
+          ${user.id}::uuid,
+          NOW(), 1
+        )
+      `;
+
+      // CE saída liga do pote
+      await tx`
+        INSERT INTO alissonerp.movimentacoes_estoque
+          (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at, local_estoque_id)
+        VALUES (
+          ${liga_insumo_id}, 1,
+          ${peso_liga_calculado}::real,
+          'LIGA_SAIDA_LIGA'::alissonerp.enum_marcador_estoque,
+          ${'Ligação #' + ligacao_id + ' — saída ' + liga_nome},
+          ${user.id}::uuid,
+          NOW(), 1
+        )
+      `;
+    });
+  } catch (e) {
+    // Saldo insuficiente detectado dentro da tx → 400 amigável; demais erros sobem.
+    if (saldoErro) {
+      return NextResponse.json({ error: saldoErro }, { status: 400 });
+    }
+    throw e;
+  }
 
   return NextResponse.json({ id: ligacao_id, ok: true });
 }
