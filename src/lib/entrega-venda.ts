@@ -319,6 +319,22 @@ async function marcarVendaEntregueSeCompleta(
 
   if (Number(pendencia.total) > 0) return false;
 
+  // ETAPA 4 (Pagamento na Entrega — decisão Jonathan 11/06): NÃO marca entregue
+  // enquanto houver saldo 'Na Entrega' pendente. O atendente/motoboy precisa
+  // registrar o pagamento real antes (rota POST /api/vendas/[id]/cobrar-entrega).
+  // IMPACTO SE REMOVIDO: joia sairia entregue sem o cliente ter pago o que ficou
+  // combinado para pagar na entrega.
+  const [naEntrega] = await tx`
+    SELECT COALESCE(SUM(valor), 0)::numeric AS total
+    FROM alissonerp.pagamentos_venda
+    WHERE venda_id = ${vendaId} AND forma = 'Na Entrega' AND status = 'pendente'
+  `;
+  if (Number(naEntrega.total) > 0) {
+    throw new Error(
+      `NA_ENTREGA_PENDENTE: registre o pagamento na entrega (R$${Number(naEntrega.total).toFixed(2)}) antes de concluir a entrega.`,
+    );
+  }
+
   await tx`
     UPDATE alissonerp.vendas_erp
     SET situacao = 'entregue', updated_at = now()

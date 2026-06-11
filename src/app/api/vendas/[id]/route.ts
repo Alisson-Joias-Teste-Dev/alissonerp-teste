@@ -532,6 +532,16 @@ export async function PATCH(
   // pagamento total antes da entrega. A unica excecao e `entregue` com
   // aprovacao formal de entrega sem pagamento total; nesse caso o helper de
   // aprovacao garante A Receber sem duplicar antes da baixa real de estoque.
+  //
+  // ETAPA 4 (Pagamento na Entrega — decisão Jonathan 11/06): a forma 'Na Entrega'
+  // é um saldo que o cliente paga NA HORA da entrega. Regras:
+  //   • APROVAR: a consultora aprova DIRETO (sem gerente) se confirmados +
+  //     'Na Entrega' pendentes = total e não há OUTRO pendente. O 'Na Entrega'
+  //     pendente NÃO bloqueia a aprovação (diferente de A Receber, que precisa
+  //     de aprovação de crédito).
+  //   • ENTREGAR: NÃO deixa entregar enquanto houver 'Na Entrega' pendente — o
+  //     atendente/motoboy precisa registrar o pagamento real antes (rota
+  //     /cobrar-entrega). Sem exceção de gerente para este caso.
   // IMPACTO SE REMOVIDO: pedido pode baixar estoque sem pagamento e sem trilha
   // de aprovacao/rastreio financeiro.
   if (body.situacao && ["aprovado", "entregue"].includes(body.situacao)) {
@@ -539,6 +549,8 @@ export async function PATCH(
       SELECT
         v.total_venda::numeric AS total_venda,
         COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'pendente'), 0)::numeric AS soma_pendentes,
+        COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'pendente' AND p.forma = 'Na Entrega'), 0)::numeric AS soma_na_entrega,
+        COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'pendente' AND p.forma != 'Na Entrega'), 0)::numeric AS soma_pendentes_outros,
         COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado' AND p.data_confirmacao IS NOT NULL), 0)::numeric AS soma_confirmados
       FROM alissonerp.vendas_erp v
       LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
@@ -546,46 +558,78 @@ export async function PATCH(
       GROUP BY v.total_venda
     `;
     const somaPendentes = Number(pcCheck?.soma_pendentes ?? 0);
+    const somaNaEntrega = Number(pcCheck?.soma_na_entrega ?? 0);
+    const somaPendentesOutros = Number(pcCheck?.soma_pendentes_outros ?? 0);
     const somaPaga = Number(pcCheck?.soma_confirmados ?? 0);
     const totalDev = Number(pcCheck?.total_venda ?? 0);
-    const pagamentoIncompleto = somaPendentes > 0 || somaPaga < totalDev - 0.01;
-    let permitirEntregaSemPagamento = false;
 
-    if (body.situacao === "entregue" && pagamentoIncompleto) {
-      const temExcecaoAprovada = await vendaTemExcecaoEntregaAprovada(vendaId);
-      if (!temExcecaoAprovada) {
-        try {
-          const result = await solicitarAprovacaoEntregaSemPagamento(vendaId, user.id);
-          return NextResponse.json(
-            {
-              ok: true,
-              precisa_aprovacao_entrega: true,
-              tarefa_id: result.tarefaId,
-              ja_existia: result.jaExistia,
-              message: result.jaExistia
-                ? "Entrega sem pagamento total já aguarda aprovação."
-                : "Entrega sem pagamento total enviada para aprovação.",
-            },
-            { status: 202 },
-          );
-        } catch (err) {
-          return internalError(`[PATCH /api/vendas/${vendaId}] entrega_sem_pagamento`, err, "Falha ao solicitar aprovação de entrega sem pagamento total", 409);
-        }
+    // ── APROVAR: 'Na Entrega' pendente é permitido ──────────────────────────
+    if (body.situacao === "aprovado") {
+      // Bloqueia se houver pendente que NÃO seja 'Na Entrega' (ex.: Pix não pago)
+      if (somaPendentesOutros > 0) {
+        return NextResponse.json(
+          { error: "Venda possui pagamentos pendentes (fora 'Na Entrega'). Confirme-os antes de aprovar." },
+          { status: 409 },
+        );
       }
-      permitirEntregaSemPagamento = temExcecaoAprovada;
-    }
+      // Exige que confirmados + 'Na Entrega' cubram o total
+      if (somaPaga + somaNaEntrega < totalDev - 0.01) {
+        return NextResponse.json(
+          { error: `Pagamento insuficiente: R$${(somaPaga + somaNaEntrega).toFixed(2)} (pago + na entrega) de R$${totalDev.toFixed(2)} devidos.` },
+          { status: 409 },
+        );
+      }
+      // OK para aprovar — o 'Na Entrega' fica pendente até a cobrança na entrega.
+    } else {
+      // ── ENTREGAR ──────────────────────────────────────────────────────────
+      // 'Na Entrega' pendente BLOQUEIA a entrega (decisão Jonathan: não entrega
+      // sem pagar). O atendente cobra via /cobrar-entrega antes.
+      if (somaNaEntrega > 0) {
+        return NextResponse.json(
+          { error: `Registre o pagamento na entrega (R$${somaNaEntrega.toFixed(2)}) antes de marcar como entregue.`, code: "NA_ENTREGA_PENDENTE" },
+          { status: 409 },
+        );
+      }
 
-    if (!permitirEntregaSemPagamento && somaPendentes > 0) {
-      return NextResponse.json(
-        { error: "Venda possui pagamentos pendentes. Confirme todos antes de concluir." },
-        { status: 409 },
-      );
-    }
-    if (!permitirEntregaSemPagamento && somaPaga < totalDev - 0.01) {
-      return NextResponse.json(
-        { error: `Pagamento insuficiente: R$${somaPaga.toFixed(2)} confirmados de R$${totalDev.toFixed(2)} devidos.` },
-        { status: 409 },
-      );
+      const pagamentoIncompleto = somaPendentes > 0 || somaPaga < totalDev - 0.01;
+      let permitirEntregaSemPagamento = false;
+
+      if (pagamentoIncompleto) {
+        const temExcecaoAprovada = await vendaTemExcecaoEntregaAprovada(vendaId);
+        if (!temExcecaoAprovada) {
+          try {
+            const result = await solicitarAprovacaoEntregaSemPagamento(vendaId, user.id);
+            return NextResponse.json(
+              {
+                ok: true,
+                precisa_aprovacao_entrega: true,
+                tarefa_id: result.tarefaId,
+                ja_existia: result.jaExistia,
+                message: result.jaExistia
+                  ? "Entrega sem pagamento total já aguarda aprovação."
+                  : "Entrega sem pagamento total enviada para aprovação.",
+              },
+              { status: 202 },
+            );
+          } catch (err) {
+            return internalError(`[PATCH /api/vendas/${vendaId}] entrega_sem_pagamento`, err, "Falha ao solicitar aprovação de entrega sem pagamento total", 409);
+          }
+        }
+        permitirEntregaSemPagamento = temExcecaoAprovada;
+      }
+
+      if (!permitirEntregaSemPagamento && somaPendentes > 0) {
+        return NextResponse.json(
+          { error: "Venda possui pagamentos pendentes. Confirme todos antes de concluir." },
+          { status: 409 },
+        );
+      }
+      if (!permitirEntregaSemPagamento && somaPaga < totalDev - 0.01) {
+        return NextResponse.json(
+          { error: `Pagamento insuficiente: R$${somaPaga.toFixed(2)} confirmados de R$${totalDev.toFixed(2)} devidos.` },
+          { status: 409 },
+        );
+      }
     }
   }
 

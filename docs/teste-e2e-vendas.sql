@@ -120,4 +120,33 @@ BEGIN
 END $$;
 ROLLBACK;
 
+\echo '====== CENARIO 5: Na Entrega — cobranca na entrega baixa a conta ======'
+BEGIN;
+ALTER TABLE public.vendas DISABLE TRIGGER trg_notificar_n8n;
+DO $$
+DECLARE v_id INT; v_qtd INT; v_cr TEXT; v_sit TEXT;
+BEGIN
+  INSERT INTO alissonerp.vendas_erp (numero_venda, cliente_id, vendedor_id, total_produtos, total_venda, situacao, created_by)
+  VALUES ('E2E-5', 1711, 104891, 1000, 1000, 'aprovado', '681f363c-9e67-48a9-bd5f-443edc8eb79e') RETURNING id INTO v_id;
+  -- pagamento Na Entrega pendente (combinado de pagar na entrega)
+  INSERT INTO alissonerp.pagamentos_venda (venda_id, forma, valor, parcelas, status)
+  VALUES (v_id, 'Na Entrega', 1000, 1, 'pendente');
+  SELECT COUNT(*) INTO v_qtd FROM alissonerp.contas_receber WHERE venda_erp_id=v_id;
+  IF v_qtd=0 THEN RAISE NOTICE 'PASS 5.1 — Na Entrega pendente NAO gera conta a receber ainda'; ELSE RAISE EXCEPTION 'FALHA 5.1 — criou % CR', v_qtd; END IF;
+
+  -- COBRAR NA ENTREGA: confirma o Na Entrega com a forma real (Dinheiro)
+  UPDATE alissonerp.pagamentos_venda
+  SET forma='Dinheiro', status='confirmado', data_confirmacao=NOW()
+  WHERE venda_id=v_id AND forma='Na Entrega' AND status='pendente';
+  SELECT situacao INTO v_cr FROM alissonerp.contas_receber WHERE venda_erp_id=v_id LIMIT 1;
+  IF v_cr='pago' THEN RAISE NOTICE 'PASS 5.2 — cobranca na entrega criou conta a receber PAGA'; ELSE RAISE EXCEPTION 'FALHA 5.2 — cr=%', COALESCE(v_cr,'(nenhuma)'); END IF;
+  SELECT situacao INTO v_sit FROM alissonerp.vendas_erp WHERE id=v_id;
+  IF v_sit='aprovado' THEN RAISE NOTICE 'PASS 5.3 — cobranca NAO mudou status (continua aprovado)'; ELSE RAISE EXCEPTION 'FALHA 5.3 — sit=%', v_sit; END IF;
+
+  UPDATE alissonerp.vendas_erp SET situacao='entregue' WHERE id=v_id;
+  SELECT situacao INTO v_sit FROM alissonerp.vendas_erp WHERE id=v_id;
+  IF v_sit='entregue' THEN RAISE NOTICE 'PASS 5.4 — apos cobrar, entrega concluida (entregue)'; ELSE RAISE EXCEPTION 'FALHA 5.4 — sit=%', v_sit; END IF;
+END $$;
+ROLLBACK;
+
 \echo '====== FIM DOS TESTES ======'

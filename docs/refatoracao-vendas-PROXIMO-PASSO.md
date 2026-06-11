@@ -11,8 +11,8 @@
 | 1 — Blindagem | ✅ Código pronto e commitado (v2.61.0). Migration 295 aplicada no banco de TESTE; NÃO em produção. |
 | 2 — Novos status (fim do concluído) | ✅ FEITO (v2.62.0 + v2.63.0). Migrations 296+297 no TESTE. Código refatorado, trava ligada, baixa-na-hora, ponte de volta desligada. tsc limpo, 0 falha nova. Commitado em homolog (PAROU — sem main). Aguarda teste do Jonathan. |
 | 3 — Celular obrigatório + códigos | ✅ FEITO (v2.64.0). Celular obrigatório p/ aprovar (approveVenda); WhatsApp do desenvolvedor (fallback quando código não chega ao cliente) + campo em Config›Integrações. Sem migration. Teste E2E 13/13 PASS. tsc limpo, 0 falha nova. Commitado em homolog — aguarda teste do Jonathan. |
-| 4 — Pagamento na entrega | ⬜ Próxima. |
-| 5 — Testes + subida | ⬜ |
+| 4 — Pagamento na entrega | 🟡 Backend FEITO + testado (v2.65.0): forma 'Na Entrega', aprovação direta, rota /cobrar-entrega, bloqueio "não entrega sem pagar", opção no front. E2E 18/18. FALTA o BOTÃO de cobrança na tela de entrega (rota já existe). |
+| 5 — Testes + subida | 🟡 Bateria automática FEITA (E2E 18/18 + tsc + suíte sem falha nova). Falta o teste manual do Jonathan no homolog → depois subir main. |
 
 ## Decisões do Jonathan (NÃO re-perguntar)
 - Status: rascunho → aprovado → em_rota → entregue (+cancelado). SEM concluído/enviado novos.

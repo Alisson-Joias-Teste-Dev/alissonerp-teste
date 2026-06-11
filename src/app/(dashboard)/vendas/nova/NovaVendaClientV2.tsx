@@ -268,7 +268,10 @@ const TIPOS_SERVICO = [
   { id: 6, nome: "Outros" },
 ];
 
-const FORMAS_FIXAS = ["Vale-Troca", "A Receber", "Múltiplas", "Manual (MP)"];
+// "Na Entrega" (Etapa 4): saldo que o cliente paga na hora da entrega. A
+// consultora aprova direto (sem gerente); a entrega só conclui após a cobrança
+// (POST /api/vendas/[id]/cobrar-entrega). Fica pendente até lá.
+const FORMAS_FIXAS = ["Vale-Troca", "A Receber", "Na Entrega", "Múltiplas", "Manual (MP)"];
 const CONDICOES = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
 const COM_CARTAO = ["Cartão de Crédito", "Pix"];
 

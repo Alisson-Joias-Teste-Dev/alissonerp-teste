@@ -1,8 +1,38 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 11/06/2026 — Versão: v2.64.0 <!-- Revisado 11/06/2026 -->
+> 📋 Última atualização automática: 11/06/2026 — Versão: v2.65.0 <!-- Revisado 11/06/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## feat(vendas): Etapa 4 — Pagamento na Entrega (v2.65.0)
+
+**Contexto:** Etapa 4 da refatoração (decisões do Jonathan 11/06/2026). Nova forma de
+pagamento "Na Entrega" — o cliente paga parte (ou tudo) na hora que recebe a joia.
+Sem migration (forma é texto livre em pagamentos_venda; não tocou o schema public).
+
+**Regras (decisões do Jonathan):**
+- **Aprovar:** a consultora aprova DIRETO (sem gerente) quando confirmados + 'Na Entrega'
+  pendentes = total e não há outro pendente. O 'Na Entrega' pendente NÃO bloqueia a
+  aprovação (diferente de 'A Receber', que exige aprovação de crédito).
+- **Cobrança na entrega:** o atendente/motoboy registra a forma REAL usada (Dinheiro/Pix/
+  Cartão) — nova rota `POST /api/vendas/[id]/cobrar-entrega` confirma o 'Na Entrega' com
+  essa forma; o gatilho 297 baixa a conta a receber na hora.
+- **Não entrega sem pagar:** a entrega NÃO conclui enquanto houver 'Na Entrega' pendente,
+  tanto no PATCH `/api/vendas/[id]` (situacao='entregue') quanto no fluxo do motoboy
+  (`marcarVendaEntregueSeCompleta` lança NA_ENTREGA_PENDENTE). Sem exceção de gerente
+  para este caso.
+
+**Arquivos:** `src/app/api/vendas/[id]/route.ts` (guards de aprovação/entrega separados
+para 'Na Entrega'); `src/app/api/vendas/[id]/cobrar-entrega/route.ts` (nova); `src/lib/
+entrega-venda.ts` (bloqueio no fluxo do motoboy); `NovaVendaClientV2.tsx` ('Na Entrega'
+como forma selecionável).
+
+**Teste E2E (docs/teste-e2e-vendas.sql, 18 asserções PASS):** ciclo completo + Na Entrega
+(pendente não gera conta a receber; cobrar na entrega cria a conta PAGA; cobrança não muda
+status; após cobrar, entrega conclui). `tsc` limpo; suíte sem falha nova.
+
+**⚠️ Pendente (UI):** falta o BOTÃO "Cobrar na entrega" na tela de entrega/detalhe da
+venda (a rota backend já existe). Sem ele, a cobrança só via API.
 
 ## feat(vendas): Etapa 3 — celular obrigatório + WhatsApp do desenvolvedor (v2.64.0)
 
