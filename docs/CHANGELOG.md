@@ -1,8 +1,32 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 11/06/2026 — Versão: v2.60.3 <!-- Revisado 11/06/2026 -->
+> 📋 Última atualização automática: 11/06/2026 — Versão: v2.60.4 <!-- Revisado 11/06/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(ligacao): "Disponível" do Ouro 24k passa a usar o pote (depósito 1) (v2.60.4)
+
+**Sintoma:** na aba Ligação, o campo "Peso Ouro" mostrava "Disponível: 6,73g", número
+menor do que o Ouro 24k fino realmente disponível no pote. Além de enganar a tela, a
+checagem de saldo do backend bloqueava ligações válidas.
+
+**Causa raiz:** o saldo do Ouro 24k (e da liga) vinha de `vw_detalhe_pote.saldo_real`, que
+soma TODOS os depósitos — incluindo operadores. O insumo 275 (Ouro 24k Fino) tinha 10,90g no
+depósito 1 (Almoxarifado/pote) e −4,17g num operador (depósito 6), resultando em 6,73g de
+total global. Pela §3 ("Ouro Total: só depósito ID=1"), o disponível do pote é 10,90g.
+
+**Correção:** fonte do saldo trocada para `vw_saldo_estoque` filtrado em
+`deposito_id = PARAM.ALMOXARIFADO_DEPOSITO_ID` (`SUM(saldo)`), em 3 pontos:
+- `src/app/(dashboard)/purificacao/page.tsx` (carga inicial; também removido o `275` literal)
+- `src/app/api/purificacao/liga-tipos/route.ts` (refetch client)
+- `src/app/api/purificacao/ligacao/route.ts` (checagem de saldo no POST, fora e dentro da tx)
+
+**Resultado:** "Disponível" passou a mostrar 10,90g; backend libera com base no pote real.
+Verificado: `GET /api/purificacao/liga-tipos` → `saldo_24k = 10.9`; modal exibe 10,90g.
+`npx tsc --noEmit` limpo.
+
+> ⚠️ Pendência de dado (fora do escopo): operador (depósito 6) está com −4,17g de Ouro 24k
+> fino — investigar movimentação que deixou o saldo negativo.
 
 ## fix(ligacao): blindagem do estoque de ouro na aba Ligação (v2.60.3)
 

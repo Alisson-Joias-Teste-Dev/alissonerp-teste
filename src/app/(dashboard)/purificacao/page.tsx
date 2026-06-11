@@ -1,5 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql, { normalizeRow } from "@/lib/db";
+import { getParametroNumber, PARAM } from "@/lib/parametros";
 import PurificacaoClient from "./PurificacaoClient";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +39,10 @@ export default async function PurificacaoPage() {
       }
     }
   }
+
+  // Parâmetros de estoque (§5): id do Ouro 24k fino e depósito do pote (Almoxarifado Central).
+  const ouro24kLigaId  = await getParametroNumber(PARAM.OURO_24K_LIGA_INSUMO_ID);
+  const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
 
   // Carregar dados iniciais em paralelo
   const [purificacoes, teores, statsRow, ligacoes, ligaTipos, ligacaoStatsRow] = await Promise.all([
@@ -136,13 +141,17 @@ export default async function PurificacaoPage() {
         iliga.nome      AS liga_nome,
         lto.teor_default,
         lto.ativo,
-        COALESCE(vp24k.saldo_real, 0)::numeric  AS saldo_24k,
-        COALESCE(vpliga.saldo_real, 0)::numeric AS saldo_liga
+        COALESCE((
+          SELECT SUM(saldo) FROM alissonerp.vw_saldo_estoque
+          WHERE insumo_id = ${ouro24kLigaId} AND deposito_id = ${almoxarifadoId}
+        ), 0)::numeric AS saldo_24k,
+        COALESCE((
+          SELECT SUM(saldo) FROM alissonerp.vw_saldo_estoque
+          WHERE insumo_id = lto.liga_insumo_id AND deposito_id = ${almoxarifadoId}
+        ), 0)::numeric AS saldo_liga
       FROM alissonerp.liga_tipo_ouro lto
       JOIN alissonerp.insumos i18k  ON i18k.id  = lto.tipo_18k_insumo_id
       JOIN alissonerp.insumos iliga ON iliga.id = lto.liga_insumo_id
-      LEFT JOIN alissonerp.vw_detalhe_pote vp24k  ON vp24k.insumo_id  = 275
-      LEFT JOIN alissonerp.vw_detalhe_pote vpliga ON vpliga.insumo_id = lto.liga_insumo_id
       WHERE lto.ativo = true
       ORDER BY lto.id
     `,
