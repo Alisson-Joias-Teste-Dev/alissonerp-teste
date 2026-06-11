@@ -1,8 +1,45 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 11/06/2026 — Versão: v2.62.0 <!-- Revisado 11/06/2026 -->
+> 📋 Última atualização automática: 11/06/2026 — Versão: v2.63.0 <!-- Revisado 11/06/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## feat(vendas): trava de status + baixa automática no pagamento (v2.63.0)
+
+**Contexto:** complemento da Etapa 2 (decisões do Jonathan em 11/06/2026). Migration
+297 aplicada SÓ no banco de TESTE — NÃO em produção.
+
+**1) Trava de status (rede de segurança no banco):** liga de fato a máquina de estados
+da venda — cria a tabela `vendas_transicoes` + o gatilho `trg_registrar_transicao_venda`
+(BEFORE UPDATE OF situacao). A migration 178 tinha criado a função mas o gatilho/tabela
+NUNCA foram aplicados em produção (função inerte). Transições permitidas mapeadas do
+código real (inclui a volta do estorno aprovado/em_rota → rascunho; mantém concluido/
+enviado como destino só p/ rota legado e histórico). **Entregue é ponto final:**
+entregue→rascunho é BLOQUEADO (decisão Jonathan); só entregue→cancelado/concluido.
+
+**2) Baixa automática no pagamento:** novo gatilho em `pagamentos_venda`
+(`fn_venda_baixar_recebimento_pago`): quando os pagamentos confirmados cobrem o total
+da venda (aprovada), cria a conta a receber JÁ como 'pago', na hora, SEM mexer no status
+da venda. Funciona em qualquer forma de pagamento. Guard anti-duplicata (não recria se já
+há CR não-cancelada; o trigger de entrega 296 também é guardado).
+
+**3) Estorno respeita o ponto final:** `estornarVenda` (vendas-aprovar.ts) não volta mais
+venda entregue/concluida para rascunho — registra a devolução do pagamento e cancela a
+CR, mas mantém o status (nova ação `mantida_terminal`). Sem isso, a trava recusaria o
+estorno de venda entregue.
+
+**4) Desligada a "ponte de volta" public.vendas → vendas_erp:** removidos os gatilhos
+`trg_sync_venda_insert_from_public` e `trg_sync_venda_update_from_public`. Decisão do
+Jonathan: `alissonerp.vendas_erp` é a ÚNICA fonte de verdade; o schema public (Evolury,
+SÓ histórico) não espelha mais de volta. **Bug que isso corrigiu:** o espelhamento
+ida-e-volta transformava toda venda 'entregue' em 'concluido' sozinha (em public.vendas
+'entregue' e 'concluido' usam o mesmo código 2, e a volta escolhia 'concluido') — então
+'entregue' nunca ficava. O espelhamento de IDA (erp → public) continua.
+
+Validado no banco de teste: pagar total → CR 'pago' + venda fica 'aprovado'; entregar →
+venda fica 'entregue' (não vira concluido) sem duplicar CR; trava barra transições
+inválidas; estorno de entregue não desfaz a entrega. `tsc` limpo; suíte vitest sem falha
+nova vs HEAD. Migration 297 NÃO aplicada em produção.
 
 ## feat(vendas): Novo fluxo de status — Etapa 2 da refatoração (v2.62.0)
 

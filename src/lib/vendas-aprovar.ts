@@ -769,7 +769,11 @@ export async function approveVenda(
 // (após confirmado) ou charged_back.
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type EstornoAcao = "cancelada" | "revertida_rascunho" | "ja_estornado";
+// "mantida_terminal": venda já estava entregue/concluido (ponto final do fluxo
+// novo 06/2026) — o estorno registra a devolução do pagamento e cancela a conta
+// a receber, mas NÃO desfaz a entrega voltando pra rascunho. Correção de venda
+// entregue é via cancelamento ou solicitação de alteração (decisão Jonathan).
+export type EstornoAcao = "cancelada" | "revertida_rascunho" | "ja_estornado" | "mantida_terminal";
 
 export interface EstornarVendaResult {
   ok: true;
@@ -785,8 +789,16 @@ export async function estornarVenda(
 ): Promise<EstornarVendaResult> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return await (sql as any).begin(async (tx: typeof sql): Promise<EstornarVendaResult> => {
-    // 1. Bloqueia pagamento + venda para evitar race entre dois estornos simultâneos
-    await tx`SELECT id FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE`;
+    // 1. Bloqueia pagamento + venda para evitar race entre dois estornos simultâneos.
+    // Captura a situacao para decidir se o estorno pode reverter o status (fluxo novo).
+    const [vendaLock] = await tx`
+      SELECT id, situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE
+    `;
+    const situacaoAtual = vendaLock?.situacao as string | undefined;
+    // Entregue/concluido = ponto final (trava de status, migration 297): o estorno
+    // NÃO volta pra rascunho nem cancela essas vendas — só devolve o pagamento e
+    // cancela a CR. Sem este guard, o UPDATE pra rascunho seria recusado pela trava.
+    const ehTerminal = situacaoAtual === "entregue" || situacaoAtual === "concluido";
     const [pag] = await tx`
       SELECT id, venda_id, status, gateway_payload
       FROM alissonerp.pagamentos_venda
@@ -827,7 +839,12 @@ export async function estornarVenda(
 
     // 4. Decide ação sobre a venda
     let acao: EstornoAcao;
-    if (nOutros > 0) {
+    if (ehTerminal) {
+      // Venda entregue/concluida = ponto final: NÃO mexe no status. O pagamento
+      // já foi marcado estornado e a CR será cancelada abaixo. A correção da
+      // venda em si (se necessária) é via cancelamento ou solicitação de alteração.
+      acao = "mantida_terminal";
+    } else if (nOutros > 0) {
       // Ainda há outros pagamentos confirmados → volta pra rascunho
       // pra vendedora recobrar o valor estornado (ou cancelar manualmente)
       await tx`

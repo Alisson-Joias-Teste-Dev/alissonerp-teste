@@ -9,7 +9,7 @@
 |---|---|
 | 0 — Backup + banco de teste | ✅ Dump prod (280MB) em `~/backups/alissonerp/prod_full_2026-06-11.dump`; tag `v2.60.4-pre-refatoracao-vendas` e branch `backup-pre-refatoracao-vendas-2026-06` no origin. ✅ Banco de teste RECRIADO do zero (1º restore tinha corrompido — banco-alvo não estava vazio). Validado: `vendas_erp` 14.958, `auth.users` 29, 0 usuários órfãos, FKs de entregas_venda/contas_receber/compras_metal ok. Erros restantes no log v2 são só de roles/extensões Supabase ausentes no WSL (irrelevantes). |
 | 1 — Blindagem | ✅ Código pronto e commitado (v2.61.0). Migration 295 aplicada no banco de TESTE; NÃO em produção. |
-| 2 — Novos status (fim do concluído) | ✅ FEITO (v2.62.0). Migration 296 criada + aplicada no TESTE. Código todo refatorado, tsc limpo, testes ajustados. Commitado em homolog (PAROU — sem main). Aguarda teste do Jonathan. |
+| 2 — Novos status (fim do concluído) | ✅ FEITO (v2.62.0 + v2.63.0). Migrations 296+297 no TESTE. Código refatorado, trava ligada, baixa-na-hora, ponte de volta desligada. tsc limpo, 0 falha nova. Commitado em homolog (PAROU — sem main). Aguarda teste do Jonathan. |
 | 3 — Celular obrigatório + códigos | ⬜ Próxima. |
 | 4 — Pagamento na entrega | ⬜ |
 | 5 — Testes + subida | ⬜ |
@@ -30,11 +30,19 @@
 - **Front**: VendaDetalheClient — "venda concluída" → "venda quitada".
 - **Testes**: tsc limpo; 7 testes do comportamento antigo atualizados; 0 falhas novas vs HEAD.
 
-## ⚠️ Pendências / achados para o Jonathan decidir
-1. **Trigger da máquina de estados NÃO existe em produção.** A função `fn_registrar_transicao_venda` existe mas (a) não há trigger em `vendas_erp` chamando ela e (b) a tabela `vendas_transicoes` não existe. Ou seja: a validação de transição NUNCA esteve ativa no banco — quem controla o fluxo é o código (SITUACOES_VALIDAS no PATCH). Decidir: ativar o trigger (cria tabela + trigger) ou deixar a máquina de estados só no código? A migration 296 atualiza a FUNÇÃO por consistência, mas sem trigger ela é inerte.
-2. **CR de venda paga ANTES da entrega (Etapa 4).** No fluxo novo a conta a receber nasce 'pendente' quando a venda vira 'entregue'. Se o cliente já pagou tudo antes (no aprovado), quem marca essa CR como paga? Antes era o `fn_cr_marcar_pago_mp` dentro do `concluirVenda`. Definir na Etapa 4 (provável: chamar na confirmação de entrega).
-3. **CLAUDE.md corrompido no working tree** (não commitado): cada linha virou comentário `# ` com escapes `\*\*`. NÃO fui eu. Deixei intocado e FORA deste commit. O Jonathan precisa decidir: restaurar do HEAD (`git checkout CLAUDE.md`) ou recuperar a versão que ele queria. A versão do HEAD ainda diz "v2.60.2" (desatualizada — já estamos em v2.62.0).
-4. **Suíte vitest tem ~105 falhas PRÉ-EXISTENTES** no HEAD, não relacionadas a esta mudança. Pendência separada.
+## Etapa 2.1 — trava + baixa automática (v2.63.0, migration 297)
+Decisões do Jonathan (11/06) e o que foi feito:
+- **Trava de status LIGADA** (migration 297): tabela `vendas_transicoes` + gatilho `trg_registrar_transicao_venda`. A 178 nunca foi aplicada em prod. Entregue = ponto final (entregue→rascunho bloqueado). Estorno (aprovado/em_rota→rascunho) permitido; legado→concluido permitido.
+- **Baixa na hora do pagamento** (decisão Jonathan): gatilho `fn_venda_baixar_recebimento_pago` em pagamentos_venda — pagou o total → CR 'pago' na hora, venda fica 'aprovado'.
+- **Estorno**: venda entregue/concluida não volta pra rascunho (`mantida_terminal`).
+- **Ponte de volta public→erp DESLIGADA** (decisão Jonathan: só vendas_erp é fonte de verdade; Evolury é só histórico): dropados `trg_sync_venda_insert_from_public` e `trg_sync_venda_update_from_public`. Corrigiu o bug que transformava 'entregue' em 'concluido' sozinho (código 2 ambíguo no public). Espelhamento de IDA (erp→public) mantido.
+- ✅ Validado no teste: paga→entrega mantém 'entregue', CR não duplica, trava barra inválidas, estorno de entregue não desfaz. tsc limpo, 0 falha nova.
+- ⚠️ Migration 297 só no TESTE. Commitada em homolog (PAROU — sem main). Aguarda teste do Jonathan.
+
+## ⚠️ Pendências para depois
+1. **CLAUDE.md** estava corrompido no working tree (não commitado, não foi eu) — RESTAURADO do HEAD (`git checkout`). A versão do HEAD ainda diz "v2.60.2" (desatualizada — já estamos em v2.63.0); atualizar a versão no header do CLAUDE.md numa próxima.
+2. **Suíte vitest tem ~105 falhas PRÉ-EXISTENTES** no HEAD (rate-limit 429 no upload-ofx, mocks desatualizados em verificar-manual/confirmar-pagamento/etc.), não relacionadas a esta mudança. Pendência separada.
+3. **CR de venda paga DEPOIS, na entrega sem pagamento total** (Etapa 4): o gatilho 296 cria CR 'pendente' na entrega; a baixa-na-hora (297) só cobre quem pagou antes. Conferir o fluxo "pagamento na entrega" na Etapa 4.
 
 ## Cuidados (continuam valendo p/ Etapas 3-5)
 - NÃO tocar: ordens/pcp/protocolo/service/compras (têm 'concluido' próprio).
