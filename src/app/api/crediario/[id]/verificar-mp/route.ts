@@ -4,7 +4,6 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { fetchPayment } from "@/lib/mercado-pago";
 import { creditarSaldo } from "@/lib/saldo-credito";
-import { concluirVenda } from "@/lib/vendas-aprovar";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
@@ -170,31 +169,12 @@ export async function POST(
     }
   }
 
-  // ── Concluir venda se todos os pagamentos confirmados ────────────────────
-  let vendaConcluida = false;
-  if (vendaId) {
-    const [pendentes] = await sql`
-      SELECT COUNT(*) AS cnt FROM alissonerp.pagamentos_venda
-      WHERE venda_id = ${vendaId} AND status = 'pendente'
-    `;
-    const [venda] = await sql`
-      SELECT situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}
-    `;
-    if (Number(pendentes.cnt) === 0 && venda?.situacao === "aprovado") {
-      try {
-        await concluirVenda(vendaId, user.id, { tinyBestEffort: true });
-        vendaConcluida = true;
-      } catch (err) {
-        console.error("[crediario/verificar-mp] Erro ao concluir venda:", err);
-      }
-    }
-  }
-
+  // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda —
+  // o status só muda na entrega (em_rota → entregue).
   return NextResponse.json({
     ok: true,
     mp_status: mpData.status,
     mp_valor: valorMp,
     saldo_devolvido: saldoDevolvido,
-    venda_concluida: vendaConcluida,
   });
 }

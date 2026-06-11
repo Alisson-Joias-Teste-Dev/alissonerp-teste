@@ -1,8 +1,60 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 11/06/2026 — Versão: v2.61.0 <!-- Revisado 11/06/2026 -->
+> 📋 Última atualização automática: 11/06/2026 — Versão: v2.62.0 <!-- Revisado 11/06/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## feat(vendas): Novo fluxo de status — Etapa 2 da refatoração (v2.62.0)
+
+**Contexto:** segunda etapa da refatoração vendas/entregas (plano aprovado em 11/06/2026).
+O fim natural da venda agora é a ENTREGA: `rascunho → aprovado → em_rota → entregue`
+(+ `cancelado`). Os status `concluido` e `enviado` foram APOSENTADOS — vendas antigas
+neles ficam intocadas (histórico), mas nenhuma venda nova transiciona PARA eles.
+
+**Banco (migration 296 — aplicada só no banco de TESTE, junto com a 295):**
+- `fn_registrar_transicao_venda`: nova máquina de estados (aprovado → em_rota | entregue
+  | cancelado; entregue/cancelado terminais; históricos podem sair, nunca receber).
+  ⚠️ ACHADO: a função existe em produção mas SEM trigger e SEM a tabela
+  `vendas_transicoes` — a máquina de estados nunca esteve ativa; quem controla o fluxo
+  é o código. Ativar (ou não) o trigger é decisão pendente do Jonathan.
+- `fn_venda_gerar_conta_receber`: dispara também em `entregue` (compat com
+  confirmado/concluido mantida).
+- `fn_proteger_itens_venda_fechada`: `entregue` agora também blinda itens.
+- `vw_dash_vendas_todas`: já tinha `em_rota` desde a 290 — sem mudança.
+
+**Backend — pagamento quitado NÃO conclui mais a venda (decisão Jonathan 11/06):**
+- `concluirVenda()` APOSENTADA (removida de `src/lib/vendas-aprovar.ts`) e
+  `autoConcluirVendaSeQuitada()` removida de `src/lib/baixa-credito.ts`.
+- Auto-conclusão removida de 16 pontos: webhooks MP (x2) e PagBank, checar-point e
+  verificar-manual (MP e PagBank), reconciliar-pendentes (MP e PagBank), crediário
+  (registrar-pagamento, verificar-mp, verificar-pagbank), pagamentos `[pagId]` e
+  `/confirmar`, solicitações de alteração (x2). Auto-APROVAR (rascunho + crédito)
+  continua em todos. Respostas trocam `venda_concluida` por `pagamento_quitado`.
+- PATCH `/api/vendas/[id]`: situações válidas agora `rascunho|aprovado|entregue|cancelado`;
+  aprovação DELEGADA ao `approveVenda()` (apagadas ~430 linhas inline de Tiny/ordem/cofre
+  duplicadas da lib). `criarOrdemDoOrcamento()` da lib atualizado para usar
+  `orcamentoFichaToDados`/`nomeItemOrdem` (ficha técnica completa — perfil/friso/canal/pedra).
+- Solicitações de alteração: alvo `concluido`/`enviado` agora retorna 409 (aposentados).
+
+**Comissões e relatórios — `em_rota` adicionado (mantendo status antigos):**
+`comissoes/elegiveis|resumo|fechamentos|gerar-maio`, `dashboard-comercial/analise-comissoes`
+(x2), `vendas/analise-frete`, `vendas/cliente/[id]/historico` (+ `entregue`),
+`financeiro/cofre-ouro/upgrades`.
+
+**Front:** VendaDetalheClient — mensagens "venda concluída" viraram "venda quitada"
+(lê `pagamento_quitado`/`todos_pagos`). Não havia botão "Concluir" (já não existia).
+
+**Banco de teste:** restore anterior estava corrompido (objetos antigos travaram
+contatos/leads/vendedores/auth.users). Recriado do zero com o dump de 11/06 —
+validado: `vendas_erp` 14.958, `auth.users` 29, 0 usuários órfãos, FKs ok.
+Migrations 295+296 aplicadas no teste; smoke test: aprovado→entregue cria CR ✔.
+
+**Testes:** `npx tsc --noEmit` limpo. Suíte vitest: ZERO falhas novas vs HEAD
+(7 testes do comportamento antigo atualizados p/ o fluxo novo; 1 falha pré-existente
+corrigida de brinde). ⚠️ A suíte já tinha ~105 falhas PRÉ-EXISTENTES no HEAD
+(não relacionadas a esta mudança) — pendência separada.
+
+Migrations 295/296 NÃO aplicadas em produção (aguardam Etapas 3-5 + testes + aval).
 
 ## feat(vendas/entregas): Blindagem do módulo — Etapa 1 da refatoração (v2.61.0)
 

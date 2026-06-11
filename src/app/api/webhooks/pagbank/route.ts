@@ -17,7 +17,8 @@
  *      - devolverSaldoGerente()
  *      - baixarContaReceber()
  *      - autoAprovarVendaRascunho()
- *      - autoConcluirVendaSeQuitada()
+ *      (fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda —
+ *       o status só muda na entrega)
  *   7. Retorna sempre 200 em cenários tratados (evita PagBank reentregar)
  *
  * DIFERENÇA vs MP: PagBank manda o payload COMPLETO (não apenas notification).
@@ -33,7 +34,6 @@ import {
   baixarContaReceber,
   registrarComunicacaoRecebimento,
   autoAprovarVendaRascunho,
-  autoConcluirVendaSeQuitada,
   buscarPagamentoAReceberPendente,
 } from "@/lib/baixa-credito";
 
@@ -278,10 +278,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Auto-aprovar e auto-concluir
+      // Auto-aprovar venda em rascunho com crédito. Fluxo novo 06/2026:
+      // pagamento quitado NÃO conclui mais a venda — ela segue 'aprovado'
+      // até a entrega (em_rota → entregue).
       if (userId) {
         await autoAprovarVendaRascunho(sql, vendaId, userId);
-        await autoConcluirVendaSeQuitada(sql, vendaId, userId);
       }
 
       await logWebhookUpdate(orderId, 200, `PAID processado: charge=${chargeId} venda=${vendaId}`);

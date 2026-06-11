@@ -2,14 +2,14 @@ import { NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getAccessToken } from "@/lib/mercado-pago";
-import { concluirVenda } from "@/lib/vendas-aprovar";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /api/mercado-pago/reconciliar-pendentes
 //
 // Busca todos pagamentos MP com status='pendente' no banco e consulta o MP
 // via external_reference. Se o MP retornar algum payment 'approved', confirma
-// o pagamento no ERP e conclui a venda se o total estiver quitado.
+// o pagamento no ERP. Fluxo novo 06/2026: pagamento quitado NÃO conclui
+// mais a venda (status só muda na entrega).
 //
 // Uso: quando webhooks foram perdidos (HMAC quebrado, deploy atrasado, etc).
 // Apenas desenvolvedor/admin.
@@ -97,16 +97,8 @@ export async function POST() {
         return { quitada: Number(soma_confirmados) + 0.01 >= Number(total_venda) };
       });
 
-      let acao = "pagamento_confirmado";
-      if (result.quitada) {
-        try {
-          await concluirVenda(pag.venda_id, user.id, { tinyBestEffort: true });
-          acao = "venda_concluida";
-        } catch (err) {
-          console.error(`[reconciliar-pendentes] concluirVenda falhou venda=${pag.venda_id}`, err);
-          acao = "confirmado_mas_conclusao_falhou";
-        }
-      }
+      // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda.
+      const acao = result.quitada ? "pagamento_quitado" : "pagamento_confirmado";
 
       resultados.push({ pagamento_id: pag.id, venda_id: pag.venda_id, acao, payment_id: paymentId });
     } catch (err) {

@@ -16,10 +16,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { buscarPedido, buscarCobranca, centavosParaReais } from "@/lib/pagbank";
-import {
-  devolverSaldoGerente,
-  autoConcluirVendaSeQuitada,
-} from "@/lib/baixa-credito";
+import { devolverSaldoGerente } from "@/lib/baixa-credito";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
@@ -203,18 +200,13 @@ export async function POST(
     }
   }
 
-  // Concluir venda se todos os pagamentos confirmados
-  let vendaConcluida = false;
-  if (vendaId) {
-    vendaConcluida = await autoConcluirVendaSeQuitada(sql, vendaId, user.id);
-  }
-
+  // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda —
+  // o status só muda na entrega (em_rota → entregue).
   return NextResponse.json({
     ok: true,
     pb_status: pbStatus,
     pb_valor: valorPbReais,
     pb_tipo: pbTipo,
     saldo_devolvido: saldoDevolvido,
-    venda_concluida: vendaConcluida,
   });
 }

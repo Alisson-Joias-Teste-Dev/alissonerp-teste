@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
       ), 0)::text AS valor
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
-        AND ve.situacao IN ('aprovado', 'enviado', 'entregue', 'concluido')
+        AND ve.situacao IN ('aprovado', 'em_rota', 'enviado', 'entregue', 'concluido')
       WHERE pv.status = 'confirmado'
         AND pv.forma NOT IN ('Vale-Troca', 'A Receber')
         AND pv.id NOT IN (

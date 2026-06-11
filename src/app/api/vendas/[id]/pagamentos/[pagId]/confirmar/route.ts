@@ -28,15 +28,16 @@
  *   3. (tx) Devolve saldo proporcional ao gerente
  *   4. (tx) Baixa contas_receber (com split se parcial) + comunicação
  *   5. (tx) logAudit
- *   6. (fora da tx) Auto-aprova / auto-conclui a venda — erros viram warning
- *      na resposta (não silenciosos), sem desfazer o financeiro já confirmado.
+ *   6. (fora da tx) Auto-aprova a venda (rascunho + crédito) — erros viram
+ *      warning na resposta (não silenciosos), sem desfazer o financeiro já
+ *      confirmado. Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a
+ *      venda — o status só muda na entrega (em_rota → entregue).
  */
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { creditarSaldo } from "@/lib/saldo-credito";
-import { concluirVenda } from "@/lib/vendas-aprovar";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { logAudit } from "@/lib/audit";
 import { internalError } from "@/lib/api-error";
@@ -283,9 +284,9 @@ export async function POST(
   }
 
   // ── Pós-transação: checar se todos os pagamentos estão confirmados ──────────
-  // Auto-aprovação/auto-conclusão usam as libs (que têm transação e lock
-  // próprios). Falhas aqui NÃO desfazem o financeiro já confirmado acima —
-  // viram warning explícito na resposta (sem catch silencioso).
+  // Auto-aprovação usa as libs (que têm transação e lock próprios). Falhas
+  // aqui NÃO desfazem o financeiro já confirmado acima — viram warning
+  // explícito na resposta (sem catch silencioso).
   const warnings: string[] = [];
   const [pendentes] = await sql`
     SELECT COUNT(*) AS cnt
@@ -293,7 +294,6 @@ export async function POST(
     WHERE venda_id = ${vendaId} AND status = 'pendente'
   `;
   const todosPagos = Number(pendentes.cnt) === 0;
-  let vendaConcluida = false;
   let vendaAprovada = false;
 
   // Auto-aprovar quando venda em rascunho com crédito aprovado e:
@@ -339,25 +339,12 @@ export async function POST(
     }
   }
 
-  // Auto-concluir: situação efetiva é 'aprovado' (já estava OU acabou de ser aprovada)
-  // e todos os pagamentos foram confirmados.
-  const situacaoEfetiva = vendaAprovada ? "aprovado" : vendaSituacao;
-  if (todosPagos && situacaoEfetiva === "aprovado") {
-    try {
-      await concluirVenda(vendaId, user.id, { tinyBestEffort: true });
-      vendaConcluida = true;
-    } catch (err) {
-      const m = err instanceof Error ? err.message : String(err);
-      console.error(`[confirmarPagamento] Erro ao concluir venda ${vendaId}:`, err);
-      warnings.push(`Pagamento confirmado, mas a conclusão automática da venda falhou: ${m}`);
-    }
-  }
-
+  // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda —
+  // o status só muda na entrega (em_rota → entregue).
   return NextResponse.json({
     ok: true,
     saldo_devolvido: saldoDevolvido,
     venda_aprovada: vendaAprovada,
-    venda_concluida: vendaConcluida,
     todos_pagos: todosPagos,
     pagamento_parcial: ehPagamentoParcial || undefined,
     valor_pago: valorEfetivo,

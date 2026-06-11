@@ -19,7 +19,7 @@
 
 import type { Sql } from "postgres";
 import { creditarSaldo } from "@/lib/saldo-credito";
-import { concluirVenda, approveVenda } from "@/lib/vendas-aprovar";
+import { approveVenda } from "@/lib/vendas-aprovar";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -294,38 +294,6 @@ export async function registrarComunicacaoRecebimento(
       ${options.userId}::uuid
     )
   `;
-}
-
-// ─── Auto-concluir venda se todos pagamentos confirmados ──────────────────────
-//
-// Verifica se não há mais pagamentos pendentes na venda e, se a situação for
-// 'aprovado', chama concluirVenda().
-
-export async function autoConcluirVendaSeQuitada(
-  sql: Sql,
-  vendaId: number,
-  userId: string,
-): Promise<boolean> {
-  const [pendentes] = await sql`
-    SELECT COUNT(*) AS cnt FROM alissonerp.pagamentos_venda
-    WHERE venda_id = ${vendaId} AND status = 'pendente'
-  `;
-
-  if (Number(pendentes.cnt) > 0) return false;
-
-  const [venda] = await sql`
-    SELECT situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}
-  `;
-
-  if (venda?.situacao !== "aprovado") return false;
-
-  try {
-    await concluirVenda(vendaId, userId, { tinyBestEffort: true });
-    return true;
-  } catch (err) {
-    console.error(`[baixa-credito] Erro ao concluir venda ${vendaId}:`, err);
-    return false;
-  }
 }
 
 // ─── Auto-aprovar venda em rascunho com crédito ──────────────────────────────

@@ -3,7 +3,6 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { fetchPayment } from "@/lib/mercado-pago";
-import { concluirVenda } from "@/lib/vendas-aprovar";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
@@ -216,21 +215,13 @@ export async function POST(
 
   const { novoPagId, quitada } = txResult;
 
-  let vendaConcluida = false;
-  if (quitada && venda.situacao === "aprovado") {
-    try {
-      await concluirVenda(vendaId, user.id, { tinyBestEffort: true });
-      vendaConcluida = true;
-    } catch (err) {
-      console.error("[verificar-manual] Erro ao concluir venda:", err);
-    }
-  }
-
+  // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda —
+  // o status só muda na entrega (em_rota → entregue).
   return NextResponse.json({
     ok: true,
     pagamento_id: novoPagId,
     valor_registrado: valorRegistrar,
     mp_status: mpData.status,
-    venda_concluida: vendaConcluida,
+    pagamento_quitado: quitada,
   });
 }

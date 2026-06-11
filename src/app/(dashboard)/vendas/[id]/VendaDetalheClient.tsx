@@ -1292,7 +1292,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setMpManualMsg({ text: `Pagamento verificado e registrado! Valor: R$ ${Number(data.valor_registrado).toFixed(2).replace(".", ",")}${data.venda_concluida ? " — venda concluída." : ""}`, ok: true });
+      // Fluxo novo 06/2026: pagamento quitado não conclui mais a venda
+      setMpManualMsg({ text: `Pagamento verificado e registrado! Valor: R$ ${Number(data.valor_registrado).toFixed(2).replace(".", ",")}${data.pagamento_quitado ? " — venda quitada." : ""}`, ok: true });
       setMpManualId("");
       await load();
     } catch (e) {
@@ -1353,7 +1354,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         });
         const d = await res.json();
         if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
-        setRecebimentoMsg({ text: `Confirmado! R$ ${Number(d.valor_registrado).toFixed(2).replace(".", ",")}${d.venda_concluida ? " — venda concluída." : ""}`, ok: true });
+        setRecebimentoMsg({ text: `Confirmado! R$ ${Number(d.valor_registrado).toFixed(2).replace(".", ",")}${d.pagamento_quitado ? " — venda quitada." : ""}`, ok: true });
         setRecebimentoPagId(null);
         setRecebimentoTipo(null);
         setRecebimentoMpId("");
@@ -1440,7 +1441,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${pagId}/confirmar`, { method: "POST" });
         const d = await res.json();
         if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
-        if (d.venda_concluida) alert("Todos os pagamentos confirmados — venda concluída!");
+        // Fluxo novo 06/2026: pagamento quitado não conclui mais a venda —
+        // o status só muda na entrega (em_rota → entregue).
+        if (d.todos_pagos) alert("Todos os pagamentos confirmados — venda quitada!");
       } else {
         const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${pagId}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },

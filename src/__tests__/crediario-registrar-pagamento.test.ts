@@ -506,9 +506,11 @@ describe("POST /api/crediario/[id]/registrar-pagamento", () => {
     expect(data.ok).toBe(true);
   });
 
-  // ═══ AUTO-CONCLUSÃO DA VENDA ════════════════════════════════════════════════
+  // ═══ AUTO-CONCLUSÃO DA VENDA — APOSENTADA (fluxo novo 06/2026) ═══════════════
+  // Pagamento quitado NÃO conclui mais a venda: o status só muda na entrega
+  // (em_rota → entregue). concluirVenda() foi removida da lib.
 
-  it("conclui venda quando todos pagamentos confirmados e venda aprovada", async () => {
+  it("NÃO conclui venda mesmo com todos pagamentos confirmados e venda aprovada (fluxo novo)", async () => {
     setupQueries({
       situacaoVenda: "aprovado",
       pendentesAposUpdate: 0,
@@ -518,8 +520,9 @@ describe("POST /api/crediario/[id]/registrar-pagamento", () => {
     const res = await POST(makeRequest(), makeParams());
     const data = await res.json();
 
-    expect(mockConcluirVenda).toHaveBeenCalledTimes(1);
-    expect(data.venda_concluida).toBe(true);
+    expect(mockConcluirVenda).not.toHaveBeenCalled();
+    expect(data.ok).toBe(true);
+    expect(data).not.toHaveProperty("venda_concluida");
   });
 
   it("NÃO conclui venda quando ainda há pagamentos pendentes", async () => {
@@ -568,7 +571,8 @@ describe("POST /api/crediario/[id]/registrar-pagamento", () => {
 
     expect(data).toHaveProperty("ok", true);
     expect(data).toHaveProperty("saldo_devolvido");
-    expect(data).toHaveProperty("venda_concluida");
+    // venda_concluida saiu da resposta — fluxo novo 06/2026 (pagamento não muda status)
+    expect(data).not.toHaveProperty("venda_concluida");
     expect(data).toHaveProperty("valor_pago");
   });
 });
