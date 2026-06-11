@@ -1,8 +1,31 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 19/05/2026 — Versão: v2.60.2 <!-- Revisado 19/05/2026 -->
+> 📋 Última atualização automática: 11/06/2026 — Versão: v2.60.3 <!-- Revisado 11/06/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## fix(ligacao): blindagem do estoque de ouro na aba Ligação (v2.60.3)
+
+**Contexto:** auditoria da aba Ligação (módulo Purificação), que transforma Ouro 24k +
+liga → 18k. Como é operação com ouro (= dinheiro), a integridade de estoque é crítica.
+
+**Correções (em `src/app/api/purificacao/ligacao/`):**
+- **Atomicidade (§0 dupla-entrada):** criar/concluir/cancelar agora rodam em `sql.begin`.
+  Antes, a ligação e as CEs de saída/entrada eram queries separadas — se a 2ª falhasse,
+  o ouro saía do pote sem contrapartida e a ligação ficava órfã (saldo inconsistente).
+- **Race do saldo (TOCTOU):** dentro da transação, as linhas dos insumos são travadas com
+  `FOR UPDATE` (ordem de id p/ evitar deadlock) e o saldo é reconferido — fecha a janela
+  entre checagem inicial e gravação, impedindo dois lotes simultâneos de estourar o pote.
+- **Permissão de teor no servidor:** o POST passou a revalidar `editar_teor_ligacao` quando
+  o teor enviado difere do padrão do tipo (tolerância de float, §3). Antes, o cadeado era
+  só na tela e podia ser burlado por requisição direta, alterando consumo de liga/produção.
+- **Parâmetro em vez de literal (§5):** o `insumo_id = 275` chumbado nas movimentações foi
+  trocado por `PARAM.OURO_24K_LIGA_INSUMO_ID` (POST e DELETE).
+- **Pureza no GET:** o SELECT da listagem voltou a retornar `pureza`, que sumia do card em
+  lotes com pureza < 100% (NaN < 100 = false).
+
+**Impacto:** nenhuma migration; não toca funções no-touch nem schemas readonly. Caminho
+normal idêntico — a diferença só aparece no erro (agora atômico). `npx tsc --noEmit` limpo.
 
 ## fix(orcamento): rascunho Bordas Elevadas preserva modelo/valor/peso (v2.60.2)
 
